@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Mes tickets",
+    "workspace_fallback": "Espace de travail",
+    "empty_title": "Aucun ticket ne vous est assigné",
+    "empty_description": "Les tickets que vous créez ou qui vous sont assignés apparaîtront ici."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Tous",
+      "all_description": "Qui me sont assignés, que j'ai créés, ou qui impliquent mes agents et mes squads",
+      "assigned_label": "Assignés",
+      "assigned_description": "Tickets qui me sont assignés",
+      "created_label": "Créés",
+      "created_description": "Tickets que j'ai créés",
+      "agents_label": "Mes agents et squads",
+      "agents_description": "Tickets assignés à mes agents"
+    },
+    "filter_button": "Filtrer",
+    "filter_status": "Statut",
+    "filter_priority": "Priorité",
+    "issue_count_one": "{{count}} ticket",
+    "issue_count_other": "{{count}} tickets",
+    "reset_filters": "Réinitialiser tous les filtres",
+    "display_settings": "Paramètres d'affichage",
+    "grouping": "Regroupement",
+    "group_status": "Statut",
+    "group_assignee": "Assigné à",
+    "ordering": "Tri",
+    "ascending": "Croissant",
+    "descending": "Décroissant",
+    "card_properties": "Propriétés des cartes",
+    "view_board": "Vue tableau",
+    "view_list": "Vue liste",
+    "view_swimlane": "Vue couloirs",
+    "view_label": "Vue",
+    "view_board_short": "Tableau",
+    "view_list_short": "Liste",
+    "view_swimlane_short": "Couloirs",
+    "sort_manual": "Manuel"
+  },
+  "errors": {
+    "move_failed": "Échec du déplacement du ticket"
+  }
+}

@@ -1,0 +1,273 @@
+{
+  "step_nav": {
+    "wordmark": "Multica",
+    "label": "Étapes de prise en main",
+    "about_you": {
+      "label": "À propos de vous",
+      "description": "Votre rôle, et ce que vous voulez accomplir."
+    },
+    "workspace": {
+      "label": "Espace de travail",
+      "description": "Nommez-le et choisissez son URL."
+    },
+    "runtime": {
+      "label": "Rencontrez Mika",
+      "description": "Votre premier coéquipier agent, et où il s'exécute."
+    }
+  },
+  "welcome": {
+    "wordmark": "Bienvenue sur Multica",
+    "headline_line1": "Vos coéquipiers IA,",
+    "headline_line2": "dans",
+    "headline_emphasis": "un seul espace de travail.",
+    "lede": "Confiez-leur du travail comme à un collègue — ils s'en saisissent, mettent à jour le statut et commentent une fois terminé.",
+    "lede_web": "L'application de bureau embarque le runtime — rien à installer. Continuez sur le web pour connecter votre propre CLI.",
+    "lede_desktop": "À la fin, un vrai agent répondra à votre premier ticket.",
+    "download_desktop": "Télécharger l'application de bureau",
+    "continue_on_web": "Continuer sur le web",
+    "start_exploring": "Commencer l'exploration",
+    "skip_existing": "Je l'ai déjà fait",
+    "illustration_caption": "Chaque ticket, chaque fil, chaque décision — partagés par votre équipe et vos agents.",
+    "illustration": {
+      "card1_actor_name": "Vous",
+      "card1_actor_initial": "N",
+      "card1_body_prefix": " peut-il rédiger un court billet de lancement ? À partir des conclusions d'entretiens de ",
+      "card1_body_suffix": ".",
+      "card1_mention_content": "@Content Agent",
+      "card1_mention_research": "@Research Agent",
+      "card2_actor_name": "Content Agent",
+      "card2_body": "Je m'en occupe. Je reprends les citations de Research et je rédige autour de l'angle « temps gagné »…",
+      "card3_actor_name": "Research Agent",
+      "card3_body": "Entretiens utilisateurs de la semaine résumés — 12 appels, 4 thèmes récurrents, 3 citations à mettre en avant.",
+      "card3_timestamp": "il y a 15 min",
+      "card4_actor_name": "Review Agent",
+      "card4_body": "Brouillon de lundi relu — 4 remarques sur le ton. J'attends le suivant.",
+      "card5_actor_name": "Coding Agent",
+      "card5_body_prefix": "Fonctionnalité d'export livrée, celle que ",
+      "card5_body_suffix": " avait signalée. Lien d'aperçu dans la PR.",
+      "card5_mention_you": "@vous",
+      "card5_timestamp": "à l'instant"
+    }
+  },
+  "common": {
+    "back": "Retour",
+    "continue": "Continuer",
+    "skip": "Ignorer",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "log_out": "Se déconnecter"
+  },
+  "source_backfill": {
+    "eyebrow": "Une question rapide",
+    "lede": "Une seule question — elle nous aide à comprendre à qui Multica est utile. Répondez une fois et vous reprenez votre travail.",
+    "submit": "Envoyer",
+    "hint_ready": "C'est bon. Cliquez sur Envoyer quand vous êtes prêt."
+  },
+  "questions": {
+    "about_you": {
+      "question": "Parlez-nous un peu de vous."
+    },
+    "source": {
+      "question": "Comment avez-vous connu Multica ?",
+      "friends_colleagues": "Amis ou collègues",
+      "search": "Google / moteur de recherche",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "Autre réseau social",
+      "blog_newsletter": "Blog / newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "Au travail",
+      "event_conference": "Conférence / meetup",
+      "dont_remember": "Je ne m'en souviens pas",
+      "other": "Autre",
+      "other_placeholder": "ex. un podcast que j'écoute"
+    },
+    "role": {
+      "question": "Qu'est-ce qui vous décrit le mieux ?",
+      "engineer": "Ingénieur / développeur",
+      "product": "Chef de produit",
+      "designer": "Designer",
+      "founder": "Fondateur / dirigeant",
+      "marketing": "Marketing / croissance",
+      "writer": "Rédacteur / contenu",
+      "research": "Chercheur / analyste",
+      "ops": "Opérations / gestion de projet",
+      "student": "Étudiant / usage personnel",
+      "other": "Autre",
+      "other_placeholder": "ex. enseignant, responsable support"
+    },
+    "use_case": {
+      "question": "Pour quoi voulez-vous utiliser Multica ?",
+      "ship_code": "Livrer du code avec des agents IA",
+      "manage_team": "Gérer les tâches de mon équipe",
+      "personal_tasks": "Organiser mes propres tâches",
+      "plan_research": "Planifier, réfléchir, faire des recherches",
+      "write_publish": "Écrire, réviser, publier",
+      "automate_ops": "Automatiser les opérations et les processus",
+      "evaluate": "Je découvre simplement",
+      "other": "Autre",
+      "other_placeholder": "ex. coordination d'un groupe d'étude"
+    }
+  },
+  "option_card": {
+    "other_label": "Autre",
+    "other_aria": "Décrire autre chose"
+  },
+  "step_question": {
+    "hint_pick": "Choisissez-en un pour continuer — ou passez si vous préférez ne pas répondre.",
+    "hint_continue": "C'est bon. Cliquez sur Continuer quand vous êtes prêt."
+  },
+  "cli_install": {
+    "copy_aria": "Copier",
+    "intro": "Il vous faut un runtime d'agent sur cet ordinateur (Claude Code, Codex, Cursor, …) pour qu'il exécute votre agent. Fonctionne aussi sur des serveurs et des machines de développement distantes.",
+    "step1_label": "Installer le CLI Multica",
+    "step2_label": "Démarrer le daemon"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Les runtimes cloud ne sont pas encore actifs. Laissez votre adresse e-mail et nous vous préviendrons dès qu'ils le seront.",
+    "intro_warning": "Attention : les agents ne peuvent pas exécuter de tâches sans runtime — si vous passez maintenant, rien ne s'exécutera tant que vous n'en aurez pas installé un.",
+    "email_label": "E-mail",
+    "email_placeholder": "vous@entreprise.com",
+    "reason_label": "Pourquoi le cloud ?",
+    "optional": "Facultatif",
+    "reason_placeholder": "ex. nous voulons des agents actifs en continu, ou mon équipe travaille sur des appareils différents.",
+    "join": "Rejoindre la liste d'attente",
+    "on_list": "Vous êtes sur la liste",
+    "success_toast": "Vous êtes sur la liste. Nous vous écrirons dès que les runtimes cloud seront actifs.",
+    "failed_toast": "Échec de l'inscription à la liste d'attente"
+  },
+  "welcome_after_onboarding": {
+    "skip": {
+      "loading": "Configuration de votre espace de travail…",
+      "title": "Bienvenue sur Multica !",
+      "subtitle": "Nous avons ajouté un ticket pour vous aider à connecter un runtime. Une fois prêt, commencez avec Mika depuis Runtimes.",
+      "got_it": "Compris",
+      "status_in_progress": "En cours",
+      "error_title": "Nous n'avons pas pu mettre cela en place",
+      "error_body": "Le guide de runtime n'a pas été créé. Vous pouvez réessayer, ou connecter un runtime depuis la page Runtimes quand vous le souhaitez.",
+      "retry": "Réessayer",
+      "dismiss": "Pas maintenant",
+      "cards": {
+        "install_runtime": {
+          "title": "Connecter un runtime",
+          "subtitle": "Installez Codex ou Kimi, puis démarrez la discussion guidée avec Mika depuis Runtimes."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "Votre premier espace de travail",
+    "eyebrow_resume": "Reprendre ou repartir de zéro",
+    "headline_first": "Nommez votre espace de travail.",
+    "headline_resume": "Continuez avec {{name}}, ou créez-en un autre.",
+    "lede_first": "Un espace de travail réunit vos tickets, vos agents et vos projets. Vous pourrez inviter des coéquipiers ou en créer d'autres plus tard.",
+    "lede_resume": "Reprenez la configuration avec l'espace de travail que vous avez déjà, ou créez-en un nouveau à côté — vous pouvez appartenir à autant d'espaces que vous voulez.",
+    "name_label": "Nom de l'espace de travail",
+    "name_placeholder": "Acme Inc, Mon labo, Projets perso…",
+    "random_name": "Aléatoire",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Préfixe des tickets",
+    "issue_prefix_prefix": "Les tickets ressembleront à ",
+    "issue_prefix_suffix": ". Vous pourrez le changer plus tard dans les paramètres.",
+    "issue_prefix_pending": "Définissez l'URL ci-dessus et les numéros de tickets la suivront — ou saisissez un préfixe ici.",
+    "create_new_title": "Créer un espace de travail",
+    "create_new_subtitle": "Repartez de zéro — un espace distinct pour une autre facette de votre travail.",
+    "hint_opening": "Ouverture de {{name}}.",
+    "hint_creating": "Création de {{name}}.",
+    "hint_creating_pending": "Création de {{name}}…",
+    "hint_creating_fallback": "votre espace de travail",
+    "hint_name_first": "Nommez votre espace de travail pour le créer.",
+    "hint_pick": "Choisissez votre espace de travail ou créez-en un nouveau.",
+    "cta_open": "Ouvrir {{name}}",
+    "cta_create_named": "Créer {{name}}",
+    "cta_create_workspace": "Créer l'espace de travail",
+    "cta_creating": "Création…",
+    "slug_format_error": "Uniquement des lettres minuscules, des chiffres et des traits d'union",
+    "slug_taken_error": "Cette URL d'espace de travail est déjà prise.",
+    "slug_reserved_error": "Cette URL d'espace de travail est réservée et ne peut pas être utilisée.",
+    "slug_conflict_toast": "Choisissez une autre URL d'espace de travail",
+    "create_failed_toast": "Échec de la création de l'espace de travail",
+    "creation_disabled_eyebrow": "La création d'espaces de travail est désactivée",
+    "creation_disabled_headline": "Demandez une invitation à votre administrateur.",
+    "creation_disabled_lede": "Cette instance Multica n'autorise pas la création de nouveaux espaces de travail. Dès qu'un administrateur vous invite, acceptez l'invitation et actualisez pour continuer.",
+    "creation_disabled_logout": "Se déconnecter",
+    "creation_disabled_eyebrow_resume": "Votre espace de travail",
+    "creation_disabled_headline_resume": "Continuez avec {{name}}.",
+    "creation_disabled_lede_resume": "La création d'espaces de travail est désactivée sur cette instance : vous continuerez donc dans votre espace existant."
+  },
+  "step_runtime": {
+    "scanning_headline": "Connexion de cet ordinateur…",
+    "scanning_lede_prefix": "Votre agent passe par un outil de codage IA que vous possédez déjà — comme ",
+    "scanning_lede_suffix": ", et d'autres. Nous vérifions lesquels sont installés sur cet ordinateur.",
+    "found_headline": "Où Mika doit-il s'exécuter ?",
+    "found_lede": "Voici les runtimes d'agent trouvés sur cet ordinateur. Vous pourrez en changer ou en ajouter plus tard.",
+    "runtime_count_one": "{{count}} runtime d'agent",
+    "runtime_count_other": "{{count}} runtimes d'agent",
+    "status_all_online": "tous en ligne",
+    "status_none_online": "aucun en ligne",
+    "status_n_online": "{{count}} en ligne",
+    "online_label": "en ligne",
+    "offline_label": "hors ligne",
+    "empty_headline": "Aucun runtime d'agent trouvé sur cet ordinateur pour l'instant.",
+    "empty_lede_prefix": "Un runtime d'agent est un outil de codage IA auquel nous nous connectons — comme ",
+    "empty_lede_suffix": ". Installez-en un et actualisez, ou choisissez une option ci-dessous.",
+    "empty_skip_title": "Passer pour l'instant",
+    "empty_skip_subtitle": "Entrez dans votre espace de travail maintenant. Votre agent ne pourra pas exécuter de tâches tant qu'aucun runtime d'agent n'est connecté sur cet ordinateur — mais vous pouvez déjà parcourir, planifier et inviter des coéquipiers.",
+    "empty_skip_action": "Ignorer",
+    "empty_waitlist_title": "Utiliser un ordinateur cloud",
+    "empty_waitlist_subtitle": "Nous ferons tourner un ordinateur pour vous dans le cloud. Pas encore actif.",
+    "empty_waitlist_action": "Bientôt disponible",
+    "skip": "Passer pour l'instant",
+    "refresh": "Actualiser",
+    "refreshing": "Actualisation…",
+    "hint_selected": "Sélectionné : {{name}}",
+    "hint_pick": "Choisissez un runtime d'agent ci-dessus pour commencer avec Mika.",
+    "hint_waiting": "En attente du premier résultat…",
+    "hint_skip_or_refresh": "Actualisez après en avoir installé un, ou passez pour entrer dans votre espace de travail.",
+    "continue": "Commencer avec Mika"
+  },
+  "step_platform": {
+    "eyebrow": "Connecter un ordinateur",
+    "headline": "Connectez un ordinateur pour exécuter votre agent.",
+    "lede": "Mika, le chef de cabinet de votre espace de travail, s'exécute sur un vrai ordinateur que vous connectez à Multica. Choisissez comment en connecter un.",
+    "hint_default": "Choisissez un mode de connexion — ou passez et connectez un ordinateur plus tard.",
+    "download_title": "Utiliser cet ordinateur",
+    "download_subtitle": "Installez notre application de bureau pour connecter cet ordinateur. S'ouvre dans un nouvel onglet — choisissez-y votre plateforme.",
+    "download_button": "Télécharger",
+    "cli_title": "Connecter depuis le terminal",
+    "cli_subtitle": "Connectez un serveur, une machine de développement distante, ou tout ordinateur sans interface graphique. Terminal requis.",
+    "cli_action": "Afficher les étapes",
+    "cloud_title": "Utiliser un ordinateur cloud",
+    "cloud_subtitle": "Nous ferons tourner un ordinateur pour vous dans le cloud. Pas encore actif.",
+    "cloud_action": "Bientôt disponible",
+    "cli_dialog_title": "Connecter depuis le terminal",
+    "cli_dialog_description": "La même connexion que l'application de bureau, configurée depuis le terminal. Pour les serveurs, les machines de développement distantes, ou tout ordinateur sans interface graphique.",
+    "cli_dialog_pick_hint": "Choisissez un ordinateur ci-dessus.",
+    "cli_dialog_connect": "Connecter et continuer",
+    "runtimes_connected_one": "{{count}} ordinateur connecté",
+    "runtimes_connected_other": "{{count}} ordinateurs connectés",
+    "live_listening": "En direct · En attente de votre ordinateur",
+    "stage_normal_prefix": "Exécutez la commande ci-dessus. Dès que ",
+    "stage_normal_suffix": " aura terminé la connexion via le navigateur, votre ordinateur apparaîtra ici automatiquement (généralement en 10 à 30 secondes).",
+    "stage_midway_prefix": "Toujours à l'écoute. Vérifiez que vous avez bien terminé dans l'onglet de navigateur ouvert par ",
+    "stage_midway_suffix": " — votre approbation y est nécessaire avant que votre ordinateur puisse se connecter.",
+    "stage_slow_prefix": "Cela prend plus de temps que d'habitude. Vérifiez le terminal où vous avez lancé ",
+    "stage_slow_suffix": " pour d'éventuelles erreurs.",
+    "stage_stalled_prefix": "Rien ne remonte pour l'instant. Si le terminal ne vous met pas à l'aise, ",
+    "stage_stalled_term": "l'application de bureau",
+    "stage_stalled_suffix": " est la voie la plus simple — un clic et cet ordinateur est connecté. Fermez cette fenêtre et choisissez l'application de bureau, ou cliquez sur Ignorer pour continuer."
+  },
+  "errors": {
+    "skip_failed": "Échec de la finalisation de la prise en main",
+    "mika_setup_failed": "Impossible de démarrer votre espace de travail Mika"
+  },
+  "mika_intro": {
+    "headline": "Rencontrez Mika, votre premier coéquipier agent.",
+    "name": "Mika",
+    "role": "Chef de cabinet",
+    "blurb": "Dites à Mika ce que vous voulez faire. Cela devient un ticket, avec le bon agent dessus."
+  }
+}

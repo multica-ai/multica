@@ -1,0 +1,200 @@
+{
+  "title": "Facturation (page de test)",
+  "subtitle": "Passe-plat direct vers /api/v1/billing/* de multica-cloud. Interface inachevée — tous les points d'accès entassés sur une page pour vérifier le proxy et le flux Stripe.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Solde",
+    "credits_suffix": "crédits",
+    "meta": "micro brut : {{micro}} · propriétaire : {{owner}}… · mis à jour {{updated}}"
+  },
+  "buy": {
+    "title": "Acheter des crédits / Gérer la facturation",
+    "no_tiers": "Aucun palier tarifaire configuré. Le cloud n'a probablement pas de clé Stripe — le paiement renverra 503.",
+    "tier_money_to_credits": "{{money}} → {{credits}} crédits",
+    "tier_bonus": " + {{credits}} en bonus",
+    "tier_bonus_with_expiry": " + {{credits}} en bonus ({{expiry}})",
+    "tier_id": "id : {{id}}",
+    "open_portal": "Ouvrir le portail de facturation Stripe",
+    "portal_hint": "Un 400 est attendu pour les utilisateurs qui n'ont pas encore payé (aucune fiche client Stripe n'existe).",
+    "toast_no_url": "Le cloud n'a renvoyé aucune URL de paiement",
+    "toast_checkout_failed": "Échec du paiement",
+    "toast_no_portal_url": "Aucune URL de portail renvoyée",
+    "toast_portal_failed": "Échec du portail"
+  },
+  "checkout": {
+    "session_label": "Session de paiement {{prefix}}…",
+    "loading": "Chargement de l'état de la commande…",
+    "fetch_failed": "Échec de la récupération de l'état : {{error}}",
+    "fetch_failed_unknown": "erreur inconnue",
+    "final_status": "État final : {{status}}",
+    "polling_status": "Interrogation de l'état… actuel : {{status}}",
+    "status_unknown": "inconnu",
+    "label_order": "Commande",
+    "label_tier": "Palier",
+    "label_charged": "Facturé",
+    "charged_value": "{{money}} · {{credits}} crédits",
+    "charged_with_bonus": "{{money}} · {{credits}} crédits + {{bonus}} en bonus",
+    "clear_url": "Effacer de l'URL"
+  },
+  "transactions": {
+    "title": "Transactions",
+    "empty": "Aucune transaction pour l'instant.",
+    "credits_value": "{{value}} crédits",
+    "row_meta": "{{date}} · solde après : {{balance}} crédits · réf. : {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Lots de crédits",
+    "empty": "Aucun lot pour l'instant.",
+    "remaining_over_total": "{{remaining}} / {{total}} crédits",
+    "id_suffix": "{{id}}…",
+    "consumed": "Consommés : {{value}} crédits",
+    "expires_suffix": " · expire {{value}}",
+    "never_expires_suffix": " · n'expire jamais"
+  },
+  "topups": {
+    "title": "Commandes de recharge",
+    "empty": "Aucune commande de recharge pour l'instant.",
+    "amount_to_credits": "{{money}} → {{credits}} crédits",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} crédits + {{bonus}} en bonus",
+    "row_meta": "{{date}} · stripe : {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "workspace": {
+    "title": "Facturation",
+    "description": "Gérez le forfait, les limites, les sièges humains et la facturation Stripe de cet espace de travail.",
+    "loading": "Chargement de la facturation de l'espace de travail",
+    "plan": {
+      "free": "Gratuit",
+      "pro": "Pro",
+      "unknown": "Forfait inconnu"
+    },
+    "status": {
+      "inactive": "Inactif",
+      "active": "Actif",
+      "trialing": "Période d'essai",
+      "past_due": "En retard de paiement",
+      "canceled": "Annulé",
+      "unknown": "État inconnu"
+    },
+    "load_failed": {
+      "title": "La facturation est temporairement indisponible",
+      "description": "Nous n'avons pas pu lire un état d'abonnement fiable. Votre forfait n'a pas été modifié."
+    },
+    "actions": {
+      "retry": "Réessayer",
+      "upgrade": "Passer à Pro",
+      "manage": "Gérer la facturation",
+      "refresh_seats": "Actualiser les sièges",
+      "cancel": "Annuler",
+      "continue_to_stripe": "Continuer vers Stripe"
+    },
+    "errors": {
+      "action_title": "Échec de l'action de facturation",
+      "temporarily_unavailable": "La facturation est temporairement indisponible. Réessayez dans un instant.",
+      "permission_changed": "Votre rôle dans l'espace de travail n'autorise plus cette action. Actualisez la page pour voir vos droits actuels.",
+      "checkout_response": "Le paiement n'a pas pu s'ouvrir car la réponse du serveur était illisible. Réessayez sans changer l'intervalle sélectionné.",
+      "already_subscribed": "Cet espace de travail a déjà un abonnement. Le forfait actuel a été actualisé.",
+      "checkout_failed": "Le paiement n'a pas pu être créé. Réessayez dans un instant.",
+      "portal_response": "Le portail de facturation n'a pas pu s'ouvrir car la réponse du serveur était illisible.",
+      "portal_unavailable": "Le portail de facturation n'est pas disponible pour cet espace de travail. Le forfait actuel a été actualisé.",
+      "portal_failed": "Le portail de facturation n'a pas pu être ouvert. Réessayez dans un instant.",
+      "reconcile_response": "Les sièges ont été actualisés, mais le résultat n'a pas pu être lu. Rechargez la page pour confirmer le nombre actuel.",
+      "reconcile_failed": "Les sièges n'ont pas pu être actualisés. Les modifications de membres restent enregistrées et le rapprochement périodique réessaiera."
+    },
+    "return": {
+      "cancel_title": "Paiement annulé",
+      "cancel_description": "Aucun changement de forfait n'a été effectué.",
+      "portal_title": "Détails de facturation actualisés",
+      "portal_description": "Le dernier état d'abonnement est affiché ci-dessous.",
+      "syncing_title": "Activation de votre abonnement",
+      "syncing_description": "Le paiement est terminé. Nous attendons que Stripe confirme le changement de forfait.",
+      "timeout_description": "Le paiement a été reçu, mais l'abonnement est encore en cours de synchronisation. Actualisez cette page dans un instant.",
+      "active_title": "Pro est actif",
+      "active_description": "Cet espace de travail a désormais accès à Pro."
+    },
+    "past_due": {
+      "title": "Le paiement demande votre attention",
+      "description": "Ouvrez le portail de facturation pour mettre à jour votre moyen de paiement et conserver l'accès Pro."
+    },
+    "read_only": {
+      "title": "Accès en lecture seule à la facturation",
+      "description": "Vous pouvez consulter le forfait et les limites de l'espace de travail. Seuls les propriétaires et administrateurs peuvent souscrire ou gérer un abonnement."
+    },
+    "current": {
+      "title": "Forfait actuel",
+      "plan": "Forfait de l'espace de travail",
+      "plan_description": "Les droits actuellement appliqués à cet espace de travail.",
+      "members": "Membres humains",
+      "members_description": "Les agents et les invitations en attente ne comptent pas comme des sièges.",
+      "member_count_one": "{{count}} membre",
+      "member_count_other": "{{count}} membres",
+      "period_end": "Fin de la période en cours",
+      "period_end_description": "La date indiquée par l'état d'abonnement actuel."
+    },
+    "upgrade": {
+      "title": "Passer à Pro",
+      "description": "Choisissez un intervalle de facturation, puis confirmez le nombre de sièges et le montant final dans Stripe Checkout.",
+      "interval_label": "Intervalle de facturation",
+      "monthly": "Mensuel",
+      "yearly": "Annuel",
+      "pro_for_team_one": "Pro pour {{count}} siège humain",
+      "pro_for_team_other": "Pro pour {{count}} sièges humains",
+      "price_loading": "Chargement des tarifs d'abonnement",
+      "unit_price": "{{price}} par siège humain",
+      "estimated_monthly_total": "Total mensuel estimé : {{price}}",
+      "estimated_yearly_total": "Total annuel estimé : {{price}}",
+      "price_at_checkout": "Le serveur recompte les membres humains avant l'achat. Stripe Checkout affiche le tarif par siège et le total faisant foi avant le paiement."
+    },
+    "management": {
+      "title": "Gestion de l'abonnement",
+      "description": "Stripe gère de façon sécurisée les moyens de paiement, les factures et la résiliation.",
+      "portal": "Portail de facturation Stripe",
+      "portal_description": "Ouvrez Stripe pour gérer l'abonnement de cet espace de travail.",
+      "portal_unavailable": "Aucun portail de facturation Stripe n'est disponible pour cet espace de travail."
+    },
+    "limits": {
+      "title": "Consommation et limites",
+      "description": "Les limites actuelles sont affichées sans inventer de totaux de consommation que le serveur ne fournit pas encore.",
+      "issues": "Tâches récentes",
+      "issues_description": "Le forfait Gratuit conserve les tâches les plus récemment actives. Pro n'a aucune limite de fenêtre.",
+      "autopilots": "Automatisations réussies",
+      "autopilots_description": "Le quota Gratuit est réinitialisé chaque mois calendaire UTC. Pro est illimité.",
+      "unlimited": "Illimité",
+      "per_month": "{{count}} / mois"
+    },
+    "seats": {
+      "title": "Sièges",
+      "description": "Chaque membre humain actuel compte comme un siège Pro. Ce n'est pas le cas des agents ni des invitations en attente.",
+      "human_members": "Membres humains actuels",
+      "human_members_description": "Actualisez après une modification des membres pour demander à la facturation cloud de rapprocher la quantité Stripe.",
+      "updated": "Sièges actualisés",
+      "reconciled": "Membres actuels : {{actual}} · sièges facturés : {{billed}}"
+    },
+    "confirm": {
+      "title": "Continuer vers Stripe Checkout ?",
+      "description": "Intervalle de facturation : {{interval}}. Membres humains actuels : {{count}}. Stripe recomptera les sièges et affichera le montant final avant le paiement."
+    }
+  },
+  "shared": {
+    "request_failed": "Échec de la requête",
+    "refresh": "Actualiser",
+    "paging": "page {{page}} / {{totalPages}} · {{total}} au total",
+    "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "Retour vers la facturation de l'espace de travail…",
+    "load_failed_title": "Impossible d'ouvrir la facturation de l'espace de travail",
+    "load_failed_description": "Vous revenez de Stripe, mais nous n'avons pas pu charger votre liste d'espaces de travail pour ouvrir la bonne page de facturation. Ouvrez Paramètres de l'espace de travail → Facturation pour vérifier l'état actuel.",
+    "workspace_missing_title": "Espace de travail introuvable",
+    "workspace_missing_description": "Vous revenez de Stripe, mais cet espace de travail ne vous est plus accessible — il a peut-être été supprimé, ou vos droits ont changé. Ouvrez Facturation dans l'espace de travail attendu pour vérifier l'état actuel.",
+    "retry": "Réessayer",
+    "go_to_app": "Aller sur Multica"
+  }
+}

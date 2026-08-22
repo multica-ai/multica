@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "Boîte de réception",
+    "back": "Boîte de réception"
+  },
+  "menu": {
+    "mark_all_read": "Tout marquer comme lu",
+    "archive_all": "Tout archiver",
+    "archive_all_read": "Archiver tout ce qui est lu",
+    "archive_completed": "Archiver les éléments terminés"
+  },
+  "context_menu": {
+    "mark_read": "Marquer comme lu",
+    "mark_unread": "Marquer comme non lu",
+    "archive": "Archiver",
+    "unarchive": "Désarchiver",
+    "open_in_new_tab": "Ouvrir dans un nouvel onglet"
+  },
+  "list": {
+    "empty": "Aucune notification",
+    "mark_done_tooltip": "Marquer comme traité",
+    "archive_tooltip": "Archiver",
+    "time": {
+      "just_now": "à l'instant",
+      "minutes": "{{count}} min",
+      "hours": "{{count}} h",
+      "days": "{{count}} j"
+    },
+    "archived_title": "Archivées",
+    "archived_empty": "Aucune notification archivée",
+    "unarchive_tooltip": "Désarchiver",
+    "actions_aria": "Actions de notification"
+  },
+  "detail": {
+    "select_prompt": "Sélectionnez une notification pour afficher les détails",
+    "empty": "Votre boîte de réception est vide",
+    "original_input": "Saisie d'origine",
+    "edit_advanced": "Modifier en mode avancé",
+    "archive": "Archiver",
+    "unarchive": "Désarchiver"
+  },
+  "types": {
+    "issue_assigned": "Assigné",
+    "issue_subscribed": "Abonné",
+    "unassigned": "Désassigné",
+    "assignee_changed": "Assignation modifiée",
+    "status_changed": "Statut modifié",
+    "priority_changed": "Priorité modifiée",
+    "start_date_changed": "Date de début modifiée",
+    "due_date_changed": "Date d'échéance modifiée",
+    "new_comment": "Nouveau commentaire",
+    "mentioned": "Mentionné",
+    "review_requested": "Relecture demandée",
+    "task_completed": "Tâche terminée",
+    "task_failed": "Tâche en échec",
+    "agent_blocked": "Agent bloqué",
+    "agent_completed": "Agent terminé",
+    "reaction_added": "Réaction",
+    "quick_create_done": "Créé avec un agent",
+    "quick_create_failed": "Échec de la création avec un agent",
+    "quick_create_unconfirmed": "Création avec un agent non confirmée"
+  },
+  "labels": {
+    "set_status_to": "Statut défini sur",
+    "set_priority_to": "Priorité définie sur",
+    "assigned_to": "Assigné à {{name}}",
+    "removed_assignee": "Assignation retirée",
+    "set_start_date_to": "Date de début définie au {{date}}",
+    "removed_start_date": "Date de début retirée",
+    "set_due_date_to": "Date d'échéance définie au {{date}}",
+    "removed_due_date": "Date d'échéance retirée",
+    "reacted_to_comment": "A réagi {{emoji}} à votre commentaire",
+    "created_with_agent": "Créé avec un agent : {{identifier}}",
+    "failed_with_detail": "Échec : {{detail}}"
+  },
+  "toasts": {
+    "archived": "Notification archivée",
+    "unarchived": "Notification restaurée"
+  },
+  "errors": {
+    "mark_read_failed": "Échec du marquage comme lu",
+    "mark_unread_failed": "Échec du marquage comme non lu",
+    "archive_failed": "Échec de l'archivage",
+    "mark_done_failed": "Échec du marquage comme traité",
+    "mark_all_read_failed": "Échec du marquage global comme lu",
+    "archive_all_failed": "Échec de l'archivage global",
+    "archive_all_read_failed": "Échec de l'archivage des éléments lus",
+    "archive_completed_failed": "Échec de l'archivage des éléments terminés",
+    "unarchive_failed": "Échec du désarchivage",
+    "archived_load_failed": "Échec du chargement des notifications archivées"
+  }
+}
