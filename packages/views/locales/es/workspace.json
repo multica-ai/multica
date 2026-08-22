@@ -1,0 +1,30 @@
+{
+  "create_form": {
+    "name_label": "Nombre del Workspace",
+    "name_placeholder": "Mi Workspace",
+    "url_label": "URL del Workspace",
+    "url_placeholder": "mi-workspace",
+    "submit": "Crear workspace",
+    "submitting": "Creando...",
+    "errors": {
+      "slug_format": "Solo letras minúsculas, números y guiones",
+      "slug_taken": "Esa URL de workspace ya está en uso.",
+      "slug_reserved": "Esa URL de workspace está reservada y no se puede usar.",
+      "slug_conflict_toast": "Elegí una URL de workspace diferente",
+      "create_failed": "Error al crear el workspace"
+    }
+  },
+  "new_page": {
+    "back": "Volver",
+    "log_out": "Cerrar sesión",
+    "title": "Bienvenido a Multica",
+    "description": "Un workspace donde vos y tus compañeros de IA trabajan codo a codo — tomando issues, dejando comentarios y compartiendo el mismo contexto.",
+    "invite_hint": "Podés invitar compañeros una vez que tu workspace esté listo."
+  },
+  "no_access": {
+    "title": "Workspace no disponible",
+    "description": "Este workspace no existe o no tenés acceso.",
+    "go_to_workspaces": "Ir a mis workspaces",
+    "sign_in_different": "Iniciar sesión con otro usuario"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "Bandeja de entrada",
+    "my_issues": "Mis Issues",
+    "issues": "Issues",
+    "projects": "Proyectos",
+    "autopilots": "Autopilot",
+    "agents": "Agents",
+    "squads": "Squads",
+    "usage": "Uso",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Configuración"
+  },
+  "help": {
+    "trigger": "Ayuda",
+    "docs": "Docs",
+    "changelog": "Registro de cambios",
+    "feedback": "Feedback"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Cargando workspace…",
+    "loading_named_prefix": "Cargando"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Desfijar",
+    "workspaces_label": "Workspaces",
+    "create_workspace": "Crear workspace",
+    "pending_invitations_label": "Invitaciones pendientes",
+    "invitation_workspace_fallback": "Workspace",
+    "invitation_join": "Unirse",
+    "invitation_decline": "Rechazar",
+    "log_out": "Cerrar sesión",
+    "new_issue": "Nuevo Issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Fijados",
+    "workspace_group": "Workspace",
+    "configure_group": "Configurar",
+    "unread_overflow": "99+"
+  }
+}
