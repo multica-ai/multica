@@ -307,3 +307,31 @@ func TestRepoCheckoutRetryDelay(t *testing.T) {
 		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }
+
+func TestRepoCheckoutTimeout(t *testing.T) {
+	// Cannot run t.Parallel(): t.Setenv forbids it.
+	cases := []struct {
+		name string
+		env  string
+		want time.Duration
+	}{
+		{name: "unset", env: "", want: defaultRepoCheckoutTimeout},
+		{name: "duration string", env: "20m", want: 20 * time.Minute},
+		{name: "plain seconds", env: "90", want: 90 * time.Second},
+		{name: "invalid", env: "bogus", want: defaultRepoCheckoutTimeout},
+		{name: "negative seconds", env: "-5", want: defaultRepoCheckoutTimeout},
+		{name: "zero seconds", env: "0", want: defaultRepoCheckoutTimeout},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env == "" {
+				t.Setenv("MULTICA_REPO_CHECKOUT_TIMEOUT", "")
+			} else {
+				t.Setenv("MULTICA_REPO_CHECKOUT_TIMEOUT", tc.env)
+			}
+			if got := repoCheckoutTimeout(); got != tc.want {
+				t.Fatalf("repoCheckoutTimeout() = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}

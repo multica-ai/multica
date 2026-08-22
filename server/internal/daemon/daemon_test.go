@@ -1661,7 +1661,7 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	t.Cleanup(srv.Close)
 	d := &Daemon{
 		client:       NewClient(srv.URL),
-		repoCache:    repocache.New(t.TempDir(), slog.Default()),
+		repoCache:    repocache.New(t.TempDir(), slog.Default(), 0),
 		logger:       slog.Default(),
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),

@@ -123,7 +123,7 @@ func TestRunGitOutputTimesOut(t *testing.T) {
 func TestRepoMaintenanceYieldsToForeground(t *testing.T) {
 	t.Parallel()
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	const barePath = "/cache/repo.git"
 	entered := make(chan struct{})
 	maintenanceDone := make(chan error, 1)
@@ -165,7 +165,7 @@ func TestRepoMaintenanceYieldsToForeground(t *testing.T) {
 func TestCancelMaintenanceStopsMaintenanceWithoutARepoCheckout(t *testing.T) {
 	t.Parallel()
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	const barePath = "/cache/reused-worktree.git"
 	entered := make(chan struct{})
 	done := make(chan error, 1)
@@ -200,7 +200,7 @@ func TestCancelMaintenanceStopsMaintenanceWithoutARepoCheckout(t *testing.T) {
 func TestCancelMaintenanceWaitsForCleanupBarrier(t *testing.T) {
 	t.Parallel()
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	const barePath = "/cache/cleanup-barrier.git"
 	entered := make(chan struct{})
 	cancelled := make(chan struct{})
@@ -243,7 +243,7 @@ func TestCreateWorktreeContextReturnsBusyAfterBoundedLockWait(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	cache := New(root, testLogger())
+	cache := New(root, testLogger(), 0)
 	const (
 		workspaceID = "ws-1"
 		repoURL     = "https://github.com/org/repo.git"
@@ -283,7 +283,7 @@ func TestCreateWorktreeContextCancelsRunningGitProcessTree(t *testing.T) {
 	t.Setenv("MULTICA_TEST_GIT_MARKER", marker)
 
 	root := t.TempDir()
-	cache := New(root, testLogger())
+	cache := New(root, testLogger(), 0)
 	const (
 		workspaceID = "ws-1"
 		repoURL     = "https://github.com/org/repo.git"
@@ -452,7 +452,7 @@ func TestSyncAndLookup(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 
 	// Sync should clone the repo.
 	err := cache.Sync("ws-123", []RepoInfo{
@@ -520,7 +520,7 @@ func TestSyncKeepsDistinctCachesForSegmentBoundaryColliders(t *testing.T) {
 	runGitAuthored(t, srcB, "add", ".")
 	runGitAuthored(t, srcB, "commit", "-m", "B-content")
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: srcA}, {URL: srcB}}); err != nil {
 		t.Fatalf("Sync failed: %v", err)
 	}
@@ -591,7 +591,7 @@ func TestSyncFetchesExisting(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 
 	// First sync: clone.
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
@@ -642,7 +642,7 @@ func TestWorktreeFromCache(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestCreateWorktree(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -714,10 +714,208 @@ func TestCreateWorktree(t *testing.T) {
 	}
 }
 
+// TestCreateWorktreeRecoversFromCorruptedAdminMetadata reproduces the
+// multica-ai/multica#6879 scenario: a checkout canceled mid `git worktree
+// add` (e.g. by the CLI's own HTTP timeout racing the daemon's internal git
+// timeout) leaves the worktree's `.git` file marker in place but the bare
+// repo's admin directory for that worktree incomplete/missing. Before the
+// fix, the next retry against the same workdir hit isGitWorktree == true and
+// routed into updateExistingWorktreeContext, which failed hard with "fatal:
+// not a git repository" on every subsequent retry. The fix adds
+// gitWorktreeAdminIntact to detect this and self-heal by recreating the
+// worktree instead.
+func TestCreateWorktreeRecoversFromCorruptedAdminMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger(), 0)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	params := WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Code Reviewer",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+	}
+
+	first, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("first CreateWorktree failed: %v", err)
+	}
+	if _, err := os.Stat(first.Path); err != nil {
+		t.Fatalf("worktree path does not exist: %s: %v", first.Path, err)
+	}
+
+	// Simulate the canceled-checkout corruption: the .git file marker still
+	// exists, but the admin directory it points at is gone (as if `git
+	// worktree add` was killed partway through writing its bookkeeping
+	// files).
+	adminDir := readWorktreeAdminDir(t, first.Path)
+	if err := os.RemoveAll(adminDir); err != nil {
+		t.Fatalf("failed to corrupt admin dir: %v", err)
+	}
+	if gitWorktreeAdminIntact(first.Path) {
+		t.Fatalf("expected corrupted worktree to be reported as not intact")
+	}
+
+	// Retrying against the same workdir/task must self-heal instead of
+	// failing forever.
+	second, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("second CreateWorktree (after corruption) failed: %v", err)
+	}
+	if second.Path != first.Path {
+		t.Fatalf("expected recovered worktree at same path %q, got %q", first.Path, second.Path)
+	}
+	if _, err := os.Stat(second.Path); err != nil {
+		t.Fatalf("recovered worktree path does not exist: %s: %v", second.Path, err)
+	}
+	if !gitWorktreeAdminIntact(second.Path) {
+		t.Fatalf("expected recovered worktree to have intact admin metadata")
+	}
+
+	// The recovered worktree must be usable by ordinary git commands.
+	cmd := exec.Command("git", "-C", second.Path, "status", "--short")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git status on recovered worktree failed: %s: %v", out, err)
+	}
+}
+
+// TestCreateWorktreeRecoversFromStaleIndexLock reproduces the failure
+// reported on multica-ai/multica#6879: a checkout killed mid `git
+// reset`/`git checkout` can leave a stale index.lock behind while
+// HEAD/commondir/gitdir stay intact, so gitWorktreeAdminIntact alone can't
+// detect it. Every retry against the same workdir hit
+// updateExistingWorktreeContext's `git reset --hard`, which failed hard on
+// the pre-existing lock file. The fix falls through to the same
+// remove-and-recreate recovery used for corrupted admin metadata whenever
+// the reuse attempt itself fails.
+func TestCreateWorktreeRecoversFromStaleIndexLock(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger(), 0)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	params := WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Code Reviewer",
+		TaskID:      "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+	}
+
+	first, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("first CreateWorktree failed: %v", err)
+	}
+
+	// Simulate a checkout killed mid `git reset`/`git checkout`: admin
+	// metadata is fine, but a stale index.lock is left behind.
+	adminDir := readWorktreeAdminDir(t, first.Path)
+	lockPath := filepath.Join(adminDir, "index.lock")
+	if err := os.WriteFile(lockPath, nil, 0o644); err != nil {
+		t.Fatalf("failed to create stale index.lock: %v", err)
+	}
+	if !gitWorktreeAdminIntact(first.Path) {
+		t.Fatalf("expected worktree with only a stale index.lock to still report admin metadata as intact")
+	}
+
+	// Retrying against the same workdir/task must self-heal instead of
+	// failing forever with the opaque "Unable to create index.lock" error.
+	second, err := cache.CreateWorktree(params)
+	if err != nil {
+		t.Fatalf("second CreateWorktree (after stale index.lock) failed: %v", err)
+	}
+	if second.Path != first.Path {
+		t.Fatalf("expected recovered worktree at same path %q, got %q", first.Path, second.Path)
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("expected stale index.lock to be gone after recovery, stat err: %v", err)
+	}
+
+	cmd := exec.Command("git", "-C", second.Path, "status", "--short")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git status on recovered worktree failed: %s: %v", out, err)
+	}
+}
+
+// readWorktreeAdminDir reads a linked worktree's .git file and resolves the
+// admin directory it points at, mirroring gitWorktreeAdminIntact's parsing.
+func readWorktreeAdminDir(t *testing.T, worktreePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, ".git"))
+	if err != nil {
+		t.Fatalf("read .git file: %v", err)
+	}
+	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, prefix) {
+		t.Fatalf(".git file does not start with %q: %q", prefix, line)
+	}
+	adminDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(adminDir) {
+		adminDir = filepath.Join(worktreePath, adminDir)
+	}
+	return adminDir
+}
+
+func TestGitWorktreeAdminIntact(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger(), 0)
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	workDir := t.TempDir()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "Code Reviewer",
+		TaskID:      "b2c3d4e5-f6a7-8901-bcde-f21345678901",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if !gitWorktreeAdminIntact(result.Path) {
+		t.Error("expected freshly created worktree to have intact admin metadata")
+	}
+
+	// Removing a required bookkeeping file from the admin dir must flip the
+	// result to false.
+	adminDir := readWorktreeAdminDir(t, result.Path)
+	if err := os.Remove(filepath.Join(adminDir, "HEAD")); err != nil {
+		t.Fatalf("remove HEAD: %v", err)
+	}
+	if gitWorktreeAdminIntact(result.Path) {
+		t.Error("expected worktree with missing admin HEAD to be reported as not intact")
+	}
+
+	// A path with no .git file at all must also report false.
+	noGit := t.TempDir()
+	if gitWorktreeAdminIntact(noGit) {
+		t.Error("expected path with no .git file to be reported as not intact")
+	}
+}
+
 func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -782,7 +980,7 @@ func TestCreateWorktreeWithIsolatedGitMetadata(t *testing.T) {
 func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("initial sync failed: %v", err)
 	}
@@ -852,7 +1050,7 @@ func TestCreateWorktreeReusesIsolatedGitMetadata(t *testing.T) {
 func TestCreateWorktreeMigratesLinkedWorktreeToIsolatedMetadata(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -940,7 +1138,7 @@ func TestLocalCloneArgsOnlyDisablesHardlinksOnWindows(t *testing.T) {
 func TestIsolatedCheckoutCloneWithoutHardlinksIsIndependent(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1031,7 +1229,7 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1069,7 +1267,7 @@ func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1107,7 +1305,7 @@ func TestCreateWorktreeDoesNotExcludeReasonixProjectConfig(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1165,7 +1363,7 @@ func gitInfoExclude(t *testing.T, worktreePath string) string {
 func TestCreateWorktreeNotCached(t *testing.T) {
 	t.Parallel()
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 
 	_, err := cache.CreateWorktree(WorktreeParams{
 		WorkspaceID: "ws-1",
@@ -1198,7 +1396,7 @@ func TestCreateWorktreeWithRequestedBranchRef(t *testing.T) {
 		t.Fatal("test setup failed: review branch did not advance")
 	}
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1229,7 +1427,7 @@ func TestCreateWorktreeWithRequestedCommitRef(t *testing.T) {
 	firstCommit := gitHead(t, sourceRepo)
 	addEmptyCommit(t, sourceRepo, "second commit")
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1261,7 +1459,7 @@ func TestCreateWorktreeWithRequestedTagRef(t *testing.T) {
 	// the default branch tip).
 	addEmptyCommit(t, sourceRepo, "post-tag commit")
 
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1286,7 +1484,7 @@ func TestCreateWorktreeWithRequestedTagRef(t *testing.T) {
 func TestCreateWorktreeWithUnknownRequestedRef(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1372,7 +1570,7 @@ func TestCreateWorktreeFetchesDespiteAgentBranchOnRemote(t *testing.T) {
 	runGitAuthored(t, sourceRepo, "checkout", "--detach", "HEAD")
 
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1452,7 +1650,7 @@ func TestEnsureRemoteTrackingLayoutMigratesLegacyCache(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1505,7 +1703,7 @@ func TestCreateWorktreePathCollisionDoesNotLeakBranch(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1552,7 +1750,7 @@ func TestGetRemoteDefaultBranchScansForCustomDefault(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1594,7 +1792,7 @@ func TestGetRemoteDefaultBranchFallsBackToBareHead(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1638,7 +1836,7 @@ func TestGitFetchRefreshesOriginHeadAfterDefaultChange(t *testing.T) {
 	initialBranch := currentBranchName(t, sourceRepo)
 
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1690,7 +1888,7 @@ func TestGetRemoteDefaultBranchUsesBareHeadHintForCustomDefault(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1735,7 +1933,7 @@ func TestCreateWorktreeInstallsCoAuthoredByHook(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1779,7 +1977,7 @@ func TestCoAuthoredByHookIdempotent(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1829,7 +2027,7 @@ func TestCreateWorktreeRemovesCoAuthoredByHookWhenDisabled(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1902,7 +2100,7 @@ func TestCreateWorktreeRemovesLegacyCoAuthoredByHook(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -1985,7 +2183,7 @@ func TestRemoveCoAuthoredByHookPreservesUserHook(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -2032,7 +2230,7 @@ func TestGetRemoteDefaultBranchAmbiguousOriginReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -2113,7 +2311,7 @@ func TestCreateWorktreeStampsLastUsed(t *testing.T) {
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
 
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -2147,7 +2345,7 @@ func TestCreateWorktreeStampsLastUsed(t *testing.T) {
 // it live?" — the GC needs the second to map live repo URLs onto directories.
 func TestBarePathIsIndependentOfExistence(t *testing.T) {
 	t.Parallel()
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 
 	path := cache.BarePath("ws-1", "https://example.com/acme/widgets.git")
 	if path == "" {
