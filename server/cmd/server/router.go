@@ -1202,6 +1202,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Get("/readyz", health.readyHandler)
 	r.Get("/healthz", health.readyHandler)
 
+	// Public key set for task identity tokens. Unauthenticated by design:
+	// the systems that verify these tokens are external to Multica and hold
+	// no credentials here, and the response is public key material. 404s
+	// unless the feature is configured. See internal/handler/tasktoken_jwks.go.
+	r.Get("/.well-known/jwks.json", h.GetTaskTokenJWKS)
+
 	// Realtime subsystem metrics — connection counts, slow-client evictions,
 	// and per-event-type send QPS counters. Exposed as JSON so it can be
 	// scraped by ops or surfaced in the admin UI without adding a Prometheus
