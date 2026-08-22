@@ -1100,6 +1100,97 @@ func TestPrepareOpenclawConfigManagedSetFreshInstall(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigFallsBackToRegistryOnEnvelopeWithoutExit — the
+// completeness rule accepts a JSON error envelope as a finished answer (it is
+// valid JSON), so a CLI that prints one and then lingers past the idle grace
+// yields err == nil with the envelope in stdout. The missing-key verdict must be
+// the same as when the CLI exits non-zero: select the registry rather than
+// decoding the envelope as an agent list and failing the whole preparation.
+func TestPrepareOpenclawConfigFallsBackToRegistryOnEnvelopeWithoutExit(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userCfgPath},
+		// Envelope, no error: the CLI answered and then failed to exit.
+		"config get agents.list --json": {stdout: `{"error":"Config path not found: agents.list"}`},
+		"agents list --json":            {stdout: `[{"id":"scout","workspace":"/old"}]`},
+	})
+
+	// Without the envelope check this decodes as an agent list, fails to
+	// unmarshal into []any, and takes the whole preparation down.
+	if _, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{}); err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	var called []string
+	registryConsulted := false
+	for _, call := range stub.calls {
+		joined := strings.Join(call.args, " ")
+		called = append(called, joined)
+		if joined == "agents list --json" {
+			registryConsulted = true
+		}
+	}
+	if !registryConsulted {
+		t.Errorf("registry was never consulted (calls: %v), so the envelope was not recognized", called)
+	}
+	wrapper, err := os.ReadFile(filepath.Join(envRoot, openclawConfigFile))
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	// A registry-sourced list is deliberately not written back as
+	// `agents.list` (see buildPerTaskOpenclawConfig), but the envelope must not
+	// reach the wrapper by any route either.
+	if strings.Contains(string(wrapper), "Config path not found") {
+		t.Errorf("wrapper %s carries the CLI error envelope", wrapper)
+	}
+}
+
+// TestPrepareOpenclawConfigFailsClosedOnResolvedConfigEnvelopeWithoutExit — the
+// object-target counterpart, and the one with a silent failure mode: an envelope
+// decoded as the user's resolved config would be sanitized and written into the
+// task's snapshot, so preparation has to fail closed with the CLI's own message.
+func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigEnvelopeWithoutExit(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: userCfgPath},
+		"config get agents.list --json": {stdout: "null"},
+		"config get --json": {
+			stdout: `{"error":"schema validation failed","resolved":{"apiKey":"must-not-leak"}}`,
+		},
+	})
+
+	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		McpConfig: json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`),
+	})
+	if err == nil {
+		t.Fatal("prepareOpenclawConfig succeeded on an error envelope that arrived without a non-zero exit")
+	}
+	if !strings.Contains(err.Error(), "schema validation failed") {
+		t.Errorf("error %q omits the CLI's own diagnostic", err.Error())
+	}
+	if strings.Contains(err.Error(), "must-not-leak") {
+		t.Errorf("error leaked a non-diagnostic JSON field: %q", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(envRoot, openclawUserSnapshotFile)); !os.IsNotExist(statErr) {
+		t.Errorf("snapshot exists after fail-closed: %v", statErr)
+	}
+}
+
 // TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError — when the
 // user has a config on disk and the agent has managed mcp_config but
 // `openclaw config get --json` errors, the preparer must NOT fall back to

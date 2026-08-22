@@ -2393,14 +2393,25 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 
 	// Try JSON modes first. Different openclaw builds expose the
 	// flag under different names; trying a couple is cheap.
+	//
+	// RunCollectQuiet, not cmd.Output(), for two measured reasons. openclaw
+	// forks an `openclaw-config` helper that inherits stdout, and cmd.Output()
+	// waits for that pipe to reach EOF — so each attempt could park past
+	// runCtx and leave the helper behind, up to four orphans per call. And
+	// `openclaw agents list` prints the correct list in ~250ms and then does
+	// not exit at all, so waiting for exit spent the whole 30s budget to
+	// arrive at output we already had. See run_collect.go / MUL-5467.
+	//
+	// JSONOutputComplete is what makes the early return safe: a list still being
+	// written does not parse, so a truncated catalog can never be mistaken for
+	// the real one.
 	for _, jsonArgs := range [][]string{
 		{"agents", "list", "--json"},
 		{"agents", "list", "--output", "json"},
 		{"agents", "list", "-o", "json"},
 	} {
 		cmd := runtimeCmd.exec(runCtx, jsonArgs...)
-		hideAgentWindow(cmd)
-		out, err := cmd.Output()
+		out, _, _, err := RunCollectQuietCmd(runCtx, cmd, nil, 0, JSONOutputComplete)
 		if err != nil && len(out) == 0 {
 			continue
 		}
@@ -2412,9 +2423,13 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// Text fallback. Be strict — the default output is a decorated
 	// banner with box-drawing and section headers, and picking up
 	// the wrong tokens produces nonsense entries like "Identity:".
+	//
+	// RunCollect (wait for exit) rather than the quiet variant: decorated text
+	// has no completeness rule, so an early return could yield a partial agent
+	// list, and a silently short catalog is worse than a slow one. This path
+	// still gains the orphan reaping and the bounded return.
 	cmd := runtimeCmd.exec(runCtx, "agents", "list")
-	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, _, err := RunCollectCmd(runCtx, cmd, nil)
 	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}

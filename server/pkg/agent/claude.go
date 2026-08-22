@@ -1110,15 +1110,20 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 
+	// RunCollectCmd, not cmd.Output(): a broken CLI (node/bun shim) can leave
+	// grandchildren that inherited and still hold our stdout pipe open, and
+	// cmd.Output() blocks in Wait() until that pipe closes — defeating the
+	// timeout above. The collector owns the pipes so Wait returns on the direct
+	// child's exit, then reaps the tree so the grandchild cannot linger as an
+	// orphan. The cmd.WaitDelay backstop this replaces bounded the call but left
+	// that orphan running and reported exec.ErrWaitDelay, i.e. it failed a probe
+	// whose output had in fact arrived — and a failed version probe skips runtime
+	// registration entirely. See run_collect.go and MUL-5467.
+	//
+	// Built through runtimeCmd.exec so a custom runtime's fixed_args prefix is
+	// still applied (MUL-6260); the collector is handed the finished command.
 	cmd := runtimeCmd.exec(ctx, "--version")
-	hideAgentWindow(cmd)
-	// exec.CommandContext only kills the direct child on timeout. A broken CLI
-	// (node/bun shim) can leave grandchildren that inherited and still hold our
-	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
-	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
-	// reaps shortly after the context fires so this call always returns.
-	cmd.WaitDelay = 2 * time.Second
-	data, err := cmd.Output()
+	data, _, err := RunCollectCmd(ctx, cmd, nil)
 	if err != nil {
 		// One provider-agnostic boundary for probes: DetectVersion routes every
 		// provider through here, so an ENOEXEC diagnosis added at this point

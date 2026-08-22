@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // openclawConfigFile is the per-task synthesized OpenClaw config the daemon
@@ -48,24 +49,24 @@ const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 // MULTICA_OPENCLAW_CLI_TIMEOUT (or backends.openclaw.cli_timeout in the CLI
 // config, which the daemon translates into the same env var).
 //
-// It is a deadline, not a guaranteed cap — see the gap below.
+// The gap that used to be documented here — that this was a deadline and not a
+// cap — is closed as of MUL-5467. Keeping the measurements, because they are
+// what the fix has to hold against: CommandContext kills only the direct child,
+// and cmd.Output() blocks in Wait() until the stdout pipe closes, so a CLI that
+// leaves a descendant holding stdout ran for the descendant's lifetime.
+// Measured on linux/dash: a shim whose backgrounded child slept 6s took 6.01s
+// against a 150ms deadline. An npm shim is that shape on Windows (cmd.exe →
+// node). A cmd.WaitDelay backstop bounded the call but left the descendant
+// running (measured: returns in 2.17s with the grandchild still in state S),
+// trading a hang for a process leak, and on Unix nothing reaped it because
+// preparationProcessController.finish() is a no-op there.
 //
-// Known gap (deliberately not fixed here): this deadline does not actually
-// bound the call when the CLI leaves a descendant holding stdout.
-// CommandContext kills only the direct child, and cmd.Output() blocks in
-// Wait() until the stdout pipe closes, so the call runs for the descendant's
-// lifetime. Measured on linux/dash: a shim whose backgrounded child slept 6s
-// took 6.01s against a 150ms deadline. An npm shim is that shape on Windows
-// (cmd.exe → node).
-//
-// A cmd.WaitDelay backstop bounds the call but leaves the descendant running
-// (measured: returns in 2.17s with the grandchild still in state S), trading a
-// hang for a process leak — and on Unix nothing reaps it, because
-// preparationProcessController.finish() is a no-op there. Closing this properly
-// needs process-tree ownership (Unix process group, Windows Job Object) so the
-// deadline can terminate the whole tree, which is its own change with its own
-// risk surface. Tracked in MUL-5467; this file intentionally keeps the existing
-// behaviour rather than shipping half of it.
+// execOpenclawCLI now goes through agent.RunCollectQuiet, which owns the pipes
+// (so Wait returns when the direct child exits, whatever a descendant is holding)
+// and owns the process tree (Unix process group, Windows Job Object), so the
+// descendant is reaped rather than orphaned. The deadline below is therefore
+// enforceable, and a host that needs more of it can say so through the override
+// rather than discovering that the limit was advisory.
 const openclawCLITimeout = 30 * time.Second
 
 // OpenclawCLITimeoutEnv overrides openclawCLITimeout. Accepts a Go duration
@@ -975,6 +976,12 @@ func openclawResolvedFullConfig(bin string, timeout time.Duration) (map[string]a
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
+	// This target is an object, so an envelope decodes cleanly and would be
+	// carried into the sanitized snapshot as if it were the user's config. There
+	// is no graceful reading of an error here: fail closed.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		return nil, openclawStdoutEnvelopeError("config get --json", message)
+	}
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &cfg); err != nil {
 		return nil, fmt.Errorf("parse `openclaw config get --json` output: %w", err)
@@ -1015,6 +1022,17 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" || trimmed == "null" {
 		return nil, false, nil
+	}
+	// An envelope that arrived without a non-zero exit must reach the same
+	// verdict as one that did; see openclawStdoutEnvelopeError. Missing the
+	// key here is what selects the registry, so letting the envelope through
+	// as data would turn a graceful fallback into a failed preparation.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if strings.Contains(strings.ToLower(message), "agents.list") && isOpenclawKeyMissingMessage(message) {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, true, rerr
+		}
+		return nil, false, openclawStdoutEnvelopeError("config get agents.list --json", message)
 	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
@@ -1060,6 +1078,14 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
+	// Same reasoning as the resolver above: without a non-zero exit the envelope
+	// only shows up here.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if isOpenclawKeyMissingMessage(message) || isOpenclawUnknownSubcommandMessage(message) {
+			return nil, nil
+		}
+		return nil, openclawStdoutEnvelopeError("agents list --json", message)
+	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
 		return nil, fmt.Errorf("parse `openclaw agents list --json` output: %w", err)
@@ -1071,6 +1097,76 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 // openclaw CLI. Production points at execOpenclawCLI; tests swap in a stub
 // to avoid spawning a real binary. Production code never reassigns it.
 var openclawExec = execOpenclawCLI
+
+// openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
+// Shared by the parser and by openclawConfigPathComplete so the two cannot
+// disagree about which line carries the answer.
+func openclawLastNonEmptyLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if trimmed := strings.TrimSpace(lines[i]); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// openclawConfigPathComplete reports whether out already carries a usable
+// `openclaw config file` answer, i.e. its last non-empty line looks like a path.
+//
+// Deliberately stricter than the parser, which resolves a relative line through
+// filepath.Abs and would therefore accept a Doctor warning border as an answer.
+// That leniency is fine once the command has finished; as a completeness rule it
+// would let the early return fire on the banner OpenClaw prints *before* the
+// path. Measured on 2026.5.27: the banner lands 54ms ahead of the path.
+//
+// The `$OPENCLAW_HOME\...` form counts as an answer once that variable resolves
+// to an absolute directory, which is the hand-off #7310 left here: while the
+// parser could not expand the shape, accepting it would have handed the caller a
+// path the parser then failed on, so this rule had to refuse it and such a host
+// lost the early return. #7310 made expandOpenclawPath understand it, so the
+// refusal is now the only thing standing between those hosts and the hang
+// tolerance the rest of this change exists for.
+//
+// Resolved through openclawHomeFromEnv rather than read raw from the
+// environment, because the value itself may be a tilde path that upstream
+// expands before printing (see there). Judging `~/svc` by filepath.IsAbs on the
+// raw string answers false and silently withholds the early return on exactly
+// the configuration #7310's review was about.
+func openclawConfigPathComplete(out []byte) bool {
+	line := openclawLastNonEmptyLine(string(out))
+	if line == "" {
+		return false
+	}
+	if _, isTilde := openclawTildeRest(line); isTilde {
+		return true
+	}
+	if _, isOpenclawHome := openclawHomeRest(line); isOpenclawHome {
+		home, err := openclawHomeFromEnv()
+		return err == nil && filepath.IsAbs(home)
+	}
+	return filepath.IsAbs(line)
+}
+
+// openclawOutputComplete returns the rule that decides whether the bytes
+// captured so far are a finished answer for this openclaw subcommand, for
+// agent.RunCollectQuiet's early return.
+//
+// A nil result means "no rule for this shape", which makes RunCollectQuiet wait
+// for the process to exit — the conservative behaviour. Adding a subcommand
+// without a rule therefore loses the hang tolerance rather than risking a
+// truncated answer.
+func openclawOutputComplete(args []string) agent.OutputComplete {
+	for _, a := range args {
+		if a == "--json" {
+			return agent.JSONOutputComplete
+		}
+	}
+	if len(args) >= 2 && args[0] == "config" && args[1] == "file" {
+		return openclawConfigPathComplete
+	}
+	return nil
+}
 
 // execOpenclawCLI executes an openclaw subcommand and returns its stdout,
 // including stdout captured before a non-zero exit. Failed stdout stays in the
@@ -1102,14 +1198,21 @@ var openclawExec = execOpenclawCLI
 // check cancellation the standard way. The process error is still printed for
 // diagnosis, just not as the wrapped cause.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = os.Environ()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	raw, err := cmd.Output()
+	// agent.RunCollectQuiet, not cmd.Output(): this package owns the pipes and
+	// the process tree, which is what makes the deadline above enforceable at all
+	// (MUL-5467 — see openclawCLITimeout). The per-subcommand rule from
+	// openclawOutputComplete additionally lets a CLI that prints its answer and
+	// then refuses to exit be treated as finished, so `openclaw config file` no
+	// longer has to reach the deadline to be useful.
+	//
+	// Every error shape below is unchanged, including returning captured stdout
+	// alongside the error: annotateOpenclawJSONError reads it, and the typed
+	// timeout sentinel is what lets the daemon classify a local stall
+	// structurally.
+	raw, stderrOut, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, openclawOutputComplete(args), bin, args...)
 	stdout := string(raw)
 	if err != nil {
-		stderrMsg := strings.TrimSpace(stderr.String())
+		stderrMsg := strings.TrimSpace(stderrOut)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			msg := fmt.Sprintf("openclaw %s: %v (process: %v)", strings.Join(args, " "), ctxErr, err)
 			if stderrMsg != "" {
@@ -1240,11 +1343,32 @@ func annotateOpenclawJSONError(err error, stdout string) error {
 	if !ok {
 		return err
 	}
+	return fmt.Errorf("%w (json error: %s)", err, openclawBoundedJSONErrorMessage(message))
+}
+
+func openclawBoundedJSONErrorMessage(message string) string {
 	runes := []rune(message)
 	if len(runes) > openclawJSONErrorMaxRunes {
-		message = string(runes[:openclawJSONErrorMaxRunes]) + "…"
+		return string(runes[:openclawJSONErrorMaxRunes]) + "…"
 	}
-	return fmt.Errorf("%w (json error: %s)", err, message)
+	return message
+}
+
+// openclawStdoutEnvelopeError turns a CLI error envelope that arrived on stdout
+// *without* a non-zero exit into an error.
+//
+// The completeness rules let RunCollectQuiet accept a finished-looking answer
+// from a CLI that has printed it but not exited yet (see openclawOutputComplete),
+// and a JSON error envelope is itself valid JSON, so JSONOutputComplete accepts
+// one. The exit-status path therefore no longer sees every CLI error: a build
+// that prints `{"error": "..."}` and then lingers past the idle grace hands back
+// err == nil with the envelope sitting in stdout. Callers must check for that
+// explicitly, because decoding an envelope as data is silent for an object
+// target — it would be written straight into the generated config — and only
+// accidentally noisy for a list target, where the type mismatch surfaces as an
+// opaque parse error instead of the CLI's own message.
+func openclawStdoutEnvelopeError(command, message string) error {
+	return fmt.Errorf("`openclaw %s` reported: %s", command, openclawBoundedJSONErrorMessage(message))
 }
 
 // isOpenclawKeyMissingResult recognizes the JSON error envelope observed in
@@ -1296,7 +1420,11 @@ func isOpenclawUnknownSubcommand(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	return isOpenclawUnknownSubcommandMessage(err.Error())
+}
+
+func isOpenclawUnknownSubcommandMessage(msg string) bool {
+	msg = strings.ToLower(msg)
 	return strings.Contains(msg, "unknown command") ||
 		strings.Contains(msg, "unknown option") ||
 		strings.Contains(msg, "does not recognize") ||
