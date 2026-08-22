@@ -42,6 +42,10 @@ Multica currently detects these commands:
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
 
+<Callout type="info">
+On macOS, installing [Tencent WorkBuddy](https://copilot.tencent.com/work/) is also enough for CodeBuddy. After checking the configured path and `PATH`, Multica detects the `codebuddy` CLI bundled in `/Applications/WorkBuddy.app` or `~/Applications/WorkBuddy.app`. Complete WorkBuddy's sign-in before starting the daemon. Tencent documents this programmatic interface in [Headless mode](https://copilot.tencent.com/docs/cli/headless).
+</Callout>
+
 ## 2. Sign in on your machine
 
 After installing, launch the tool once in a terminal on its own and complete its sign-in or model provider setup. If the tool cannot complete requests in the terminal, the daemon's invocations fail the same way.

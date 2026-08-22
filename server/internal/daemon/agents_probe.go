@@ -148,6 +148,20 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 				}
 			}
 		}
+		if defaultCmd == "codebuddy" && cmd == defaultCmd {
+			// WorkBuddy bundles an executable CodeBuddy CLI in its macOS app
+			// resources without installing a global command. Its entrypoint is
+			// a Node script, so also expose WorkBuddy's staged Node runtime.
+			for _, p := range workbuddyDesktopAppBundlePaths() {
+				if isExecutableFile(p) && ensureWorkBuddyNodeOnPath() {
+					return AgentEntry{
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
+					}, true
+				}
+			}
+		}
 		return AgentEntry{}, false
 	}
 

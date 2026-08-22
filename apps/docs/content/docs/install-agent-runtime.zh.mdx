@@ -42,6 +42,10 @@ Multica 当前会检测以下命令：
 
 "受支持"表示 Multica 能够调用对应 CLI，不代表 Multica 会替你提供该工具的账号、订阅或模型额度。
 
+<Callout type="info">
+在 macOS 安装[腾讯 WorkBuddy](https://copilot.tencent.com/work/)后，也可以直接使用 CodeBuddy。Multica 会先检查配置路径和 `PATH`，再检测 `/Applications/WorkBuddy.app` 或 `~/Applications/WorkBuddy.app` 内置的 `codebuddy` CLI。启动守护进程前，请先在 WorkBuddy 完成登录。腾讯的[无界面模式文档](https://copilot.tencent.com/docs/cli/headless)介绍了这套编程接口。
+</Callout>
+
 ## 2. 在本机完成登录
 
 安装后，先在终端中单独启动一次工具，并按照它自己的流程登录或配置模型服务。工具在终端中无法完成请求时，守护进程调用它同样会失败。

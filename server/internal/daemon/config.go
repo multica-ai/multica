@@ -903,6 +903,65 @@ var codexDesktopAppBundlePaths = func() []string {
 	return paths
 }
 
+// workbuddyDesktopAppBundlePaths returns the executable CodeBuddy CLI bundled
+// with Tencent WorkBuddy for macOS. WorkBuddy does not install `codebuddy` on
+// PATH, but its unpacked Electron resources contain the same headless CLI that
+// the built-in CodeBuddy backend drives. Prefer the system-wide installation
+// before the per-user Applications directory.
+var workbuddyDesktopAppBundlePaths = func() []string {
+	const relative = "WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy"
+	paths := []string{filepath.Join("/Applications", relative)}
+	if home, err := os.UserHomeDir(); err == nil {
+		paths = append(paths, filepath.Join(home, "Applications", relative))
+	}
+	return paths
+}
+
+// workbuddyNodeBinaryPaths returns Node versions staged by WorkBuddy for its
+// bundled CLI. The `codebuddy` entrypoint is a Node script, so a GUI-launched
+// Multica daemon cannot rely on a system `node` being present on PATH.
+var workbuddyNodeBinaryPaths = func() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	paths, err := filepath.Glob(filepath.Join(home, ".workbuddy", "binaries", "node", "versions", "*", "bin", "node"))
+	if err != nil {
+		return nil
+	}
+	return paths
+}
+
+// ensureWorkBuddyNodeOnPath makes the staged Node runtime available to the
+// bundled CodeBuddy script. It is intentionally called only after the bundle
+// itself wins discovery, so unrelated agent launches keep their environment.
+func ensureWorkBuddyNodeOnPath() bool {
+	if _, err := exec.LookPath("node"); err == nil {
+		return true
+	}
+	paths := workbuddyNodeBinaryPaths()
+	for i := len(paths) - 1; i >= 0; i-- {
+		if !isExecutableFile(paths[i]) {
+			continue
+		}
+		nodeDir := filepath.Dir(paths[i])
+		for _, existing := range filepath.SplitList(os.Getenv("PATH")) {
+			if existing == nodeDir {
+				return true
+			}
+		}
+		pathValue := nodeDir
+		if existing := os.Getenv("PATH"); existing != "" {
+			pathValue += string(os.PathListSeparator) + existing
+		}
+		if err := os.Setenv("PATH", pathValue); err != nil {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
 // loginShellResolveTimeout caps how long the daemon will wait for the user's
 // login shell to print canonical agent paths. A broken rc file should not
 // block startup — if the shell takes longer than this, we proceed without

@@ -42,6 +42,10 @@ Multica は現在、次のコマンドを検出します。
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
 
+<Callout type="info">
+macOS では、[Tencent WorkBuddy](https://copilot.tencent.com/work/) をインストールするだけで CodeBuddy を利用できます。Multica は設定されたパスと `PATH` を確認した後、`/Applications/WorkBuddy.app` または `~/Applications/WorkBuddy.app` に同梱された `codebuddy` CLI を検出します。デーモンを起動する前に WorkBuddy でログインを完了してください。Tencent の [ヘッドレスモード](https://copilot.tencent.com/docs/cli/headless)に、このプログラムインターフェースの説明があります。
+</Callout>
+
 ## 2. ローカル環境でログインする
 
 インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
