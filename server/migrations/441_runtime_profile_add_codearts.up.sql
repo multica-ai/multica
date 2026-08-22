@@ -27,5 +27,7 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'grok',
         'qwen',
         'qwenpaw',
-        'mcode'
+        'mcode',
+        'dim',
+        'zeroclaw'
     )) NOT VALID;

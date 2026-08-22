@@ -1,4 +1,4 @@
--- Restore the pre-348 whitelist. Existing CodeArts rows remain valid because
+-- Restore the pre-441 whitelist. Existing CodeArts rows remain valid because
 -- the replacement constraint is NOT VALID, but new CodeArts profiles are
 -- blocked.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
@@ -26,5 +26,7 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'grok',
         'qwen',
         'qwenpaw',
-        'mcode'
+        'mcode',
+        'dim',
+        'zeroclaw'
     )) NOT VALID;
