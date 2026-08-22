@@ -79,6 +79,7 @@ func (s *stubAPIClientWithRecorder) SendBindingPromptCard(ctx context.Context, p
 	s.bindingCalls = append(s.bindingCalls, p)
 	return nil
 }
+func (s *stubAPIClientWithRecorder) SendDMCard(context.Context, SendDMCardParams) error { return nil }
 
 func (s *stubAPIClientWithRecorder) GetBotInfo(ctx context.Context, creds InstallationCredentials) (BotInfo, error) {
 	return BotInfo{}, nil

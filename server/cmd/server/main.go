@@ -749,6 +749,13 @@ func main() {
 			drainCancel()
 		}
 	}
+	if h.InboxChannelDispatcher != nil {
+		inboxDrainCtx, inboxDrainCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := h.InboxChannelDispatcher.Close(inboxDrainCtx); err != nil {
+			slog.Warn("Inbox Channel dispatcher did not drain before shutdown", "error", err)
+		}
+		inboxDrainCancel()
+	}
 
 	if metricsServer != nil {
 		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)

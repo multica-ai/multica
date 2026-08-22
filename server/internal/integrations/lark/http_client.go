@@ -460,6 +460,43 @@ func (c *httpAPIClient) PatchInteractiveCard(ctx context.Context, p PatchCardPar
 	return nil
 }
 
+// SendDMCard posts an interactive card directly to a user's open_id. The
+// caller has already selected and authenticated the exact installation.
+func (c *httpAPIClient) SendDMCard(ctx context.Context, p SendDMCardParams) error {
+	if p.OpenID == "" {
+		return errors.New("lark http client: missing open_id")
+	}
+	if p.CardJSON == "" {
+		return errors.New("lark http client: missing card json")
+	}
+	token, err := c.tenantAccessToken(ctx, p.InstallationID)
+	if err != nil {
+		return err
+	}
+	q := url.Values{}
+	q.Set("receive_id_type", "open_id")
+	body := map[string]string{
+		"receive_id": string(p.OpenID),
+		"msg_type":   "interactive",
+		"content":    p.CardJSON,
+	}
+	var resp struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	path := "/open-apis/im/v1/messages?" + q.Encode()
+	if err := c.doJSON(ctx, c.resolveBaseURL(p.InstallationID), http.MethodPost, path, token, body, &resp); err != nil {
+		return fmt.Errorf("lark http client: send DM card: %w", err)
+	}
+	if resp.Code != 0 {
+		if isTokenError(resp.Code) {
+			c.invalidateToken(p.InstallationID.AppID)
+		}
+		return &APIError{Op: "send DM card", Code: resp.Code, Msg: resp.Msg}
+	}
+	return nil
+}
+
 // SendBindingPromptCard renders the member-binding card and posts it
 // directly to the unbound user's open_id (not the chat). Keeping the
 // card template inside this client — rather than the dispatcher —

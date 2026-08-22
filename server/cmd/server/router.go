@@ -28,6 +28,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channelnotify"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
@@ -429,6 +430,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// connection of its own outside the per-installation supervisor. The Router
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
+	inboxChannelSenders := channelnotify.NewRegistry()
+	enabledInboxChannels := channelnotify.ParseEnabledChannels(os.Getenv("MULTICA_INBOX_FORWARD_CHANNELS"))
+	h.InboxChannelSenders = inboxChannelSenders
 	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
 	// Debounce the per-session run trigger so a burst of messages collapses
 	// into one agent run instead of one per message (MUL-2968).
@@ -508,6 +512,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// backfills) take it directly; the constructor-based services
 				// wrap *db.Queries internally, so they keep taking queries.
 				cs := lark.NewChannelStore(queries)
+				if larkClient.IsConfigured() {
+					inboxChannelSenders.Register(channel.TypeFeishu, lark.NewInboxSender(
+						cs, installSvc, larkClient, appURLFromEnv(), slog.Default(),
+					))
+				}
 				patcher := lark.NewPatcher(cs, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
 
@@ -947,6 +956,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 	} else {
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
+	}
+
+	if len(enabledInboxChannels) > 0 {
+		for _, channelType := range enabledInboxChannels {
+			if _, ok := inboxChannelSenders.Lookup(channelType); !ok {
+				slog.Warn("Inbox Channel forwarding configured without a proactive sender",
+					"channel_type", channelType)
+			}
+		}
+		dispatcher := channelnotify.NewDispatcher(
+			channelnotify.NewResolver(queries),
+			inboxChannelSenders,
+			channelnotify.Config{Enabled: enabledInboxChannels, Logger: slog.Default()},
+		)
+		dispatcher.Register(bus)
+		h.InboxChannelDispatcher = dispatcher
 	}
 
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at

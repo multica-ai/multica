@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/integrations/channelnotify"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
@@ -270,6 +271,11 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
+	// InboxChannelSenders contains proactive private-delivery adapters keyed by
+	// Channel type. InboxChannelDispatcher is nil when the deployment allowlist
+	// is empty; main.go drains it during graceful shutdown when enabled.
+	InboxChannelSenders    *channelnotify.Registry
+	InboxChannelDispatcher *channelnotify.Dispatcher
 	// ChannelMediaReconciler settles the channel-media intent ledger
 	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
 	// where the storage backend exists; main.go starts it as an independent

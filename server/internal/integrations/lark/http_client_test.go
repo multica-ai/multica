@@ -241,6 +241,78 @@ func TestHTTPClient_IsConfigured(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendDMCard_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_dm", 7200)
+	cardJSON := `{"header":{"title":{"tag":"plain_text","content":"Assigned"}}}`
+	fake.stubSend(map[string]any{"code": 0, "msg": "ok"}, func(r *http.Request, body map[string]string) {
+		if got := r.URL.Query().Get("receive_id_type"); got != "open_id" {
+			t.Errorf("receive_id_type = %q, want open_id", got)
+		}
+		if got := body["receive_id"]; got != "ou_recipient" {
+			t.Errorf("receive_id = %q, want ou_recipient", got)
+		}
+		if got := body["msg_type"]; got != "interactive" {
+			t.Errorf("msg_type = %q, want interactive", got)
+		}
+		if got := body["content"]; got != cardJSON {
+			t.Errorf("content = %q, want %q", got, cardJSON)
+		}
+	})
+	c := newTestClient(fake, time.Now)
+
+	err := c.SendDMCard(context.Background(), SendDMCardParams{
+		InstallationID: testCreds(),
+		OpenID:         "ou_recipient",
+		CardJSON:       cardJSON,
+	})
+	if err != nil {
+		t.Fatalf("SendDMCard: %v", err)
+	}
+	if got := fake.lastAuth(); got != "Bearer tok_dm" {
+		t.Fatalf("Authorization = %q, want Bearer tok_dm", got)
+	}
+}
+
+func TestHTTPClient_SendDMCardRejectsMissingFields(t *testing.T) {
+	c := NewHTTPAPIClient(HTTPClientConfig{})
+	for name, params := range map[string]SendDMCardParams{
+		"open id":   {InstallationID: testCreds(), CardJSON: `{}`},
+		"card json": {InstallationID: testCreds(), OpenID: "ou_recipient"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := c.SendDMCard(context.Background(), params); err == nil {
+				t.Fatal("SendDMCard accepted missing required field")
+			}
+		})
+	}
+}
+
+func TestHTTPClient_SendDMCard_TokenExpiredInvalidatesCache(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_dm_refresh", 7200)
+	var calls atomic.Int32
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			writeJSON(w, map[string]any{"code": codeTokenExpired, "msg": "expired"})
+			return
+		}
+		writeJSON(w, map[string]any{"code": 0, "msg": "ok"})
+	})
+	c := newTestClient(fake, time.Now)
+	params := SendDMCardParams{InstallationID: testCreds(), OpenID: "ou_recipient", CardJSON: `{}`}
+
+	if err := c.SendDMCard(context.Background(), params); err == nil {
+		t.Fatal("first SendDMCard should surface expired token")
+	}
+	if err := c.SendDMCard(context.Background(), params); err != nil {
+		t.Fatalf("second SendDMCard: %v", err)
+	}
+	if got := fake.tokenN.Load(); got != 2 {
+		t.Fatalf("token endpoint hits = %d, want 2 after cache invalidation", got)
+	}
+}
+
 func TestHTTPClient_DownloadMessageResource(t *testing.T) {
 	fake := newLarkFake(t)
 	fake.stubToken("tok_resource", 7200)
