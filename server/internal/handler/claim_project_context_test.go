@@ -69,14 +69,17 @@ const (
 
 // assertNoForeignContext fails when any part of the foreign tenant's project
 // reached the claim response, on any field the daemon forwards to the agent.
-func assertNoForeignContext(t *testing.T, body string) {
+func assertNoForeignContext(t *testing.T, body string, extra ...string) {
 	t.Helper()
-	for _, leaked := range []string{
+	for _, leaked := range append([]string{
 		foreignProjectTitle,
 		foreignProjectDescription,
 		foreignRepoURL,
 		foreignLocalPath,
-	} {
+	}, extra...) {
+		if leaked == "" {
+			continue
+		}
 		if strings.Contains(body, leaked) {
 			t.Errorf("claim response leaked foreign tenant context %q: %s", leaked, body)
 		}
@@ -134,7 +137,7 @@ func TestClaimTask_IssueProjectInForeignWorkspace_DegradesToWorkspaceRepos(t *te
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
 	}
-	assertNoForeignContext(t, w.Text())
+	assertNoForeignContext(t, w.Text(), foreignProjectID)
 
 	if resp.Task.ProjectID != "" {
 		t.Errorf("project_id = %q, want empty for an out-of-workspace project reference", resp.Task.ProjectID)
@@ -187,7 +190,7 @@ func TestClaimTask_QuickCreateProjectInForeignWorkspace_DegradesToWorkspaceRepos
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
 	}
-	assertNoForeignContext(t, w.Text())
+	assertNoForeignContext(t, w.Text(), foreignProjectID)
 
 	if resp.Task.ProjectID != "" {
 		t.Errorf("quick-create project_id = %q, want empty for an out-of-workspace project", resp.Task.ProjectID)
@@ -326,7 +329,7 @@ func TestClaimTask_AutopilotRunOnlyForeignWorkspace_CancelsTask(t *testing.T) {
 	if !strings.Contains(w.Text(), "task workspace isolation check failed") {
 		t.Fatalf("claim error = %q, want the workspace isolation failure", w.Text())
 	}
-	assertNoForeignContext(t, w.Text())
+	assertNoForeignContext(t, w.Text(), foreignProjectID)
 	if strings.Contains(w.Text(), foreignAutopilotTitle) {
 		t.Errorf("claim error leaked the foreign autopilot title: %s", w.Text())
 	}
