@@ -305,16 +305,21 @@
   "page": {
     "title": "설정",
     "my_account": "내 계정",
-    "workspace_fallback": "워크스페이스",
+    "groups": {
+      "management": "워크스페이스 · 일반",
+      "tasks": "워크스페이스 · 태스크",
+      "connections": "워크스페이스 · 연결",
+      "extensions": "워크스페이스 · 확장"
+    },
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
       "shortcuts": "단축키",
-      "issue": "태스크",
+      "issue": "태스크 환경설정",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
-      "general": "일반",
+      "general": "기본 정보",
       "repositories": "저장소",
       "github": "GitHub",
       "integrations": "연동",
@@ -850,7 +855,9 @@
     "toast_save_failed": "저장소를 저장하지 못했습니다"
   },
   "desktop": {
+    "group_title": "데스크톱",
     "tabs": {
+      "daemon": "Daemon",
       "updates": "업데이트"
     },
     "updates": {

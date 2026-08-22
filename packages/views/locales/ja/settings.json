@@ -305,16 +305,21 @@
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
-    "workspace_fallback": "ワークスペース",
+    "groups": {
+      "management": "ワークスペース · 一般",
+      "tasks": "ワークスペース · タスク",
+      "connections": "ワークスペース · 接続",
+      "extensions": "ワークスペース · 拡張機能"
+    },
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
-      "issue": "タスク",
+      "issue": "タスクの環境設定",
       "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
-      "general": "一般",
+      "general": "基本情報",
       "repositories": "リポジトリ",
       "github": "GitHub",
       "integrations": "連携",
@@ -1112,7 +1117,9 @@
     "toast_save_failed": "リポジトリを保存できませんでした"
   },
   "desktop": {
+    "group_title": "デスクトップ",
     "tabs": {
+      "daemon": "Daemon",
       "updates": "アップデート"
     },
     "updates": {

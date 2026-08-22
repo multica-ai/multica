@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
@@ -16,7 +16,6 @@ const stub = vi.hoisted(
 );
 vi.mock("./account-tab", stub("AccountTab"));
 vi.mock("./preferences-tab", stub("PreferencesTab"));
-vi.mock("./chat-tab", stub("ChatTab"));
 vi.mock("./issue-tab", stub("IssueTab"));
 vi.mock("./tokens-tab", stub("TokensTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
@@ -32,10 +31,6 @@ vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
-
-vi.mock("@multica/core/paths", () => ({
-  useCurrentWorkspace: () => ({ name: "Acme" }),
-}));
 
 const replace = vi.fn();
 const navigationState = { search: "" };
@@ -135,6 +130,174 @@ describe("SettingsPage Plugin feature flag", () => {
 
     expect(screen.getByRole("tab", { name: "Plugins" })).toBeInTheDocument();
     expect(screen.getByText("PluginsTab")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage information architecture", () => {
+  it("orders account and workspace tabs by their settings groups", () => {
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Profile",
+      "Preferences",
+      "Issue Preferences",
+      "Notifications",
+      "Shortcuts",
+      "API Tokens",
+      "Basic Information",
+      "Members",
+      "Issue Statuses",
+      "Labels",
+      "Properties",
+      "Quick Actions",
+      "Repositories",
+      "GitHub",
+      "Integrations",
+      "MCP",
+      "Labs",
+    ]);
+    expect(screen.getByText("Workspace · General")).toBeInTheDocument();
+    expect(screen.getByText("Workspace · Issues")).toBeInTheDocument();
+    expect(screen.getByText("Workspace · Connections")).toBeInTheDocument();
+    expect(screen.getByText("Workspace · Extensions")).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "zh-Hans",
+      ["工作区 · 常规", "工作区 · 任务", "工作区 · 连接", "工作区 · 扩展"],
+    ],
+    [
+      "ja",
+      [
+        "ワークスペース · 一般",
+        "ワークスペース · タスク",
+        "ワークスペース · 接続",
+        "ワークスペース · 拡張機能",
+      ],
+    ],
+    [
+      "ko",
+      ["워크스페이스 · 일반", "워크스페이스 · 태스크", "워크스페이스 · 연결", "워크스페이스 · 확장"],
+    ],
+  ] as const)("renders localized workspace groups in %s", (locale, labels) => {
+    renderWithI18n(<SettingsPage />, { locale });
+
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it("uses the localized plugin name in Chinese", () => {
+    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
+
+    renderWithI18n(<SettingsPage />, { locale: "zh-Hans" });
+
+    expect(screen.getByRole("tab", { name: "插件" })).toBeInTheDocument();
+  });
+
+  it("distinguishes scopes, workspace groups, and nested tabs", () => {
+    renderWithI18n(<SettingsPage />);
+
+    const accountHeading = screen.getByText("My Account");
+    const subgroupHeading = screen.getByText("Workspace · General");
+
+    expect(accountHeading.className).toContain("text-caption");
+    expect(accountHeading.className).toContain("text-muted-foreground");
+    expect(subgroupHeading).toHaveClass("text-caption");
+    expect(subgroupHeading).toHaveClass("text-muted-foreground");
+    expect(accountHeading.parentElement).toHaveClass("md:p-2");
+    expect(subgroupHeading.parentElement).toHaveClass("md:p-2");
+    expect(screen.getByText("Workspace · Issues").parentElement).toHaveClass(
+      "md:p-2",
+    );
+    expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Profile" }).parentElement,
+    ).toHaveClass("md:gap-0.5");
+    expect(
+      screen.getByRole("tab", { name: "Basic Information" }).parentElement,
+    ).toHaveClass("md:gap-0.5");
+    expect(screen.getByRole("tab", { name: "Profile" }).className).toContain(
+      "group-data-[variant=line]/tabs-list:data-active:bg-surface-selected",
+    );
+    expect(screen.getByRole("tab", { name: "Profile" }).className).not.toContain(
+      "!",
+    );
+    expect(screen.getByRole("tab", { name: "Profile" }).className).not.toContain(
+      "brand",
+    );
+  });
+
+  it("keeps keyboard navigation continuous across visual groups", async () => {
+    layout.compact = false;
+    navigationState.search = "tab=tokens";
+    renderWithI18n(<SettingsPage />);
+
+    const lastAccountTab = screen.getByRole("tab", { name: "API Tokens" });
+    lastAccountTab.focus();
+    await act(async () => {
+      fireEvent.keyDown(lastAccountTab, { key: "ArrowRight" });
+    });
+
+    expect(
+      screen.getByRole("tab", { name: "Basic Information" }),
+    ).toHaveFocus();
+  });
+
+  it("keeps optional admin tabs in their groups and Labs last", () => {
+    configStore.getState().setFeatureFlags({
+      [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
+      [PLUGINS_V1_FLAG]: true,
+    });
+
+    renderWithI18n(<SettingsPage />);
+
+    const labels = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(labels.indexOf("Members")).toBeLessThan(labels.indexOf("Billing"));
+    expect(labels.indexOf("Plugins")).toBeLessThan(labels.indexOf("MCP"));
+    expect(labels.at(-1)).toBe("Labs");
+  });
+
+  it("renders platform settings in their own group between account and workspace", () => {
+    renderWithI18n(
+      <SettingsPage
+        extraSettingsGroups={[
+          {
+            label: "Desktop",
+            tabs: [
+              {
+                value: "daemon",
+                label: "Daemon",
+                icon: () => null,
+                content: <div>DaemonTab</div>,
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    const labels = screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(labels.indexOf("API Tokens")).toBeLessThan(labels.indexOf("Daemon"));
+    expect(labels.indexOf("Daemon")).toBeLessThan(
+      labels.indexOf("Basic Information"),
+    );
+    expect(screen.getByText("Desktop")).toHaveClass("h-8");
+    expect(screen.getByText("Desktop").parentElement).toHaveClass("md:p-2");
+    expect(screen.getByText("Workspace · General")).toHaveClass("h-8");
+    expect(
+      screen.getByText("Workspace · General").parentElement,
+    ).toHaveClass("md:p-2");
+  });
+
+  it("keeps old Chat settings links on the merged Preferences surface", () => {
+    navigationState.search = "tab=chat";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.queryByRole("tab", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.getByText("PreferencesTab")).toBeInTheDocument();
   });
 });
 

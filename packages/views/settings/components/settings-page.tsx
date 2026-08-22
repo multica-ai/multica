@@ -11,7 +11,6 @@ import {
   FlaskConical,
   Bell,
   Plug,
-  MessageCircle,
   Tags,
   CircleDot,
   Keyboard,
@@ -23,8 +22,13 @@ import {
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+} from "@multica/ui/components/ui/sidebar";
+import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
@@ -33,7 +37,6 @@ import {
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
-import { ChatTab } from "./chat-tab";
 import { IssueTab } from "./issue-tab";
 import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
@@ -54,32 +57,23 @@ import { BillingTab } from "./billing-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "issue", "chat", "notifications", "tokens"] as const;
+const ACCOUNT_TAB_KEYS = [
+  "profile",
+  "preferences",
+  "issue",
+  "notifications",
+  "shortcuts",
+  "tokens",
+] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
-  shortcuts: Keyboard,
   issue: ListTodo,
-  chat: MessageCircle,
   notifications: Bell,
+  shortcuts: Keyboard,
   tokens: Key,
 } as const;
 
-const WORKSPACE_TAB_KEYS = [
-  "general",
-  "repositories",
-  "github",
-  "integrations",
-  "labs",
-  "members",
-  "billing",
-  "labels",
-  "issue_statuses",
-  "properties",
-  "quick_actions",
-  "mcp",
-  "plugins",
-] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
@@ -95,6 +89,30 @@ const WORKSPACE_TAB_VALUES = {
   mcp: "mcp",
   plugins: "plugins",
 } as const;
+type WorkspaceTabKey = keyof typeof WORKSPACE_TAB_VALUES;
+
+const WORKSPACE_TAB_GROUPS: ReadonlyArray<{
+  label: "management" | "tasks" | "connections" | "extensions";
+  tabs: readonly WorkspaceTabKey[];
+}> = [
+  {
+    label: "management",
+    tabs: ["general", "members", "billing"],
+  },
+  {
+    label: "tasks",
+    tabs: ["issue_statuses", "labels", "properties", "quick_actions"],
+  },
+  {
+    label: "connections",
+    tabs: ["repositories", "github", "integrations"],
+  },
+  {
+    label: "extensions",
+    tabs: ["plugins", "mcp", "labs"],
+  },
+];
+
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
   repositories: FolderGit2,
@@ -115,15 +133,42 @@ const DEFAULT_TAB = "profile";
 const TAB_QUERY_KEY = "tab";
 
 // Legacy `?tab=…` values that have been collapsed into another tab. Old
-// bookmarks still land on the correct surface without us preserving a
-// dead TabsContent entry. Lark used to be its own top-level workspace
-// tab; it now lives inside Integrations.
-const LEGACY_WORKSPACE_TAB_REDIRECTS: Record<string, string> = {
+// bookmarks still land on the correct surface without us preserving dead
+// TabsContent entries.
+const LEGACY_TAB_REDIRECTS: Record<string, string> = {
   lark: "integrations",
+  chat: "preferences",
 };
 
-const SETTINGS_TAB_TRIGGER_CLASS =
-  "h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected md:!w-full md:px-2 md:after:hidden";
+const SETTINGS_TAB_TRIGGER_CLASS = cn(
+  "h-8 shrink-0 px-2.5 font-normal hover:bg-surface-hover",
+  "data-active:font-medium data-active:text-surface-selected-foreground",
+  "group-data-[variant=line]/tabs-list:data-active:bg-surface-selected group-data-[variant=line]/tabs-list:data-active:hover:bg-surface-selected",
+  "dark:data-active:text-surface-selected-foreground dark:group-data-[variant=line]/tabs-list:data-active:bg-surface-selected dark:group-data-[variant=line]/tabs-list:data-active:hover:bg-surface-selected",
+  "md:px-2 md:after:hidden",
+);
+
+const SETTINGS_NAV_GROUP_ITEMS_CLASS =
+  "flex w-auto min-w-0 flex-row gap-1 md:w-full md:flex-col md:gap-0.5";
+
+function SettingsNavGroup({
+  label,
+  children,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <SidebarGroup className="w-auto flex-row p-0 md:w-full md:flex-col md:p-2">
+      <SidebarGroupLabel className="hidden min-w-0 truncate md:flex">
+        {label}
+      </SidebarGroupLabel>
+      <SidebarGroupContent className="w-auto md:w-full">
+        <div className={SETTINGS_NAV_GROUP_ITEMS_CLASS}>{children}</div>
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
 
 export interface ExtraSettingsTab {
   value: string;
@@ -132,14 +177,18 @@ export interface ExtraSettingsTab {
   content: React.ReactNode;
 }
 
-interface SettingsPageProps {
-  /** Additional tabs injected by platform (e.g. desktop daemon settings) */
-  extraAccountTabs?: ExtraSettingsTab[];
+export interface ExtraSettingsGroup {
+  label: string;
+  tabs: ExtraSettingsTab[];
 }
 
-export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
+interface SettingsPageProps {
+  /** Additional platform-scoped groups (e.g. settings for the desktop app). */
+  extraSettingsGroups?: ExtraSettingsGroup[];
+}
+
+export function SettingsPage({ extraSettingsGroups }: SettingsPageProps = {}) {
   const { t } = useT("settings");
-  const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
   const isMobile = useIsMobile();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
@@ -148,14 +197,21 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     false,
   );
 
-  const visibleWorkspaceTabKeys = React.useMemo(
+  const visibleWorkspaceTabGroups = React.useMemo(
     () =>
-      WORKSPACE_TAB_KEYS.filter(
-        (key) =>
-          (key !== "plugins" || pluginsEnabled) &&
-          (key !== "billing" || billingEnabled),
-      ),
+      WORKSPACE_TAB_GROUPS.map((group) => ({
+        ...group,
+        tabs: group.tabs.filter(
+          (key) =>
+            (key !== "plugins" || pluginsEnabled) &&
+            (key !== "billing" || billingEnabled),
+        ),
+      })),
     [billingEnabled, pluginsEnabled],
+  );
+  const visibleWorkspaceTabKeys = React.useMemo(
+    () => visibleWorkspaceTabGroups.flatMap((group) => group.tabs),
+    [visibleWorkspaceTabGroups],
   );
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
@@ -166,16 +222,18 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
       new Set<string>([
         ...ACCOUNT_TAB_KEYS,
         ...visibleWorkspaceTabKeys.map((key) => WORKSPACE_TAB_VALUES[key]),
-        ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
+        ...(extraSettingsGroups?.flatMap((group) =>
+          group.tabs.map((tab) => tab.value),
+        ) ?? []),
       ]),
-    [extraAccountTabs, visibleWorkspaceTabKeys],
+    [extraSettingsGroups, visibleWorkspaceTabKeys],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
   const candidateTab = tabFromUrl
     ? tabFromUrl === "billing" && !billingEnabled
       ? "workspace"
-      : LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
+      : LEGACY_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
     : null;
   const activeTab =
     candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
@@ -206,59 +264,68 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
         {/* The gap below this row belongs to the row, not to the heading: with
             `items-center`, a bottom margin on the `h1` is part of the box being
             centred, so it offsets the heading against the trigger beside it. */}
-        <div className="flex items-center md:mb-4">
+        <div className="flex items-center md:mb-2.5">
           <CollapsedNavTrigger />
-          <h1 className="sr-only text-body font-semibold md:not-sr-only md:px-2">{t(($) => $.page.title)}</h1>
+          <h1 className="sr-only text-title-sm font-semibold md:not-sr-only md:px-2.5">
+            {t(($) => $.page.title)}
+          </h1>
         </div>
         <TabsList
           variant="line"
-          className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch"
+          className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch md:gap-0"
         >
           {/* My Account group */}
-          <span className="hidden px-2 pb-1 pt-2 text-caption font-medium text-muted-foreground md:block">
-            {t(($) => $.page.my_account)}
-          </span>
-          {ACCOUNT_TAB_KEYS.map((key) => {
-            const Icon = ACCOUNT_TAB_ICONS[key];
-            return (
-              <TabsTrigger
-                key={key}
-                value={key}
-                className={SETTINGS_TAB_TRIGGER_CLASS}
-              >
-                <Icon className="h-4 w-4" />
-                {t(($) => $.page.tabs[key])}
-              </TabsTrigger>
-            );
-          })}
-          {extraAccountTabs?.map((tab) => (
-            <TabsTrigger
-              key={tab.value}
-              value={tab.value}
-              className={SETTINGS_TAB_TRIGGER_CLASS}
-            >
-              <tab.icon className="h-4 w-4" />
-              {tab.label}
-            </TabsTrigger>
+          <SettingsNavGroup label={t(($) => $.page.my_account)}>
+            {ACCOUNT_TAB_KEYS.map((key) => {
+              const Icon = ACCOUNT_TAB_ICONS[key];
+              return (
+                <TabsTrigger
+                  key={key}
+                  value={key}
+                  className={SETTINGS_TAB_TRIGGER_CLASS}
+                >
+                  <Icon className="h-4 w-4" />
+                  {t(($) => $.page.tabs[key])}
+                </TabsTrigger>
+              );
+            })}
+          </SettingsNavGroup>
+          {extraSettingsGroups?.map((group) => (
+            <SettingsNavGroup key={group.label} label={group.label}>
+              {group.tabs.map((tab) => (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className={SETTINGS_TAB_TRIGGER_CLASS}
+                >
+                  <tab.icon className="h-4 w-4" />
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </SettingsNavGroup>
           ))}
 
           {/* Workspace group */}
-          <span className="hidden truncate px-2 pb-1 pt-4 text-caption font-medium text-muted-foreground md:block">
-            {workspaceName ?? t(($) => $.page.workspace_fallback)}
-          </span>
-          {visibleWorkspaceTabKeys.map((key) => {
-            const Icon = WORKSPACE_TAB_ICONS[key];
-            return (
-              <TabsTrigger
-                key={key}
-                value={WORKSPACE_TAB_VALUES[key]}
-                className={SETTINGS_TAB_TRIGGER_CLASS}
-              >
-                <Icon className="h-4 w-4" />
-                {t(($) => $.page.tabs[key])}
-              </TabsTrigger>
-            );
-          })}
+          {visibleWorkspaceTabGroups.map((group) => (
+            <SettingsNavGroup
+              key={group.label}
+              label={t(($) => $.page.groups[group.label])}
+            >
+              {group.tabs.map((key) => {
+                const Icon = WORKSPACE_TAB_ICONS[key];
+                return (
+                  <TabsTrigger
+                    key={key}
+                    value={WORKSPACE_TAB_VALUES[key]}
+                    className={SETTINGS_TAB_TRIGGER_CLASS}
+                  >
+                    <Icon className="h-4 w-4" />
+                    {t(($) => $.page.tabs[key])}
+                  </TabsTrigger>
+                );
+              })}
+            </SettingsNavGroup>
+          ))}
         </TabsList>
       </div>
 
@@ -269,10 +336,9 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
-          <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
           <TabsContent value="issue"><IssueTab /></TabsContent>
-          <TabsContent value="chat"><ChatTab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
+          <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>
           <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
           <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
@@ -289,9 +355,13 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>
           <TabsContent value="mcp"><McpTab /></TabsContent>
           {pluginsEnabled ? <TabsContent value="plugins"><PluginsTab /></TabsContent> : null}
-          {extraAccountTabs?.map((tab) => (
-            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
-          ))}
+          {extraSettingsGroups?.flatMap((group) =>
+            group.tabs.map((tab) => (
+              <TabsContent key={tab.value} value={tab.value}>
+                {tab.content}
+              </TabsContent>
+            )),
+          )}
         </div>
       </div>
     </Tabs>
