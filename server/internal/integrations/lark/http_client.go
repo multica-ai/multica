@@ -270,7 +270,7 @@ func (c *httpAPIClient) invalidateToken(appID string) {
 // goes to the chat-level send endpoint keyed by receive_id=chat_id, the
 // historical behavior. Body is map[string]any (not map[string]string)
 // because reply_in_thread is a bool.
-func outboundMessageRequest(chatID ChatID, msgType, content string, target ReplyTarget) (string, map[string]any) {
+func outboundMessageRequest(chatID ChatID, msgType, content string, target ReplyTarget, receiveIDType ReceiveIDType) (string, map[string]any) {
 	if target.IsSet() {
 		return "/open-apis/im/v1/messages/" + url.PathEscape(target.MessageID) + "/reply", map[string]any{
 			"msg_type":        msgType,
@@ -279,7 +279,15 @@ func outboundMessageRequest(chatID ChatID, msgType, content string, target Reply
 		}
 	}
 	q := url.Values{}
-	q.Set("receive_id_type", "chat_id")
+	// receive_id_type selects how Lark reads receive_id. Empty keeps the
+	// historical chat-level send; the inbox push sets open_id so the bot
+	// opens a 1:1 conversation with the bound member instead of needing a
+	// chat to already exist.
+	idType := string(receiveIDType)
+	if idType == "" {
+		idType = "chat_id"
+	}
+	q.Set("receive_id_type", idType)
 	return "/open-apis/im/v1/messages?" + q.Encode(), map[string]any{
 		"receive_id": string(chatID),
 		"msg_type":   msgType,
@@ -301,7 +309,7 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	if err != nil {
 		return "", err
 	}
-	path, body := outboundMessageRequest(p.ChatID, "interactive", p.CardJSON, p.ReplyTarget)
+	path, body := outboundMessageRequest(p.ChatID, "interactive", p.CardJSON, p.ReplyTarget, "")
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -345,7 +353,7 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
-	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget, p.ReceiveIDType)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -391,24 +399,29 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	if err != nil {
 		return "", err
 	}
+	// update_multi is declared on every markdown card: Lark refuses to
+	// apply PatchInteractiveCard to a card that did not declare itself
+	// updatable AT SEND TIME, and the refusal is silent (see the same
+	// note on defaultRenderer.Render). The inbox digest patches these
+	// cards; for cards that are never patched the flag is inert.
+	cfg := map[string]any{"update_multi": true}
+	if p.Summary != "" {
+		cfg["summary"] = map[string]any{"content": p.Summary}
+	}
 	card := map[string]any{
 		"schema": "2.0",
+		"config": cfg,
 		"body": map[string]any{
 			"elements": []any{
 				map[string]any{"tag": "markdown", "content": p.Markdown},
 			},
 		},
 	}
-	if p.Summary != "" {
-		card["config"] = map[string]any{
-			"summary": map[string]any{"content": p.Summary},
-		}
-	}
 	cardBytes, err := json.Marshal(card)
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode markdown card: %w", err)
 	}
-	path, body := outboundMessageRequest(p.ChatID, "interactive", string(cardBytes), p.ReplyTarget)
+	path, body := outboundMessageRequest(p.ChatID, "interactive", string(cardBytes), p.ReplyTarget, p.ReceiveIDType)
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`

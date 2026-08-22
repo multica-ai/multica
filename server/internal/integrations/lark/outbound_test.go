@@ -32,6 +32,27 @@ type fakePatcherQueries struct {
 	created             []CreateOutboundCardMessageParams
 	createReturn        OutboundCardMessage
 	statusUpdates       []UpdateOutboundCardStatusParams
+	memberBinding       db.ChannelUserBinding
+	memberBindingErr    error
+	workspace           db.Workspace
+	workspaceErr        error
+	issue               db.Issue
+	issueErr            error
+}
+
+func (f *fakePatcherQueries) FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
+	if f.memberBindingErr != nil {
+		return db.ChannelUserBinding{}, f.memberBindingErr
+	}
+	return f.memberBinding, nil
+}
+
+func (f *fakePatcherQueries) GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error) {
+	return f.workspace, f.workspaceErr
+}
+
+func (f *fakePatcherQueries) GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error) {
+	return f.issue, f.issueErr
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
