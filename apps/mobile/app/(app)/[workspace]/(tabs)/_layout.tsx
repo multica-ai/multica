@@ -33,6 +33,7 @@ import {
   useChatUnreadMessageCount,
 } from "@/lib/unread-counts";
 import { MoreTabDropdownAnchor } from "@/components/nav/more-tab-dropdown";
+import { translate } from "@/i18n";
 
 // Only override backgroundColor — @react-navigation/elements Badge internally
 // sets borderRadius = size/2, height = size, minWidth = size, so a single
@@ -54,7 +55,11 @@ export default function TabsLayout() {
   // Truncation aligned with web's sidebar badges: 99+ for both. `undefined`
   // makes React Navigation hide the badge, so zero-count is a free no-op.
   const inboxBadge =
-    inboxUnread > 0 ? (inboxUnread > 99 ? "99+" : String(inboxUnread)) : undefined;
+    inboxUnread > 0
+      ? inboxUnread > 99
+        ? "99+"
+        : String(inboxUnread)
+      : undefined;
   const chatBadge =
     chatUnread > 0 ? (chatUnread > 99 ? "99+" : String(chatUnread)) : undefined;
 
@@ -77,7 +82,7 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="inbox"
           options={{
-            title: "Inbox",
+            title: translate("Inbox"),
             tabBarBadge: inboxBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
@@ -92,7 +97,7 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="my-issues"
           options={{
-            title: "My Issues",
+            title: translate("My Issues"),
             tabBarIcon: ({ color, size, focused }) => (
               <Image
                 source={focused ? "sf:checklist" : "sf:checklist.unchecked"}
@@ -105,7 +110,7 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="chat"
           options={{
-            title: "Chat",
+            title: translate("Chat"),
             tabBarBadge: chatBadge,
             tabBarBadgeStyle: BADGE_STYLE,
             tabBarIcon: ({ color, size, focused }) => (
@@ -120,7 +125,7 @@ export default function TabsLayout() {
         <Tabs.Screen
           name="more"
           options={{
-            title: "More",
+            title: translate("More"),
             tabBarIcon: ({ color, size }) => (
               <Image
                 source="sf:ellipsis"

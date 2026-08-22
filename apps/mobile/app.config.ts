@@ -30,8 +30,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // (apps/desktop/build/icon.png). Expo prebuild generates every required
     // iOS icon size from this single PNG.
     icon: "./assets/icon.png",
+    locales: {
+      en: "./i18n/native/en.json",
+      "zh-Hans": "./i18n/native/zh-Hans.json",
+    },
     ios: {
       supportsTablet: false,
+      infoPlist: {
+        CFBundleAllowMixedLocalizations: true,
+      },
       // Pins DEVELOPMENT_TEAM on every prebuild. Leaving it unset is the normal
       // path — `expo run:ios` then resolves a signing identity from the Keychain
       // itself, which is right when the Apple ID owns exactly one team. With
@@ -61,18 +68,26 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-localization",
+        {
+          supportedLocales: {
+            ios: ["en", "zh-Hans"],
+            android: ["en", "zh-Hans"],
+          },
+        },
+      ],
       "@react-native-community/datetimepicker",
       "react-native-enriched-markdown",
       [
         "expo-image-picker",
         {
-          // iOS NSPhotoLibraryUsageDescription. Without this string in
-          // Info.plist, calling launchImageLibraryAsync hard-crashes on
-          // iOS 14+. Camera + microphone are disabled — we only ever read
-          // from the existing photo library.
+          // Base Info.plist permission copy. Expo also generates localized
+          // InfoPlist.strings from i18n/native/*.json.
           photosPermission:
             "Allow Multica to access your photos to attach images to issues and comments.",
-          cameraPermission: false,
+          cameraPermission:
+            "Allow Multica to use your camera to take a profile photo.",
           microphonePermission: false,
         },
       ],

@@ -1,10 +1,5 @@
 import { useMemo } from "react";
-import {
-  ActionSheetIOS,
-  Alert,
-  FlatList,
-  View,
-} from "react-native";
+import { ActionSheetIOS, Alert, FlatList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -29,20 +24,22 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { deduplicateInboxItems } from "@/lib/inbox-display";
+import { translate } from "@/i18n";
 
 export default function Inbox() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { colorScheme } = useColorScheme();
-  const { data: rawItems, isLoading, error, refetch, isRefetching } = useQuery(
-    inboxListOptions(wsId),
-  );
+  const {
+    data: rawItems,
+    isLoading,
+    error,
+    refetch,
+    isRefetching,
+  } = useQuery(inboxListOptions(wsId));
   // Dedup + drop archived to match web/desktop. See CLAUDE.md
   // "Behavioral parity" → inbox dedup incident.
-  const data = useMemo(
-    () => deduplicateInboxItems(rawItems ?? []),
-    [rawItems],
-  );
+  const data = useMemo(() => deduplicateInboxItems(rawItems ?? []), [rawItems]);
   const markRead = useMarkInboxRead();
   const markAllRead = useMarkAllInboxRead();
   const archive = useArchiveInbox();
@@ -77,18 +74,18 @@ export default function Inbox() {
   // the iOS red treatment + Alert confirm.
   const onPressMenu = () => {
     const options = [
-      "Cancel",
-      "Mark all read",
-      "Archive all read",
-      "Archive completed",
-      "Archive all",
+      translate("Cancel"),
+      translate("Mark all read"),
+      translate("Archive all read"),
+      translate("Archive completed"),
+      translate("Archive all"),
     ];
     ActionSheetIOS.showActionSheetWithOptions(
       {
         options,
         cancelButtonIndex: 0,
         destructiveButtonIndex: 4,
-        title: "Inbox",
+        title: translate("Inbox"),
       },
       (i) => {
         if (i === 1) markAllRead.mutate();
@@ -96,12 +93,14 @@ export default function Inbox() {
         else if (i === 3) archiveCompleted.mutate();
         else if (i === 4) {
           Alert.alert(
-            "Archive all?",
-            "This archives every inbox item, read or unread. You can still find them via the issue pages.",
+            translate("Archive all?"),
+            translate(
+              "This archives every inbox item, read or unread. You can still find them via the issue pages.",
+            ),
             [
-              { text: "Cancel", style: "cancel" },
+              { text: translate("Cancel"), style: "cancel" },
               {
-                text: "Archive all",
+                text: translate("Archive all"),
                 style: "destructive",
                 onPress: () => archiveAll.mutate(),
               },
@@ -115,13 +114,13 @@ export default function Inbox() {
   return (
     <View className="flex-1 bg-background">
       <Header
-        title="Inbox"
+        title={translate("Inbox")}
         right={
           <>
             <IconButton
               name="ellipsis-horizontal"
               onPress={onPressMenu}
-              accessibilityLabel="Inbox actions"
+              accessibilityLabel={translate("Inbox actions")}
             />
             <HeaderActions />
           </>
@@ -132,11 +131,13 @@ export default function Inbox() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load inbox:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {translate("Failed to load inbox:")}{" "}
+            {error instanceof Error
+              ? error.message
+              : translate("unknown error")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : !data || data.length === 0 ? (
@@ -188,11 +189,12 @@ function InboxEmpty({ iconColor }: { iconColor: string }) {
     <View className="flex-1 items-center justify-center px-8 gap-3">
       <Ionicons name="mail-open-outline" size={42} color={iconColor} />
       <Text className="text-base font-medium text-foreground text-center">
-        Inbox zero
+        {translate("Inbox zero")}
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        When someone @mentions you, assigns an issue, or an agent finishes a
-        task, it shows up here.
+        {translate(
+          "When someone @mentions you, assigns an issue, or an agent finishes a task, it shows up here.",
+        )}
       </Text>
     </View>
   );

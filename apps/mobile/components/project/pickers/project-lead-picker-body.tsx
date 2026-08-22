@@ -24,6 +24,7 @@ import { memberListOptions } from "@/data/queries/members";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 const AVATAR_SIZE = 36;
 
@@ -136,19 +137,18 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
               showPresence
             />
           )}
-          <Text
-            className="flex-1 text-base text-foreground"
-            numberOfLines={1}
-          >
+          <Text className="flex-1 text-base text-foreground" numberOfLines={1}>
             {item.kind === "unassigned"
-              ? "Unassigned"
+              ? translate("Unassigned")
               : item.kind === "member"
                 ? item.member.name
                 : item.agent.name}
           </Text>
           {/* Inline type tag — Apple UITableViewCellStyleValue1. */}
           {item.kind === "agent" ? (
-            <Text className="text-sm text-muted-foreground">Agent</Text>
+            <Text className="text-sm text-muted-foreground">
+              {translate("Agent")}
+            </Text>
           ) : null}
           {isRowSelected(value, item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -159,8 +159,8 @@ export function ProjectLeadPickerBody({ value, query, onChange }: Props) {
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No members or agents in this workspace yet."}
+              ? translate("No matches.")
+              : translate("No members or agents in this workspace yet.")}
           </Text>
         </View>
       }

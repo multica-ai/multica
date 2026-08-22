@@ -10,13 +10,14 @@ import { projectDetailOptions } from "@/data/queries/projects";
 import { useUpdateProject } from "@/data/mutations/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useNativeSearchBar } from "@/lib/use-native-search-bar";
+import { translate } from "@/i18n";
 
 export default function ProjectLeadPickerRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: project } = useQuery(projectDetailOptions(wsId, id));
   const updateProject = useUpdateProject(id);
-  const query = useNativeSearchBar("Search members or agents", {
+  const query = useNativeSearchBar(translate("Search members or agents"), {
     autoFocus: true,
   });
 

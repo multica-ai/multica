@@ -36,6 +36,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { translate } from "@/i18n";
 
 export default function SwitchWorkspaceRoute() {
   const activeSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -46,12 +47,12 @@ export default function SwitchWorkspaceRoute() {
   const onSelect = (ws: Workspace) => {
     if (ws.slug === activeSlug) return;
     Alert.alert(
-      "Switch workspace",
-      `Switch to "${ws.name}"?`,
+      translate("Switch workspace"),
+      translate('Switch to "{{name}}"?', { name: ws.name }),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: translate("Cancel"), style: "cancel" },
         {
-          text: "Switch",
+          text: translate("Switch"),
           onPress: () => {
             router.dismiss();
             router.replace(`/${ws.slug}/inbox`);
@@ -65,7 +66,7 @@ export default function SwitchWorkspaceRoute() {
     <View className="flex-1">
       <View className="px-4 pt-4 pb-3">
         <Text className="text-base font-semibold text-foreground">
-          Switch workspace
+          {translate("Switch workspace")}
         </Text>
       </View>
       {isLoading ? (
@@ -106,8 +107,8 @@ function WorkspaceRow({
       disabled={active}
       accessibilityLabel={
         active
-          ? `${workspace.name}, current workspace`
-          : `Switch to ${workspace.name}`
+          ? translate("{{name}}, current workspace", { name: workspace.name })
+          : translate("Switch to {{name}}", { name: workspace.name })
       }
       className={cn(
         "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",

@@ -15,6 +15,7 @@ import { Pressable, View } from "react-native";
 import type { Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectIcon } from "@/components/ui/project-icon";
+import { translate } from "@/i18n";
 
 interface Props {
   project: Project;
@@ -30,22 +31,16 @@ export function ProjectHeaderCard({ project, onEdit }: Props) {
     >
       <View className="items-start gap-2">
         <ProjectIcon icon={project.icon} size="lg" />
-        <Text
-          className="text-2xl font-bold text-foreground"
-          selectable
-        >
+        <Text className="text-2xl font-bold text-foreground" selectable>
           {project.title}
         </Text>
         {project.description ? (
-          <Text
-            className="text-sm text-muted-foreground"
-            selectable
-          >
+          <Text className="text-sm text-muted-foreground" selectable>
             {project.description}
           </Text>
         ) : onEdit ? (
           <Text className="text-sm text-muted-foreground/60 italic">
-            Add a description
+            {translate("Add a description")}
           </Text>
         ) : null}
         {project.issue_count > 0 ? (
@@ -65,7 +60,7 @@ function ProgressSection({ done, total }: { done: number; total: number }) {
     <View className="w-full pt-2 gap-1.5">
       <View className="flex-row items-center justify-between">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground">
-          Progress
+          {translate("Progress")}
         </Text>
         <Text className="text-xs text-muted-foreground">
           {done} / {total} · {pct}%

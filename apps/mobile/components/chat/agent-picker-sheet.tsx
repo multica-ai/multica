@@ -19,6 +19,7 @@ import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { translate } from "@/i18n";
 
 interface Props {
   visible: boolean;
@@ -48,7 +49,7 @@ export function AgentPickerSheet({
             <View className="bg-popover rounded-2xl overflow-hidden">
               <View className="px-4 py-3 border-b border-border">
                 <Text className="text-base font-semibold text-foreground">
-                  Choose an agent
+                  {translate("Choose an agent")}
                 </Text>
               </View>
 
@@ -56,7 +57,7 @@ export function AgentPickerSheet({
                 {agents.length === 0 ? (
                   <View className="px-4 py-8">
                     <Text className="text-sm text-muted-foreground text-center">
-                      No agents available.
+                      {translate("No agents available.")}
                     </Text>
                   </View>
                 ) : (
@@ -77,7 +78,12 @@ export function AgentPickerSheet({
                           !runtimeBound && "opacity-50",
                         )}
                       >
-                        <ActorAvatar type="agent" id={agent.id} size={32} showPresence />
+                        <ActorAvatar
+                          type="agent"
+                          id={agent.id}
+                          size={32}
+                          showPresence
+                        />
                         <View className="flex-1">
                           <Text
                             className="text-sm font-medium text-foreground"
@@ -96,7 +102,7 @@ export function AgentPickerSheet({
                         </View>
                         {!runtimeBound ? (
                           <Text className="text-xs font-medium text-warning">
-                            Needs runtime
+                            {translate("Needs runtime")}
                           </Text>
                         ) : null}
                         {selected ? (

@@ -21,10 +21,12 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import type { ChatMessage } from "@multica/core/types";
 import { useChatSelectStore } from "@/data/chat-select-store";
+import { translate } from "@/i18n";
 
-export function useChatMessageLongPress(
-  message: ChatMessage,
-): { onLongPress: () => void; isPressed: boolean } {
+export function useChatMessageLongPress(message: ChatMessage): {
+  onLongPress: () => void;
+  isPressed: boolean;
+} {
   const [isPressed, setIsPressed] = useState(false);
 
   const onLongPress = useCallback(() => {
@@ -33,10 +35,7 @@ export function useChatMessageLongPress(
     Haptics.selectionAsync().catch(() => {});
     setIsPressed(true);
 
-    type Action =
-      | { kind: "copy" }
-      | { kind: "select" }
-      | { kind: "cancel" };
+    type Action = { kind: "copy" } | { kind: "select" } | { kind: "cancel" };
 
     const options: string[] = [];
     const actions: Action[] = [];
@@ -46,10 +45,10 @@ export function useChatMessageLongPress(
     };
 
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(translate("Copy"), { kind: "copy" });
+      push(translate("Select Text"), { kind: "select" });
     }
-    push("Cancel", { kind: "cancel" });
+    push(translate("Cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
 

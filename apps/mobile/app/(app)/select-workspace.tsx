@@ -8,6 +8,7 @@ import { CardPressable } from "@/components/ui/card";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export default function SelectWorkspace() {
   const user = useAuthStore((s) => s.user);
@@ -25,14 +26,14 @@ export default function SelectWorkspace() {
       <ScrollView contentContainerClassName="px-6 py-6 gap-6">
         <View className="gap-1">
           <Text className="text-xs uppercase tracking-wider text-muted-foreground">
-            Signed in as
+            {translate("Signed in as")}
           </Text>
           <Text className="text-base text-foreground">{user?.email}</Text>
         </View>
 
         <View className="gap-3">
           <Text className="text-2xl font-semibold text-foreground">
-            Select a workspace
+            {translate("Select a workspace")}
           </Text>
 
           {isLoading ? (
@@ -42,17 +43,20 @@ export default function SelectWorkspace() {
           ) : error ? (
             <View className="gap-3">
               <Text className="text-sm text-destructive">
-                Failed to load workspaces:{" "}
-                {error instanceof Error ? error.message : "unknown error"}
+                {translate("Failed to load workspaces:")}{" "}
+                {error instanceof Error
+                  ? error.message
+                  : translate("unknown error")}
               </Text>
               <Button variant="outline" onPress={() => refetch()}>
-                <Text>Retry</Text>
+                <Text>{translate("Retry")}</Text>
               </Button>
             </View>
           ) : !data || data.length === 0 ? (
             <Text className="text-sm text-muted-foreground">
-              You don&apos;t belong to any workspaces yet. Contact your workspace
-              admin to be invited.
+              {translate(
+                "You don't belong to any workspaces yet. Contact your workspace admin to be invited.",
+              )}
             </Text>
           ) : (
             <View className="gap-3">
@@ -80,7 +84,7 @@ export default function SelectWorkspace() {
 
         <View className="pt-4 border-t border-border">
           <Button variant="outline" onPress={() => logout()}>
-            <Text>Sign out</Text>
+            <Text>{translate("Sign out")}</Text>
           </Button>
         </View>
       </ScrollView>

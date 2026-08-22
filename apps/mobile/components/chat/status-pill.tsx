@@ -32,15 +32,13 @@ import Animated, {
   withTiming,
   type SharedValue,
 } from "react-native-reanimated";
-import type {
-  ChatPendingTask,
-  TaskMessagePayload,
-} from "@multica/core/types";
+import type { ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
 import type { AgentAvailability } from "@multica/core/agents";
 import { Text } from "@/components/ui/text";
 import { formatElapsedSecs } from "@/lib/format-elapsed";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   pendingTask: ChatPendingTask | null | undefined;
@@ -58,17 +56,17 @@ interface Stage {
 }
 
 const TOOL_LABELS: Record<string, string> = {
-  bash: "Running command",
-  exec: "Running command",
-  read: "Reading files",
-  glob: "Reading files",
-  grep: "Searching code",
-  write: "Making edits",
-  edit: "Making edits",
-  multi_edit: "Making edits",
-  multiedit: "Making edits",
-  web_search: "Searching web",
-  websearch: "Searching web",
+  bash: translate("Running command"),
+  exec: translate("Running command"),
+  read: translate("Reading files"),
+  glob: translate("Reading files"),
+  grep: translate("Searching code"),
+  write: translate("Making edits"),
+  edit: translate("Making edits"),
+  multi_edit: translate("Making edits"),
+  multiedit: translate("Making edits"),
+  web_search: translate("Searching web"),
+  websearch: translate("Searching web"),
 };
 
 function pickStage(
@@ -78,21 +76,21 @@ function pickStage(
 ): Stage {
   // Mirrors web: deferred is an older turn waiting for retry backoff, not
   // active model work, so it must not fall through to "Thinking".
-  if (status === "deferred") return { label: "Retrying" };
+  if (status === "deferred") return { label: translate("Retrying") };
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
   ) {
-    return { label: "Offline", static: true };
+    return { label: translate("Offline"), static: true };
   }
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "unstable"
   ) {
-    return { label: "Reconnecting" };
+    return { label: translate("Reconnecting") };
   }
-  if (status === "queued") return { label: "Queued" };
-  if (status === "dispatched") return { label: "Starting up" };
+  if (status === "queued") return { label: translate("Queued") };
+  if (status === "dispatched") return { label: translate("Starting up") };
 
   let latest: TaskMessagePayload | null = null;
   for (let i = taskMessages.length - 1; i >= 0; i--) {
@@ -102,14 +100,14 @@ function pickStage(
       break;
     }
   }
-  if (!latest) return { label: "Thinking" };
-  if (latest.type === "thinking") return { label: "Thinking" };
-  if (latest.type === "text") return { label: "Typing" };
+  if (!latest) return { label: translate("Thinking") };
+  if (latest.type === "thinking") return { label: translate("Thinking") };
+  if (latest.type === "text") return { label: translate("Typing") };
   if (latest.type === "tool_use") {
     const slug = (latest.tool ?? "").toLowerCase();
-    return { label: TOOL_LABELS[slug] ?? "Working" };
+    return { label: TOOL_LABELS[slug] ?? translate("Working") };
   }
-  return { label: "Thinking" };
+  return { label: translate("Thinking") };
 }
 
 // Tabular figures for the 1Hz counter — proportional digits change the text

@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "NSPhotoLibraryUsageDescription": "允许 Multica 访问你的照片，以便为任务和评论添加图片。",
+    "NSCameraUsageDescription": "允许 Multica 使用相机拍摄头像。"
+  }
+}

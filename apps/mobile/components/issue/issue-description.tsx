@@ -18,6 +18,7 @@ import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
 import { issueAttachmentsOptions } from "@/data/queries/issues";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export function IssueDescription({
   issueId,
@@ -35,7 +36,7 @@ export function IssueDescription({
     return (
       <View className="px-4 pb-4">
         <Text className="text-sm text-muted-foreground italic">
-          No description.
+          {translate("No description.")}
         </Text>
       </View>
     );

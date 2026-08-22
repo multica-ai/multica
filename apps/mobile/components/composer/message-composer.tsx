@@ -64,6 +64,7 @@ import {
   type ComposerAttachmentItem,
   type MentionChip,
 } from "@/components/issue/composer-attachment-row";
+import { translate } from "@/i18n";
 
 export interface MessageComposerReplyTarget {
   actorName: string;
@@ -147,7 +148,7 @@ function serializeMentions(chips: MentionChip[]): string {
         m.type === "issue"
           ? m.name
           : m.type === "all"
-            ? "@all"
+            ? translate("@all")
             : `@${m.name}`;
       return `[${label}](mention://${m.type}/${m.id})`;
     })
@@ -158,8 +159,8 @@ export function MessageComposer({
   onSubmit,
   mentionPickerPath,
   uploadContext,
-  placeholder = "Type a message…",
-  pillLabel = "Type a message…",
+  placeholder = translate("Type a message…"),
+  pillLabel = translate("Type a message…"),
   pillIcon = "chatbubble-ellipses-outline",
   value: controlledValue,
   onChangeText: controlledOnChange,
@@ -213,11 +214,7 @@ export function MessageComposer({
   // Auto-expand + focus when an `expandTrigger` changes. Comment uses
   // this to react to the long-press → reply flow setting a reply target.
   const triggerSeen = useRef<string | null>(null);
-  if (
-    expandTrigger &&
-    triggerSeen.current !== expandTrigger &&
-    !disabled
-  ) {
+  if (expandTrigger && triggerSeen.current !== expandTrigger && !disabled) {
     triggerSeen.current = expandTrigger;
     setExpanded(true);
     requestAnimationFrame(() => inputRef.current?.focus());
@@ -285,21 +282,11 @@ export function MessageComposer({
     } catch {
       setText(textSnap);
       setAttachments(attachmentsSnap);
-      mentionsSnap.forEach((m) =>
-        useMentionDraftStore.getState().toggle(m),
-      );
+      mentionsSnap.forEach((m) => useMentionDraftStore.getState().toggle(m));
     } finally {
       setSubmitting(false);
     }
-  }, [
-    canSend,
-    text,
-    mentions,
-    attachments,
-    setText,
-    clearMentions,
-    onSubmit,
-  ]);
+  }, [canSend, text, mentions, attachments, setText, clearMentions, onSubmit]);
 
   /** Streams a picked asset to /api/upload-file, updating the matching
    *  thumbnail's status as it goes. Pulled out so retry can call it
@@ -325,7 +312,8 @@ export function MessageComposer({
           ),
         );
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message =
+          err instanceof Error ? err.message : translate("Unknown error");
         setAttachments((prev) =>
           prev.map((it) =>
             it.localId === localId
@@ -347,7 +335,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.fileSize != null && picked.fileSize > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        translate("File too large"),
+        translate("Files must be smaller than 100 MB."),
+      );
       return;
     }
     const filename = picked.fileName ?? `image-${Date.now()}.jpg`;
@@ -380,7 +371,10 @@ export function MessageComposer({
     const picked = picker.assets[0];
     if (!picked) return;
     if (picked.size != null && picked.size > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+      Alert.alert(
+        translate("File too large"),
+        translate("Files must be smaller than 100 MB."),
+      );
       return;
     }
     const mimeType = picked.mimeType ?? "application/octet-stream";
@@ -462,11 +456,7 @@ export function MessageComposer({
         accessibilityState={{ disabled }}
         className="flex-row items-center gap-2 h-11 px-4 rounded-full bg-secondary active:opacity-80"
       >
-        <Ionicons
-          name={pillIcon}
-          size={18}
-          color={theme.mutedForeground}
-        />
+        <Ionicons name={pillIcon} size={18} color={theme.mutedForeground} />
         <Text className="text-base text-muted-foreground">
           {disabled && disabledReason ? disabledReason : pillLabel}
         </Text>
@@ -491,13 +481,14 @@ export function MessageComposer({
               className="flex-1 text-xs font-medium text-muted-foreground"
               numberOfLines={1}
             >
-              Replying to {replyTarget.actorName}
+              {translate("Replying to")}
+              {replyTarget.actorName}
             </Text>
             <Pressable
               onPress={onClearReplyTarget}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="Cancel reply"
+              accessibilityLabel={translate("Cancel reply")}
             >
               <Ionicons
                 name="close-circle"
@@ -521,7 +512,7 @@ export function MessageComposer({
         className="rounded-3xl border border-border bg-secondary"
         style={{ borderCurve: "continuous" }}
       >
-        {(mentions.length > 0 || attachments.length > 0) ? (
+        {mentions.length > 0 || attachments.length > 0 ? (
           <View className="px-2 pt-2 pb-1">
             <ComposerAttachmentRow
               mentions={mentions}
@@ -555,21 +546,21 @@ export function MessageComposer({
             iconSize={20}
             color={mentions.length > 0 ? theme.primary : undefined}
             onPress={onAtPress}
-            accessibilityLabel="Mention someone or an issue"
+            accessibilityLabel={translate("Mention someone or an issue")}
             className="h-8 w-8"
           />
           <IconButton
             name="image-outline"
             iconSize={20}
             onPress={onImagePress}
-            accessibilityLabel="Upload image"
+            accessibilityLabel={translate("Upload image")}
             className="h-8 w-8"
           />
           <IconButton
             name="attach-outline"
             iconSize={20}
             onPress={onFilePress}
-            accessibilityLabel="Upload file"
+            accessibilityLabel={translate("Upload file")}
             className="h-8 w-8"
           />
           <View className="flex-1" />
@@ -585,7 +576,7 @@ export function MessageComposer({
               disabled={!canSend}
               hitSlop={12}
               className="h-8 w-8 rounded-full"
-              accessibilityLabel="Send"
+              accessibilityLabel={translate("Send")}
               accessibilityState={{ disabled: !canSend }}
             />
           )}

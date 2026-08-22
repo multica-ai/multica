@@ -17,12 +17,16 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      "expo-localization": path.resolve(
+        __dirname,
+        "i18n/expo-localization.test-stub.ts",
+      ),
     },
   },
   test: {
     environment: "node",
     globals: true,
-    include: ["lib/**/*.test.ts", "data/**/*.test.ts"],
+    include: ["lib/**/*.test.ts", "data/**/*.test.ts", "i18n/**/*.test.ts"],
     passWithNoTests: true,
   },
 });

@@ -73,6 +73,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { translate } from "@/i18n";
 
 interface Props {
   messages: ChatMessage[];
@@ -164,9 +165,7 @@ export function ChatMessageList({
   const pendingTaskId = pendingTask?.task_id ?? null;
   const pendingAlreadyPersisted =
     !!pendingTaskId &&
-    messages.some(
-      (m) => m.role === "assistant" && m.task_id === pendingTaskId,
-    );
+    messages.some((m) => m.role === "assistant" && m.task_id === pendingTaskId);
   const showLiveSection = !!pendingTaskId && !pendingAlreadyPersisted;
   const showLiveTimeline =
     showLiveSection && (liveTaskMessages?.length ?? 0) > 0;
@@ -182,77 +181,75 @@ export function ChatMessageList({
     // also dismiss, matching iOS Notes / iMessage behaviour. Scroll
     // gestures are unaffected (Pressable only intercepts non-drag taps).
     <ImageSequenceProvider blocks={imageBlocks}>
-    <Pressable
-      onPress={
-        selectingId
-          ? () => useChatSelectStore.getState().clear()
-          : undefined
-      }
-      disabled={!selectingId}
-      style={{ flex: 1 }}
-    >
-    {/* `key` on first message id forces remount on session switch so
+      <Pressable
+        onPress={
+          selectingId ? () => useChatSelectStore.getState().clear() : undefined
+        }
+        disabled={!selectingId}
+        style={{ flex: 1 }}
+      >
+        {/* `key` on first message id forces remount on session switch so
         `startRenderingFromBottom` re-fires and we land at the new
         session's bottom (instead of inheriting the previous session's
         scroll position). Cheap because sessions are switched, not
         re-rendered every keystroke. */}
-    <FlashList
-      key={messages[0]?.id ?? "empty"}
-      data={messages}
-      keyExtractor={(m) => m.id}
-      renderItem={({ item }) => (
-        <MessageRow
-          message={item}
-          onQuickAction={onQuickAction}
-          quickActionsDisabled={quickActionsDisabled}
-        />
-      )}
-      ItemSeparatorComponent={MessageSeparator}
-      ListFooterComponent={
-        showLiveSection ? (
-          <View style={{ paddingTop: 12 }} className="gap-2">
-            {showLiveTimeline ? (
-              <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
-            ) : null}
-            <StatusPill
-              pendingTask={pendingTask}
-              taskMessages={liveTaskMessages}
-              availability={availability}
+        <FlashList
+          key={messages[0]?.id ?? "empty"}
+          data={messages}
+          keyExtractor={(m) => m.id}
+          renderItem={({ item }) => (
+            <MessageRow
+              message={item}
+              onQuickAction={onQuickAction}
+              quickActionsDisabled={quickActionsDisabled}
             />
-          </View>
-        ) : null
-      }
-      // Outer padding mirrors web's max-w-4xl px-5 py-4 container at
-      // mobile scale. Vertical gap between bubbles handled by
-      // ItemSeparatorComponent (FlashList doesn't honour `gap-*` on
-      // contentContainer the way FlatList's gap-via-NativeWind did).
-      contentContainerStyle={{
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        paddingBottom: 16,
-      }}
-      // Chat behavior: initial render at the bottom; when new messages
-      // arrive AND the user is within 20% of the bottom, auto-scroll.
-      // Reading history (further than 20% up) is preserved. This single
-      // prop replaces the entire FlatList-era guard ref dance.
-      maintainVisibleContentPosition={{
-        autoscrollToBottomThreshold: 0.2,
-        startRenderingFromBottom: true,
-      }}
-      // Any user-initiated scroll exits message text-selection mode —
-      // matches iMessage's behavior where scrolling implicitly commits /
-      // dismisses the selection caret. Hooks both drag-start and the
-      // momentum kick after a flick so a fast scroll can't escape.
-      onScrollBeginDrag={() => useChatSelectStore.getState().clear()}
-      onMomentumScrollBegin={() => useChatSelectStore.getState().clear()}
-      // iMessage-style keyboard dismissal: dragging the list pulls the
-      // keyboard down with the finger (iOS); tapping empty space between
-      // bubbles dismisses it. `handled` keeps Pressables inside bubbles
-      // (long-press action sheet etc.) firing normally.
-      keyboardDismissMode="interactive"
-      keyboardShouldPersistTaps="handled"
-    />
-    </Pressable>
+          )}
+          ItemSeparatorComponent={MessageSeparator}
+          ListFooterComponent={
+            showLiveSection ? (
+              <View style={{ paddingTop: 12 }} className="gap-2">
+                {showLiveTimeline ? (
+                  <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
+                ) : null}
+                <StatusPill
+                  pendingTask={pendingTask}
+                  taskMessages={liveTaskMessages}
+                  availability={availability}
+                />
+              </View>
+            ) : null
+          }
+          // Outer padding mirrors web's max-w-4xl px-5 py-4 container at
+          // mobile scale. Vertical gap between bubbles handled by
+          // ItemSeparatorComponent (FlashList doesn't honour `gap-*` on
+          // contentContainer the way FlatList's gap-via-NativeWind did).
+          contentContainerStyle={{
+            paddingHorizontal: 16,
+            paddingTop: 12,
+            paddingBottom: 16,
+          }}
+          // Chat behavior: initial render at the bottom; when new messages
+          // arrive AND the user is within 20% of the bottom, auto-scroll.
+          // Reading history (further than 20% up) is preserved. This single
+          // prop replaces the entire FlatList-era guard ref dance.
+          maintainVisibleContentPosition={{
+            autoscrollToBottomThreshold: 0.2,
+            startRenderingFromBottom: true,
+          }}
+          // Any user-initiated scroll exits message text-selection mode —
+          // matches iMessage's behavior where scrolling implicitly commits /
+          // dismisses the selection caret. Hooks both drag-start and the
+          // momentum kick after a flick so a fast scroll can't escape.
+          onScrollBeginDrag={() => useChatSelectStore.getState().clear()}
+          onMomentumScrollBegin={() => useChatSelectStore.getState().clear()}
+          // iMessage-style keyboard dismissal: dragging the list pulls the
+          // keyboard down with the finger (iOS); tapping empty space between
+          // bubbles dismisses it. `handled` keeps Pressables inside bubbles
+          // (long-press action sheet etc.) firing normally.
+          keyboardDismissMode="interactive"
+          keyboardShouldPersistTaps="handled"
+        />
+      </Pressable>
     </ImageSequenceProvider>
   );
 }
@@ -272,9 +269,7 @@ function MessageRow({
 }) {
   const isUser = message.role === "user";
   const isFailure = !!message.failure_reason;
-  const isSelecting = useChatSelectStore(
-    (s) => s.selectingId === message.id,
-  );
+  const isSelecting = useChatSelectStore((s) => s.selectingId === message.id);
   const longPress = useChatMessageLongPress(message);
 
   if (isFailure) {
@@ -321,10 +316,7 @@ function MessageRow({
     );
     if (isSelecting) return body;
     return (
-      <Pressable
-        onLongPress={longPress.onLongPress}
-        delayLongPress={500}
-      >
+      <Pressable onLongPress={longPress.onLongPress} delayLongPress={500}>
         {body}
       </Pressable>
     );
@@ -385,12 +377,10 @@ function AssistantRow({
   const isNoResponse = message.message_kind === "no_response";
   const body = (
     <View className="gap-1.5">
-      {timeline.length > 0 ? (
-        <ChatTimeline items={timeline} />
-      ) : null}
+      {timeline.length > 0 ? <ChatTimeline items={timeline} /> : null}
       {isNoResponse ? (
         <Text className="text-sm italic text-muted-foreground">
-          The agent finished this turn without a text reply.
+          {translate("The agent finished this turn without a text reply.")}
         </Text>
       ) : (
         <Markdown
@@ -415,7 +405,9 @@ function AssistantRow({
       ) : null}
     </View>
   );
-  const messageBody = isSelecting ? body : (
+  const messageBody = isSelecting ? (
+    body
+  ) : (
     <Pressable onLongPress={longPress.onLongPress} delayLongPress={500}>
       {body}
     </Pressable>
@@ -463,7 +455,7 @@ function QuickActions({
   return (
     <View
       className="flex-row flex-wrap gap-2 pt-0.5"
-      accessibilityLabel="Suggested follow-ups"
+      accessibilityLabel={translate("Suggested follow-ups")}
     >
       {actions.slice(0, 3).map((action, index) => (
         <Pressable
@@ -510,13 +502,17 @@ function ElapsedCaption({
 }) {
   const label =
     variant === "replied"
-      ? `Replied in ${formatElapsedMs(elapsedMs)}`
+      ? translate("Replied in {{elapsed}}", {
+          elapsed: formatElapsedMs(elapsedMs),
+        })
       : variant === "finished"
-        ? `Finished in ${formatElapsedMs(elapsedMs)}`
-        : `Failed after ${formatElapsedMs(elapsedMs)}`;
-  return (
-    <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>
-  );
+        ? translate("Finished in {{elapsed}}", {
+            elapsed: formatElapsedMs(elapsedMs),
+          })
+        : translate("Failed after {{elapsed}}", {
+            elapsed: formatElapsedMs(elapsedMs),
+          });
+  return <Text className="text-xs text-muted-foreground/80 mt-1">{label}</Text>;
 }
 
 function FailureBubble({
@@ -557,16 +553,12 @@ function FailureBubble({
             <CollapsibleTrigger asChild>
               <View
                 accessibilityRole="button"
-                accessibilityLabel="Show error details"
+                accessibilityLabel={translate("Show error details")}
                 className="mt-1 flex-row items-center gap-1 active:opacity-70"
               >
-                <Ionicons
-                  name="chevron-forward"
-                  size={12}
-                  color="#71717a"
-                />
+                <Ionicons name="chevron-forward" size={12} color="#71717a" />
                 <Text className="text-xs text-muted-foreground">
-                  Show details
+                  {translate("Show details")}
                 </Text>
               </View>
             </CollapsibleTrigger>

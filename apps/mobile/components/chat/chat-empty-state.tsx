@@ -20,11 +20,12 @@
 import { View } from "react-native";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { translate } from "@/i18n";
 
 const STARTER_PROMPTS: { icon: string; text: string }[] = [
-  { icon: "📋", text: "List my open issues by priority" },
-  { icon: "📝", text: "Summarize what I did today" },
-  { icon: "💡", text: "Help me plan what to do next" },
+  { icon: "📋", text: translate("List my open issues by priority") },
+  { icon: "📝", text: translate("Summarize what I did today") },
+  { icon: "💡", text: translate("Help me plan what to do next") },
 ];
 
 interface Props {
@@ -33,7 +34,11 @@ interface Props {
   onPickPrompt: (text: string) => void;
 }
 
-export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) {
+export function ChatEmptyState({
+  hasSessions,
+  agentName,
+  onPickPrompt,
+}: Props) {
   // First-time experience: educate before suggesting actions. Starter
   // prompts here would presume the user already knows what chat is for.
   if (!hasSessions) {
@@ -41,19 +46,21 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
       <View className="flex-1 items-center justify-center px-6 py-8">
         <View className="max-w-xs items-center gap-3">
           <Text className="text-base font-semibold text-foreground text-center">
-            Chat with your agents
+            {translate("Chat with your agents")}
           </Text>
           <Text className="text-sm text-muted-foreground text-center">
             <Text className="text-sm text-muted-foreground">
-              ✨ They know your workspace —{" "}
+              {translate("✨ They know your workspace —")}{" "}
             </Text>
             <Text className="text-sm font-medium text-foreground">
-              issues, projects, skills
+              {translate("issues, projects, skills")}
             </Text>
             <Text className="text-sm text-muted-foreground">.</Text>
           </Text>
           <Text className="text-sm text-muted-foreground text-center">
-            Ask for a summary, plan your day, or hand off a small task.
+            {translate(
+              "Ask for a summary, plan your day, or hand off a small task.",
+            )}
           </Text>
         </View>
       </View>
@@ -61,7 +68,9 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
   }
 
   // Returning user: starter prompts are the fastest path back to action.
-  const title = agentName ? `Hi, I'm ${agentName}` : "Welcome back to Multica";
+  const title = agentName
+    ? translate("Hi, I'm {{name}}", { name: agentName })
+    : translate("Welcome back to Multica");
   return (
     <View className="flex-1 items-center justify-center px-6 py-8 gap-5">
       <View className="items-center gap-1">
@@ -69,7 +78,7 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
           {title}
         </Text>
         <Text className="text-sm text-muted-foreground text-center">
-          Try asking
+          {translate("Try asking")}
         </Text>
       </View>
       <View className="w-full max-w-xs gap-2">
@@ -82,7 +91,7 @@ export function ChatEmptyState({ hasSessions, agentName, onPickPrompt }: Props) 
             accessibilityLabel={p.text}
           >
             <Text className="text-sm text-foreground">
-              <Text className="text-sm">{p.icon}  </Text>
+              <Text className="text-sm">{p.icon} </Text>
               {p.text}
             </Text>
           </Button>

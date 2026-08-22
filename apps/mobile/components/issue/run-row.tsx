@@ -17,6 +17,7 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useCancelTask } from "@/data/mutations/issues";
 import { useActorLookup } from "@/data/use-actor-name";
 import { timeAgo } from "@/lib/time-ago";
+import { translate } from "@/i18n";
 
 interface Props {
   task: AgentTask;
@@ -42,10 +43,7 @@ export function RunRow({ task, issueId }: Props) {
     <View className="flex-row items-start gap-3 py-2">
       <ActorAvatar type="agent" id={task.agent_id} size={28} showPresence />
       <View className="flex-1 gap-1">
-        <Text
-          className="text-sm text-foreground"
-          numberOfLines={2}
-        >
+        <Text className="text-sm text-foreground" numberOfLines={2}>
           <Text className="font-medium">{getName("agent", task.agent_id)}</Text>
           <Text className="text-muted-foreground"> · {summary}</Text>
         </Text>
@@ -90,12 +88,12 @@ function CancelButton({
 
   const onPress = () => {
     Alert.alert(
-      "Cancel task?",
-      "The agent will stop after the current step.",
+      translate("Cancel task?"),
+      translate("The agent will stop after the current step."),
       [
-        { text: "Keep running", style: "cancel" },
+        { text: translate("Keep running"), style: "cancel" },
         {
-          text: "Cancel task",
+          text: translate("Cancel task"),
           style: "destructive",
           onPress: () => mutation.mutate(taskId),
         },
@@ -109,7 +107,9 @@ function CancelButton({
       disabled={mutation.isPending}
       className="px-3 py-1.5 rounded-md bg-secondary active:opacity-70"
     >
-      <Text className="text-xs font-medium text-foreground">Cancel</Text>
+      <Text className="text-xs font-medium text-foreground">
+        {translate("Cancel")}
+      </Text>
     </Pressable>
   );
 }
@@ -117,27 +117,27 @@ function CancelButton({
 function fallbackSummary(task: AgentTask): string {
   switch (task.kind) {
     case "comment":
-      return "Comment task";
+      return translate("Comment task");
     case "autopilot":
-      return "Autopilot run";
+      return translate("Autopilot run");
     case "chat":
-      return "Chat task";
+      return translate("Chat task");
     case "quick_create":
-      return "Quick create";
+      return translate("Quick create");
     case "direct":
     default:
-      return "Task";
+      return translate("Task");
   }
 }
 
 const STATUS_LABEL: Record<AgentTask["status"], string> = {
-  queued: "Queued",
-  dispatched: "Starting",
-  waiting_local_directory: "Waiting for directory",
-  running: "Running",
-  completed: "Done",
-  failed: "Failed",
-  cancelled: "Cancelled",
+  queued: translate("Queued"),
+  dispatched: translate("Starting"),
+  waiting_local_directory: translate("Waiting for directory"),
+  running: translate("Running"),
+  completed: translate("Done"),
+  failed: translate("Failed"),
+  cancelled: translate("Cancelled"),
 };
 
 const STATUS_CLASS: Record<AgentTask["status"], string> = {
@@ -161,32 +161,32 @@ const STATUS_CLASS: Record<AgentTask["status"], string> = {
 // An unrecognised reason still does — a compact badge is the one place where
 // web's raw-wire-value fallback would overflow the row.
 const FAILURE_REASON_LABEL: Record<string, string> = {
-  queued_expired: "Queue expired",
-  runtime_offline: "Runtime offline",
-  runtime_recovery: "Runtime recovery",
-  timeout: "Timeout",
-  iteration_limit: "Iteration limit",
-  agent_blocked: "Needs input",
-  api_invalid_request: "Request rejected",
-  skill_bundle_unavailable: "Skill download failed",
-  runtime_cli_timeout: "Runtime CLI timeout",
+  queued_expired: translate("Queue expired"),
+  runtime_offline: translate("Runtime offline"),
+  runtime_recovery: translate("Runtime recovery"),
+  timeout: translate("Timeout"),
+  iteration_limit: translate("Iteration limit"),
+  agent_blocked: translate("Needs input"),
+  api_invalid_request: translate("Request rejected"),
+  skill_bundle_unavailable: translate("Skill download failed"),
+  runtime_cli_timeout: translate("Runtime CLI timeout"),
 
-  "agent_error.provider_auth_or_access": "Auth failed",
-  "agent_error.provider_quota_limit": "Quota exhausted",
-  "agent_error.provider_capacity_or_rate_limit": "Rate limited",
-  "agent_error.provider_server_error": "Provider error",
-  "agent_error.provider_network": "Network error",
-  "agent_error.process_failure": "Process crashed",
-  "agent_error.empty_or_unparseable_output": "No usable output",
-  "agent_error.agent_timeout": "Agent timeout",
-  "agent_error.context_overflow": "Context overflow",
-  "agent_error.missing_config": "Config missing",
-  "agent_error.model_not_found_or_unavailable": "Model unavailable",
-  "agent_error.runtime_version_unsupported": "CLI unsupported",
-  "agent_error.runtime_missing_executable": "CLI not installed",
-  "agent_error.unknown": "Agent error",
+  "agent_error.provider_auth_or_access": translate("Auth failed"),
+  "agent_error.provider_quota_limit": translate("Quota exhausted"),
+  "agent_error.provider_capacity_or_rate_limit": translate("Rate limited"),
+  "agent_error.provider_server_error": translate("Provider error"),
+  "agent_error.provider_network": translate("Network error"),
+  "agent_error.process_failure": translate("Process crashed"),
+  "agent_error.empty_or_unparseable_output": translate("No usable output"),
+  "agent_error.agent_timeout": translate("Agent timeout"),
+  "agent_error.context_overflow": translate("Context overflow"),
+  "agent_error.missing_config": translate("Config missing"),
+  "agent_error.model_not_found_or_unavailable": translate("Model unavailable"),
+  "agent_error.runtime_version_unsupported": translate("CLI unsupported"),
+  "agent_error.runtime_missing_executable": translate("CLI not installed"),
+  "agent_error.unknown": translate("Agent error"),
 
-  agent_error: "Agent error",
-  codex_semantic_inactivity: "Codex inactivity",
-  manual: "Manual",
+  agent_error: translate("Agent error"),
+  codex_semantic_inactivity: translate("Codex inactivity"),
+  manual: translate("Manual"),
 };

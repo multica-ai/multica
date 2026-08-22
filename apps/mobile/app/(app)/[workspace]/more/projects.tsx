@@ -28,6 +28,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ProjectRow } from "@/components/project/project-row";
 import { projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export default function ProjectsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -64,11 +65,13 @@ export default function ProjectsPage() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load projects:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {translate("Failed to load projects:")}{" "}
+            {error instanceof Error
+              ? error.message
+              : translate("unknown error")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : sorted.length === 0 ? (
@@ -103,7 +106,7 @@ function PlusButton({ onPress }: { onPress: () => void }) {
     <IconButton
       name="add"
       onPress={onPress}
-      accessibilityLabel="New project"
+      accessibilityLabel={translate("New project")}
     />
   );
 }
@@ -112,14 +115,15 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <View className="flex-1 items-center justify-center px-6 gap-4">
       <Text className="text-base font-medium text-foreground">
-        No projects yet
+        {translate("No projects yet")}
       </Text>
       <Text className="text-sm text-muted-foreground text-center">
-        Group related issues into a project to track progress and assign a
-        lead.
+        {translate(
+          "Group related issues into a project to track progress and assign a lead.",
+        )}
       </Text>
       <Button variant="default" onPress={onCreate}>
-        <Text>Create project</Text>
+        <Text>{translate("Create project")}</Text>
       </Button>
     </View>
   );

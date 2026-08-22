@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import { useAuthStore } from "@/data/auth-store";
 import { api } from "@/data/api";
 import type { FileAsset } from "@/data/api";
+import { translate } from "@/i18n";
 
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024; // 5 MB — matches what's reasonable on cellular.
 
@@ -59,10 +60,17 @@ export default function ProfileSettingsScreen() {
   const dirty = name.trim() !== (user?.name ?? "") && name.trim().length > 0;
 
   const handleAvatarPick = () => {
-    const options = ["Take Photo", "Choose from Library", "Remove Photo", "Cancel"];
+    const options = [
+      translate("Take Photo"),
+      translate("Choose from Library"),
+      translate("Remove Photo"),
+      translate("Cancel"),
+    ];
     const removeIndex = user?.avatar_url ? 2 : -1;
     const cancelIndex = user?.avatar_url ? 3 : 2;
-    const visibleOptions = user?.avatar_url ? options : options.filter((_, i) => i !== 2);
+    const visibleOptions = user?.avatar_url
+      ? options
+      : options.filter((_, i) => i !== 2);
 
     ActionSheetIOS.showActionSheetWithOptions(
       {
@@ -82,7 +90,10 @@ export default function ProfileSettingsScreen() {
   const pickFromCamera = async () => {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert("Permission needed", "Camera access is required to take a photo.");
+      Alert.alert(
+        translate("Permission needed"),
+        translate("Camera access is required to take a photo."),
+      );
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -106,7 +117,10 @@ export default function ProfileSettingsScreen() {
 
   const uploadAvatar = async (asset: ImagePicker.ImagePickerAsset) => {
     if (asset.fileSize && asset.fileSize > MAX_AVATAR_BYTES) {
-      Alert.alert("Image too large", "Pick an image under 5 MB.");
+      Alert.alert(
+        translate("Image too large"),
+        translate("Pick an image under 5 MB."),
+      );
       return;
     }
     const fileAsset: FileAsset = {
@@ -124,8 +138,10 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Upload failed",
-        err instanceof Error ? err.message : "Could not upload avatar.",
+        translate("Upload failed"),
+        err instanceof Error
+          ? err.message
+          : translate("Could not upload avatar."),
       );
     } finally {
       setUploading(false);
@@ -139,8 +155,10 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Remove failed",
-        err instanceof Error ? err.message : "Could not remove avatar.",
+        translate("Remove failed"),
+        err instanceof Error
+          ? err.message
+          : translate("Could not remove avatar."),
       );
     } finally {
       setUploading(false);
@@ -155,8 +173,10 @@ export default function ProfileSettingsScreen() {
       setUser(updated);
     } catch (err) {
       Alert.alert(
-        "Save failed",
-        err instanceof Error ? err.message : "Could not update profile.",
+        translate("Save failed"),
+        err instanceof Error
+          ? err.message
+          : translate("Could not update profile."),
       );
     } finally {
       setSaving(false);
@@ -171,7 +191,10 @@ export default function ProfileSettingsScreen() {
     >
       <View className="items-center gap-3">
         <Pressable onPress={handleAvatarPick} disabled={uploading}>
-          <Avatar alt={user?.name ?? "Your avatar"} className="size-24">
+          <Avatar
+            alt={user?.name ?? translate("Your avatar")}
+            className="size-24"
+          >
             {user?.avatar_url ? (
               <AvatarImage source={{ uri: user.avatar_url }} />
             ) : null}
@@ -186,7 +209,7 @@ export default function ProfileSettingsScreen() {
           <ActivityIndicator />
         ) : (
           <Text className="text-xs text-muted-foreground">
-            Tap to change photo
+            {translate("Tap to change photo")}
           </Text>
         )}
       </View>
@@ -195,31 +218,35 @@ export default function ProfileSettingsScreen() {
 
       <View className="gap-4">
         <View>
-          <Text className="text-xs text-muted-foreground mb-1.5">Name</Text>
+          <Text className="text-xs text-muted-foreground mb-1.5">
+            {translate("Name")}
+          </Text>
           <TextField
             value={name}
             onChangeText={setName}
-            placeholder="Your name"
+            placeholder={translate("Your name")}
             autoCapitalize="words"
             autoCorrect={false}
             returnKeyType="done"
           />
         </View>
         <View>
-          <Text className="text-xs text-muted-foreground mb-1.5">Email</Text>
+          <Text className="text-xs text-muted-foreground mb-1.5">
+            {translate("Email")}
+          </Text>
           <View className="rounded-md border border-border bg-muted px-3 py-2.5">
             <Text className="text-base text-muted-foreground">
               {user?.email ?? "—"}
             </Text>
           </View>
           <Text className="text-xs text-muted-foreground mt-1.5">
-            Email is set at sign-up and can&apos;t be changed here.
+            {translate("Email is set at sign-up and can't be changed here.")}
           </Text>
         </View>
       </View>
 
       <Button onPress={handleSave} disabled={!dirty || saving}>
-        <Text>{saving ? "Saving…" : "Save"}</Text>
+        <Text>{saving ? translate("Saving…") : translate("Save")}</Text>
       </Button>
     </ScrollView>
   );

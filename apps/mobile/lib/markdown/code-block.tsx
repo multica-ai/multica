@@ -27,11 +27,7 @@
  * write, so we own the feedback.
  */
 import { useEffect, useRef, useState } from "react";
-import {
-  Pressable,
-  ScrollView,
-  View,
-} from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import Svg, { Path, Rect } from "react-native-svg";
@@ -50,6 +46,7 @@ import {
   SHIKI_THEME_LIGHT,
   type HighlightedLine,
 } from "./shiki";
+import { translate } from "@/i18n";
 
 interface Props {
   code: string;
@@ -126,18 +123,11 @@ function HighlightedCode({
   return (
     <View>
       {lines.map((line, i) => (
-        <Text
-          key={i}
-          className={CODE_BLOCK_TEXT_CLASS}
-          selectable={selectable}
-        >
+        <Text key={i} className={CODE_BLOCK_TEXT_CLASS} selectable={selectable}>
           {line.tokens.length === 0
             ? " "
             : line.tokens.map((t, j) => (
-                <Text
-                  key={j}
-                  style={t.color ? { color: t.color } : undefined}
-                >
+                <Text key={j} style={t.color ? { color: t.color } : undefined}>
                   {t.content}
                 </Text>
               ))}
@@ -192,7 +182,9 @@ function CodeBlockHeader({ code, lang }: Props) {
         onPress={onCopy}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={copied ? "Code copied" : "Copy code"}
+        accessibilityLabel={
+          copied ? translate("Code copied") : translate("Copy code")
+        }
       >
         {copied ? (
           <CheckIcon color={t.success} />
