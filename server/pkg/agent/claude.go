@@ -112,6 +112,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
+	// Every stream-json frame we send — initial prompt, control responses,
+	// and mid-run Steer messages — goes through this locked writer. Each
+	// frame is a single Write call, so the lock is what guarantees frames
+	// from different goroutines (prompt writer, scanner's control responses,
+	// Steer callers) can never interleave mid-frame on the pipe.
+	stdinW := &lockedFrameWriter{w: stdin}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -153,10 +159,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// leaves the child stuck waiting for a response until its own fallback
 	// timeout.
 	writeDone := make(chan error, 1)
+	// initialWritten gates Steer: a steer frame must never reach claude
+	// before the initial prompt frame, or the steer text would become the
+	// task prompt. Closed only on a successful prompt write.
+	initialWritten := make(chan struct{})
 	go func() {
-		err := writeClaudeInput(stdin, prompt)
+		err := writeClaudeInput(stdinW, prompt)
 		if err != nil {
 			closeStdin()
+		} else {
+			close(initialWritten)
 		}
 		writeDone <- err
 	}()
@@ -268,7 +280,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				}
 			case "control_request":
-				b.handleControlRequest(msg, stdin)
+				b.handleControlRequest(msg, stdinW)
 			}
 		}
 		scanErr := scanner.Err()
@@ -363,7 +375,31 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	return &Session{Messages: msgCh, Result: resCh}, nil
+	steer := func(text string) error {
+		// Never let a steer frame overtake the initial prompt; if the run
+		// ends (or is cancelled) before the prompt ever lands, report it so
+		// the caller can fall back to its follow-up-task path.
+		select {
+		case <-initialWritten:
+		case <-procDone:
+			return fmt.Errorf("claude session already finished")
+		case <-runCtx.Done():
+			return fmt.Errorf("claude session cancelled: %w", runCtx.Err())
+		}
+		select {
+		case <-procDone:
+			return fmt.Errorf("claude session already finished")
+		default:
+		}
+		if err := writeClaudeInput(stdinW, text); err != nil {
+			// Includes the closed-stdin case after the final result event —
+			// the run is wrapping up and can no longer accept input.
+			return fmt.Errorf("steer claude session: %w", err)
+		}
+		return nil
+	}
+
+	return &Session{Messages: msgCh, Result: resCh, Steer: steer}, nil
 }
 
 func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
@@ -772,6 +808,21 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		args = append(args, "--settings", opts.ClaudeSettingsPath)
 	}
 	return args
+}
+
+// lockedFrameWriter serialises whole-frame writes to claude's stdin. Every
+// producer (initial prompt, control responses, Steer) writes one complete
+// newline-terminated frame per Write call; the mutex makes that write atomic
+// with respect to the other producers.
+type lockedFrameWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (lw *lockedFrameWriter) Write(p []byte) (int, error) {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	return lw.w.Write(p)
 }
 
 func writeClaudeInput(w io.Writer, prompt string) error {

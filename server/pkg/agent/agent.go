@@ -140,6 +140,16 @@ type Session struct {
 	Messages <-chan Message
 	// Result receives exactly one value — the final outcome — then closes.
 	Result <-chan Result
+	// Steer, when non-nil, delivers an additional user message into the
+	// LIVE session while the agent is still working. The message is queued
+	// on the agent's own input stream, so it is considered as the next user
+	// turn rather than interrupting the in-flight one. Nil means the backend
+	// has no mid-run input channel — callers must treat that as "not
+	// supported" and fall back to their existing follow-up-task path, never
+	// as an error. Steer returns an error once the session has finished (or
+	// its input stream is closed); the caller owns that same fallback then,
+	// so a message is never silently dropped. Safe for concurrent use.
+	Steer func(text string) error
 }
 
 // MessageType identifies the kind of Message.
