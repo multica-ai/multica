@@ -266,7 +266,16 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		} else if runCtx.Err() == context.Canceled {
 			scanResult.status = "aborted"
 			scanResult.errMsg = "execution cancelled"
-		} else if exitErr != nil && scanResult.status == "completed" {
+		} else if exitErr != nil && scanResult.status == "completed" && !scanResult.sawTerminalSignal {
+			// A non-zero exit only demotes a "completed" run when there is no
+			// positive evidence the run actually finished. OpenCode is a Bun
+			// binary that on Windows routinely crashes on process teardown with
+			// 0xc0000409 (STATUS_STACK_BUFFER_OVERRUN) AFTER emitting a full,
+			// clean event stream — so a run that reached a terminal signal
+			// (step_finish) must stay "completed" despite the crash-on-exit,
+			// mirroring the writeErr guard below (#5872). Runs that never
+			// signalled completion still fail here; genuine mid-run errors are
+			// already failed via the `error` event before this branch.
 			scanResult.status = "failed"
 			scanResult.errMsg = fmt.Sprintf("opencode exited with error: %v", exitErr)
 		} else if exitErr != nil && scanResult.noTerminalSignal {
