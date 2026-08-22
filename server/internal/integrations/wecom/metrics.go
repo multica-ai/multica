@@ -52,16 +52,30 @@ type Metrics interface {
 	// engine is not keeping up with one bot's traffic, and past a point
 	// WeCom stops seeing the socket drained and replaces the connection.
 	RecordCallbackQueueBlocked()
+
+	// RecordOutboundDelivered — one reply reached the user. It is the
+	// denominator: without it a flat drop counter cannot be told apart from a
+	// quiet day, and "the bot went silent" is exactly the report that cannot
+	// afford that ambiguity.
+	RecordOutboundDelivered()
+	// RecordOutboundDropped — one reply the adapter owed a user and did not
+	// deliver, labelled with why (outbound_outcome.go's closed reason set).
+	// Some reasons are ordinary — a question typed in the web UI on a
+	// WeCom-bound session is not deliverable here and never was — so this is
+	// read as a breakdown, not as an error total.
+	RecordOutboundDropped(reason string)
 }
 
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
 // nil-pointer dereference on the read loop.
 type nopMetrics struct{}
 
-func (nopMetrics) RecordConnectFailure()       {}
-func (nopMetrics) RecordAuthFailure()          {}
-func (nopMetrics) RecordCallbackQueued()       {}
-func (nopMetrics) RecordCallbackQueueBlocked() {}
+func (nopMetrics) RecordConnectFailure()        {}
+func (nopMetrics) RecordAuthFailure()           {}
+func (nopMetrics) RecordCallbackQueued()        {}
+func (nopMetrics) RecordCallbackQueueBlocked()  {}
+func (nopMetrics) RecordOutboundDelivered()     {}
+func (nopMetrics) RecordOutboundDropped(string) {}
 
 // orNopMetrics turns an unset sink into one that is safe to call.
 func orNopMetrics(m Metrics) Metrics {

@@ -32,11 +32,25 @@ import "github.com/prometheus/client_golang/prometheus"
 // there: the two connection failures reach the Supervisor as a returned error
 // and are logged with installation_id, while a blocked ingest queue is
 // counted and nothing else — the counter says some bot is behind, not which.
+// The outbound pair answers a different question from the connection ones, and
+// it is the question GH #7215 and #6890 were filed as: a reply was produced,
+// the transcript has it, and the WeCom chat stayed quiet. Several unrelated
+// causes end that way — no socket in this process, a turn that originated in
+// the web UI, a revoked installation, a frame the platform refused — and from
+// the chat they are one symptom. Delivered is the denominator: without it, a
+// drop rate of zero and a bot nobody messaged look identical, which is the
+// same ambiguity the connection counters exist to remove.
+//
+// reason is a closed set (wecom/outbound_outcome.go). It is the only label
+// here, and it stays bounded by construction — no installation, workspace or
+// session id, same rule as everywhere else in this package.
 type WecomMetrics struct {
 	ConnectFailures      prometheus.Counter
 	AuthFailures         prometheus.Counter
 	CallbacksQueued      prometheus.Counter
 	CallbackQueueBlocked prometheus.Counter
+	OutboundDelivered    prometheus.Counter
+	OutboundDropped      *prometheus.CounterVec
 }
 
 func NewWecomMetrics() *WecomMetrics {
@@ -54,6 +68,12 @@ func NewWecomMetrics() *WecomMetrics {
 			"Inbound callbacks handed to the ingest worker. The baseline every other inbound number is read against."),
 		CallbackQueueBlocked: counter("inbound_queue_blocked_total",
 			"Times the read loop had to wait on a full ingest queue. Backpressure by design; a rising rate means the engine is behind and the socket is about to stop being drained."),
+		OutboundDelivered: counter("outbound_delivered_total",
+			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
+		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_dropped_total",
+			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Not an error total: origin_not_channel is ordinary (a question typed in Multica on a WeCom-bound session), while no_live_connection, platform_refused, ack_timeout and transport_error each mean somebody in WeCom is waiting on an answer that is not coming.",
+		}, []string{"reason"}),
 	}
 }
 
@@ -61,6 +81,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
+		m.OutboundDelivered, m.OutboundDropped,
 	}
 }
 
@@ -70,3 +91,7 @@ func (m *WecomMetrics) RecordConnectFailure()       { m.ConnectFailures.Inc() }
 func (m *WecomMetrics) RecordAuthFailure()          { m.AuthFailures.Inc() }
 func (m *WecomMetrics) RecordCallbackQueued()       { m.CallbacksQueued.Inc() }
 func (m *WecomMetrics) RecordCallbackQueueBlocked() { m.CallbackQueueBlocked.Inc() }
+func (m *WecomMetrics) RecordOutboundDelivered()    { m.OutboundDelivered.Inc() }
+func (m *WecomMetrics) RecordOutboundDropped(reason string) {
+	m.OutboundDropped.WithLabelValues(reason).Inc()
+}

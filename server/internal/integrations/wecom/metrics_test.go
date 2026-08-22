@@ -48,6 +48,11 @@ func (m *countingMetrics) RecordConnectFailure()       { m.bump("connect_failure
 func (m *countingMetrics) RecordAuthFailure()          { m.bump("auth_failure") }
 func (m *countingMetrics) RecordCallbackQueued()       { m.bump("callback_queued") }
 func (m *countingMetrics) RecordCallbackQueueBlocked() { m.bump("callback_blocked") }
+func (m *countingMetrics) RecordOutboundDelivered()    { m.bump("outbound_delivered") }
+func (m *countingMetrics) RecordOutboundDropped(reason string) {
+	m.bump("outbound_dropped")
+	m.bump("outbound_dropped:" + reason)
+}
 
 var _ Metrics = (*countingMetrics)(nil)
 
