@@ -99,6 +99,27 @@ describe("keyboard shortcut definitions", () => {
     expect(action.allowInEditable).toBe(false);
   });
 
+  it("ships the timeline jumps as primary-chorded Home/End, editable-safe", () => {
+    expect(SHORTCUT_ACTION_BY_ID.scrollToTop.defaultShortcut).toEqual(
+      createShortcutChord("Home", { primary: true }),
+    );
+    expect(SHORTCUT_ACTION_BY_ID.scrollToBottom.defaultShortcut).toEqual(
+      createShortcutChord("End", { primary: true }),
+    );
+    // Jumping to the bottom while a comment is half-drafted is the primary
+    // use case, so the chords must work with the caret inside an editor.
+    expect(SHORTCUT_ACTION_BY_ID.scrollToTop.allowInEditable).toBe(true);
+    expect(SHORTCUT_ACTION_BY_ID.scrollToBottom.allowInEditable).toBe(true);
+    // Bare Home/End are browser/editor-owned plain keys and must stay out of
+    // the allowlist, even for the editable-safe actions.
+    expect(
+      isShortcutAllowedForAction("scrollToTop", createShortcutChord("Home"), "macos"),
+    ).toBe(false);
+    expect(
+      isShortcutAllowedForAction("scrollToBottom", createShortcutChord("End"), "windows"),
+    ).toBe(false);
+  });
+
   it("strictly distinguishes Command and Control on macOS", () => {
     const commandF = createShortcutChord("F", { primary: true });
     const controlF = createShortcutChord("F", { control: true });

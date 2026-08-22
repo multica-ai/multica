@@ -337,6 +337,8 @@
     "unpin_tooltip": "사이드바 고정 해제",
     "thread_nav_label": "스레드로 이동",
     "thread_nav_resolved_label": "{{title}} (해결됨)",
+    "scroll_to_top": "맨 위로",
+    "scroll_to_bottom": "맨 아래로",
     "thread_nav": {
       "button_label_other": "스레드 ({{count}})",
       "search_placeholder": "스레드 또는 작성자 검색",

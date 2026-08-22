@@ -12,6 +12,8 @@ export type ShortcutActionId =
   | "toggleChat"
   | "findInIssue"
   | "openThreadNav"
+  | "scrollToTop"
+  | "scrollToBottom"
   | "archiveInboxItem"
   | "send"
   | "goBack"
@@ -101,6 +103,25 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     id: "openThreadNav",
     category: "general",
     defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
+    allowInEditable: true,
+  },
+  // Mod+Home / Mod+End mirror "document start / document end" in editors and
+  // terminals: a bound jump to the very ends of the document you have open.
+  // The bare Home/End keys sit in PLAIN_GLOBAL_RESERVED_KEYS (they scroll and
+  // move the caret inside editors), so the defaults ship primary-chorded.
+  // `allowInEditable` follows openThreadNav's reasoning: jumping to the
+  // bottom while a comment is half-drafted is the common case, not the
+  // exception.
+  {
+    id: "scrollToTop",
+    category: "general",
+    defaultShortcut: createShortcutChord("Home", { primary: true }),
+    allowInEditable: true,
+  },
+  {
+    id: "scrollToBottom",
+    category: "general",
+    defaultShortcut: createShortcutChord("End", { primary: true }),
     allowInEditable: true,
   },
   {

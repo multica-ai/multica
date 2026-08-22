@@ -85,6 +85,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
 import { ThreadMinimap } from "./thread-minimap";
+import { TimelineScrollButtons } from "./timeline-scroll-buttons";
 import { ThreadNavPanel, mentionsUser, type ThreadNavThread } from "./thread-nav-panel";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
@@ -1704,6 +1705,53 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [isFlatTimeline, items, scrollContainerEl],
   );
 
+  // Top/bottom quick jump (upstream #6959). Same split as jumpToThread above:
+  // the flat modes drive the container's scrollTop directly, the virtualized
+  // browsing mode indexes into Virtuoso — never native scrollIntoView, which
+  // also scrolls the desktop shell (#3929).
+  const scrollToTop = useCallback(() => {
+    // Setting scrollTop on the shared container works in both modes: in the
+    // virtualized mode Virtuoso rides this very element through
+    // customScrollParent, so the row window follows the container exactly as
+    // it does when the user drags the scrollbar.
+    if (scrollContainerEl) scrollContainerEl.scrollTop = 0;
+  }, [scrollContainerEl]);
+  // The virtualized bottom jump repeats once after ~100ms for the same
+  // reason the posted-comment scroll does: the first jump lands on Virtuoso's
+  // estimated row heights, the repeat realigns once the real heights are
+  // measured.
+  const scrollBottomCleanupRef = useRef<() => void>(() => {});
+  useEffect(() => () => scrollBottomCleanupRef.current(), []);
+  const scrollToBottom = useCallback(() => {
+    const jumpViaContainer = () => {
+      if (scrollContainerEl) scrollContainerEl.scrollTop = scrollContainerEl.scrollHeight;
+    };
+    // Flat mode (find bar / deep link) mounts every row, and a
+    // description-only issue has no timeline rows for Virtuoso to index —
+    // in both cases the container's own extent is the page bottom.
+    if (isFlatTimeline || items.length === 0) {
+      jumpViaContainer();
+      return;
+    }
+    const index = items.length - 1;
+    const scrollEnd = () => {
+      const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
+      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
+    };
+    let timer: number | undefined;
+    const frame = requestAnimationFrame(() => {
+      scrollEnd();
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        scrollEnd();
+      }, 100);
+    });
+    scrollBottomCleanupRef.current = () => {
+      cancelAnimationFrame(frame);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [isFlatTimeline, items.length, scrollContainerEl]);
+
   // Header thread navigator. `open` and `pinned` live here rather than inside
   // the panel because the global shortcut has to be able to open it already
   // pinned, and because the rail needs `threadNavHoverId` to light the tick
@@ -1746,6 +1794,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     threadNavOpen,
     threadNavPinned,
   ]);
+
+  // Global Mod+Home / Mod+End — jump the open issue detail's timeline to its
+  // top / bottom (upstream #6959). Scoped and visibility-gated like the
+  // openThreadNav handler above, so only the visible tab claims the key.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+      const toTop = shortcutMatchesEvent(getShortcut("scrollToTop"), e);
+      const toBottom = shortcutMatchesEvent(getShortcut("scrollToBottom"), e);
+      if (!toTop && !toBottom) return;
+      if (!scrollContainerEl || scrollContainerEl.getClientRects().length === 0) return;
+      e.preventDefault();
+      if (toTop) scrollToTop();
+      else scrollToBottom();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [scrollContainerEl, scrollToTop, scrollToBottom]);
 
   const {
     reactions: issueReactions,
@@ -3488,14 +3554,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             so it covers neither the scrollbar nor body text. It also clears
             the resize handle's 4px drag strip at the panel edge. Hover
             previews a thread, click jumps to it. Hidden on mobile: no
-            hover, and the gutter is too tight. */}
+            hover, and the gutter is too tight. bottom-24 keeps the rail
+            clear of the top/bottom jump buttons pinned at the rail's foot. */}
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
             scrollContainerEl={scrollContainerEl}
             onJump={jumpToThread}
             highlightedThreadId={threadNavHoverId}
-            className="absolute bottom-0 right-3 top-12"
+            className="absolute bottom-24 right-3 top-12"
+          />
+        )}
+        {/* Back-to-top / jump-to-bottom (upstream #6959). Same right-edge
+            strip as the rail; pinned above the composer's sticky corner and
+            clear of the chat launcher (which only claims that corner below
+            md, where these buttons are hidden anyway). Each button fades out
+            while the timeline already rests at its end. */}
+        {!isMobile && (
+          <TimelineScrollButtons
+            scrollContainerEl={scrollContainerEl}
+            onScrollToTop={scrollToTop}
+            onScrollToBottom={scrollToBottom}
+            className="absolute bottom-6 right-3 z-10"
           />
         )}
       </div>

@@ -183,6 +183,14 @@
         "label": "Open thread navigator",
         "description": "List, search, and jump between the comment threads of the open issue."
       },
+      "scrollToTop": {
+        "label": "Scroll to top",
+        "description": "Jump the open issue's timeline back to its top."
+      },
+      "scrollToBottom": {
+        "label": "Scroll to bottom",
+        "description": "Jump the open issue's timeline to its bottom (latest activity)."
+      },
       "archiveInboxItem": {
         "label": "Archive notification",
         "description": "Archive the open inbox notification, or restore it while reading the archive."
