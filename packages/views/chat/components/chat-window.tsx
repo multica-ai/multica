@@ -92,6 +92,7 @@ import { useT } from "../../i18n";
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
 const CHAT_VIRTUOSO_INITIAL_FIRST_ITEM_INDEX = 1_000_000;
+const STARTER_PROMPT_DEBOUNCE_MS = 300;
 
 
 export function ChatWindow() {
@@ -163,6 +164,12 @@ export function ChatWindow() {
     : 0;
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
+  const starterPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (starterPromptTimerRef.current) {
+      clearTimeout(starterPromptTimerRef.current);
+    }
+  }, []);
   // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
   // page controller — the skip/apply/consume/reconcile state machine must not
   // diverge between the two composers.
@@ -591,6 +598,19 @@ export function ChatWindow() {
     ],
   );
 
+  const handleStarterPrompt = useCallback(
+    (text: string) => {
+      if (starterPromptTimerRef.current) {
+        clearTimeout(starterPromptTimerRef.current);
+      }
+      starterPromptTimerRef.current = setTimeout(() => {
+        starterPromptTimerRef.current = null;
+        void handleSend(text);
+      }, STARTER_PROMPT_DEBOUNCE_MS);
+    },
+    [handleSend],
+  );
+
   const handleStop = useCallback(() => {
     if (!pendingTaskId || !activeSessionId) {
       apiLogger.debug("cancelTask skipped: no pending task");
@@ -920,7 +940,7 @@ export function ChatWindow() {
         <EmptyState
           hasSessions={sessions.length > 0}
           agentName={activeAgent?.name}
-          onPickPrompt={(text) => handleSend(text)}
+          onPickPrompt={handleStarterPrompt}
         />
       )}
 
