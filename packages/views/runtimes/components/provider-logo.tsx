@@ -219,6 +219,24 @@ function QoderLogo({ className }: { className: string }) {
   );
 }
 
+// Junie (JetBrains) — JetBrains publishes an official Junie wordmark
+// (colored/black/white SVG variants, brand color #40FF40) at
+// jetbrains.com/company/brand/, but no official mark asset was available to
+// embed verbatim here. This is a placeholder monochrome tile in the Junie
+// brand color, matching the compact letter-tile style already used for
+// Grok/Kimi/MCode; swap in the real vector mark once it is sourced.
+function JunieLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden>
+      <rect width="24" height="24" rx="5" fill="#000000" />
+      <path
+        d="M14.7 7.2h2.1v6.4c0 2.1-1.4 3.5-3.6 3.5-1.5 0-2.7-.6-3.4-1.7l1.6-1.3c.4.6 1 1 1.7 1 1 0 1.6-.6 1.6-1.7V7.2z"
+        fill="#40FF40"
+      />
+    </svg>
+  );
+}
+
 // Antigravity (Google) — official mark, shipped as a PNG asset next to this file.
 import antigravityLogo from "./antigravity-logo.png";
 const antigravityLogoSrc = staticAssetSrc(antigravityLogo);
@@ -381,6 +399,8 @@ export function ProviderLogo({
       return <ReasonixLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
+    case "junie":
+      return <JunieLogo className={className} />;
     case "qoder":
     case "qoderclicn":
       return <QoderLogo className={className} />;

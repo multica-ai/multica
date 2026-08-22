@@ -48,6 +48,23 @@ func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
 	}
 }
 
+func TestListModelsJunieUsesRuntimeDefaultAndManualEntry(t *testing.T) {
+	// Junie returns its manual-entry catalog without resolving or executing a
+	// CLI: its ACP model-catalog shape has not been confirmed against a live
+	// handshake yet, so discovery deliberately degrades to empty rather than
+	// guess at a parser (see the case "junie" comment in models.go).
+	got, err := ListModels(context.Background(), "junie", Command{Path: ""})
+	if err != nil {
+		t.Fatalf("ListModels(junie) error: %v", err)
+	}
+	if len(got.Models) != 0 {
+		t.Fatalf("ListModels(junie) = %+v, want no static catalog", got)
+	}
+	if got.Fallback {
+		t.Error("junie's empty catalog is deliberate, not a discovery fallback")
+	}
+}
+
 func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	// Copilot uses dynamic ACP discovery, but with no `copilot`
 	// binary on PATH (the discovery LookPath fails) it must fall

@@ -76,6 +76,20 @@ describe("ProviderLogo", () => {
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 
+  it("renders the Junie mark instead of the generic fallback", () => {
+    const { container } = render(
+      <ProviderLogo provider="junie" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector("svg");
+
+    // Placeholder tile in the JetBrains Junie brand color until an official
+    // vector mark is sourced (see the comment above JunieLogo).
+    expect(logo?.querySelector('rect[fill="#000000"]')).not.toBeNull();
+    expect(logo?.querySelector('path[fill="#40FF40"]')).not.toBeNull();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("renders the MiniMax Code mark instead of the generic fallback", () => {
     const { container } = render(
       <ProviderLogo provider="mcode" className="runtime-logo" />,

@@ -203,6 +203,17 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverKiroModels(ctx, runtimeCmd))
 		})
+	case "junie":
+		// JetBrains Junie's ACP session/new model-catalog shape has not been
+		// confirmed against a live handshake yet (unlike kiro/reasonix, whose
+		// discovery was verified against an installed binary before landing).
+		// Per builtin_runtimes.go's documented ModelDiscovery: nil fallback
+		// pattern, degrade to an empty catalog rather than guess a discovery
+		// parser at a response shape nobody has observed — the runtime
+		// default plus manual model entry stay available either way (same
+		// posture as qwen). Replace with a discoverJunieModels call modelled
+		// on discoverKiroModels once the shape is confirmed.
+		return Catalog{Models: []Model{}}, nil
 	case "qoder", "qoderclicn":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverQoderModels(ctx, runtimeCmd, qoderDefaultBinary(providerType)))

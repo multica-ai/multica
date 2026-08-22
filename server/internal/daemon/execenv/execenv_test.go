@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func testLogger() *slog.Logger {
@@ -816,7 +818,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", ""} {
+	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", "junie", ""} {
 		provider := provider
 		name := provider
 		if name == "" {
@@ -895,6 +897,54 @@ func TestMcodeUsesNativeProjectSkillRoot(t *testing.T) {
 	want := filepath.Join(workDir, ".minimax", "skills")
 	if got := skillsDirPath(workDir, "mcode"); got != want {
 		t.Fatalf("skillsDirPath(mcode) = %q, want %q", got, want)
+	}
+}
+
+func TestJunieUsesNativeProjectSkillRoot(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	want := filepath.Join(workDir, ".junie", "skills")
+	if got := skillsDirPath(workDir, "junie"); got != want {
+		t.Fatalf("skillsDirPath(junie) = %q, want %q", got, want)
+	}
+}
+
+// skillsDirPathFallbackExempt lists the providers that legitimately resolve to
+// the .agent_context/skills fallback because their skills do not live under
+// the task workdir at all.
+var skillsDirPathFallbackExempt = map[string]string{
+	"codex":  "skills are hydrated into CODEX_HOME, not the workdir (see hydrateCodexSkills)",
+	"hermes": "skills live in the per-task HERMES_HOME/skills (see hermes_home.go)",
+	// TODO: dim has no native project skills dir either. That is a
+	// pre-existing gap, tracked separately rather than widened here.
+	"dim": "no native project skills dir mapped yet — pre-existing gap",
+}
+
+// TestSkillsDirPathCoversEverySupportedType is the skillsDirPath twin of
+// TestRuntimeConfigPathCoversEverySupportedType. Without it a newly supported
+// provider silently inherits the .agent_context/skills fallback, which no CLI
+// scans — the skills are written, the prompt claims they were discovered, and
+// the agent never sees a single SKILL.md. Junie shipped exactly that way.
+func TestSkillsDirPathCoversEverySupportedType(t *testing.T) {
+	t.Parallel()
+	workDir := t.TempDir()
+	fallback := filepath.Join(workDir, ".agent_context", "skills")
+	for _, provider := range agent.SupportedTypes {
+		provider := provider
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+			got := skillsDirPath(workDir, provider)
+			if got != fallback {
+				return
+			}
+			if reason, ok := skillsDirPathFallbackExempt[provider]; ok {
+				t.Logf("%s uses the fallback by design: %s", provider, reason)
+				return
+			}
+			t.Fatalf("skillsDirPath(%q) fell through to the .agent_context fallback %q; "+
+				"map it to the provider's native project skills dir, or document it in skillsDirPathFallbackExempt",
+				provider, fallback)
+		})
 	}
 }
 

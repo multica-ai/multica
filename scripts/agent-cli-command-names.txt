@@ -9,6 +9,7 @@ dim
 dsh
 grok
 hermes
+junie
 kimi
 kiro-cli
 mcode

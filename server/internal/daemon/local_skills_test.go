@@ -334,6 +334,14 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantPath: "~/.grok/skills/review-helper",
 			wantName: "Grok Review",
 		},
+		{
+			// ~/.junie/skills is not env-overridable, so unlike grok/qwen/
+			// reasonix/dsh this row needs no home-var clearing below.
+			provider: "junie",
+			root:     filepath.Join(".junie", "skills"),
+			wantPath: "~/.junie/skills/review-helper",
+			wantName: "Junie Review",
+		},
 	}
 
 	for _, tc := range tests {

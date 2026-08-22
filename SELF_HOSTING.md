@@ -124,6 +124,7 @@ You also need at least one AI agent CLI installed:
 - [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
 - Dim (`dim` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
+- [Junie](https://junie.jetbrains.com/) (`junie` on PATH)
 - Qoder CLI (`qodercli` on PATH)
 - Qoder CN CLI (`qoderclicn` on PATH)
 - Trae CLI (`traecli` on PATH)

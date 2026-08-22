@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
-// OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
+// OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Junie, Antigravity, Qoder,
 // Trae, Grok, Qwen Code, QwenPaw, MiniMax Code). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
@@ -278,7 +278,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "junie", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -287,7 +287,7 @@ type Config struct {
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
 // migration 254 to add reasonix, migration 313 to add dsh, migration 327 to
-// add mcode): a
+// add mcode, migration 377 to add junie): a
 // custom runtime profile may only
 // be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
@@ -296,7 +296,8 @@ type Config struct {
 // header and provider branding but was previously missing from this whitelist,
 // so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
 // ACP backend (`grok agent --always-approve stdio`). qwen is Qwen Code's
-// native `qwen -p <prompt> --output-format stream-json` backend.
+// native `qwen -p <prompt> --output-format stream-json` backend. junie is the
+// JetBrains Junie CLI ACP backend (`junie --acp=true`).
 var SupportedTypes = []string{
 	"claude",
 	"codebuddy",
@@ -312,6 +313,7 @@ var SupportedTypes = []string{
 	"reasonix",
 	"dsh",
 	"kiro",
+	"junie",
 	"antigravity",
 	"qoder",
 	"qoderclicn",
@@ -407,6 +409,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &dimBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
+	case "junie":
+		return &junieBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
 	case "qoder", "qoderclicn":
@@ -455,6 +459,7 @@ var launchHeaders = map[string]string{
 	"reasonix":    "reasonix acp",
 	"dsh":         "dsh --profile multica (stdio)",
 	"kiro":        "kiro-cli acp",
+	"junie":       "junie --acp=true",
 	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
 	"pi":          "pi (json mode)",

@@ -162,7 +162,7 @@ authenticated, so switching providers is a dropdown, not a migration.
 | Qwen Code | `qwen` | QwenPaw | `qwenpaw` |
 | Reasonix | `reasonix` | Trae CLI | `traecli` |
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
-| MiniMax Code | `mcode` | — | — |
+| MiniMax Code | `mcode` | Junie | `junie` |
 | Dim | `dim` | | |
 
 Installing and authenticating them: [Install an agent runtime](https://multica.ai/docs/install-agent-runtime) ·

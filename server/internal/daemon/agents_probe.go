@@ -206,6 +206,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
+	// JetBrains Junie CLI (`junie`), driven over ACP via `junie --acp=true`.
+	// MULTICA_JUNIE_MODEL seeds the daemon-wide default model when one is
+	// configured; Junie's model catalog is not yet enumerable (see the
+	// case "junie" comment in models.go), so this is manual-entry only today.
+	if e, ok := probe("MULTICA_JUNIE_PATH", "junie", "MULTICA_JUNIE_MODEL"); ok {
+		agents["junie"] = e
+	}
 	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
 		agents["codebuddy"] = e
 	}

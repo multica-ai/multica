@@ -436,6 +436,12 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "junie":
+		// JetBrains Junie CLI auto-discovers project-level skills from
+		// .junie/skills/<name>/SKILL.md in the project root; a project skill
+		// wins over a same-named ~/.junie/skills one.
+		// See https://junie.jetbrains.com/docs/agent-skills.html
+		return filepath.Join(workDir, ".junie", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

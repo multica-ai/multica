@@ -158,6 +158,7 @@ var allFileBasedProviders = []string{
 	"dsh",
 	"dim",
 	"kiro",
+	"junie",
 	"antigravity",
 	"qwen",
 	"qwenpaw",
@@ -241,6 +242,7 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "skills", "my-own"), "SKILL.md"},
 		{"reasonix", filepath.Join(".reasonix", "skills", "my-own"), "SKILL.md"},
 		{"kiro", filepath.Join(".kiro", "skills", "my-own"), "SKILL.md"},
+		{"junie", filepath.Join(".junie", "skills", "my-own"), "SKILL.md"},
 		{"antigravity", filepath.Join(".agents", "skills", "my-own"), "SKILL.md"},
 		{"qwen", filepath.Join(".qwen", "skills", "my-own"), "SKILL.md"},
 		{"hermes", filepath.Join(".agent_context", "skills", "my-own"), "SKILL.md"},
@@ -308,6 +310,9 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 		{"kimi", filepath.Join(".kimi", "config.json")},
 		{"reasonix", filepath.Join(".reasonix", "config.toml")},
 		{"kiro", filepath.Join(".kiro", "config.json")},
+		// Junie's project guidelines file is the realistic pre-existing
+		// sibling of .junie/skills/; Cleanup must leave .junie/ alive.
+		{"junie", filepath.Join(".junie", "guidelines.md")},
 		{"antigravity", filepath.Join(".agents", "config.json")},
 		{"qwen", filepath.Join(".qwen", "settings.json")},
 	}
@@ -640,6 +645,7 @@ var sameSlugSkillProviderCases = []struct {
 	{"reasonix", filepath.Join(".reasonix", "skills", "issue-review")},
 	{"dsh", filepath.Join(".dsh", "skills", "issue-review")},
 	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
+	{"junie", filepath.Join(".junie", "skills", "issue-review")},
 	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
 	{"qwen", filepath.Join(".qwen", "skills", "issue-review")},
 	{"hermes", filepath.Join(".agent_context", "skills", "issue-review")},

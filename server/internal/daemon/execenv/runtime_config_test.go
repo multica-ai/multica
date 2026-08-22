@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // Sub-issue Creation section — after MUL-2538 the platform posts the
@@ -1084,6 +1085,25 @@ func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 		}
 		if string(got) != "untouched\n" {
 			t.Errorf("unknown provider must not write %s; got:\n%s", name, string(got))
+		}
+	}
+}
+
+// Guard against the class of bug found in #1163's review: a provider added to
+// agent.SupportedTypes (so it is offered as a custom runtime profile) but
+// never added to runtimeConfigPath's switch. runtimeConfigPath then falls to
+// its default "" case, InjectRuntimeConfig silently no-ops, and every task on
+// that provider runs with no workflow brief at all — traecli shipped with
+// exactly this gap once already (#4945/#4946: "its agents were silently
+// missing the workflow section... leaving issues stuck in todo with no
+// comment and no error"). Every officially supported provider must resolve to
+// a real config path.
+func TestRuntimeConfigPathCoversEverySupportedType(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	for _, provider := range agent.SupportedTypes {
+		if got := runtimeConfigPath(dir, provider); got == "" {
+			t.Errorf("runtimeConfigPath(%q) = \"\" — provider is in agent.SupportedTypes but has no runtime config file, so InjectRuntimeConfig will silently skip it", provider)
 		}
 	}
 }

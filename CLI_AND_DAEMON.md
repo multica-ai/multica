@@ -220,6 +220,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) | `reasonix` | DeepSeek-focused ACP coding agent (run `reasonix setup` first) |
 | Dim | `dim` | DimCode ACP coding agent (speaks the ACP protocol via `dim acp`) |
 | Kiro CLI | `kiro-cli` | Kiro ACP coding agent |
+| [Junie](https://junie.jetbrains.com/) | `junie` | JetBrains Junie ACP coding agent (ACP via `junie --acp=true`) |
 | [Qoder CLI](https://docs.qoder.com/) | `qodercli` | Qoder ACP coding agent |
 | [Qoder CN CLI](https://help.aliyun.com/en/lingma/qodercli-cn/product-overview/what-is-qoder-cli-cn) | `qoderclicn` | Qoder CN ACP coding agent |
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
@@ -330,6 +331,8 @@ Agent-specific overrides:
 | `MULTICA_DIM_MODEL` | Override the Dim model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
 | `MULTICA_KIRO_MODEL` | Override the Kiro model used |
+| `MULTICA_JUNIE_PATH` | Custom path to the `junie` binary |
+| `MULTICA_JUNIE_MODEL` | Override the Junie model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
 | `MULTICA_QODER_MODEL` | Override the Qoder model used |
 | `MULTICA_QODERCLICN_PATH` | Custom path to the `qoderclicn` binary |
@@ -354,7 +357,7 @@ The daemon launches Qwen Code as `qwen -p <prompt> --output-format stream-json`.
 
 #### `mcp_config` on ACP runtimes
 
-ACP-family runtimes — Hermes, Kimi, Kiro, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.
+ACP-family runtimes — Hermes, Kimi, Kiro, Junie, Grok, Qoder, Reasonix, Trae, QwenPaw, MiniMax Code, Dim, and any custom runtime profile whose `protocol_family` is one of them — receive MCP servers **over the ACP session protocol**, not through a config file. The daemon translates the agent's `mcp_config` into ACP's `McpServer` array and sends it with `session/new`, and again with that runtime's resume request (`session/resume` on Hermes, Kimi, Qoder and Reasonix; `session/load` on Kiro, Junie, Grok, Trae, QwenPaw and Dim) so a resumed task keeps the same tools. MiniMax Code 0.1.2 advertises no session-loading capability, so a later run falls back to a fresh session.
 
 Nothing is written to the runtime's own config file, and the runtime's own file is not read or merged. `~/.hermes/…`, `~/.jcode/mcp.json` and the like stay untouched; an agent's servers travel with its tasks instead of being installed per machine.
 
