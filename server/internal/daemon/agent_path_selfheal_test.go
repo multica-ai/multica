@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -135,6 +136,85 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(root, "empty"))
 	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
 		t.Fatalf("cached self-heal not reused: got (%q, %q), want (%q, %q)", got.Path, ver, v2, "0.144.3")
+	}
+}
+
+// TestResolveAgentEntry_PrefersLivePathWhenVersionDetectFails is the regression
+// for GH #6452, the follow-up to MUL-4486. An in-place upgrade deletes the
+// pinned versioned directory, and the `--version` probe of the binary the
+// command now resolves to never returns — on macOS a freshly written,
+// quarantined Homebrew cask artifact blocks in _dyld_start until the probe
+// timeout kills it. The candidate cannot be adopted, since nothing about it was
+// verified. But answering with the pinned path is worse than answering with an
+// unknown version: that path is gone, so every consumer fails on a file the
+// upgrade removed instead of probing the one that is installed, and the retry
+// that would recover a transient probe failure never gets to run.
+func TestResolveAgentEntry_PrefersLivePathWhenVersionDetectFails(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink/exec-bit layout is POSIX-specific")
+	}
+
+	root := t.TempDir()
+	stableBin := filepath.Join(root, "bin")
+	t.Setenv("PATH", stableBin)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
+
+	// The probe is killed by its own timeout, as reported. detectVersionOK flips
+	// it back on to stand in for the repair (replacing the file with a fresh
+	// inode), so the same entry can be observed healing for real afterwards.
+	detectVersionOK := false
+	origDetect := detectAgentVersion
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		if !detectVersionOK {
+			return "", errors.New("signal: killed")
+		}
+		return filepath.Base(filepath.Dir(filepath.Dir(runtimeCmd.Path))), nil
+	}
+	t.Cleanup(func() { detectAgentVersion = origDetect })
+
+	d := newSelfHealTestDaemon()
+	d.setAgentVersion("codex", "0.144.1")
+	entry := AgentEntry{Path: v1, Command: "codex"}
+	ctx := context.Background()
+
+	// In-place upgrade: the pinned versioned tree is deleted and the stable
+	// command name now resolves to v2.
+	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
+		t.Fatalf("remove v1 tree: %v", err)
+	}
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+	if agentExecutablePresent(v1) {
+		t.Fatalf("v1 path still present after removing its tree: %q", v1)
+	}
+
+	got, ver := d.resolveAgentEntry(ctx, "codex", entry)
+	if got.Path == v1 {
+		t.Fatalf("kept the deleted pinned path %q; every consumer then fails on a file the upgrade removed", v1)
+	}
+	if got.Path != v2 {
+		t.Fatalf("resolved %q, want the live re-resolved path %q", got.Path, v2)
+	}
+	// An unknown version, never a wrong one: the last known value is reported,
+	// and the unverified pair is deliberately NOT published, so the next call
+	// probes again instead of pinning a path to a version nothing detected.
+	if ver != "0.144.1" {
+		t.Fatalf("returned version = %q, want the last known %q", ver, "0.144.1")
+	}
+	d.resolvedPathsMu.RLock()
+	cached, published := d.resolvedPaths["codex"]
+	d.resolvedPathsMu.RUnlock()
+	if published {
+		t.Fatalf("unverified path was published as a healed pair: %+v", cached)
+	}
+
+	// Once version detection recovers, the same entry heals for real and adopts
+	// the verified {path, version} pair.
+	detectVersionOK = true
+	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
+		t.Fatalf("heal did not complete after version detection recovered: got (%q, %q), want (%q, %q)",
+			got.Path, ver, v2, "0.144.3")
 	}
 }
 
