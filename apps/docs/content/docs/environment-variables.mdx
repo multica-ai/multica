@@ -175,6 +175,9 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
 | Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Base64-encoded 32-byte key for stored secrets and encrypted surface launch URLs |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Dedicated cookie-free browser origin routed to this backend; must differ from app/API origins and preserve `Host` |
+| Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 

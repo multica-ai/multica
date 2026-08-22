@@ -142,15 +142,12 @@ export interface PluginPackageListResponse {
   packages: PluginPackage[];
 }
 
-/**
- * The code one surface runs, read from the version the workspace installed.
- *
- * The host inlines it into the sandboxed document it generates, so the surface
- * loads nothing over the network and its CSP names no third-party script origin
- * at all.
- */
-export interface PluginSurfaceScript {
-  code: string;
+/** One short-lived, installation-bound launch of a hosted surface. */
+export interface PluginSurfaceLaunch {
+  /** Multica's cookie-free content URL, never the plugin author's server. */
+  url: string;
+  /** Single-use proof the generated document must present to this frame. */
+  bridge_token: string;
   version: string;
   digest: string;
 }

@@ -8,50 +8,30 @@
 // user and checks the scopes this plugin was granted.
 //
 // A surface entry is ONE script with no module graph. Multica stores and serves
-// the published artifact and inlines it into the document it generates, so
-// there is no origin for a static `import` to resolve against — and that is the
+// the published artifact and serves it in a generated content document, so
+// there is no module graph for a static `import` to resolve against — and that is the
 // point: a surface cannot reach its author's server just by loading. In a real
 // plugin you would bundle `@multica/plugin-sdk` in; this file inlines the few
 // calls it needs so the example stays readable and has nothing to install.
 
 const pending = new Map();
-let port = null;
+const port = globalThis.__multicaPluginBridgePortV2;
 let sequence = 0;
 
-window.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || data.type !== "multica:plugin-bridge-init" || !event.ports[0]) return;
-  // Only the embedder may hand this frame a port, and only once. Sibling frames
-  // are mutually opaque but `parent.frames[i]` is an allowed cross-origin
-  // access, so another plugin on this page could otherwise deliver its own port
-  // and become this surface's "host". Origin is useless here (a sandboxed frame
-  // sees "null"), so identity is the window reference.
-  if (event.source !== window.parent || port) return;
-  port = event.ports[0];
-  port.onmessage = (message) => {
-    const payload = message.data;
-    if (payload?.kind === "theme") return applyTheme(payload.theme);
-    const entry = pending.get(payload?.id);
-    if (!entry) return;
-    pending.delete(payload.id);
-    if (payload.ok) entry.resolve(payload.data);
-    else entry.reject(new Error(payload.error));
-  };
-  port.start();
-  applyTheme(data.theme);
-  resize(360);
-  correlate();
-});
-
-// Announce until the host answers with a port. One announcement is not enough
-// in either direction: this frame can finish executing before the embedder's
-// effect attaches its listener, and a host waiting on the iframe load event can
-// miss that event entirely.
-(function announce(attempts) {
-  if (port || attempts > 50) return;
-  window.parent.postMessage({ type: "multica:plugin-surface-ready" }, "*");
-  setTimeout(() => announce(attempts + 1), 120);
-})(0);
+if (!(port instanceof MessagePort)) throw new Error("Multica surface bridge is unavailable");
+delete globalThis.__multicaPluginBridgePortV2;
+port.onmessage = (message) => {
+  const payload = message.data;
+  if (payload?.kind === "theme") return applyTheme(payload.theme);
+  const entry = pending.get(payload?.id);
+  if (!entry) return;
+  pending.delete(payload.id);
+  if (payload.ok) entry.resolve(payload.data);
+  else entry.reject(new Error(payload.error));
+};
+port.start();
+resize(360);
+correlate();
 
 function applyTheme(theme) {
   for (const [name, value] of Object.entries(theme ?? {})) {

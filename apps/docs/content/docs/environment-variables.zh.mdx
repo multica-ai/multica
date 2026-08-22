@@ -175,6 +175,9 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
+| 插件 | `MULTICA_PLUGIN_SECRET_KEY` | base64 编码的 32 字节密钥，用于加密已存 secret 和 surface 启动 URL |
+| 插件 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到后端的独立无 Cookie 浏览器 origin；必须不同于 app/API origin，并保留 `Host` |
+| 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 

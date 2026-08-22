@@ -1,6 +1,6 @@
 export { PluginPanelSection } from "./plugin-panel-section";
 export { PluginSurfaceFrame } from "./plugin-surface-frame";
-export { buildSurfaceCSP, buildSurfaceDocument, surfaceConnectSources } from "./surface-document";
+export { buildSurfaceFrameDocument } from "./surface-document";
 export {
   PluginHookMenuItems,
   collectManualHookActions,

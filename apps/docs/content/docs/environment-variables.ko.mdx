@@ -175,6 +175,9 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 저장된 secret과 surface 실행 URL을 암호화하는 base64 인코딩 32바이트 키 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
+| Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 

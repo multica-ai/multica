@@ -20,9 +20,9 @@ import { PluginSurfaceFrame } from "./plugin-surface-frame";
 /**
  * The mount point for `modal` surfaces.
  *
- * A modal is the same sandboxed iframe as a panel — `allow-scripts` without
- * `allow-same-origin`, host-generated srcdoc, CSP derived from the granted
- * `net:` scopes — differing only in where it appears. What it is NOT is a way
+ * A modal is the same hosted, opaque inner iframe as a panel — with a CSP
+ * derived from the granted `net:` scopes — differing only in where it appears.
+ * What it is NOT is a way
  * for a plugin to interrupt somebody: it opens because a person picked it from
  * the issue menu, never on the plugin's own initiative.
  */

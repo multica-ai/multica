@@ -70,7 +70,7 @@ import type {
   PluginPackage,
   PluginPackageListResponse,
   PluginPreview,
-  PluginSurfaceScript,
+  PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
@@ -297,19 +297,17 @@ export const EMPTY_PLUGIN_PACKAGE: PluginPackage = {
   created_at: "",
 };
 
-/**
- * A surface's code. The empty default is what the frame renders as "this panel
- * could not load" — an unparseable response must never become an empty script
- * that looks like a working but silent panel.
- */
-export const PluginSurfaceScriptSchema = z.object({
-  code: z.string().default(""),
+/** A malformed launch becomes unavailable, never a partly trusted frame. */
+export const PluginSurfaceLaunchSchema = z.object({
+  url: z.string().default(""),
+  bridge_token: z.string().default(""),
   version: z.string().default(""),
   digest: z.string().default(""),
 }).loose();
 
-export const EMPTY_PLUGIN_SURFACE_SCRIPT: PluginSurfaceScript = {
-  code: "",
+export const EMPTY_PLUGIN_SURFACE_LAUNCH: PluginSurfaceLaunch = {
+  url: "",
+  bridge_token: "",
   version: "",
   digest: "",
 };

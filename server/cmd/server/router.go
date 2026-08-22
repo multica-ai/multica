@@ -344,12 +344,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		VCSIntegrationEnabled:    os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		AppURL:                   appURLFromEnv(),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
+		PluginSurfaceOrigin:      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
@@ -1083,6 +1085,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// is derived from this rather than stored, so no row holds a usable
 			// one.
 			h.PluginService.DeploymentKey = pluginKey
+			h.PluginSurfaceTokens, err = handler.NewPluginSurfaceTokenBox(pluginKey)
+			if err != nil {
+				slog.Error("plugins: surface token key derivation failed; surfaces disabled", "error", err)
+			}
 			slog.Info("Plugin secret encryption enabled")
 		}
 	} else {
@@ -1163,6 +1169,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Use(opts.HTTPMetrics.Middleware)
 	}
 	r.Use(chimw.Recoverer)
+	r.Use(h.PluginSurfaceHostBoundary)
 	r.Use(middleware.ContentSecurityPolicy)
 
 	// Share allowed origins with WebSocket origin checker.
@@ -1241,6 +1248,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// be avatar-class — see server/internal/handler/avatar.go (MUL-5393 /
 	// #6024).
 	r.Get("/api/avatars/{sig}/*", h.ServeAvatar)
+
+	// Hosted plugin documents are capability-authenticated and intentionally
+	// outside the session middleware: the configured content origin must stay
+	// cookie-free. The encrypted path token binds the installation, immutable
+	// version, surface and one bridge challenge.
+	r.Get("/plugin-surfaces/{token}", h.ServePluginSurface)
 
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
@@ -1470,10 +1483,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// see what is mounted in their workspace and which scopes
 					// it holds; install / configure / remove stay admin-only.
 					r.Get("/plugins", h.ListPlugins)
-					// A surface's code, read from the version the workspace
-					// installed. Member-visible because opening an issue is
-					// what asks for it.
-					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/script", h.GetPluginSurfaceScript)
+					// One short-lived hosted surface launch. Member-visible
+					// because opening an issue is what asks for it; executable
+					// bytes stay off the authenticated app/API origin.
+					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

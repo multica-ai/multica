@@ -175,6 +175,9 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
 | セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
 | セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 保存済み secret と surface 起動 URL を暗号化する base64 形式の 32 バイト鍵 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | バックエンドへルーティングする Cookie なしの専用 origin。app/API origin と分離し、`Host` を保持すること |
+| Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
