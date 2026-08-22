@@ -71,7 +71,10 @@ export { useSubIssuesCollapseStore } from "./sub-issues-collapse-store";
 export {
   useSubIssueDisplayStore,
   SUB_ISSUE_ROW_PROPERTY_KEYS,
+  SUB_ISSUE_SORT_FIELDS,
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
+  type SubIssueSortField,
+  type SubIssueSortDirection,
 } from "./sub-issue-display-store";
