@@ -35,13 +35,21 @@ RETURNING *;
 -- name: UpdateWorkspaceMcpServer :one
 -- Full replace of one entry. The name can change here (unlike the previous
 -- document model) because bindings key off the id, so a rename cannot orphan
--- the agents that use it.
+-- the agents that use it. Replacing `config` drops last_probe: that result
+-- described the previous credentials / command.
 UPDATE workspace_mcp_server SET
     name = COALESCE(sqlc.narg('name'), name),
     config = COALESCE(sqlc.narg('config'), config),
+    last_probe = CASE WHEN sqlc.narg('config') IS NOT NULL THEN NULL ELSE last_probe END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: SetWorkspaceMcpServerLastProbe :exec
+-- Probe metadata only — do not bump updated_at, which is the catalog-edit clock.
+UPDATE workspace_mcp_server
+SET last_probe = $3
+WHERE id = $1 AND workspace_id = $2;
 
 -- name: DeleteWorkspaceMcpServer :execrows
 DELETE FROM workspace_mcp_server
@@ -55,7 +63,7 @@ DELETE FROM agent_mcp_server WHERE server_id = $1;
 -- name: ListAgentMcpServers :many
 -- Every workspace server bound to this agent, enabled or not, for the agent
 -- settings list. `enabled` comes from the binding.
-SELECT s.id, s.workspace_id, s.name, s.config, s.created_at, s.updated_at, ams.enabled
+SELECT s.id, s.workspace_id, s.name, s.config, s.last_probe, s.created_at, s.updated_at, ams.enabled
 FROM workspace_mcp_server s
 JOIN agent_mcp_server ams ON ams.server_id = s.id
 WHERE ams.agent_id = $1

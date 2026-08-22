@@ -300,7 +300,14 @@
     "updated_toast": "已更新共享 MCP 服务",
     "removed_toast": "已移除共享 MCP 服务",
     "save_failed_toast": "共享 MCP 服务保存失败",
-    "remove_failed_toast": "共享 MCP 服务移除失败"
+    "remove_failed_toast": "共享 MCP 服务移除失败",
+    "test_connection": "测试连接",
+    "probe_runtime_label": "用于探测的运行时",
+    "probe_runtime_placeholder": "选择运行时",
+    "probe_ok": "上次探测：在 “{{runtime}}” 成功，{{time}} · {{count}} 个工具",
+    "probe_fail": "上次探测：在 “{{runtime}}” 失败，{{time}} · {{error}}",
+    "probe_ok_toast": "连接成功",
+    "probe_failed_toast": "连接失败"
   },
   "page": {
     "title": "设置",

@@ -37,10 +37,21 @@ vi.mock("@multica/core/workspace/queries", () => ({
   workspaceMcpServersOptions: () => ({ queryKey: ["workspaces", "workspace-1", "mcp-servers"] }),
 }));
 
+const mockProbe = vi.hoisted(() => vi.fn());
+
 vi.mock("@multica/core/workspace/mutations", () => ({
   useCreateWorkspaceMcpServer: () => ({ mutateAsync: mockCreate, isPending: false }),
   useUpdateWorkspaceMcpServer: () => ({ mutateAsync: mockUpdate, isPending: false }),
   useDeleteWorkspaceMcpServer: () => ({ mutateAsync: mockDelete, isPending: false }),
+  useProbeWorkspaceMcpServer: () => ({ mutateAsync: mockProbe, isPending: false }),
+}));
+
+vi.mock("@multica/core/runtimes/queries", () => ({
+  runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+}));
+
+vi.mock("@multica/core/runtimes", () => ({
+  runtimeDisplayName: (rt: { name: string }) => rt.name,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -79,6 +90,7 @@ describe("McpTab", () => {
     mockCreate.mockResolvedValue({});
     mockUpdate.mockResolvedValue({});
     mockDelete.mockResolvedValue({});
+    mockProbe.mockResolvedValue({ status: "completed" });
   });
 
   it("lists the library servers with their transport", () => {
@@ -198,9 +210,33 @@ describe("McpTab", () => {
     expect(screen.queryByRole("button", { name: /Add server/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit server" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove server" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Test connection/ })).toBeNull();
     expect(
       screen.getByText(/Only workspace owners and admins/),
     ).toBeInTheDocument();
+  });
+
+  it("shows last probe and lets an owner test the connection", async () => {
+    const user = userEvent.setup();
+    data.servers = [
+      server({
+        last_probe: {
+          status: "ok",
+          probed_at: new Date().toISOString(),
+          runtime_id: "rt-1",
+          runtime_name: "home-mbp",
+          elapsed_ms: 80,
+          tools: ["search", "fetch"],
+        },
+      }),
+    ];
+    render(<McpTab />, { wrapper: Wrapper });
+
+    expect(screen.getByText(/Last probe: ok on "home-mbp"/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Test connection/ }));
+    await waitFor(() =>
+      expect(mockProbe).toHaveBeenCalledWith({ serverId: "srv-1", runtimeId: undefined }),
+    );
   });
 
   it("renders an empty state when the library is empty", () => {

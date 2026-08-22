@@ -30,7 +30,7 @@ func (q *Queries) AddAgentMcpServer(ctx context.Context, arg AddAgentMcpServerPa
 const createWorkspaceMcpServer = `-- name: CreateWorkspaceMcpServer :one
 INSERT INTO workspace_mcp_server (workspace_id, name, config, created_by)
 VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, name, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, config, created_by, created_at, updated_at, last_probe
 `
 
 type CreateWorkspaceMcpServerParams struct {
@@ -56,6 +56,7 @@ func (q *Queries) CreateWorkspaceMcpServer(ctx context.Context, arg CreateWorksp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProbe,
 	)
 	return i, err
 }
@@ -90,7 +91,7 @@ func (q *Queries) DeleteWorkspaceMcpServer(ctx context.Context, arg DeleteWorksp
 }
 
 const getWorkspaceMcpServer = `-- name: GetWorkspaceMcpServer :one
-SELECT id, workspace_id, name, config, created_by, created_at, updated_at FROM workspace_mcp_server
+SELECT id, workspace_id, name, config, created_by, created_at, updated_at, last_probe FROM workspace_mcp_server
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -110,12 +111,13 @@ func (q *Queries) GetWorkspaceMcpServer(ctx context.Context, arg GetWorkspaceMcp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProbe,
 	)
 	return i, err
 }
 
 const listAgentMcpServers = `-- name: ListAgentMcpServers :many
-SELECT s.id, s.workspace_id, s.name, s.config, s.created_at, s.updated_at, ams.enabled
+SELECT s.id, s.workspace_id, s.name, s.config, s.last_probe, s.created_at, s.updated_at, ams.enabled
 FROM workspace_mcp_server s
 JOIN agent_mcp_server ams ON ams.server_id = s.id
 WHERE ams.agent_id = $1
@@ -127,6 +129,7 @@ type ListAgentMcpServersRow struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Name        string             `json:"name"`
 	Config      []byte             `json:"config"`
+	LastProbe   []byte             `json:"last_probe"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Enabled     bool               `json:"enabled"`
@@ -148,6 +151,7 @@ func (q *Queries) ListAgentMcpServers(ctx context.Context, agentID pgtype.UUID) 
 			&i.WorkspaceID,
 			&i.Name,
 			&i.Config,
+			&i.LastProbe,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Enabled,
@@ -199,7 +203,7 @@ func (q *Queries) ListEnabledAgentMcpServers(ctx context.Context, agentID pgtype
 }
 
 const listWorkspaceMcpServers = `-- name: ListWorkspaceMcpServers :many
-SELECT id, workspace_id, name, config, created_by, created_at, updated_at FROM workspace_mcp_server
+SELECT id, workspace_id, name, config, created_by, created_at, updated_at, last_probe FROM workspace_mcp_server
 WHERE workspace_id = $1
 ORDER BY name ASC
 `
@@ -224,6 +228,7 @@ func (q *Queries) ListWorkspaceMcpServers(ctx context.Context, workspaceID pgtyp
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LastProbe,
 		); err != nil {
 			return nil, err
 		}
@@ -316,13 +321,32 @@ func (q *Queries) SetAgentMcpServerEnabled(ctx context.Context, arg SetAgentMcpS
 	return result.RowsAffected(), nil
 }
 
+const setWorkspaceMcpServerLastProbe = `-- name: SetWorkspaceMcpServerLastProbe :exec
+UPDATE workspace_mcp_server
+SET last_probe = $3
+WHERE id = $1 AND workspace_id = $2
+`
+
+type SetWorkspaceMcpServerLastProbeParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LastProbe   []byte      `json:"last_probe"`
+}
+
+// Probe metadata only — do not bump updated_at, which is the catalog-edit clock.
+func (q *Queries) SetWorkspaceMcpServerLastProbe(ctx context.Context, arg SetWorkspaceMcpServerLastProbeParams) error {
+	_, err := q.db.Exec(ctx, setWorkspaceMcpServerLastProbe, arg.ID, arg.WorkspaceID, arg.LastProbe)
+	return err
+}
+
 const updateWorkspaceMcpServer = `-- name: UpdateWorkspaceMcpServer :one
 UPDATE workspace_mcp_server SET
     name = COALESCE($3, name),
     config = COALESCE($4, config),
+    last_probe = CASE WHEN $4 IS NOT NULL THEN NULL ELSE last_probe END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, config, created_by, created_at, updated_at
+RETURNING id, workspace_id, name, config, created_by, created_at, updated_at, last_probe
 `
 
 type UpdateWorkspaceMcpServerParams struct {
@@ -334,7 +358,8 @@ type UpdateWorkspaceMcpServerParams struct {
 
 // Full replace of one entry. The name can change here (unlike the previous
 // document model) because bindings key off the id, so a rename cannot orphan
-// the agents that use it.
+// the agents that use it. Replacing `config` drops last_probe: that result
+// described the previous credentials / command.
 func (q *Queries) UpdateWorkspaceMcpServer(ctx context.Context, arg UpdateWorkspaceMcpServerParams) (WorkspaceMcpServer, error) {
 	row := q.db.QueryRow(ctx, updateWorkspaceMcpServer,
 		arg.ID,
@@ -351,6 +376,7 @@ func (q *Queries) UpdateWorkspaceMcpServer(ctx context.Context, arg UpdateWorksp
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastProbe,
 	)
 	return i, err
 }

@@ -419,6 +419,7 @@
       "dialog_name_locked": "여기서는 이름을 바꿀 수 없습니다. 이름을 바꾸면 서버가 하나 더 추가되고 기존 서버가 남습니다. 제거 후 다시 추가하세요.",
       "workspace_overridden_badge": "재정의됨",
       "workspace_disabled_badge": "비활성화됨",
+      "workspace_probe_failed": "{{runtime}}에서 마지막 프로브가 실패했습니다",
       "runtime_title": "런타임에서 상속",
       "runtime_title_named": "{{runtime}}에서 상속",
       "refresh_action": "새로고침",

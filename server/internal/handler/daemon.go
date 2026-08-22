@@ -1151,6 +1151,9 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if len(ack.PendingLocalSkillImports) > 0 {
 		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
 	}
+	if ack.PendingMcpProbe != nil {
+		resp["pending_mcp_probe"] = ack.PendingMcpProbe
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1397,6 +1400,27 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 			slog.Warn("local skill import HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeImportMs)
 		} else {
 			slog.Warn("local skill import HasPending failed", "error", probeErr, "runtime_id", runtimeID)
+		}
+	}
+
+	if h.McpProbeStore != nil {
+		probeMcpCtx, cancelProbeMcp := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
+		hasMcp, probeMcpErr := h.McpProbeStore.HasPending(probeMcpCtx, runtimeID)
+		cancelProbeMcp()
+		switch {
+		case probeMcpErr == nil && hasMcp:
+			pendingProbe, popErr := h.McpProbeStore.PopPending(ctx, runtimeID)
+			if popErr != nil {
+				slog.Warn("mcp probe PopPending failed", "error", popErr, "runtime_id", runtimeID)
+			} else if pendingProbe != nil {
+				ack.PendingMcpProbe = &protocol.DaemonHeartbeatPendingMcpProbe{ID: pendingProbe.ID}
+			}
+		case probeMcpErr != nil:
+			if errors.Is(probeMcpErr, context.DeadlineExceeded) || errors.Is(probeMcpErr, context.Canceled) {
+				slog.Warn("mcp probe HasPending timed out", "runtime_id", runtimeID)
+			} else {
+				slog.Warn("mcp probe HasPending failed", "error", probeMcpErr, "runtime_id", runtimeID)
+			}
 		}
 	}
 

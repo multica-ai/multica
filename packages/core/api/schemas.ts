@@ -83,6 +83,7 @@ import type {
   User,
   WebhookDelivery,
   WorkspaceMcpServer,
+  WorkspaceMcpProbeRequest,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -2922,12 +2923,39 @@ export const EMPTY_SKILL: Skill = {
  * `transport` stays a plain string (not an enum) so an unknown value from a
  * newer backend still parses — the UI has a default branch for it.
  */
+export const WorkspaceMcpLastProbeSchema = z.object({
+  status: z.string().default(""),
+  probed_at: z.string().default(""),
+  runtime_id: z.string().default(""),
+  runtime_name: z.string().default(""),
+  elapsed_ms: z.number().default(0),
+  error_code: z.string().optional(),
+  error: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+});
+
 export const WorkspaceMcpServerSchema = z.object({
   id: z.string().default(""),
   workspace_id: z.string().default(""),
   name: z.string().default(""),
   transport: z.string().default("unknown"),
   enabled: z.boolean().optional(),
+  last_probe: WorkspaceMcpLastProbeSchema.optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const WorkspaceMcpProbeRequestSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  server_id: z.string().default(""),
+  runtime_id: z.string().default(""),
+  runtime_name: z.string().default(""),
+  status: z.string().default(""),
+  error_code: z.string().optional(),
+  error: z.string().optional(),
+  elapsed_ms: z.number().optional(),
+  tools: z.array(z.string()).optional(),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 });
@@ -2939,6 +2967,17 @@ export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
   workspace_id: "",
   name: "",
   transport: "unknown",
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_WORKSPACE_MCP_PROBE: WorkspaceMcpProbeRequest = {
+  id: "",
+  workspace_id: "",
+  server_id: "",
+  runtime_id: "",
+  runtime_name: "",
+  status: "",
   created_at: "",
   updated_at: "",
 };

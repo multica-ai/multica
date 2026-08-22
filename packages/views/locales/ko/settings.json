@@ -300,7 +300,14 @@
     "updated_toast": "공유 MCP 서버를 업데이트했습니다",
     "removed_toast": "공유 MCP 서버를 제거했습니다",
     "save_failed_toast": "공유 MCP 서버를 저장하지 못했습니다",
-    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다"
+    "remove_failed_toast": "공유 MCP 서버를 제거하지 못했습니다",
+    "test_connection": "연결 테스트",
+    "probe_runtime_label": "프로브할 런타임",
+    "probe_runtime_placeholder": "런타임 선택",
+    "probe_ok": "마지막 프로브: \"{{runtime}}\"에서 성공 {{time}} · 도구 {{count}}개",
+    "probe_fail": "마지막 프로브: \"{{runtime}}\"에서 실패 {{time}} · {{error}}",
+    "probe_ok_toast": "연결에 성공했습니다",
+    "probe_failed_toast": "연결에 실패했습니다"
   },
   "page": {
     "title": "설정",

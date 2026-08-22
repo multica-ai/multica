@@ -27,6 +27,11 @@ const (
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
 
+	// DaemonCapabilityMcpProbeV1 advertises that the daemon can run an
+	// on-demand workspace MCP handshake (initialize + tools/list) and report
+	// the redacted result back (GH #7166).
+	DaemonCapabilityMcpProbeV1 = "mcp-probe-v1"
+
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
 	// chat:cancel_finalized as an invalidation hint plus the draft-restores
@@ -114,6 +119,7 @@ type WorkspacesChangedPayload struct{}
 // newer server stays safe on an older daemon.
 const (
 	PendingWorkKindModelList = "model_list"
+	PendingWorkKindMcpProbe  = "mcp_probe"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -352,6 +358,9 @@ type DaemonHeartbeatAckPayload struct {
 	// that don't know this field silently ignore it (standard JSON behavior)
 	// and fall back to the singular PendingLocalSkillImport above.
 	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+	// PendingMcpProbe asks the daemon to handshake one workspace MCP server
+	// and report tools/list. Older daemons ignore the unknown field.
+	PendingMcpProbe *DaemonHeartbeatPendingMcpProbe `json:"pending_mcp_probe,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no
@@ -383,3 +392,23 @@ type DaemonHeartbeatPendingLocalSkillImport struct {
 	ID       string `json:"id"`
 	SkillKey string `json:"skill_key"`
 }
+
+// DaemonHeartbeatPendingMcpProbe describes a request for the daemon to
+// probe one workspace MCP server (initialize + tools/list).
+type DaemonHeartbeatPendingMcpProbe struct {
+	ID string `json:"id"`
+}
+
+// Redacted MCP probe error codes. The daemon and API share this closed set
+// so a new code is a protocol change, not a local string.
+const (
+	McpProbeCodeNoRuntime            = "no_runtime"
+	McpProbeCodeUnsupportedDaemon    = "unsupported_daemon"
+	McpProbeCodeTimeout              = "timeout"
+	McpProbeCodeCommandNotFound      = "command_not_found"
+	McpProbeCodeUnauthorized         = "unauthorized"
+	McpProbeCodeTLS                  = "tls"
+	McpProbeCodeUnsupportedTransport = "unsupported_transport"
+	McpProbeCodeHandshake            = "handshake"
+	McpProbeCodeInternal             = "internal"
+)
