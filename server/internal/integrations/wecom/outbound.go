@@ -73,6 +73,11 @@ type Outbound struct {
 	// outbound_outcome.go for why the drop breakdown exists at all.
 	metrics Metrics
 
+	// relay routes a reply to the replica holding the bot's socket when this
+	// one does not. Nil on a deployment with no Redis, where it is also
+	// unnecessary: one replica publishes and holds the socket both.
+	relay *RelayOutbound
+
 	// Two counters bound attachment delivery, and they are two because one
 	// cannot be in both places at once.
 	//
@@ -219,8 +224,28 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if o.senders == nil {
 		return errors.New("wecom: sender registry not configured")
 	}
+	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
 	sender := o.senders.get(inst.ID)
 	if sender == nil {
+		// Before giving up: this reply may simply have been produced on the
+		// wrong replica. Hand it to the one holding the socket.
+		//
+		// Counted by the replica that delivers it, not here — so a reply that
+		// is routed and then delivered appears once, on the sender's side.
+		// A reply routed while EVERY replica is mid-reconnect is read by
+		// nobody and counted by nobody; that window is the durability problem
+		// this deliberately does not solve (relay_outbound.go).
+		if o.relay.publish(relayFrame{
+			InstallationID: util.UUIDToString(inst.ID),
+			ChatID:         binding.ChannelChatID,
+			ChatType:       chatType,
+			Content:        content,
+			TaskID:         util.UUIDToString(taskID),
+		}, relayEventID(e, taskID)) {
+			o.logger.DebugContext(ctx, "wecom outbound: routed to the replica holding the socket",
+				"installation_id", util.UUIDToString(inst.ID), "chat_session_id", e.ChatSessionID)
+			return nil
+		}
 		// No live WS for this installation on this replica. Two causes:
 		// (1) the Supervisor lost the lease or is mid-reconnect — transient,
 		// and the user's next inbound message reaches the reconnected loop;
@@ -232,7 +257,6 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// rather than drop it silently.
 		return errNoLiveConnection
 	}
-	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
 	// Words first. An empty completion reaches here only because a file is
 	// bound to it, and an empty markdown bubble ahead of that file would be
 	// noise the user has to scroll past.

@@ -185,6 +185,13 @@ type RouterOptions struct {
 	// ChannelLeaseRedis is a dedicated non-blocking Redis client/pool. It is
 	// required only when CHANNEL_WS_LEASE_BACKEND=redis.
 	ChannelLeaseRedis *redis.Client
+	// WecomRelay is the realtime relay, seen through the two halves the WeCom
+	// adapter needs: publish a reply to the other replicas, and register as
+	// the consumer that delivers the ones they publish. Nil on a deployment
+	// with no Redis — where it is also unnecessary, because one replica both
+	// publishes the completion and holds the socket.
+	WecomRelay WecomRelay
+
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
 	WecomMetrics *obsmetrics.WecomMetrics
@@ -910,6 +917,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// as "the bot cannot connect".
 				wecomOutboundOpts = append(wecomOutboundOpts,
 					wecom.WithOutboundMetrics(wecomMetricsOrNil(opts.WecomMetrics)))
+				// Cross-replica routing. Built here rather than in main
+				// because the senders registry it guards is created here, and
+				// registered back onto the relay so every node's read loop
+				// reaches it. See wecom/relay_outbound.go.
+				if opts.WecomRelay != nil {
+					router := wecom.NewRelayOutbound(wecomSenders, opts.WecomRelay,
+						slog.Default(), wecomMetricsOrNil(opts.WecomMetrics))
+					opts.WecomRelay.SetWecomOutboundDeliverer(router)
+					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithRelay(router))
+					slog.Info("wecom integration: cross-replica outbound routing enabled")
+				}
 				wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...).Register(bus)
 
 				// Ranges the media fetcher may dial despite looking reserved.
@@ -2365,6 +2383,15 @@ func composioCallbackBaseURL(publicURL string) string {
 		return publicURL
 	}
 	return appURLFromEnv()
+}
+
+// WecomRelay is what the WeCom adapter needs from the realtime relay:
+// publish under ScopeWecomOutbound, and register the consumer that acts on
+// frames the other replicas publish. *realtime.ShardedStreamRelay and
+// *realtime.RedisRelay both satisfy it.
+type WecomRelay interface {
+	PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error
+	SetWecomOutboundDeliverer(d realtime.WecomOutboundDeliverer)
 }
 
 // wecomMetricsOrNil keeps a typed nil out of the adapter's interface field.
