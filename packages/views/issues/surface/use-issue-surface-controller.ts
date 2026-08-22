@@ -233,6 +233,7 @@ export function useIssueSurfaceController({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
+  const tableGrouping = useViewStore((s) => s.tableGrouping);
   const listCollapsedStatuses = useViewStore((s) => s.listCollapsedStatuses);
   const hiddenStatusCategories = useViewStore((s) => s.hiddenStatusCategories);
   const catalog = useIssueStatuses(wsId);
@@ -640,6 +641,7 @@ export function useIssueSurfaceController({
         secondary_values: serverStatuses,
       };
     }
+    if (effectiveGrouping === "project") return { kind: "project" };
     const propertyId = propertyIdFromViewKey(effectiveGrouping);
     if (propertyId) {
       return {
@@ -746,6 +748,11 @@ export function useIssueSurfaceController({
     loadProjects:
       cardProperties.project ||
       (usesTable && tableColumns.some((column) => column.key === "project")) ||
+      // Project group headers resolve their title through the projects query,
+      // so grouping by project has to load it even when no card/column shows
+      // the project itself.
+      (usesTable && tableGrouping === "project") ||
+      (effectiveViewMode === "board" && effectiveGrouping === "project") ||
       (effectiveViewMode === "swimlane" && swimlaneGrouping === "project"),
   });
 

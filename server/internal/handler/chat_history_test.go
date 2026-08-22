@@ -11,10 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type fakeChatHistoryReader struct {
@@ -25,6 +27,22 @@ type fakeChatHistoryReader struct {
 	gotSession    pgtype.UUID
 	gotThreadID   string
 	gotOpts       channel.HistoryOptions
+}
+
+func TestChatHistoryScopePassesImmutableContextGeneration(t *testing.T) {
+	scope := chatHistoryScope{
+		contextRevision: pgtype.Int8{Int64: 3, Valid: true},
+		historyStart:    "100.000000",
+		historyEnd:      "200.000000",
+		boundaryPending: true,
+	}
+	opts := scope.historyOptions(newRequest("GET", "/api/chat/history?limit=7&before=150.000000", nil))
+	if opts.ContextRevision != 3 || opts.After != "100.000000" || opts.Until != "200.000000" || !opts.BoundaryPending {
+		t.Fatalf("generation options = %+v", opts)
+	}
+	if opts.Limit != 7 || opts.Before != "150.000000" {
+		t.Fatalf("paging options = %+v", opts)
+	}
 }
 
 func (f *fakeChatHistoryReader) ChannelOverview(_ context.Context, sid pgtype.UUID, opts channel.HistoryOptions) (channel.HistoryPage, error) {
@@ -70,7 +88,7 @@ func newChatHistoryTask(t *testing.T, chatSession bool) string {
 // session and returns the task id.
 func newChatHistoryTaskForSession(t *testing.T, sessionID string) string {
 	t.Helper()
-	agentID := createHandlerTestAgent(t, "ChatHistorySessionAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatHistorySessionAgent-"+uuid.NewString(), []byte("[]"))
 	runtimeID := handlerTestRuntimeID(t)
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
@@ -400,6 +418,97 @@ func TestGetChatHistory_WebOnlyTranscriptHasNoChannelType(t *testing.T) {
 	}
 	if len(resp.Messages) != 1 {
 		t.Fatalf("expected the stored transcript, got %+v", resp.Messages)
+	}
+}
+
+func TestGetChatHistory_ChannelTaskCannotReadEarlierContextGeneration(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("requires test database")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "ChatHistoryFreshBoundaryAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	legacyTaskID := newChatHistoryTaskForSession(t, sessionID)
+	taskID := newChatHistoryTaskForSession(t, sessionID)
+	withSlackHistory(t, nil)
+
+	var installationID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, status, installer_user_id)
+		VALUES ($1, $2, 'wecom', '{"app_id":"history-context-boundary"}'::jsonb, 'active', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&installationID); err != nil {
+		t.Fatalf("create installation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, sessionID)
+		testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID)
+		testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding
+			(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, context_revision)
+		VALUES ($1, $2, 'wecom', 'CONTEXT_BOUNDARY', 'group', 2)
+	`, sessionID, installationID); err != nil {
+		t.Fatalf("seed context binding: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+		VALUES ($1, 1), ($1, 2)
+	`, sessionID); err != nil {
+		t.Fatalf("seed context generations: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET channel_context_revision = 2 WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("stamp task context generation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET channel_context_revision = 1 WHERE id = $1`, legacyTaskID); err != nil {
+		t.Fatalf("stamp legacy task context generation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, task_id, channel_ingested, channel_context_revision)
+		VALUES
+			($1, 'user', 'old secret', NULL, TRUE, 1),
+			($1, 'user', 'rolling legacy message', NULL, TRUE, NULL),
+			($1, 'assistant', 'rolling legacy answer', $2, FALSE, NULL),
+			($1, 'user', 'fresh question', NULL, TRUE, 2)
+	`, sessionID, legacyTaskID); err != nil {
+		t.Fatalf("seed context messages: %v", err)
+	}
+	visible, err := testHandler.Queries.ListChatMessages(ctx, util.MustParseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("list UI transcript: %v", err)
+	}
+	if len(visible) != 4 {
+		t.Fatalf("UI transcript contains %d messages, want both generations", len(visible))
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var resp ChatChannelHistoryResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Messages) != 1 || resp.Messages[0].Text != "fresh question" {
+		t.Fatalf("generation-scoped transcript = %+v", resp.Messages)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", legacyTaskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("legacy status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode legacy response: %v", err)
+	}
+	legacyTexts := make(map[string]bool, len(resp.Messages))
+	for _, message := range resp.Messages {
+		legacyTexts[message.Text] = true
+	}
+	if len(resp.Messages) != 3 || !legacyTexts["old secret"] || !legacyTexts["rolling legacy message"] || !legacyTexts["rolling legacy answer"] {
+		t.Fatalf("first-generation rolling transcript = %+v", resp.Messages)
 	}
 }
 

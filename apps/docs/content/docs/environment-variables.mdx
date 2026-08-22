@@ -33,6 +33,8 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Container-level retry budget shared by migration and API startup; set to `0` for one fail-fast attempt per phase |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Fallback timeout for each startup connection attempt; native pgx `connect_timeout`, `PGCONNECT_TIMEOUT`, or service settings take precedence |
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |

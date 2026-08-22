@@ -294,6 +294,29 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.32",
+        date: "2026-08-21",
+        title: "钉钉群组、项目视图与更顺畅的协作",
+        changes: [],
+        features: [
+          "在群里提及钉钉机器人后，群组会显示在对应智能体下。",
+          "看板和列表可按项目分组，让相关 Issue 聚在一起。",
+        ],
+        improvements: [
+          "长时间运行的智能体任务现在更顺畅。",
+          "自托管服务器遇到短暂数据库故障后会自动恢复。",
+          "Telegram 的欢迎提示和回复现在使用英文。",
+        ],
+        fixes: [
+          "再次运行任务时，不会中断正在进行的工作。",
+          "同时运行的任务不会再覆盖彼此的工作空间。",
+          "OpenClaw、Pi 和 OpenCode 可正常使用你配置的自定义提供商。",
+          "切换工作区不会再中断实时更新或提及功能。",
+          "普通 CLI 输出不再暴露 Autopilot Webhook 凭据。",
+          "不用等无关编码任务结束，也能和智能体聊天。",
+        ],
+      },
+      {
         version: "0.4.31",
         date: "2026-08-20",
         title: "移出待办池前的启动确认、Webhook 事件筛选、Windows 构建修复",

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,21 +21,16 @@ import (
 // which skill, so uninstall removes exactly those and nothing a person wrote.
 // That is one nullable column.
 //
-// A resource is not a hook — nothing calls anything. The file is fetched once,
-// at install, from the same origin as the manifest, and after that it is just a
-// skill.
-
-// maxSkillBytes bounds one fetched SKILL.md. Generous for prose, small enough
-// that a source URL cannot use the install path to push a large body into the
-// database.
-const maxSkillBytes = 256 * 1024
+// A resource is not a hook — nothing calls anything. The file was validated and
+// stored when the author published the version, so installing it is a read from
+// our own database rather than a fetch of whatever the author is serving today.
 
 // InstallSkillResources writes the manifest's skill resources and prunes the
 // ones this installation no longer declares.
 //
 // Called inside the install transaction: a plugin that half-installs its skills
 // is worse than one that fails, because the missing half is invisible.
-func (s *PluginService) InstallSkillResources(ctx context.Context, queries *db.Queries, installation db.PluginInstallation, manifest plugincontract.Manifest, sourceURL string, userID pgtype.UUID) error {
+func (s *PluginService) InstallSkillResources(ctx context.Context, queries *db.Queries, installation db.PluginInstallation, manifest plugincontract.Manifest, userID pgtype.UUID) error {
 	resources := skillResources(manifest)
 
 	// Prune first, so a rename frees its old name before the new one is
@@ -57,15 +51,16 @@ func (s *PluginService) InstallSkillResources(ctx context.Context, queries *db.Q
 	}
 
 	for _, resource := range resources {
-		content, err := s.fetchSkillResource(ctx, sourceURL, resource.Entry)
+		raw, err := s.packageFile(ctx, queries, installation.PackageVersionID, resource.Entry)
 		if err != nil {
 			return err
 		}
-		name, description := skill.ParseSkillFrontmatter(content)
+		content := string(raw)
+		_, description := skill.ParseSkillFrontmatter(content)
 		// The manifest key is authoritative for the name, not the frontmatter.
 		// The consent screen listed the key, the tool namespace uses it, and a
 		// file that disagrees must not silently install under another name.
-		name = resource.Key
+		name := resource.Key
 		if strings.TrimSpace(description) == "" {
 			description = "Provided by the " + manifest.Name + " Plugin."
 		}
@@ -96,44 +91,4 @@ func skillResources(manifest plugincontract.Manifest) []plugincontract.Resource 
 		}
 	}
 	return resources
-}
-
-// fetchSkillResource reads one SKILL.md from beside the manifest.
-//
-// Resolved relative to the source URL rather than taken as a URL of its own:
-// the manifest already passed the origin checks, and letting a resource name an
-// arbitrary address would hand the install path a second, unreviewed fetch
-// target. `entry` is validated at parse time to be a relative path with no
-// traversal, which is what makes this safe to join.
-func (s *PluginService) fetchSkillResource(ctx context.Context, sourceURL, entry string) (string, error) {
-	if strings.HasPrefix(sourceURL, LocalSourcePrefix) {
-		raw, err := s.readLocalFile(strings.TrimPrefix(sourceURL, LocalSourcePrefix), entry)
-		if err != nil {
-			return "", err
-		}
-		return string(raw), nil
-	}
-
-	base, err := url.Parse(sourceURL)
-	if err != nil {
-		return "", pluginErrf(PluginErrorInvalid, "source_url is not a valid URL")
-	}
-	resolved := base.JoinPath("..", entry).String()
-
-	var raw []byte
-	if s.isDevOrigin(resolved) {
-		raw, err = fetchDevManifest(ctx, resolved)
-	} else {
-		raw, err = fetchRemoteManifest(ctx, resolved)
-	}
-	if err != nil {
-		return "", &PluginError{Kind: PluginErrorInvalid, Message: "fetch plugin skill " + entry, Err: err}
-	}
-	if len(raw) > maxSkillBytes {
-		return "", pluginErrf(PluginErrorInvalid, "plugin skill %s exceeds %d bytes", entry, maxSkillBytes)
-	}
-	if strings.TrimSpace(string(raw)) == "" {
-		return "", pluginErrf(PluginErrorInvalid, "plugin skill %s is empty", entry)
-	}
-	return string(raw), nil
 }

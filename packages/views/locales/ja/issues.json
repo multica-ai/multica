@@ -596,7 +596,8 @@
   },
   "card": {
     "update_failed": "タスクを更新できませんでした",
-    "updated_ago": "{{time}} に更新"
+    "updated_ago": "{{time}} に更新",
+    "child_progress_restricted_other": "サブタスク {{count}} 件が制限中"
   },
   "actions": {
     "status": "ステータス",
@@ -777,11 +778,13 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} のインターフェースを読み込めませんでした。",
-    "surface_local_only": "{{name}} はローカルソースからインストールされているため、ブラウザでインターフェースを読み込めません。",
     "hook_succeeded": "{{name}} が完了しました。",
     "hook_failed": "{{name}} が失敗しました。",
     "hook_refused": "{{name}} は実行されませんでした。",
     "hook_activity": "最近の呼び出し",
-    "hook_never_run": "このフックはまだ実行されていません。"
+    "hook_never_run": "このフックはまだ実行されていません。",
+    "surface_loading": "{{name}} を読み込んでいます…",
+    "surface_unavailable": "{{name}} のインターフェースを読み込めません。インストール済みのバージョンに含まれていない可能性があります。",
+    "surface_navigated": "{{name}} がパネルを外部から読み込んだページに置き換えようとしました。停止して接続を切りました。ワークスペース管理者に知らせてください。"
   }
 }

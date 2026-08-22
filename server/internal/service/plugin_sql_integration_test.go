@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -66,13 +67,42 @@ func TestDeleteWorkspacePluginDataClearsEveryPluginTable(t *testing.T) {
 	parsedWorkspaceID := mustParseUUID(t, workspaceID)
 
 	manifest, _ := json.Marshal(map[string]any{"manifest_version": 1})
+	pkg, err := queries.CreatePluginPackage(ctx, db.CreatePluginPackageParams{
+		WorkspaceID: parsedWorkspaceID,
+		PluginKey:   fmt.Sprintf("com.example.teardown%d", suffix),
+		Name:        "Teardown",
+	})
+	if err != nil {
+		t.Fatalf("create package: %v", err)
+	}
+	version, err := queries.CreatePluginPackageVersion(ctx, db.CreatePluginPackageVersionParams{
+		PackageID:   pkg.ID,
+		WorkspaceID: parsedWorkspaceID,
+		Version:     "1.0.0",
+		Manifest:    manifest,
+		Digest:      strings.Repeat("a", 64),
+		SizeBytes:   1,
+	})
+	if err != nil {
+		t.Fatalf("create package version: %v", err)
+	}
+	if err := queries.CreatePluginPackageFile(ctx, db.CreatePluginPackageFileParams{
+		VersionID: version.ID,
+		Path:      "ui/main.js",
+		Content:   []byte("// stub"),
+		SizeBytes: 7,
+		Sha256:    strings.Repeat("b", 64),
+	}); err != nil {
+		t.Fatalf("create package file: %v", err)
+	}
+
 	installation, err := queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
-		WorkspaceID:   parsedWorkspaceID,
-		PluginKey:     fmt.Sprintf("com.example.teardown%d", suffix),
-		SourceUrl:     "local:fixture",
-		Version:       "1.0.0",
-		Manifest:      manifest,
-		GrantedScopes: []byte(`["issues:read"]`),
+		WorkspaceID:      parsedWorkspaceID,
+		PluginKey:        fmt.Sprintf("com.example.teardown%d", suffix),
+		PackageVersionID: version.ID,
+		Version:          "1.0.0",
+		Manifest:         manifest,
+		GrantedScopes:    []byte(`["issues:read"]`),
 	})
 	if err != nil {
 		t.Fatalf("create installation: %v", err)
@@ -115,5 +145,29 @@ func TestDeleteWorkspacePluginDataClearsEveryPluginTable(t *testing.T) {
 		if remaining != 0 {
 			t.Fatalf("%s kept %d rows after workspace deletion", table, remaining)
 		}
+	}
+	// Published artifacts are the largest thing a deleted workspace can strand:
+	// they exist whether or not anything installed them, so the sweep has to
+	// clear them by workspace rather than through the installation ids.
+	for _, table := range []string{"plugin_package", "plugin_package_version"} {
+		var remaining int
+		if err := tx.QueryRow(ctx,
+			fmt.Sprintf(`SELECT COUNT(*) FROM %s WHERE workspace_id = $1`, table),
+			parsedWorkspaceID,
+		).Scan(&remaining); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if remaining != 0 {
+			t.Fatalf("%s kept %d rows after workspace deletion", table, remaining)
+		}
+	}
+	var remainingFiles int
+	if err := tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM plugin_package_file WHERE version_id = $1`, version.ID,
+	).Scan(&remainingFiles); err != nil {
+		t.Fatalf("count plugin_package_file: %v", err)
+	}
+	if remainingFiles != 0 {
+		t.Fatalf("plugin_package_file kept %d rows after workspace deletion", remainingFiles)
 	}
 }

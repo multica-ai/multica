@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 本地 `multica` 数据库 | PostgreSQL 连接地址 |
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 容器启动过程中，migration 与 API 共享的暂时性数据库故障重试时长；设为 `0` 时每个阶段只尝试一次 |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 启动期间单次数据库连接的兜底超时；pgx 原生 `connect_timeout`、`PGCONNECT_TIMEOUT` 或 service 配置优先 |
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |

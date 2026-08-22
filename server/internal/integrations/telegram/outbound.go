@@ -178,7 +178,7 @@ const (
 const streamPlaceholder = "…"
 
 // taskFailedText is sent when the agent run fails outright.
-const taskFailedText = "❌ 智能体处理失败，请稍后重试。"
+const taskFailedText = "❌ The agent run failed. Please try again."
 
 // NewOutbound builds the Telegram outbound subscriber.
 func NewOutbound(q outboundQueries, decrypt Decrypter, apiBase string, client *http.Client, logger *slog.Logger) *Outbound {

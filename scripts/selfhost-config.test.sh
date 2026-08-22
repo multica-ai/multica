@@ -56,6 +56,8 @@ require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 require_config "$config" 'SMTP_FROM_EMAIL: multica@example.com'
+require_config "$config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: 3m'
+require_config "$config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: 5s'
 
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the

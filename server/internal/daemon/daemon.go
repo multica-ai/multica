@@ -5343,6 +5343,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
+	// A conversation is not a second writer. Everything above still applied —
+	// the mode was checked, the path was validated, and the assignment stands,
+	// so this task keeps the user's directory as its working directory. Only
+	// the queueing is skipped, which is what stops a chat turn from sitting
+	// behind a 20-minute build with nothing to contribute to it (issue #7344).
+	// See localDirectoryLockExempt for why the mutex does not owe this task a
+	// slot.
+	if localDirectoryLockExempt(task) {
+		taskLog.Info("local_directory: chat task, skipping path mutex")
+		return nil, false
+	}
+
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
 	// per-task watcher only starts after the lock is acquired. If the user
@@ -5380,8 +5392,17 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// server status update below fails.
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
-		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
+		// Rendered to the user, so it names the directory rather than its path
+		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
+		// the daemon's own logs, which is where an operator debugging a wedged
+		// lock looks for it.
+		reason := assignment.DisplayName()
 		if holder != "" {
+			// Known rough edge: this clause is English and the client renders it
+			// inside a localized "Waiting for {reason}" label, so a zh/ja/ko user
+			// sees mixed script. Fixing it properly means sending the directory
+			// and the holder as separate fields and localizing the join on the
+			// client — worth doing if this hint grows, not for one parenthetical.
 			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 		}
 		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
@@ -5693,8 +5714,31 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // the conversation's session store got mounted (execenv.Environment
 // HermesSessionStore) — and false drops the resume with the same disclosure as
 // a workdir mismatch.
+// sameExistingDir reports whether two paths name the same existing directory.
+// False when either cannot be stat'd, which is the safe answer here: an absent
+// prior workdir means there is nothing to resume from.
+func sameExistingDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
 func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir && sessionHomeReachable
+	// Compare the directories, not the spelling. Reuse runs in the canonical
+	// path it validated and locked, which need not be character-identical to
+	// the PriorWorkDir the server sent — a symlinked workspaces root is enough
+	// to make them differ. A string compare would then silently drop the prior
+	// session on every follow-up task in that installation.
+	reused := task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
 	if !reused && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: session store not reachable from this run",
 			"session_id", task.PriorSessionID,
@@ -5762,33 +5806,33 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 // terminal file raced and dropped the session (MUL-4886). Both proofs this
 // function reads — the env-root provenance and the workdir task-context marker
 // — are written at Prepare time, so neither depends on completion ordering.
-func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
+func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) (string, bool) {
 	if task.PriorWorkDir == "" || localAssignment != nil {
-		return false
+		return "", false
 	}
 
 	root, err := filepath.EvalSymlinks(workspacesRoot)
 	if err != nil {
-		return false
+		return "", false
 	}
 	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
 	if err != nil {
-		return false
+		return "", false
 	}
 	info, err := os.Stat(workdir)
 	if err != nil || !info.IsDir() {
-		return false
+		return "", false
 	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
-		return false
+		return "", false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
-		return false
+		return "", false
 	}
 	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
-		return false
+		return "", false
 	}
 	// Managed-env provenance is written only for non-local resumable envs, so
 	// its presence (plus the workspace/scope/agent match) proves this is a
@@ -5797,12 +5841,12 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
 		prov.WorkspaceID != task.WorkspaceID ||
 		prov.AgentID != task.AgentID {
-		return false
+		return "", false
 	}
 
 	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
 	if err != nil {
-		return false
+		return "", false
 	}
 	var marker struct {
 		ManagedBy     string `json:"managed_by"`
@@ -5811,15 +5855,21 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		ChatSessionID string `json:"chat_session_id"`
 	}
 	if json.Unmarshal(data, &marker) != nil {
-		return false
+		return "", false
 	}
 	if marker.ManagedBy != execenv.TaskContextMarkerManagedBy || marker.AgentID != task.AgentID {
-		return false
+		return "", false
 	}
 	if task.IssueID != "" {
-		return prov.IssueID == task.IssueID && marker.IssueID == task.IssueID
+		if prov.IssueID != task.IssueID || marker.IssueID != task.IssueID {
+			return "", false
+		}
+		return workdir, true
 	}
-	return prov.ChatSessionID == task.ChatSessionID && marker.ChatSessionID == task.ChatSessionID
+	if prov.ChatSessionID != task.ChatSessionID || marker.ChatSessionID != task.ChatSessionID {
+		return "", false
+	}
+	return workdir, true
 }
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
@@ -6086,6 +6136,126 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 		})
 	}
 }
+
+// lockReusablePriorEnvRoot decides whether this task may continue in a prior
+// task's env root and, if so, takes the exclusion lock on it.
+//
+// Order matters and is the point of this function. The lock WRITES a file into
+// the directory, so eligibility has to be proven first:
+// shouldReusePriorWorkdir resolves symlinks, checks the
+// {workspace}/{task}/workdir shape and verifies managed provenance, and only
+// the canonical path it returns is ever opened. Locking on
+// filepath.Dir(task.PriorWorkDir) before that would drop .task_lock into
+// whatever the path happened to point at — a symlink target outside the
+// workspaces root, or a user's own local_directory.
+//
+// The re-check under the lock closes the gap between proving eligibility and
+// acting on it. Declining is always safe: the caller falls back to a fresh
+// Prepare, which costs session continuity, not correctness.
+func (d *Daemon) lockReusablePriorEnvRoot(task Task, localAssignment *localDirectoryAssignment, heldRoot string) (*execenv.EnvRootClaim, string, os.FileInfo, bool) {
+	// Pin the workspaces root BEFORE validating anything. Opening it after,
+	// from a name validation just approved, would re-resolve that name: rename
+	// the root aside, leave a symlink to a look-alike tree, and os.Root
+	// faithfully pins the replacement. Root promises you cannot escape the tree
+	// it opened — not that it opened the tree you meant. Holding the handle
+	// first makes that ordering impossible.
+	wsRoot, err := os.OpenRoot(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+	defer wsRoot.Close()
+
+	workDir, ok := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !ok {
+		return nil, "", nil, false
+	}
+	priorRoot := filepath.Dir(workDir)
+	// workDir came back through EvalSymlinks, so the root it is measured
+	// against has to be resolved the same way — otherwise a symlinked
+	// workspaces root (macOS /tmp -> /private/tmp, a home on a linked volume)
+	// makes the two look unrelated and every reuse is refused.
+	canonicalWorkspacesRoot, err := filepath.EvalSymlinks(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+	rel, err := filepath.Rel(canonicalWorkspacesRoot, priorRoot)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, "", nil, false
+	}
+	// Already covered by this run's own claim (a task re-dispatched onto its
+	// own directory); taking a second lock on it would only deadlock against
+	// ourselves.
+	if priorRoot == heldRoot {
+		return nil, workDir, nil, true
+	}
+
+	// Pin the identity of the directory that just passed validation. Every
+	// later step is checked against THIS, not against whatever the name
+	// resolves to next: a path string cannot tell "the directory I validated"
+	// apart from "a different directory now answering to that name".
+	validatedInfo, err := os.Stat(priorRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+
+	// Deterministic seam for the TOCTOU regressions: tests swap the validated
+	// directory here, between proving eligibility and taking the lock.
+	if reuseLockTestHook != nil {
+		reuseLockTestHook()
+	}
+
+	claim, lockedInfo, err := execenv.LockEnvRootForReuse(wsRoot, rel, priorRoot)
+	switch {
+	case errors.Is(err, execenv.ErrEnvRootBusy):
+		d.logger.Info("prior workdir is in use by another execution; starting a fresh environment",
+			"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot))
+		return nil, "", nil, false
+	case err != nil:
+		d.logger.Warn("could not lock prior workdir; starting a fresh environment",
+			"task", shortID(task.ID), "error", err)
+		return nil, "", nil, false
+	case claim == nil:
+		return nil, "", nil, false
+	}
+	// The lock has to have landed on the directory validation approved.
+	if !os.SameFile(validatedInfo, lockedInfo) {
+		d.logger.Info("prior workdir changed identity before it could be claimed; starting a fresh environment",
+			"task", shortID(task.ID))
+		claim.Release()
+		return nil, "", nil, false
+	}
+
+	// Re-validate while holding the lock, and require the answer to be the SAME
+	// directory. Equality of the canonical path is not enough on its own: the
+	// tree can be rearranged so a different-but-equally-valid env root now
+	// answers to that name, which would leave us holding a lock on one
+	// directory while handing another to Reuse. os.SameFile compares identity,
+	// not spelling.
+	recheckedWorkDir, stillOK := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !stillOK || recheckedWorkDir != workDir {
+		claim.Release()
+		return nil, "", nil, false
+	}
+	// ...and the directory we are about to hand to Reuse has to be that same
+	// one, so the object locked and the object used cannot diverge.
+	currentInfo, err := os.Stat(filepath.Dir(recheckedWorkDir))
+	if err != nil || !os.SameFile(lockedInfo, currentInfo) {
+		d.logger.Info("prior workdir changed identity while being claimed; starting a fresh environment",
+			"task", shortID(task.ID))
+		claim.Release()
+		return nil, "", nil, false
+	}
+	return claim, workDir, lockedInfo, true
+}
+
+// reuseLockTestHook runs between reuse eligibility validation and taking the
+// prior-root lock. Nil outside tests; the TOCTOU regressions use it to make the
+// swap deterministic instead of racing it.
+var reuseLockTestHook func()
+
+// reuseBeforeUseTestHook runs after the prior-root claim is settled and before
+// Reuse resolves that path by name. Nil outside tests.
+var reuseBeforeUseTestHook func()
 
 func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv.PrepareParams) (*execenv.Environment, error) {
 	if d.executionEnvironmentCommand == nil {
@@ -6462,6 +6632,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorName:                    task.InitiatorName,
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
+		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
+		IssueStatusesOmitted:             task.IssueStatusesOmitted,
 		ConnectedApps:                    task.ConnectedApps,
 	}
 
@@ -6479,6 +6651,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
+
+	// Claim the env root HERE, in the daemon parent, and hold it for the whole
+	// task run — the same lifetime as unmarkActiveEnvRoot above.
+	//
+	// It cannot be claimed inside preparation: production preparation runs in a
+	// short-lived helper process (prepareExecutionEnvironment ->
+	// PrepareIsolated), so a lock taken there dies with the helper and the
+	// *os.File cannot cross its JSON response back to us. Claiming there would
+	// leave the agent running with no protection at all — which is exactly the
+	// re-dispatch window this guards.
+	envClaim, err := execenv.ClaimEnvRoot(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+	}
+	defer envClaim.Release()
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -6700,12 +6887,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
+	if priorClaim, priorWorkDir, lockedPriorInfo, ok := d.lockReusablePriorEnvRoot(task, localAssignment, envClaim.RootDir()); ok {
+		defer priorClaim.Release()
+		// Deterministic seam for the last-window regression: tests swap the
+		// directory here, after the claim is settled and before Reuse resolves
+		// the path by name.
+		if reuseBeforeUseTestHook != nil {
+			reuseBeforeUseTestHook()
+		}
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkDir:               task.PriorWorkDir,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			// The canonical path the lock was taken on. Handing Reuse the raw
+			// PriorWorkDir instead would re-resolve it, so the directory we
+			// locked and the directory we use could differ.
+			WorkDir:               priorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
 			ResumeSessionID:       task.PriorSessionID,
@@ -6725,6 +6922,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
 		}
+		// Reuse resolves priorWorkDir by name, so confirm what it actually
+		// opened is still the directory we hold the lock on. An fd cannot cross
+		// into the preparation helper process, so the name is the only thing
+		// that can be handed over; this turns "silently ran somewhere else"
+		// into "declined and started clean". See lockReusablePriorEnvRoot for
+		// what remains uncovered.
+		if env != nil && lockedPriorInfo != nil {
+			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
+			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment",
+					"task", shortID(task.ID))
+				env = nil
+			}
+		}
 		// Reuse can decline (nil) and fall through to a fresh Prepare below.
 		// Whether it did decides whether an env-root-scoped session store — the
 		// Hermes overlay's task-local state.db — carried over from the prior task.
@@ -6733,11 +6944,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkspaceID:           task.WorkspaceID,
-			TaskID:                task.ID,
-			AgentName:             agentName,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			WorkspaceID:    task.WorkspaceID,
+			TaskID:         task.ID,
+			AgentName:      agentName,
+			// This run already holds the claim (envClaim above) and the reset
+			// it implies; preparation must not try to take it again.
+			EnvRootPreclaimed:     true,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
 			OpenclawBin:           openclawBin,
@@ -6955,12 +7169,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}()
 	}
-	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
+	taskTempDir, taskTempLock, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
 	defer func() {
-		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
+		// Drop the execution lock before removing the directory: while it is
+		// held the GC sweep correctly refuses to touch this directory, so a
+		// removal that fails here (a file inside still open — the Windows case
+		// in #7364) would otherwise leave the directory pinned until the daemon
+		// exits. Released first, the next GC cycle acquires the lock, sees the
+		// owner is gone and reclaims it. Nothing waits on the task path.
+		//
+		// RemoveTaskTempDir rather than os.RemoveAll so that a cleanup which
+		// fails here leaves the .task_lock marker intact — without it the next
+		// sweep could not tell this directory from a pre-lock leftover.
+		execenv.ReleaseTaskTempLock(taskTempLock)
+		if cerr := execenv.RemoveTaskTempDir(taskTempDir); cerr != nil {
 			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
 		}
 	}()
@@ -7000,7 +7225,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	prompt := BuildPrompt(task, provider)
+	// An exempt turn runs in the user's directory without having queued for it,
+	// so a sibling coding task may be writing to the same tree right now. That
+	// is the one thing it cannot work out from its own context — tell it.
+	// Worktree mode is excluded: there the tree is this task's private checkout.
+	var promptOptions []PromptOption
+	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+	}
+	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -7367,7 +7600,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider)
+		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -8287,6 +8520,17 @@ func repoDataToInfo(repos []RepoData) []repocache.RepoInfo {
 	return info
 }
 
+func convertIssueStatusesForEnv(statuses []IssueStatusData) []execenv.IssueStatusForEnv {
+	if len(statuses) == 0 {
+		return nil
+	}
+	result := make([]execenv.IssueStatusForEnv, len(statuses))
+	for i, s := range statuses {
+		result[i] = execenv.IssueStatusForEnv{Key: s.Key, Name: s.Name, Category: s.Category, Description: s.Description}
+	}
+	return result
+}
+
 func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	if len(repos) == 0 {
 		return nil
@@ -8536,34 +8780,44 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 	return strings.Join(parts, string(os.PathListSeparator)), true
 }
 
-func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (string, error) {
+// ensureTaskTempDir creates this task's private temp directory and returns it
+// with its execution lock held. The caller owns the lock for the lifetime of
+// the run and must release it before removing the directory — see the cleanup
+// defer in runTask, and execenv.PruneTaskTempDirs for what the lock buys.
+func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (string, *os.File, error) {
 	envRoot = strings.TrimSpace(envRoot)
 	if envRoot == "" {
-		return "", errors.New("env root is empty")
+		return "", nil, errors.New("env root is empty")
 	}
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
-		return "", errors.New("workspace id is empty")
+		return "", nil, errors.New("workspace id is empty")
 	}
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
-		return "", errors.New("task id is empty")
+		return "", nil, errors.New("task id is empty")
 	}
 	base, overrideConfigured, err := taskTempBaseDir()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	dir, err := os.MkdirTemp(base, "multica-task-")
+	dir, err := os.MkdirTemp(base, execenv.TaskTempDirPrefix)
 	if err != nil {
 		if overrideConfigured {
-			return "", fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
+			return "", nil, fmt.Errorf("MULTICA_AGENT_TEMP_BASE: create task temp dir: %w", err)
 		}
-		return "", err
+		return "", nil, err
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
-		return "", err
+		_ = os.RemoveAll(dir)
+		return "", nil, err
 	}
-	return dir, nil
+	lock, err := execenv.LockTaskTempDir(dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", nil, err
+	}
+	return dir, lock, nil
 }
 
 // taskTempBaseDir resolves the parent directory for private per-task temp

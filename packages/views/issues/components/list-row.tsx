@@ -25,10 +25,14 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useT } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
   total: number;
+  visibleDone?: number;
+  visibleTotal?: number;
+  hiddenTotal?: number;
 }
 
 function formatDate(date: string): string {
@@ -54,6 +58,7 @@ function ListRowContent({
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
+  const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -124,6 +129,11 @@ function ListRowContent({
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
+                {(childProgress!.hiddenTotal ?? 0) > 0 && (
+                  <span className="text-micro text-warning tabular-nums font-medium">
+                    {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
+                  </span>
+                )}
               </span>
             )}
             {showLabels && (

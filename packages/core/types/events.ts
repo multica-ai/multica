@@ -322,9 +322,12 @@ export interface TaskRunningPayload {
 
 // task:waiting_local_directory fires when the daemon dequeues a task but
 // can't immediately acquire the on-disk path lock — another task on this
-// daemon is already executing in the same local_directory. The optional
-// `wait_reason` mirrors the server-side hint (path / holder task id), but
-// is not yet surfaced end-to-end; the UI today only reads the status.
+// daemon is already executing in the same local_directory. `wait_reason` names
+// the directory and, when known, the short id of the task holding it; the
+// StatusPill renders it so a parked task explains itself instead of just
+// spinning. It is a display name, never an absolute path — the daemon strips
+// that at the source (localDirectoryAssignment.DisplayName), because this text
+// reaches every client on the session and lands in screenshots.
 export interface TaskWaitingLocalDirectoryPayload {
   task_id: string;
   agent_id: string;

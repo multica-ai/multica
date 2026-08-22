@@ -76,6 +76,9 @@ interface PluginModalSurfaceProps {
 }
 
 export function PluginModalSurface({ target, issueId, onOpenChange }: PluginModalSurfaceProps) {
+  // Same source as usePluginModalSurfaces above: a modal only ever opens from
+  // the issue menu, which is inside the workspace route.
+  const workspace = useCurrentWorkspace();
   if (!target) return null;
   return (
     <Dialog open onOpenChange={onOpenChange}>
@@ -95,6 +98,7 @@ export function PluginModalSurface({ target, issueId, onOpenChange }: PluginModa
           // issue into its context call, and an unchanged document would not
           // reload for a different one.
           key={`${pluginModalKey(target)}:${issueId ?? ""}`}
+          wsId={workspace?.id ?? ""}
           installation={target.installation}
           surface={target.surface}
           issueId={issueId}

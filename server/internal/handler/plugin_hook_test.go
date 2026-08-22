@@ -47,9 +47,9 @@ const hookHandlerTestManifest = `{
 
 func installHookPlugin(t *testing.T) string {
 	t.Helper()
-	source := withLocalPluginSource(t, hookHandlerTestManifest)
+	versionID := withLocalPluginSource(t, hookHandlerTestManifest)
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read", "comments:write", "net:example.com"},
 	})
 	recorder := httptest.NewRecorder()
@@ -276,7 +276,7 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 		`"net:example.com"`, `"net:`+host+`"`,
 	).Replace(hookHandlerTestManifest)
 
-	source := withLocalPluginSource(t, manifest)
+	versionID := withLocalPluginSource(t, manifest)
 	// The dev-origin opt-in is what lets a loopback endpoint be dialled at all;
 	// the granted net: scope still has to cover it, which the replace above did.
 	previousOrigins := testHandler.PluginService.DevOrigins
@@ -300,7 +300,7 @@ func TestEventDispatchRespectsTheFeatureFlagEndToEnd(t *testing.T) {
 	})
 
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read", "comments:write", "net:" + host},
 	})
 	install := httptest.NewRecorder()

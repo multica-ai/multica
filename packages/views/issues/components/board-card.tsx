@@ -292,11 +292,16 @@ export const BoardCardContent = memo(function BoardCardContent({
                 )
               )}
               {showChildProgress && (
-                <div className="inline-flex shrink-0 items-center gap-1">
+                <div className="inline-flex shrink-0 items-center gap-1.5">
                   <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                   <span className="text-micro text-muted-foreground tabular-nums font-medium">
                     {childProgress!.done}/{childProgress!.total}
                   </span>
+                  {(childProgress!.hiddenTotal ?? 0) > 0 && (
+                    <span className="text-micro text-warning tabular-nums font-medium">
+                      {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
+                    </span>
+                  )}
                 </div>
               )}
               {showUpdatedHint && (

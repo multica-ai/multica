@@ -1,10 +1,11 @@
 // Package dingtalk is the DingTalk integration for the channel-agnostic engine.
-// It uses the bring-your-own-app (BYO) model: a workspace admin creates their
-// own DingTalk Stream-mode robot and pastes its AppKey (client id) and AppSecret
-// (client secret) into Multica. Each channel_installation carries its OWN
-// AppSecret and gets its OWN Stream-mode connection, supervised per-installation
-// by the engine like Feishu and Slack (dingtalk_channel.go) — so several agents
-// can each have a distinct bot identity in one DingTalk organization.
+// It uses the bring-your-own-app (BYO) model: an agent owner or workspace admin
+// creates a DingTalk Stream-mode robot and pastes its AppKey (client id) and
+// AppSecret (client secret) into Multica. Each channel_installation carries its
+// OWN AppSecret and gets its OWN Stream-mode connection, supervised
+// per-installation by the engine like Feishu and Slack (dingtalk_channel.go) —
+// so several agents can each have a distinct bot identity in one DingTalk
+// organization.
 //
 // Each installation's Stream connection only ever delivers events for its own
 // robot, so the per-installation connection stamps its AppKey into the inbound
