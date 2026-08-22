@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -2192,5 +2193,112 @@ func TestBranchNameDistinctForSharedUUIDv7Prefix(t *testing.T) {
 	b := fmt.Sprintf("agent/%s/%s", sanitizeName("Windows Codex"), taskKey("01a01ec0-f014-7000-8000-000000000002"))
 	if a == b {
 		t.Fatalf("both tasks resolved to branch %q", a)
+	}
+}
+
+func staleRegistrationSetup(t *testing.T) (barePath, baseRef string) {
+	t.Helper()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	barePath = cache.Lookup("ws-1", sourceRepo)
+	if barePath == "" {
+		t.Fatal("lookup returned empty bare path")
+	}
+	baseRef = getRemoteDefaultBranch(barePath)
+	if baseRef == "" {
+		t.Fatal("no default branch ref in bare cache")
+	}
+	return barePath, baseRef
+}
+
+// Registers a worktree in the bare cache and then deletes its directory,
+// leaving the prunable registration behind — the #7404 state.
+func registerStaleWorktree(t *testing.T, barePath, baseRef, path, branch string) {
+	t.Helper()
+	if err := runWorktreeAdd(barePath, path, branch, baseRef); err != nil {
+		t.Fatalf("setup worktree add failed: %v", err)
+	}
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatalf("setup remove worktree dir failed: %v", err)
+	}
+}
+
+func TestCreateWorktreeRecoversFromStaleRegistration(t *testing.T) {
+	t.Parallel()
+	barePath, baseRef := staleRegistrationSetup(t)
+
+	wtPath := filepath.Join(t.TempDir(), "run-dir")
+	// The stale registration is from a PREVIOUS cycle under a different
+	// branch name — the realistic #7404 shape: the path slug repeats, the
+	// branch (agent/<name>/<task-id>) does not.
+	registerStaleWorktree(t, barePath, baseRef, wtPath, "previous-cycle-branch")
+
+	branch, err := createWorktreeContext(context.Background(), barePath, wtPath, "task-branch", baseRef)
+	if err != nil {
+		t.Fatalf("createWorktreeContext did not recover from stale registration: %v", err)
+	}
+	if branch != "task-branch" {
+		t.Fatalf("branch = %q, want requested name %q with no suffix", branch, "task-branch")
+	}
+	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
+		t.Fatalf("worktree not created at %s: %v", wtPath, err)
+	}
+}
+
+func TestCreateWorktreeStaleRegistrationDoesNotSuffixBranch(t *testing.T) {
+	t.Parallel()
+	barePath, baseRef := staleRegistrationSetup(t)
+
+	wtPath := filepath.Join(t.TempDir(), "run-dir")
+	registerStaleWorktree(t, barePath, baseRef, wtPath, "previous-cycle-branch")
+
+	if _, err := createWorktreeContext(context.Background(), barePath, wtPath, "task-branch", baseRef); err != nil {
+		t.Fatalf("createWorktreeContext did not recover from stale registration: %v", err)
+	}
+
+	out, err := runGitOutput("-C", barePath, "branch", "--list")
+	if err != nil {
+		t.Fatalf("branch --list failed: %v", err)
+	}
+	branches := strings.TrimSpace(string(out))
+	if !strings.Contains(branches, "task-branch") {
+		t.Fatalf("requested branch missing after recovery:\n%s", branches)
+	}
+	for _, line := range strings.Split(branches, "\n") {
+		name := strings.TrimSpace(strings.TrimPrefix(line, "* "))
+		if regexp.MustCompile(`^task-branch-\d+$`).MatchString(name) {
+			t.Fatalf("recovery leaked a timestamp-suffixed branch %q; branches:\n%s", name, branches)
+		}
+	}
+}
+
+func TestCreateWorktreeBranchCollisionDoesNotPrune(t *testing.T) {
+	t.Parallel()
+	barePath, baseRef := staleRegistrationSetup(t)
+
+	// A stale registration at an unrelated path must survive a branch
+	// collision elsewhere: collision takes the suffix path, never a prune.
+	stalePath := filepath.Join(t.TempDir(), "stale-run-dir")
+	registerStaleWorktree(t, barePath, baseRef, stalePath, "stale-branch")
+
+	if err := runGit("-C", barePath, "branch", "collide-branch", baseRef); err != nil {
+		t.Fatalf("setup branch creation failed: %v", err)
+	}
+
+	freshPath := filepath.Join(t.TempDir(), "fresh-run-dir")
+	branch, err := createWorktreeContext(context.Background(), barePath, freshPath, "collide-branch", baseRef)
+	if err != nil {
+		t.Fatalf("createWorktreeContext with genuine collision failed: %v", err)
+	}
+	if branch == "collide-branch" || !regexp.MustCompile(`^collide-branch-\d+$`).MatchString(branch) {
+		t.Fatalf("branch = %q, want timestamp-suffixed collision resolution", branch)
+	}
+
+	// The prune must NOT have run: the stale registration is still fatal.
+	if err := runWorktreeAdd(barePath, stalePath, "another-branch", baseRef); err == nil {
+		t.Fatal("stale registration was pruned by the branch-collision path; it must survive")
 	}
 }
