@@ -37,6 +37,12 @@ const DefaultAutopilotScheduleTimezone = "UTC"
 // time.
 const maxAutopilotScheduleLateness = 5 * time.Minute
 
+// autopilotScheduleOfflineRetryDelay is the only retry delay for scheduled
+// Autopilots. MaxAttempts=2 below means one initial attempt plus this one
+// retry; keeping the delay separate makes the high-frequency cron impact
+// explicit and prevents a later generic backoff from silently widening it.
+const autopilotScheduleOfflineRetryDelay = time.Minute
+
 // AutopilotScheduleDispatcher is the narrow contract this job needs
 // from service.AutopilotService. Defined here so unit tests in this
 // package (and the cmd/server integration tests) can stub it without
@@ -49,6 +55,18 @@ type AutopilotScheduleDispatcher interface {
 		source string,
 		payload []byte,
 		plannedAt time.Time,
+	) (*db.AutopilotRun, error)
+}
+
+type autopilotAttemptDispatcher interface {
+	DispatchAutopilotForPlanAttempt(
+		ctx context.Context,
+		autopilot db.Autopilot,
+		triggerID pgtype.UUID,
+		source string,
+		payload []byte,
+		plannedAt time.Time,
+		retryBudgetRemaining bool,
 	) (*db.AutopilotRun, error)
 }
 
@@ -103,11 +121,9 @@ func AutopilotScheduleDispatchJob(
 		StaleTimeout:      5 * time.Minute,
 		HeartbeatInterval: 30 * time.Second,
 		AllowStaleReentry: true,
-		MaxAttempts:       3,
+		MaxAttempts:       2,
 		RetryBackoff: []time.Duration{
-			1 * time.Minute,
-			5 * time.Minute,
-			15 * time.Minute,
+			autopilotScheduleOfflineRetryDelay,
 		},
 		// Belt-and-suspenders: 5 plan_times is more than CatchUpLatestOnly
 		// ever needs; the cap matters only if a future caller flips the
@@ -254,6 +270,16 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 		// MUST surface it here — moving forward to a newer occurrence
 		// would strand the FAILED row at attempt < max_attempts
 		// forever and leak the missed dispatch.
+		//
+		// This check intentionally precedes the five-minute lateness
+		// gate below. The gate admits new occurrences; once admitted, a
+		// failed occurrence keeps its single one-minute retry even when
+		// that makes plan_time older than five minutes. At the edge of
+		// the admission window the retry becomes eligible about six
+		// minutes after plan_time. Its claim can be later after scheduler
+		// downtime because retry eligibility is deliberately durable.
+		// After attempt 2 is exhausted, minute-frequency crons resume at
+		// the latest due occurrence instead of pinning this cursor.
 		if latest.RetryEligible(now) {
 			return []time.Time{latest.PlanTime}, nil
 		}
@@ -370,9 +396,17 @@ func autopilotHandler(
 			}}, nil
 		}
 
-		run, err := dispatcher.DispatchAutopilotForPlan(
-			ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
-		)
+		var run *db.AutopilotRun
+		if attemptDispatcher, ok := dispatcher.(autopilotAttemptDispatcher); ok {
+			run, err = attemptDispatcher.DispatchAutopilotForPlanAttempt(
+				ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
+				in.Attempt < in.Job.MaxAttempts,
+			)
+		} else {
+			run, err = dispatcher.DispatchAutopilotForPlan(
+				ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
+			)
+		}
 		if err != nil {
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
