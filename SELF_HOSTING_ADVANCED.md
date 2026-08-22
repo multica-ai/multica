@@ -196,6 +196,32 @@ the platform's verdict, match the frame's `req_id` against the `dir=in` line
 answering it and read that line's `errcode` — a frame can be written
 successfully and still be rejected there.
 
+### Task Identity Tokens (Optional)
+
+Let agents reach your internal systems as the person who asked, rather than as
+a shared service account. At claim time the server signs a short-lived JWT
+naming the run's accountable human; the daemon injects it into the agent
+process; your system verifies it and applies the permissions it already has for
+that person.
+
+| Variable | Description |
+|----------|-------------|
+| `MULTICA_TASK_TOKEN_PRIVATE_KEY` | PEM signing key (PKCS#8, SEC 1 EC, or PKCS#1 RSA). Enables the feature together with the catalog |
+| `MULTICA_TASK_TOKEN_TEMPLATES` | JSON array of token templates: which claims are signed, into which environment variable, with what TTL |
+| `MULTICA_TASK_TOKEN_MANIFEST_ENV` | Optional. Names an extra variable describing the systems actually issued for a run |
+
+Setting only one of the first two is a startup error. Leaving both unset
+changes nothing: no tokens are issued and the Identity Tokens tab stays hidden.
+
+The public keys are then served, unauthenticated, at
+`/.well-known/jwks.json` for verifiers to fetch; the endpoint 404s while the
+feature is unconfigured.
+
+See [TASK_IDENTITY_TOKENS.md](TASK_IDENTITY_TOKENS.md) for the full design,
+catalog format, and security boundaries, and
+[TASK_IDENTITY_TOKENS_AI.md](TASK_IDENTITY_TOKENS_AI.md) for a checklist you
+can hand to an AI agent to wire up the receiving system.
+
 ### CLI / Daemon
 
 These are configured on each user's machine, not on the server:
