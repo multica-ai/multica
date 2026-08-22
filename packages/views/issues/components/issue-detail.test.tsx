@@ -605,12 +605,18 @@ function createTestQueryClient() {
   });
 }
 
-function renderIssueDetail(issueId = "issue-1") {
+function renderIssueDetail(
+  issueId = "issue-1",
+  options: { defaultSidebarOpen?: boolean } = {},
+) {
   const queryClient = createTestQueryClient();
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
-        <IssueDetail issueId={issueId} />
+        <IssueDetail
+          issueId={issueId}
+          defaultSidebarOpen={options.defaultSidebarOpen}
+        />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -940,6 +946,21 @@ describe("IssueDetail (shared)", () => {
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
   });
 
+  it("widens the issue content when the properties sidebar starts collapsed", async () => {
+    const { container } = renderIssueDetail("issue-1", {
+      defaultSidebarOpen: false,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    const content = container.querySelector("[data-issue-detail-content]");
+    expect(content).not.toBeNull();
+    expect(content?.className).toContain("max-w-6xl");
+    expect(content?.className).not.toContain("max-w-4xl");
+  });
+
   it("pins the comment composer to the scroll viewport on a wide screen", async () => {
     const { container } = renderIssueDetail();
 
@@ -1102,6 +1123,21 @@ describe("IssueDetail (shared)", () => {
         result: null,
         error: null,
         created_at: "2026-06-08T08:00:00Z",
+        trigger_summary: "Started from comment",
+      },
+      {
+        id: "task-running",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "running",
+        priority: 0,
+        dispatched_at: null,
+        started_at: "2026-06-08T08:03:00Z",
+        completed_at: null,
+        result: null,
+        error: null,
+        created_at: "2026-06-08T08:03:00Z",
         trigger_summary: "Started from comment",
       },
     ]);

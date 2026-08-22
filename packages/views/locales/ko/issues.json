@@ -508,6 +508,7 @@
     "section": "실행 로그",
     "show_past": "이전 실행 보기 ({{count}})",
     "hide_past": "이전 실행 숨기기 ({{count}})",
+    "history": "이전 실행",
     "cancel_task_tooltip": "작업 취소",
     "cancel_task_aria": "작업 취소",
     "retry_task_tooltip": "작업 다시 시도",

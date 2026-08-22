@@ -2545,11 +2545,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
       )}
 
-      {/* Execution log — active runs + collapsed past runs, each carrying its
-          own token spend, with the issue total on the section header.
-          Self-contained; owns its own collapse state and WS subscriptions.
-          Hides itself when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} identifier={issue.identifier} />
+      {/* Execution log — active runs only. Historical runs live under the
+          header agent chip so collapsing the properties panel does not hide
+          the only path to run history. */}
+      <ExecutionLogSection issueId={id} identifier={issue.identifier} showPast={false} />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values
@@ -2860,7 +2859,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             of the scroll: below `md` the composer is not pinned (see
             `useStickyComposer`), so it lands here — right where the launcher
             floats — once the reader scrolls to the bottom. */}
-        <div className="mx-auto w-full max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8">
+        <div
+          className={cn(
+            "mx-auto w-full px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
+            sidebarOpen ? "max-w-4xl" : "max-w-6xl",
+          )}
+          data-issue-detail-content
+        >
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3367,11 +3372,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
             <LocalDirectoryHint projectId={issue?.project_id} />
 
-            {/* The "agent is working" live signal now lives in the header
-                (IssueAgentHeaderChip) so it stays in one fixed place and
-                doesn't compete with sticky banners in this content column.
-                The per-task timeline + past runs live in the right panel
-                via ExecutionLogSection. */}
+            {/* The live signal and historical runs live in the header chip so
+                they stay reachable even when the properties panel is closed. */}
 
             {/* Timeline entries — virtualized via react-virtuoso to keep
                 first-paint cost O(viewport) instead of O(N). On a 500-comment

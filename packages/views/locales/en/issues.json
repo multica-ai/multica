@@ -530,6 +530,7 @@
     "section": "Execution log",
     "show_past": "Show past runs ({{count}})",
     "hide_past": "Hide past runs ({{count}})",
+    "history": "Historical runs",
     "cancel_task_tooltip": "Cancel task",
     "cancel_task_aria": "Cancel task",
     "retry_task_tooltip": "Retry task",

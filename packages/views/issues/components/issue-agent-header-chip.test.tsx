@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@multica/core/api";
@@ -76,6 +76,18 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 });
 
 vi.mock("./execution-log-section", () => ({
+  isActiveTask: (task: AgentTask) =>
+    ["queued", "dispatched", "waiting_local_directory", "running"].includes(
+      task.status,
+    ),
+  sortPastTasks: (tasks: AgentTask[]) =>
+    tasks
+      .filter((task) => ["completed", "failed", "cancelled"].includes(task.status))
+      .toSorted((a, b) => {
+        const at = a.completed_at ?? a.created_at;
+        const bt = b.completed_at ?? b.created_at;
+        return new Date(bt).getTime() - new Date(at).getTime();
+      }),
   ActiveTaskRow: ({
     task,
     onTranscriptOpenChange,
@@ -94,6 +106,9 @@ vi.mock("./execution-log-section", () => ({
         Open transcript
       </button>
     </div>
+  ),
+  PastTaskRow: ({ task }: { task: AgentTask }) => (
+    <div data-testid="past-task-row">{task.id}</div>
   ),
 }));
 
@@ -200,6 +215,9 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getByText("Walt is working")).toBeInTheDocument();
     expect(screen.queryByText(/events?/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/\d+[smh]/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Walt is working" }).className).toContain(
+      "border-beam",
+    );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 
@@ -318,9 +336,7 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getByText("Walt 在工作")).toBeInTheDocument();
   });
 
-  it("does not render when the issue has only terminal tasks", () => {
-    // The list is issue-scoped by the endpoint, so the chip's only job is to
-    // ignore terminal statuses (those are the execution log's story).
+  it("shows historical runs without an active-state beam when no task is running", () => {
     mockState.tasks = [
       makeTask({
         id: "task-done",
@@ -336,6 +352,67 @@ describe("IssueAgentHeaderChip", () => {
 
     renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
 
-    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    const historyButtons = screen.getAllByRole("button", { name: "Historical runs" });
+    expect(historyButtons).toHaveLength(2);
+    const trigger = historyButtons.find((button) => button.className.includes("h-7"));
+    expect(trigger).toBeDefined();
+    expect(trigger?.className).not.toContain("border-beam");
+    expect(screen.getAllByTestId("past-task-row")).toHaveLength(2);
+  });
+
+  it("toggles the expanded history list when it is the only chip content", () => {
+    mockState.tasks = [
+      makeTask({
+        id: "task-past",
+        status: "completed",
+        completed_at: "2026-06-08T08:05:00Z",
+      }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const content = screen.getByTestId("agent-popover-content");
+    const historyToggle = within(content).getByRole("button", {
+      name: "Historical runs",
+    });
+    expect(within(content).getByTestId("past-task-row")).toHaveTextContent(
+      "task-past",
+    );
+
+    fireEvent.click(historyToggle);
+    expect(within(content).queryByTestId("past-task-row")).not.toBeInTheDocument();
+
+    fireEvent.click(historyToggle);
+    expect(within(content).getByTestId("past-task-row")).toBeInTheDocument();
+  });
+
+  it("keeps history as an active-list sibling with rows nested below it", () => {
+    mockState.tasks = [
+      makeTask({ id: "task-running", status: "running" }),
+      makeTask({
+        id: "task-past",
+        status: "completed",
+        completed_at: "2026-06-08T08:05:00Z",
+      }),
+    ];
+
+    renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    const content = screen.getByTestId("agent-popover-content");
+    const activeRow = within(content).getByTestId("active-task-row");
+    const historyToggle = within(content).getByRole("button", {
+      name: "Historical runs",
+    });
+    expect(historyToggle.parentElement).toBe(activeRow.parentElement);
+    expect(within(content).queryByTestId("past-task-row")).not.toBeInTheDocument();
+
+    fireEvent.click(historyToggle);
+
+    const historyGroup = within(content).getByRole("group", {
+      name: "Historical runs",
+    });
+    const pastRow = within(historyGroup).getByTestId("past-task-row");
+    expect(pastRow).toHaveTextContent("task-past");
+    expect(pastRow.parentElement).toBe(historyGroup);
   });
 });

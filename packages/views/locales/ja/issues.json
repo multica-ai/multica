@@ -508,6 +508,7 @@
     "section": "実行ログ",
     "show_past": "過去の実行を表示 ({{count}})",
     "hide_past": "過去の実行を非表示 ({{count}})",
+    "history": "過去の実行",
     "cancel_task_tooltip": "作業をキャンセル",
     "cancel_task_aria": "作業をキャンセル",
     "retry_task_tooltip": "作業を再試行",

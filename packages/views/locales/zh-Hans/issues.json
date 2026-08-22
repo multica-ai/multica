@@ -508,6 +508,7 @@
     "section": "执行日志",
     "show_past": "显示历史运行（{{count}}）",
     "hide_past": "隐藏历史运行（{{count}}）",
+    "history": "历史运行",
     "cancel_task_tooltip": "取消 task",
     "cancel_task_aria": "取消 task",
     "retry_task_tooltip": "重试 task",
