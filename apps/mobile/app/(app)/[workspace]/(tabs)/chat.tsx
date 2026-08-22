@@ -33,10 +33,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  KeyboardAvoidingView,
-  Platform,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -511,8 +510,15 @@ export default function ChatTab() {
         }
       />
       {availability === "none" ? <NoAgentBanner /> : null}
+      {/*
+       * Use the keyboard-controller implementation already mounted by the
+       * root KeyboardProvider. Unlike RN's event-driven KAV, its padding is
+       * derived from the native keyboard state, so a keyboard dismissal that
+       * occurs while the app is backgrounded cannot leave stale bottom
+       * padding and collapse this flex layout when the app resumes.
+       */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
         className="flex-1"
       >
         <ChatMessageList
