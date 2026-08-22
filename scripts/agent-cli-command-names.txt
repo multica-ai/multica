@@ -22,3 +22,4 @@ qwen
 qwenpaw
 reasonix
 traecli
+zeroclaw
