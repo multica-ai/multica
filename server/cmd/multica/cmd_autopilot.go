@@ -120,7 +120,8 @@ func init() {
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as task prompt)")
-	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
+	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID; mutually exclusive with --squad)")
+	autopilotCreateCmd.Flags().String("squad", "", "Assignee squad (name or ID; mutually exclusive with --agent)")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
@@ -131,7 +132,8 @@ func init() {
 	// update
 	autopilotUpdateCmd.Flags().String("title", "", "New title")
 	autopilotUpdateCmd.Flags().String("description", "", "New description")
-	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID)")
+	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID; mutually exclusive with --squad)")
+	autopilotUpdateCmd.Flags().String("squad", "", "New assignee squad (name or ID; mutually exclusive with --agent)")
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
 	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
@@ -215,7 +217,7 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "title"),
 			strVal(a, "status"),
 			strVal(a, "execution_mode"),
-			actors.agent(strVal(a, "assignee_id")),
+			actors.autopilotAssignee(strVal(a, "assignee_type"), strVal(a, "assignee_id")),
 			strVal(a, "last_run_at"),
 		})
 	}
@@ -266,7 +268,7 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 		strVal(ap, "title"),
 		strVal(ap, "status"),
 		strVal(ap, "execution_mode"),
-		actors.agent(strVal(ap, "assignee_id")),
+		actors.autopilotAssignee(strVal(ap, "assignee_type"), strVal(ap, "assignee_id")),
 		strVal(ap, "last_run_at"),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -329,9 +331,13 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if title == "" {
 		return fmt.Errorf("--title is required")
 	}
-	agent, _ := cmd.Flags().GetString("agent")
-	if agent == "" {
-		return fmt.Errorf("--agent is required (agent name or ID)")
+	agentSet := cmd.Flags().Changed("agent")
+	squadSet := cmd.Flags().Changed("squad")
+	if agentSet && squadSet {
+		return fmt.Errorf("--agent and --squad are mutually exclusive")
+	}
+	if !agentSet && !squadSet {
+		return fmt.Errorf("one of --agent or --squad is required")
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	if mode == "" {
@@ -344,14 +350,30 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	agentID, err := resolveAgent(ctx, client, agent)
+	assigneeType := "agent"
+	assigneeRef := "agent"
+	if squadSet {
+		assigneeType = "squad"
+		assigneeRef = "squad"
+	}
+	assignee, _ := cmd.Flags().GetString(assigneeRef)
+	if strings.TrimSpace(assignee) == "" {
+		return fmt.Errorf("--%s cannot be empty", assigneeRef)
+	}
+	var assigneeID string
+	if assigneeType == "squad" {
+		assigneeID, err = resolveSquad(ctx, client, assignee)
+	} else {
+		assigneeID, err = resolveAgent(ctx, client, assignee)
+	}
 	if err != nil {
-		return fmt.Errorf("resolve agent: %w", err)
+		return fmt.Errorf("resolve %s: %w", assigneeType, err)
 	}
 
 	body := map[string]any{
 		"title":          title,
-		"assignee_id":    agentID,
+		"assignee_type":  assigneeType,
+		"assignee_id":    assigneeID,
 		"execution_mode": mode,
 	}
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
@@ -415,14 +437,34 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("agent") {
+	agentSet := cmd.Flags().Changed("agent")
+	squadSet := cmd.Flags().Changed("squad")
+	if agentSet && squadSet {
+		return fmt.Errorf("--agent and --squad are mutually exclusive")
+	}
+	if agentSet {
 		v, _ := cmd.Flags().GetString("agent")
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("--agent cannot be empty")
+		}
 		agentID, resolveErr := resolveAgent(ctx, client, v)
 		if resolveErr != nil {
 			return fmt.Errorf("resolve agent: %w", resolveErr)
 		}
 		body["assignee_type"] = "agent"
 		body["assignee_id"] = agentID
+	}
+	if squadSet {
+		v, _ := cmd.Flags().GetString("squad")
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("--squad cannot be empty")
+		}
+		squadID, resolveErr := resolveSquad(ctx, client, v)
+		if resolveErr != nil {
+			return fmt.Errorf("resolve squad: %w", resolveErr)
+		}
+		body["assignee_type"] = "squad"
+		body["assignee_id"] = squadID
 	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")
@@ -471,7 +513,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --description, --agent, --status, --mode, etc.")
+		return fmt.Errorf("no fields to update; use flags like --title, --description, --agent, --squad, --status, --mode, etc.")
 	}
 
 	var result map[string]any
@@ -864,5 +906,48 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 			parts = append(parts, fmt.Sprintf("  %q (%s)", m.Name, truncateID(m.ID)))
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
+	}
+}
+
+// resolveSquad accepts either a UUID or a squad name (case-insensitive substring)
+// and returns the squad's UUID. Archived squads are ignored because the API
+// rejects them as autopilot assignees.
+func resolveSquad(ctx context.Context, client *cli.APIClient, nameOrID string) (string, error) {
+	if uuidRegexp.MatchString(nameOrID) {
+		return nameOrID, nil
+	}
+	if client.WorkspaceID == "" {
+		return "", fmt.Errorf("workspace ID is required to resolve squads; use --workspace-id or set MULTICA_WORKSPACE_ID")
+	}
+
+	var squads []map[string]any
+	if err := client.GetJSON(ctx, "/api/squads", &squads); err != nil {
+		return "", fmt.Errorf("fetch squads: %w", err)
+	}
+
+	nameLower := strings.ToLower(nameOrID)
+	type match struct{ ID, Name string }
+	var matches []match
+	for _, squad := range squads {
+		if strVal(squad, "archived_at") != "" {
+			continue
+		}
+		squadName := strVal(squad, "name")
+		if strings.Contains(strings.ToLower(squadName), nameLower) {
+			matches = append(matches, match{ID: strVal(squad, "id"), Name: squadName})
+		}
+	}
+
+	switch len(matches) {
+	case 0:
+		return "", fmt.Errorf("no squad found matching %q", nameOrID)
+	case 1:
+		return matches[0].ID, nil
+	default:
+		var parts []string
+		for _, m := range matches {
+			parts = append(parts, fmt.Sprintf("  %q (%s)", m.Name, truncateID(m.ID)))
+		}
+		return "", fmt.Errorf("ambiguous squad %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
 }
