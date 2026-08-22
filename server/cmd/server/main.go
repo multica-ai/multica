@@ -356,6 +356,9 @@ func main() {
 	go hub.Run()
 	daemonHub := daemonws.NewHub()
 	var daemonWakeup service.TaskWakeupNotifier = daemonHub
+	// Nil unless a Redis relay is running: without one there is only one
+	// replica, and it both publishes the completion and holds the socket.
+	var wecomRelay WecomRelay
 
 	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
 	// multiple API nodes can deliver each other's events. Without it the hub
@@ -419,6 +422,7 @@ func main() {
 				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
+				wecomRelay = sharded
 				legacy := realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, legacyReadRedis, relayConfig.RetentionConfig())
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
@@ -426,6 +430,7 @@ func main() {
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
+				wecomRelay = sharded
 				relay = sharded
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			}
@@ -558,6 +563,7 @@ func main() {
 		WecomMetrics:        wecomMetrics,
 		DaemonHub:           daemonHub,
 		DaemonWakeup:        daemonWakeup,
+		WecomRelay:          wecomRelay,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
