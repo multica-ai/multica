@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -1726,13 +1727,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		u := c.usage
 		c.usageMu.Unlock()
 
-		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
+		// Read the rollout once for plan limits and as a token-usage fallback.
 		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
 		// scan this backend's per-task CODEX_HOME, since sessions are isolated
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
+		taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+		scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed)
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
-			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
+			if scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -1755,6 +1757,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			SessionID:                    threadID,
 			DurationMs:                   duration.Milliseconds(),
 			Usage:                        usageMap,
+			PlanLimits:                   planLimitsFromCodexSession(scanned),
 			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
 		}
 	}()
@@ -3375,8 +3378,16 @@ func codexInt64(m map[string]any, keys ...string) int64 {
 
 // codexSessionUsage holds usage extracted from a Codex session JSONL file.
 type codexSessionUsage struct {
-	usage TokenUsage
-	model string
+	usage      TokenUsage
+	model      string
+	planLimits *protocol.PlanLimitsSnapshot
+}
+
+func planLimitsFromCodexSession(session *codexSessionUsage) *protocol.PlanLimitsSnapshot {
+	if session == nil {
+		return nil
+	}
+	return session.planLimits
 }
 
 // scanCodexSessionUsage extracts usage for threadID from its Codex rollout.
@@ -3417,8 +3428,9 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 	// They have the same owner, so prefer the latest deterministically without ever
 	// crossing into a different thread's rollout.
 	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime, resumed)
-	if result == nil || (result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 &&
-		result.usage.CacheReadTokens == 0 && result.usage.CacheWriteTokens == 0) {
+	if result == nil || (result.planLimits == nil && result.usage.InputTokens == 0 &&
+		result.usage.OutputTokens == 0 && result.usage.CacheReadTokens == 0 &&
+		result.usage.CacheWriteTokens == 0) {
 		return nil
 	}
 	return result
@@ -3550,6 +3562,18 @@ type codexRawTokenUsage struct {
 	ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 }
 
+type codexRawRateLimitWindow struct {
+	UsedPercent   *float64 `json:"used_percent"`
+	WindowMinutes *int64   `json:"window_minutes"`
+	ResetsAt      *int64   `json:"resets_at"`
+}
+
+type codexRawRateLimits struct {
+	Primary              *codexRawRateLimitWindow `json:"primary"`
+	Secondary            *codexRawRateLimitWindow `json:"secondary"`
+	RateLimitReachedType string                   `json:"rate_limit_reached_type"`
+}
+
 // codexSessionTokenCount represents a token_count event in Codex JSONL.
 type codexSessionTokenCount struct {
 	Timestamp time.Time `json:"timestamp"`
@@ -3560,6 +3584,7 @@ type codexSessionTokenCount struct {
 			TotalTokenUsage *codexRawTokenUsage `json:"total_token_usage"`
 			LastTokenUsage  *codexRawTokenUsage `json:"last_token_usage"`
 			Model           string              `json:"model"`
+			RateLimits      *codexRawRateLimits `json:"rate_limits"`
 		} `json:"info"`
 		Model string `json:"model"`
 	} `json:"payload"`
@@ -3617,6 +3642,9 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 
 		// Extract token usage from token_count events.
 		if evt.Payload.Type == "token_count" && evt.Payload.Info != nil {
+			if rawLimits := evt.Payload.Info.RateLimits; rawLimits != nil {
+				result.planLimits = codexPlanLimitsSnapshot(rawLimits, evt.Timestamp)
+			}
 			afterStart := startTime.IsZero() || timestampAfterStart ||
 				(evt.Timestamp.IsZero() && (!resumed || afterStartBoundary))
 			if usage := evt.Payload.Info.TotalTokenUsage; usage != nil {
@@ -3644,16 +3672,80 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 		}
 	}
 
-	if !finalUsageFound {
+	if result.planLimits != nil && result.planLimits.ObservedAt == 0 {
+		if info, err := os.Stat(path); err == nil {
+			result.planLimits.ObservedAt = info.ModTime().Unix()
+		}
+	}
+	if !finalUsageFound && result.planLimits == nil {
 		return nil
 	}
-	cachedTokens := finalUsage.CachedInputTokens
-	result.usage = TokenUsage{
-		InputTokens:     codexUncachedInputTokens(finalUsage.InputTokens, cachedTokens),
-		OutputTokens:    finalUsage.OutputTokens + finalUsage.ReasoningOutputTokens,
-		CacheReadTokens: cachedTokens,
+	if finalUsageFound {
+		cachedTokens := finalUsage.CachedInputTokens
+		result.usage = TokenUsage{
+			InputTokens:     codexUncachedInputTokens(finalUsage.InputTokens, cachedTokens),
+			OutputTokens:    finalUsage.OutputTokens + finalUsage.ReasoningOutputTokens,
+			CacheReadTokens: cachedTokens,
+		}
 	}
 	return &result
+}
+
+func codexPlanLimitsSnapshot(raw *codexRawRateLimits, observedAt time.Time) *protocol.PlanLimitsSnapshot {
+	if raw == nil {
+		return nil
+	}
+	windows := make([]protocol.PlanLimitWindow, 0, 2)
+	for _, item := range []struct {
+		name   string
+		window *codexRawRateLimitWindow
+	}{
+		{name: "primary", window: raw.Primary},
+		{name: "secondary", window: raw.Secondary},
+	} {
+		if item.window == nil {
+			continue
+		}
+		window := protocol.PlanLimitWindow{Name: item.name}
+		if item.window.UsedPercent != nil && *item.window.UsedPercent >= 0 && *item.window.UsedPercent <= 100 {
+			usedPercent := *item.window.UsedPercent
+			window.UsedPercent = &usedPercent
+		}
+		if item.window.WindowMinutes != nil && *item.window.WindowMinutes > 0 {
+			windowMinutes := *item.window.WindowMinutes
+			window.WindowMinutes = &windowMinutes
+		}
+		if item.window.ResetsAt != nil && *item.window.ResetsAt > 0 {
+			resetsAt := *item.window.ResetsAt
+			window.ResetsAt = &resetsAt
+		}
+		if window.UsedPercent != nil || window.ResetsAt != nil {
+			windows = append(windows, window)
+		}
+	}
+	if len(windows) == 0 && raw.RateLimitReachedType == "" {
+		return nil
+	}
+	status := protocol.PlanLimitsStatusAvailable
+	if raw.RateLimitReachedType != "" {
+		status = protocol.PlanLimitsStatusExhausted
+	} else {
+		for _, window := range windows {
+			if window.UsedPercent != nil && *window.UsedPercent >= 100 {
+				status = protocol.PlanLimitsStatusExhausted
+				break
+			}
+		}
+	}
+	snapshot := &protocol.PlanLimitsSnapshot{
+		Provider: "codex",
+		Status:   status,
+		Windows:  windows,
+	}
+	if !observedAt.IsZero() {
+		snapshot.ObservedAt = observedAt.Unix()
+	}
+	return snapshot
 }
 
 func subtractCodexRawTokenUsage(total, baseline codexRawTokenUsage) codexRawTokenUsage {

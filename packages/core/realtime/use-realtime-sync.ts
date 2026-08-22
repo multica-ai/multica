@@ -961,7 +961,6 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
-      "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_deleted", "chat:session_updated",

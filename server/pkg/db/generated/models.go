@@ -96,6 +96,7 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
+	PlanLimits     []byte             `json:"plan_limits"`
 }
 
 type AgentSkill struct {

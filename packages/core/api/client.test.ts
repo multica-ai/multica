@@ -1904,6 +1904,33 @@ describe("ApiClient explicit workspace targeting", () => {
     });
     expect(slugHeaderOf(fetchMock)).toBeUndefined();
   });
+
+  it("keeps a runtime when optional plan limit data is malformed", async () => {
+    stubOk([{
+      id: "runtime-1",
+      workspace_id: "ws-1",
+      daemon_id: "daemon-1",
+      name: "Codex",
+      runtime_mode: "local",
+      provider: "codex",
+      launch_header: "Codex",
+      status: "online",
+      device_info: "devbox",
+      metadata: {},
+      owner_id: "user-1",
+      visibility: "private",
+      last_seen_at: "2026-08-21T00:00:00Z",
+      created_at: "2026-08-21T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      plan_limits: { provider: "codex", status: "available" },
+    }]);
+
+    const runtimes = await new ApiClient("https://api.example.test").listRuntimes();
+
+    expect(runtimes).toHaveLength(1);
+    expect(runtimes[0]?.id).toBe("runtime-1");
+    expect(runtimes[0]?.plan_limits).toBeUndefined();
+  });
 });
 
 describe("ApiClient model discovery response schema", () => {

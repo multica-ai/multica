@@ -289,6 +289,7 @@
     "col_owner": "所有者",
     "col_agents": "エージェント",
     "col_cost": "コスト · 7 日",
+    "col_plan_limits": "プラン上限",
     "col_cli": "CLI",
     "cost_delta_flat": "変化なし",
     "cli_managed_badge": "デスクトップ",
@@ -307,6 +308,20 @@
     "pending_health_error": "登録エラー",
     "pending_health_disabled": "無効",
     "pending_cli_unknown": "待機中"
+  },
+  "plan_limits": {
+    "title": "プラン上限",
+    "observed": "{{when}}に更新",
+    "unavailable": "上限データは利用できません",
+    "unavailable_hint": "上限スナップショットはまだ報告されていません。Codex は CLI セッション後に報告しますが、古いデーモンと未対応の CLI では利用できません。",
+    "unavailable_hint_claude": "Claude Code は現在、セッション上限に達した場合にのみプラン上限を報告します。",
+    "limit_reached": "上限に達しました",
+    "used": "{{percent}}% 使用済み",
+    "resets": "{{when}}にリセット",
+    "window_5h": "5時間ウィンドウ",
+    "window_7d": "7日間ウィンドウ",
+    "window_primary": "現在のウィンドウ",
+    "window_secondary": "セカンダリウィンドウ"
   },
   "profiles": {
     "cta": "ランタイムを追加",

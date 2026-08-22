@@ -17,6 +17,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -844,6 +845,61 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	}
 	if got.usage.OutputTokens != 50 {
 		t.Fatalf("output tokens = %d, want 50", got.usage.OutputTokens)
+	}
+}
+
+func TestParseCodexSessionFileCapturesCredentialFreePlanLimits(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"timestamp":"2026-08-21T12:00:00Z","type":"event_msg","payload":{"type":"token_count","info":{"rate_limits":{"limit_id":"codex","plan_type":"pro","primary":{"used_percent":17.0,"window_minutes":300,"resets_at":1782403604},"secondary":{"used_percent":24.0,"window_minutes":10080,"resets_at":1782958880},"credits":{"balance":"private"}},"model":"gpt-5.6"}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	got := parseCodexSessionFile(path)
+	if got == nil || got.planLimits == nil {
+		t.Fatal("expected plan limits without token usage")
+	}
+	snapshot := got.planLimits
+	if snapshot.Provider != "codex" || snapshot.Status != protocol.PlanLimitsStatusAvailable {
+		t.Fatalf("snapshot identity = %+v", snapshot)
+	}
+	if snapshot.ObservedAt != time.Date(2026, time.August, 21, 12, 0, 0, 0, time.UTC).Unix() {
+		t.Fatalf("observed_at = %d", snapshot.ObservedAt)
+	}
+	if len(snapshot.Windows) != 2 {
+		t.Fatalf("windows = %+v, want primary and secondary", snapshot.Windows)
+	}
+	primary := snapshot.Windows[0]
+	if primary.Name != "primary" || primary.UsedPercent == nil || *primary.UsedPercent != 17 ||
+		primary.WindowMinutes == nil || *primary.WindowMinutes != 300 ||
+		primary.ResetsAt == nil || *primary.ResetsAt != 1782403604 {
+		t.Fatalf("primary window = %+v", primary)
+	}
+
+	wire, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatalf("marshal snapshot: %v", err)
+	}
+	for _, forbidden := range []string{"limit_id", "plan_type", "credits", "private"} {
+		if strings.Contains(string(wire), forbidden) {
+			t.Fatalf("snapshot leaked provider field %q: %s", forbidden, wire)
+		}
+	}
+}
+
+func TestCodexPlanLimitsMarksReachedWindowExhausted(t *testing.T) {
+	t.Parallel()
+
+	used := 93.0
+	minutes := int64(300)
+	got := codexPlanLimitsSnapshot(&codexRawRateLimits{
+		Primary:              &codexRawRateLimitWindow{UsedPercent: &used, WindowMinutes: &minutes},
+		RateLimitReachedType: "primary",
+	}, time.Time{})
+	if got == nil || got.Status != protocol.PlanLimitsStatusExhausted {
+		t.Fatalf("snapshot = %+v, want exhausted", got)
 	}
 }
 
