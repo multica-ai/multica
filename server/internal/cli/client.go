@@ -157,7 +157,12 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		WorkspaceID: workspaceID,
 		Token:       token,
-		HTTPClient:  &http.Client{Timeout: httpTimeout()},
+		HTTPClient: &http.Client{
+			Timeout: httpTimeout(),
+			// Retries live in the transport so every call site below gets
+			// them without having to opt in (FLU-65).
+			Transport: newRetryTransport(nil),
+		},
 	}
 }
 

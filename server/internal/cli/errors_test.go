@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"syscall"
@@ -36,7 +37,19 @@ func TestClassifyNetworkError(t *testing.T) {
 		{"dns string fallback", errors.New("dial tcp: lookup api.multica.ai: no such host"), KindNetworkDNS},
 		{"refused string fallback", errors.New("dial tcp 127.0.0.1:443: connect: connection refused"), KindNetworkRefused},
 		{"tls string fallback", errors.New("x509: certificate signed by unknown authority"), KindNetworkTLS},
-		{"offline catch-all", errors.New("write: connection reset by peer"), KindNetworkOffline},
+		// A reset means the connection was up and then broke. It used to fall
+		// into the offline catch-all, which told users to check a network
+		// that was working; it is now its own retryable kind (FLU-65).
+		{"reset is interrupted", errors.New("write: connection reset by peer"), KindNetworkInterrupted},
+		{"reset typed is interrupted", syscall.ECONNRESET, KindNetworkInterrupted},
+		{"broken pipe is interrupted", errors.New("write tcp 10.0.0.1:443: write: broken pipe"), KindNetworkInterrupted},
+		{"eof is interrupted", io.EOF, KindNetworkInterrupted},
+		{"unexpected eof is interrupted", errors.New("Post \"https://x\": unexpected EOF"), KindNetworkInterrupted},
+		{"goaway is interrupted", errors.New("http2: server sent GOAWAY and closed the connection"), KindNetworkInterrupted},
+		{"malformed status is interrupted", errors.New("malformed HTTP status code \"Server\""), KindNetworkInterrupted},
+		{"unreachable is offline", errors.New("dial tcp 10.0.0.1:443: connect: network is unreachable"), KindNetworkOffline},
+		{"no route is offline", syscall.EHOSTUNREACH, KindNetworkOffline},
+		{"offline catch-all", errors.New("something we have never seen"), KindNetworkOffline},
 		{"nil", nil, KindUnknown},
 	}
 	for _, tc := range cases {
@@ -80,7 +93,8 @@ func TestHTTPErrorKind(t *testing.T) {
 func TestFormatErrorAllKinds(t *testing.T) {
 	withLang(t, "") // default English
 	allKinds := []ErrorKind{
-		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline,
+		KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS,
+		KindNetworkInterrupted, KindNetworkOffline,
 		KindAuthRequired, KindForbidden, KindNotFound, KindConflict, KindValidation,
 		KindRateLimited, KindServerError, KindUnknown,
 	}
@@ -375,19 +389,20 @@ func withLang(t *testing.T, lang string) {
 
 func TestErrorKindString(t *testing.T) {
 	cases := map[ErrorKind]string{
-		KindNetworkTimeout: "network_timeout",
-		KindNetworkDNS:     "network_dns",
-		KindNetworkRefused: "network_refused",
-		KindNetworkTLS:     "network_tls",
-		KindNetworkOffline: "network_offline",
-		KindAuthRequired:   "auth_required",
-		KindForbidden:      "forbidden",
-		KindNotFound:       "not_found",
-		KindConflict:       "conflict",
-		KindValidation:     "validation",
-		KindRateLimited:    "rate_limited",
-		KindServerError:    "server_error",
-		KindUnknown:        "unknown",
+		KindNetworkTimeout:     "network_timeout",
+		KindNetworkDNS:         "network_dns",
+		KindNetworkRefused:     "network_refused",
+		KindNetworkTLS:         "network_tls",
+		KindNetworkInterrupted: "network_interrupted",
+		KindNetworkOffline:     "network_offline",
+		KindAuthRequired:       "auth_required",
+		KindForbidden:          "forbidden",
+		KindNotFound:           "not_found",
+		KindConflict:           "conflict",
+		KindValidation:         "validation",
+		KindRateLimited:        "rate_limited",
+		KindServerError:        "server_error",
+		KindUnknown:            "unknown",
 	}
 	seen := map[string]ErrorKind{}
 	for k, want := range cases {
