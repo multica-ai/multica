@@ -45,12 +45,18 @@ export interface TestTableIssue {
   number: number;
 }
 
+interface TestProject {
+  id: string;
+  title: string;
+}
+
 export class TestApiClient {
   private token: string | null = null;
   private workspaceSlug: string | null = null;
   private workspaceId: string | null = null;
   private email: string | null = null;
   private createdIssueIds: string[] = [];
+  private createdProjectIds: string[] = [];
   private seededIssueIds: string[] = [];
 
   async login(email: string, name: string) {
@@ -194,6 +200,19 @@ export class TestApiClient {
     return issue;
   }
 
+  async createProject(title: string, opts?: Record<string, unknown>): Promise<TestProject> {
+    const res = await this.authedFetch("/api/projects", {
+      method: "POST",
+      body: JSON.stringify({ title, ...opts }),
+    });
+    if (!res.ok) {
+      throw new Error(`create project failed: ${res.status} ${await res.text()}`);
+    }
+    const project = (await res.json()) as TestProject;
+    this.createdProjectIds.push(project.id);
+    return project;
+  }
+
   /**
    * Insert a large, deterministic issue fixture in one transaction.
    *
@@ -305,6 +324,10 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async deleteProject(id: string) {
+    await this.authedFetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
   async updateIssue(id: string, updates: Record<string, unknown>) {
     const res = await this.authedFetch(`/api/issues/${id}`, {
       method: "PUT",
@@ -339,6 +362,14 @@ export class TestApiClient {
       }
     }
     this.createdIssueIds = [];
+    for (const id of this.createdProjectIds) {
+      try {
+        await this.deleteProject(id);
+      } catch {
+        /* ignore — may already be deleted */
+      }
+    }
+    this.createdProjectIds = [];
   }
 
   getToken() {
