@@ -395,6 +395,8 @@
     "due_date_removed": "removed due date",
     "title_renamed": "renamed this issue from \"{{from}}\" to \"{{to}}\"",
     "description_updated": "updated the description",
+    "task_no_response_one": "finished without a text reply",
+    "task_no_response_other": "finished without a text reply ({{count}} times)",
     "task_completed_one": "completed the task",
     "task_completed_other": "completed the task ({{count}} times)",
     "task_failed_one": "task failed",
