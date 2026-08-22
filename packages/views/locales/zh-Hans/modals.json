@@ -113,6 +113,7 @@
     "members_group": "成员",
     "agents_group": "智能体",
     "no_results": "未找到结果",
+    "title_required": "请输入标题后再创建",
     "submit": "创建项目",
     "submitting": "创建中...",
     "toast_created": "已创建项目",

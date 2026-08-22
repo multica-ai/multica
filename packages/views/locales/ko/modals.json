@@ -113,6 +113,7 @@
     "members_group": "멤버",
     "agents_group": "에이전트",
     "no_results": "결과 없음",
+    "title_required": "만들려면 제목을 입력하세요",
     "submit": "프로젝트 만들기",
     "submitting": "만드는 중...",
     "toast_created": "프로젝트를 만들었습니다",
