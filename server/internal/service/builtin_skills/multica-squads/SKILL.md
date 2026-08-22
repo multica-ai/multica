@@ -180,6 +180,10 @@ Current behavior:
   — on those paths the protocol instead carries an explicit "do not change this
   issue's status".
 
+The status names above are category rules: a workspace may define custom
+statuses beyond the built-ins, and each one inherits its category's behavior in
+full (the runtime brief lists the workspace catalog when any exist).
+
 Assignment validation rejects a missing type/id pair, non-existent squad,
 archived squad, archived leader, and private leader when the actor cannot access
 it.

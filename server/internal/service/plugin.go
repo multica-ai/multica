@@ -7,12 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -24,28 +22,24 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
-// LocalSourcePrefix installs from MULTICA_PLUGIN_DIR instead of the network.
-// Self-hosted operators and plugin authors need a loop that does not require
-// publishing to a public HTTPS host first.
-const LocalSourcePrefix = "local:"
-
-// PluginService owns plugin installation, configuration, and plugin-owned
-// state.
+// PluginService owns plugin publishing, installation, configuration, and
+// plugin-owned state.
 type PluginService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
 	// Secrets encrypts `secret` config values. Nil disables secret writes so a
 	// misconfigured deployment fails closed instead of storing plaintext.
 	Secrets *secretbox.Box
-	// LocalDir is MULTICA_PLUGIN_DIR. Empty disables local sources.
+	// LocalDir is MULTICA_PLUGIN_DIR: a directory of plugin sources an author
+	// can publish from without zipping and uploading after every edit. Empty
+	// disables the development publish channel.
 	LocalDir string
-	// DevOrigins is MULTICA_PLUGIN_DEV_ORIGINS: origins a plugin author may
-	// serve a manifest from while building one, typically a localhost static
-	// server. Empty in every deployment that has not opted in, which is the
-	// only reason it is safe to skip the public-HTTPS guard for them.
+	// DevOrigins is MULTICA_PLUGIN_DEV_ORIGINS: hook endpoint origins an author
+	// may point a plugin at while building one, typically a localhost server.
+	// Empty in every deployment that has not opted in, which is the only reason
+	// it is safe to skip the public-HTTPS guard for them.
 	DevOrigins []string
 	// Host gates which declared contributions this build can actually run.
 	Host plugincontract.Capabilities
@@ -161,10 +155,17 @@ func pluginErrf(kind PluginErrorKind, format string, args ...any) *PluginError {
 // manifest text plus the scope list: there is no signature, no trust tier, and
 // no publisher verification in this model, so the administrator reading the
 // scopes IS the trust decision.
+//
+// What it describes is one published version, and installing binds to that same
+// version — so unlike the URL model this replaced, the code approved here is the
+// code that runs.
 type PluginPreview struct {
 	Manifest     plugincontract.Manifest `json:"manifest"`
 	Scopes       []string                `json:"scopes"`
 	ConfigSchema []PluginConfigField     `json:"config_schema"`
+	VersionID    string                  `json:"version_id"`
+	Version      string                  `json:"version"`
+	Digest       string                  `json:"digest"`
 	// Upgrade describes what changes if this replaces an existing install.
 	Installed        bool     `json:"installed"`
 	InstalledVersion string   `json:"installed_version,omitempty"`
@@ -202,44 +203,19 @@ func ConfigFieldsForManifest(manifest plugincontract.Manifest) []PluginConfigFie
 	return fields
 }
 
-// FetchManifest resolves a source URL to a parsed manifest.
+// ManifestForVersion decodes the manifest a published version froze at publish
+// time.
 //
-// Network sources reuse the Remote MCP endpoint guard: public HTTPS only, no
-// userinfo/query/fragment, private and metadata address ranges refused, and the
-// dialer re-checks the resolved address so a DNS rebind between validation and
-// connection cannot reach an internal host.
-func (s *PluginService) FetchManifest(ctx context.Context, sourceURL string) (plugincontract.Manifest, []byte, error) {
-	sourceURL = strings.TrimSpace(sourceURL)
-	if sourceURL == "" {
-		return plugincontract.Manifest{}, nil, pluginErrf(PluginErrorInvalid, "source_url is required")
+// Nothing is fetched. The manifest, the surface scripts and the skill text were
+// all validated together when the author published, and they are read back
+// together — an installation cannot end up consenting to one version's manifest
+// while running another version's code.
+func ManifestForVersion(version db.PluginPackageVersion) (plugincontract.Manifest, []byte, error) {
+	var manifest plugincontract.Manifest
+	if err := json.Unmarshal(version.Manifest, &manifest); err != nil {
+		return plugincontract.Manifest{}, nil, &PluginError{Kind: PluginErrorInvalid, Message: "published plugin manifest is unreadable", Err: err}
 	}
-	if len(sourceURL) > 2048 {
-		return plugincontract.Manifest{}, nil, pluginErrf(PluginErrorInvalid, "source_url is too long")
-	}
-
-	var raw []byte
-	var err error
-	switch {
-	case strings.HasPrefix(sourceURL, LocalSourcePrefix):
-		raw, err = s.readLocalManifest(strings.TrimPrefix(sourceURL, LocalSourcePrefix))
-	case s.isDevOrigin(sourceURL):
-		// Explicitly opted in by the operator, so the public-HTTPS guard is
-		// skipped rather than worked around. This is what makes iterating on a
-		// surface possible: the author serves it from localhost and installs by
-		// URL, exactly as a published plugin would be.
-		raw, err = fetchDevManifest(ctx, sourceURL)
-	default:
-		raw, err = fetchRemoteManifest(ctx, sourceURL)
-	}
-	if err != nil {
-		return plugincontract.Manifest{}, nil, err
-	}
-
-	manifest, canonical, parseErr := plugincontract.ParseManifest(raw)
-	if parseErr != nil {
-		return plugincontract.Manifest{}, nil, &PluginError{Kind: PluginErrorInvalid, Message: "plugin manifest is invalid", Err: parseErr}
-	}
-	return manifest, canonical, nil
+	return manifest, version.Manifest, nil
 }
 
 // parseDevOrigins reads the opt-in list. Anything that is not a bare origin is
@@ -281,85 +257,15 @@ func (s *PluginService) isDevOrigin(sourceURL string) bool {
 	return false
 }
 
-// fetchDevManifest is the opted-in path: an ordinary bounded GET with no SSRF
-// guard, because the operator named this exact origin.
-func fetchDevManifest(ctx context.Context, sourceURL string) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+// PreviewPlugin reads a published version's manifest without writing anything.
+// It is the first half of the two-step install: the administrator must see the
+// scopes before an installation row exists.
+func (s *PluginService) PreviewPlugin(ctx context.Context, workspaceID pgtype.UUID, versionID string) (*PluginPreview, error) {
+	version, err := s.VersionForWorkspace(ctx, workspaceID, versionID)
 	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "build manifest request", Err: err}
+		return nil, err
 	}
-	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "fetch plugin manifest", Err: err}
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, pluginErrf(PluginErrorUnavailable, "plugin manifest request returned HTTP %d", response.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, plugincontract.MaxManifestSize+1))
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "read plugin manifest", Err: err}
-	}
-	if len(raw) > plugincontract.MaxManifestSize {
-		return nil, pluginErrf(PluginErrorInvalid, "plugin manifest exceeds %d bytes", plugincontract.MaxManifestSize)
-	}
-	return raw, nil
-}
-
-func (s *PluginService) readLocalManifest(name string) ([]byte, error) {
-	if s.LocalDir == "" {
-		return nil, pluginErrf(PluginErrorInvalid, "local plugin sources require MULTICA_PLUGIN_DIR")
-	}
-	// The name indexes a directory the operator already controls, but it still
-	// arrives over the API, so it must not be able to escape the configured
-	// root or name a dotfile path.
-	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") {
-		return nil, pluginErrf(PluginErrorInvalid, "local plugin source must be a single directory name under MULTICA_PLUGIN_DIR")
-	}
-	path := filepath.Join(s.LocalDir, name, plugincontract.ManifestFilename)
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, pluginErrf(PluginErrorNotFound, "no %s found for local plugin %q", plugincontract.ManifestFilename, name)
-	}
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "read local plugin manifest", Err: err}
-	}
-	return raw, nil
-}
-
-func fetchRemoteManifest(ctx context.Context, sourceURL string) ([]byte, error) {
-	endpoint, err := remotemcp.ValidatePublicHTTPSEndpoint(ctx, sourceURL, nil, nil)
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "source_url must be a plain public HTTPS URL", Err: err}
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "build manifest request", Err: err}
-	}
-	request.Header.Set("Accept", "application/json")
-	response, err := remotemcp.NewSecureHTTPClient(endpoint).Do(request)
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "fetch plugin manifest", Err: err}
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return nil, pluginErrf(PluginErrorUnavailable, "plugin manifest request returned HTTP %d", response.StatusCode)
-	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, plugincontract.MaxManifestSize+1))
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "read plugin manifest", Err: err}
-	}
-	if len(raw) > plugincontract.MaxManifestSize {
-		return nil, pluginErrf(PluginErrorInvalid, "plugin manifest exceeds %d bytes", plugincontract.MaxManifestSize)
-	}
-	return raw, nil
-}
-
-// PreviewPlugin fetches and parses a manifest without writing anything. It is
-// the first half of the two-step install: the administrator must see the scopes
-// before an installation row exists.
-func (s *PluginService) PreviewPlugin(ctx context.Context, workspaceID pgtype.UUID, sourceURL string) (*PluginPreview, error) {
-	manifest, _, err := s.FetchManifest(ctx, sourceURL)
+	manifest, _, err := ManifestForVersion(version)
 	if err != nil {
 		return nil, err
 	}
@@ -371,6 +277,9 @@ func (s *PluginService) PreviewPlugin(ctx context.Context, workspaceID pgtype.UU
 		Manifest:     manifest,
 		Scopes:       manifest.Scopes,
 		ConfigSchema: ConfigFieldsForManifest(manifest),
+		VersionID:    uuidString(version.ID),
+		Version:      version.Version,
+		Digest:       version.Digest,
 	}
 	existing, err := s.Queries.GetWorkspacePluginInstallationByKey(ctx, db.GetWorkspacePluginInstallationByKeyParams{
 		WorkspaceID: workspaceID,
@@ -423,8 +332,17 @@ func decodeScopes(raw []byte) []string {
 // manifest exactly: partial consent would leave the plugin silently broken, and
 // consenting to a scope the manifest does not request would grant access the
 // administrator was never shown a reason for.
-func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID pgtype.UUID, sourceURL string, grantedScopes []string) (db.PluginInstallation, error) {
-	manifest, canonical, err := s.FetchManifest(ctx, sourceURL)
+//
+// The installation is bound to one published version. A later publish creates
+// another version and does not touch this row — upgrading is a second, explicit
+// consent, which is what makes "approved the manifest, ran the code" a true
+// statement rather than an aspiration.
+func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID pgtype.UUID, versionID string, grantedScopes []string) (db.PluginInstallation, error) {
+	version, err := s.VersionForWorkspace(ctx, workspaceID, versionID)
+	if err != nil {
+		return db.PluginInstallation{}, err
+	}
+	manifest, canonical, err := ManifestForVersion(version)
 	if err != nil {
 		return db.PluginInstallation{}, err
 	}
@@ -454,11 +372,21 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 		defer func() { _ = tx.Rollback(ctx) }()
 		queries := s.Queries.WithTx(tx)
 
+		if lockErr := lockPluginPackageKey(ctx, queries, workspaceID, manifest.Key); lockErr != nil {
+			return db.PluginInstallation{}, lockErr
+		}
+		if recheckErr := requireVersionStillPublished(ctx, queries, workspaceID, version.ID); recheckErr != nil {
+			return db.PluginInstallation{}, recheckErr
+		}
+
 		installation, createErr := queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
-			WorkspaceID:   workspaceID,
-			PluginKey:     manifest.Key,
-			SourceUrl:     sourceURL,
-			Version:       manifest.Version,
+			WorkspaceID:      workspaceID,
+			PluginKey:        manifest.Key,
+			PackageVersionID: version.ID,
+			// The published version string, not the manifest's: a development
+			// publish lands under a `+dev.N` suffix, and the settings page has to
+			// name the version that actually exists.
+			Version:       version.Version,
 			Manifest:      canonical,
 			GrantedScopes: scopesJSON,
 			InstalledBy:   userID,
@@ -471,7 +399,7 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 			}
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "install plugin", Err: createErr}
 		}
-		if skillErr := s.InstallSkillResources(ctx, queries, installation, manifest, sourceURL, userID); skillErr != nil {
+		if skillErr := s.InstallSkillResources(ctx, queries, installation, manifest, userID); skillErr != nil {
 			return db.PluginInstallation{}, skillErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
@@ -501,18 +429,25 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	defer func() { _ = tx.Rollback(ctx) }()
 	queries := s.Queries.WithTx(tx)
 
+	if err := lockPluginPackageKey(ctx, queries, workspaceID, manifest.Key); err != nil {
+		return db.PluginInstallation{}, err
+	}
+	if err := requireVersionStillPublished(ctx, queries, workspaceID, version.ID); err != nil {
+		return db.PluginInstallation{}, err
+	}
+
 	for _, key := range orphanedSecrets {
 		if _, err := queries.DeletePluginSecret(ctx, db.DeletePluginSecretParams{InstallationID: existing.ID, Key: key}); err != nil {
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "prune plugin secret", Err: err}
 		}
 	}
 	updated, err := queries.UpdatePluginInstallationManifest(ctx, db.UpdatePluginInstallationManifestParams{
-		ID:            existing.ID,
-		SourceUrl:     sourceURL,
-		Version:       manifest.Version,
-		Manifest:      canonical,
-		GrantedScopes: scopesJSON,
-		Config:        config,
+		ID:               existing.ID,
+		PackageVersionID: version.ID,
+		Version:          version.Version,
+		Manifest:         canonical,
+		GrantedScopes:    scopesJSON,
+		Config:           config,
 	})
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "upgrade plugin", Err: err}
@@ -520,7 +455,7 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	// Re-run on upgrade so a changed SKILL.md takes effect and a dropped one is
 	// pruned. Same transaction as the manifest snapshot: the two must never
 	// disagree about what this version contributes.
-	if err := s.InstallSkillResources(ctx, queries, updated, manifest, sourceURL, userID); err != nil {
+	if err := s.InstallSkillResources(ctx, queries, updated, manifest, userID); err != nil {
 		return db.PluginInstallation{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -823,32 +758,4 @@ func (s *PluginService) InstallationForWorkspace(ctx context.Context, workspaceI
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "load plugin installation", Err: err}
 	}
 	return installation, nil
-}
-
-// readLocalFile reads a file from inside a local plugin directory.
-//
-// Same containment as readLocalManifest, plus one more: the joined path is
-// re-checked against the plugin's own directory after cleaning. `entry` is
-// validated at manifest-parse time to be relative and traversal-free, but this
-// is the layer that touches the filesystem and it does not get to assume that.
-func (s *PluginService) readLocalFile(name, entry string) ([]byte, error) {
-	if s.LocalDir == "" {
-		return nil, pluginErrf(PluginErrorInvalid, "local plugin sources require MULTICA_PLUGIN_DIR")
-	}
-	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") {
-		return nil, pluginErrf(PluginErrorInvalid, "local plugin source must be a single directory name under MULTICA_PLUGIN_DIR")
-	}
-	root := filepath.Join(s.LocalDir, name)
-	path := filepath.Clean(filepath.Join(root, entry))
-	if path != root && !strings.HasPrefix(path, root+string(os.PathSeparator)) {
-		return nil, pluginErrf(PluginErrorInvalid, "plugin resource %q escapes its directory", entry)
-	}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, pluginErrf(PluginErrorNotFound, "plugin resource %q was not found", entry)
-	}
-	if err != nil {
-		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "read plugin resource", Err: err}
-	}
-	return raw, nil
 }

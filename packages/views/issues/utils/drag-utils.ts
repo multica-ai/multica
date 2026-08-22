@@ -11,7 +11,7 @@ import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "position"
+  "status" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
 
 export type DragMoveUpdates = DragMoveTargetUpdates & {
@@ -48,6 +48,12 @@ export function assigneeGroupId(
   return type && id ? `assignee:${type}:${id}` : UNASSIGNED_GROUP_ID;
 }
 
+/** Mirrors the server's project group key (`project:<id>` / `project:none`)
+ *  so a column built from a descriptor and one built from a card agree. */
+export function projectGroupId(projectId: string | null): string {
+  return `project:${projectId ?? "none"}`;
+}
+
 export function getIssueGroupId(
   issue: Issue,
   grouping: IssueGrouping,
@@ -58,6 +64,7 @@ export function getIssueGroupId(
   // column has, and the card was dropped from the board/list entirely
   // (MUL-6409).
   if (grouping === "status") return statusGroupId(issueColumnCategory(issue));
+  if (grouping === "project") return projectGroupId(issue.project_id ?? null);
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) {
     const value = issue.properties?.[propertyId];
@@ -153,6 +160,9 @@ export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolea
     const optionId = typeof value === "string" ? value : null;
     return optionId === (group.propertyOptionId ?? null);
   }
+  if (group.projectId !== undefined) {
+    return (issue.project_id ?? null) === group.projectId;
+  }
   return (
     (issue.assignee_type ?? null) === (group.assigneeType ?? null) &&
     (issue.assignee_id ?? null) === (group.assigneeId ?? null)
@@ -180,6 +190,9 @@ export function getMoveUpdates(
   // Property columns: the value change is not part of UpdateIssueRequest —
   // the board applies it through useSetIssueProperty after the position move.
   if (group.propertyId !== undefined) return { position };
+  if (group.projectId !== undefined) {
+    return { project_id: group.projectId, position };
+  }
   return {
     assignee_type: group.assigneeType ?? null,
     assignee_id: group.assigneeId ?? null,

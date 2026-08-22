@@ -14,7 +14,13 @@ multica.ui.resize(320);
 
 ## What a surface is
 
-An ordinary script in a sandboxed iframe.
+**One** script in a sandboxed iframe.
+
+Bundle this SDK and everything else your surface needs into a single file. There
+is no module graph: you publish an artifact, Multica stores it and inlines your
+entry into the document it generates, so there is no origin for a top-level
+`import` to resolve against. Publishing refuses an entry that has one rather
+than letting it fail later in a reader's browser.
 
 The frame is mounted with `sandbox="allow-scripts"` and **not**
 `allow-same-origin`, so it has an opaque origin. Consequences worth knowing
@@ -27,9 +33,20 @@ before you write one:
   directly, that backend must accept a null origin in CORS.
 - **A CSP you did not write.** The host generates the document and derives
   `connect-src` from the `net:` scopes in your manifest. Declare every host you
-  intend to reach; a surface with no `net:` scope cannot make network requests
-  at all. `net:` is an exact host — declare `net:api.example.com` separately from
-  `net:example.com`.
+  intend to reach; with no `net:` scope your surface cannot issue a network
+  request at all, including back to your own origin, which is no longer in the
+  policy now that Multica serves your code. `net:` is an exact host, so declare
+  `net:api.example.com` separately from `net:example.com`.
+
+## Publishing
+
+Zip the manifest with every file it names and upload it in **Settings →
+Plugins**. You need no server of your own for the frontend; hook endpoints and
+MCP servers are still yours to run.
+
+A published version is immutable. Installing binds a workspace to one version,
+and publishing a new one changes nothing there until an administrator upgrades —
+so what they approved on the consent screen is what their browsers run.
 
 ## What you can do, and what bounds it
 

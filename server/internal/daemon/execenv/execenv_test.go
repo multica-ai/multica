@@ -6284,7 +6284,7 @@ func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
 		t.Fatalf("seed env root: %v", err)
 	}
-	if err := writeEnvRootOwnerExclusive(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
+	if err := writeEnvRootOwner(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
 	survivor := filepath.Join(envRoot, "workdir", "other-task-work.txt")
@@ -6331,6 +6331,10 @@ func TestPrepareResetsItsOwnEnvRoot(t *testing.T) {
 	if err := os.WriteFile(stale, []byte("from the previous run"), 0o644); err != nil {
 		t.Fatalf("seed stale file: %v", err)
 	}
+	// End the first execution. A rerun only reaches the reset path once the
+	// previous execution has released the env root; an overlapping one is
+	// refused, which TestPrepareRefusesOverlappingExecutionOfSameTask covers.
+	first.ReleaseLock()
 
 	second, err := Prepare(PrepareParams{
 		WorkspacesRoot: workspacesRoot,
@@ -6435,7 +6439,7 @@ func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
+	if _, _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
 		t.Fatal("claimEnvRoot took a directory holding files with no owner")
 	} else if !strings.Contains(err.Error(), "names no owning task") {
 		t.Fatalf("error = %v, want it to explain the missing owner", err)
@@ -6455,14 +6459,160 @@ func TestClaimEnvRootAdoptsEmptyDirectory(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
-	fresh, err := claimEnvRoot(envRoot, id)
+	lock, reset, err := claimEnvRoot(envRoot, id)
 	if err != nil {
 		t.Fatalf("claimEnvRoot on an empty directory: %v", err)
 	}
-	if !fresh {
-		t.Fatal("adopting an empty directory should report a fresh claim")
+	defer releaseLockFile(lock)
+	if reset {
+		t.Fatal("adopting an empty directory should not ask for a reset")
 	}
 	if owner, _ := readEnvRootOwner(envRoot); owner != id {
 		t.Fatalf("owner = %q, want %q", owner, id)
+	}
+}
+
+// prepareSameTask is a helper for the stale-dispatch regressions below: two
+// executions of ONE task id, which is what the server actually re-delivers.
+func prepareSameTask(t *testing.T, workspacesRoot, taskID string) (*Environment, error) {
+	t.Helper()
+	return Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-redispatch",
+		TaskID:         taskID,
+		AgentName:      "Redispatch",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+}
+
+// TestPrepareRefusesOverlappingExecutionOfSameTask covers the gap review found
+// after the identity marker landed: the marker answers WHO owns an env root,
+// not whether that owner is still running, so "owner == my task id" was read as
+// "my own rerun, safe to reset".
+//
+// That is reachable, not theoretical. ReclaimStaleDispatchedTaskForRuntime
+// re-delivers a task row whose prepare lease expired using the SAME task id,
+// and a failing lease renewal only logs — it does not cancel the Prepare still
+// in flight. The re-delivered execution would then wipe the running one's
+// workdir, config and worktree: the very cross-execution deletion the env-root
+// claim exists to prevent, arriving through the one door it left open.
+func TestPrepareRefusesOverlappingExecutionOfSameTask(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	live, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	defer live.Cleanup(true)
+
+	inFlight := filepath.Join(live.WorkDir, "in-flight.txt")
+	if err := os.WriteFile(inFlight, []byte("still running"), 0o644); err != nil {
+		t.Fatalf("seed in-flight work: %v", err)
+	}
+
+	// The stale-dispatch reclaim arrives while the first execution is running.
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err == nil {
+		second.Cleanup(true)
+		t.Fatal("a second execution of the same task took over a live env root")
+	}
+	if !strings.Contains(err.Error(), "running execution") {
+		t.Fatalf("error = %v, want it to name the live execution", err)
+	}
+	if _, statErr := os.Stat(inFlight); statErr != nil {
+		t.Fatalf("the re-dispatched execution destroyed live work: %v", statErr)
+	}
+}
+
+// TestPrepareResetsAfterPriorExecutionEnded is the other half: once the earlier
+// execution is gone, the same task id must still be able to recover. The lock
+// is what distinguishes the two cases, and the kernel drops it when the holder
+// exits, so no stale-state cleanup path is needed for a crashed execution.
+func TestPrepareResetsAfterPriorExecutionEnded(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	stale := filepath.Join(first.WorkDir, "stale.txt")
+	if err := os.WriteFile(stale, []byte("left behind"), 0o644); err != nil {
+		t.Fatalf("seed stale work: %v", err)
+	}
+	// The execution ends without tearing the directory down — a crash, from the
+	// next execution's point of view.
+	first.ReleaseLock()
+
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("recovery execution refused a released env root: %v", err)
+	}
+	defer second.Cleanup(true)
+	if _, statErr := os.Stat(stale); !os.IsNotExist(statErr) {
+		t.Fatalf("recovery did not reset the env root; stale file still present (%v)", statErr)
+	}
+}
+
+// TestClaimEnvRootRepairsTornOwnerMarker covers the reliability note from the
+// same review: the marker used to be created empty and written a moment later,
+// so a crash in between left a zero-length marker. That read back as "no
+// owner", while the marker itself counted as directory content — so the env
+// root could never be adopted OR reset, and stayed wedged until someone
+// deleted it by hand.
+//
+// Holding the lock before reading the marker is what makes repair safe: no
+// other execution can be mid-claim, so an unnamed marker can simply be
+// rewritten.
+func TestClaimEnvRootRepairsTornOwnerMarker(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, envRootOwnerFile), nil, 0o644); err != nil {
+		t.Fatalf("seed torn marker: %v", err)
+	}
+
+	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	lock, _, err := claimEnvRoot(envRoot, id)
+	if err != nil {
+		t.Fatalf("claimEnvRoot wedged on a torn marker: %v", err)
+	}
+	defer releaseLockFile(lock)
+	if owner, _ := readEnvRootOwner(envRoot); owner != id {
+		t.Fatalf("owner = %q, want the repairing task %q", owner, id)
+	}
+}
+
+// TestReleaseLockFreesEnvRootForALaterDispatch pins the lifetime rule that
+// Windows CI surfaced: the lock belongs to the task EXECUTION, and nothing in
+// production calls Environment.Cleanup — the GC reclaims env roots on its own
+// schedule. A lock released only by Cleanup would therefore be held until the
+// daemon exited, fail-closing every later dispatch of that task and, on
+// Windows, pinning the directory against removal. The daemon defers
+// ReleaseLock for the task run; this covers the contract it relies on.
+func TestReleaseLockFreesEnvRootForALaterDispatch(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	first.ReleaseLock()
+	first.ReleaseLock() // idempotent: Cleanup may release the same lock again
+
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("later dispatch was refused after the lock was released: %v", err)
+	}
+	// Cleanup must stay safe on an already-released lock.
+	if err := second.Cleanup(true); err != nil {
+		t.Fatalf("cleanup after release: %v", err)
 	}
 }

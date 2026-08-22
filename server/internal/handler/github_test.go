@@ -42,6 +42,11 @@ func TestExtractIdentifiers(t *testing.T) {
 			want: []string{"MUL-1510"},
 		},
 		{
+			name: "single_character_prefix",
+			in:   []string{"H-412: fix widget parity"},
+			want: []string{"H-412"},
+		},
+		{
 			name: "title_and_body",
 			in:   []string{"Fix MUL-82", "Closes MUL-1510 and ABC-7", ""},
 			want: []string{"MUL-82", "MUL-1510", "ABC-7"},
@@ -88,6 +93,11 @@ func TestExtractClosingIdentifiers(t *testing.T) {
 			name: "single_closes",
 			in:   []string{"", "Closes MUL-1"},
 			want: []string{"MUL-1"},
+		},
+		{
+			name: "single_character_prefix",
+			in:   []string{"", "Closes H-412"},
+			want: []string{"H-412"},
 		},
 		{
 			name: "all_keyword_inflections",

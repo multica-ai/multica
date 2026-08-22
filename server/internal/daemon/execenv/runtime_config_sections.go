@@ -266,7 +266,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	// create an unaware cross-issue run, and agents cannot discover the safe
 	// ownership-only --no-start path if the command is hidden behind --help.
 	b.WriteString("- `multica issue assign <id> (--to X | --to-id <uuid> | --unassign) [--no-start]` — change ownership. On assign/update/status, `--no-start` records the change without starting another run — use it when the work is already underway.\n")
-	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
+	writeIssueStatusCommand(b, ctx)
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`; see `## Comment Formatting` for why. `multica issue comment add --help` for full flags.\n")
 	b.WriteString("- `multica issue metadata list <issue-id> [--output json]` — list KV metadata.\n")
@@ -283,6 +283,75 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.IsSquadLeader {
 		b.WriteString("### Squad maintenance\n")
 		b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — change role in place (use this instead of remove+add).\n\n")
+	}
+}
+
+// briefStatusCategoryOrder is the category order the catalog block renders in:
+// the board's category rank (matching ListIssueStatusEntries' ORDER BY), NOT
+// the static line's historical enumeration order. Local to the brief on
+// purpose — importing the issuestatus package would pull the db package into
+// execenv for a 7-element constant.
+var briefStatusCategoryOrder = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
+
+// writeIssueStatusCommand emits the `multica issue status` bullet.
+//
+// With no custom statuses on the claim (the overwhelmingly common case, and
+// every old-server case) it emits the exact pre-MUL-6460 line — byte-identical
+// so existing deployments see no brief change and no prompt-cache loss.
+//
+// With custom statuses it replaces the seven-value enumeration with the
+// workspace's catalog, grouped by category. Category is the anchor an agent
+// reasons from — the semantic rules in `## Workflow` are category rules, and a
+// custom status inherits its category's platform behavior in full — so each
+// line leads with the category key, then the statuses inside it. Name and
+// description ride along because instructions and users refer to statuses by
+// display name ("move it to Human Review"), and the description is the
+// admin's disambiguator when a category holds more than one status.
+//
+// Name/description are user-authored: they pass through
+// sanitizeNameForBriefMarkdown so a crafted status name cannot inject
+// headings or break out of the surrounding inline markdown. Keys are
+// CHECK-constrained server-side; sanitizeBriefCodeToken is defense-in-depth,
+// and an entry whose key fails it is dropped rather than rendered mangled.
+func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.IssueStatuses) == 0 {
+		b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
+		return
+	}
+	byCategory := make(map[string][]IssueStatusForEnv, len(briefStatusCategoryOrder))
+	for _, s := range ctx.IssueStatuses {
+		if sanitizeBriefCodeToken(s.Key) == "" {
+			continue
+		}
+		byCategory[s.Category] = append(byCategory[s.Category], s)
+	}
+	b.WriteString("- `multica issue status <id> <status> [--no-start]` — flip status. This workspace's statuses by category — a custom status inherits its category's platform behavior in full:\n")
+	builtInOnly := make([]string, 0, len(briefStatusCategoryOrder))
+	for _, category := range briefStatusCategoryOrder {
+		customs := byCategory[category]
+		if len(customs) == 0 {
+			builtInOnly = append(builtInOnly, "`"+category+"`")
+			continue
+		}
+		fmt.Fprintf(b, "  - `%s`: `%s` (built-in)", category, category)
+		for _, s := range customs {
+			name := sanitizeNameForBriefMarkdown(s.Name)
+			desc := sanitizeNameForBriefMarkdown(s.Description)
+			fmt.Fprintf(b, ", `%s`", sanitizeBriefCodeToken(s.Key))
+			switch {
+			case name != "" && desc != "":
+				fmt.Fprintf(b, " (%s — %s)", name, desc)
+			case name != "":
+				fmt.Fprintf(b, " (%s)", name)
+			}
+		}
+		b.WriteString("\n")
+	}
+	if len(builtInOnly) > 0 {
+		fmt.Fprintf(b, "  - Built-in key only: %s.\n", strings.Join(builtInOnly, ", "))
+	}
+	if ctx.IssueStatusesOmitted > 0 {
+		fmt.Fprintf(b, "  - …and %d more custom statuses not listed; an invalid status errors with the full valid list.\n", ctx.IssueStatusesOmitted)
 	}
 }
 
@@ -636,6 +705,13 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- You cannot proceed without something you are missing → `blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n")
 	if ctx.IsSquadLeader {
 		b.WriteString("- Squad leader: dispatching members is not delivery — a dispatch turn leaves the parent `in_progress`, and it moves to `in_review` only on the later turn (a member update or stage-barrier re-trigger) where you confirm the overall goal is met.\n")
+	}
+	// Emitted only when the workspace has custom statuses (MUL-6460): the
+	// bullets above stay category rules and need no rewording, but the agent
+	// needs the bridge from "category rule" to "which specific status key to
+	// write" when a category holds more than one.
+	if len(ctx.IssueStatuses) > 0 {
+		b.WriteString("- The status rules above are category rules — every status in this workspace's catalog (`## Available Commands`) inherits them from its category. When a category holds more than one status, pick the specific one by its name/description or your instructions.\n")
 	}
 	b.WriteString("- Your turn produced none of the issue's own deliverable — you answered a question or consulted on work owned elsewhere → write nothing, at any point; questions, discussion, and acknowledgements never touch status. This no-write default is what keeps concurrent runs from flapping the board.\n\n")
 }

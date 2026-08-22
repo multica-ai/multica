@@ -2019,10 +2019,27 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
+			// gateResumeToReusedWorkdir compares directory IDENTITY, not path
+			// spelling, so the table's paths have to exist on disk. Mapping
+			// them under one temp root preserves each case's same/different
+			// relationship while making them real.
+			base := t.TempDir()
+			realize := func(p string) string {
+				if p == "" {
+					return ""
+				}
+				real := filepath.Join(base, filepath.FromSlash(strings.TrimPrefix(p, "/")))
+				if err := os.MkdirAll(real, 0o755); err != nil {
+					t.Fatalf("create %s: %v", real, err)
+				}
+				return real
+			}
+			priorDir, envDir := realize(tt.priorDir), realize(tt.envDir)
+
+			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, !tt.sessionHomeUnreachable, slog.Default())
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, envDir, !tt.sessionHomeUnreachable, slog.Default())
 
 			if reused != tt.wantReused {
 				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)

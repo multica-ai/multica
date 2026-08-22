@@ -53,6 +53,9 @@ func TestSend(t *testing.T) {
 	if res.MessageID != "1700000000.111111" {
 		t.Errorf("MessageID = %q", res.MessageID)
 	}
+	if len(res.MessageIDs) != 1 || res.MessageIDs[0] != "1700000000.111111" {
+		t.Errorf("MessageIDs = %v", res.MessageIDs)
+	}
 	if gotForm.Get("channel") != "C123" || gotForm.Get("text") != "reply body" {
 		t.Errorf("posted channel/text = %q / %q", gotForm.Get("channel"), gotForm.Get("text"))
 	}

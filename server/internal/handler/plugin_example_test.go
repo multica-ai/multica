@@ -172,8 +172,13 @@ func installExamplePlugin(t *testing.T, servers exampleServers) string {
 	plugins.CallbackBaseURL = "https://multica.test/api/v1/plugin"
 	t.Cleanup(func() { *plugins = previous })
 
+	// Publishing is what validates the whole artifact: the manifest, the surface
+	// script, and the SKILL.md all have to be there and be loadable. The example
+	// is the file a plugin author copies, so this is the check that keeps it
+	// runnable rather than merely well-formed.
+	versionID := publishLocalPlugin(t, "deploy-sentinel")
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     service.LocalSourcePrefix + "deploy-sentinel",
+		"version_id":     versionID,
 		"granted_scopes": scopes,
 	})
 	recorder := httptest.NewRecorder()

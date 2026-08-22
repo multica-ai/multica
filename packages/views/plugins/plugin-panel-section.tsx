@@ -49,6 +49,7 @@ export function PluginPanelSection({ issueId }: { issueId: string }) {
       {panels.map(({ installation, surface }) => (
         <PluginSurfaceFrame
           key={`${installation.id}:${surface.key}`}
+          wsId={wsId}
           installation={installation}
           surface={surface}
           issueId={issueId}

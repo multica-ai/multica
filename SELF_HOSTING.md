@@ -8,7 +8,7 @@ Deploy Multica on your own infrastructure in minutes.
 |-----------|-------------|------------|
 | **Backend** | REST API + WebSocket server | Go (single binary) |
 | **Frontend** | Web application | Next.js 16 |
-| **Database** | Primary data store | PostgreSQL 17 with pgvector |
+| **Database** | Primary data store | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
 
 Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
