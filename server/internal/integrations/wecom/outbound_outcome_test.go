@@ -1,0 +1,271 @@
+package wecom
+
+// outbound_outcome_test.go — that every branch which ends a turn without
+// putting words in front of the user now names itself.
+//
+// The point is not that these branches exist; most of them are correct. It is
+// that they used to be indistinguishable from outside. One symptom — the answer
+// is in the Multica transcript, the WeCom chat stayed quiet — with five
+// different causes and no way to tell which fired, is a report that can be
+// argued about but not settled.
+
+import (
+	"bytes"
+	"log/slog"
+	"strings"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/multica-ai/multica/server/internal/events"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+const (
+	outcomeSession = "22222222-2222-2222-2222-222222222222"
+	outcomeTask    = "33333333-3333-3333-3333-333333333333"
+)
+
+// outcomeRig is one subscriber with a live socket, its log, and its counters.
+// The socket is live in every case here, so nothing a test observes can be
+// blamed on connectivity.
+type outcomeRig struct {
+	o    *Outbound
+	conn *recordingConn
+	logs *bytes.Buffer
+	mx   *countingMetrics
+}
+
+func newOutcomeRig(t *testing.T, q *fakeOutboundQueries, withSocket bool) *outcomeRig {
+	t.Helper()
+	r := &outcomeRig{logs: &bytes.Buffer{}, mx: newCountingMetrics()}
+	reg := newSendersRegistry()
+	instID := mustTestUUID(t)
+	if withSocket {
+		r.conn = &recordingConn{}
+		reg.set(instID, r.conn.autoAck(newWSSender(r.conn, nil)))
+	}
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	r.o = NewOutbound(q, reg,
+		slog.New(slog.NewTextHandler(r.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		WithOutboundMetrics(r.mx))
+	return r
+}
+
+func (r *outcomeRig) frames() int {
+	if r.conn == nil {
+		return 0
+	}
+	r.conn.mu.Lock()
+	defer r.conn.mu.Unlock()
+	return len(r.conn.frames)
+}
+
+// deliverableTurn is a completed turn that has every right to be delivered:
+// bound session, active installation, asked in the room, words to say.
+func deliverableTurn(t *testing.T) *fakeOutboundQueries {
+	t.Helper()
+	q := &fakeOutboundQueries{
+		sessionBinding:  db.ChannelChatSessionBinding{ChannelChatID: "CHAT_1", ChatType: "p2p"},
+		installation:    db.ChannelInstallation{Status: string(InstallationActive)},
+		channelIngested: askedOverWecom(),
+	}
+	q.fileTask(t, outcomeTask)
+	return q
+}
+
+func outcomeEvent() events.Event {
+	return events.Event{
+		Type:          protocol.EventChatDone,
+		ChatSessionID: outcomeSession,
+		Payload:       protocol.ChatDonePayload{Content: "the answer", TaskID: outcomeTask},
+	}
+}
+
+func TestEveryUndeliveredReplyNamesItself(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		reason     string
+		actionable bool
+		socket     bool
+		setup      func(t *testing.T, q *fakeOutboundQueries)
+	}{
+		{
+			name: "asked in the web UI", reason: "origin_not_channel", socket: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
+		},
+		{
+			name: "installation revoked mid-flight", reason: "installation_inactive", socket: true,
+			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.installation.Status = "revoked" },
+		},
+		{
+			name: "no socket in this process", reason: "no_live_connection", actionable: true, socket: false,
+			setup: func(*testing.T, *fakeOutboundQueries) {},
+		},
+		{
+			name: "the platform refused the frame", reason: "platform_refused", actionable: true, socket: true,
+			setup: func(*testing.T, *fakeOutboundQueries) {},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			tc.setup(t, q)
+			r := newOutcomeRig(t, q, tc.socket)
+			if tc.reason == "platform_refused" {
+				r.conn.refuseCode, r.conn.refuseMsg = 45002, "content exceed max length"
+			}
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_dropped:" + tc.reason); got != 1 {
+				t.Fatalf("counter for %s = %d, want 1. log:\n%s", tc.reason, got, r.logs.String())
+			}
+			out := r.logs.String()
+			if !strings.Contains(out, "reason="+tc.reason) {
+				t.Errorf("log does not name the reason:\n%s", out)
+			}
+			// A reason somebody must act on is a WARN; one that is ordinary in
+			// a healthy deployment is a DEBUG, so it can be read as a rate
+			// without drowning the log.
+			if warned := strings.Contains(out, "level=WARN"); warned != tc.actionable {
+				t.Errorf("level=WARN present = %v, want %v:\n%s", warned, tc.actionable, out)
+			}
+			if got := r.mx.get("outbound_delivered"); got != 0 {
+				t.Errorf("delivered = %d on a turn that was not delivered", got)
+			}
+		})
+	}
+}
+
+// TestDeliveredIsCounted — the denominator. Without it a drop rate of zero and
+// a bot nobody messaged are the same number, which is the ambiguity the whole
+// breakdown exists to remove.
+func TestDeliveredIsCounted(t *testing.T) {
+	t.Parallel()
+	r := newOutcomeRig(t, deliverableTurn(t), true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if got := r.mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("delivered = %d, want 1. log:\n%s", got, r.logs.String())
+	}
+	if got := r.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("dropped = %d, want 0", got)
+	}
+	if n := r.frames(); n != 1 {
+		t.Errorf("frames = %d, want 1", n)
+	}
+}
+
+// TestNonWecomSessionIsNotADrop — this subscriber sees every chat:done in the
+// deployment, including Slack's and the web UI's. Those are not this adapter's
+// to answer and must not inflate the drop rate.
+func TestNonWecomSessionIsNotADrop(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.sessionErr = pgx.ErrNoRows
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if got := r.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("dropped = %d; another platform's session is not a WeCom drop", got)
+	}
+	if r.logs.Len() != 0 {
+		t.Errorf("logged something for another platform's session:\n%s", r.logs.String())
+	}
+}
+
+// TestRefusalIsNotATransportError — a refusal the server stated and a frame
+// that never left call for opposite responses (fix the message vs retry the
+// connection), so they must not share a bucket.
+func TestRefusalIsNotATransportError(t *testing.T) {
+	t.Parallel()
+	if got := classifyDrop(&wecomAPIError{Cmd: cmdSendMsg, Code: 45002, Msg: "too long"}); got != dropPlatformRefused {
+		t.Errorf("a stated refusal classified as %q", got)
+	}
+	if got := classifyDrop(errAckTimeout); got != dropAckTimeout {
+		t.Errorf("a missing verdict classified as %q", got)
+	}
+	if got := classifyDrop(errNoLiveConnection); got != dropNoConnection {
+		t.Errorf("a missing socket classified as %q", got)
+	}
+	if got := classifyDrop(nil); got != "" {
+		t.Errorf("success classified as %q", got)
+	}
+}
+
+// TestNilMetricsSinkIsSafe — a deployment with /metrics off must not panic on
+// the first dropped reply.
+func TestNilMetricsSinkIsSafe(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	reg := newSendersRegistry()
+	instID := mustTestUUID(t)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	o := NewOutbound(q, reg, slog.Default()) // no WithOutboundMetrics
+
+	o.handleEvent(outcomeEvent()) // no socket registered: takes the drop path
+}
+
+// TestReasonStringsArePinned — these are metric label values. Renaming one
+// silently retires whatever alert or dashboard reads it, and the rename would
+// otherwise pass every test in this package: nothing else asserts the strings
+// themselves, only that some reason was recorded.
+func TestReasonStringsArePinned(t *testing.T) {
+	t.Parallel()
+	for want, got := range map[string]dropReason{
+		"no_live_connection":    dropNoConnection,
+		"origin_not_channel":    dropOriginNotChannel,
+		"installation_inactive": dropInstallationInactive,
+		"task_missing":          dropTaskMissing,
+		"platform_refused":      dropPlatformRefused,
+		"ack_timeout":           dropAckTimeout,
+		"transport_error":       dropTransport,
+	} {
+		if string(got) != want {
+			t.Errorf("reason = %q, want %q", got, want)
+		}
+	}
+}
+
+// TestActionableSplitIsPinned — which reasons reach an operator's log at WARN
+// is a judgement, and one a refactor should have to change on purpose. The two
+// quiet ones are quiet because they are ordinary in a healthy deployment, not
+// because they matter less.
+func TestActionableSplitIsPinned(t *testing.T) {
+	t.Parallel()
+	quiet := map[dropReason]bool{dropOriginNotChannel: true, dropInstallationInactive: true}
+	for _, r := range []dropReason{
+		dropNoConnection, dropOriginNotChannel, dropInstallationInactive,
+		dropTaskMissing, dropPlatformRefused, dropAckTimeout, dropTransport,
+	} {
+		if got := r.actionable(); got == quiet[r] {
+			t.Errorf("%s actionable = %v", r, got)
+		}
+	}
+}
+
+// TestCompletionWithNoTaskIdIsCounted — the origin gate cannot run without a
+// task to read the provenance stamp off, so the turn is withheld. Rare, but it
+// used to be the quietest branch of all: no log, no counter, nothing.
+func TestCompletionWithNoTaskIdIsCounted(t *testing.T) {
+	t.Parallel()
+	r := newOutcomeRig(t, deliverableTurn(t), true)
+
+	e := outcomeEvent()
+	e.Payload = protocol.ChatDonePayload{Content: "the answer"} // no TaskID
+	r.o.handleEvent(e)
+
+	if got := r.mx.get("outbound_dropped:task_missing"); got != 1 {
+		t.Errorf("task_missing = %d, want 1. log:\n%s", got, r.logs.String())
+	}
+	if n := r.frames(); n != 0 {
+		t.Errorf("frames = %d, want 0", n)
+	}
+}
