@@ -76,6 +76,24 @@ func TestNormalizeWebhookPayload_PreservesCallerProvidedEnvelope(t *testing.T) {
 	}
 }
 
+func TestNormalizeWebhookPayload_PreservesLargeNumbersInCallerEnvelope(t *testing.T) {
+	body := []byte(`{"event":"caller.event","eventPayload":{"id":9007199254740993}}`)
+
+	env, err := normalizeWebhookPayload(body, http.Header{})
+	if err != nil {
+		t.Fatalf("normalize: %v", err)
+	}
+	var inner struct {
+		ID json.Number `json:"id"`
+	}
+	if err := json.Unmarshal(env.EventPayload, &inner); err != nil {
+		t.Fatalf("decode eventPayload: %v", err)
+	}
+	if got, want := inner.ID.String(), "9007199254740993"; got != want {
+		t.Fatalf("eventPayload id = %s, want %s", got, want)
+	}
+}
+
 func TestNormalizeWebhookPayload_GitHubHeaderInferEvent(t *testing.T) {
 	body := []byte(`{"action":"opened","pull_request":{"number":7}}`)
 	headers := http.Header{}

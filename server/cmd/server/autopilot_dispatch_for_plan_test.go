@@ -217,6 +217,97 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	}
 }
 
+func TestDispatchAutopilotUsesPayloadTitleToDistinguishWebhookDeliveries(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	titlePrefix := "Webhook delivery " + time.Now().UTC().Format("20060102150405.000000000")
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Per-delivery title variables",
+		Description:        pgtype.Text{String: "Per-delivery title test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: titlePrefix + " {{payload.identifier}}", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = testPool.Exec(bg, `DELETE FROM autopilot_run WHERE autopilot_id = $1`, ap.ID)
+		_, _ = testPool.Exec(bg, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE $2`, testWorkspaceID, titlePrefix+"%")
+		_, _ = testPool.Exec(bg, `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	payload := func(identifier string) []byte {
+		return []byte(`{"event":"ticket.updated","eventPayload":{"identifier":"` + identifier + `"}}`)
+	}
+
+	first, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "webhook", payload("ABC-101"))
+	if err != nil {
+		t.Fatalf("first DispatchAutopilot: %v", err)
+	}
+	if first == nil || first.Status != "issue_created" {
+		t.Fatalf("first dispatch = %+v, want issue_created", first)
+	}
+
+	second, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "webhook", payload("ABC-102"))
+	if err != nil {
+		t.Fatalf("second DispatchAutopilot: %v", err)
+	}
+	if second == nil || second.Status != "issue_created" {
+		t.Fatalf("distinct delivery = %+v, want issue_created", second)
+	}
+
+	redelivery, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "webhook", payload("ABC-101"))
+	if err != nil {
+		t.Fatalf("redelivery DispatchAutopilot: %v", err)
+	}
+	if redelivery == nil || redelivery.Status != "skipped" {
+		t.Fatalf("matching redelivery = %+v, want skipped", redelivery)
+	}
+
+	var titles []string
+	rows, err := testPool.Query(ctx,
+		`SELECT title FROM issue WHERE workspace_id = $1 AND title LIKE $2 ORDER BY title`,
+		testWorkspaceID, titlePrefix+"%",
+	)
+	if err != nil {
+		t.Fatalf("list created issues: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err != nil {
+			t.Fatalf("scan title: %v", err)
+		}
+		titles = append(titles, title)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate titles: %v", err)
+	}
+	wantTitles := []string{titlePrefix + " ABC-101", titlePrefix + " ABC-102"}
+	if len(titles) != len(wantTitles) || titles[0] != wantTitles[0] || titles[1] != wantTitles[1] {
+		t.Fatalf("created issue titles = %v, want %v", titles, wantTitles)
+	}
+}
+
 // TestDispatchAutopilotForPlanRejectsZeroArgs locks in the
 // fail-loud contract: a caller that forgets to set trigger_id or
 // planned_at would silently disable the idempotency guard, and the
