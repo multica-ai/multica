@@ -42,6 +42,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | How long a task may sit in the queue unclaimed before failing with `queued_expired`; raise it when low-concurrency runtimes can legitimately wait behind long-running work |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
 

@@ -42,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途 task 的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | task 在队列中无人认领的最长时长，超过后以 `queued_expired` 失败；低并发运行时可能合理地排在长任务之后，此时应调大 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 

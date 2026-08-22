@@ -42,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 작업을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | 태스크가 대기열에 점유되지 않고 머물 수 있는 최대 시간. 초과 시 `queued_expired`로 실패. 저 동시성 런타임이 긴 작업 뒤에 합리적으로 대기할 수 있으므로 이 경우 값을 키워야 함 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
