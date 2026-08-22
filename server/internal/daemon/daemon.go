@@ -5633,6 +5633,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
+	"prime":      "Prime Agent",
 }
 
 func init() {
@@ -5672,7 +5673,13 @@ func providerDisplayName(name string) string {
 // app-server (AGENTS.md), opencode 1.17.7 (AGENTS.md), pi 0.67.2 (AGENTS.md),
 // hermes 0.18.2 over ACP (AGENTS.md). MCode 0.1.2 also loads AGENTS.md by its
 // native runtime contract. kiro was confirmed earlier by a kiro-cli
-// 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
+// 2.13.0 ACP smoke — see the call site. prime (Prime Agent v0.7.1) is confirmed
+// both by source (packages/coding-agent/src/core/resource-loader.ts's
+// loadContextFileFromDir checks AGENTS.md/CLAUDE.md in the session cwd
+// unconditionally) and by a real ACP smoke test against the v0.7.1 binary —
+// see pkg/agent/prime_integration_test.go's TestPrimeRealACPReadsAgentsMD,
+// which writes a unique marker into a real AGENTS.md and asserts the real
+// agent process reads it back. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
 	case "openclaw", "kimi", "traecli", "qwenpaw":
@@ -9061,6 +9068,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.QwenArgs
 	case "qwenpaw":
 		args = cfg.QwenpawArgs
+	case "prime":
+		args = cfg.PrimeArgs
 	default:
 		return nil
 	}

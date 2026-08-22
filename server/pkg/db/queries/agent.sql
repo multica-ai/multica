@@ -1106,6 +1106,37 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
 ORDER BY terminal_at DESC
 LIMIT 1;
 
+-- name: GetLastTaskWorkDirForIssueAndAgent :one
+-- Returns the work_dir of the most recent terminal task for (agent_id,
+-- issue_id), independent of whether that task reported a session_id.
+--
+-- GetLastTaskSession above is the usual source of both the resume pointer and
+-- the workdir, but its latest_per_session CTE filters `session_id IS NOT NULL`,
+-- so a backend that never reports a session matches zero rows there and loses
+-- the workdir along with the session. Prime Agent is the first such backend:
+-- every turn is a fresh session/new, so reporting a resume pointer would be a
+-- claim it cannot honour, and it deliberately leaves Result.SessionID empty.
+--
+-- The workdir is not a resume pointer. It carries the previous turn's branch,
+-- its uncommitted edits and any commits not yet pushed, so losing it strands
+-- real work in an orphaned directory — a materially worse outcome than losing
+-- a model transcript. The two are already separable elsewhere: the rerun and
+-- chat claim paths both offer PriorWorkDir outside their session checks. This
+-- query lets the issue path do the same.
+--
+-- Terminal statuses only: a running task still owns its directory. No poison
+-- or resume-safety filtering, matching the rerun and chat paths — those guards
+-- exist to protect session RESUMPTION, and nothing is resumed here.
+-- shouldReusePriorWorkdir revalidates the directory's provenance markers on
+-- disk and execenv.Reuse falls back to a fresh Prepare when it is gone, so a
+-- stale path offered here is dropped rather than silently reused.
+SELECT work_dir FROM agent_task_queue
+WHERE agent_id = $1 AND issue_id = $2
+  AND work_dir IS NOT NULL
+  AND status IN ('completed', 'failed', 'cancelled')
+ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
+LIMIT 1;
+
 -- name: GetLatestTaskRolloutMissing :one
 -- Reports whether the most recent terminal task for (agent_id, issue_id)
 -- withheld its Codex session because the rollout was missing (MUL-5305). When

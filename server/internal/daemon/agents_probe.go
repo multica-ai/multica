@@ -269,6 +269,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
 	}
+	// Prime Agent (`prime-agent`), driven over ACP via `prime-agent --mode
+	// acp`. It takes no model env var: the underlying model is fixed
+	// process-globally at Prime's own startup and never read from ACP
+	// session params, so ExecOptions.Model is ignored — see
+	// ModelSelectionSupported. Reading one here would only advertise a knob
+	// that silently does nothing.
+	if e, ok := probe("MULTICA_PRIME_PATH", "prime-agent", ""); ok {
+		agents["prime"] = e
+	}
 	return agents
 }
 

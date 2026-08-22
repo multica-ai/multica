@@ -114,6 +114,9 @@ const (
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
 //   - Grok: $GROK_HOME/skills, defaulting to ~/.grok/skills
 //   - Qwen Code: $QWEN_HOME/skills, defaulting to ~/.qwen/skills
+//   - Prime Agent: $PRIME_AGENT_CODING_AGENT_DIR/skills, defaulting to
+//     ~/.prime/agent/skills (auto-scanned and enabled by default; see
+//     https://github.com/PrimeIntellect-ai/prime-agent/blob/v0.7.1/packages/coding-agent/src/core/package-manager.ts)
 //
 // The universal ~/.agents/skills root is documented as a cross-tool skill
 // location by Codex (https://developers.openai.com/codex/skills) and Gemini
@@ -239,6 +242,21 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			// directly below it. Project skills are injected separately under
 			// <workDir>/.minimax/skills.
 			providerRoot = filepath.Join(home, ".minimax", "skills")
+		case "prime":
+			// PRIME_AGENT_CODING_AGENT_DIR overrides Prime Agent's global
+			// ~/.prime/agent directory, which owns settings, sessions,
+			// credentials, and personal skills. Verified in prime-agent v0.7.1
+			// source (packages/coding-agent/src/config.ts's ENV_AGENT_DIR /
+			// getAgentDir, and package-manager.ts's userDirs.skills =
+			// join(globalBaseDir, "skills")) — this is a real, auto-scanned,
+			// enabled-by-default skill root, distinct from the per-task
+			// <workDir>/.prime/agent/skills/ binding directory (skillsDirPath in
+			// execenv/context.go).
+			primeHome := strings.TrimSpace(os.Getenv("PRIME_AGENT_CODING_AGENT_DIR"))
+			if primeHome == "" {
+				primeHome = filepath.Join(home, ".prime", "agent")
+			}
+			providerRoot = filepath.Join(primeHome, "skills")
 		default:
 			return nil, false, nil
 		}

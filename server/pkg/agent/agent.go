@@ -278,7 +278,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "prime".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -286,8 +286,8 @@ type Config struct {
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
-// migration 254 to add reasonix, migration 313 to add dsh, migration 327 to
-// add mcode): a
+// migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
+// add mcode, migration 370 to add dim, migration 372 to add prime): a
 // custom runtime profile may only
 // be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
@@ -321,6 +321,7 @@ var SupportedTypes = []string{
 	"qwenpaw",
 	"mcode",
 	"dim",
+	"prime",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -421,6 +422,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenpawBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
+	case "prime":
+		return &primeBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -466,6 +469,7 @@ var launchHeaders = map[string]string{
 	"qwenpaw":     "qwenpaw acp",
 	"dim":         "dim acp",
 	"mcode":       "mcode acp",
+	"prime":       "prime-agent --mode acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

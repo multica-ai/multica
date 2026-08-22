@@ -374,3 +374,72 @@ func phaseCount(entries []map[string]any, phase string) int {
 	}
 	return count
 }
+
+// TestPrimeWindowsDescendantsDieWithTheOwnedProcessTree is the Prime
+// counterpart to the Codex case above, and the regression guard for owning the
+// tree at all.
+//
+// Prime's own cancellation coverage is //go:build unix because its fakes are
+// POSIX shell, so nothing exercised the Windows teardown. That mattered:
+// configureProcessGroup is a no-op here, so with a plain cmd.Start nothing is
+// registered in ownedProcessTrees, waitProcessGroupGone reports false
+// unconditionally, and signalProcessGroup falls back to killing the direct
+// child alone — leaving every descendant alive.
+//
+// The spawner never reads stdin and never answers the ACP handshake, which is
+// deliberate: the run stays pinned in initialize until the timeout fires, so
+// this exercises the teardown path without needing a JSON-RPC fake. The
+// grandchild also inherits the stdout pipe, so a teardown that only unblocks
+// the reader without reaping the tree would still fail here.
+func TestPrimeWindowsDescendantsDieWithTheOwnedProcessTree(t *testing.T) {
+	exePath, pidPath := buildDescendantSpawner(t)
+
+	primeGracefulExitGraceNanos.Store(int64(200 * time.Millisecond))
+	primeTerminateGraceNanos.Store(int64(200 * time.Millisecond))
+	primeTeardownGraceNanos.Store(int64(200 * time.Millisecond))
+	t.Cleanup(func() {
+		primeGracefulExitGraceNanos.Store(0)
+		primeTerminateGraceNanos.Store(0)
+		primeTeardownGraceNanos.Store(0)
+	})
+
+	backend, err := New("prime", Config{
+		ExecutablePath: exePath,
+		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Env:            map[string]string{"DESCENDANT_PID_FILE": pidPath},
+	})
+	if err != nil {
+		t.Fatalf("new prime backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	descendantPid := waitForDescendantPid(t, pidPath)
+	if !processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d was not running; the test cannot prove anything", descendantPid)
+	}
+
+	started := time.Now()
+	select {
+	case <-session.Result:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Execute never returned after the run timed out during the handshake")
+	}
+	if elapsed := time.Since(started); elapsed > 20*time.Second {
+		t.Fatalf("teardown exceeded its bound: %s", elapsed)
+	}
+
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d survived prime-agent cleanup; the process tree was not owned", descendantPid)
+	}
+}

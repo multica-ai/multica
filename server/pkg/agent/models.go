@@ -247,6 +247,14 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// MCode's ACP server does not expose session-scoped model selection or
 		// a model catalog. The configured MCode runtime owns the model choice.
 		return Catalog{Models: []Model{}}, nil
+	case "prime":
+		// Prime Agent's model is fixed process-globally at CLI startup and
+		// never read from session/new or session/prompt over ACP, so there is
+		// no consumer for a discovered catalog — same reasoning as qwenpaw
+		// above. Return an empty list without spawning a discovery
+		// subprocess. If a future Prime version exposes model selection over
+		// ACP, restore a discovery helper here.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -374,6 +382,13 @@ func ModelSelectionSupported(providerType string) bool {
 		// upstream, this can be reverted to `true`. MCode similarly exposes no
 		// model option through ACP, so its runtime configuration remains the
 		// source of truth.
+		return false
+	case "prime":
+		// Prime Agent's model is a process-global choice fixed at CLI startup
+		// (--model/--provider flags or settings.json defaults); neither
+		// session/new nor session/prompt read a model field over ACP, so
+		// there is nothing Multica could set per session. If a future Prime
+		// version exposes model selection over ACP, this can be revisited.
 		return false
 	default:
 		return true

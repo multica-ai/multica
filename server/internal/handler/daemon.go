@@ -2543,12 +2543,41 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
-			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+			}); err == nil {
+				if prior.SessionID.Valid && prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
 				if prior.WorkDir.Valid {
 					resp.PriorWorkDir = prior.WorkDir.String
+				}
+			}
+			// The workdir is not a resume pointer, so it is recovered even when
+			// no resumable session exists. A backend that never reports a
+			// session id (Prime Agent: every turn is a fresh session/new, so a
+			// resume pointer would claim continuity it cannot honour) writes
+			// session_id = NULL on every row, and GetLastTaskSession's
+			// latest_per_session CTE filters `session_id IS NOT NULL` — so it
+			// matches nothing and returns ErrNoRows. Splitting the two
+			// assignments above is therefore necessary but not sufficient: the
+			// row never reaches this scope at all, and without this fallback
+			// every follow-up on the issue would get a brand-new workdir,
+			// stranding the previous turn's branch, its uncommitted edits and
+			// any unpushed commits in an orphaned directory.
+			//
+			// This mirrors what the rerun path (src.WorkDir) and the chat path
+			// (cs.WorkDir) already do — both offer the workdir outside their
+			// session checks. Only the issue path coupled them.
+			//
+			// Guarded on the empty string so a backend that DID report a
+			// session keeps taking the workdir from that session's own row:
+			// the fallback can only widen the no-workdir case, never override
+			// a resumable session's directory with an unrelated one.
+			if resp.PriorWorkDir == "" {
+				if workDir, err := h.Queries.GetLastTaskWorkDirForIssueAndAgent(r.Context(), db.GetLastTaskWorkDirForIssueAndAgentParams{
+					AgentID: task.AgentID,
+					IssueID: task.IssueID,
+				}); err == nil && workDir.Valid {
+					resp.PriorWorkDir = workDir.String
 				}
 			}
 			// MUL-5305: if the most recent terminal task withheld its Codex

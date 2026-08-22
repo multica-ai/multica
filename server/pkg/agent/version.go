@@ -18,6 +18,13 @@ var MinVersions = map[string]string{
 	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
 	"dim":     "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":   "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
+	// The whole fail-closed rlmMaxDepth gate is argued from v0.7.1 internals:
+	// getAgentDir's PRIME_AGENT_CODING_AGENT_DIR handling, _resolveRlmMaxDepth's
+	// precedence chain, and the settings.json path the gate opens. A build that
+	// resolved that path differently would make the gate read the wrong file and
+	// pass silently, so the assumption is enforced rather than only documented.
+	// 0.7.1 is also the only version smoke-tested against a live account.
+	"prime": "0.7.1",
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against

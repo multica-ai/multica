@@ -516,6 +516,16 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
 
+      # server/pkg/agent is the only package with //go:build agentintegration
+      # files, and the default build never compiles them — so a production
+      # helper that collides with a test-local one of the same name passes
+      # every check here and breaks only for whoever runs the tagged suite.
+      # -run '^$' compiles the package's tests without executing any, so this
+      # resolves no agent CLI, needs no account and consumes no quota.
+      - name: Build agentintegration-tagged tests
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: cd server && go test -tags=agentintegration ./pkg/agent -run '^$' -count=1
+
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go run ./cmd/migrate up
