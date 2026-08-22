@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/entitlement"
+	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -25,6 +28,9 @@ const (
 	issueTableDefaultPageSize = 50
 	issueTableMaxPageSize     = 100
 	issueTableQueryTimeout    = 8 * time.Second
+	// This is a transport and memory guard, independent of entitlement limits.
+	// Larger visible sets stay in PostgreSQL instead of becoming UUID arrays.
+	issueTableWindowIDCacheLimit = 4_096
 )
 
 func withIssueTableQueryTimeout(r *http.Request) (*http.Request, context.CancelFunc) {
@@ -47,7 +53,42 @@ func (h *Handler) beginIssueTableSnapshot(ctx context.Context) (*Handler, pgx.Tx
 	snapshot := *h
 	snapshot.DB = tx
 	snapshot.Queries = db.New(tx)
+	snapshot.issueTableWindowCache = &issueTableWindowCache{}
 	return &snapshot, tx, nil
+}
+
+type issueTableWindowCache struct {
+	workspaceID    pgtype.UUID
+	limit          int64
+	policyRevision int64
+	ids            []pgtype.UUID
+	useIDs         bool
+	loaded         bool
+}
+
+func (h *Handler) issueTableVisibleIssueIDs(ctx context.Context, workspaceID pgtype.UUID, policy issueWindowPolicy) ([]pgtype.UUID, bool, error) {
+	cache := h.issueTableWindowCache
+	if cache != nil && cache.loaded && cache.workspaceID == workspaceID && cache.limit == policy.limit && cache.policyRevision == policy.policyRevision {
+		return cache.ids, cache.useIDs, nil
+	}
+	var ids []pgtype.UUID
+	useIDs := policy.limit <= issueTableWindowIDCacheLimit
+	if useIDs {
+		var err error
+		ids, useIDs, err = h.issueWindowVisibleIDsUpTo(ctx, workspaceID, policy, issueTableWindowIDCacheLimit)
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	if cache != nil {
+		cache.workspaceID = workspaceID
+		cache.limit = policy.limit
+		cache.policyRevision = policy.policyRevision
+		cache.ids = ids
+		cache.useIDs = useIDs
+		cache.loaded = true
+	}
+	return ids, useIDs, nil
 }
 
 func writeIssueTableQueryFailure(w http.ResponseWriter, r *http.Request, message string) {
@@ -405,6 +446,13 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "failed to canonicalize table query")
 		return issueTableSQL{}, false
 	}
+	windowPolicy, windowEnabled := h.issueWindowPolicy(r.Context(), workspaceUUID)
+	if windowEnabled && windowPolicy.action == entitlement.ActionEnforce {
+		// A cursor issued under a different entitlement revision or limit must
+		// not be accepted after the visible collection changes.
+		digest := sha256.Sum256([]byte(fmt.Sprintf("%s|%s|%d|%d", fingerprint, windowPolicy.action, windowPolicy.limit, windowPolicy.policyRevision)))
+		fingerprint = "sha256:" + hex.EncodeToString(digest[:])
+	}
 
 	where := []string{"i.workspace_id = $1"}
 	args := []any{workspaceUUID}
@@ -413,8 +461,14 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
+	// the exact statuses the user picked, and since MUL-6243 those can be custom
+	// — rejecting them here 400'd the entire request, so filtering a board by a
+	// custom status errored the surface instead of narrowing it. The predicate
+	// below is a parameterized `status = ANY(...)`, so an unknown key simply
+	// matches nothing; length-bounded so an arbitrary blob cannot ride in.
 	for _, status := range spec.Filters.Statuses {
-		if !issueTableContainsString(validIssueStatuses, status) {
+		if status == "" || len(status) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid filters.statuses")
 			return issueTableSQL{}, false
 		}
@@ -627,6 +681,21 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		where = append(where, "i.parent_issue_id IS NULL")
 	}
 	where = appendIssueTableSearchFilter(where, addArg, spec.Search)
+	if windowEnabled && windowPolicy.action == entitlement.ActionEnforce && h.issueTableWindowCache != nil {
+		visibleIDs, useIDs, err := h.issueTableVisibleIssueIDs(r.Context(), workspaceUUID, windowPolicy)
+		if err != nil {
+			slog.Warn("resolve table issue window failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to resolve table issue window")
+			return issueTableSQL{}, false
+		}
+		if useIDs {
+			where = append(where, fmt.Sprintf("i.id = ANY(%s::uuid[])", addArg(visibleIDs)))
+		} else {
+			where = appendIssueWindow(where, addArg, windowPolicy, "$1", "i")
+		}
+	} else if windowEnabled {
+		where = appendIssueWindow(where, addArg, windowPolicy, "$1", "i")
+	}
 
 	return issueTableSQL{
 		where:       strings.Join(where, " AND "),

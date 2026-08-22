@@ -10,6 +10,11 @@
     "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Apply link",
+      "remove": "Remove link",
+      "close": "Close link editor"
+    },
     "heading_dropdown": {
       "text": "Text",
       "normal_text": "Normal Text",

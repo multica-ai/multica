@@ -28,7 +28,8 @@
     },
     "archived_title": "Archived",
     "archived_empty": "No archived notifications",
-    "unarchive_tooltip": "Unarchive"
+    "unarchive_tooltip": "Unarchive",
+    "actions_aria": "Notification actions"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
@@ -71,6 +72,10 @@
     "reacted_to_comment": "Reacted {{emoji}} to your comment",
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}"
+  },
+  "toasts": {
+    "archived": "Notification archived",
+    "unarchived": "Notification restored"
   },
   "errors": {
     "mark_read_failed": "Failed to mark as read",

@@ -5,6 +5,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -14,6 +15,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // TestHideAgentWindowSetsCreateNewConsole guards against a regression where
@@ -72,13 +76,194 @@ func TestHideAgentWindowPreservesExistingSysProcAttr(t *testing.T) {
 	}
 }
 
-func TestCodexInitializeRetrySuppressedWithoutConfirmedTreeCleanup(t *testing.T) {
-	if codexInitializeRetrySupported() {
-		t.Fatal("Codex initialize retry must remain disabled until Windows descendant cleanup is positively confirmed")
+// TestCodexInitializeRetrySupportedWithOwnedProcessTree pins the inverse of the
+// invariant this file used to hold. Now that a launched Codex is assigned to a
+// Job Object, descendant termination is observable, so the retry is no longer
+// categorically suppressed on Windows. The cleanup_confirmed gate at the call
+// site still suppresses it whenever ownership could not be taken, so a host
+// where the assignment fails behaves exactly as it did before.
+func TestCodexInitializeRetrySupportedWithOwnedProcessTree(t *testing.T) {
+	if !codexInitializeRetrySupported() {
+		t.Fatal("Codex initialize retry should be available once the process tree is owned by a Job Object")
 	}
 }
 
-func TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded(t *testing.T) {
+// TestStartOwnedProcessTreeCapturesImmediateDescendants is the pre-attach
+// window: Windows grants job membership only to processes created after the
+// assignment and never retroactively, so a child that spawns its real work
+// immediately could escape a job it joined after Start. The helper here spawns
+// its grandchild as the very first thing it does, and the assertion is direct —
+// the job's own accounting must have seen both processes, not just the wrapper.
+//
+// That distinction matters more than it looks: a job holding only a wrapper that
+// exits reports the tree empty while the escaped process is still running, which
+// would make cleanup look confirmed when it is not.
+func TestStartOwnedProcessTreeCapturesImmediateDescendants(t *testing.T) {
+	exePath, pidPath := buildDescendantSpawner(t)
+
+	cmd := exec.Command(exePath, "spawn")
+	cmd.Env = append(os.Environ(), "DESCENDANT_PID_FILE="+pidPath)
+	hideAgentWindow(cmd)
+	if err := startOwnedProcessTree(cmd, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("startOwnedProcessTree: %v", err)
+	}
+	t.Cleanup(func() { releaseProcessGroup(cmd) })
+
+	descendantPid := waitForDescendantPid(t, pidPath)
+	if !processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d was not running; the test cannot prove anything", descendantPid)
+	}
+	if total := jobTotalProcesses(t, cmd); total < 2 {
+		t.Fatalf("job accounted for %d processes, want the child and its descendant; the descendant escaped the job", total)
+	}
+
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	if !waitProcessGroupGone(cmd, 10*time.Second) {
+		t.Fatal("waitProcessGroupGone reported the tree still active after terminating the job")
+	}
+	_ = cmd.Wait()
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d survived termination of its owning process tree", descendantPid)
+	}
+}
+
+// TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed covers the
+// degraded path: a command started with a plain Start owns no job, so there is
+// nothing to observe, and callers must read that as "cleanup unconfirmed"
+// rather than as success.
+func TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed(t *testing.T) {
+	cmd := exec.Command("cmd.exe", "/c", "exit", "0")
+	hideAgentWindow(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	if waitProcessGroupGone(cmd, 50*time.Millisecond) {
+		t.Fatal("waitProcessGroupGone must not confirm cleanup for an unowned process")
+	}
+}
+
+// TestStartOwnedProcessTreeLeavesNoSuspendedChild guards the CREATE_SUSPENDED
+// path: a child that is never resumed would hang the launch forever, so a
+// successful return has to mean the process is actually running.
+func TestStartOwnedProcessTreeLeavesNoSuspendedChild(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "ran.txt")
+	cmd := exec.Command("cmd.exe", "/c", "echo ran > "+marker)
+	hideAgentWindow(cmd)
+	if err := startOwnedProcessTree(cmd, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("startOwnedProcessTree: %v", err)
+	}
+	t.Cleanup(func() { releaseProcessGroup(cmd) })
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("child exited with error: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("child never exited; it was most likely left suspended")
+	}
+	if _, err := os.ReadFile(marker); err != nil {
+		t.Fatalf("child produced no output, so it never ran: %v", err)
+	}
+}
+
+// jobTotalProcesses reports how many processes the command's job has ever
+// accounted for, which is what proves membership regardless of whether a
+// descendant has already exited.
+func jobTotalProcesses(t *testing.T, cmd *exec.Cmd) uint32 {
+	t.Helper()
+	tree, ok := lookupProcessTree(cmd)
+	if !ok {
+		t.Fatal("command owns no process tree")
+	}
+	var info jobObjectBasicAccountingInformation
+	if err := windows.QueryInformationJobObject(
+		tree.job,
+		windows.JobObjectBasicAccountingInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info)),
+		nil,
+	); err != nil {
+		t.Fatalf("query job accounting: %v", err)
+	}
+	return info.TotalProcesses
+}
+
+// buildDescendantSpawner compiles a helper that starts a long-lived grandchild
+// and records its pid, then blocks. It is the smallest shape that distinguishes
+// "killed the child" from "killed the tree".
+func buildDescendantSpawner(t *testing.T) (exePath, pidPath string) {
+	t.Helper()
+	tempDir := t.TempDir()
+	sourcePath := filepath.Join(tempDir, "spawner.go")
+	exePath = filepath.Join(tempDir, "spawner.exe")
+	pidPath = filepath.Join(tempDir, "descendant.pid")
+	const source = `package main
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"time"
+)
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "descendant" { time.Sleep(10*time.Minute); return }
+	child := exec.Command(os.Args[0], "descendant")
+	if err := child.Start(); err != nil { panic(err) }
+	if err := os.WriteFile(os.Getenv("DESCENDANT_PID_FILE"), []byte(fmt.Sprint(child.Process.Pid)), 0600); err != nil { panic(err) }
+	time.Sleep(10*time.Minute)
+}`
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "build", "-o", exePath, sourcePath)
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build descendant spawner: %v: %s", err, output)
+	}
+	return exePath, pidPath
+}
+
+func waitForDescendantPid(t *testing.T, pidPath string) int {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(pidPath)
+		if err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil && pid > 0 {
+				t.Cleanup(func() {
+					if process, err := os.FindProcess(pid); err == nil {
+						_ = process.Kill()
+					}
+				})
+				return pid
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("descendant pid never appeared at %s", pidPath)
+	return 0
+}
+
+// processStillRunning reports whether pid names a live process. An exited
+// process can still be openable while a handle to it is held, so the exit code
+// is what decides.
+func processStillRunning(pid int) bool {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return false
+	}
+	defer windows.CloseHandle(handle)
+	var code uint32
+	if err := windows.GetExitCodeProcess(handle, &code); err != nil {
+		return false
+	}
+	const stillActive = 259
+	return code == stillActive
+}
+
+func TestCodexWindowsDescendantsDieWithTheOwnedProcessTree(t *testing.T) {
 	tempDir := t.TempDir()
 	sourcePath := filepath.Join(tempDir, "fake_codex.go")
 	exePath := filepath.Join(tempDir, "fake_codex.exe")
@@ -158,11 +343,25 @@ func main() {
 	}
 	entries := parseJSONLogEntries(t, logs.String())
 	failure := findCodexLifecyclePhase(t, entries, "thread_start_failure")
-	if failure["cleanup_confirmed"] != false || failure["reaped"] != false {
-		t.Fatalf("Windows tree cleanup must remain unconfirmed: %v", failure)
+	if failure["cleanup_confirmed"] != true || failure["reaped"] != true {
+		t.Fatalf("Windows tree cleanup should be confirmed once the tree is owned: %v", failure)
 	}
 	if phaseCount(entries, "thread_start_response") != 0 {
 		t.Fatalf("unexpected thread_start_response: %v", entries)
+	}
+
+	// The descendant inherited its stdout from the app-server and outlives a
+	// plain child kill; it must not outlive the tree.
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		t.Fatalf("descendant pid was never recorded: %v", err)
+	}
+	descendantPid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("parse descendant pid %q: %v", raw, err)
+	}
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d survived codex cleanup", descendantPid)
 	}
 }
 

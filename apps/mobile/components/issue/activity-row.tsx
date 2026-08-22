@@ -21,11 +21,7 @@
  */
 import { View } from "react-native";
 import Svg, { Line, Rect } from "react-native-svg";
-import type {
-  IssuePriority,
-  IssueStatus,
-  TimelineEntry,
-} from "@multica/core/types";
+import type { IssuePriority, TimelineEntry } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";
@@ -33,6 +29,8 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { formatActivity } from "@/lib/format-activity";
 import { timeAgo } from "@/lib/time-ago";
 import { useActorLookup } from "@/data/use-actor-name";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import type { IssueStatusCatalog } from "@/lib/issue-status";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
@@ -79,14 +77,25 @@ function CalendarGlyph({
 
 function LeadIcon({
   entry,
+  catalog,
   mutedFg,
 }: {
   entry: TimelineEntry;
+  catalog: IssueStatusCatalog;
   mutedFg: string;
 }) {
   const details = (entry.details ?? {}) as Record<string, string>;
   if (entry.action === "status_changed" && details.to) {
-    return <StatusIcon status={details.to as IssueStatus} size={14} />;
+    // `details.to` is a status KEY: the glyph comes from its category and the
+    // colour from the catalog, so a custom status is recognizable. (MUL-6243)
+    return (
+      <StatusIcon
+        status={details.to}
+        category={catalog.categoryOf(details.to)}
+        color={catalog.colorOf(details.to)}
+        size={14}
+      />
+    );
   }
   if (entry.action === "priority_changed" && details.to) {
     return <PriorityIcon priority={details.to as IssuePriority} size={14} />;
@@ -108,6 +117,7 @@ function LeadIcon({
 
 export function ActivityRow({ entry }: { entry: TimelineEntry }) {
   const { getName } = useActorLookup();
+  const catalog = useIssueStatuses();
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
   const resolveName = (
@@ -116,7 +126,7 @@ export function ActivityRow({ entry }: { entry: TimelineEntry }) {
   ): string =>
     getName(type as "member" | "agent" | null | undefined, id);
   const actorName = resolveName(entry.actor_type, entry.actor_id);
-  const verb = formatActivity(entry, resolveName);
+  const verb = formatActivity(entry, resolveName, catalog.labelOf);
   const showCoalesceBadge =
     (entry.coalesced_count ?? 1) > 1 &&
     entry.action !== "task_completed" &&
@@ -125,7 +135,7 @@ export function ActivityRow({ entry }: { entry: TimelineEntry }) {
   return (
     <View className="flex-row items-center px-4 gap-2">
       <View className="w-4 items-center justify-center shrink-0">
-        <LeadIcon entry={entry} mutedFg={mutedFg} />
+        <LeadIcon entry={entry} catalog={catalog} mutedFg={mutedFg} />
       </View>
       <Text
         className="text-xs text-muted-foreground flex-1"

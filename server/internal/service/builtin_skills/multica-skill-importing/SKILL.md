@@ -234,6 +234,39 @@ Then report that the skill already exists and include its `id` / `name`. Do not
 retry in a loop, and do not create a second skill under a different name just to
 dodge the conflict.
 
+## Updating an already-imported skill: `multica skill refresh`
+
+When the goal is to pull the latest version of a skill that is already in the
+workspace, prefer `refresh` over re-typing the import URL:
+
+```bash
+multica skill refresh <skill-id> --output json
+```
+
+It sends `POST /api/skills/{id}/refresh` (empty body). The server re-downloads
+the bundle from the provenance stored in the skill's `config.origin`
+(`github`, `skills_sh`, or `clawhub` with its `source_url`) and overwrites the
+skill in place:
+
+- Preserved: skill ID, `created_by`, `created_at`, agent-skill bindings, and
+  labels — agents keep the skill without re-adding it.
+- Replaced: name (an upstream rename is adopted), description, `SKILL.md`
+  content, provenance config, and the full supporting-file set.
+- Permission: the skill's creator or a workspace `owner`/`admin` — broader than
+  `import --on-conflict overwrite`, which stays creator-only.
+
+The success response is the plain `SkillWithFilesResponse` (same shape as
+`multica skill get`), not the import result envelope. Failure modes to report
+instead of retrying in a loop:
+
+- `422`: the skill has no refreshable provenance (created manually, imported
+  from a local archive, or copied from a local runtime). Re-import instead.
+- `409`: the upstream renamed the skill and another workspace skill already
+  uses that name; nothing was changed.
+- `403`: caller is neither the creator nor a workspace admin.
+- `502` / `503` / `504` / `413`: upstream fetch failed (gone, unavailable,
+  timed out, or now exceeds import caps); the skill is left untouched.
+
 ## Incorrect → correct
 
 Incorrect (bypasses Multica):

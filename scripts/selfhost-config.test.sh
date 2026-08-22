@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# docker-compose.selfhost.yml requires JWT_SECRET (${JWT_SECRET:?...}) and
+# .env.example ships an empty value. Direct `docker compose config` calls in
+# this script let the calling environment outrank the env file, so one
+# throwaway export covers them. The make-driven recipes below additionally
+# include .env and bare-`export` it to the recipe environment, clobbering
+# this value, so run_recipe seeds it into the recipe .env as well.
+export JWT_SECRET=test-secret-for-config-test
+
 require_config() {
   local config=$1
   local expected=$2
@@ -33,6 +41,7 @@ tmp_dir="$(mktemp -d)"
 trap 'rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
+printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
 
 config="$(
   docker compose \
@@ -47,6 +56,26 @@ require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 require_config "$config" 'SMTP_FROM_EMAIL: multica@example.com'
+require_config "$config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: 3m'
+require_config "$config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: 5s'
+
+# The backend environment is an explicit allowlist, so a variable documented in
+# .env.example but missing here silently never reaches the container: the
+# operator configures it, the server never sees it, and nothing reports the gap.
+# Assert the values actually land, then assert the allowlist has not drifted
+# behind the documentation the next time an LLM knob is added.
+require_config "$config" 'MULTICA_LLM_API_KEY: llm-key-from-env'
+require_config "$config" 'MULTICA_LLM_BASE_URL: http://gateway.example/v1'
+require_config "$config" 'MULTICA_LLM_DEFAULT_MODEL: model-from-env'
+require_config "$config" 'MULTICA_LLM_MAX_RETRIES: "3"'
+
+while IFS= read -r llm_var; do
+  if ! grep -Eq "^[[:space:]]+${llm_var}: \\\$\{${llm_var}:-" docker-compose.selfhost.yml; then
+    echo "$llm_var is documented in .env.example but not mapped into the backend"
+    echo "service in docker-compose.selfhost.yml, so self-hosted deployments cannot set it."
+    exit 1
+  fi
+done < <(grep -oE '^MULTICA_LLM_[A-Z_]+' .env.example)
 
 for script in scripts/dev.sh scripts/check.sh; do
   if ! grep -Fq '. scripts/local-env.sh' "$script"; then
@@ -239,6 +268,13 @@ run_recipe() {
   local target=$1 env_mutation=$2 shell_env=$3 make_args=$4
 
   cp "$recipe_dir/.env.example" "$recipe_dir/.env"
+  # The Makefile includes .env and bare-`export`s every variable to the
+  # recipe environment, which clobbers this script's JWT_SECRET with the
+  # empty value .env.example ships; docker-compose.selfhost.yml now refuses
+  # to interpolate an empty JWT_SECRET. Seed the throwaway value into the
+  # recipe .env so make, the stub, and Compose all see a usable secret.
+  sed "s/^JWT_SECRET=.*/JWT_SECRET=$JWT_SECRET/" "$recipe_dir/.env" >"$recipe_dir/.env.tmp"
+  mv "$recipe_dir/.env.tmp" "$recipe_dir/.env"
   if [ -n "$env_mutation" ]; then
     sed "$env_mutation" "$recipe_dir/.env" >"$recipe_dir/.env.tmp"
     mv "$recipe_dir/.env.tmp" "$recipe_dir/.env"

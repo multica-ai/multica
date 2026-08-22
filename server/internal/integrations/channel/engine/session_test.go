@@ -26,14 +26,36 @@ func uid(b byte) pgtype.UUID {
 
 // fakeTx satisfies pgx.Tx by embedding the (nil) interface; the ChatSession
 // service only calls Commit/Rollback, which we override as no-ops.
-type fakeTx struct{ pgx.Tx }
+type fakeTx struct {
+	pgx.Tx
+	commitErr  error
+	committed  bool
+	rolledBack bool
+}
 
-func (fakeTx) Commit(context.Context) error   { return nil }
-func (fakeTx) Rollback(context.Context) error { return nil }
+func (tx *fakeTx) Commit(context.Context) error {
+	tx.committed = true
+	return tx.commitErr
+}
+func (tx *fakeTx) Rollback(context.Context) error {
+	tx.rolledBack = true
+	return nil
+}
 
-type fakeTxStarter struct{}
+type fakeTxStarter struct {
+	tx       *fakeTx
+	beginErr error
+}
 
-func (fakeTxStarter) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, nil }
+func (s fakeTxStarter) Begin(context.Context) (pgx.Tx, error) {
+	if s.beginErr != nil {
+		return nil, s.beginErr
+	}
+	if s.tx != nil {
+		return s.tx, nil
+	}
+	return &fakeTx{}, nil
+}
 
 // fakeSessionQueries is an in-memory SessionQueries for unit tests.
 type fakeSessionQueries struct {
@@ -58,14 +80,24 @@ type fakeSessionQueries struct {
 	reconcilerOwnedKeys   map[string]bool
 	issueLookupErr        error
 
-	markRows         int64 // MarkChannelInboundDedupProcessed result
-	pendingFresh     bool
-	createBindingErr error // simulate a unique violation on create
-	raceWinner       pgtype.UUID
+	markRows           int64 // MarkChannelInboundDedupProcessed result
+	pendingFresh       bool
+	legacyPendingFresh bool
+	contextRevision    int64
+	contextInitiator   pgtype.UUID
+	boundaryPending    bool
+	ensureContextErr   error
+	lockContextErr     error
+	advanceContextErr  error
+	resolveContextErr  error
+	setInitiatorErr    error
+	pendingContextsErr error
+	createBindingErr   error // simulate a unique violation on create
+	raceWinner         pgtype.UUID
 }
 
 func newFake() *fakeSessionQueries {
-	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(42), updateMediaRows: 1}
+	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(42), updateMediaRows: 1, contextRevision: 1}
 }
 
 func bindKey(inst pgtype.UUID, chat string) string { return fmt.Sprintf("%x|%s", inst.Bytes, chat) }
@@ -101,10 +133,21 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 	return db.ChannelChatSessionBinding{ChatSessionID: arg.ChatSessionID}, nil
 }
 
+func (f *fakeSessionQueries) LockChatSessionForAppend(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	return id, nil
+}
+
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
 	f.lastCreate = arg
 	return db.ChatMessage{ID: f.messageID}, nil
+}
+
+func (f *fakeSessionQueries) ListUnownedChannelChatContextRevisions(context.Context, pgtype.UUID) ([]PendingContext, error) {
+	if f.pendingContextsErr != nil {
+		return nil, f.pendingContextsErr
+	}
+	return []PendingContext{{Revision: f.contextRevision, InitiatorUserID: f.contextInitiator}}, nil
 }
 
 func (f *fakeSessionQueries) ClearChatMessageChannelMediaPending(context.Context, db.ClearChatMessageChannelMediaPendingParams) error {
@@ -159,9 +202,53 @@ func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) erro
 	return nil
 }
 
-func (f *fakeSessionQueries) MarkChannelChatSessionPendingFresh(context.Context, pgtype.UUID) (bool, error) {
+func (f *fakeSessionQueries) LockChannelChatSessionBindingForContext(context.Context, pgtype.UUID) (db.ChannelChatSessionBinding, error) {
+	if f.lockContextErr != nil {
+		return db.ChannelChatSessionBinding{}, f.lockContextErr
+	}
+	return db.ChannelChatSessionBinding{
+		ContextRevision: f.contextRevision, PendingFresh: f.legacyPendingFresh,
+	}, nil
+}
+
+func (f *fakeSessionQueries) LockChannelChatContextGenerationByRevision(context.Context, db.LockChannelChatContextGenerationByRevisionParams) (db.ChannelChatContextGeneration, error) {
+	if f.lockContextErr != nil {
+		return db.ChannelChatContextGeneration{}, f.lockContextErr
+	}
+	return db.ChannelChatContextGeneration{
+		Revision: f.contextRevision, PendingFresh: f.pendingFresh,
+		HistoryBoundaryPending: f.boundaryPending,
+	}, nil
+}
+
+func (f *fakeSessionQueries) EnsureChannelChatContextGeneration(context.Context, pgtype.UUID) error {
+	return f.ensureContextErr
+}
+
+func (f *fakeSessionQueries) AdvanceChannelChatContextGeneration(_ context.Context, arg db.AdvanceChannelChatContextGenerationParams) (db.AdvanceChannelChatContextGenerationRow, error) {
+	if f.advanceContextErr != nil {
+		return db.AdvanceChannelChatContextGenerationRow{}, f.advanceContextErr
+	}
+	f.contextRevision = arg.CurrentRevision + 1
 	f.pendingFresh = true
-	return true, nil
+	f.boundaryPending = !arg.HasMessageBody
+	return db.AdvanceChannelChatContextGenerationRow{Revision: f.contextRevision, PendingFresh: true, HistoryBoundaryPending: f.boundaryPending}, nil
+}
+
+func (f *fakeSessionQueries) ResolveChannelChatContextHistoryStart(context.Context, db.ResolveChannelChatContextHistoryStartParams) error {
+	if f.resolveContextErr != nil {
+		return f.resolveContextErr
+	}
+	f.boundaryPending = false
+	return nil
+}
+
+func (f *fakeSessionQueries) SetChannelChatContextInitiator(_ context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error) {
+	if f.setInitiatorErr != nil {
+		return pgtype.UUID{}, f.setInitiatorErr
+	}
+	f.contextInitiator = arg.InitiatorUserID
+	return arg.InitiatorUserID, nil
 }
 
 func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(context.Context, db.UpdateChannelChatSessionBindingReplyTargetParams) error {
@@ -320,6 +407,20 @@ func TestAppendUserMessage_IssueCommand(t *testing.T) {
 	}
 	if res.IssueCommand == nil || res.IssueCommand.Title != "Fix bug" || res.IssueCommand.Description != "steps to repro" {
 		t.Errorf("IssueCommand = %+v", res.IssueCommand)
+	}
+}
+
+func TestAppendUserMessage_ChannelCommandDoesNotReplaceContextInitiator(t *testing.T) {
+	f := newFake()
+	f.contextInitiator = uid(7)
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(8), Body: "/issue Fix bug", MessageID: "m1",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.contextInitiator != uid(7) {
+		t.Fatalf("context initiator = %v, want prior agent-input sender %v", f.contextInitiator, uid(7))
 	}
 }
 
@@ -682,16 +783,147 @@ func TestAppendUserMessage_FreshMessagePersistsPendingIntent(t *testing.T) {
 	if !f.pendingFresh {
 		t.Fatal("fresh message did not persist pending intent in the append transaction")
 	}
+	if f.contextRevision != 2 || !f.lastCreate.ChannelContextRevision.Valid || f.lastCreate.ChannelContextRevision.Int64 != 2 {
+		t.Fatalf("fresh message context = generation %d / row %+v, want 2", f.contextRevision, f.lastCreate.ChannelContextRevision)
+	}
 }
 
 func TestMarkPendingFresh_BareCommandPersistsIntent(t *testing.T) {
 	f := newFake()
 	s := newTestSession(f)
-	if err := s.MarkPendingFresh(context.Background(), uid(1)); err != nil {
+	if err := s.MarkPendingFresh(context.Background(), uid(1), "m1"); err != nil {
 		t.Fatalf("MarkPendingFresh: %v", err)
 	}
 	if !f.pendingFresh {
 		t.Fatal("bare fresh command did not persist pending intent")
+	}
+	if f.contextRevision != 2 || !f.boundaryPending {
+		t.Fatalf("bare fresh context = generation %d pending=%t, want 2/true", f.contextRevision, f.boundaryPending)
+	}
+}
+
+func TestAppendUserMessage_ResolvesBareFreshBoundaryOnNextMessage(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if err := s.MarkPendingFresh(context.Background(), uid(1), "command-ts"); err != nil {
+		t.Fatalf("MarkPendingFresh: %v", err)
+	}
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{SessionID: uid(1), Body: "next", MessageID: "next-ts"})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.boundaryPending || res.ContextRevision != 2 || f.lastCreate.ChannelContextRevision.Int64 != 2 {
+		t.Fatalf("resolved context: pending=%t result=%d row=%d", f.boundaryPending, res.ContextRevision, f.lastCreate.ChannelContextRevision.Int64)
+	}
+}
+
+func TestAppendUserMessage_AdvancesLegacyPendingFreshFromRollingDeploy(t *testing.T) {
+	f := newFake()
+	f.legacyPendingFresh = true
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "next", MessageID: "next-ts",
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.contextRevision != 2 || res.ContextRevision != 2 || f.lastCreate.ChannelContextRevision.Int64 != 2 {
+		t.Fatalf("legacy pending fresh context = generation:%d result:%d row:%d, want 2", f.contextRevision, res.ContextRevision, f.lastCreate.ChannelContextRevision.Int64)
+	}
+}
+
+func TestAppendUserMessage_ContextGenerationFailuresDoNotWriteMessage(t *testing.T) {
+	testErr := errors.New("context generation failed")
+	tests := []struct {
+		name  string
+		setup func(*fakeSessionQueries)
+		input AppendInput
+	}{
+		{name: "ensure", setup: func(f *fakeSessionQueries) { f.ensureContextErr = testErr }},
+		{name: "lock", setup: func(f *fakeSessionQueries) { f.lockContextErr = testErr }},
+		{name: "advance", setup: func(f *fakeSessionQueries) { f.advanceContextErr = testErr }, input: AppendInput{ForceFresh: true}},
+		{name: "resolve", setup: func(f *fakeSessionQueries) {
+			f.boundaryPending = true
+			f.resolveContextErr = testErr
+		}, input: AppendInput{MessageID: "boundary"}},
+		{name: "snapshot initiator", setup: func(f *fakeSessionQueries) { f.setInitiatorErr = testErr }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake()
+			tt.setup(f)
+			input := tt.input
+			input.SessionID = uid(1)
+			input.Body = "must not persist"
+			_, err := newTestSession(f).AppendUserMessage(context.Background(), input)
+			if !errors.Is(err, testErr) {
+				t.Fatalf("AppendUserMessage error = %v, want injected failure", err)
+			}
+			if len(f.messages) != 0 || f.touched != 0 || f.replyTargets != 0 {
+				t.Fatalf("failed append wrote message/touch/reply = %d/%d/%d", len(f.messages), f.touched, f.replyTargets)
+			}
+		})
+	}
+}
+
+func TestAppendUserMessage_PendingContextLookupFailureRollsBack(t *testing.T) {
+	testErr := errors.New("pending context lookup failed")
+	f := newFake()
+	f.pendingContextsErr = testErr
+	tx := &fakeTx{}
+	s := newChatSessionWith(f, fakeTxStarter{tx: tx}, channel.TypeFeishu, SessionTitles{})
+
+	_, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Body: "must roll back", MessageID: "m1",
+	})
+	if !errors.Is(err, testErr) {
+		t.Fatalf("AppendUserMessage error = %v, want injected failure", err)
+	}
+	if tx.committed || !tx.rolledBack {
+		t.Fatalf("transaction committed/rolled back = %t/%t, want false/true", tx.committed, tx.rolledBack)
+	}
+	if f.touched != 0 || f.replyTargets != 0 {
+		t.Fatalf("failed append touched session/reply target = %d/%d, want 0/0", f.touched, f.replyTargets)
+	}
+}
+
+func TestMarkPendingFresh_ContextGenerationFailuresRollBack(t *testing.T) {
+	testErr := errors.New("context generation failed")
+	tests := []struct {
+		name  string
+		setup func(*fakeSessionQueries)
+	}{
+		{name: "ensure", setup: func(f *fakeSessionQueries) { f.ensureContextErr = testErr }},
+		{name: "lock", setup: func(f *fakeSessionQueries) { f.lockContextErr = testErr }},
+		{name: "advance", setup: func(f *fakeSessionQueries) { f.advanceContextErr = testErr }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFake()
+			tt.setup(f)
+			tx := &fakeTx{}
+			s := newChatSessionWith(f, fakeTxStarter{tx: tx}, channel.TypeFeishu, SessionTitles{})
+			err := s.MarkPendingFresh(context.Background(), uid(1), "command")
+			if !errors.Is(err, testErr) {
+				t.Fatalf("MarkPendingFresh error = %v, want injected failure", err)
+			}
+			if tx.committed || !tx.rolledBack {
+				t.Fatalf("transaction committed/rolledBack = %t/%t, want false/true", tx.committed, tx.rolledBack)
+			}
+		})
+	}
+}
+
+func TestMarkPendingFresh_CommitFailureRollsBack(t *testing.T) {
+	commitErr := errors.New("commit failed")
+	tx := &fakeTx{commitErr: commitErr}
+	s := newChatSessionWith(newFake(), fakeTxStarter{tx: tx}, channel.TypeFeishu, SessionTitles{})
+	err := s.MarkPendingFresh(context.Background(), uid(1), "command")
+	if !errors.Is(err, commitErr) {
+		t.Fatalf("MarkPendingFresh error = %v, want commit failure", err)
+	}
+	if !tx.committed || !tx.rolledBack {
+		t.Fatalf("transaction committed/rolledBack = %t/%t, want true/true", tx.committed, tx.rolledBack)
 	}
 }
 

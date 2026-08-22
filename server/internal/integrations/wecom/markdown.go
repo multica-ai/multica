@@ -8,6 +8,8 @@ package wecom
 import (
 	"strings"
 	"unicode/utf8"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
 // breakMemberLinks is what every caller splicing member-authored text into a
@@ -64,7 +66,7 @@ func breakMemberLinks(s string) string {
 // link without "](" is a CommonMark link reference definition, and this
 // renderer resolves those — see breakLinkReferenceDefinitions.
 func breakLinkAdjacency(s string) string {
-	return strings.ReplaceAll(s, "](", "] (")
+	return channel.BreakMarkdownLinkAdjacency(s)
 }
 
 // breakLinkReferenceDefinitions stops member-authored text from *defining* a

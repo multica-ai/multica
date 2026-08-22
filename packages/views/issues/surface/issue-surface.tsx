@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { FilterX, ListTodo, Plus } from "lucide-react";
+import { AlertTriangle, FilterX, ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
@@ -261,7 +261,13 @@ function IssueSurfaceContent({
             }
           />
         )}
-        {controller.isLoading ? (
+        {/* A failed status catalog precedes loading/empty/content on purpose.
+            Row fetching is suspended while it is down (a custom status filter
+            cannot be routed without it), so every branch below would render an
+            unexplained empty surface with no way out. (MUL-6243) */}
+        {controller.isStatusCatalogError ? (
+          <StatusCatalogErrorState onRetry={controller.retryStatusCatalog} />
+        ) : controller.isLoading ? (
           renderLoading ? (
             renderLoading(renderContext)
           ) : (
@@ -373,6 +379,23 @@ function IssueSurfaceContent({
  * copy only describes the unfiltered case. The action clears exactly the
  * filters this state tests for, so it always restores content.
  */
+function StatusCatalogErrorState({ onRetry }: { onRetry: () => void }) {
+  const { t } = useT("issues");
+  return (
+    <div
+      role="alert"
+      className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground"
+    >
+      <AlertTriangle className="h-10 w-10 text-faint-foreground" />
+      <p className="text-body">{t(($) => $.status_catalog_error.title)}</p>
+      <p className="text-caption">{t(($) => $.status_catalog_error.hint)}</p>
+      <Button variant="outline" size="sm" className="mt-1" onClick={onRetry}>
+        {t(($) => $.status_catalog_error.retry)}
+      </Button>
+    </div>
+  );
+}
+
 function FilteredEmptyState() {
   const { t } = useT("issues");
   const clearFilters = useViewStore((s) => s.clearFilters);

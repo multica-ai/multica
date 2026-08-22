@@ -11,16 +11,6 @@
     "cancelled": "취소됨",
     "recent": "최근 항목"
   },
-  "pages": {
-    "inbox": "인박스",
-    "my_issues": "내 태스크",
-    "issues": "태스크",
-    "projects": "프로젝트",
-    "agents": "에이전트",
-    "runtimes": "런타임",
-    "skills": "스킬",
-    "settings": "설정"
-  },
   "commands": {
     "current_theme_aria": "현재 테마",
     "new_issue": "새 태스크",

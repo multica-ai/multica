@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "状态列表加载失败",
+    "hint": "没有它就无法应用状态筛选，因此暂时不显示议题。",
+    "retry": "重试"
+  },
+  "revision": {
+    "conflict": "任务或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
+    "compare_title": "标题存在并发修改，请比较两个版本。",
+    "compare_description": "描述存在并发修改，请比较两个版本。",
+    "compare_comment": "评论存在并发修改，请比较两个版本。",
+    "server_version": "服务端最新版本",
+    "local_version": "你的本地版本",
+    "keep_local": "保留我的版本",
+    "use_server": "使用最新版本"
+  },
   "page": {
     "breadcrumb_title": "任务",
     "breadcrumb_workspace_fallback": "工作区",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "筛选",
     "placeholder": "筛选...",
+    "search_status": "搜索状态...",
     "no_results": "无结果",
     "no_labels": "还没有标签",
     "no_assignee": "无负责人",
@@ -242,6 +258,7 @@
     "back": "返回",
     "title_placeholder": "任务标题",
     "desc_placeholder": "添加描述...",
+    "current_issue": "当前任务",
     "sub_issues_label": "子任务",
     "sub_issue_of": "属于父任务",
     "add_sub_issues": "添加子任务",
@@ -349,6 +366,8 @@
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
+    "project_directory_path_copied": "已复制项目目录路径",
+    "project_directory_path_copied_with_branch": "已复制项目目录路径 — 任务改动位于 {{branch}} 分支",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地 agent 运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
@@ -404,11 +423,13 @@
     "trigger_blocked_invocation_not_allowed": "找不到该目标，或你没有它的使用权限",
     "trigger_blocked_target_unavailable": "该目标不可用",
     "trigger_blocked_runtime_offline": "该目标的运行时已离线",
+    "trigger_blocked_runtime_unusable": "该目标的 CLI 在它所在的机器上无法运行 —— 需要在那台机器上重装",
     "trigger_blocked_agent_runtime_required": "该目标未绑定运行时——绑定后才能运行",
     "trigger_blocked_generic": "该目标不会被触发",
     "trigger_blocked_short_invocation_not_allowed": "找不到或无权限",
     "trigger_blocked_short_target_unavailable": "不可用",
     "trigger_blocked_short_runtime_offline": "运行时离线",
+    "trigger_blocked_short_runtime_unusable": "CLI 无法运行",
     "trigger_blocked_short_agent_runtime_required": "需绑定运行时",
     "trigger_blocked_short_generic": "不会触发",
     "send_reply_failed": "发送回复失败",
@@ -575,7 +596,8 @@
   },
   "card": {
     "update_failed": "更新任务失败",
-    "updated_ago": "更新于 {{time}}"
+    "updated_ago": "更新于 {{time}}",
+    "child_progress_restricted_other": "{{count}} 个子任务受限"
   },
   "actions": {
     "status": "状态",
@@ -597,6 +619,7 @@
     "unpin_from_sidebar": "从侧边栏取消固定",
     "copy_link": "复制链接",
     "copy_workdir_path": "复制本地 workdir 路径",
+    "copy_project_directory_path": "复制项目目录路径",
     "relations": "关系",
     "create_sub_issue": "创建子任务",
     "set_parent_issue": "设置父任务...",
@@ -613,9 +636,12 @@
       "value_placeholder": "输入值…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "搜索成员…",
       "open_link": "打开链接",
       "archived_hint": "已归档属性——值为只读",
-      "none": "无值"
+      "unknown_value": "无法显示",
+      "unknown_value_hint": "该值由更新版本的 Multica 设置，当前版本无法编辑——请更新应用，或清除该值",
+      "none": "未设置"
     },
     "filter_options_aria": "筛选选项",
     "no_results": "无结果",
@@ -748,5 +774,17 @@
     "manage_hint": "排序与显隐只影响你自己",
     "visible_toggle": "在视图栏显示",
     "more_label": "更多视图"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} 的界面加载失败。",
+    "hook_succeeded": "{{name}} 已完成。",
+    "hook_failed": "{{name}} 执行失败。",
+    "hook_refused": "{{name}} 未被执行。",
+    "hook_activity": "最近调用",
+    "hook_never_run": "该 hook 尚未运行过。",
+    "surface_loading": "正在加载 {{name}}…",
+    "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
+    "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
   }
 }

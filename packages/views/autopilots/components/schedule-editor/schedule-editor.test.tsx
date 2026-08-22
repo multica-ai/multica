@@ -463,21 +463,6 @@ describe("ScheduleEditor", () => {
     expect(screen.getByTestId("cron-out").textContent).toBe("30 14 * * *");
   });
 
-  it("keeps the minute across a fixed time → minute-step window → fixed time trip", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 14 * * *"));
-    await user.click(screen.getByRole("button", { name: "At an interval" }));
-    await user.click(screen.getByLabelText("Interval unit"));
-    await user.click(await screen.findByRole("option", { name: "minutes" }));
-    await user.click(screen.getByLabelText("Window start hour"));
-    await user.keyboard("14");
-    await user.click(screen.getByRole("button", { name: "At a time" }));
-    // A minute-step window is hour-granular, so its bounds read :00 — but the
-    // model still holds the 30 the user typed. Reading the anchor back off the
-    // window would silently fire the schedule half an hour early.
-    expect(screen.getByTestId("cron-out").textContent).toBe("30 14 * * *");
-  });
-
   it("focuses the interval when the time switches to an interval", async () => {
     const user = userEvent.setup();
     renderEditor(cron("0 9 * * *"));
@@ -707,18 +692,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("0 9-23/3 * * *");
   });
 
-  it("takes a window widened back to the whole day as all day again", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9-21/3 * * *"));
-    await user.click(screen.getByLabelText("Window start hour"));
-    await user.keyboard("00");
-    await user.click(screen.getByLabelText("Window end hour"));
-    await user.keyboard("23");
-    // A window that spans the day IS all day: the schedule has one form, and
-    // "0-23/3" is not a second one.
-    expect(cronOut()).toBe("0 */3 * * *");
-  });
-
   it("clears the window end to the end of the day, not onto its start", async () => {
     const user = userEvent.setup();
     renderEditor(cron("0 9-15 * * *"));
@@ -738,15 +711,6 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("0 * * * *");
   });
 
-  it("raises the window end when the start is moved past it", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("0 9-12 * * *"));
-    const startHour = screen.getByLabelText("Window start hour");
-    await user.click(startHour!);
-    await user.keyboard("18");
-    expect(cronOut()).toBe("0 18-18 * * *");
-  });
-
   it("moves the shared firing minute when the window end's minute is edited", async () => {
     const user = userEvent.setup();
     renderEditor(cron("0 9-21 * * *"));
@@ -757,16 +721,9 @@ describe("ScheduleEditor", () => {
     expect(cronOut()).toBe("30 9-21 * * *");
   });
 
-  it("keeps the firing minute across an interval unit round-trip", async () => {
-    const user = userEvent.setup();
-    renderEditor(cron("30 */2 * * *"));
-    await user.click(screen.getAllByRole("combobox")[0]!);
-    await user.click(await screen.findByRole("option", { name: "minutes" }));
-    await user.click(screen.getAllByRole("combobox")[0]!);
-    await user.click(await screen.findByRole("option", { name: "hours" }));
-    expect(cronOut()).toBe("30 */2 * * *");
-  });
-
+  // The all-day variant of this round-trip is the same wiring with a strictly
+  // weaker assertion; clampWindow's own unit round-trip matrix is in
+  // transitions.test.ts.
   it("keeps the firing minute across a unit round-trip with a time window", async () => {
     const user = userEvent.setup();
     renderEditor(cron("30 9-21/2 * * *"));

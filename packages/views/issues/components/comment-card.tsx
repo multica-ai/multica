@@ -32,7 +32,7 @@ import { useTimeAgo } from "../../i18n";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { api, dispatchReasonCode } from "@multica/core/api";
+import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -43,6 +43,7 @@ import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/iss
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
+import { RevisionConflictCompare } from "./revision-conflict-compare";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -106,8 +107,9 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  onReplyAccepted?: (commentId: string) => void;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
@@ -303,12 +305,14 @@ function TaskCommentRetryButton({
 function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>,
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>,
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const [editing, setEditing] = useState(false);
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
+  const [initialContentBase, setInitialContentBase] = useState(entry.content ?? "");
+  const [revisionConflict, setRevisionConflict] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.
@@ -339,6 +343,9 @@ function useEditAttachmentState(
   useEffect(() => {
     setSuppressedAgentIds(new Set());
   }, [issueId, entry.id, entry.parent_id]);
+  useEffect(() => {
+    if (revisionConflict) setInitialContentBase(entry.content ?? "");
+  }, [entry.content, revisionConflict]);
 
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
@@ -372,6 +379,7 @@ function useEditAttachmentState(
 
   const resetState = () => {
     setEditing(false);
+    setRevisionConflict(false);
     setContent(entry.content ?? "");
     setSuppressedAgentIds(new Set());
     setRetainedStandaloneIds(null);
@@ -383,6 +391,7 @@ function useEditAttachmentState(
     cancelledRef.current = false;
     const draft = getDraft(draftKey) ?? entry.content ?? "";
     setInitialValue(draft);
+    setInitialContentBase(entry.content ?? "");
     setContent(draft);
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
@@ -391,6 +400,21 @@ function useEditAttachmentState(
   const cancelEdit = () => {
     cancelledRef.current = true;
     resetState();
+  };
+
+  /**
+   * Discard the local draft and continue from the version the server holds.
+   * Local-only — the server already stores this content, so nothing is written.
+   * The editor is dirty (that is why the conflict exists), so `adoptContent` is
+   * the only channel that lands: a plain `defaultValue` change is mount-only.
+   */
+  const adoptServerVersion = () => {
+    const serverContent = entry.content ?? "";
+    editorRef.current?.adoptContent(serverContent);
+    setContent(serverContent);
+    setDraft(draftKey, serverContent);
+    setInitialContentBase(serverContent);
+    setRevisionConflict(false);
   };
 
   // Await-then-render save (MUL-5181): shared submit contract, with the edit-
@@ -441,11 +465,18 @@ function useEditAttachmentState(
           trimmed,
           activeIds,
           suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+          initialContentBase,
         );
+        setRevisionConflict(false);
         return true;
       } catch (err) {
+        if (errorCode(err) === "revision_conflict") {
+          setRevisionConflict(true);
+        }
         toast.error(
-          err instanceof Error && err.message
+          errorCode(err) === "revision_conflict"
+            ? t(($) => $.revision.conflict)
+            : err instanceof Error && err.message
             ? err.message
             : t(($) => $.comment.update_failed),
         );
@@ -497,7 +528,51 @@ function useEditAttachmentState(
     startEdit,
     cancelEdit,
     saveEdit,
+    revisionConflict,
+    adoptServerVersion,
   };
+}
+
+function CommentRevisionConflict({
+  serverContent,
+  localContent,
+  onKeepLocal,
+  onUseServer,
+  saving,
+}: {
+  serverContent: string;
+  localContent: string;
+  onKeepLocal: () => void;
+  onUseServer: () => void;
+  saving?: boolean;
+}) {
+  const { t } = useT("issues");
+  return (
+    <RevisionConflictCompare
+      className="mt-2"
+      title={t(($) => $.revision.compare_comment)}
+      serverLabel={t(($) => $.revision.server_version)}
+      localLabel={t(($) => $.revision.local_version)}
+      serverValue={serverContent}
+      localValue={localContent}
+      actions={(
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving}
+            onClick={onKeepLocal}
+          >
+            {t(($) => $.revision.keep_local)}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={onUseServer}>
+            {t(($) => $.revision.use_server)}
+          </Button>
+        </div>
+      )}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -524,7 +599,7 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
@@ -662,6 +737,15 @@ function CommentRow({
               attachments={edit.editorAttachments}
             />
           </div>
+          {edit.revisionConflict ? (
+            <CommentRevisionConflict
+              serverContent={entry.content ?? ""}
+              localContent={edit.content}
+              onKeepLocal={() => void edit.saveEdit()}
+              onUseServer={edit.adoptServerVersion}
+              saving={edit.saving}
+            />
+          ) : null}
           {edit.standaloneEditAttachments.length > 0 && (
             <AttachmentList
               attachments={edit.standaloneEditAttachments}
@@ -751,6 +835,7 @@ function CommentCardImpl({
   currentUserId,
   canModerate = false,
   onReply,
+  onReplyAccepted,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -978,6 +1063,15 @@ function CommentCardImpl({
                     attachments={edit.editorAttachments}
                   />
                 </div>
+                {edit.revisionConflict ? (
+                  <CommentRevisionConflict
+                    serverContent={entry.content ?? ""}
+                    localContent={edit.content}
+                    onKeepLocal={() => void edit.saveEdit()}
+                    onUseServer={edit.adoptServerVersion}
+                    saving={edit.saving}
+                  />
+                ) : null}
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex min-w-0 flex-1 flex-col gap-1">
                     {edit.standaloneEditAttachments.length > 0 && (
@@ -1138,6 +1232,7 @@ function CommentCardImpl({
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onSubmit={(content, attachmentIds, suppressAgentIds) => onReply(entry.id, content, attachmentIds, suppressAgentIds)}
+                  onAccepted={onReplyAccepted}
                 />
               </div>
             </>

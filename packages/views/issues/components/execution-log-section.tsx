@@ -17,7 +17,7 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
 import { TranscriptButton } from "../../common/task-transcript";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import {
   formatTokens,
@@ -432,8 +432,17 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const label = useStatusLabel(task.status);
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
+  // A failed run always explains itself. A cancelled one only when the SERVER
+  // cancelled it for a persisted reason (worktree claim gate, preserved-work
+  // delivery) — a user-initiated cancel stays a plain "Cancelled".
   const failureLabel =
-    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason)
+      : cancelReasonLabel(task);
+  // Hovering the status mark reveals the actionable text ("upgrade the daemon
+  // on that machine", "work preserved at …"), not just the reason bucket.
+  const statusTitle =
+    failureLabel && task.error ? `${failureLabel}: ${task.error}` : (failureLabel ?? label);
 
   // What this run cost, in the slot the relative timestamp used to hold.
   //
@@ -493,7 +502,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
     <RowShell task={task} title={rowTitle}>
       <TriggerText text={trigger} />
       <TaskCommentCoverage task={task} />
-      <RowStatus title={failureLabel ?? label}>
+      <RowStatus title={statusTitle}>
         <TaskStatusIcon status={task.status} />
         <span className="sr-only">
           {[failureLabel ?? label, time].filter(Boolean).join(" · ")}

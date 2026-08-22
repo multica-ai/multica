@@ -155,10 +155,13 @@ var allFileBasedProviders = []string{
 	"cursor",
 	"kimi",
 	"reasonix",
+	"dsh",
+	"dim",
 	"kiro",
 	"antigravity",
 	"qwen",
 	"qwenpaw",
+	"mcode",
 }
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline
@@ -635,6 +638,7 @@ var sameSlugSkillProviderCases = []struct {
 	{"cursor", filepath.Join(".cursor", "skills", "issue-review")},
 	{"kimi", filepath.Join(".kimi", "skills", "issue-review")},
 	{"reasonix", filepath.Join(".reasonix", "skills", "issue-review")},
+	{"dsh", filepath.Join(".dsh", "skills", "issue-review")},
 	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
 	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
 	{"qwen", filepath.Join(".qwen", "skills", "issue-review")},

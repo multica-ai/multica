@@ -104,6 +104,49 @@ function recordFromPairs(pairs: KeyValue[]): Record<string, string> | undefined 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+/**
+ * The guided form can only express two transports, and saving from it REWRITES
+ * the entry (`configFromForm` emits `type: "http"` for anything non-stdio). An
+ * entry on any other transport — `sse` today, whatever a newer backend reports
+ * tomorrow — must therefore never be routed through the form, or editing it
+ * would silently change its protocol and can break the server outright.
+ * Those entries take the JSON path, which round-trips whatever is typed.
+ *
+ * This one classifies a NON-secret summary transport, which the server emits
+ * from a closed set (stdio / http / sse / unknown).
+ */
+function formCanExpressTransport(transport: string): boolean {
+  return transport === "stdio" || transport === "http";
+}
+
+/** The `type` values `configFromForm` can write back without changing them. */
+const FORM_EXPRESSIBLE_TYPES = new Set([
+  "local",
+  "stdio",
+  "remote",
+  "http",
+  "streamable-http",
+]);
+
+/**
+ * Whether the form can round-trip a SAVED entry.
+ *
+ * Deliberately does not reuse `mcpTransport`: that is a lossy DISPLAY
+ * classifier — it reports "http" for any entry carrying a `url`, whatever its
+ * `type` — so `{"type":"websocket","url":"wss://…"}` would look form-editable
+ * and be rewritten to `type: "http"` on save. Safety decisions need the
+ * explicit value, not the display bucket.
+ */
+function formCanExpressConfig(config: Record<string, unknown>): boolean {
+  const type =
+    typeof config.type === "string" ? config.type.trim().toLowerCase() : "";
+  if (type !== "") return FORM_EXPRESSIBLE_TYPES.has(type);
+  // No explicit type: the form infers stdio from `command` and http from
+  // `url`, and writes that same shape back. With neither there is nothing for
+  // it to express, so leave the entry to the JSON editor.
+  return config.command !== undefined || config.url !== undefined;
+}
+
 function configFromForm(form: McpFormState): Record<string, unknown> {
   const config = { ...form.extras };
   if (form.transport === "stdio") {
@@ -136,16 +179,38 @@ function parseServerJson(text: string):
   }
 }
 
+/**
+ * Whether the guided form can edit this entry without changing it. The legacy
+ * `mcp` container is provider-native and must round-trip verbatim; so is any
+ * entry whose transport the form cannot express. When the caller could not read
+ * the saved config back, the safe summary's transport is the only signal.
+ */
+function formSupportsServer(server: ManagedMcpServer): boolean {
+  if (server.container === "mcp") return false;
+  // With a saved entry in hand, judge the entry itself; the summary transport
+  // is only a fallback for callers that could not read one back.
+  return Object.keys(server.config).length > 0
+    ? formCanExpressConfig(server.config)
+    : formCanExpressTransport(server.transport);
+}
+
 export function McpServerDialog({
   open,
   server,
   existingNames,
+  lockName = false,
   onOpenChange,
   onSave,
 }: {
   open: boolean;
   server: ManagedMcpServer | null;
   existingNames: Set<string>;
+  /**
+   * Pins the name while editing. Callers whose backend has no atomic rename
+   * must set this: letting the field change would turn "save" into "create a
+   * second server" and silently leave the original behind.
+   */
+  lockName?: boolean;
   onOpenChange: (open: boolean) => void;
   onSave: (name: string, config: Record<string, unknown>) => Promise<void>;
 }) {
@@ -160,10 +225,24 @@ export function McpServerDialog({
     if (!open) return;
     const config = server?.config ?? {};
     setName(server?.name ?? "");
-    setForm(server ? formFromConfig(config) : emptyForm());
+    // A caller that cannot read the saved entry back (the workspace layer is
+    // write-only) passes an empty config with the transport from the safe
+    // summary. Seeding from `formFromConfig({})` there would open an http form
+    // for a known stdio server, so take the transport from the summary.
+    setForm(
+      !server
+        ? emptyForm()
+        : Object.keys(config).length > 0
+          ? formFromConfig(config)
+          : { ...emptyForm(), transport: server.transport === "stdio" ? "stdio" : "http" },
+    );
     setJsonText(JSON.stringify(config, null, 2));
-    setMode(server?.container === "mcp" ? "json" : "form");
+    setMode(server && !formSupportsServer(server) ? "json" : "form");
   }, [open, server]);
+
+  // The form is unavailable — not merely unselected — for entries it cannot
+  // represent, so switching to it cannot rewrite them either.
+  const formAvailable = !server || formSupportsServer(server);
 
   const jsonResult = useMemo(() => parseServerJson(jsonText), [jsonText]);
   const trimmedName = name.trim();
@@ -261,12 +340,20 @@ export function McpServerDialog({
             onChange={(event) => setName(event.target.value)}
             placeholder={t(($) => $.tab_body.mcp_config.dialog_name_placeholder)}
             aria-invalid={nameError !== null || undefined}
+            readOnly={lockName}
+            aria-readonly={lockName || undefined}
+            className={lockName ? "text-muted-foreground" : undefined}
           />
+          {lockName ? (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.mcp_config.dialog_name_locked)}
+            </p>
+          ) : null}
         </div>
 
         <Tabs value={mode} onValueChange={handleModeChange}>
           <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="form" disabled={server?.container === "mcp"}>
+            <TabsTrigger value="form" disabled={!formAvailable}>
               {t(($) => $.tab_body.mcp_config.dialog_form_tab)}
             </TabsTrigger>
             <TabsTrigger value="json">

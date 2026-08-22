@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -189,5 +194,210 @@ func TestPreparationRequestPreservesOpenclawGatewayForHelper(t *testing.T) {
 				t.Fatal("gateway pin fields did not survive the helper protocol")
 			}
 		})
+	}
+}
+
+// TestPreparationHelperPreservesOpenclawTimeoutKind covers the boundary that
+// makes structural classification possible. Prepare runs in a one-shot helper
+// process and its error reaches the daemon as JSON text, so an
+// errors.Is-based check would silently degrade to "unknown error" — and the
+// daemon would fall back to matching "deadline exceeded" in the message, which
+// is exactly the misclassification this change removes (#7112).
+func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim shape is covered by the windows-tagged tests")
+	}
+	sleepBin, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("no sleep binary available to build a slow shim: %v", err)
+	}
+	// A CLI slower than the deadline, which the child process inherits through
+	// the environment. openclawCLIMinTimeout is the floor, so the shim has to
+	// outlast a full second.
+	shim := writeShim(t, t.TempDir(), "#!/bin/sh\n"+sleepBin+" 5\n", "")
+	t.Setenv(OpenclawCLITimeoutEnv, "1s")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-helper-openclaw-timeout",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		Provider:       "openclaw",
+		OpenclawBin:    shim,
+		Task:           TaskContextForEnv{IssueID: "issue-helper-openclaw-timeout"},
+	}, logger)
+	if err == nil {
+		t.Fatal("expected preparation to fail when the openclaw CLI outlasts its deadline")
+	}
+	if !errors.Is(err, ErrOpenclawCLITimeout) {
+		t.Errorf("the timeout sentinel must survive the helper boundary\ngot: %s", err)
+	}
+	if !strings.Contains(err.Error(), "openclaw config file") {
+		t.Errorf("the original diagnostic must survive too\ngot: %s", err)
+	}
+}
+
+// TestRehydratePreparationErrorUnknownKind pins the mixed-version direction of
+// the same wire: a helper newer than the daemon may name a kind this build has
+// never heard of, and the error must still arrive with its message intact
+// rather than being dropped or mislabelled.
+func TestRehydratePreparationErrorUnknownKind(t *testing.T) {
+	err := rehydratePreparationError("prepare failed somehow", "some_future_kind")
+	if err == nil || err.Error() != "prepare failed somehow" {
+		t.Fatalf("rehydratePreparationError dropped the message: %v", err)
+	}
+	if errors.Is(err, ErrOpenclawCLITimeout) {
+		t.Error("an unknown kind must not be reported as an openclaw CLI timeout")
+	}
+	if kind := preparationErrorKind(errors.New("plain failure")); kind != "" {
+		t.Errorf("preparationErrorKind(plain) = %q, want empty", kind)
+	}
+	if kind := preparationErrorKind(fmt.Errorf("wrapped: %w", ErrOpenclawCLITimeout)); kind != preparationErrorKindOpenclawCLITimeout {
+		t.Errorf("preparationErrorKind(timeout) = %q, want %q", kind, preparationErrorKindOpenclawCLITimeout)
+	}
+}
+
+// TestPrepareIsolatedKeepsTheClaimWithTheParent is the production-path
+// regression. Every real daemon prepares through PrepareIsolated, and the
+// helper is a short-lived child process: a lock taken inside it is released by
+// the kernel the instant it exits, and *os.File cannot travel back through the
+// helper's JSON response. An env-root claim taken during preparation therefore
+// protects nothing by the time the agent runs — the in-process Prepare tests
+// cannot see this, because there the "helper" never exits.
+//
+// The parent takes the claim and keeps it, so a second execution of the same
+// task must still be refused after PrepareIsolated has returned.
+func TestPrepareIsolatedKeepsTheClaimWithTheParent(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const (
+		workspaceID = "ws-isolated"
+		taskID      = "01a01ec0-e69d-7000-8000-0123456789ab"
+	)
+
+	claim, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	if err != nil {
+		t.Fatalf("parent claim: %v", err)
+	}
+	defer claim.Release()
+
+	env, err := PrepareIsolated(context.Background(), preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot:    workspacesRoot,
+		WorkspaceID:       workspaceID,
+		TaskID:            taskID,
+		AgentName:         "Isolated",
+		EnvRootPreclaimed: true,
+		Task:              TaskContextForEnv{IssueID: taskID},
+	}, nil)
+	if err != nil {
+		t.Fatalf("PrepareIsolated: %v", err)
+	}
+	if env == nil || env.WorkDir == "" {
+		t.Fatal("PrepareIsolated returned no environment")
+	}
+
+	// The helper has exited. If the claim had been taken inside it, the lock
+	// would be gone and this second claim would succeed.
+	if second, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID); err == nil {
+		second.Release()
+		t.Fatal("production PrepareIsolated returned without retaining the execution lock")
+	}
+
+	// And releasing it must hand the env root back for a later dispatch.
+	claim.Release()
+	next, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	if err != nil {
+		t.Fatalf("env root stayed locked after release: %v", err)
+	}
+	next.Release()
+}
+
+// TestLockEnvRootForReuseExcludesConcurrentContinuations covers the lock
+// primitive the reuse path is built on. The composed decision — validate the
+// prior workdir, then lock only the canonical root — is pinned by
+// TestLockReusablePriorEnvRoot* in the daemon package, which is where the
+// ordering lives.
+func TestLockEnvRootForReuseExcludesConcurrentContinuations(t *testing.T) {
+	t.Parallel()
+	priorRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(filepath.Join(priorRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed prior root: %v", err)
+	}
+
+	wsRoot, err := os.OpenRoot(filepath.Dir(filepath.Dir(priorRoot)))
+	if err != nil {
+		t.Fatalf("open workspaces root: %v", err)
+	}
+	defer wsRoot.Close()
+	rel := filepath.Join(filepath.Base(filepath.Dir(priorRoot)), filepath.Base(priorRoot))
+
+	first, _, err := LockEnvRootForReuse(wsRoot, rel, priorRoot)
+	if err != nil {
+		t.Fatalf("first continuation: %v", err)
+	}
+	if first == nil {
+		t.Fatal("expected a claim for an existing prior root")
+	}
+
+	if second, _, err := LockEnvRootForReuse(wsRoot, rel, priorRoot); err == nil {
+		second.Release()
+		t.Fatal("two continuations locked the same prior workdir at once")
+	}
+
+	first.Release()
+	again, _, err := LockEnvRootForReuse(wsRoot, rel, priorRoot)
+	if err != nil {
+		t.Fatalf("prior root stayed locked after release: %v", err)
+	}
+	again.Release()
+
+	// A missing root is not an error — the caller falls through to a fresh
+	// Prepare, and there is nothing to exclude on.
+	base := t.TempDir()
+	baseRoot, err := os.OpenRoot(base)
+	if err != nil {
+		t.Fatalf("open base: %v", err)
+	}
+	defer baseRoot.Close()
+	missing, _, err := LockEnvRootForReuse(baseRoot, "absent", filepath.Join(base, "absent"))
+	if err != nil || missing != nil {
+		t.Fatalf("missing prior root: claim=%v err=%v, want nil/nil", missing, err)
+	}
+}
+
+// TestPrepareIsolatedFailsLoudlyWhenPreclaimIsNotDeclared pins what happens if
+// a caller ever holds the claim but forgets EnvRootPreclaimed. Parent and
+// helper then contend for the same lock, and the important property is that
+// this fails immediately and says so, rather than proceeding with preparation
+// that silently believes it is protected.
+func TestPrepareIsolatedFailsLoudlyWhenPreclaimIsNotDeclared(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const (
+		workspaceID = "ws-preclaim"
+		taskID      = "01a01ec0-e69d-7000-8000-0123456789ab"
+	)
+
+	claim, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	if err != nil {
+		t.Fatalf("parent claim: %v", err)
+	}
+	defer claim.Release()
+
+	_, err = PrepareIsolated(context.Background(), preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    workspaceID,
+		TaskID:         taskID,
+		AgentName:      "Forgetful",
+		// EnvRootPreclaimed deliberately left false while the parent holds it.
+		Task: TaskContextForEnv{IssueID: taskID},
+	}, nil)
+	if err == nil {
+		t.Fatal("preparation ran without declaring the parent's claim")
+	}
+	if !strings.Contains(err.Error(), "running execution") {
+		t.Fatalf("error = %v, want it to name the held claim", err)
 	}
 }

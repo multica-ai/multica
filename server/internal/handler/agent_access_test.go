@@ -512,11 +512,13 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 // posting a plain (non-@mention) comment, bypassing the visibility gate that
 // #2359 added to chat / @mention / assignment.
 //
-// The gate must:
+// The gate must (as tightened by MUL-3963 — the cases below are the source of
+// truth, this list only summarises them):
 //   - reject plain workspace members (not owner, not admin, not agent owner)
 //   - allow the agent owner
-//   - allow workspace owners/admins
-//   - allow agent-to-agent traffic regardless of agent visibility
+//   - reject workspace owners/admins: management access is not invoke access
+//   - reject an agent actor with no owner / allow-listed human originator —
+//     A2A is judged by the top of the chain, never by the immediate agent
 func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -587,7 +589,7 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+			got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)

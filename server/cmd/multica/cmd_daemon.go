@@ -97,6 +97,7 @@ func init() {
 	f.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	f.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	f.String("workspaces-root", "", "Base directory for task workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
@@ -118,6 +119,7 @@ func init() {
 	rf.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	rf.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
+	rf.String("workspaces-root", "", "Base directory for task workspaces (env: MULTICA_WORKSPACES_ROOT)")
 	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
@@ -281,6 +283,94 @@ func healthPortForProfile(profile string) int {
 		h += int(b)
 	}
 	return daemon.DefaultHealthPort + 1 + (h % 1000)
+}
+
+// daemonProfileMismatchError reports that the daemon answering on a profile's
+// health port is not that profile's daemon.
+type daemonProfileMismatchError struct {
+	Want string // profile the caller asked to act on
+	Got  string // profile the daemon on that port reports; unset when Unreadable
+	Port int
+	// Unreadable marks a daemon that answered the profile field with something
+	// that is not a string. It claimed an identity we cannot read, so it must
+	// not be credited as ours — see daemonIdentityMismatch.
+	Unreadable bool
+}
+
+func (e *daemonProfileMismatchError) Error() string {
+	if e.Unreadable {
+		return fmt.Sprintf(
+			"port %d is serving a daemon that reported an unreadable profile identity\n"+
+				"Refusing to act on it as %s: an identity that cannot be read cannot be confirmed to be yours.",
+			e.Port, describeProfile(e.Want))
+	}
+	return fmt.Sprintf(
+		"port %d is serving profile %s, not %s\n"+
+			"Both profile names hash to the same health port, so this command would have acted on the wrong daemon.\n"+
+			"Run it against %s directly, or rename one of the profiles.",
+		e.Port, describeProfile(e.Got), describeProfile(e.Want), describeProfile(e.Got))
+}
+
+// statusNote is the one-line explanation `daemon status` prints under its
+// verdict, where the command has not failed and there is no error to render.
+func (e *daemonProfileMismatchError) statusNote() string {
+	if e.Unreadable {
+		return fmt.Sprintf("Note: port %d is serving a daemon whose profile identity could not be read.", e.Port)
+	}
+	return fmt.Sprintf("Note: port %d is serving %s, which hashes to the same port.",
+		e.Port, describeProfile(e.Got))
+}
+
+// statusJSON is the additive `port_conflict` object for --output json.
+func (e *daemonProfileMismatchError) statusJSON() map[string]any {
+	if e.Unreadable {
+		return map[string]any{"port": e.Port, "unreadable_identity": true}
+	}
+	return map[string]any{"port": e.Port, "profile": e.Got}
+}
+
+// describeProfile renders a profile name for humans, naming the default
+// profile rather than printing an empty string.
+func describeProfile(profile string) string {
+	if profile == "" {
+		return "the default profile"
+	}
+	return strconv.Quote(profile)
+}
+
+// daemonIdentityMismatch reports whether the daemon behind health belongs to a
+// profile other than the one being acted on.
+//
+// The health port is a hash of the profile name into a 1000-port range, so
+// distinct names collide — any rearrangement of the same characters lands on
+// the same port. Without this check `--profile a daemon stop` reads the PID off
+// whatever daemon answered and kills it, which for a collision is profile b's
+// daemon and every runtime it hosts (#6694).
+//
+// A daemon that predates the profile field omits it entirely. That is the only
+// case treated as "cannot prove identity, proceed anyway": refusing there would
+// break lifecycle commands against a daemon that is merely older. Once the
+// field is present it is enforced strictly — including the empty string, which
+// is the default profile identifying itself, not a missing answer.
+func daemonIdentityMismatch(health map[string]any, profile string, port int) error {
+	raw, ok := health["profile"]
+	if !ok {
+		return nil
+	}
+	got, isString := raw.(string)
+	if !isString {
+		// Present but malformed (null, a number) is NOT the same as absent.
+		// Dropping the type check would collapse such a value to "" and, for a
+		// caller targeting the default profile, read as a match — handing the
+		// lifecycle commands a daemon whose identity was never established.
+		// Absence is a daemon too old to answer; this is a daemon answering
+		// wrongly, so it fails closed.
+		return &daemonProfileMismatchError{Want: profile, Port: port, Unreadable: true}
+	}
+	if got == profile {
+		return nil
+	}
+	return &daemonProfileMismatchError{Want: profile, Got: got, Port: port}
 }
 
 // unknownProfileError reports an explicitly named --profile that has no
@@ -469,6 +559,13 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 	if daemonAlive(health) {
+		// A live daemon on our port that belongs to someone else is a
+		// collision, not an "already running" — starting would fail to bind
+		// and "already running" would send the user looking for a daemon of
+		// theirs that does not exist.
+		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
+			return err
+		}
 		label := "daemon"
 		if profile != "" {
 			label = fmt.Sprintf("daemon [%s]", profile)
@@ -766,6 +863,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if v := flagString(cmd, "runtime-name"); v != "" {
 		args = append(args, "--runtime-name", v)
 	}
+	if v := flagString(cmd, "workspaces-root"); v != "" {
+		args = append(args, "--workspaces-root", v)
+	}
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		args = append(args, "--poll-interval", d.String())
 	}
@@ -867,14 +967,19 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		"MULTICA_AGENT_RUNTIME_NAME",
 		fileCfg.RuntimeName,
 	)
+	workspacesRoot, err := resolveWorkspacesRootForProfile(profile, flagString(cmd, "workspaces-root"))
+	if err != nil {
+		return err
+	}
 
 	overrides := daemon.Overrides{
-		ServerURL:   serverURL,
-		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  deviceNameFlag,
-		RuntimeName: runtimeNameFlag,
-		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ServerURL:      serverURL,
+		DaemonID:       flagString(cmd, "daemon-id"),
+		DeviceName:     deviceNameFlag,
+		RuntimeName:    runtimeNameFlag,
+		WorkspacesRoot: workspacesRoot,
+		Profile:        profile,
+		HealthPort:     healthPortForProfile(profile),
 	}
 	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
 	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
@@ -1104,6 +1209,12 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 	if daemonAlive(health) {
+		// Identity before preflight, and well before the stop phase: restart
+		// kills whatever answered on this port, so a collision would take out
+		// another profile's daemon and then start ours in its place.
+		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
+			return err
+		}
 		// Validate the restart can succeed BEFORE the stop phase, not just
 		// inside the start phase: a missing/revoked token or an unreachable
 		// server would otherwise kill the running daemon and then fail to
@@ -1163,6 +1274,11 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		}
 		fmt.Fprintf(os.Stderr, "%s is not running.\n", label)
 		return nil
+	}
+	// The PID to kill comes from whatever answered on this port, so verify it
+	// is ours before signalling it.
+	if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
+		return err
 	}
 
 	pid, ok := health["pid"].(float64)
@@ -1258,13 +1374,41 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 
 	health := checkDaemonHealthOnPort(ctx, healthPort)
 
+	// A daemon belonging to another profile answered on our port. Reporting it
+	// as ours would be the same lie in a new place: this profile's daemon is
+	// not running, and the port is simply occupied. Say exactly that, and keep
+	// the top-level verdict "stopped" so scripts reading it stay correct.
+	//
+	// Only outside a daemon-managed task. There the port comes from the host
+	// daemon's own injection rather than a profile hash, so no collision is
+	// possible — and the task's profile is necessarily empty (--profile is
+	// rejected) while the host may run a named one, which would make every
+	// named-profile host look like a conflict and break the standing contract
+	// that `daemon status` in a task reports on the daemon hosting it.
+	var conflict *daemonProfileMismatchError
+	if daemonAlive(health) && !inDaemonTaskIdentityContext() {
+		errors.As(daemonIdentityMismatch(health, profile, healthPort), &conflict)
+	}
+
 	if output == "json" {
+		if conflict != nil {
+			return cli.PrintJSON(os.Stdout, map[string]any{
+				"status":        "stopped",
+				"port_conflict": conflict.statusJSON(),
+			})
+		}
 		return cli.PrintJSON(os.Stdout, health)
 	}
 
 	label := "Daemon"
 	if profile != "" {
 		label = fmt.Sprintf("Daemon [%s]", profile)
+	}
+
+	if conflict != nil {
+		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
+		fmt.Fprintln(os.Stdout, conflict.statusNote())
+		return nil
 	}
 
 	switch health["status"] {
@@ -1279,15 +1423,16 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 }
 
 // daemonStatusHealthPort resolves which daemon `status` should probe. Outside a
-// task that is the --profile-derived port. Inside a managed task it is the
-// daemon-injected MULTICA_DAEMON_PORT and nothing else: healthPortForProfile
-// hashes whatever profile name the caller passes, so deriving the port there
-// would let a task report on a daemon that is not the one hosting it — and for
-// a task hosted by a named-profile daemon it would silently probe the default
-// daemon instead. A missing port fails closed rather than guessing.
+// task that is the --profile-derived port, even when a stale
+// MULTICA_DAEMON_PORT remains in the host environment. Inside a managed task it
+// is the daemon-injected port and nothing else: healthPortForProfile hashes
+// whatever profile name the caller passes, so deriving the port there would let
+// a task report on a daemon that is not the one hosting it — and for a task
+// hosted by a named-profile daemon it would silently probe the default daemon
+// instead. A missing port fails closed rather than guessing.
 func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	profile := resolveProfile(cmd)
-	if !inDaemonManagedExecutionContext() {
+	if !inDaemonTaskIdentityContext() {
 		return healthPortForProfile(profile), nil
 	}
 	if profile != "" {
@@ -1304,6 +1449,16 @@ func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	return port, nil
 }
 
+// describeDaemonManager turns the daemon's launched_by tag into something a
+// user can act on. Unknown values are passed through rather than dropped: a
+// newer daemon naming a manager this CLI predates is still worth showing.
+func describeDaemonManager(launchedBy string) string {
+	if launchedBy == "desktop" {
+		return "Multica Desktop app (start and stop it from the app)"
+	}
+	return launchedBy
+}
+
 // printDaemonStatusReport renders a key/value summary of the daemon health
 // response. The value column is aligned to the widest label so the dynamic
 // "Daemon [profile]" row stays in step with the static rows below it.
@@ -1314,6 +1469,12 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	}
 	if version, ok := health["cli_version"].(string); ok && version != "" {
 		rows = append(rows, row{"Version", version})
+	}
+	// Answers "why is a daemon running that I never started?" — the reporter's
+	// ask in #6694. Only rendered when the daemon names a manager, so a
+	// standalone daemon and an older one that cannot say both stay unchanged.
+	if managed, ok := health["launched_by"].(string); ok && managed != "" {
+		rows = append(rows, row{"Managed by", describeDaemonManager(managed)})
 	}
 	// Only present while a confirmed on-disk version change is waiting for the
 	// daemon to go idle, so it reads as an explanation rather than a status line.
@@ -1344,6 +1505,36 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 
 // --- daemon logs ---
 
+// tailLog is the seam tests replace to observe `daemon logs` without spawning
+// the platform tail implementation.
+var tailLog = tailLogFile
+
+// profileLabel names a profile for humans; the default profile has no name.
+func profileLabel(profile string) string {
+	if profile == "" {
+		return "default"
+	}
+	return profile
+}
+
+// daemonLogSourcePath resolves the daemon.log path for a profile —
+// ~/.multica/daemon.log for the default profile,
+// ~/.multica/profiles/<name>/daemon.log for a named one — and guarantees it is
+// absolute, because this path is shown to the user to paste into an editor or
+// another shell.
+//
+// A relative result means daemonDirForProfile could not resolve the home
+// directory and swallowed the error, leaving a bare "daemon.log". That is
+// reported instead of returned: it would resolve against the caller's cwd and
+// name a file with nothing to do with the daemon.
+func daemonLogSourcePath(profile string) (string, error) {
+	logPath := daemonLogPathForProfile(profile)
+	if !filepath.IsAbs(logPath) {
+		return "", fmt.Errorf("cannot resolve the state directory for profile %q", profileLabel(profile))
+	}
+	return logPath, nil
+}
+
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon logs"); err != nil {
 		return err
@@ -1352,7 +1543,10 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
-	logPath := daemonLogPathForProfile(profile)
+	logPath, err := daemonLogSourcePath(profile)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)
 	}
@@ -1360,7 +1554,14 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	return tailLogFile(logPath, lines, follow)
+	// Name the file before streaming it. Which daemon.log is live is otherwise
+	// unknowable — a stale default-profile log reads fine and looks current —
+	// and this command is the only thing that knows the answer. It goes to
+	// stderr and is written before the tail starts so `-f` output and any
+	// downstream pipe stay clean.
+	fmt.Fprintf(cmd.ErrOrStderr(), "Reading %s (profile: %s)\n", logPath, profileLabel(profile))
+
+	return tailLog(logPath, lines, follow)
 }
 
 // daemonAlive reports whether a health response indicates a live daemon
@@ -1416,7 +1617,8 @@ func envUnset(name string) bool {
 }
 
 // resolveDaemonStringOverride picks the value that goes into
-// daemon.Overrides for a string knob (device_name, runtime_name).
+// daemon.Overrides for a string knob (device_name, runtime_name,
+// workspaces_root).
 // Precedence, highest first:
 //
 //  1. flag (already resolved to string; empty means "not passed")
@@ -1438,6 +1640,20 @@ func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
 		return ""
 	}
 	return cfgValue
+}
+
+// resolveWorkspacesRootForProfile is the single human-CLI resolver for the
+// daemon's task workspace root. Keeping daemon start, disk-usage, aggregate
+// scans, and cross-profile hints on this path prevents diagnostics from
+// drifting away from the directory the daemon actually uses.
+func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) {
+	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	override := resolveDaemonStringOverride(
+		flagValue,
+		"MULTICA_WORKSPACES_ROOT",
+		fileCfg.WorkspacesRoot,
+	)
+	return daemon.ResolveWorkspacesRoot(profile, override)
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -1637,7 +1853,7 @@ func checkTaskDiskUsageScope(profile, rootOverride string, allProfiles bool) err
 // with. Failing closed on a missing value keeps that guess out of the output.
 func resolveDiskUsageRoot(taskContext bool, profile, rootOverride string) (string, error) {
 	if !taskContext {
-		return daemon.ResolveWorkspacesRoot(profile, rootOverride)
+		return resolveWorkspacesRootForProfile(profile, rootOverride)
 	}
 	root := strings.TrimSpace(os.Getenv(daemon.TaskWorkspacesRootEnv))
 	if root == "" {
@@ -1769,12 +1985,10 @@ func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, 
 // (e.g. when MULTICA_WORKSPACES_ROOT pins every profile to one directory) are
 // collapsed to a single entry.
 func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
-	seen := map[string]bool{}
 	out := make([]daemon.DiskUsageRoot, 0)
 
-	if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil {
+	if root, err := resolveWorkspacesRootForProfile("", ""); err == nil {
 		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
-		seen[root] = true
 	}
 
 	profilesRoot, err := profilesRootDir()
@@ -1793,8 +2007,8 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		root, err := daemon.ResolveWorkspacesRoot(name, "")
-		if err != nil || seen[root] {
+		root, err := resolveWorkspacesRootForProfile(name, "")
+		if err != nil || containsDiskUsageRoot(out, root) {
 			continue
 		}
 		// Skip profile roots that were never created on disk — a configured
@@ -1802,10 +2016,18 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
 			continue
 		}
-		seen[root] = true
 		out = append(out, daemon.DiskUsageRoot{Profile: name, Root: root})
 	}
 	return out, nil
+}
+
+func containsDiskUsageRoot(roots []daemon.DiskUsageRoot, candidate string) bool {
+	for _, root := range roots {
+		if samePath(root.Root, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, byWorkspace bool) {
@@ -1961,7 +2183,7 @@ type diskUsageProfileSuggestion struct {
 func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsageProfileSuggestion {
 	out := make([]diskUsageProfileSuggestion, 0)
 	if currentProfile != "" {
-		if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil && !samePath(root, currentRoot) {
+		if root, err := resolveWorkspacesRootForProfile("", ""); err == nil && !samePath(root, currentRoot) {
 			if taskCount := countDiskUsageTaskDirs(root); taskCount > 0 {
 				out = append(out, diskUsageProfileSuggestion{
 					Profile:   "",
@@ -1989,7 +2211,7 @@ func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsage
 		if profile == currentProfile {
 			continue
 		}
-		root, err := daemon.ResolveWorkspacesRoot(profile, "")
+		root, err := resolveWorkspacesRootForProfile(profile, "")
 		if err != nil || samePath(root, currentRoot) {
 			continue
 		}

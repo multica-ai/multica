@@ -51,7 +51,7 @@ func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 		Number:      7,
 		Status:      "todo",
 	}
-	svc.broadcastIssueUpdated(issue, "in_progress")
+	svc.broadcastIssueUpdated(context.Background(), issue, "in_progress")
 
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 published event, got %d", len(got))
@@ -104,7 +104,7 @@ func TestBroadcastIssueUpdated_NoStatusChange(t *testing.T) {
 		WorkspaceID: testUUID(2),
 		Status:      "todo",
 	}
-	svc.broadcastIssueUpdated(issue, "todo")
+	svc.broadcastIssueUpdated(context.Background(), issue, "todo")
 
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 published event, got %d", len(got))

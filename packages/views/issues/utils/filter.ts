@@ -53,10 +53,19 @@ export interface IssueFilterContext {
 }
 
 /**
+ * Filter value that selects issues where a custom property is UNSET ("No
+ * value"). Mirrors the backend sentinel in `parsePropertiesFilterParam`
+ * (`server/internal/handler/property.go`); cannot collide with a real option id
+ * (select options are UUIDs, checkbox uses "true"/"false").
+ */
+export const NO_PROPERTY_VALUE = "__none__";
+
+/**
  * Match one issue against the property filters. Select values are single
  * option-id strings, multi_select values are option-id arrays, checkbox
  * values are booleans compared against the "true"/"false" pseudo-options.
- * An issue with no value for a filtered definition never matches it.
+ * An issue with no value for a filtered definition matches only when the
+ * "No value" (NO_PROPERTY_VALUE) pseudo-option is selected for it.
  */
 export function issueMatchesPropertyFilters(
   issue: Issue,
@@ -66,7 +75,10 @@ export function issueMatchesPropertyFilters(
   for (const [propertyId, selected] of Object.entries(propertyFilters)) {
     if (selected.length === 0) continue;
     const value = issue.properties?.[propertyId];
-    if (value === undefined) return false;
+    if (value === undefined) {
+      if (selected.includes(NO_PROPERTY_VALUE)) continue;
+      return false;
+    }
     if (typeof value === "string") {
       if (!selected.includes(value)) return false;
     } else if (Array.isArray(value)) {

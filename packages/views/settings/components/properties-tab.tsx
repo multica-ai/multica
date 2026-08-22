@@ -346,6 +346,10 @@ export function PropertyTypeLabel({ type }: { type: string }) {
       return <>{t(($) => $.properties.types.checkbox)}</>;
     case "url":
       return <>{t(($) => $.properties.types.url)}</>;
+    case "actor":
+      return <>{t(($) => $.properties.types.actor)}</>;
+    case "multi_actor":
+      return <>{t(($) => $.properties.types.multi_actor)}</>;
     default:
       // Forward compat: newer servers may ship types this build doesn't know.
       return <>{type}</>;

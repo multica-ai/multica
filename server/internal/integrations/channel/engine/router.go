@@ -119,6 +119,12 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 // delay dwarfs every pipeline budget.
 const DefaultMediaTimeout = 45 * time.Second
 
+// Dedup finalization is a short durability step after the claimed pipeline has
+// selected a terminal outcome. The request context may already be cancelled,
+// so preserve its values while giving Mark/Release a bounded opportunity to
+// commit instead of stranding a claim until stale reclaim.
+const dedupFinalizeTimeout = time.Second
+
 type mediaQueueEntry struct {
 	tail chan struct{}
 }
@@ -296,8 +302,10 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 
 	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken, bareFresh)
 
-	if claimed {
-		r.applyFinalize(ctx, set, inst.ID, msg.MessageID, claimToken, finalize)
+	if claimed && finalize != finalizeNone {
+		finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), dedupFinalizeTimeout)
+		r.applyFinalize(finalizeCtx, set, inst.ID, msg.MessageID, claimToken, finalize)
+		finalizeCancel()
 	}
 
 	// ErrClaimLost: another worker holds the claim. Surface as duplicate.
@@ -365,7 +373,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		// ForceFresh is a task-dispatch property. A bare command has no useful
 		// task to dispatch, so remember the intent and apply it to the next real
 		// message instead of writing or running an empty turn.
-		if err := set.Session.MarkPendingFresh(ctx, sessionID); err != nil {
+		if err := set.Session.MarkPendingFresh(ctx, sessionID, msg.MessageID); err != nil {
 			return Result{}, finalizeRelease, fmt.Errorf("persist fresh command: %w", err)
 		}
 		return Result{
@@ -517,7 +525,32 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    and the OutboundReplier still fires — only the debounced run trigger
 	//    (and therefore the typing indicator) is suppressed.
 	if !msg.SkipAgentRun {
-		res.runBatch = r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+		pendingContexts := appendRes.PendingContexts
+		if len(pendingContexts) == 0 {
+			// Test and third-party SessionBinder implementations created before the
+			// crash-recovery field still schedule the appended generation normally.
+			pendingContexts = []PendingContext{{
+				Revision: appendRes.ContextRevision, InitiatorUserID: identity.UserID,
+			}}
+		}
+		for _, pending := range pendingContexts {
+			revision := pending.Revision
+			forceFresh := revision == appendRes.ContextRevision && msg.ForceFresh
+			if revision == appendRes.ContextRevision {
+				// Only the generation this message actually belongs to answers
+				// for the round. A recovered older generation is somebody
+				// else's window being restored; reporting its batch here would
+				// bind this turn's indicator to a run it is not part of.
+				res.runBatch = r.scheduleRunWithFresh(set, inst, msg, sessionID, identity.UserID, forceFresh, revision)
+			} else if pending.InitiatorUserID.Valid {
+				r.scheduleRecoveredRun(set, inst, msg, sessionID, pending.InitiatorUserID, revision)
+			} else {
+				slog.Warn("skipping recovered channel context without initiator snapshot",
+					"chat_session_id", util.UUIDToString(sessionID),
+					"context_revision", revision,
+				)
+			}
+		}
 		res.runScheduled = true
 	}
 	if resolveMedia {
@@ -704,27 +737,43 @@ func (r *Router) finishMediaQueue(key string, done chan struct{}) {
 // decides it, so a caller never has to infer the boundary from arrival times.
 //
 // With batching disabled each message is its own run, so it gets a fresh id.
-func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) RunBatchID {
-	fresh := msg.ForceFresh
+func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, contextRevision int64) RunBatchID {
+	return r.scheduleRunWithFresh(set, inst, msg, sessionID, initiatorUserID, msg.ForceFresh, contextRevision)
+}
+
+func (r *Router) scheduleRunWithFresh(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, fresh bool, contextRevision int64) RunBatchID {
+	return r.scheduleRunMode(set, inst, msg, sessionID, initiatorUserID, fresh, contextRevision, true)
+}
+
+func (r *Router) scheduleRecoveredRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, contextRevision int64) RunBatchID {
+	return r.scheduleRunMode(set, inst, msg, sessionID, initiatorUserID, false, contextRevision, false)
+}
+
+func (r *Router) scheduleRunMode(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, fresh bool, contextRevision int64, replace bool) RunBatchID {
 	batch := RunBatchID(r.batchSeq.Add(1))
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, batch)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, contextRevision, batch)
 		return batch
 	}
-	key := keyForSession(sessionID)
+	key := keyForSessionContext(sessionID, contextRevision)
 	// The batcher hands the flush the id of the batch it is answering, not the
 	// one minted here: a message that JOINS an armed window re-arms the flush,
 	// and that flush belongs to the batch already collecting. Passing it as an
 	// argument rather than capturing it keeps the two in one place — the
 	// batcher's lock — with nothing for a firing timer to race against.
 	flush := func(answering RunBatchID) {
-		// A later message may replace this closure inside the debounce window.
-		// AppendMessage persists ForceFresh on the channel binding, and
-		// EnqueueChatTask consumes it transactionally, so correctness does not
-		// depend on which message's in-memory closure wins.
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, answering)
+		// A later message in this same durable context generation may replace
+		// the closure. /new advances the generation and therefore uses a distinct
+		// batch key; the pre-boundary flush remains armed independently.
+		// AppendMessage persists ForceFresh on the channel binding and
+		// EnqueueChannelChatTask consumes it transactionally, so correctness
+		// does not depend on which message's closure wins.
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, contextRevision, answering)
 	}
-	return r.batcher.Schedule(key, batch, flush)
+	if replace {
+		return r.batcher.Schedule(key, batch, flush)
+	}
+	return r.batcher.ScheduleIfAbsent(key, batch, flush)
 }
 
 // chatRunFlushTimeout bounds the detached flush (session reload + enqueue +
@@ -739,7 +788,7 @@ const chatRunFlushTimeout = 10 * time.Second
 // TypingNotifier either way — with the task id when one was created, or as
 // settled when none was — so a platform holding per-run state learns which of
 // its rounds this was without inferring it from ordering.
-func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, batch RunBatchID) {
+func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, contextRevision int64, batch RunBatchID) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -750,7 +799,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		r.clearTyping(ctx, set, sessionID, batch)
 		return
 	}
-	task, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh)
+	task, err := r.tasks.EnqueueChannelChatTask(ctx, session, initiatorUserID, forceFresh, contextRevision)
 	if err == nil {
 		r.bindTyping(ctx, set, sessionID, batch, task.ID)
 	}
@@ -831,6 +880,10 @@ func keyForSession(sessionID pgtype.UUID) string {
 	return string(sessionID.Bytes[:])
 }
 
+func keyForSessionContext(sessionID pgtype.UUID, contextRevision int64) string {
+	return fmt.Sprintf("%s:%d", keyForSession(sessionID), contextRevision)
+}
+
 // applyFinalize flips the in-flight claim row to its terminal state,
 // token-fenced. Best-effort: a transport failure cannot abort the outcome.
 func (r *Router) applyFinalize(ctx context.Context, set ResolverSet, instID pgtype.UUID, messageID string, claimToken pgtype.UUID, action dedupFinalize) {
@@ -876,6 +929,9 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	opts := service.IssueCreateOpts{
 		AssignedAgentRunFireAt: assignedRunFireAt,
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			// Plain IssueToMap is authoritative here: this path always creates
+			// with the built-in "todo" above, and a built-in status IS its own
+			// category, so no catalog read is possible or needed. (MUL-6243)
 			return map[string]any{"issue": service.IssueToMap(issue, issuePrefix)}
 		},
 	}

@@ -144,3 +144,63 @@ function meetsMinCliVersion(detected: string | undefined | null, minimum: string
   if (!parsed) return false;
   return !lessThan(parsed, parseSemver(minimum)!);
 }
+
+/**
+ * Capability a daemon advertises when it implements worktree mode for
+ * local_directory resources. Mirrors `DaemonCapabilityLocalWorktreeV1` in
+ * `server/pkg/protocol/messages.go`.
+ */
+export const LOCAL_WORKTREE_CAPABILITY = "local-worktree-v1";
+
+/** Minimal runtime shape this module needs; keeps callers from importing types. */
+type RuntimeCapabilityRow = {
+  daemon_id?: string | null;
+  last_seen_at?: string | null;
+  metadata?: unknown;
+};
+
+/**
+ * Whether the machine behind `daemonId` has ADVERTISED worktree support, judged
+ * by its most recently seen runtime row.
+ *
+ * Deliberately a positive signal only, and deliberately not a gate. `false`
+ * means "no runtime row here says yes" — which covers a daemon that genuinely
+ * cannot, a row written before the server recorded capabilities at all, and a
+ * server too old to record them in the first place. Those have different
+ * remedies and the client cannot reliably tell them apart: it would have to
+ * infer the backend's age from data the backend wrote, and a row's silence
+ * outlives the upgrade that fixed it (#7113).
+ *
+ * So the client stopped trying. The server is asked instead — it knows its own
+ * version by construction — at every write path (create project, add resource,
+ * update resource) and again at claim time, which is the gate that actually
+ * keeps agents out of the user's working copy (MUL-5707). This function only
+ * decides whether to PRESELECT parallel mode, where a wrong guess costs a
+ * radio button, not a blocked user or a misleading instruction.
+ *
+ * Newest-row, not any-row: deregistering a runtime only marks it offline and
+ * its metadata survives, so a machine that once advertised the capability and
+ * then downgraded would otherwise keep vouching for itself forever.
+ */
+export function runtimeAdvertisesLocalWorktree(
+  runtimes: RuntimeCapabilityRow[],
+  daemonId: string | null | undefined,
+): boolean {
+  if (!daemonId) return false;
+  let newest: RuntimeCapabilityRow | undefined;
+  for (const rt of runtimes) {
+    if (rt.daemon_id !== daemonId) continue;
+    if (!newest) {
+      newest = rt;
+      continue;
+    }
+    // A row that never reported sorts oldest, so a live row always wins.
+    const candidateSeen = rt.last_seen_at ?? "";
+    const currentSeen = newest.last_seen_at ?? "";
+    if (candidateSeen > currentSeen) newest = rt;
+  }
+  const metadata = newest?.metadata;
+  if (!metadata || typeof metadata !== "object") return false;
+  const caps = (metadata as { capabilities?: unknown }).capabilities;
+  return Array.isArray(caps) && caps.includes(LOCAL_WORKTREE_CAPABILITY);
+}

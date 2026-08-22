@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -32,11 +33,9 @@ func completeTaskViaHandler(t *testing.T, taskID, output string) *httptest.Respo
 func pendingTaskCountForAgentIssue(t *testing.T, issueID, agentID string) int {
 	t.Helper()
 	var n int
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')`,
-		issueID, agentID).Scan(&n); err != nil {
-		t.Fatalf("count pending tasks: %v", err)
-	}
+		issueID, agentID).Scan(&n)
 	return n
 }
 
@@ -46,11 +45,9 @@ func pendingTaskCountForAgentIssue(t *testing.T, issueID, agentID string) int {
 func queuedTaskCountForAgentIssue(t *testing.T, issueID, agentID string) int {
 	t.Helper()
 	var n int
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
-		issueID, agentID).Scan(&n); err != nil {
-		t.Fatalf("count queued tasks: %v", err)
-	}
+		issueID, agentID).Scan(&n)
 	return n
 }
 
@@ -65,51 +62,37 @@ func TestCompleteTask_ReconcilesMemberCommentPostedDuringRun(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+		testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	// Issue assigned to the agent so a plain member comment routes to it.
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-e2e fixture', 'in_progress', 'none', $2, 'member', 999001, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "reconcile-e2e fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999001,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 
 	// Trigger comment created BEFORE the run starts.
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	// A running task whose started_at is in the past.
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	// A deliberate member comment that arrived DURING the run (after started_at).
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'member', $3, 'wait, also handle this', 'comment', now() - interval '1 minute')
-	`, issueID, testWorkspaceID, testUserID); err != nil {
-		t.Fatalf("setup: mid-run member comment: %v", err)
-	}
+	`, issueID, testWorkspaceID, testUserID)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -131,39 +114,27 @@ func TestCompleteTask_NoReconcileWhenNoNewMemberComment(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+		testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-negative fixture', 'in_progress', 'none', $2, 'member', 999002, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "reconcile-negative fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999002,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'the only request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "the only request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
@@ -191,54 +162,40 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 	ctx := context.Background()
 
 	var agentA, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&agentA, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent A: %v", err)
-	}
+		testWorkspaceID).Scan(&agentA, &runtimeID)
 	// A second, workspace-invocable agent that a member can @mention.
 	agentB := createHandlerTestAgent(t, "Reconcile Other Agent B", nil)
 
 	// Issue assigned to A so A's completion is the one that reconciles.
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-other-agent fixture', 'in_progress', 'none', $2, 'member', 999003, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentA).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "reconcile-other-agent fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999003,
+		"assignee_type": "agent",
+		"assignee_id":   agentA,
+	})
 
 	// A's trigger comment, created before the run starts.
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	// A running task for A whose started_at is in the past.
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentA, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentA, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	// A member comment posted DURING A's run that @-mentions agent B.
 	mention := "[@B](mention://agent/" + agentB + ") please take a look"
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'member', $3, $4, 'comment', now() - interval '1 minute')
-	`, issueID, testWorkspaceID, testUserID, mention); err != nil {
-		t.Fatalf("setup: mid-run @B comment: %v", err)
-	}
+	`, issueID, testWorkspaceID, testUserID, mention)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -282,26 +239,21 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	ctx := context.Background()
 
 	var runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: get runtime: %v", err)
-	}
+		testWorkspaceID).Scan(&runtimeID)
 	// Two workspace-invocable agents: A authors the mention, B is the target
 	// (and the agent whose run completes / reconciles).
 	agentA := createHandlerTestAgent(t, "Reconcile A2A Author A", nil)
 	agentB := createHandlerTestAgent(t, "Reconcile A2A Target B", nil)
 
 	// Issue assigned to B so B's completion is the one that reconciles.
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-a2a-mention fixture', 'in_progress', 'none', $2, 'member', 999007, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "reconcile-a2a-mention fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999007,
+		"assignee_type": "agent",
+		"assignee_id":   agentB,
+	})
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID) })
 
 	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
@@ -310,26 +262,19 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	}
 
 	// B's trigger comment, created before the run starts.
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	// B's task is DISPATCHED (claim response already built, not yet running) —
 	// the state that makes an incoming mention hit the merge-miss + active-task
 	// drop at creation time.
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: dispatched task: %v", err)
-	}
+	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	// Agent A posts an explicit @B mention through the real trigger path while
@@ -337,13 +282,11 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	// as the CreateComment handler would for an agent-authored comment.
 	var mentionCommentID string
 	mention := "[@B](mention://agent/" + agentB + ") please also handle this"
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
 		VALUES ($1, $2, 'agent', $3, $4, 'comment')
 		RETURNING id
-	`, issueID, testWorkspaceID, agentA, mention).Scan(&mentionCommentID); err != nil {
-		t.Fatalf("setup: agent @B comment: %v", err)
-	}
+	`, issueID, testWorkspaceID, agentA, mention).Scan(&mentionCommentID)
 	mentionComment, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(mentionCommentID))
 	if err != nil {
 		t.Fatalf("setup: load mention comment: %v", err)
@@ -357,9 +300,7 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 	}
 
 	// B's task progresses dispatched → running, then completes.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() - interval '1 minute' WHERE id = $1`, taskID); err != nil {
-		t.Fatalf("advance task to running: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() - interval '1 minute' WHERE id = $1`, taskID)
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -386,50 +327,36 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 	ctx := context.Background()
 
 	var runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: get runtime: %v", err)
-	}
+		testWorkspaceID).Scan(&runtimeID)
 	agentA := createHandlerTestAgent(t, "Reconcile PlainReply Author A", nil)
 	agentB := createHandlerTestAgent(t, "Reconcile PlainReply Target B", nil)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'reconcile-plain-agent-reply fixture', 'in_progress', 'none', $2, 'member', 999008, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentB).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "reconcile-plain-agent-reply fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999008,
+		"assignee_type": "agent",
+		"assignee_id":   agentB,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentB, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	// A plain agent-authored reply during B's run — NO mention of anyone.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'agent', $3, 'thanks, looks good to me', 'comment', now() - interval '1 minute')
-	`, issueID, testWorkspaceID, agentA); err != nil {
-		t.Fatalf("setup: plain agent reply: %v", err)
-	}
+	`, issueID, testWorkspaceID, agentA)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -457,7 +384,6 @@ func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T)
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
 	fx := newSquadCommentTriggerFixture(t)
 	issueID := uuidToString(fx.Issue.ID)
 	t.Cleanup(func() {
@@ -466,28 +392,25 @@ func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T)
 	})
 
 	var leaderRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID); err != nil {
-		t.Fatalf("setup: load leader runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID)
 	// A running leader task whose completion drives reconcile.
-	var leaderTaskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, is_leader_task, squad_id, priority, created_at, started_at)
-		VALUES ($1, $2, $3, 'running', TRUE, $4, 0, now() - interval '10 minutes', now() - interval '5 minutes')
-		RETURNING id
-	`, fx.LeaderID, leaderRuntimeID, issueID, fx.SquadID).Scan(&leaderTaskID); err != nil {
-		t.Fatalf("setup: leader task: %v", err)
-	}
+	leaderTaskID := dbfx.Task(t, fx.LeaderID, testutil.Cols{
+		"runtime_id":     leaderRuntimeID,
+		"issue_id":       issueID,
+		"status":         "running",
+		"is_leader_task": true,
+		"squad_id":       fx.SquadID,
+		"created_at":     testutil.Raw("now() - interval '10 minutes'"),
+		"started_at":     testutil.Raw("now() - interval '5 minutes'"),
+	})
 
 	// A plain worker-agent reply (no mention) posted during the leader's run.
 	// At create time this WOULD route to the leader via the squad-leader
 	// fallback; reconcile must not replay it.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'agent', $3, 'done — pushed the change', 'comment', now() - interval '1 minute')
-	`, issueID, testWorkspaceID, fx.OtherID); err != nil {
-		t.Fatalf("setup: plain worker reply: %v", err)
-	}
+	`, issueID, testWorkspaceID, fx.OtherID)
 
 	if w := completeTaskViaHandler(t, leaderTaskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -504,17 +427,12 @@ func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T)
 // the user id (for a second distinct originator).
 func handlerWorkspaceMember(t *testing.T, slug string) string {
 	t.Helper()
-	ctx := context.Background()
 	var userID string
 	email := slug + "-" + time.Now().Format("150405.000000") + "@example.test"
-	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
-		"Reconcile Test "+slug, email).Scan(&userID); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
-		testWorkspaceID, userID); err != nil {
-		t.Fatalf("create member: %v", err)
-	}
+	dbfx.QueryRow(t, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"Reconcile Test "+slug, email).Scan(&userID)
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+		testWorkspaceID, userID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)
 		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
@@ -539,21 +457,17 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL ORDER BY created_at ASC LIMIT 1`,
-		testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+		testWorkspaceID).Scan(&agentID)
 	userB := handlerWorkspaceMember(t, "originatorB")
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'diff-originator fixture', 'in_progress', 'none', $2, 'member', 999004, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
+	issueID := dbfx.Issue(t, "diff-originator fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999004,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 		testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
@@ -567,13 +481,9 @@ func TestConsecutiveCommentsDifferentOriginatorsFullEnqueuePath(t *testing.T) {
 
 	insertMemberComment := func(authorID, content string) db.Comment {
 		t.Helper()
-		var id string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-			VALUES ($1, $2, 'member', $3, $4, 'comment') RETURNING id
-		`, issueID, testWorkspaceID, authorID, content).Scan(&id); err != nil {
-			t.Fatalf("insert comment: %v", err)
-		}
+		id := dbfx.Comment(t, issueID, content, testutil.Cols{
+			"author_id": authorID,
+		})
 		c, err := testHandler.Queries.GetComment(ctx, util.MustParseUUID(id))
 		if err != nil {
 			t.Fatalf("load comment: %v", err)
@@ -622,51 +532,37 @@ func TestCompleteTask_ReconcilesDispatchedWindowComment(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+		testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'dispatched-window fixture', 'in_progress', 'none', $2, 'member', 999005, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "dispatched-window fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999005,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'member', $3, 'initial request', 'comment', now() - interval '10 minutes')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
 
 	// Running task: dispatched 5m ago, started 2m ago. The claim response was
 	// built at dispatch.
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '5 minutes', now() - interval '2 minutes')
 		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	// A member comment in the dispatch→start window: after dispatched_at
 	// (5m ago), before started_at (2m ago). A started_at anchor would miss it.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 		VALUES ($1, $2, 'member', $3, 'squeezed in before start', 'comment', now() - interval '3 minutes')
-	`, issueID, testWorkspaceID, testUserID); err != nil {
-		t.Fatalf("setup: dispatch-window comment: %v", err)
-	}
+	`, issueID, testWorkspaceID, testUserID)
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
 		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
@@ -683,7 +579,7 @@ func taskTriggerOriginatorCoalesced(t *testing.T, issueID, agentID string) (stri
 	t.Helper()
 	var trigger, originator string
 	var coalesced []string
-	if err := testPool.QueryRow(context.Background(), `
+	dbfx.QueryRow(t, `
 		SELECT COALESCE(trigger_comment_id::text, ''),
 		       COALESCE(originator_user_id::text, ''),
 		       coalesced_comment_ids::text[]
@@ -691,9 +587,7 @@ func taskTriggerOriginatorCoalesced(t *testing.T, issueID, agentID string) (stri
 		 WHERE issue_id = $1 AND agent_id = $2
 		 ORDER BY created_at DESC
 		 LIMIT 1
-	`, issueID, agentID).Scan(&trigger, &originator, &coalesced); err != nil {
-		t.Fatalf("read task trigger/originator/coalesced: %v", err)
-	}
+	`, issueID, agentID).Scan(&trigger, &originator, &coalesced)
 	return trigger, originator, coalesced
 }
 
@@ -721,21 +615,16 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
-		testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+		testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'pre-dispatch race fixture', 'in_progress', 'none', $2, 'member', 999006, 0, 'agent', $3)
-		RETURNING id
-	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "pre-dispatch race fixture", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999006,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
 
 	// Timeline: task created 10m ago; the run's trigger 10m ago; a delivered
 	// pre-claim coalesced comment 8m ago; the RACE comment 7m ago (still before
@@ -743,12 +632,10 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	insertComment := func(content, age string) string {
 		t.Helper()
 		var id string
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 			INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 			VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval) RETURNING id
-		`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
-			t.Fatalf("insert comment: %v", err)
-		}
+		`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id)
 		return id
 	}
 	triggerCommentID := insertComment("initial request", "10 minutes")
@@ -759,15 +646,13 @@ func TestCompleteTask_ReconcilesPreDispatchMergeRaceComment(t *testing.T) {
 	// comment recorded in coalesced_comment_ids, dispatched after the race
 	// comment, started later still.
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue
 			(agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, delivered_comment_ids, status, priority, created_at, dispatched_at, started_at)
 		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], ARRAY[$4::uuid, $5::uuid], 'running', 0,
 			now() - interval '10 minutes', now() - interval '6 minutes', now() - interval '5 minutes')
 		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: running task: %v", err)
-	}
+	`, agentID, runtimeID, issueID, triggerCommentID, deliveredCoalescedID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
 
 	if w := completeTaskViaHandler(t, taskID, "done"); w.Code != http.StatusOK {
@@ -811,24 +696,20 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 			ctx := context.Background()
 			runtimeID := createClaimReclaimRuntime(t, ctx, "Planned undelivered runtime "+tc.name)
 			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Planned undelivered agent "+tc.name)
-			if _, err := testPool.Exec(ctx, `
+			dbfx.Exec(t, `
 				UPDATE issue
 				SET assignee_type = 'agent', assignee_id = $2
 				WHERE id = $1
-			`, issueID, agentID); err != nil {
-				t.Fatalf("assign issue: %v", err)
-			}
+			`, issueID, agentID)
 
 			insertComment := func(content, age string) string {
 				t.Helper()
 				var id string
-				if err := testPool.QueryRow(ctx, `
+				dbfx.QueryRow(t, `
 					INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
 					VALUES ($1, $2, 'member', $3, $4, 'comment', now() - $5::interval)
 					RETURNING id
-				`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id); err != nil {
-					t.Fatalf("insert comment: %v", err)
-				}
+				`, issueID, testWorkspaceID, testUserID, content, age).Scan(&id)
 				return id
 			}
 			old1 := insertComment("planned old one", "10 minutes")
@@ -840,7 +721,7 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 			}
 
 			var taskID string
-			if err := testPool.QueryRow(ctx, `
+			dbfx.QueryRow(t, `
 				INSERT INTO agent_task_queue (
 					agent_id, runtime_id, issue_id, trigger_comment_id,
 					coalesced_comment_ids, delivered_comment_ids,
@@ -852,9 +733,7 @@ func TestCompleteTask_ReconcilesPlannedButUndeliveredComments(t *testing.T) {
 					'running', 0, now() - interval '5 minutes', now() - interval '4 minutes', now() - interval '3 minutes'
 				)
 				RETURNING id
-			`, agentID, runtimeID, issueID, trigger, old1, old2, delivered).Scan(&taskID); err != nil {
-				t.Fatalf("insert running task: %v", err)
-			}
+			`, agentID, runtimeID, issueID, trigger, old1, old2, delivered).Scan(&taskID)
 			t.Cleanup(func() {
 				testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 			})

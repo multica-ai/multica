@@ -20,7 +20,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 AI로 만들려면 Builder 대화를 진행할 온라인 런타임이 필요합니다. 어느 방법을 선택하든 만들기 전에 최종 설정을 확인하고 수정할 수 있습니다.
 
-![에이전트 생성 시작 방법 선택: Start blank와 Build with AI](/images/docs/quickstart-new-agent.png)
+![에이전트 생성 시작 방법 선택: Start blank와 Build with AI](/images/docs/quickstart-new-agent.webp)
 
 ## 필수 항목
 
@@ -83,7 +83,7 @@ Access는 어떤 멤버가 이 에이전트를 실행할 수 있는지 결정합
 | **전체 워크스페이스**(Entire workspace) | 모든 워크스페이스 멤버가 실행할 수 있습니다. |
 | **지정한 멤버**(Specific people) | 나와 선택한 멤버만 실행할 수 있습니다. |
 
-![Access 설정: 나만, 전체 워크스페이스, 지정한 멤버의 세 단계](/images/docs/agent-access-settings.png)
+![Access 설정: 나만, 전체 워크스페이스, 지정한 멤버의 세 단계](/images/docs/agent-access-settings.webp)
 
 에이전트 owner만 Access를 수정할 수 있으며 워크스페이스 관리자도 수정할 수 없습니다. 워크스페이스 `owner`와 `admin`은 다른 설정을 관리할 수 있지만 관리자 권한으로 허가받지 않은 에이전트를 실행할 수는 없습니다.
 
@@ -118,6 +118,10 @@ Access는 어떤 멤버가 이 에이전트를 실행할 수 있는지 결정합
 ## 사용자 지정 인수와 MCP
 
 사용자 지정 인수는 배열의 각 항목으로 AI 코딩 도구에 전달되며 shell 확장을 거치지 않습니다. 인수 이름의 유효성은 해당 도구가 결정합니다. 별도 필드가 있는 모델 설정을 여기서 다시 입력할 필요는 없습니다.
+
+<Callout type="warning">
+자격 증명이나 다른 secret을 사용자 지정 인수에 넣지 마세요. 값은 자식 프로세스의 argv에 남아 같은 머신의 다른 프로세스에서 `ps` 또는 `/proc`를 통해 보일 수 있습니다. 대신 환경 변수(`custom_env`)를 사용하세요. 데몬 로그는 인수 값을 가리지만 운영 체제의 프로세스 목록까지 보호하지는 못합니다.
+</Callout>
 
 MCP 설정에는 token이 포함될 수 있으며 저장 및 표시 규칙은 환경 변수와 같습니다. 관리형 MCP 설정을 지원하는 런타임에서만 이 항목이 표시됩니다. 지원하지 않는 도구는 설정을 저장해도 MCP 기능을 자동으로 얻지 않습니다.
 

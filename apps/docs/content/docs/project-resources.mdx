@@ -39,29 +39,57 @@ The UI for adding a local directory is Desktop-only, because browsers cannot pic
 <Callout type="warning">
 **This is an escape hatch, not a more convenient default.** `local_directory` exists for people who have no other option — the canonical case is a game project whose checkout is tens of gigabytes, where re-cloning per task is simply not viable.
 
-If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it runs in worktree mode by default, so tasks on the same repo run with unlimited concurrency. Choosing `local_directory` means every task on that folder runs **strictly one at a time, forever**. Read "When to pick" below before you commit to it.
+If your directory is an ordinary git repo you can clone, **use `github_repo` instead**: it runs in worktree mode by default, so tasks on the same repo run with unlimited concurrency. A `local_directory` runs **one task at a time by default**; if the directory is a git repo you can opt into worktree mode to get concurrency back (see "How tasks share the directory"). Read "When to pick" below before you commit to it.
 </Callout>
 
 
 1. Make sure Desktop's local daemon is online.
-2. Open the project's **Resources**.
+2. Open the project's **Resources**, or the **Local directory** tab of the create-project dialog — the same choice is available before the project exists.
 3. Choose "Add local directory", then pick the folder to use.
+4. Pick how tasks should use it — **Direct** or **Parallel**, described under "How tasks share the directory". Desktop preselects **Parallel** when the folder is a git repository the runtime on that machine can isolate, and **Direct** otherwise. Change it right there, or later from **Resources** with the pencil next to the directory.
+
+Preselection applies only to a directory you are linking now. A directory linked earlier keeps the mode it was saved with — an existing setup is never switched under you.
 
 The directory must be an absolute path, must already exist, and must be readable and writable by the current daemon. These paths are rejected: system roots and drive roots (`/`, `C:\`), home directories themselves and the parents of home directories (such as `/Users`, `/home`, `/root`), and system directories such as `/etc`, `/var`, `/tmp`, `/usr`, and `/opt`. If the chosen path is a symlink, it is resolved to its real path first and validated again by the same rules; the serial lock also applies to the real path.
 
 Each project can link at most one local directory per daemon. Different computers on a team can each link their own directory for the same project.
 
 <Callout type="warning">
-A local directory is not an isolated environment. The agent directly sees and modifies your current branch and uncommitted files; Multica does not automatically switch branches, stash, commit, push, or open PRs.
+In the default `in_place` mode a local directory is not an isolated environment: the agent directly sees and modifies your current branch and uncommitted files, and Multica does not automatically switch branches, stash, commit, push, or open PRs. Worktree mode changes this — see "How tasks share the directory" below.
 </Callout>
 
-## Local directories run serially
+## How tasks share the directory
 
-When two tasks use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
+A local directory has two execution modes, set per resource with `execution_mode`. Desktop labels them **Direct** and **Parallel**; the API, the CLI and the rest of this page use the identifiers.
+
+### `in_place` (default) — "Direct"
+
+The agent works directly in your directory, and tasks run one at a time. When two tasks use the same real directory, the later one enters `waiting_local_directory` and continues after the earlier one releases the directory. Two paths that reach the same directory through different symlinks serialize the same way.
 
 Waiting does not modify the directory. A waiting task can be cancelled; otherwise it waits until the directory becomes available.
 
-To work on several changes at once, use a GitHub repository resource so the runtime prepares a separate working directory for each piece of work.
+### `worktree` — "Parallel"
+
+Each task gets its own [git worktree](https://git-scm.com/docs/git-worktree) of your repo, created inside the runtime's own workspace directory. **Tasks on the same directory run concurrently — none of them wait**, and none of them write to your working copy.
+
+Requires the directory to be a git repository with at least one commit. If it is not, tasks fail with an explicit error rather than quietly falling back to serial execution. The runtime on that machine must also implement the mode. It declares that when it connects, and Multica gates on the declaration rather than on a version number — a development build can carry a version string that looks new enough while having none of the implementation. The declaration is checked twice: saving the resource is refused, with a hint to update the app on that machine, while its runtime does not declare the capability; and each task is checked again against the runtime that actually claims it — so a machine downgraded after the resource was saved has its tasks cancelled with a reason instead of silently running them in place. Asking for `worktree` is asking for isolation; editing your working copy instead is never the fallback.
+
+What the agent sees, and what you get back:
+
+- **The agent starts from what you see, not from `HEAD`.** Your uncommitted edits and your untracked files are replayed into the worktree, so the agent is not reviewing code you no longer have. Your own working copy, index, and stash list are never touched. If that state cannot be reproduced faithfully — including when there is more untracked content than the replay covers (2000 files / 200 MiB) — the task fails instead of starting from a tree you would not recognise. The usual fix is to gitignore or clean up build output that is not already ignored.
+- **The result is a branch in your repo**, named `agent/<agent>/<task>`. The run's **Run details** panel shows the branch name (and lets you copy it); you can also find it with `git branch`. Review it with `git log` / `git diff`, and merge or cherry-pick it yourself. Multica never merges it for you. A run that failed partway still reports its branch, because it still committed whatever the agent had produced.
+- **Nothing is silently dropped.** Anything the agent leaves uncommitted is committed to that branch before the worktree is removed, including when the task fails partway. In the rare case that commit itself cannot be made — for example a repo with `commit.gpgSign` and no signing key available to the runtime — the worktree is deliberately kept instead of removed, the task is reported as failed, and `git worktree list` in your repo points at the directory holding the work.
+- **A task that changes nothing leaves nothing behind.** Its branch is deleted rather than left as an empty entry in `git branch`.
+
+Because the worktree lives in the runtime's workspace directory, it is reclaimed on the normal cleanup schedule; only the branch persists in your repo.
+
+<Callout type="warn">
+**Self-hosted operators:** isolation for this mode is enforced by the server (at save time and again when a runtime claims each task), so a runtime downgraded at any point is caught. The combination that is *not* caught is rolling the server back to a build that predates this feature while runtimes that do not implement the mode are still connected — an old server has no gate, and such a runtime ignores `execution_mode` and would run the task in place. Do not roll the server back past this release while `worktree` resources exist unless every runtime on those machines is up to date.
+</Callout>
+
+<Callout type="info">
+Worktree mode covers git repositories. A plain non-git directory still runs serially — that is what `in_place` is for.
+</Callout>
 
 ## What gets written during a run
 
@@ -89,6 +117,17 @@ multica project resource add <project-id> \
   --type local_directory \
   --local-path /absolute/path/to/repo \
   --daemon-id <daemon-id>
+
+# Link a local git repo and let tasks run concurrently in their own worktrees
+multica project resource add <project-id> \
+  --type local_directory \
+  --local-path /absolute/path/to/repo \
+  --daemon-id <daemon-id> \
+  --execution-mode worktree
+
+# Switch an existing local directory between modes
+multica project resource update <project-id> <resource-id> --execution-mode worktree
+multica project resource update <project-id> <resource-id> --execution-mode in_place
 
 # Remove a resource
 multica project resource remove <project-id> <resource-id>

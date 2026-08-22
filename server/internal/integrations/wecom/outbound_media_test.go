@@ -773,6 +773,17 @@ func TestDeliverAttachments_AdmissionBoundsTheLookupStage(t *testing.T) {
 		t.Errorf("%d lookups reached the database, want at most %d — the lookup stage is unbounded",
 			got, maxAdmittedAttachmentDeliveries)
 	}
+	// The admitted cap is reached with nothing pending, which is the half of
+	// the ordering the constant's comment cites this test for: a pending slot
+	// is claimed only after a lookup finds a file, and every goroutine here is
+	// still inside its lookup. Asserted rather than implied — the citation is
+	// only worth what the test checks.
+	o.pendingMu.Lock()
+	pending := o.pendingAttachments
+	o.pendingMu.Unlock()
+	if pending != 0 {
+		t.Errorf("pending = %d at the admitted cap, want 0 — a slot was claimed before the lookup found a file", pending)
+	}
 
 	close(q.lookupGate)
 	running.Wait()

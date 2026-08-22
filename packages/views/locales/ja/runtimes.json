@@ -128,8 +128,12 @@
       "public": "公開"
     },
     "visibility_hint": {
-      "private": "あなたとワークスペース管理者のみが、このランタイムでエージェントを作成できます。",
+      "private": "あなたのみが、このランタイムでエージェントを作成できます。",
       "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。"
+    },
+    "visibility_hint_readonly": {
+      "private": "このランタイムでエージェントを作成できるのは所有者だけで、公開に切り替えられるのも所有者だけです。",
+      "public": "ワークスペースのメンバーなら誰でも、このランタイムでエージェントを作成できます。非公開に戻せるのは所有者だけです。"
     },
     "visibility_toast_updated": "公開範囲を {{visibility}} に設定しました",
     "visibility_toast_failed": "公開範囲を更新できませんでした",
@@ -271,6 +275,12 @@
   "charts": {
     "heatmap_less": "少ない",
     "heatmap_more": "多い",
+    "heatmap_no_activity": "アクティビティなし",
+    "heatmap_busiest_day": "最も活発な日",
+    "heatmap_most_active_weekday": "最も活発な曜日",
+    "heatmap_quietest_weekday": "最も静かな曜日",
+    "heatmap_average": "平均 {{value}}",
+    "heatmap_window_total_other": "{{count}}日間の合計",
     "tooltip_total": "合計"
   },
   "list": {

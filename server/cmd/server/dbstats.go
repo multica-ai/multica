@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 )
 
 const (
@@ -52,10 +53,10 @@ const (
 //
 // pgx's own built-in default (max(4, NumCPU)) is intentionally NOT used as a
 // fallback — it is the value that caused the prod incident.
-func newDBPool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(dbURL)
+func newDBPool(ctx context.Context, dbURL string, connectTimeout time.Duration) (*pgxpool.Pool, error) {
+	cfg, err := dbstartup.ParsePoolConfig(dbURL, connectTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("parse database url: %w", err)
+		return nil, err
 	}
 
 	urlParams := poolParamsFromURL(dbURL)

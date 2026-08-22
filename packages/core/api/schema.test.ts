@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiClient } from "./client";
+import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
@@ -126,6 +126,73 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("getIssue", () => {
+    // Unlike a list, a single issue has no safe-empty shape, and the bare
+    // identifier autolink caches this result for 5 minutes. A malformed 2xx
+    // must therefore fail the call instead of becoming a truthy issue with an
+    // `undefined` id — and it must fail with something OTHER than an
+    // ApiError 404, which `issueIdentifierOptions` maps to "no such issue".
+    const validIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Existing",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2025-01-01T00:00:00Z",
+      updated_at: "2025-01-01T00:00:00Z",
+    };
+
+    it("resolves a well-formed issue, defaulting the fields older servers omit", async () => {
+      stubFetchJson({ ...validIssue, unknown_field: "kept" });
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("MUL-1");
+      expect(issue.id).toBe("issue-1");
+      expect(issue.stage).toBeNull();
+      expect(issue.metadata).toEqual({});
+      expect(issue.properties).toEqual({});
+    });
+
+    it("rejects a 200 body that is not a usable issue (no truthy issue with an undefined id)", async () => {
+      stubFetchJson({ not: "an issue" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.toThrow();
+    });
+
+    it("rejects a 200 body whose required field drifted type", async () => {
+      stubFetchJson({ ...validIssue, number: "1" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.toThrow();
+    });
+
+    it("does not disguise a malformed body as a 404", async () => {
+      stubFetchJson({ id: "issue-1" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.not.toBeInstanceOf(
+        ApiError,
+      );
+    });
+
+    it("still surfaces a real 404 as an ApiError so autolink can resolve to null", async () => {
+      stubFetchJson({ error: "issue not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("TES-1")).rejects.toMatchObject({
+        status: 404,
+      });
     });
   });
 
@@ -315,6 +382,234 @@ describe("ApiClient schema fallback", () => {
       expect(res.installations).toHaveLength(1);
       expect(res.configured).toBe(true);
       expect(res.install_supported).toBeUndefined();
+      expect(res.installations[0]?.agent_available).toBeUndefined();
+    });
+
+    it("preserves the orphaned-Agent marker from a new server", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-orphan", status: "active", agent_available: false },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.agent_available).toBe(false);
+    });
+
+    it("parses linked DingTalk identities from a new-server row", async () => {
+      stubFetchJson({
+        installations: [
+          {
+            id: "dt-1",
+            status: "active",
+            bound_dingtalk_user_ids: ["staff-1001"],
+          },
+        ],
+        configured: true,
+        install_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual(["staff-1001"]);
+    });
+
+    it("defaults missing or malformed linked identities to an empty list", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-old", status: "active" },
+          {
+            id: "dt-broken",
+            status: "active",
+            bound_dingtalk_user_ids: "staff-1001",
+          },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual([]);
+      expect(res.installations[1]?.bound_dingtalk_user_ids).toEqual([]);
+    });
+  });
+
+  describe("Telegram integration", () => {
+    it("falls back to a safe empty installation list when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listTelegramInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+      });
+    });
+
+    it("defaults fields omitted by an older server", async () => {
+      stubFetchJson({
+        installations: [{ id: "tg-1", status: "active" }],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listTelegramInstallations("ws-1");
+      expect(res.installations[0]).toMatchObject({
+        id: "tg-1",
+        workspace_id: "",
+        agent_id: "",
+        bot_id: "",
+        bot_username: "",
+      });
+      expect(res.install_supported).toBeUndefined();
+    });
+
+    it("falls back safely when register and redeem responses are malformed", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.registerTelegramBot("ws-1", "agent-1", { bot_token: "token" }),
+      ).resolves.toMatchObject({ id: "", status: "revoked" });
+
+      stubFetchJson({ workspace_id: 123 });
+      await expect(client.redeemTelegramBindingToken("bind-token")).resolves.toEqual({
+        workspace_id: "",
+        installation_id: "",
+        telegram_user_id: "",
+      });
+    });
+  });
+
+  describe("listDingTalkGroups", () => {
+    it("preserves bot activity metadata for each group relationship", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [
+              {
+                installation_id: "inst-1",
+                agent_id: "agent-1",
+                bot_name: "Release Bot",
+                bot_identity_issue: "",
+                last_active_at: "2026-08-19T08:00:00Z",
+                mention_count: 18,
+              },
+            ],
+          },
+        ],
+        group_discovery_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.groups[0]?.bots[0]).toMatchObject({
+        last_active_at: "2026-08-19T08:00:00Z",
+        mention_count: 18,
+      });
+    });
+
+    it("uses an agent-scoped endpoint for Agent detail group visibility", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listAgentDingTalkGroups("agent-1");
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/agents/agent-1/dingtalk/groups",
+        expect.any(Object),
+      );
+    });
+
+    it("requests one inactive installation page and can forget an observation", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listDingTalkGroups("ws-1", {
+        activity: "inactive",
+        installationId: "inst-1",
+        offset: 20,
+        limit: 10,
+      });
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/groups?activity=inactive&installation_id=inst-1&offset=20&limit=10",
+        expect.any(Object),
+      );
+
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await client.forgetDingTalkGroup("ws-1", "inst-1", "cid/encoded");
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/installations/inst-1/groups/cid%2Fencoded",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("treats an older backend's missing endpoint as an empty group list", async () => {
+      stubFetchJson({ error: "not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("treats an older backend's admin-only group inventory as unsupported for members", async () => {
+      stubFetchJson({ error: "forbidden" }, 403);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("does not hide a real group-list server failure", async () => {
+      stubFetchJson({ error: "unavailable" }, 503);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).rejects.toMatchObject({
+        status: 503,
+      });
+    });
+
+    it("falls back to an empty group list when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("defaults additive bot identity fields and isolates a malformed bot list", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [{ installation_id: "inst-1", agent_id: "agent-1" }],
+          },
+          {
+            conversation_id: "cid-old-server",
+            bots: "not-an-array",
+          },
+        ],
+        group_discovery_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.group_discovery_supported).toBe(true);
+      expect(res.groups).toEqual([
+        {
+          conversation_id: "cid-platform",
+          conversation_title: "Platform",
+          bots: [
+            {
+              installation_id: "inst-1",
+              agent_id: "agent-1",
+              bot_name: "",
+              bot_identity_issue: "",
+            },
+          ],
+        },
+        {
+          conversation_id: "cid-old-server",
+          conversation_title: "",
+          bots: [],
+        },
+      ]);
     });
   });
 
@@ -380,77 +675,6 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listChildIssues("issue-1");
       expect(res).toEqual({ issues: [] });
-    });
-  });
-
-  // Agent template catalog is hit by the desktop create-agent picker.
-  // Installed desktop builds outlive any given server, so the shape MUST
-  // survive future field renames / wrapping without crashing. Each test
-  // here mirrors a concrete future drift we want to absorb.
-  describe("listAgentTemplates", () => {
-    it("falls back to [] when the body is null", async () => {
-      stubFetchJson(null);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toEqual([]);
-    });
-
-    it("defaults skills to [] when the field is missing from a template", async () => {
-      // Future server: drops `skills` because the picker no longer reads
-      // them. Picker code calls `template.skills.length` — must not throw.
-      stubFetchJson([{ slug: "x", name: "X" }]);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toHaveLength(1);
-      expect(tmpls[0]?.skills).toEqual([]);
-    });
-
-    it("accepts the bare-array shape (current contract)", async () => {
-      stubFetchJson([
-        { slug: "a", name: "A", description: "", skills: [] },
-        { slug: "b", name: "B", description: "", skills: [] },
-      ]);
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls.map((t) => t.slug)).toEqual(["a", "b"]);
-    });
-
-    it("accepts a future {templates: [...]} envelope without breaking", async () => {
-      // Server migrates to a paginated envelope. We unwrap so the picker
-      // keeps working on the older bare-array consumer.
-      stubFetchJson({
-        templates: [{ slug: "a", name: "A", description: "", skills: [] }],
-        total: 1,
-      });
-      const client = new ApiClient("https://api.example.test");
-      const tmpls = await client.listAgentTemplates();
-      expect(tmpls).toHaveLength(1);
-      expect(tmpls[0]?.slug).toBe("a");
-    });
-  });
-
-  describe("getAgentTemplate", () => {
-    it("falls back to a minimal record carrying the requested slug", async () => {
-      // Slug is part of the URL the user clicked — the fallback round-
-      // trips it so the page header still makes sense after a parse miss.
-      stubFetchJson({ wrong: "shape" });
-      const client = new ApiClient("https://api.example.test");
-      const detail = await client.getAgentTemplate("code-reviewer");
-      expect(detail.slug).toBe("code-reviewer");
-      expect(detail.skills).toEqual([]);
-      expect(detail.instructions).toBe("");
-    });
-
-    it("defaults instructions to '' when the field is missing", async () => {
-      stubFetchJson({
-        slug: "code-reviewer",
-        name: "Code Reviewer",
-        description: "",
-        skills: [],
-      });
-      const client = new ApiClient("https://api.example.test");
-      const detail = await client.getAgentTemplate("code-reviewer");
-      expect(detail.instructions).toBe("");
     });
   });
 
@@ -544,37 +768,6 @@ describe("ApiClient schema fallback", () => {
       stubFetchJson({ error: "not found" }, 404);
       const client = new ApiClient("https://api.example.test");
       expect(await client.listAgentBuilderSessions()).toEqual([]);
-    });
-  });
-
-  describe("createAgentFromTemplate", () => {
-    it("falls back to an empty agent when the response is malformed", async () => {
-      // The agent was created server-side even though the client can't
-      // parse the response — UI code reads `agent.id === ""` and skips
-      // the navigation step rather than landing on `/agents/`.
-      stubFetchJson({ unexpected: "shape" });
-      const client = new ApiClient("https://api.example.test");
-      const resp = await client.createAgentFromTemplate({
-        template_slug: "x",
-        name: "X",
-        runtime_id: "rt-1",
-      });
-      expect(resp.agent.id).toBe("");
-      expect(resp.imported_skill_ids).toEqual([]);
-      expect(resp.reused_skill_ids).toEqual([]);
-    });
-
-    it("defaults imported_skill_ids / reused_skill_ids to [] when missing", async () => {
-      stubFetchJson({ agent: { id: "agent-1" } });
-      const client = new ApiClient("https://api.example.test");
-      const resp = await client.createAgentFromTemplate({
-        template_slug: "x",
-        name: "X",
-        runtime_id: "rt-1",
-      });
-      expect(resp.agent.id).toBe("agent-1");
-      expect(resp.imported_skill_ids).toEqual([]);
-      expect(resp.reused_skill_ids).toEqual([]);
     });
   });
 
@@ -719,6 +912,132 @@ describe("ApiClient schema fallback", () => {
         url: "",
       });
     });
+
+    it("parses workspace entitlements into camelCase without fabricating Free", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        plan: "pro",
+        status: "active",
+        seats: 4,
+        issue_window: null,
+        autopilot_runs: null,
+        current_period_end: "2026-09-13T00:00:00Z",
+        snapshot_expires_at: null,
+        version: 7,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.getWorkspaceSubscriptionEntitlements(),
+      ).resolves.toEqual({
+        workspaceId: "workspace-1",
+        plan: "pro",
+        status: "active",
+        seats: 4,
+        issueWindow: null,
+        autopilotRuns: null,
+        currentPeriodEnd: "2026-09-13T00:00:00Z",
+        snapshotExpiresAt: null,
+        version: 7,
+      });
+
+      stubFetchJson({ plan: "free", seats: "unknown" });
+      await expect(client.getWorkspaceSubscriptionEntitlements()).resolves.toBeNull();
+    });
+
+    it("accepts an empty workspace entitlement snapshot", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        plan: "free",
+        status: "inactive",
+        seats: 0,
+        issue_window: 1000,
+        autopilot_runs: 100,
+        snapshot_expires_at: null,
+        version: 0,
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.getWorkspaceSubscriptionEntitlements(),
+      ).resolves.toMatchObject({ seats: 0, plan: "free" });
+    });
+
+    it("sends the Checkout idempotency key in the header and body", async () => {
+      stubFetchJson(
+        {
+          request_id: "request-1",
+          session_id: "cs_test_1",
+          url: "https://checkout.stripe.com/test-session",
+        },
+        201,
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createWorkspaceSubscriptionCheckout({
+          interval: "year",
+          idempotencyKey: "checkout-intent-1",
+        }),
+      ).resolves.toEqual({
+        requestId: "request-1",
+        sessionId: "cs_test_1",
+        url: "https://checkout.stripe.com/test-session",
+      });
+
+      const fetchMock = vi.mocked(fetch);
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit & {
+        headers: Record<string, string>;
+      };
+      expect(init.headers["Idempotency-Key"]).toBe("checkout-intent-1");
+      expect(JSON.parse(String(init.body))).toEqual({
+        interval: "year",
+        idempotency_key: "checkout-intent-1",
+      });
+    });
+
+    it("rejects unreadable or non-HTTPS Stripe URLs at the schema boundary", async () => {
+      stubFetchJson(
+        {
+          request_id: "request-1",
+          session_id: "cs_test_1",
+          url: "javascript:alert(1)",
+        },
+        201,
+      );
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.createWorkspaceSubscriptionCheckout({
+          interval: "month",
+          idempotencyKey: "checkout-intent-1",
+        }),
+      ).resolves.toBeNull();
+
+      stubFetchJson({ url: 123 });
+      await expect(
+        client.createWorkspaceSubscriptionPortal("portal-intent-1"),
+      ).resolves.toBeNull();
+    });
+
+    it("parses seat reconciliation into camelCase", async () => {
+      stubFetchJson({
+        workspace_id: "workspace-1",
+        billed_seats: 5,
+        actual_seats: 4,
+        action: "scheduled_decrease",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(
+        client.reconcileWorkspaceSubscriptionSeats(),
+      ).resolves.toEqual({
+        workspaceId: "workspace-1",
+        billedSeats: 5,
+        actualSeats: 4,
+        action: "scheduled_decrease",
+      });
+    });
   });
 });
 
@@ -745,5 +1064,253 @@ describe("parseWithFallback", () => {
     const fallback = { id: "fallback" };
     const out = parseWithFallback(null, schema, fallback, opts);
     expect(out).toBe(fallback);
+  });
+});
+
+// Workspace subscription reads carry a specific hazard the wallet schemas do
+// not: the fallback for a paid workspace must never be a shape that reads as
+// Free. An older cloud, a 503, or a renamed field has to surface as "unknown"
+// so the UI shows "unavailable" instead of quietly downgrading a paying team.
+describe("workspace subscription contract", () => {
+  const entitlement = {
+    workspace_id: "11111111-1111-1111-1111-111111111111",
+    plan: "pro",
+    status: "active",
+    seats: 3,
+    issue_window: null,
+    autopilot_runs: null,
+    current_period_end: "2026-09-01T00:00:00Z",
+    snapshot_expires_at: null,
+    version: 7,
+  };
+
+  it("maps a full summary to camelCase without inventing values", async () => {
+    stubFetchJson({
+      entitlement,
+      billing_interval: "year",
+      actual_seats: 3,
+      billed_seats: 5,
+      pending_seat_quantity: 3,
+      used_seats: 3,
+      reserved_seats: 2,
+      purchase_version: 11,
+      active_seat_purchase: {
+        request_id: "22222222-2222-2222-2222-222222222222",
+        target_seats: 7,
+        status: "processing",
+      },
+      cancel_at_period_end: true,
+      grace_until: "2026-09-08T00:00:00Z",
+      has_stripe_customer: true,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary).not.toBeNull();
+    expect(summary?.entitlement.plan).toBe("pro");
+    expect(summary?.entitlement.version).toBe(7);
+    expect(summary?.billingInterval).toBe("year");
+    expect(summary?.billedSeats).toBe(5);
+    expect(summary?.pendingSeatQuantity).toBe(3);
+    expect(summary?.usedSeats).toBe(3);
+    expect(summary?.reservedSeats).toBe(2);
+    expect(summary?.purchaseVersion).toBe(11);
+    expect(summary?.activeSeatPurchase).toEqual({
+      requestId: "22222222-2222-2222-2222-222222222222",
+      targetSeats: 7,
+      status: "processing",
+      expiresAt: null,
+    });
+    expect(summary?.cancelAtPeriodEnd).toBe(true);
+    expect(summary?.graceUntil).toBe("2026-09-08T00:00:00Z");
+    expect(summary?.hasStripeCustomer).toBe(true);
+  });
+
+  it("keeps a paid summary readable when optional fields are absent", async () => {
+    // A cloud that predates the optional seat/cancellation fields still has to
+    // produce a usable Pro summary rather than failing the whole read.
+    stubFetchJson({ entitlement, actual_seats: 3 });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.plan).toBe("pro");
+    expect(summary?.billingInterval).toBeNull();
+    expect(summary?.billedSeats).toBeNull();
+    expect(summary?.pendingSeatQuantity).toBeNull();
+    expect(summary?.usedSeats).toBe(3);
+    expect(summary?.reservedSeats).toBe(0);
+    expect(summary?.purchaseVersion).toBeNull();
+    expect(summary?.activeSeatPurchase).toBeNull();
+    expect(summary?.cancelAtPeriodEnd).toBe(false);
+    expect(summary?.graceUntil).toBeNull();
+    // Absent means "no Stripe customer known", which is the safe reading: the
+    // caller hides Portal rather than offering a control that would 404.
+    expect(summary?.hasStripeCustomer).toBe(false);
+  });
+
+  it("preserves unknown plans and statuses instead of coercing them", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, plan: "business", status: "paused" },
+      actual_seats: 9,
+    });
+    const client = new ApiClient("https://api.example.test");
+    const summary = await client.getWorkspaceSubscriptionSummary();
+
+    expect(summary?.entitlement.plan).toBe("business");
+    expect(summary?.entitlement.status).toBe("paused");
+  });
+
+  it("returns null — never a Free-looking shape — for a malformed summary", async () => {
+    stubFetchJson({ entitlement: { plan: "pro" }, actual_seats: "many" });
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
+  });
+
+  it("throws ApiError for a non-2xx summary so the caller reports unavailable", async () => {
+    // An older cloud without the route, a 403, or a 503 never reaches schema
+    // parsing: fetch rejects first and a React Query caller sees isError. What
+    // matters for both paths is the same — no snapshot is produced, so nothing
+    // can be mistaken for a Free workspace.
+    for (const status of [404, 503]) {
+      stubFetchJson({ error: "unavailable" }, status);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getWorkspaceSubscriptionSummary()).rejects.toThrow();
+    }
+  });
+
+  it("returns null for a 2xx body that does not match the contract", async () => {
+    // The other half of the contract: a response that arrives successfully but
+    // does not conform degrades to null rather than throwing into React.
+    stubFetchJson({ unexpected: "shape" });
+    const client = new ApiClient("https://api.example.test");
+    expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
+  });
+
+  it("accepts additive cloud fields on summary and prices", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, trial_ends_at: "2026-10-01T00:00:00Z" },
+      actual_seats: 3,
+      future_field: { nested: true },
+    });
+    const client = new ApiClient("https://api.example.test");
+    expect(
+      (await client.getWorkspaceSubscriptionSummary())?.entitlement.plan,
+    ).toBe("pro");
+  });
+
+  it("maps validated prices and rejects a non-positive amount", async () => {
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    const client = new ApiClient("https://api.example.test");
+    const prices = await client.getWorkspaceSubscriptionPrices();
+    expect(prices?.month.unitAmount).toBe(2000);
+    expect(prices?.year.interval).toBe("year");
+
+    // A zero or missing amount must not be rendered next to a purchase button.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 0, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("rejects a prices response whose interval does not match its slot", async () => {
+    const client = new ApiClient("https://api.example.test");
+
+    // An interval outside the contract.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 20000, interval: "week", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+
+    // Valid intervals in the wrong slots. Accepting this would let the UI quote
+    // a yearly amount as the monthly price.
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+      year: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 1 },
+    });
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("rejects a prices response whose interval count is not one", async () => {
+    stubFetchJson({
+      month: { currency: "usd", unit_amount: 2000, interval: "month", interval_count: 3 },
+      year: { currency: "usd", unit_amount: 20000, interval: "year", interval_count: 1 },
+    });
+    const client = new ApiClient("https://api.example.test");
+
+    expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("maps seat purchase previews and confirmations without trusting client totals", async () => {
+    stubFetchJson({
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      purchase_version: 9,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      quoted_at: "2026-08-21T06:00:00Z",
+    });
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.previewWorkspaceSeatPurchase({ additionalSeats: 2 }),
+    ).resolves.toEqual({
+      currentSeats: 5,
+      additionalSeats: 2,
+      resultingSeats: 7,
+      purchaseVersion: 9,
+      currency: "usd",
+      prorationAmount: 425,
+      nextInvoiceAmount: 14000,
+      quotedAt: "2026-08-21T06:00:00Z",
+    });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchase-preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ additional_seats: 2 }),
+      }),
+    );
+
+    stubFetchJson({
+      request_id: "33333333-3333-3333-3333-333333333333",
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      status: "submitted",
+    }, 202);
+    await expect(
+      client.purchaseWorkspaceSeats({
+        additionalSeats: 2,
+        expectedCurrentSeats: 5,
+        expectedPurchaseVersion: 9,
+        acceptedProrationAmount: 425,
+        currency: "usd",
+        idempotencyKey: "seat-request-1",
+      }),
+    ).resolves.toMatchObject({ resultingSeats: 7, status: "submitted" });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchases",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          additional_seats: 2,
+          expected_current_seats: 5,
+          expected_purchase_version: 9,
+          accepted_proration_amount: 425,
+          currency: "usd",
+          idempotency_key: "seat-request-1",
+        }),
+        headers: expect.objectContaining({ "Idempotency-Key": "seat-request-1" }),
+      }),
+    );
   });
 });

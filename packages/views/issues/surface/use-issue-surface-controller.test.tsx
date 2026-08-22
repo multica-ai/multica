@@ -179,6 +179,10 @@ describe("useIssueSurfaceController", () => {
     listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
     listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       ...tableMethods,
       listIssueTableRows,
@@ -234,6 +238,8 @@ describe("useIssueSurfaceController", () => {
         query: expect.objectContaining({
           scope: { kind: "project", project_id: "p1" },
         }),
+        // A workspace with no custom statuses keeps the original contract —
+        // that is what makes this safe across a rolling deploy. (MUL-6243)
         group: { kind: "status" },
       }),
     );
@@ -248,6 +254,10 @@ describe("useIssueSurfaceController", () => {
   // all of them.
   it("keeps the table query spec identity while its source queries are still pending", async () => {
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets,
@@ -330,6 +340,10 @@ describe("useIssueSurfaceController", () => {
       facets: [{ kind: "status" as const, values: [] }],
     }));
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues: legacyListIssues,
       listIssueTableRows: tableRows,
       listIssueTableFacets: tableFacets,
@@ -644,6 +658,10 @@ describe("useIssueSurfaceController", () => {
       facets: [{ kind: "status", values: [{ key: "todo", count: 2 }] }],
     });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableFacets,
       listGroupedIssues: vi.fn(() => never()),
@@ -729,6 +747,10 @@ describe("useIssueSurfaceController", () => {
       });
       const tableMethods = statusTableMethodsFromLegacy(listIssues);
       setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
         listIssues,
         ...tableMethods,
         listIssueTableFacets,
@@ -775,6 +797,47 @@ describe("useIssueSurfaceController", () => {
     },
   );
 
+  it.each([
+    { grouping: "assignee" as const, expected: { kind: "assignee" } },
+    { grouping: "project" as const, expected: { kind: "project" } },
+  ])(
+    "asks the server for $grouping groups when the board is grouped that way",
+    async ({ grouping, expected }) => {
+      // The board's columns ARE the server's group descriptors, so the group
+      // spec it requests is the whole contract — a board that asks for the
+      // wrong dimension renders another dimension's columns.
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.getState().setViewMode("board");
+      store.getState().setGrouping(grouping);
+      const tableMethods = statusTableMethodsFromLegacy(listIssues);
+      const listIssueTableGroups = vi.fn(tableMethods.listIssueTableGroups);
+      setApiInstance({
+        listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+        listIssues,
+        ...tableMethods,
+        listIssueTableGroups,
+        listGroupedIssues: vi.fn(() => never()),
+        listProjects: vi.fn(() => Promise.resolve({ projects: [], total: 0 })),
+        getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+        getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      } as unknown as ApiClient);
+
+      renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p1" },
+            modes: ["board", "list", "swimlane"],
+          }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
+      expect(listIssueTableGroups.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ group: expected }),
+      );
+    },
+  );
+
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
@@ -790,6 +853,10 @@ describe("useIssueSurfaceController", () => {
       }),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -840,6 +907,10 @@ describe("useIssueSurfaceController", () => {
         next_cursor: null,
       });
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listIssueTableRows,
       listIssueTableFacets: vi.fn(() => never()),
@@ -893,6 +964,10 @@ describe("useIssueSurfaceController", () => {
       ] satisfies WorkspaceWorkingAgent[]),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
@@ -934,6 +1009,10 @@ describe("useIssueSurfaceController", () => {
       Promise.resolve([] satisfies WorkspaceWorkingAgent[]),
     );
     setApiInstance({
+      // The board pages by category, so every surface stub answers the catalog
+      // read. Empty is the real shape for a workspace with no custom statuses:
+      // a built-in key IS its own category. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),

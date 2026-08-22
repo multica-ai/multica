@@ -16,7 +16,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 3. 확인 창에서 시작될 에이전트를 확인합니다.
 4. 필요하면 인계 설명을 입력한 뒤 **시작**을 선택합니다.
 
-![할당 확인 창: 인계 설명을 입력하거나 지금은 시작하지 않도록 선택할 수 있습니다.](/images/docs/assign-confirm-dialog.png)
+![할당 확인 창: 인계 설명을 입력하거나 지금은 시작하지 않도록 선택할 수 있습니다.](/images/docs/assign-confirm-dialog.webp)
 
 인계 설명은 이번 실행에만 사용됩니다. 범위, 순서, 이번에 특히 주의할 점을 보충하기에 적합합니다. 장기적으로 적용할 요구 사항은 이슈, 프로젝트 설명, 에이전트 지시문에 작성하세요.
 
@@ -43,7 +43,9 @@ Multica가 에이전트의 [실행 태스크](/tasks)를 만듭니다. 온라인
 
 `backlog` 상태에서도 에이전트를 할당하는 것만으로 실행이 시작되지 않습니다. 이슈를 `backlog`에서 다른 상태로 옮기거나 댓글에서 담당자에게 추가 요청을 해야 이후 실행이 생성됩니다.
 
-이 효과는 `backlog`에만 적용됩니다. 이미 `done` 또는 `cancelled` 상태인 이슈도 에이전트에게 할당하거나 다시 할당하면 즉시 실행이 시작됩니다.
+이미 에이전트나 스쿼드 담당자가 있는 태스크를 `backlog` 밖으로 옮기면 같은 확인 대화상자가 열립니다. 실행을 시작하는 것이 바로 이 상태 변경이므로 동일한 인계 메모를 남길 수 있고, **아직 시작 안 함**도 그대로 사용할 수 있습니다(상태만 옮기고 에이전트는 깨우지 않습니다). 이 대화상자는 `backlog`·`done`·`cancelled` 이외 카테고리로 옮길 때 나타납니다.
+
+이 효과는 `backlog` 카테고리에만 적용되며, 그 카테고리의 [사용자 지정 상태](/issues#사용자-지정-상태)도 똑같이 동작합니다. 이미 `done` 또는 `cancelled` 상태인 이슈도 에이전트에게 할당하거나 다시 할당하면 즉시 실행이 시작됩니다.
 
 ## 할당 권한
 
@@ -67,10 +69,14 @@ Multica가 에이전트의 [실행 태스크](/tasks)를 만듭니다. 온라인
 
 ```bash
 multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
 multica issue assign MUL-42 --unassign
 ```
 
 스크립트에서는 `--to-id <uuid>`를 사용하면 이름이 같은 객체를 잘못 매칭하는 일을 피할 수 있습니다. UUID는 `multica agent list --output json` 또는 `multica workspace member list --output json`으로 확인합니다.
+
+할당이 담당자만 기록하고 새 태스크를 만들면 안 되는 경우(예: 같은 에이전트가 다른 실행에서 이미 해당 이슈를 처리 중인 경우)에는 `--no-start`를 사용하세요. `issue update`와 `issue status`에서도 같은 플래그를 사용할 수 있습니다. 담당자와 상태를 모두 바꾸는 소유권 전용 흐름이라면 두 명령 모두에 이 플래그를 전달해야 합니다. 할당을 억제해도 이후 상태 변경이 시작하는 실행까지 자동으로 억제되지는 않습니다.
 
 ## 다음 단계
 

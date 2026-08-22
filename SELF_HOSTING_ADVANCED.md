@@ -11,7 +11,7 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
-| `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
+| `JWT_SECRET` | **Required — no safe default.** Secret key for signing JWT tokens. A production backend refuses to boot if this is empty or a known placeholder. Generate with `openssl rand -hex 32`. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
 ### Database Pool Tuning (Optional)
@@ -86,7 +86,17 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 ### File Storage (Optional)
 
-For file uploads and attachments, configure S3 and (optionally) CloudFront:
+Uploads and attachments are written to local disk by default. Set `S3_BUCKET` to
+use S3-compatible object storage instead.
+
+#### Local disk (default)
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_UPLOAD_DIR` | Directory attachments are written to (default: `./data/uploads`). The default is **relative to the backend's working directory** — `/app` in the bundled image, where the compose file mounts the `backend_uploads` volume. When running the binary manually it resolves against whatever directory you launched from, so set an absolute path; otherwise uploads land somewhere new each time the launch directory changes, and existing `attachment` rows point at files the server no longer looks for |
+| `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
+
+#### S3 / CloudFront
 
 | Variable | Description |
 |----------|-------------|
@@ -211,6 +221,7 @@ Agent-specific overrides:
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
@@ -222,7 +233,37 @@ Agent-specific overrides:
 
 ## Database Setup
 
-Multica requires PostgreSQL 17 with the pgvector extension.
+Multica requires PostgreSQL 17. It does **not** use pgvector — no migration
+declares a `vector` column or runs `CREATE EXTENSION vector`. The bundled image
+is named `pgvector/pgvector:pg17` for historical reasons only; a stock
+PostgreSQL 17 is sufficient.
+
+Migrations reference four extensions:
+
+| Extension | Migration | Required |
+| --- | --- | --- |
+| `pgcrypto` | `001_init` | **Yes** — a bare `CREATE EXTENSION`; the migration fails without it |
+| `pg_trgm` | `137_search_index_pg_trgm_extension` | **Yes** — same, and the search indexes depend on it |
+| `pg_bigm` | `032_issue_search_index` | No — wrapped in `DO ... EXCEPTION`, skipped with a `NOTICE` when unavailable |
+| `pg_cron` | `076_task_usage_pgcron_extension` | No — same; the usage rollup runs in-process instead, see [Usage Dashboard Rollup](#usage-dashboard-rollup) |
+
+`pgcrypto` and `pg_trgm` ship with every standard PostgreSQL 17 build
+(`postgresql-contrib` on Debian/Ubuntu, bundled in Homebrew's `postgresql@17`
+and in the official `postgres:17` image), so neither hard requirement needs a
+custom image.
+
+`pg_bigm` is optional and only affects **CJK search quality** — bigram indexes
+are far more selective than trigram ones for Chinese, Japanese, and Korean text.
+Search works without it: migrations 138–142 install portable `pg_trgm` fallback
+indexes covering every column the search handlers touch. Installing `pg_bigm`
+does require a custom image or a source build — the bundled
+`pgvector/pgvector:pg17` image does not ship it either.
+
+> Because `pg_bigm` and `pg_cron` are installed conditionally, a row in
+> `schema_migrations` proves the migration ran, not that its objects exist. Run
+> `SELECT extname FROM pg_extension` to see what a database actually has. To
+> recover a missing comment-content search index, follow
+> `server/cmd/migrate/README.md`.
 
 ### Using Docker Compose (Recommended)
 
@@ -230,10 +271,12 @@ The `docker-compose.selfhost.yml` includes PostgreSQL. No separate setup needed.
 
 ### Using Your Own PostgreSQL
 
-If you prefer to use an existing PostgreSQL instance, ensure the pgvector extension is available:
+If you prefer to use an existing PostgreSQL instance, confirm the migration role
+can create the two required extensions:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
 Set `DATABASE_URL` in your `.env` and remove the `postgres` service from the compose file.
@@ -312,7 +355,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
+**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)
@@ -579,6 +622,34 @@ networking, allowlists, NetworkPolicy, or proxy authentication. If you bind
 `METRICS_ADDR=0.0.0.0:9090` inside a container, only publish that port to a
 trusted network, for example a host-local mapping such as
 `127.0.0.1:9090:9090`.
+
+## Go Runtime Profiling
+
+The backend exposes all standard Go pprof routes on the fixed loopback-only
+management listener `127.0.0.1:6060`, including CPU, heap, allocs, goroutine,
+block, mutex, threadcreate, symbol, and trace profiles:
+
+```bash
+go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
+
+The public API port does not serve `/debug/pprof/`. The listener address is not
+configurable and is never bound to a container or host network interface.
+Profiles can reveal process internals and some captures add CPU or memory
+pressure, so access should remain limited to operators on the same host or in
+the same container network namespace.
+
+A loopback listener inside a container belongs to that container's network
+namespace and is not reachable directly from the host. With the Compose stack,
+capture the profile inside the backend container and copy it out:
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec backend \
+  wget -qO /tmp/heap.pprof http://127.0.0.1:6060/debug/pprof/heap
+docker compose -f docker-compose.selfhost.yml cp backend:/tmp/heap.pprof ./heap.pprof
+go tool pprof ./heap.pprof
+```
 
 ## Upgrading
 

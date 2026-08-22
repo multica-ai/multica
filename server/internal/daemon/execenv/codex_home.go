@@ -63,8 +63,15 @@ type CodexHomeOptions struct {
 	// whole shared history back in. Empty means a fresh thread (no rollout to
 	// expose). See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
-	// IsLocalDirectory marks a local_directory task — one running in the user's
-	// own project directory. These tasks get a fresh codex-home per task ID (the
+	// IsLocalDirectory marks a task whose env root is never reused across task
+	// IDs — every local_directory task, in_place or worktree. Worktree tasks
+	// get a fresh env root per task just like in-place ones do
+	// (shouldReusePriorWorkdir refuses any local assignment), so they need the
+	// same per-issue session store; keying this on "runs in the user's
+	// directory" instead would silently drop a Codex agent's conversation
+	// history between turns on the same issue.
+	//
+	// These tasks get a fresh codex-home per task ID (the
 	// daemon never reuses their workdir), so their sessions/ is pointed at the
 	// per-issue store (SessionStoreKey) that survives across task IDs and holds
 	// ONLY this issue's rollouts — never the machine's whole ~/.codex/sessions.
@@ -473,7 +480,7 @@ func PruneCodexSessionStores(profile string, retention time.Duration, now time.T
 				continue
 			}
 			storeDir := filepath.Join(agentDir, is.Name())
-			newest, size := codexStoreStat(storeDir)
+			newest, size := dirStat(storeDir)
 			if newest.IsZero() || now.Sub(newest) <= retention {
 				kept++
 				continue
@@ -511,9 +518,10 @@ func PruneCodexSessionStores(profile string, retention time.Duration, now time.T
 	return removed, bytesFreed
 }
 
-// codexStoreStat walks dir once, returning the newest modification time seen
-// (the store's last activity) and its total byte size (for GC accounting).
-func codexStoreStat(dir string) (newest time.Time, size int64) {
+// dirStat walks dir once, returning the newest modification time seen (the
+// directory's last activity) and its total byte size (for GC accounting).
+// Shared by the store pruners and the task temp sweep.
+func dirStat(dir string) (newest time.Time, size int64) {
 	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -658,7 +666,7 @@ func linkCodexSessionsToStore(dst, storeDir, sharedSessions, resumeID string, lo
 }
 
 // touchCodexSessionStore refreshes storeDir's modification time to now — the
-// signal codexStoreStat reads as the store's last activity. Best-effort: a
+// signal dirStat reads as the store's last activity. Best-effort: a
 // failed touch only risks an over-eager prune, which the active-store guard
 // still prevents.
 func touchCodexSessionStore(storeDir string, logger *slog.Logger) {

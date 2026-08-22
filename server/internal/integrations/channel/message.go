@@ -209,4 +209,8 @@ type OutboundMessage struct {
 type SendResult struct {
 	// MessageID is the platform's identifier for the delivered message.
 	MessageID string
+	// MessageIDs contains every delivered platform message identifier when one
+	// logical reply is split into multiple messages. Adapters that never chunk
+	// may leave it empty and return only MessageID for compatibility.
+	MessageIDs []string
 }

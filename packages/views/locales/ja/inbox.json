@@ -28,7 +28,8 @@
     },
     "archived_title": "アーカイブ済み",
     "archived_empty": "アーカイブされた通知はありません",
-    "unarchive_tooltip": "アーカイブ解除"
+    "unarchive_tooltip": "アーカイブ解除",
+    "actions_aria": "通知の操作"
   },
   "detail": {
     "select_prompt": "詳細を表示する通知を選択してください",
@@ -71,6 +72,10 @@
     "reacted_to_comment": "あなたのコメントに {{emoji}} のリアクションをしました",
     "created_with_agent": "エージェントで作成: {{identifier}}",
     "failed_with_detail": "失敗: {{detail}}"
+  },
+  "toasts": {
+    "archived": "通知をアーカイブしました",
+    "unarchived": "通知を元に戻しました"
   },
   "errors": {
     "mark_read_failed": "既読にできませんでした",

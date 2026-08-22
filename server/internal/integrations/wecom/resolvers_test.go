@@ -42,7 +42,7 @@ func (f *fakeSessionBinder) EnsureSession(_ context.Context, in engine.EnsureSes
 	f.ensureIn = in
 	return f.sessID, nil
 }
-func (f *fakeSessionBinder) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
+func (f *fakeSessionBinder) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (f *fakeSessionBinder) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in
 	return engine.AppendResult{}, nil

@@ -16,6 +16,8 @@ var MinVersions = map[string]string{
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
 	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"dim":     "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
+	"mcode":   "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
@@ -33,6 +35,22 @@ const MinQuickCreateCLIVersion = "0.2.21"
 // into the generated issue-create prompt. Basic quick-create remains on the
 // older floor above; only requests using these optional fields need this gate.
 const MinQuickCreateFieldsCLIVersion = "0.4.3"
+
+// MinLocalWorktreeCLIVersion is the release that first shipped
+// execution_mode=worktree for local_directory resources (MUL-5707).
+//
+// NOTHING GATES ON THIS. It is a display value: the number shown in the 422
+// payload and the UI hint so a user knows roughly which release to update to.
+// The gates themselves read protocol.DaemonCapabilityLocalWorktreeV1, which
+// the daemon advertises only when it actually implements the mode.
+//
+// It stopped being a gate because it could not be one. A daemon without the
+// implementation does not lose a field — it runs the task IN PLACE, editing the
+// working copy the user asked to isolate. Version strings cannot answer that:
+// CheckMinCLIVersionFor exempts git-describe dev builds so `make daemon` stays
+// unblocked, and a v0.4.23-era daemon reporting "v0.4.21-24-gcd3c0bb89" sailed
+// through the floor and ran two tasks in the user's own directory.
+const MinLocalWorktreeCLIVersion = "0.4.24"
 
 // MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders
 // the assignment handoff note into the run's opening prompt + issue_context.md

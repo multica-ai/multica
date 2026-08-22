@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -229,6 +231,71 @@ func TestEnsureTaskSkillBundles_AcceptsServerSideSkillUpdate(t *testing.T) {
 	}
 	if _, ok := d.skillCache.Load("ws-1", currentRef); !ok {
 		t.Error("updated bundle should be cached under its own (new) hash")
+	}
+}
+
+func TestEnsureTaskSkillBundles_CacheRemovalFailureDoesNotDiscardDownloadedBundle(t *testing.T) {
+	bundle := makeResolvableSkillBundle("skill-1")
+	ref := skillRefFromBundle(bundle)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundle}})
+	}))
+	defer server.Close()
+
+	cache := NewSkillBundleCache(t.TempDir())
+	cache.removeAll = func(string) error { return fs.ErrPermission }
+	daemon := &Daemon{client: NewClient(server.URL), skillCache: cache}
+	task := &Task{
+		ID:          "task-1",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+	}
+
+	if err := daemon.ensureTaskSkillBundles(context.Background(), task); err != nil {
+		t.Fatalf("cache removal failure must not discard a downloaded bundle: %v", err)
+	}
+	if len(task.Agent.Skills) != 1 || task.Agent.Skills[0].Hash != bundle.Hash {
+		t.Fatalf("downloaded bundle was not attached to the task: %+v", task.Agent.Skills)
+	}
+	if _, ok := cache.Load(task.WorkspaceID, ref); ok {
+		t.Fatal("bundle must not appear cached after the removal failure")
+	}
+}
+
+func TestEnsureTaskSkillBundles_RejectsPluginHashDrift(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	makePluginBundle := func(content string) SkillData {
+		bundle := SkillData{ID: "plugin:review-readiness", Source: skillbundle.SourcePlugin, Name: "review-readiness", Content: content}
+		ref := skillRefFromBundle(bundle)
+		bundle.Hash = ref.Hash
+		bundle.SizeBytes = ref.SizeBytes
+		return bundle
+	}
+	pinned := makePluginBundle("pinned-content")
+	mutated := makePluginBundle("mutated-content")
+	pinnedRef := skillRefFromBundle(pinned)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{mutated}})
+	}))
+	defer server.Close()
+
+	daemon := &Daemon{client: NewClient(server.URL), skillCache: NewSkillBundleCache(t.TempDir())}
+	task := &Task{
+		ID:          "task-plugin-pin",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{pinnedRef}},
+	}
+	if err := daemon.ensureTaskSkillBundles(context.Background(), task); err == nil {
+		t.Fatal("expected plugin bundle hash drift to fail closed")
+	}
+	if _, ok := daemon.skillCache.Load(task.WorkspaceID, pinnedRef); ok {
+		t.Fatal("mutated plugin bundle must not be cached under the pinned ref")
 	}
 }
 

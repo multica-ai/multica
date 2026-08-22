@@ -20,7 +20,7 @@ The creation page offers two options:
 
 Build with AI needs an online runtime for the Builder conversation. Either way, you can review and edit the final configuration before creating.
 
-![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.png)
+![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.webp)
 
 ## Required fields
 
@@ -83,7 +83,7 @@ Access decides which members can run this agent (assign, @-mention, or chat):
 | **Entire workspace** | Every workspace member can run it. |
 | **Specific people** | Only you and the selected members can run it. |
 
-![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.png)
+![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.webp)
 
 Only the agent owner can change Access — workspace admins cannot. Workspace `owner`s and `admin`s can manage the rest of the configuration, but cannot use their admin role to run agents they aren't granted.
 
@@ -118,6 +118,10 @@ Critical runtime variables such as `PATH`, `HOME`, and `MULTICA_*` cannot be ove
 ## Custom arguments and MCP
 
 Custom arguments are passed to the AI coding tool as an array, item by item, without shell expansion. Whether an argument is valid is up to the tool; model configuration that already has a dedicated field doesn't need to be repeated here.
+
+<Callout type="warning">
+Do not put credentials or other secrets in custom arguments. They remain in the child process's argv and may be visible to other local processes through `ps` or `/proc`; use environment variables (`custom_env`) instead. Daemon logs redact argument values, but that does not protect the operating system's process list.
+</Callout>
 
 MCP configuration may contain tokens; its storage and display rules match environment variables. Only runtimes that support managed MCP configuration show this section; tools without MCP support don't gain it just because a configuration is saved.
 

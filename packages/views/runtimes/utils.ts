@@ -776,14 +776,25 @@ export interface DailyCostData {
   cost: number;
 }
 
-// Stacked variant — splits the daily $ figure into the three components that
-// drive billing (cache reads excluded; their cost is tracked separately as
-// "savings" since they're typically dominated by the cached-input discount).
+// Stacked variant — splits the daily $ figure into the four components that
+// drive billing. Every component `estimateCost` charges for has to be here:
+// `total` is what the tooltip and the empty-state check read, so a component
+// missing from the stack is money missing from the user's cost figure.
+//
+// Cache reads were once excluded on the theory that their rate was too small
+// to see. It isn't: across the current rate table cached input is ~10x cheaper
+// than uncached, not ~100x, and agent sessions routinely read tens of times
+// more cached tokens than uncached ones — so cache read is often the LARGEST
+// segment, and dropping it understated some buckets by >50% (MUL-6334).
+//
+// Cache *savings* — a reconstruction of what the discount avoided — is a
+// separate KPI and deliberately not part of this stack; savings is not spend.
 export interface DailyCostStackData {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -821,6 +832,7 @@ export interface WeeklyCostStackData {
   daysCovered: number;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -835,7 +847,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
   const costMap = new Map<string, number>();
   const stackMap = new Map<
     string,
-    { input: number; output: number; cacheWrite: number }
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
   >();
   const modelMap = new Map<string, { tokens: number; cost: number }>();
 
@@ -860,10 +872,12 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     const stack = stackMap.get(u.date) ?? {
       input: 0,
       output: 0,
+      cacheRead: 0,
       cacheWrite: 0,
     };
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
     stackMap.set(u.date, stack);
 
@@ -898,14 +912,19 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        // Rounded components, not round(sum) — the tooltip's Total is the sum
+        // of the segments it draws, so totalling the rounded parts is what
+        // keeps the footer agreeing with the bars it sits under.
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 
@@ -958,7 +977,10 @@ export function aggregateByWeek(
 
   type TokenAgg = Omit<WeeklyTokenData, "label" | "rangeLabel" | "partial" | "daysCovered" | "weekEnd">;
   const tokenMap = new Map<string, TokenAgg>();
-  const stackMap = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const stackMap = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
 
   // Pre-seed every trailing calendar week in the window so sparse / empty
   // weeks still render as zero bars instead of being dropped.
@@ -971,7 +993,7 @@ export function aggregateByWeek(
       cacheRead: 0,
       cacheWrite: 0,
     });
-    stackMap.set(wkStart, { input: 0, output: 0, cacheWrite: 0 });
+    stackMap.set(wkStart, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   }
 
   for (const u of usage) {
@@ -989,6 +1011,7 @@ export function aggregateByWeek(
     if (!stack) continue;
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
   }
 
@@ -1025,13 +1048,15 @@ export function aggregateByWeek(
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         ...decorate(weekStart),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 

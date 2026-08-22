@@ -64,6 +64,12 @@ func (f *fakeTimerFactory) armedCount() int {
 	return n
 }
 
+func (f *fakeTimerFactory) createdCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.all)
+}
+
 // newTestBatcher builds a batcher whose timers are driven by f. Shared with
 // router_test.go (same package) to drive the debounce coalescing test.
 func newTestBatcher(f *fakeTimerFactory) *pendingBatcher {
@@ -135,6 +141,30 @@ func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
 	f.fireArmed()
 	if calls != 1 {
 		t.Fatalf("the live timer must still flush exactly once; got %d", calls)
+	}
+}
+
+func TestPendingBatcher_ScheduleIfAbsentPreservesExistingWindow(t *testing.T) {
+	f := &fakeTimerFactory{}
+	b := newTestBatcher(f)
+	firstCalls, recoveryCalls := 0, 0
+
+	live := b.Schedule("s", 7, func(RunBatchID) { firstCalls++ })
+	rejoined := b.ScheduleIfAbsent("s", 9, func(RunBatchID) { recoveryCalls++ })
+
+	if got := f.createdCount(); got != 1 {
+		t.Fatalf("recovery replaced a live timer: created=%d, want 1", got)
+	}
+	// Declining to re-arm is not declining to belong: the recovered message
+	// joins the batch the live window is already collecting, so it must be
+	// told that id and not the one it offered. Anything else binds the turn
+	// to a round nothing will flush.
+	if live != 7 || rejoined != 7 {
+		t.Fatalf("batch ids = %d/%d, want 7/7", live, rejoined)
+	}
+	f.fireArmed()
+	if firstCalls != 1 || recoveryCalls != 0 {
+		t.Fatalf("live/recovery flushes = %d/%d, want 1/0", firstCalls, recoveryCalls)
 	}
 }
 
