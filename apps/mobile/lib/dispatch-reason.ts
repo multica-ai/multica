@@ -1,4 +1,4 @@
-/**
+import { translate } from "@/i18n"; /**
  * Mobile-owned mirror of `packages/core/api/client.ts:dispatchReasonCode`.
  *
  * Why mirror instead of import: the core version narrows on core's own
@@ -25,10 +25,14 @@ export function dispatchReasonCode(err: unknown): string | undefined {
 export function sendFailureMessage(err: unknown): string {
   switch (dispatchReasonCode(err)) {
     case "invocation_not_allowed":
-      return "You no longer have permission to run this agent, so the message was not sent.";
+      return translate(
+        "You no longer have permission to run this agent, so the message was not sent.",
+      );
     case "agent_runtime_required":
-      return "Bind a runtime to this agent before sending a message.";
+      return translate(
+        "Bind a runtime to this agent before sending a message.",
+      );
     default:
-      return "Your message could not be sent. Please try again.";
+      return translate("Your message could not be sent. Please try again.");
   }
 }

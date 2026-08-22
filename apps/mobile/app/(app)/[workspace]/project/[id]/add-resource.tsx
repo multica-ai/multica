@@ -13,6 +13,7 @@ import { useLocalSearchParams, router } from "expo-router";
 import { Text } from "@/components/ui/text";
 import { TextField } from "@/components/ui/text-field";
 import { useCreateProjectResource } from "@/data/mutations/projects";
+import { translate } from "@/i18n";
 
 const GITHUB_PATTERN = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+(\/|$)/i;
 
@@ -38,8 +39,8 @@ export default function AddResourceRoute() {
         onSuccess: () => router.back(),
         onError: (err) => {
           Alert.alert(
-            "Failed to attach resource",
-            err instanceof Error ? err.message : "Unknown error",
+            translate("Failed to attach resource"),
+            err instanceof Error ? err.message : translate("Unknown error"),
           );
         },
       },
@@ -50,7 +51,7 @@ export default function AddResourceRoute() {
     <View className="flex-1">
       <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
         <Text className="text-base font-semibold text-foreground">
-          Attach repository
+          {translate("Attach repository")}
         </Text>
         <Pressable
           onPress={onSubmit}
@@ -61,13 +62,15 @@ export default function AddResourceRoute() {
           }`}
         >
           <Text className="text-sm font-semibold text-primary">
-            {submitting ? "Attaching…" : "Attach"}
+            {submitting ? translate("Attaching…") : translate("Attach")}
           </Text>
         </Pressable>
       </View>
       <View className="px-4 pt-4 gap-4">
         <View className="gap-1">
-          <Text className="text-xs text-muted-foreground">Repository URL</Text>
+          <Text className="text-xs text-muted-foreground">
+            {translate("Repository URL")}
+          </Text>
           <TextField
             value={url}
             onChangeText={setUrl}
@@ -80,12 +83,12 @@ export default function AddResourceRoute() {
         </View>
         <View className="gap-1">
           <Text className="text-xs text-muted-foreground">
-            Label (optional)
+            {translate("Label (optional)")}
           </Text>
           <TextField
             value={label}
             onChangeText={setLabel}
-            placeholder="e.g. Backend"
+            placeholder={translate("e.g. Backend")}
           />
         </View>
       </View>

@@ -27,6 +27,7 @@ import {
 import { projectDetailOptions } from "@/data/queries/projects";
 import { useUpdateProject } from "@/data/mutations/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export default function EditProject() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -68,12 +69,12 @@ export default function EditProject() {
       return;
     }
     Alert.alert(
-      "Discard changes?",
-      "Your edits to this project will be lost.",
+      translate("Discard changes?"),
+      translate("Your edits to this project will be lost."),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: translate("Keep editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: translate("Discard"),
           style: "destructive",
           onPress: () => router.back(),
         },
@@ -92,8 +93,8 @@ export default function EditProject() {
       onSuccess: () => router.back(),
       onError: (err) => {
         Alert.alert(
-          "Failed to save",
-          err instanceof Error ? err.message : "Unknown error",
+          translate("Failed to save"),
+          err instanceof Error ? err.message : translate("Unknown error"),
         );
       },
     });
@@ -102,7 +103,7 @@ export default function EditProject() {
   const headerLeft = useCallback(() => {
     return (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+        <Text className="text-base text-brand">{translate("Cancel")}</Text>
       </Pressable>
     );
   }, [onCancel]);
@@ -115,7 +116,7 @@ export default function EditProject() {
         className={canSave ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? translate("Saving…") : translate("Save")}
         </Text>
       </Pressable>
     );
@@ -134,10 +135,12 @@ export default function EditProject() {
           keyboardShouldPersistTaps="handled"
         >
           {!detail.data ? (
-            <Text className="text-sm text-muted-foreground">Loading…</Text>
+            <Text className="text-sm text-muted-foreground">
+              {translate("Loading…")}
+            </Text>
           ) : (
             <>
-              <Field label="Icon (emoji)">
+              <Field label={translate("Icon (emoji)")}>
                 <TextInput
                   value={icon}
                   onChangeText={(v) => {
@@ -153,11 +156,11 @@ export default function EditProject() {
                 />
               </Field>
 
-              <Field label="Title">
+              <Field label={translate("Title")}>
                 <TextInput
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="Project title"
+                  placeholder={translate("Project title")}
                   placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
                   className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
                   autoFocus={!detail.data?.title}
@@ -165,11 +168,11 @@ export default function EditProject() {
                 />
               </Field>
 
-              <Field label="Description">
+              <Field label={translate("Description")}>
                 <AutosizeTextArea
                   value={description}
                   onChangeText={setDescription}
-                  placeholder="What is this project about?"
+                  placeholder={translate("What is this project about?")}
                   className="bg-secondary/50 rounded-md px-3 py-2"
                   minHeight={MIN_BODY_INPUT_HEIGHT_PX}
                 />
@@ -198,4 +201,3 @@ function Field({
     </View>
   );
 }
-

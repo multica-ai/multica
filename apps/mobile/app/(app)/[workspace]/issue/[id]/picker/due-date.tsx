@@ -20,6 +20,7 @@ import {
 import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export default function IssueDueDatePickerRoute() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -60,7 +61,9 @@ function DueDateHeader({
 }) {
   return (
     <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
-      <Text className="text-base font-semibold text-foreground">Due date</Text>
+      <Text className="text-base font-semibold text-foreground">
+        {translate("Due date")}
+      </Text>
       <View className="flex-row items-center gap-1">
         {hasValue ? (
           <Pressable
@@ -68,7 +71,9 @@ function DueDateHeader({
             hitSlop={6}
             className="px-2 py-1 rounded-md active:bg-secondary"
           >
-            <Text className="text-sm text-destructive">Clear</Text>
+            <Text className="text-sm text-destructive">
+              {translate("Clear")}
+            </Text>
           </Pressable>
         ) : null}
         <Pressable
@@ -76,7 +81,9 @@ function DueDateHeader({
           hitSlop={6}
           className="px-2 py-1 rounded-md active:bg-secondary"
         >
-          <Text className="text-sm font-medium text-primary">Done</Text>
+          <Text className="text-sm font-medium text-primary">
+            {translate("Done")}
+          </Text>
         </Pressable>
       </View>
     </View>

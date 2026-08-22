@@ -31,6 +31,7 @@ import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { Text } from "@/components/ui/text";
+import { translate } from "@/i18n";
 
 interface Props {
   attachments?: Attachment[];
@@ -72,11 +73,7 @@ export function CommentAttachmentList({ attachments, content }: Props) {
           );
         }
         return (
-          <FileCard
-            key={attachment.id}
-            attachment={attachment}
-            theme={theme}
-          />
+          <FileCard key={attachment.id} attachment={attachment} theme={theme} />
         );
       })}
     </View>
@@ -88,7 +85,7 @@ function FileCard({
   theme,
 }: {
   attachment: Attachment;
-  theme: typeof THEME["light"];
+  theme: (typeof THEME)["light"];
 }) {
   const sizeLabel = formatBytes(attachment.size_bytes);
   return (
@@ -110,7 +107,9 @@ function FileCard({
         }
       }}
       accessibilityRole="button"
-      accessibilityLabel={`Open ${attachment.filename}`}
+      accessibilityLabel={translate("Open {{filename}}", {
+        filename: attachment.filename,
+      })}
       className="flex-row items-center gap-2 px-3 py-2 rounded-md bg-secondary/60 active:opacity-80"
     >
       <Ionicons
@@ -119,10 +118,7 @@ function FileCard({
         color={theme.mutedForeground}
       />
       <View className="flex-1">
-        <Text
-          className="text-sm text-foreground"
-          numberOfLines={1}
-        >
+        <Text className="text-sm text-foreground" numberOfLines={1}>
           {attachment.filename}
         </Text>
         {sizeLabel ? (

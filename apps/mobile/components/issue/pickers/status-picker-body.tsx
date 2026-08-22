@@ -23,6 +23,7 @@ import { StatusIcon } from "@/components/ui/status-icon";
 import { statusOptions } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   value: IssueStatus;
@@ -39,7 +40,9 @@ export function StatusPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Status</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {translate("Status")}
+        </Text>
       </View>
       <View className="px-2">
         {options.map((option) => {

@@ -10,6 +10,7 @@ import { Text } from "@/components/ui/text";
 import { PriorityIcon } from "@/components/ui/priority-icon";
 import { PRIORITY_LABEL } from "@/lib/issue-status";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 // Display order: severity descending (urgent → none).
 const PRIORITY_OPTIONS: IssuePriority[] = [
@@ -33,7 +34,9 @@ export function PriorityPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Priority</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {translate("Priority")}
+        </Text>
       </View>
       <View className="px-2">
         {PRIORITY_OPTIONS.map((v) => {

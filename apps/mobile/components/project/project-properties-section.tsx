@@ -16,13 +16,11 @@ import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";
 import { ProjectPriorityIcon } from "@/components/ui/project-priority-icon";
-import {
-  projectPriorityLabel,
-  projectStatusLabel,
-} from "@/lib/project-status";
+import { projectPriorityLabel, projectStatusLabel } from "@/lib/project-status";
 import { useActorLookup } from "@/data/use-actor-name";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   project: Project;
@@ -46,7 +44,7 @@ export function ProjectPropertiesSection({
   return (
     <View className="border-y border-border bg-background">
       <Row
-        label="Status"
+        label={translate("Status")}
         onPress={onPressStatus}
         left={<ProjectStatusIcon status={project.status} size={16} />}
         right={
@@ -57,7 +55,7 @@ export function ProjectPropertiesSection({
       />
       <Separator />
       <Row
-        label="Priority"
+        label={translate("Priority")}
         onPress={onPressPriority}
         left={<ProjectPriorityIcon priority={project.priority} size={16} />}
         right={
@@ -68,7 +66,7 @@ export function ProjectPropertiesSection({
       />
       <Separator />
       <Row
-        label="Lead"
+        label={translate("Lead")}
         onPress={onPressLead}
         left={
           leadName ? (
@@ -90,7 +88,7 @@ export function ProjectPropertiesSection({
                 : "text-sm text-muted-foreground"
             }
           >
-            {leadName ?? "Unassigned"}
+            {leadName ?? translate("Unassigned")}
           </Text>
         }
       />

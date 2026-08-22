@@ -44,6 +44,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export default function ProjectDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -61,7 +62,9 @@ export default function ProjectDetail() {
   const onRefresh = useCallback(async () => {
     await Promise.all([
       detail.refetch(),
-      qc.invalidateQueries({ queryKey: projectResourcesOptions(wsId, id).queryKey }),
+      qc.invalidateQueries({
+        queryKey: projectResourcesOptions(wsId, id).queryKey,
+      }),
       qc.invalidateQueries({
         queryKey: [...issueKeys.list(wsId), "byProject", id],
       }),
@@ -78,9 +81,7 @@ export default function ProjectDetail() {
   const { data: pins } = useQuery(pinListOptions(wsId, userId));
   const isPinned =
     !!project &&
-    !!pins?.some(
-      (p) => p.item_type === "project" && p.item_id === project.id,
-    );
+    !!pins?.some((p) => p.item_type === "project" && p.item_id === project.id);
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
 
@@ -88,11 +89,11 @@ export default function ProjectDetail() {
     if (!project) return;
     const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
     const options = [
-      "Cancel",
-      isPinned ? "Unpin" : "Pin",
-      "Edit details",
-      ...(wsUrl ? ["Open on web"] : []),
-      "Delete",
+      translate("Cancel"),
+      isPinned ? translate("Unpin") : translate("Pin"),
+      translate("Edit details"),
+      ...(wsUrl ? [translate("Open on web")] : []),
+      translate("Delete"),
     ];
     const destructiveIndex = options.length - 1;
     ActionSheetIOS.showActionSheetWithOptions(
@@ -102,20 +103,19 @@ export default function ProjectDetail() {
         destructiveButtonIndex: destructiveIndex,
       },
       (i) => {
-        const label = options[i];
-        if (label === "Pin") {
+        if (i === 1 && !isPinned) {
           createPin.mutate({ item_type: "project", item_id: project.id });
           return;
         }
-        if (label === "Unpin") {
+        if (i === 1 && isPinned) {
           deletePin.mutate({ itemType: "project", itemId: project.id });
           return;
         }
-        if (label === "Edit details") {
+        if (i === 2) {
           if (wsSlug) router.push(`/${wsSlug}/project/${id}/edit`);
           return;
         }
-        if (label === "Open on web" && wsUrl) {
+        if (i === 3 && wsUrl) {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }
@@ -128,12 +128,14 @@ export default function ProjectDetail() {
 
   const onDelete = () => {
     Alert.alert(
-      "Delete project?",
-      "This cannot be undone. Issues in this project will become unassigned from any project.",
+      translate("Delete project?"),
+      translate(
+        "This cannot be undone. Issues in this project will become unassigned from any project.",
+      ),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: translate("Cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: translate("Delete"),
           style: "destructive",
           onPress: () => {
             deleteProject.mutate(undefined, {
@@ -149,14 +151,14 @@ export default function ProjectDetail() {
     <SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
       <Stack.Screen
         options={{
-          title: project?.title || "Project",
-          headerBackTitle: "Back",
+          title: project?.title || translate("Project"),
+          headerBackTitle: translate("Back"),
           headerRight: project
             ? () => (
                 <IconButton
                   name="ellipsis-horizontal"
                   onPress={onPressMore}
-                  accessibilityLabel="Project actions"
+                  accessibilityLabel={translate("Project actions")}
                 />
               )
             : undefined,
@@ -169,13 +171,13 @@ export default function ProjectDetail() {
       ) : detail.error || projectMissing ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
-            Failed to load project:{" "}
+            {translate("Failed to load project:")}{" "}
             {detail.error instanceof Error
               ? detail.error.message
-              : "not found"}
+              : translate("not found")}
           </Text>
           <Button variant="outline" onPress={() => detail.refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : (

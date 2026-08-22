@@ -52,6 +52,7 @@ import { groupIssuesByCategory } from "@/lib/group-issues-by-category";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 // Scope tab definitions. Mirrors web `issuesScopeStore`. Counts are NOT
 // rendered on the pill labels — web's `IssuesHeader` doesn't show them
@@ -59,9 +60,9 @@ import { THEME } from "@/lib/theme";
 // row past the safe width when filter icon shares the row. Per-status
 // counts still appear on the SectionList headers below.
 const SCOPES: { value: IssuesScope; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "members", label: "Members" },
-  { value: "agents", label: "Agents" },
+  { value: "all", label: translate("All") },
+  { value: "members", label: translate("Members") },
+  { value: "agents", label: translate("Agents") },
 ];
 
 export default function IssuesPage() {
@@ -149,18 +150,20 @@ export default function IssuesPage() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {translate("Failed to load issues:")}{" "}
+            {error instanceof Error
+              ? error.message
+              : translate("unknown error")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : showEmptyState ? (
         <EmptyState
           message={
             hasActiveFilters
-              ? "No issues match the current filters."
+              ? translate("No issues match the current filters.")
               : emptyMessageForScope(scope)
           }
         />
@@ -214,7 +217,7 @@ function FilterButton({
         variant="outline"
         size="sm"
         onPress={onPress}
-        accessibilityLabel="Filter"
+        accessibilityLabel={translate("Filter")}
         className="w-9 px-0"
       >
         <Ionicons
@@ -270,7 +273,9 @@ function ScopeToolbar<S extends string>({
             >
               <Text
                 numberOfLines={1}
-                className={active ? "text-accent-foreground" : "text-muted-foreground"}
+                className={
+                  active ? "text-accent-foreground" : "text-muted-foreground"
+                }
               >
                 {s.label}
               </Text>
@@ -372,10 +377,10 @@ function EmptyState({ message }: { message: string }) {
 function emptyMessageForScope(scope: IssuesScope): string {
   switch (scope) {
     case "all":
-      return "No issues in this workspace.";
+      return translate("No issues in this workspace.");
     case "members":
-      return "No issues assigned to a member.";
+      return translate("No issues assigned to a member.");
     case "agents":
-      return "No issues assigned to agents or squads.";
+      return translate("No issues assigned to agents or squads.");
   }
 }

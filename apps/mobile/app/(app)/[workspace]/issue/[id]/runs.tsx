@@ -23,6 +23,7 @@ import {
   issueTasksOptions,
 } from "@/data/queries/issues";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 const PAST_STATUS_ORDER: Record<AgentTask["status"], number> = {
   failed: 0,
@@ -58,7 +59,9 @@ export default function IssueRunsRoute() {
         t.status === "cancelled",
     );
     return filtered.sort((a, b) => {
-      const timeDiff = (b.completed_at ?? "").localeCompare(a.completed_at ?? "");
+      const timeDiff = (b.completed_at ?? "").localeCompare(
+        a.completed_at ?? "",
+      );
       if (timeDiff !== 0) return timeDiff;
       return PAST_STATUS_ORDER[a.status] - PAST_STATUS_ORDER[b.status];
     });
@@ -68,20 +71,20 @@ export default function IssueRunsRoute() {
     <View className="flex-1">
       <View className="px-4 pt-4 pb-3">
         <Text className="text-base font-semibold text-foreground">
-          Agent Runs
+          {translate("Agent Runs")}
         </Text>
       </View>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View className="px-4 gap-3 pb-4">
           {active.length > 0 ? (
-            <Section title="Active">
+            <Section title={translate("Active")}>
               {active.map((task) => (
                 <RunRow key={task.id} task={task} issueId={id} />
               ))}
             </Section>
           ) : null}
           {past.length > 0 ? (
-            <Section title="Past">
+            <Section title={translate("Past")}>
               {past.map((task) => (
                 <RunRow key={task.id} task={task} issueId={id} />
               ))}

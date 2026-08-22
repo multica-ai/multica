@@ -28,6 +28,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 export default function CommentEmojiPickerRoute() {
   const { id, commentId } = useLocalSearchParams<{
@@ -70,7 +71,7 @@ export default function CommentEmojiPickerRoute() {
     <View className="flex-1">
       <View className="px-4 pt-3 pb-2">
         <Text className="text-lg font-semibold text-foreground">
-          Add Reaction
+          {translate("Add Reaction")}
         </Text>
       </View>
       <View className="flex-1">

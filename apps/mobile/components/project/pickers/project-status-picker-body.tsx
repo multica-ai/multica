@@ -9,11 +9,9 @@ import { useColorScheme } from "nativewind";
 import type { ProjectStatus } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";
-import {
-  PROJECT_STATUSES,
-  PROJECT_STATUS_LABEL,
-} from "@/lib/project-status";
+import { PROJECT_STATUSES, PROJECT_STATUS_LABEL } from "@/lib/project-status";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   value: ProjectStatus | string;
@@ -28,7 +26,9 @@ export function ProjectStatusPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Status</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {translate("Status")}
+        </Text>
       </View>
       <View className="px-2">
         {PROJECT_STATUSES.map((status) => {

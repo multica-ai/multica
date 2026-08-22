@@ -13,13 +13,14 @@
 import type { IssuePriority, TimelineEntry } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { STATUS_LABEL, isIssueStatusCategory } from "@/lib/issue-status";
+import { mobileLocale, translate } from "@/i18n";
 
 const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  urgent: "Urgent",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-  none: "No priority",
+  urgent: translate("Urgent"),
+  high: translate("High"),
+  medium: translate("Medium"),
+  low: translate("Low"),
+  none: translate("No priority"),
 };
 
 /**
@@ -48,7 +49,7 @@ function priorityName(p: string | undefined): string {
 // day shift). Mirrors web's formatActivity in issue-detail.tsx.
 function shortDate(date: string | undefined): string {
   if (!date) return "?";
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
+  return formatDateOnly(date, { month: "short", day: "numeric" }, mobileLocale);
 }
 
 export function formatActivity(
@@ -62,43 +63,61 @@ export function formatActivity(
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
-      return "created the issue";
+      return translate("created the issue");
     case "status_changed":
-      return `changed status: ${statusName(details.from, resolveStatusLabel)} → ${statusName(details.to, resolveStatusLabel)}`;
+      return translate("changed status: {{from}} → {{to}}", {
+        from: statusName(details.from, resolveStatusLabel),
+        to: statusName(details.to, resolveStatusLabel),
+      });
     case "priority_changed":
-      return `changed priority: ${priorityName(details.from)} → ${priorityName(details.to)}`;
+      return translate("changed priority: {{from}} → {{to}}", {
+        from: priorityName(details.from),
+        to: priorityName(details.to),
+      });
     case "assignee_changed": {
       const isSelf =
         details.to_type === entry.actor_type &&
         details.to_id === entry.actor_id;
-      if (isSelf) return "self-assigned";
-      if (details.from_id && !details.to_id) return "removed assignee";
+      if (isSelf) return translate("self-assigned");
+      if (details.from_id && !details.to_id)
+        return translate("removed assignee");
       const toName =
         details.to_id && details.to_type
           ? resolveActorName(details.to_type, details.to_id)
           : null;
-      if (toName) return `assigned to ${toName}`;
-      return "changed assignee";
+      if (toName) return translate("assigned to {{name}}", { name: toName });
+      return translate("changed assignee");
     }
     case "start_date_changed": {
-      if (!details.to) return "removed start date";
-      return `set start date to ${shortDate(details.to)}`;
+      if (!details.to) return translate("removed start date");
+      return translate("set start date to {{date}}", {
+        date: shortDate(details.to),
+      });
     }
     case "due_date_changed": {
-      if (!details.to) return "removed due date";
-      return `set due date to ${shortDate(details.to)}`;
+      if (!details.to) return translate("removed due date");
+      return translate("set due date to {{date}}", {
+        date: shortDate(details.to),
+      });
     }
     case "title_changed":
-      return `renamed: "${details.from ?? "?"}" → "${details.to ?? "?"}"`;
+      return translate('renamed: "{{from}}" → "{{to}}"', {
+        from: details.from ?? "?",
+        to: details.to ?? "?",
+      });
     case "description_updated":
-      return "updated description";
+      return translate("updated description");
     case "task_completed": {
       const n = entry.coalesced_count ?? 1;
-      return n > 1 ? `completed ${n} tasks` : "completed a task";
+      return n > 1
+        ? translate("completed {{count}} tasks", { count: n })
+        : translate("completed a task");
     }
     case "task_failed": {
       const n = entry.coalesced_count ?? 1;
-      return n > 1 ? `failed ${n} tasks` : "failed a task";
+      return n > 1
+        ? translate("failed {{count}} tasks", { count: n })
+        : translate("failed a task");
     }
     case "squad_leader_evaluated": {
       // Copy mirrors packages/views/locales/en/issues.json
@@ -108,22 +127,21 @@ export function formatActivity(
       switch (details.outcome) {
         case "action":
           return reason
-            ? `evaluated and took action: ${reason}`
-            : "evaluated and took action";
+            ? translate("evaluated and took action: {{reason}}", { reason })
+            : translate("evaluated and took action");
         case "no_action":
           return reason
-            ? `evaluated: no action needed (${reason})`
-            : "evaluated: no action needed";
+            ? translate("evaluated: no action needed ({{reason}})", { reason })
+            : translate("evaluated: no action needed");
         case "failed":
           return reason
-            ? `evaluation failed: ${reason}`
-            : "evaluation failed";
+            ? translate("evaluation failed: {{reason}}", { reason })
+            : translate("evaluation failed");
         default:
-          return "evaluated the squad trigger";
+          return translate("evaluated the squad trigger");
       }
     }
     default:
       return entry.action ?? "";
   }
 }
-

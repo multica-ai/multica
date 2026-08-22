@@ -57,6 +57,7 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { translate } from "@/i18n";
 
 // iOS bottom tab bar default height (above safe-area). React Navigation
 // doesn't expose this as a layout constant, but the value is stable
@@ -74,9 +75,13 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: "Pinned", icon: "pin", path: "/more/pins" },
-  { label: "Issues", icon: "list.bullet", path: "/more/issues" },
-  { label: "Projects", icon: "square.stack", path: "/more/projects" },
+  { label: translate("Pinned"), icon: "pin", path: "/more/pins" },
+  { label: translate("Issues"), icon: "list.bullet", path: "/more/issues" },
+  {
+    label: translate("Projects"),
+    icon: "square.stack",
+    path: "/more/projects",
+  },
 ];
 
 export function MoreTabDropdownAnchor({
@@ -140,9 +145,7 @@ export function MoreTabDropdownAnchor({
           <WorkspaceCard
             currentWorkspaceName={currentWorkspace?.name}
             currentWorkspaceAvatarUrl={currentWorkspace?.avatar_url}
-            onPress={() =>
-              slug && router.push(`/${slug}/switch-workspace`)
-            }
+            onPress={() => slug && router.push(`/${slug}/switch-workspace`)}
             chevronTint={t.mutedForeground}
           />
 
@@ -153,10 +156,7 @@ export function MoreTabDropdownAnchor({
               key={item.path}
               onPress={() => slug && router.push(`/${slug}${item.path}`)}
               accessibilityLabel={item.label}
-              className={cn(
-                "h-9 gap-3",
-                isActive(item.path) && "bg-secondary",
-              )}
+              className={cn("h-9 gap-3", isActive(item.path) && "bg-secondary")}
             >
               <ExpoImage
                 source={`sf:${item.icon}`}
@@ -192,7 +192,7 @@ function UserCard({
     <DropdownMenuItem
       onPress={onPress}
       className="h-12 gap-3"
-      accessibilityLabel="Account settings"
+      accessibilityLabel={translate("Account settings")}
     >
       {user?.avatar_url ? (
         <Image
@@ -207,17 +207,11 @@ function UserCard({
         </View>
       )}
       <View className="flex-1 min-w-0">
-        <Text
-          className="text-sm font-medium text-foreground"
-          numberOfLines={1}
-        >
+        <Text className="text-sm font-medium text-foreground" numberOfLines={1}>
           {user?.name ?? "—"}
         </Text>
         {user?.email ? (
-          <Text
-            className="text-xs text-muted-foreground"
-            numberOfLines={1}
-          >
+          <Text className="text-xs text-muted-foreground" numberOfLines={1}>
             {user.email}
           </Text>
         ) : null}
@@ -266,7 +260,9 @@ function WorkspaceCard({
       disabled={!canSwitch}
       className="h-12 gap-3"
       accessibilityLabel={
-        canSwitch ? "Switch workspace" : currentWorkspaceName ?? "Workspace"
+        canSwitch
+          ? translate("Switch workspace")
+          : (currentWorkspaceName ?? translate("Workspace"))
       }
     >
       <WorkspaceAvatar
@@ -275,11 +271,8 @@ function WorkspaceCard({
         size={32}
       />
       <View className="flex-1 min-w-0">
-        <Text
-          className="text-sm font-medium text-foreground"
-          numberOfLines={1}
-        >
-          {currentWorkspaceName ?? "Workspace"}
+        <Text className="text-sm font-medium text-foreground" numberOfLines={1}>
+          {currentWorkspaceName ?? translate("Workspace")}
         </Text>
       </View>
       {canSwitch ? (

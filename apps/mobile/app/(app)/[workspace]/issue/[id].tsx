@@ -42,13 +42,19 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
+import { translate } from "@/i18n";
 
 export default function IssueDetail() {
   // `highlight` + `h` come from inbox deep-link (apps/mobile/app/(app)/
   // [workspace]/(tabs)/inbox.tsx). `highlight` is the target comment id;
   // `h` is a per-tap nonce so re-tapping the same row re-fires the
   // scroll-and-flash effect.
-  const { id, workspace: wsSlug, highlight, h } = useLocalSearchParams<{
+  const {
+    id,
+    workspace: wsSlug,
+    highlight,
+    h,
+  } = useLocalSearchParams<{
     id: string;
     workspace: string;
     highlight?: string;
@@ -116,40 +122,50 @@ export default function IssueDetail() {
     const issueLink = webUrl
       ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
       : null;
-    const options: string[] = ["Cancel"];
-    options.push(isPinned ? "Unpin" : "Pin");
-    options.push("Edit details");
-    if (issueLink) options.push("Copy link");
-    if (issueLink) options.push("Open on web");
-    options.push("Delete issue");
-    const destructiveIndex = options.length - 1;
-    ActionSheetIOS.showActionSheetWithOptions(
+    const actions: { label: string; run?: () => void }[] = [
+      { label: translate("Cancel") },
       {
-        options,
-        cancelButtonIndex: 0,
-        destructiveButtonIndex: destructiveIndex,
-        title: issue.identifier,
+        label: isPinned ? translate("Unpin") : translate("Pin"),
+        run: () =>
+          isPinned
+            ? deletePin.mutate({ itemType: "issue", itemId: issue.id })
+            : createPin.mutate({ item_type: "issue", item_id: issue.id }),
       },
-      (i) => {
-        const label = options[i];
-        if (label === "Pin") {
-          createPin.mutate({ item_type: "issue", item_id: issue.id });
-        } else if (label === "Unpin") {
-          deletePin.mutate({ itemType: "issue", itemId: issue.id });
-        } else if (label === "Edit details") {
-          if (wsSlug) router.push(`/${wsSlug}/issue/${issue.id}/edit`);
-        } else if (label === "Copy link" && issueLink) {
-          Clipboard.setStringAsync(issueLink);
-        } else if (label === "Open on web" && issueLink) {
-          Linking.openURL(issueLink);
-        } else if (label === "Delete issue") {
+      {
+        label: translate("Edit details"),
+        run: () => router.push(`/${wsSlug}/issue/${issue.id}/edit`),
+      },
+      ...(issueLink
+        ? [
+            {
+              label: translate("Copy link"),
+              run: () => void Clipboard.setStringAsync(issueLink),
+            },
+            {
+              label: translate("Open on web"),
+              run: () => void Linking.openURL(issueLink),
+            },
+          ]
+        : []),
+      {
+        label: translate("Delete issue"),
+        run: () =>
           confirmDelete(issue, () =>
             deleteIssue.mutate(issue.id, {
               onSuccess: () => router.back(),
             }),
-          );
-        }
+          ),
       },
+    ];
+    const destructiveIndex = actions.length - 1;
+    ActionSheetIOS.showActionSheetWithOptions(
+      {
+        options: actions.map((action) => action.label),
+        cancelButtonIndex: 0,
+        destructiveButtonIndex: destructiveIndex,
+        title: issue.identifier,
+      },
+      (i) => actions[i]?.run?.(),
     );
   }, [issue, wsSlug, deleteIssue, isPinned, createPin, deletePin]);
 
@@ -157,8 +173,8 @@ export default function IssueDetail() {
     <View className="flex-1 bg-background">
       <Stack.Screen
         options={{
-          title: issue?.identifier ?? "Issue",
-          headerBackTitle: "Back",
+          title: issue?.identifier ?? translate("Issue"),
+          headerBackTitle: translate("Back"),
           headerRight: issue
             ? () => (
                 <View className="flex-row items-center gap-2">
@@ -169,7 +185,7 @@ export default function IssueDetail() {
                   <IconButton
                     name="ellipsis-horizontal"
                     onPress={onPressMore}
-                    accessibilityLabel="Issue actions"
+                    accessibilityLabel={translate("Issue actions")}
                   />
                 </View>
               )
@@ -183,13 +199,13 @@ export default function IssueDetail() {
       ) : detail.error || !issue ? (
         <View className="flex-1 items-center justify-center px-6 gap-3">
           <Text className="text-sm text-destructive text-center">
-            Failed to load issue:{" "}
+            {translate("Failed to load issue:")}{" "}
             {detail.error instanceof Error
               ? detail.error.message
-              : "not found"}
+              : translate("not found")}
           </Text>
           <Button variant="outline" onPress={() => detail.refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : (
@@ -212,11 +228,14 @@ export default function IssueDetail() {
 
 function confirmDelete(issue: Issue, onConfirm: () => void) {
   Alert.alert(
-    "Delete issue?",
-    `${issue.identifier} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone.`,
+    translate("Delete issue?"),
+    translate(
+      "{{identifier}} and its comments, reactions, and attachments will be permanently deleted. This cannot be undone.",
+      { identifier: issue.identifier },
+    ),
     [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: onConfirm },
+      { text: translate("Cancel"), style: "cancel" },
+      { text: translate("Delete"), style: "destructive", onPress: onConfirm },
     ],
   );
 }

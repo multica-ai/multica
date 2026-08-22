@@ -31,6 +31,7 @@ import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";
 import { useCreateIssue } from "@/data/mutations/issues";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
 import { useMentionInput } from "@/lib/use-mention-input";
+import { translate } from "@/i18n";
 
 export default function NewIssueModal() {
   const [title, setTitle] = useState("");
@@ -78,8 +79,8 @@ export default function NewIssueModal() {
       router.back();
     } catch (err) {
       Alert.alert(
-        "Failed to create issue",
-        err instanceof Error ? err.message : "Unknown error",
+        translate("Failed to create issue"),
+        err instanceof Error ? err.message : translate("Unknown error"),
       );
     }
   }, [
@@ -119,17 +120,14 @@ export default function NewIssueModal() {
           <TextInput
             value={title}
             onChangeText={setTitle}
-            placeholder="Issue title"
+            placeholder={translate("Issue title")}
             placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
             className="text-2xl font-semibold text-foreground py-2"
             autoFocus
             returnKeyType="next"
             editable={!isSubmitting}
           />
-          <DescriptionField
-            description={description}
-            disabled={isSubmitting}
-          />
+          <DescriptionField description={description} disabled={isSubmitting} />
           <CreateFormAttributeRow />
         </ScrollView>
 

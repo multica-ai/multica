@@ -14,6 +14,7 @@ import {
   PROJECT_PRIORITY_LABEL,
 } from "@/lib/project-status";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   value: ProjectPriority | string;
@@ -28,7 +29,9 @@ export function ProjectPriorityPickerBody({ value, onChange }: Props) {
   return (
     <ScrollView showsVerticalScrollIndicator={false}>
       <View className="px-4 pt-3 pb-2">
-        <Text className="text-lg font-semibold text-foreground">Priority</Text>
+        <Text className="text-lg font-semibold text-foreground">
+          {translate("Priority")}
+        </Text>
       </View>
       <View className="px-2">
         {PROJECT_PRIORITIES.map((priority) => {

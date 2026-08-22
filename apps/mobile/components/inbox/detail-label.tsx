@@ -23,42 +23,47 @@ import { PriorityIcon } from "@/components/ui/priority-icon";
 import { useActorLookup } from "@/data/use-actor-name";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { cn } from "@/lib/utils";
+import { mobileLocale, translate } from "@/i18n";
 
 // Mirrors PRIORITY_CONFIG.label in packages/core/issues/config/priority.ts
 const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  urgent: "Urgent",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-  none: "No priority",
+  urgent: translate("Urgent"),
+  high: translate("High"),
+  medium: translate("Medium"),
+  low: translate("Low"),
+  none: translate("No priority"),
 };
 
 // Mirrors useTypeLabels in packages/views/inbox/components/inbox-detail-label.tsx
 const TYPE_LABEL: Record<InboxItemType, string> = {
-  issue_assigned: "Assigned",
-  issue_subscribed: "Subscribed",
-  unassigned: "Unassigned",
-  assignee_changed: "Reassigned",
-  status_changed: "Status changed",
-  priority_changed: "Priority changed",
-  start_date_changed: "Start date changed",
-  due_date_changed: "Due date changed",
-  new_comment: "New comment",
-  mentioned: "Mentioned",
-  review_requested: "Review requested",
-  task_completed: "Task completed",
-  task_failed: "Task failed",
-  agent_blocked: "Agent blocked",
-  agent_completed: "Agent completed",
-  reaction_added: "Reaction added",
-  quick_create_done: "Quick-create done",
-  quick_create_failed: "Quick-create failed",
-  quick_create_unconfirmed: "Quick-create needs a check",
+  issue_assigned: translate("Assigned"),
+  issue_subscribed: translate("Subscribed"),
+  unassigned: translate("Unassigned"),
+  assignee_changed: translate("Reassigned"),
+  status_changed: translate("Status changed"),
+  priority_changed: translate("Priority changed"),
+  start_date_changed: translate("Start date changed"),
+  due_date_changed: translate("Due date changed"),
+  new_comment: translate("New comment"),
+  mentioned: translate("Mentioned"),
+  review_requested: translate("Review requested"),
+  task_completed: translate("Task completed"),
+  task_failed: translate("Task failed"),
+  agent_blocked: translate("Agent blocked"),
+  agent_completed: translate("Agent completed"),
+  reaction_added: translate("Reaction added"),
+  quick_create_done: translate("Quick-create done"),
+  quick_create_failed: translate("Quick-create failed"),
+  quick_create_unconfirmed: translate("Quick-create needs a check"),
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
 function shortDate(dateStr: string): string {
-  return formatDateOnly(dateStr, { month: "short", day: "numeric" }, "en-US");
+  return formatDateOnly(
+    dateStr,
+    { month: "short", day: "numeric" },
+    mobileLocale,
+  );
 }
 
 function singleLine(value: string | null | undefined): string {
@@ -83,7 +88,9 @@ export function InboxDetailLabel({
     const status = details.to;
     return (
       <View className={cn("flex-row items-center gap-1", className)}>
-        <Text className="text-xs text-muted-foreground">Set status to</Text>
+        <Text className="text-xs text-muted-foreground">
+          {translate("Set status to")}
+        </Text>
         <StatusIcon
           status={status}
           category={categoryOf(status)}
@@ -101,7 +108,9 @@ export function InboxDetailLabel({
     const priority = details.to as IssuePriority;
     return (
       <View className={cn("flex-row items-center gap-1", className)}>
-        <Text className="text-xs text-muted-foreground">Set priority to</Text>
+        <Text className="text-xs text-muted-foreground">
+          {translate("Set priority to")}
+        </Text>
         <PriorityIcon priority={priority} size={12} />
         <Text className="text-xs text-muted-foreground" numberOfLines={1}>
           {PRIORITY_LABEL[priority] ?? priority}
@@ -120,28 +129,34 @@ export function InboxDetailLabel({
             (details.new_assignee_type ?? "member") as "member" | "agent",
             details.new_assignee_id,
           );
-          return `Assigned to ${name}`;
+          return translate("Assigned to {{name}}", { name });
         }
         return TYPE_LABEL[item.type];
       case "unassigned":
-        return "Removed assignee";
+        return translate("Removed assignee");
       case "due_date_changed":
         return details.to
-          ? `Set due date to ${shortDate(details.to)}`
-          : "Removed due date";
+          ? translate("Set due date to {{date}}", {
+              date: shortDate(details.to),
+            })
+          : translate("Removed due date");
       case "new_comment":
         return singleLine(item.body) || TYPE_LABEL[item.type];
       case "reaction_added":
         return details.emoji
-          ? `Reacted with ${details.emoji}`
+          ? translate("Reacted with {{emoji}}", { emoji: details.emoji })
           : TYPE_LABEL[item.type];
       case "quick_create_done":
         return details.identifier
-          ? `Created with agent: ${details.identifier}`
+          ? translate("Created with agent: {{identifier}}", {
+              identifier: details.identifier,
+            })
           : TYPE_LABEL[item.type];
       case "quick_create_failed": {
         const detail = singleLine(details.error) || singleLine(item.body);
-        return detail ? `Failed: ${detail}` : TYPE_LABEL[item.type];
+        return detail
+          ? translate("Failed: {{detail}}", { detail })
+          : TYPE_LABEL[item.type];
       }
       // Mirrors packages/views/inbox/components/inbox-detail-label.tsx: the
       // unconfirmed outcome deliberately drops the "Failed:" prefix, because

@@ -24,12 +24,7 @@ import { FlatList, Pressable, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "nativewind";
-import type {
-  Agent,
-  Issue,
-  MemberWithUser,
-  Squad,
-} from "@multica/core/types";
+import type { Agent, Issue, MemberWithUser, Squad } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
@@ -49,6 +44,7 @@ import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 import { cn } from "@/lib/utils";
+import { translate } from "@/i18n";
 
 const AVATAR_SIZE = 36;
 
@@ -152,26 +148,29 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((m): Row => ({ kind: "member", member: m }));
       if (memberRows.length > 0) {
-        out.push({ kind: "section", label: "People" }, ...memberRows);
+        out.push(
+          { kind: "section", label: translate("People") },
+          ...memberRows,
+        );
       }
       const agentRows = [...agents]
         .filter((a) => matchName(a.name))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((a): Row => ({ kind: "agent", agent: a }));
       if (agentRows.length > 0) {
-        out.push({ kind: "section", label: "Agents" }, ...agentRows);
+        out.push({ kind: "section", label: translate("Agents") }, ...agentRows);
       }
       const squadRows = [...squads]
         .filter((s) => !s.archived_at && matchName(s.name))
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((s): Row => ({ kind: "squad", squad: s }));
       if (squadRows.length > 0) {
-        out.push({ kind: "section", label: "Squads" }, ...squadRows);
+        out.push({ kind: "section", label: translate("Squads") }, ...squadRows);
       }
     }
 
     if (issueResults.length > 0) {
-      out.push({ kind: "section", label: "Issues" });
+      out.push({ kind: "section", label: translate("Issues") });
       for (const i of issueResults) {
         out.push({ kind: "issue", issue: i });
       }
@@ -288,7 +287,7 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             ) : (
               <Text className="flex-1 text-base text-foreground">
                 {item.kind === "all"
-                  ? "Everyone (@all)"
+                  ? translate("Everyone (@all)")
                   : item.kind === "member"
                     ? item.member.name
                     : item.kind === "agent"
@@ -298,11 +297,15 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
             )}
             {item.kind === "agent" ? (
               <Text className="text-sm text-muted-foreground">
-                {isAgentRuntimeBound(item.agent) ? "Agent" : "Needs runtime"}
+                {isAgentRuntimeBound(item.agent)
+                  ? translate("Agent")
+                  : translate("Needs runtime")}
               </Text>
             ) : item.kind === "squad" ? (
               <Text className="text-sm text-muted-foreground">
-                {needsRuntime ? "Leader needs runtime" : "Squad"}
+                {needsRuntime
+                  ? translate("Leader needs runtime")
+                  : translate("Squad")}
               </Text>
             ) : null}
             {isSelected(item) ? (
@@ -313,7 +316,9 @@ export function MentionPickerBody({ query, mode = "comment" }: Props) {
       }}
       ListEmptyComponent={
         <View className="px-3 py-8 items-center">
-          <Text className="text-sm text-muted-foreground">No matches.</Text>
+          <Text className="text-sm text-muted-foreground">
+            {translate("No matches.")}
+          </Text>
         </View>
       }
     />

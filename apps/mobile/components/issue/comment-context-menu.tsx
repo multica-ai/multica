@@ -34,6 +34,7 @@ import {
   useToggleCommentReaction,
 } from "@/data/mutations/issues";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
+import { translate } from "@/i18n";
 
 const QUICK_ROW_SIZE = 5;
 
@@ -79,20 +80,23 @@ export function useCommentLongPress(
       actions.push(action);
     };
 
-    push("Reply", { kind: "reply" });
-    push("React…", { kind: "react" });
+    push(translate("Reply"), { kind: "reply" });
+    push(translate("React…"), { kind: "react" });
     if (hasContent) {
-      push("Copy", { kind: "copy" });
-      push("Select Text", { kind: "select" });
+      push(translate("Copy"), { kind: "copy" });
+      push(translate("Select Text"), { kind: "select" });
     }
-    if (canCopyLink) push("Copy Link", { kind: "copyLink" });
+    if (canCopyLink) push(translate("Copy Link"), { kind: "copyLink" });
     if (isRoot) {
-      push(resolved ? "Unresolve Thread" : "Resolve Thread", {
-        kind: "resolve",
-      });
+      push(
+        resolved ? translate("Unresolve Thread") : translate("Resolve Thread"),
+        {
+          kind: "resolve",
+        },
+      );
     }
-    if (isOwn) push("Delete", { kind: "delete" });
-    push("Cancel", { kind: "cancel" });
+    if (isOwn) push(translate("Delete"), { kind: "delete" });
+    push(translate("Cancel"), { kind: "cancel" });
 
     const cancelButtonIndex = options.length - 1;
     const destructiveButtonIndex = isOwn
@@ -103,8 +107,7 @@ export function useCommentLongPress(
       {
         options,
         cancelButtonIndex,
-        ...(destructiveButtonIndex !== undefined &&
-        destructiveButtonIndex >= 0
+        ...(destructiveButtonIndex !== undefined && destructiveButtonIndex >= 0
           ? { destructiveButtonIndex }
           : {}),
       },
@@ -174,12 +177,14 @@ export function useCommentLongPress(
             return;
           case "delete":
             Alert.alert(
-              "Delete comment?",
-              "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+              translate("Delete comment?"),
+              translate(
+                "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+              ),
               [
-                { text: "Cancel", style: "cancel" },
+                { text: translate("Cancel"), style: "cancel" },
                 {
-                  text: "Delete",
+                  text: translate("Delete"),
                   style: "destructive",
                   onPress: () => deleteComment.mutate(entry.id),
                 },
@@ -213,7 +218,11 @@ function presentReactSheet(args: {
 }) {
   const { entry, reactions, userId, wsSlug, issueId, toggle } = args;
   const emojis = QUICK_EMOJIS.slice(0, QUICK_ROW_SIZE);
-  const options = [...emojis, "More reactions…", "Cancel"];
+  const options = [
+    ...emojis,
+    translate("More reactions…"),
+    translate("Cancel"),
+  ];
   const cancelButtonIndex = options.length - 1;
 
   ActionSheetIOS.showActionSheetWithOptions(
@@ -223,8 +232,7 @@ function presentReactSheet(args: {
       if (i === emojis.length) {
         if (!wsSlug) return;
         router.push({
-          pathname:
-            "/[workspace]/issue/[id]/comment/[commentId]/emoji-picker",
+          pathname: "/[workspace]/issue/[id]/comment/[commentId]/emoji-picker",
           params: {
             workspace: wsSlug,
             id: issueId,

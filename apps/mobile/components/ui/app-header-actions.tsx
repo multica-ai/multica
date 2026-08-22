@@ -11,6 +11,7 @@
 import { router } from "expo-router";
 import { IconButton } from "@/components/ui/icon-button";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { translate } from "@/i18n";
 
 export function HeaderActions() {
   const slug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -27,13 +28,13 @@ export function HeaderActions() {
       <IconButton
         name="search"
         onPress={onSearch}
-        accessibilityLabel="Search"
+        accessibilityLabel={translate("Search")}
       />
       <IconButton
         name="add"
         iconSize={24}
         onPress={onCreate}
-        accessibilityLabel="New issue"
+        accessibilityLabel={translate("New issue")}
       />
     </>
   );

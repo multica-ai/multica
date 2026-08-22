@@ -44,6 +44,7 @@ import {
   patchIssueLabels,
   replaceCommentTimelineEntry,
 } from "@/data/realtime/issue-ws-updaters";
+import { translate } from "@/i18n";
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -122,7 +123,7 @@ export function useCreateComment(issueId: string) {
           content: vars.content,
           parentId: vars.parentId,
           attachmentIds: vars.attachmentIds,
-          error: err instanceof Error ? err.message : "Send failed",
+          error: err instanceof Error ? err.message : translate("Send failed"),
         });
       }
     },
