@@ -557,6 +557,7 @@ func main() {
 	taskTokenIssuer, err := tasktoken.NewIssuer(
 		os.Getenv("MULTICA_TASK_TOKEN_TEMPLATES"),
 		os.Getenv("MULTICA_TASK_TOKEN_PRIVATE_KEY"),
+		os.Getenv("MULTICA_TASK_TOKEN_MANIFEST_ENV"),
 	)
 	if err != nil {
 		slog.Error("invalid task token configuration", "error", err)

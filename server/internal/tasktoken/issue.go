@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -51,8 +52,9 @@ func EmailLocal(email string) string {
 
 // Issuer signs catalog templates for a resolved identity.
 type Issuer struct {
-	catalog *Catalog
-	key     crypto.PrivateKey
+	catalog     *Catalog
+	key         crypto.PrivateKey
+	manifestEnv string
 }
 
 // NewIssuer builds an Issuer from the raw catalog JSON and PEM private key.
@@ -60,9 +62,14 @@ type Issuer struct {
 // blank is a misconfiguration and returns an error — a deployment that set a
 // key but no catalog (or vice versa) meant to enable this and should be told
 // it is not enabled, not left silently disabled.
-func NewIssuer(rawCatalog, rawPrivateKey string) (*Issuer, error) {
+//
+// manifestEnv, when non-empty, names an extra environment variable carrying a
+// JSON array of the manifests of the templates actually issued for a run. It
+// is optional; leaving it blank injects nothing beyond the tokens themselves.
+func NewIssuer(rawCatalog, rawPrivateKey, manifestEnv string) (*Issuer, error) {
 	rawCatalog = strings.TrimSpace(rawCatalog)
 	rawPrivateKey = strings.TrimSpace(rawPrivateKey)
+	manifestEnv = strings.TrimSpace(manifestEnv)
 
 	switch {
 	case rawCatalog == "" && rawPrivateKey == "":
@@ -82,7 +89,13 @@ func NewIssuer(rawCatalog, rawPrivateKey string) (*Issuer, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Issuer{catalog: catalog, key: key}, nil
+
+	if manifestEnv != "" {
+		if err := ValidateEnvName(manifestEnv); err != nil {
+			return nil, fmt.Errorf("task token manifest env: %w", err)
+		}
+	}
+	return &Issuer{catalog: catalog, key: key, manifestEnv: manifestEnv}, nil
 }
 
 // parsePrivateKey accepts PKCS#8 ("PRIVATE KEY"), SEC 1 EC ("EC PRIVATE KEY")
@@ -135,7 +148,8 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[str
 		return nil
 	}
 
-	out := make(map[string]string, len(enabledIDs))
+	out := make(map[string]string, len(enabledIDs)+1)
+	manifests := make([]json.RawMessage, 0, len(enabledIDs))
 	for _, id := range enabledIDs {
 		tpl, ok := i.catalog.Get(id)
 		if !ok {
@@ -151,9 +165,25 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[str
 			"template_id", tpl.ID, "env", tpl.Env, "jti", jti,
 			"identity_source", tctx.Identity.Source, "user_id", tctx.Identity.UserID)
 		out[tpl.Env] = token
+		// Collected only for templates that actually produced a token, so the
+		// manifest can never advertise a system whose token is missing.
+		if len(tpl.Manifest) > 0 {
+			manifests = append(manifests, tpl.Manifest)
+		}
 	}
 	if len(out) == 0 {
 		return nil
+	}
+
+	if i.manifestEnv != "" && len(manifests) > 0 {
+		encoded, err := json.Marshal(manifests)
+		if err != nil {
+			// The tokens themselves are still good; ship them without the
+			// manifest rather than failing the whole set.
+			slog.Error("task token: encoding manifest failed", "error", err)
+			return out
+		}
+		out[i.manifestEnv] = string(encoded)
 	}
 	return out
 }

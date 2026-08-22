@@ -29,7 +29,7 @@ func withTaskTokenCatalog(t *testing.T, catalog string) {
 		testHandler.TaskTokenIssuer = nil
 		return
 	}
-	iss, err := tasktoken.NewIssuer(catalog, testTaskTokenKeyPEM(t))
+	iss, err := tasktoken.NewIssuer(catalog, testTaskTokenKeyPEM(t), "")
 	if err != nil {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}

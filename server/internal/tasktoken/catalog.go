@@ -73,6 +73,15 @@ type Template struct {
 	KeyID       string
 	TTL         time.Duration
 	Claims      map[string]string
+	// Manifest is opaque descriptive metadata about the system this token
+	// opens — a base URL, a display name, whatever the consuming tool needs to
+	// know to actually use it. The issuer collects the manifests of the
+	// templates it successfully signed into one JSON array and injects it
+	// under ManifestEnv, so a tool's view of "systems I can reach" is derived
+	// from the tokens it actually holds and cannot drift out of sync.
+	//
+	// Nothing here is interpreted: it is copied through verbatim.
+	Manifest json.RawMessage
 }
 
 // Catalog is a parsed, fully validated set of templates. A nil *Catalog means
@@ -92,6 +101,7 @@ type templateJSON struct {
 	KeyID       string            `json:"key_id"`
 	TTL         string            `json:"ttl"`
 	Claims      map[string]string `json:"claims"`
+	Manifest    json.RawMessage   `json:"manifest"`
 }
 
 // ParseCatalog parses and validates the catalog JSON. Blank input returns
@@ -132,6 +142,7 @@ func validateEntry(e templateJSON) (Template, error) {
 		Algorithm:   strings.TrimSpace(e.Algorithm),
 		KeyID:       strings.TrimSpace(e.KeyID),
 		Claims:      e.Claims,
+		Manifest:    e.Manifest,
 	}
 
 	if tpl.ID == "" {
@@ -190,7 +201,26 @@ func validateEntry(e templateJSON) (Template, error) {
 		}
 	}
 
+	if len(tpl.Manifest) > 0 && !json.Valid(tpl.Manifest) {
+		return Template{}, fmt.Errorf("manifest is not valid JSON")
+	}
+
 	return tpl, nil
+}
+
+// ValidateEnvName reports whether name is usable as an injected environment
+// variable: shell-safe in form, and not one the daemon owns.
+func ValidateEnvName(name string) error {
+	if !envNamePattern.MatchString(name) {
+		return fmt.Errorf("env name must match %s, got %q", envNamePattern, name)
+	}
+	if strings.HasPrefix(name, "MULTICA_") {
+		return fmt.Errorf("env name %q is reserved: the MULTICA_ prefix belongs to the daemon", name)
+	}
+	if _, bad := reservedEnvNames[name]; bad {
+		return fmt.Errorf("env name %q is reserved by the daemon", name)
+	}
+	return nil
 }
 
 // Get returns the template with the given id.
