@@ -1879,11 +1879,15 @@ func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
 // "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
 // the workspace's configured prefix and the number resolves to a real issue.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+	return h.lookupIssueByIdentifierWithQueries(ctx, h.Queries, workspaceID, prefix, identifier)
+}
+
+func (h *Handler) lookupIssueByIdentifierWithQueries(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
 	number, ok := issueNumberForPrefix(identifier, prefix)
 	if !ok {
 		return db.Issue{}, false
 	}
-	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+	issue, err := q.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: workspaceID,
 		Number:      number,
 	})
@@ -1893,17 +1897,33 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	return issue, true
 }
 
+type issueDoneTransition struct {
+	previous db.Issue
+	updated  db.Issue
+}
+
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
-	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+	updated, ok := h.advanceIssueToDoneWithQueries(ctx, h.Queries, issue)
+	if !ok {
+		return
+	}
+	h.publishIssueAdvancedToDone(ctx, issue, updated, workspaceID)
+}
+
+func (h *Handler) advanceIssueToDoneWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) (db.Issue, bool) {
+	updated, err := q.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
-		return
+		return db.Issue{}, false
 	}
+	return updated, true
+}
 
+func (h *Handler) publishIssueAdvancedToDone(ctx context.Context, issue, updated db.Issue, workspaceID string) {
 	// Fire the platform parent-notification path on the same transition the
 	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
 	// the most common ways a sub-issue actually reaches `done`, and skipping
