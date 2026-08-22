@@ -286,6 +286,33 @@ func TestRuntimeLocalSkillImport_OverwritePreservesIdentityAndBindings(t *testin
 	}
 }
 
+func TestRuntimeLocalSkillImport_OverwriteCanonicalizesWindowsFilePath(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	name := fmt.Sprintf("overwrite-windows-path-%d", time.Now().UnixNano())
+	existingID := createImportTargetSkill(t, name, testUserID, nil)
+
+	got := runLocalSkillImport(t, runtimeID,
+		map[string]any{"skill_key": "review-helper", "action": "overwrite", "target_skill_id": existingID},
+		reportBundleBody(name, "overwritten description", "# overwritten", map[string]string{
+			`templates\template.html`: "template",
+		}),
+	)
+
+	if got.Status != RuntimeLocalSkillCompleted {
+		t.Fatalf("status = %s, want completed (error=%q)", got.Status, got.Error)
+	}
+	if got.Skill == nil || len(got.Skill.Files) != 1 {
+		t.Fatalf("imported files = %#v, want one file", got.Skill)
+	}
+	if got.Skill.Files[0].Path != "templates/template.html" {
+		t.Fatalf("file path = %q, want canonical slash path", got.Skill.Files[0].Path)
+	}
+}
+
 func TestRuntimeLocalSkillImport_OverwriteNonCreatorFails(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
