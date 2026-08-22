@@ -128,6 +128,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   "zh-Hans": "zh-CN",
   ko: "ko-KR",
   ja: "ja-JP",
+  "pt-BR": "pt-BR",
 };
 
 export default async function RootLayout({

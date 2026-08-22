@@ -1,0 +1,109 @@
+{
+  "avatar_upload": {
+    "change": "Alterar avatar",
+    "remove": "Remover",
+    "select_image": "Escolha um arquivo de imagem.",
+    "updated": "Avatar atualizado",
+    "failed": "Falha ao enviar o avatar",
+    "upload_image": "Enviar imagem",
+    "emoji_label": "Emoji",
+    "more_emojis": "Mais emojis…",
+    "emoji_loading": "Carregando…"
+  },
+  "avatar_crop": {
+    "title": "Editar avatar",
+    "zoom": "Zoom",
+    "zoom_in": "Ampliar",
+    "zoom_out": "Reduzir",
+    "rotate": "Girar",
+    "reset": "Redefinir",
+    "cancel": "Cancelar",
+    "apply": "Salvar",
+    "uploading": "Enviando…",
+    "loading": "Carregando…",
+    "load_failed": "Não foi possível carregar a imagem"
+  },
+  "color_picker": {
+    "saturation": "Saturação e brilho",
+    "hue": "Matiz",
+    "hex": "Cor hexadecimal",
+    "eyedropper": "Selecionar uma cor da tela",
+    "presets": "Predefinições",
+    "random": "Aleatório"
+  },
+  "save": "Salvar",
+  "cancel": "Cancelar",
+  "delete": "Excluir",
+  "confirm": "Confirmar",
+  "loading": "Carregando...",
+  "time": {
+    "just_now": "agora mesmo",
+    "minutes_ago": "há {{count}}m",
+    "hours_ago": "há {{count}}h",
+    "days_ago": "há {{count}}d"
+  },
+  "lark_bind": {
+    "page_title": "Vincule sua conta do Lark",
+    "redeeming": "Resgatando token de vínculo…",
+    "needs_auth_description": "Entre no Multica para concluir o vínculo. O token no link vincula sua conta do Lark a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Vínculo concluído.",
+    "done_description": "Sua próxima mensagem para o bot no Lark irá direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir o vínculo",
+    "error_admin_hint": "Se isso continuar acontecendo, peça ao admin do workspace para reenviar o link de vínculo pelo Lark.",
+    "error_missing_token": "O link está sem o token de vínculo. Peça ao bot para enviar um novo no Lark.",
+    "error_expired": "Este link de vínculo é inválido ou expirou (os links valem por 15 minutos). Peça ao bot para enviar um novo.",
+    "error_already_bound": "Esta conta do Lark já está vinculada a outro usuário do Multica. Transferências de conta exigem uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
+  },
+  "slack_bind": {
+    "page_title": "Conecte sua conta do Slack",
+    "redeeming": "Conectando sua conta…",
+    "needs_auth_description": "Entre no Multica para concluir a conexão. O token no link vincula sua conta do Slack a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Conta conectada.",
+    "done_description": "Sua próxima mensagem para o bot no Slack irá direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a conexão",
+    "error_admin_hint": "Se isso continuar acontecendo, mande mensagem para o bot novamente no Slack para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Mande mensagem para o bot novamente no Slack para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Mande mensagem para o bot novamente para obter um novo.",
+    "error_already_bound": "Esta conta do Slack já está conectada a outro usuário do Multica. Transferências de conta exigem uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
+  },
+  "expandable_description": {
+    "expand": "Mostrar mais",
+    "collapse": "Mostrar menos"
+  },
+  "dingtalk_bind": {
+    "page_title": "Vincule sua conta do DingTalk",
+    "redeeming": "Vinculando sua conta…",
+    "needs_auth_description": "Entre no Multica para concluir a vinculação. O token no link vincula sua conta do DingTalk a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Você está vinculado.",
+    "done_description": "Sua próxima mensagem para o bot no DingTalk vai direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, mande uma mensagem para o bot no DingTalk novamente para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Mande uma mensagem para o bot no DingTalk novamente para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Mande uma mensagem para o bot novamente para obter um novo.",
+    "error_already_bound": "Esta conta do DingTalk já está vinculada a outro usuário do Multica. Transferências de conta precisam passar por uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
+  },
+  "wecom_bind": {
+    "page_title": "Vincule sua conta do Multica",
+    "redeeming": "Vinculando sua conta…",
+    "needs_auth_description": "Entre no Multica para concluir a vinculação. O token no link vincula sua identidade do WeCom a este usuário do Multica, então você precisa estar logado primeiro.",
+    "sign_in": "Entrar",
+    "done_title": "Você está vinculado.",
+    "done_description": "Sua próxima mensagem para o bot inteligente no WeCom vai direto para o agent. Você pode fechar esta aba.",
+    "error_title": "Não foi possível concluir a vinculação",
+    "error_admin_hint": "Se isso continuar acontecendo, mande uma mensagem para o bot no WeCom novamente para obter um novo link.",
+    "error_missing_token": "O link está sem o token. Mande uma mensagem para o bot no WeCom novamente para obter um novo.",
+    "error_expired": "Este link é inválido ou expirou (os links valem por 15 minutos). Mande uma mensagem para o bot novamente para obter um novo.",
+    "error_already_bound": "Esta identidade do WeCom já está vinculada a outro usuário do Multica. Transferências de conta precisam passar por uma desvinculação explícita primeiro.",
+    "error_not_member": "Você está logado em uma conta do Multica que não é membro deste workspace.",
+    "error_unknown": "Algo deu errado. Tente novamente e, se o problema persistir, contate o admin do workspace."
+  }
+}
