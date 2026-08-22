@@ -773,8 +773,10 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
-	// does not accept none, minimal, or xhigh.
+	// Grok 4.5 / 4.6 documented --effort levels. Grok cannot disable
+	// reasoning and does not accept none, minimal, or xhigh on the CLI
+	// flag Multica injects. grok-4.6's API also lists xhigh; that token
+	// stays off this enum until `grok agent --effort` accepts it.
 	"grok": {
 		"low":    true,
 		"medium": true,
