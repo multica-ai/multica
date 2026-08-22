@@ -33,6 +33,16 @@
       "create_failed": "创建子任务失败"
     }
   },
+  "table_menu": {
+    "label": "编辑表格",
+    "add_row_above": "在上方添加一行",
+    "add_row_below": "在下方添加一行",
+    "delete_row": "删除当前行",
+    "add_column_left": "在左侧添加一列",
+    "add_column_right": "在右侧添加一列",
+    "delete_column": "删除当前列",
+    "delete_table": "删除表格"
+  },
   "image": {
     "view": "查看图片",
     "download": "下载",

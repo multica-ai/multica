@@ -33,6 +33,16 @@
       "create_failed": "Failed to create sub-issue"
     }
   },
+  "table_menu": {
+    "label": "Edit table",
+    "add_row_above": "Add row above",
+    "add_row_below": "Add row below",
+    "delete_row": "Delete row",
+    "add_column_left": "Add column left",
+    "add_column_right": "Add column right",
+    "delete_column": "Delete column",
+    "delete_table": "Delete table"
+  },
   "image": {
     "view": "View image",
     "download": "Download",

@@ -33,6 +33,16 @@
       "create_failed": "하위 태스크를 만들지 못했습니다"
     }
   },
+  "table_menu": {
+    "label": "표 편집",
+    "add_row_above": "위에 행 추가",
+    "add_row_below": "아래에 행 추가",
+    "delete_row": "현재 행 삭제",
+    "add_column_left": "왼쪽에 열 추가",
+    "add_column_right": "오른쪽에 열 추가",
+    "delete_column": "현재 열 삭제",
+    "delete_table": "표 삭제"
+  },
   "image": {
     "view": "이미지 보기",
     "download": "다운로드",
