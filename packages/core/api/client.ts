@@ -759,6 +759,15 @@ export class ApiClient {
     return this.fetch("/api/cli-token", { method: "POST" });
   }
 
+  // Device authorization flow (`multica login --device`): approve the short
+  // code shown in the CLI from the current signed-in session.
+  async approveDeviceAuthorization(userCode: string): Promise<void> {
+    await this.fetch("/api/device/approve", {
+      method: "POST",
+      body: JSON.stringify({ user_code: userCode }),
+    });
+  }
+
   async getMe(): Promise<User> {
     const raw = await this.fetch<unknown>("/api/me");
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {

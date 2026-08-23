@@ -136,6 +136,9 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		}
 		return runAuthLoginToken(cmd, tokenFlag)
 	}
+	if deviceFlag, _ := cmd.Flags().GetBool("device"); deviceFlag {
+		return runAuthLoginDevice(cmd)
+	}
 	return runAuthLoginBrowser(cmd)
 }
 
@@ -310,7 +313,13 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 		return fmt.Errorf("timed out waiting for authentication")
 	}
 
-	// Use the JWT to create a PAT via the existing API.
+	return completeLoginWithJWT(cmd, serverURL, appURL, jwtToken)
+}
+
+// completeLoginWithJWT finishes every interactive login path the same way:
+// exchange the short-lived JWT for a 90-day PAT, verify it, save the config.
+// Both the browser-callback flow and the device-authorization flow land here.
+func completeLoginWithJWT(cmd *cobra.Command, serverURL, appURL, jwtToken string) error {
 	client := cli.NewAPIClient(serverURL, "", jwtToken)
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -326,7 +335,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	var patResp struct {
 		Token string `json:"token"`
 	}
-	err = client.PostJSON(ctx, "/api/tokens", map[string]any{
+	err := client.PostJSON(ctx, "/api/tokens", map[string]any{
 		"name":            patName,
 		"expires_in_days": expiresInDays,
 	}, &patResp)
@@ -405,6 +414,7 @@ func browserLoginInstructions(loginURL, callbackHost string, port int, remoteSSH
 	fmt.Fprintf(&b, "If the browser didn't open, visit:\n  %s\n", loginURL)
 	if remoteSSH && callbackHostIsLoopback(callbackHost) {
 		fmt.Fprintf(&b, "\nRemote SSH session detected. Before opening that URL on your local computer, forward the callback port in another terminal:\n  ssh -L %d:127.0.0.1:%d <user>@<remote-host>\nThen open the URL above in your local browser.\n", port, port)
+		fmt.Fprintf(&b, "\nNo tunnel? Cancel and run `multica login --device` instead: it shows a short code you enter in the web app on any signed-in device.\n")
 	}
 	fmt.Fprintln(&b, "\nWaiting for authentication...")
 	return b.String()

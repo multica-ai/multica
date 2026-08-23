@@ -119,6 +119,9 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "metrics",
   "ping",
 
+  // Device authorization approval page (`multica login --device`)
+  "activate",
+
   // RFC 2142 — privileged email mailboxes
   // Allowing user workspaces with these slugs would let attackers spoof system
   // messaging.
