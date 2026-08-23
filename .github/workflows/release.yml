@@ -76,12 +76,11 @@ jobs:
 
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
-    if: github.repository_owner == 'multica-ai'
+    # Publish CLI archives to this repository's GitHub Releases. Skip the
+    # official Homebrew tap unless we are the canonical upstream — forks
+    # must not push to `multica-ai/homebrew-tap`, and they do not have
+    # that token. Without --skip=homebrew, a fork tag push 401s the tap
+    # and marks this job red even though the rest of the pipeline is fine.
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -105,10 +104,12 @@ jobs:
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: >-
+            release --clean
+            ${{ github.repository_owner != 'multica-ai' && '--skip=homebrew' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ github.repository_owner == 'multica-ai' && secrets.HOMEBREW_TAP_GITHUB_TOKEN || '' }}
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
@@ -350,7 +351,6 @@ jobs:
 
   helm-chart:
     needs: [verify, docker-backend-merge, docker-web-merge]
-    if: github.repository_owner == 'multica-ai'
     runs-on: ubuntu-latest
     concurrency:
       group: release-helm-chart-${{ github.ref }}
@@ -389,13 +389,38 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
+  packages-public:
+    needs: [docker-backend-merge, docker-web-merge, helm-chart]
+    if: github.repository_owner != 'multica-ai'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Request public visibility for GHCR packages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          owner="${{ github.repository_owner }}"
+          for pkg in multica-backend multica-web charts/multica; do
+            encoded="${pkg//\//%2F}"
+            if gh api --method PUT \
+              -H "Accept: application/vnd.github+json" \
+              "/users/${owner}/packages/container/${encoded}/visibility" \
+              -f visibility=public; then
+              echo "public: ${pkg}"
+            else
+              echo "::warning::Could not mark ${pkg} public with GITHUB_TOKEN. Set visibility in GitHub Packages UI."
+            fi
+          done
+
   # Build the Desktop installers for Linux and Windows and upload them to
   # the GitHub Release that the `release` job above just published. macOS
   # Desktop continues to ship via the manual `release-desktop` skill so it
   # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # not (yet) wired into CI. Forks skip this: home uses a Pake wrapper
+  # around the web UI, and unsigned Electron installers are not needed.
   desktop:
     needs: release
+    if: github.repository_owner == 'multica-ai'
     strategy:
       fail-fast: false
       matrix:
