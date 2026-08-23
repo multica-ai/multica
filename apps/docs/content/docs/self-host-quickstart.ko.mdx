@@ -169,10 +169,10 @@ Caddy가 TLS 인증서를 발급하고 WebSocket을 전달합니다. `.env`를 �
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
-curl -fsS https://app.example.com/api/config | jq .daemon_server_url
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-마지막 명령은 공개 HTTPS URL을 출력해야 합니다. `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: Docker Compose 2.24 미만에서는 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`이 `FRONTEND_PORT`를 자동으로 따르지 않습니다(`.env.example`에서 복사한 `${FRONTEND_PORT}` 참조가 리터럴로 남습니다). 명시적으로 설정하세요.
+마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다(`MULTICA_PUBLIC_URL`이 설정되어 있으면 그 값을, 아니면 `MULTICA_APP_URL`을 사용합니다. 출력이 비어 있으면 둘 다 설정되지 않은 것입니다). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: Docker Compose 2.24 미만에서는 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`이 `FRONTEND_PORT`를 자동으로 따르지 않습니다(`.env.example`에서 복사한 `${FRONTEND_PORT}` 참조가 리터럴로 남습니다). 명시적으로 설정하세요.
 
 <Callout type="warning">
 `docker compose restart`는 기존 컨테이너만 다시 시작하며 `.env`를 다시 읽지 않습니다. 설정을 수정한 뒤 `.env`를 다시 읽게 하려면 `docker compose -f docker-compose.selfhost.yml up -d`를 실행하세요.
@@ -370,7 +370,7 @@ Helm은 자체 업그레이드 경로가 있습니다. values 파일에서 `imag
 |---|---|
 | `/readyz`가 `ok`를 반환하지 않음 | `docker compose -f docker-compose.selfhost.yml logs backend postgres`를 실행합니다. |
 | 인증 코드를 받지 못함 | 인증 코드를 한 번 요청한 뒤 backend 로그에서 `Verification code`를 찾습니다. |
-| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. |
+| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. 404가 반환되면 `/health`를 backend로 전달해야 합니다([문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)). |
 | 데몬의 `Agents`가 비어 있음 | AI 코딩 도구가 `PATH`에 있고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다. |
 | 이슈가 계속 큐에서 기다림 | `multica daemon status`를 실행해 데몬이 실행 중이며 워크스페이스에 연결되었는지 확인합니다. |
 

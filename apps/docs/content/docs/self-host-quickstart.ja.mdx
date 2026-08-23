@@ -58,7 +58,7 @@ make selfhost
 <Callout type="info">
 `make selfhost` は公開済みのイメージを取得し、checkout 中のコードをビルドしません。ローカルのソースを試すには `make selfhost-build` を使ってください。
 
-公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合——CLI、または `make selfhost-build` によるイメージ——は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください:
+公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合（CLI、または `make selfhost-build` によるイメージ）は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください:
 
 ```bash
 git fetch --tags --depth 1
@@ -138,7 +138,7 @@ api.example.com {
 }
 ```
 
-すべてのトラフィックを**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポート——小規模サーバーで一般的）で扱いたい場合は、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます:
+すべてのトラフィックを**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポートで、小規模サーバーで一般的な構成）で扱いたい場合は、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます:
 
 ```text
 multica.example.com {
@@ -169,10 +169,10 @@ Caddy が TLS 証明書を取得し、WebSocket を転送します。`.env` を�
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
-curl -fsS https://app.example.com/api/config | jq .daemon_server_url
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最後のコマンドは公開用の HTTPS URL を出力するはずです。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: Docker Compose 2.24 未満では `FRONTEND_ORIGIN` と `MULTICA_APP_URL` は `FRONTEND_PORT` に自動追随せず（`.env.example` からコピーした `${FRONTEND_PORT}` 参照はリテラルのまま残る）、明示的な設定が必要です。
+最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します（`MULTICA_PUBLIC_URL` が設定されていればそれを、なければ `MULTICA_APP_URL` を使います。出力が空ならどちらも未設定です）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: Docker Compose 2.24 未満では `FRONTEND_ORIGIN` と `MULTICA_APP_URL` は `FRONTEND_PORT` に自動追随せず（`.env.example` からコピーした `${FRONTEND_PORT}` 参照はリテラルのまま残る）、明示的な設定が必要です。
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。
@@ -237,7 +237,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出るのは、ほぼ常にプロキシ経由の `/health` が 404 を返していることが原因です——[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
+このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出るのは、ほぼ常にプロキシ経由の `/health` が 404 を返していることが原因です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
 
 接続状態を確認します。
 
@@ -370,7 +370,7 @@ Helm には独自のアップグレード経路があります。values ファ�
 |---|---|
 | `/readyz` が `ok` を返さない | `docker compose -f docker-compose.selfhost.yml logs backend postgres` を実行する。 |
 | 認証コードが届かない | コードを一度リクエストし、backend のログで `Verification code` を探す。 |
-| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。 |
+| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合は `/health` を backend へ転送すること（[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)）。 |
 | デーモンが `Agents` を表示しない | AI コーディングツールが `PATH` にありログイン済みであることを確認し、`multica daemon restart` を実行する。 |
 | イシューがキューにとどまり続ける | `multica daemon status` を実行し、デーモンが起動していてワークスペースに接続していることを確認する。 |
 

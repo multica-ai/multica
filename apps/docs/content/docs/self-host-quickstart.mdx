@@ -169,10 +169,10 @@ Caddy obtains TLS certificates and forwards WebSockets. After editing `.env`, re
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
-curl -fsS https://app.example.com/api/config | jq .daemon_server_url
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-The last command should print your public HTTPS URL. If it prints a `localhost` address, `.env` still carries local defaults: `FRONTEND_ORIGIN` and `MULTICA_APP_URL` do not follow `FRONTEND_PORT` automatically on Docker Compose releases older than 2.24 (the `${FRONTEND_PORT}` references copied from `.env.example` stay literal there), so set them explicitly.
+The last command prints `daemon_server_url`, the URL daemons use to reach the API (`MULTICA_PUBLIC_URL` when set, otherwise `MULTICA_APP_URL`; empty output means neither is set). If it prints a `localhost` address, `.env` still carries local defaults: `FRONTEND_ORIGIN` and `MULTICA_APP_URL` do not follow `FRONTEND_PORT` automatically on Docker Compose releases older than 2.24 (the `${FRONTEND_PORT}` references copied from `.env.example` stay literal there), so set them explicitly.
 
 <Callout type="warning">
 `docker compose restart` only restarts existing containers and does not re-read `.env`. After changing configuration, run `docker compose -f docker-compose.selfhost.yml up -d` to re-read `.env`.
@@ -370,7 +370,7 @@ Helm has its own upgrade path: set `images.backend.tag` / `images.frontend.tag` 
 |---|---|
 | `/readyz` does not return `ok` | Run `docker compose -f docker-compose.selfhost.yml logs backend postgres`. |
 | No verification code arrives | Request a code, then search the backend logs for `Verification code`. |
-| `setup self-host` reports the server is unreachable | From the computer, request `https://api.example.com/health` to confirm DNS, TLS, and the reverse proxy are all reachable. |
+| `setup self-host` reports the server is unreachable | From the computer, request `https://api.example.com/health` to confirm DNS, TLS, and the reverse proxy are all reachable. A 404 means the proxy sends `/health` to the frontend — route it to the backend ([Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable)). |
 | The daemon lists no `Agents` | Confirm the AI coding tools are on `PATH` and logged in, then run `multica daemon restart`. |
 | Issues stay queued | Run `multica daemon status` to confirm the daemon is running and connected to the workspace. |
 

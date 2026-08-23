@@ -108,7 +108,15 @@ Check the `/ws` connection under **Network → WS** in the browser's developer t
 - Whether the reverse proxy forwards the WebSocket Upgrade request.
 - Whether the browser sign-in has expired.
 
-A plain `curl` against `/ws` returning HTTP 400 is expected: the endpoint requires an authenticated daemon token and rejects the handshake without one. A 400/401 recorded in the backend logs proves the request traversed the whole proxy chain — the link itself works.
+A plain `curl` against `/ws` returning HTTP 400 is expected: the endpoint requires workspace-scoped query parameters and rejects a bare handshake. A 400/401 recorded in the backend logs proves the request traversed the whole proxy chain — the link itself works.
+
+Containers read `.env` only at creation time; recreate them after changes:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+For a complete reverse-proxy example, see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access).
 
 ## `multica setup` reports the server is not reachable
 
@@ -119,14 +127,6 @@ Route `/health` to the backend (port 8080) in your proxy — both Caddy examples
 ```bash
 curl -fsS <server-url>/health
 ```
-
-Containers read `.env` only at creation time; recreate them after changes:
-
-```bash
-docker compose -f docker-compose.selfhost.yml up -d
-```
-
-For a complete reverse-proxy example, see the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access).
 
 ## Verification code and invitation emails not delivered
 
