@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -952,7 +953,14 @@ var skillBundleResolveRetrySchedule = []time.Duration{
 // retrySleep is the sleep used between retry attempts. Pulled into a package
 // variable so tests can swap in an instant sleep without rewriting the
 // caller's schedule.
+//
+// The ±20% jitter matters fleet-wide: without it, tasks watchdog-killed at
+// outage start re-fire in lockstep and re-cluster onto the provider exactly
+// as it recovers (thundering herd).
 var retrySleep = func(ctx context.Context, d time.Duration) error {
+	if jitterSpan := d / 5; jitterSpan > 0 {
+		d += time.Duration(rand.Int63n(int64(2*jitterSpan))) - jitterSpan // [-20%, +20%)
+	}
 	timer := time.NewTimer(d)
 	defer timer.Stop()
 	select {
