@@ -473,6 +473,15 @@
   "reply": {
     "placeholder": "返信を残す..."
   },
+  "status_duration": {
+    "title": "ステータス別の経過時間",
+    "unavailable": "ステータスの変更履歴がありません",
+    "partial_note": "変更履歴がないため、作成からの経過時間を表示しています。",
+    "seconds": "{{count}} 秒",
+    "minutes": "{{count}} 分",
+    "hours": "{{count}} 時間",
+    "days": "{{count}} 日"
+  },
   "agent_activity": {
     "hover_header_other": "作業中のエージェント {{count}} 件",
     "hover_header_tasks_other": "実行中の作業 {{count}} 件",

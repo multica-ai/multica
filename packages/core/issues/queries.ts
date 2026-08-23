@@ -165,6 +165,10 @@ export const issueKeys = {
     [...issueKeys.subscribersAll(), issueId] as const,
   usageAll: () => ["issues", "usage"] as const,
   usage: (issueId: string) => [...issueKeys.usageAll(), issueId] as const,
+  statusDurationsAll: () => ["issues", "status-durations"] as const,
+  /** "Time in status" aggregate — hover-only, fetched lazily. */
+  statusDurations: (issueId: string) =>
+    [...issueKeys.statusDurationsAll(), issueId] as const,
   attachmentsAll: () => ["issues", "attachments"] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
@@ -598,6 +602,30 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+/**
+ * "Time in status" aggregate for the issue-detail status hover.
+ *
+ * Laziness comes from WHERE this is consumed, not from an `enabled` flag: the
+ * hover card's body only mounts while the card is open, so no request happens
+ * until a user actually points at the status row (same pattern as
+ * IssueHoverCard).
+ *
+ * The finite `staleTime` overrides the app-wide `staleTime: Infinity` default
+ * on purpose. Every other per-issue cache here is invalidated by a WS event
+ * when its data changes, but this one also goes stale *with no event at all* —
+ * the current status's duration grows on wall-clock time. Without this, a card
+ * re-opened an hour later would render a number frozen at whenever the issue
+ * was first opened. The open segment is ticked client-side while a card is
+ * up; this is what re-anchors it to the server between hovers.
+ */
+export function issueStatusDurationsOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.statusDurations(issueId),
+    queryFn: () => api.getIssueStatusDurations(issueId),
+    staleTime: 60_000,
   });
 }
 

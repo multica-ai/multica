@@ -488,6 +488,15 @@
   "reply": {
     "placeholder": "Leave a reply..."
   },
+  "status_duration": {
+    "title": "Time in status",
+    "unavailable": "No status history yet",
+    "partial_note": "No transitions recorded — showing time since the issue was created.",
+    "seconds": "{{count}}s",
+    "minutes": "{{count}}min",
+    "hours": "{{count}}h",
+    "days": "{{count}}d"
+  },
   "agent_activity": {
     "hover_header_one": "{{count}} agent working",
     "hover_header_other": "{{count}} agents working",

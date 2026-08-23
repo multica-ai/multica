@@ -79,6 +79,7 @@ import type {
   ShareLinkInfo,
   Skill,
   Squad,
+  StatusDurations,
   TimelineEntry,
   User,
   WebhookDelivery,
@@ -909,6 +910,38 @@ const TimelineEntrySchema = z.object({
 export const TimelineEntriesSchema = z.array(TimelineEntrySchema);
 
 export const EMPTY_TIMELINE_ENTRIES: TimelineEntry[] = [];
+
+// /status-durations returns the "time in status" aggregate for one issue:
+// total residency per status, summed over repeat visits, ordered by first
+// entry so the list reads as the issue's history top-to-bottom.
+//
+// `status` is a bare status key, not a validated enum: the workspace status
+// catalog is user-extensible and keys survive archival, so the aggregate can
+// legitimately name a status this client's catalog no longer offers. The
+// renderer falls back to the raw key rather than dropping the row.
+export const StatusDurationEntrySchema = z.object({
+  status: z.string(),
+  seconds: z.number(),
+  current: z.boolean().default(false),
+}).loose();
+
+export const StatusDurationsSchema = z.object({
+  entries: z.array(StatusDurationEntrySchema).default([]),
+  // Server clock at the moment the open segment was closed off. The live
+  // ticker adds its own elapsed time to this rather than to the client clock,
+  // so a skewed client cannot make the current status count backwards.
+  computed_at: z.string().default(""),
+  // True when nothing was ever logged for this issue, so the whole lifetime
+  // sits in one synthetic bucket. Surfaced so the UI can hedge its wording
+  // instead of presenting a reconstruction as measured history.
+  partial: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_STATUS_DURATIONS: StatusDurations = {
+  entries: [],
+  computed_at: "",
+  partial: false,
+};
 
 const OptionalStringSchema = z.preprocess(
   (value) => (typeof value === "string" ? value : undefined),
