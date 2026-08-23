@@ -41,6 +41,9 @@ const (
 	// true rollback requires migrating those issues back to built-in statuses
 	// first (migration 337's down direction refuses precisely because of this).
 	CustomIssueStatuses = "custom_issue_statuses"
+	// CerebraRouting gates the Cerebra intelligent model router. When disabled,
+	// tasks use the agent runtime's default model directly.
+	CerebraRouting = "cerebra_routing"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -65,6 +68,7 @@ var frontendPublicFlags = []string{
 	// The settings UI needs this to decide whether to offer status creation at
 	// all. Without it the tab would show a "New status" button that 403s.
 	CustomIssueStatuses,
+	CerebraRouting,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -84,6 +88,14 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 // value its older pods cannot interpret.
 func CustomIssueStatusesEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, CustomIssueStatuses, false)
+}
+
+// CerebraRoutingEnabled reports whether Cerebra model routing is enabled.
+func CerebraRoutingEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	if flags == nil {
+		return false
+	}
+	return flags.IsEnabled(ctx, CerebraRouting, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
