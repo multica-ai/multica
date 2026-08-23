@@ -2,10 +2,12 @@ package execenv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -62,12 +64,12 @@ func waitForFile(t *testing.T, path string, within time.Duration) {
 	}
 }
 
-// The lock must exclude ANOTHER PROCESS, not just another goroutine. Against
-// the in-process mutex this test fails immediately: lockGitRoot returned while
-// the child still held the repository, which is the state that let two
-// prepares run `git stash create` on one index.
-func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
-	repo := newTestRepo(t)
+// startLockHolder runs another PROCESS that takes repo's lock and holds it
+// until the returned release func is called. Another process is the only scope
+// that tests what broke here: the previous lock was an in-process mutex, and
+// production never has two contenders inside one process.
+func startLockHolder(t *testing.T, repo string) (release func()) {
+	t.Helper()
 	signals := t.TempDir()
 	readyPath := filepath.Join(signals, "ready")
 	releasePath := filepath.Join(signals, "release")
@@ -81,11 +83,25 @@ func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
 	if err := child.Start(); err != nil {
 		t.Fatalf("start lock holder: %v", err)
 	}
-	defer func() {
-		_ = os.WriteFile(releasePath, []byte("go"), 0o644)
-		_ = child.Wait()
-	}()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			_ = os.WriteFile(releasePath, []byte("go"), 0o644)
+			_ = child.Wait()
+		})
+	}
+	t.Cleanup(stop)
 	waitForFile(t, readyPath, 30*time.Second)
+	return stop
+}
+
+// The lock must exclude ANOTHER PROCESS, not just another goroutine. Against
+// the in-process mutex this test fails immediately: lockGitRoot returned while
+// the child still held the repository, which is the state that let two
+// prepares run `git stash create` on one index.
+func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
+	repo := newTestRepo(t)
+	release := startLockHolder(t, repo)
 
 	acquired := make(chan error, 1)
 	go func() {
@@ -103,9 +119,7 @@ func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	if err := os.WriteFile(releasePath, []byte("go"), 0o644); err != nil {
-		t.Fatalf("signal release: %v", err)
-	}
+	release()
 	select {
 	case err := <-acquired:
 		if err != nil {
@@ -116,10 +130,13 @@ func TestLockGitRootExcludesOtherProcesses(t *testing.T) {
 	}
 }
 
-// The lock file belongs next to the index it protects. filepath.Join(root,
-// ".git") would be wrong in a linked worktree, where .git is a file and the
-// index lives under .git/worktrees/<name>/.
-func TestGitRootLockPathIsInsideTheGitDir(t *testing.T) {
+// One repository, one lock — including across its linked worktrees.
+//
+// The section under this lock writes refs and worktrees/ in the COMMON git
+// dir, which every working tree of a repo shares. Keying on the per-worktree
+// git dir gives two resources bound to two linked worktrees two different
+// locks while they still race on that shared state.
+func TestGitRootLockPathIsRepoWide(t *testing.T) {
 	repo := newTestRepo(t)
 	path, err := gitRootLockPath(repo)
 	if err != nil {
@@ -132,12 +149,60 @@ func TestGitRootLockPathIsInsideTheGitDir(t *testing.T) {
 
 	linked := filepath.Join(t.TempDir(), "linked")
 	gitRun(t, repo, "worktree", "add", "-b", "linked-branch", linked)
+	if resolved, evalErr := filepath.EvalSymlinks(linked); evalErr == nil {
+		linked = resolved
+	}
 	linkedPath, err := gitRootLockPath(linked)
 	if err != nil {
 		t.Fatalf("gitRootLockPath(linked): %v", err)
 	}
-	if !strings.Contains(filepath.ToSlash(linkedPath), "/worktrees/") {
-		t.Fatalf("linked worktree lock = %q, want it inside the worktree's own git dir", linkedPath)
+	if linkedPath != path {
+		t.Fatalf("linked worktree locks %q, want the repository's single lock %q", linkedPath, path)
+	}
+	// The per-worktree git dir is still what the index.lock hint must read:
+	// that is where a linked worktree's own index lives.
+	linkedGitDir, err := gitDirFor(linked)
+	if err != nil {
+		t.Fatalf("gitDirFor(linked): %v", err)
+	}
+	if !strings.Contains(filepath.ToSlash(linkedGitDir), "/worktrees/") {
+		t.Fatalf("linked worktree git dir = %q, want it under worktrees/", linkedGitDir)
+	}
+}
+
+// A held lock file is never stale: the kernel drops the lock when the holder
+// exits, and the leftover file means nothing on its own. Telling the user to
+// delete it would undo this whole change — the lock binds to an open file
+// description, not to the path, so unlinking it lets the next task create and
+// lock a NEW file while the holder still owns the old inode, and both then
+// believe they are alone in the section.
+func TestGitRootLockTimeoutDoesNotAdviseDeletingTheLock(t *testing.T) {
+	repo := newTestRepo(t)
+	original := gitRootLockWait
+	gitRootLockWait = 200 * time.Millisecond
+	t.Cleanup(func() { gitRootLockWait = original })
+
+	startLockHolder(t, repo)
+
+	unlock, err := lockGitRoot(repo, worktreeTestLogger())
+	if unlock != nil {
+		unlock()
+	}
+	if err == nil {
+		t.Fatal("lockGitRoot succeeded while another process held the lock")
+	}
+	if !errors.Is(err, errGitRootLockBusy) {
+		t.Fatalf("error is not errGitRootLockBusy: %v", err)
+	}
+
+	msg := err.Error()
+	for _, banned := range []string{"can be deleted", "stale lock", "delete the lock"} {
+		if strings.Contains(msg, banned) {
+			t.Errorf("timeout message advises %q, which breaks the exclusion: %v", banned, err)
+		}
+	}
+	if !strings.Contains(msg, "wait for that task to finish or stop it") {
+		t.Errorf("timeout message does not say what to actually do: %v", err)
 	}
 }
 

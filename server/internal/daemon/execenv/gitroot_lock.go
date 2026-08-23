@@ -26,23 +26,26 @@ import (
 // failed with nothing to diagnose it by.
 //
 // The mutex is kept for the in-process callers — Finalize and Discard run in
-// the daemon parent — and an advisory file lock extends the same exclusion
-// across every process that touches the repo.
+// the daemon parent — and an advisory file lock in the repository's common git
+// dir extends the same exclusion across every process that touches the repo,
+// including two resources bound to two linked worktrees of it.
 
 const (
-	// gitRootLockFileName lives in the repository's git dir: the same
-	// directory that holds the index.lock these operations contend for, so
-	// the lock's scope and the contention's scope are the same object. Git
-	// ignores files it does not know about in $GIT_DIR, and nothing here is
-	// visible from the user's working tree — `git status` never sees it.
+	// gitRootLockFileName lives in the repository's COMMON git dir, which is
+	// what makes one lock cover one repository.
+	//
+	// The section it guards spans both scopes a repo has: `git stash create`
+	// contends for the per-working-tree index.lock, while `worktree add` /
+	// `prune` / `remove` and `branch -D` write refs and worktrees/ in the
+	// common dir, which every linked worktree shares. Keying on the
+	// per-worktree git dir would hand two resources pointing at two linked
+	// worktrees of one repo two different locks while they still raced on that
+	// shared state; the common dir is the coarser key that covers both.
+	//
+	// Git ignores files it does not know about under $GIT_DIR, and nothing
+	// here is visible from a working tree — `git status` never sees it, and
+	// `git ls-files --others` cannot list it.
 	gitRootLockFileName = "multica-worktree.lock"
-
-	// gitRootLockWait bounds the wait for a sibling's git section. That
-	// section is a handful of local git commands plus the bounded
-	// untracked-file replay, so a wait this long means the holder is wedged
-	// rather than busy. Failing with a message that names the lock file beats
-	// occupying a daemon slot forever.
-	gitRootLockWait = 3 * time.Minute
 
 	// gitRootLockPoll is the retry interval while waiting. flock has no
 	// portable timed variant, so the wait is a poll over the non-blocking
@@ -56,6 +59,14 @@ const (
 // exclusion worked and we chose not to wait any longer, so the caller must
 // fail rather than proceed unprotected.
 var errGitRootLockBusy = errors.New("execenv: git repository lock is held by another task")
+
+// gitRootLockWait bounds the wait for a sibling's git section. That section is
+// a handful of local git commands plus the bounded untracked-file replay, so a
+// wait this long means the holder is wedged rather than busy: failing with a
+// message that says who to wait for beats occupying a daemon slot forever.
+//
+// A var only so tests can shrink it; nothing at runtime writes it.
+var gitRootLockWait = 3 * time.Minute
 
 // gitRootLocks serialises git admin operations per repository within one
 // process. Concurrent `git worktree add` / `remove` / `prune` on one repo race
@@ -94,13 +105,45 @@ func gitDirFor(gitRoot string) (string, error) {
 	return dir, nil
 }
 
-// gitRootLockPath is where the advisory lock for gitRoot lives.
+// gitCommonDirCache memoises the common git dir per repo root, for the same
+// reason gitDirCache does: one git invocation, an answer that cannot change.
+var gitCommonDirCache sync.Map // gitRoot -> string
+
+// gitCommonDirFor returns the git dir shared by every working tree of the
+// repository behind gitRoot. For a main worktree that is its own git dir; for
+// a linked one it is the main repo's, where the refs and worktrees/ admin
+// state they both write actually live.
+func gitCommonDirFor(gitRoot string) (string, error) {
+	if v, ok := gitCommonDirCache.Load(gitRoot); ok {
+		return v.(string), nil
+	}
+	dir, err := runGitTrimmed(gitRoot, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", fmt.Errorf("execenv: resolve common git dir for %q: %w", gitRoot, err)
+	}
+	if dir == "" {
+		return "", fmt.Errorf("execenv: resolve common git dir for %q: empty result", gitRoot)
+	}
+	dir = filepath.FromSlash(dir)
+	// git answers this one relative to the cwd it ran in when the working tree
+	// IS the main one (plain ".git"), and absolute from a linked worktree.
+	// --path-format=absolute would settle it but only exists since git 2.31,
+	// and resolving it here costs nothing.
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(gitRoot, dir)
+	}
+	dir = filepath.Clean(dir)
+	gitCommonDirCache.Store(gitRoot, dir)
+	return dir, nil
+}
+
+// gitRootLockPath is where the advisory lock for gitRoot's repository lives.
 func gitRootLockPath(gitRoot string) (string, error) {
-	gitDir, err := gitDirFor(gitRoot)
+	commonDir, err := gitCommonDirFor(gitRoot)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(gitDir, gitRootLockFileName), nil
+	return filepath.Join(commonDir, gitRootLockFileName), nil
 }
 
 // acquireGitRootFileLock takes the cross-process lock for gitRoot, waiting up
@@ -135,8 +178,17 @@ func acquireGitRootFileLock(gitRoot string, logger *slog.Logger) (*os.File, erro
 		}
 		if time.Now().After(deadline) {
 			f.Close()
-			return nil, fmt.Errorf("%w: %q has been locked for over %s by another Multica task (%s) — "+
-				"if no task is running against that repository, the lock file is stale and can be deleted",
+			// Deliberately NOT "delete the lock file if nothing is running".
+			// The lock binds to an open file description, not to a path:
+			// unlinking it leaves the holder locking the old inode while the
+			// next task creates and locks a NEW file at the same name, and
+			// both then believe they hold it — the exact overlap this lock
+			// exists to prevent. The kernel already releases it when the
+			// holding process exits, so an idle lock file is never stale.
+			return nil, fmt.Errorf("%w: %q was still locked after %s by another Multica task (%s) — "+
+				"wait for that task to finish or stop it, then retry; the lock is released "+
+				"automatically when the holding process exits, so the file itself is never stale "+
+				"and deleting it would let two tasks into this section at once",
 				errGitRootLockBusy, gitRoot, gitRootLockWait, path)
 		}
 		time.Sleep(gitRootLockPoll)
