@@ -148,8 +148,16 @@ multica.example.com {
         reverse_proxy 127.0.0.1:8080
     }
 
-    # 브라우저와 데몬의 WebSocket은 backend로 직접
+    # 브라우저 realtime WebSocket — web 이미지는 WS 업그레이드를 proxy할 수 없어 backend로 직접
     handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 데몬 긴 연결: {server-url}/api/daemon/ws로 다이얼합니다(/ws가 아님).
+    # 이 라우트가 없으면 핸드셰이크가 실패하고 데몬은 조용히 폴링으로 폴백합니다
+    handle /api/daemon/ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
         }

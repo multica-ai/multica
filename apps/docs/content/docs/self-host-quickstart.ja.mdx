@@ -148,8 +148,16 @@ multica.example.com {
         reverse_proxy 127.0.0.1:8080
     }
 
-    # ブラウザとデーモンの WebSocket は backend へ直接
+    # ブラウザの realtime WebSocket——web イメージは WS アップグレードを proxy できないため backend へ直接
     handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # デーモンの長時間接続: {server-url}/api/daemon/ws にダイヤルします（/ws ではない）。
+    # このルートがないとハンドシェイクが失敗し、デーモンは通知なくポーリングへフォールバックします
+    handle /api/daemon/ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
         }

@@ -148,8 +148,17 @@ multica.example.com {
         reverse_proxy 127.0.0.1:8080
     }
 
-    # Browser and daemon WebSockets — straight to the backend
+    # Browser realtime WebSocket — the web image cannot proxy WS upgrades
     handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Daemon long-connection WebSocket: daemons dial {server-url}/api/daemon/ws
+    # (not /ws). Without this route the handshake fails and the daemon silently
+    # falls back to polling
+    handle /api/daemon/ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
         }

@@ -110,6 +110,8 @@ Check the `/ws` connection under **Network → WS** in the browser's developer t
 
 A plain `curl` against `/ws` returning HTTP 400 is expected: the endpoint requires workspace-scoped query parameters and rejects a bare handshake. A 400/401 recorded in the backend logs proves the request traversed the whole proxy chain — the link itself works.
 
+Self-host note: daemons dial `/api/daemon/ws` for their long connection (not `/ws`) — route it to the backend the same way. If the WebSocket handshake fails there, the daemon silently falls back to polling; repeated `status=400` lines on that path in the backend log are the symptom.
+
 Containers read `.env` only at creation time; recreate them after changes:
 
 ```bash

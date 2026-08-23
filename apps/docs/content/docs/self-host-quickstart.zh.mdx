@@ -148,8 +148,16 @@ multica.example.com {
         reverse_proxy 127.0.0.1:8080
     }
 
-    # 浏览器和守护进程的 WebSocket 直接交给 backend
+    # 网页端 realtime WebSocket——前端镜像代理不了 WS 升级，直通 backend
     handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # daemon 长连接：拨的是 {server-url}/api/daemon/ws（不是 /ws）。
+    # 缺了这条，握手失败后 daemon 会静默回退到轮询
+    handle /api/daemon/ws {
         reverse_proxy 127.0.0.1:8080 {
             flush_interval -1
         }

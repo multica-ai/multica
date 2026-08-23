@@ -110,6 +110,8 @@ multica issue runs <issue-id>
 
 直接用 `curl` 访问 `/ws` 返回 HTTP 400 是正常现象：该端点要求带 workspace 相关的查询参数，裸握手本来就会被拒。backend 日志里出现 400/401 记录，说明请求已经穿透整条代理链——链路本身是通的。
 
+自部署注意：daemon 的长连接拨的是 `/api/daemon/ws`（不是 `/ws`），同样要直通后端；握手失败时 daemon 会静默回退到轮询，backend 日志里该路径反复出现 `status=400` 即中招。
+
 容器只在创建时读取 `.env`，修改后需要重新创建：
 
 ```bash
