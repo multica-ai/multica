@@ -7,6 +7,7 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
+  CardFooter,
 } from "@multica/ui/components/ui/card";
 import {
   InputOTP,
@@ -14,38 +15,61 @@ import {
   InputOTPSeparator,
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
+import { useAuthStore } from "@multica/core/auth";
 import { useT } from "../i18n";
 
 // Device authorization approval (`multica login --device`): the CLI on a
 // remote machine shows an 8-character code; the signed-in user types it here
 // to hand that CLI a login token. Mirrors the login page's OTP input.
-const DEVICE_CODE_ALPHANUMERIC = /^[a-zA-Z0-9]+$/;
+// input-otp's pattern prop is a string (matched with RegExp constructor).
+const DEVICE_CODE_ALPHANUMERIC = "^[a-zA-Z0-9]+$";
+
+// The CLI displays the code as "XXXX-XXXX"; pasting it with the dash must
+// still fill all 8 slots (input-otp would otherwise count the dash toward
+// maxLength and fail the pattern). The server normalizes the same way.
+const stripDeviceCodeSeparators = (pasted: string) =>
+  pasted.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 
 export function ActivatePage() {
   const { t } = useT("auth");
+  const user = useAuthStore((s) => s.user);
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
 
-  const handleApprove = useCallback(async (value: string) => {
-    if (value.length !== 8) return;
-    setLoading(true);
-    setError("");
-    try {
-      await api.approveDeviceAuthorization(value);
-      setDone(true);
-    } catch (err) {
-      setError(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.activate.errors.approve_failed),
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const handleApprove = useCallback(
+    async (value: string) => {
+      if (value.length !== 8) return;
+      setLoading(true);
+      setError("");
+      try {
+        await api.approveDeviceAuthorization(value);
+        setDone(true);
+      } catch (err) {
+        // The server reports a stable code for the expected failure; only
+        // unexpected errors fall through to their raw message.
+        if (err instanceof ApiError) {
+          const body = err.body as { code?: string } | undefined;
+          if (body?.code === "invalid_device_code") {
+            setError(t(($) => $.activate.errors.invalid_code));
+            // Same-length re-entry won't re-fire onChange: clear the input.
+            setCode("");
+            return;
+          }
+        }
+        setError(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.activate.errors.approve_failed),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [t],
+  );
 
   if (done) {
     return (
@@ -75,6 +99,7 @@ export function ActivatePage() {
           autoFocus
           maxLength={8}
           pattern={DEVICE_CODE_ALPHANUMERIC}
+          pasteTransformer={stripDeviceCodeSeparators}
           inputMode="text"
           autoCapitalize="characters"
           value={code}
@@ -107,6 +132,13 @@ export function ActivatePage() {
         )}
         {error && <p className="text-body text-destructive">{error}</p>}
       </CardContent>
+      <CardFooter className="justify-center">
+        {user?.email && (
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.activate.approving_as, { email: user.email })}
+          </p>
+        )}
+      </CardFooter>
     </Card>
   );
 }

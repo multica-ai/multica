@@ -8,10 +8,10 @@ import (
 	"log/slog"
 	"math/big"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/auth"
@@ -52,11 +52,11 @@ type StartDeviceAuthRequest struct {
 }
 
 type StartDeviceAuthResponse struct {
-	DeviceCode       string `json:"device_code"`
-	UserCode         string `json:"user_code"`
-	VerificationURL  string `json:"verification_url"`
-	ExpiresIn        int    `json:"expires_in"`
-	Interval         int    `json:"interval"`
+	DeviceCode      string `json:"device_code"`
+	UserCode        string `json:"user_code"`
+	VerificationURL string `json:"verification_url"`
+	ExpiresIn       int    `json:"expires_in"`
+	Interval        int    `json:"interval"`
 }
 
 type DeviceTokenRequest struct {
@@ -112,11 +112,12 @@ func formatDeviceUserCode(code string) string {
 	return code[:4] + "-" + code[4:]
 }
 
-// deviceVerificationURL points the user at the approval page. MULTICA_APP_URL
-// is the deployed app origin; when it is unset (bare local dev) the CLI falls
-// back to composing {app_url}/activate itself.
+// deviceVerificationURL points the user at the approval page. Resolves the
+// deployed app origin the same way /api/config does (MULTICA_APP_URL with a
+// FRONTEND_ORIGIN fallback); when neither is set (bare local dev) the CLI
+// composes {app_url}/activate itself.
 func deviceVerificationURL() string {
-	base := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_APP_URL")), "/")
+	base := resolveFrontendAppURL()
 	if base == "" {
 		return ""
 	}
@@ -138,6 +139,15 @@ func (h *Handler) StartDeviceAuthorization(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to generate user code")
 		return
+	}
+
+	// Opportunistic janitor, same shape as SendCode's expired-code sweep:
+	// rows whose window closed over an hour ago go away, which also drops
+	// any approved-but-never-collected JWTs still sitting in `token`.
+	if deleted, err := h.Queries.DeleteExpiredDeviceAuthorizations(r.Context()); err != nil {
+		slog.Warn("device-auth: expired sweep failed", append(logger.RequestAttrs(r), "error", err)...)
+	} else if deleted > 0 {
+		slog.Info("device-auth: expired sweep", append(logger.RequestAttrs(r), "rows", deleted)...)
 	}
 
 	created, err := h.Queries.CreateDeviceAuthorization(r.Context(), db.CreateDeviceAuthorizationParams{
@@ -178,10 +188,15 @@ func (h *Handler) ApproveDeviceAuthorization(w http.ResponseWriter, r *http.Requ
 
 	pending, err := h.Queries.GetPendingDeviceAuthorizationByUserCode(r.Context(), auth.HashToken(normalizeDeviceUserCode(req.UserCode)))
 	if err != nil {
-		// Unknown, already-approved, or expired — one message for all three
-		// so the endpoint cannot be used to probe live codes beyond the
-		// rate limiter.
-		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		if !errors.Is(err, pgx.ErrNoRows) {
+			// Unknown, already-approved, or expired — one message for all
+			// three so the endpoint cannot be used to probe live codes
+			// beyond the rate limiter.
+			slog.Error("device-auth: pending lookup failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_device_code", "invalid or expired code")
 		return
 	}
 
@@ -209,7 +224,12 @@ func (h *Handler) ApproveDeviceAuthorization(w http.ResponseWriter, r *http.Requ
 		UserID: user.ID,
 		Token:  pgtype.Text{String: tokenString, Valid: true},
 	}); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid or expired code")
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("device-auth: approve failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		writeErrorCode(w, http.StatusBadRequest, "invalid_device_code", "invalid or expired code")
 		return
 	}
 
@@ -227,6 +247,11 @@ func (h *Handler) DeviceToken(w http.ResponseWriter, r *http.Request) {
 
 	da, err := h.Queries.GetDeviceAuthorizationByDeviceCode(r.Context(), strings.TrimSpace(req.DeviceCode))
 	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Error("device-auth: lookup failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeJSON(w, http.StatusInternalServerError, DeviceTokenResponse{Error: "server_error"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, DeviceTokenResponse{Error: deviceErrInvalid})
 		return
 	}

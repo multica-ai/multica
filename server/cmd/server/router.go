@@ -1448,7 +1448,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me", h.UpdateMe)
 		// Device authorization approval: the /activate page calls this from
 		// an authenticated browser session to bind the typed user code.
-		r.Post("/api/device/approve", h.ApproveDeviceAuthorization)
+		// Auth already gates it; the limiter just caps unauthenticated-DB-
+		// load-style hammering by any signed-in client (codes are 31^8, so
+		// brute force is not the concern — volume is).
+		r.With(authVerifyRL).Post("/api/device/approve", h.ApproveDeviceAuthorization)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)

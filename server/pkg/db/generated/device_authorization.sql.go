@@ -103,6 +103,19 @@ func (q *Queries) CreateDeviceAuthorization(ctx context.Context, arg CreateDevic
 	return i, err
 }
 
+const deleteExpiredDeviceAuthorizations = `-- name: DeleteExpiredDeviceAuthorizations :execrows
+DELETE FROM device_authorization
+WHERE expires_at < now() - interval '1 hour'
+`
+
+func (q *Queries) DeleteExpiredDeviceAuthorizations(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredDeviceAuthorizations)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDeviceAuthorizationByDeviceCode = `-- name: GetDeviceAuthorizationByDeviceCode :one
 SELECT id, device_code, user_code_hash, user_id, status, token, expires_at, interval_seconds, last_polled_at, approved_at, consumed_at, created_at FROM device_authorization
 WHERE device_code = $1

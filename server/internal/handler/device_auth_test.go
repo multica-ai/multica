@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,13 +42,13 @@ func TestGenerateDeviceUserCode(t *testing.T) {
 
 func TestNormalizeDeviceUserCode(t *testing.T) {
 	cases := map[string]string{
-		"ABCD1234":   "ABCD1234",
-		"abcd1234":   "ABCD1234",
-		"abcd-1234":  "ABCD1234",
-		" abcd 1234": "ABCD1234",
+		"ABCD1234":     "ABCD1234",
+		"abcd1234":     "ABCD1234",
+		"abcd-1234":    "ABCD1234",
+		" abcd 1234":   "ABCD1234",
 		"AbCd-1-2-3-4": "ABCD1234",
-		"":           "",
-		"----":       "",
+		"":             "",
+		"----":         "",
 	}
 	for in, want := range cases {
 		if got := normalizeDeviceUserCode(in); got != want {
@@ -244,4 +246,101 @@ func TestApproveDeviceAuthorizationRequiresAuth(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
 	}
+}
+
+// TestDeviceAuthorizationRoundTrip exercises the whole flow against the real
+// test database: start -> pending poll -> approve -> token redeem -> single-use
+// rejection. It catches wiring mistakes (SQL guards, param binding) that the
+// mock-based state-machine test above cannot.
+func TestDeviceAuthorizationRoundTrip(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database not reachable")
+	}
+	t.Setenv("JWT_SECRET", "device-roundtrip-test-secret")
+
+	email := fmt.Sprintf("device-rt-%d@test.local", time.Now().UnixNano())
+	user, err := testHandler.Queries.CreateUser(context.Background(), db.CreateUserParams{
+		Name:  "Device RT",
+		Email: email,
+	})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	userID := uuidToString(user.ID)
+
+	// start
+	w := httptest.NewRecorder()
+	testHandler.StartDeviceAuthorization(w, httptest.NewRequest(http.MethodPost, "/auth/device/start", strings.NewReader(`{}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: status %d body %s", w.Code, w.Body.String())
+	}
+	var start StartDeviceAuthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &start); err != nil {
+		t.Fatalf("start decode: %v", err)
+	}
+	if len(start.UserCode) != 9 || start.UserCode[4] != '-' {
+		t.Fatalf("user code not formatted XXXX-XXXX: %q", start.UserCode)
+	}
+
+	poll := func() DeviceTokenResponse {
+		w := httptest.NewRecorder()
+		testHandler.DeviceToken(w, httptest.NewRequest(http.MethodPost, "/auth/device/token",
+			strings.NewReader(fmt.Sprintf(`{"device_code":%q}`, start.DeviceCode))))
+		var resp DeviceTokenResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("poll decode: %v (body %s)", err, w.Body.String())
+		}
+		return resp
+	}
+
+	// poll -> pending
+	if resp := poll(); resp.Error != deviceErrPending {
+		t.Fatalf("first poll: %+v", resp)
+	}
+
+	// approve as the created user (X-User-ID is set by middleware.Auth in prod;
+	// the handler reads it directly, so no router needed here)
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/device/approve",
+		strings.NewReader(fmt.Sprintf(`{"user_code":%q}`, strings.ToLower(start.UserCode))))
+	approveReq.Header.Set("X-User-ID", userID)
+	aw := httptest.NewRecorder()
+	testHandler.ApproveDeviceAuthorization(aw, approveReq)
+	if aw.Code != http.StatusOK {
+		t.Fatalf("approve: status %d body %s", aw.Code, aw.Body.String())
+	}
+
+	// poll -> token bound to the approving user
+	granted := poll()
+	if granted.Token == "" {
+		t.Fatalf("redeem returned no token: %+v", granted)
+	}
+	if sub := decodeJWTSub(t, granted.Token); sub != userID {
+		t.Fatalf("token sub = %q, want %q", sub, userID)
+	}
+
+	// poll again -> spent
+	if resp := poll(); resp.Error != deviceErrInvalid {
+		t.Fatalf("second redeem: %+v", resp)
+	}
+}
+
+// decodeJWTSub extracts the "sub" claim without verifying the signature —
+// signature validity is issueJWT's contract, not this test's.
+func decodeJWTSub(t *testing.T, token string) string {
+	t.Helper()
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("not a JWT: %d parts", len(parts))
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	var claims struct {
+		Sub string `json:"sub"`
+	}
+	if err := json.Unmarshal(raw, &claims); err != nil {
+		t.Fatalf("parse claims: %v", err)
+	}
+	return claims.Sub
 }

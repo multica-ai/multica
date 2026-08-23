@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -75,19 +76,33 @@ func runAuthLoginDevice(cmd *cobra.Command) error {
 
 	var jwtToken string
 	for {
+		// A fresh context per request: cli.APIContext carries a ~35s
+		// deadline (per-request HTTP timeout + slack), which a single
+		// shared context would impose on the whole wait loop — approval
+		// after ~35s would then always fail with "lost contact".
+		pollCtx, pollCancel := cli.APIContext(context.Background())
 		var poll deviceTokenResponse
-		err := client.PostJSON(ctx, "/auth/device/token", map[string]string{"device_code": start.DeviceCode}, &poll)
+		err := client.PostJSON(pollCtx, "/auth/device/token", map[string]string{"device_code": start.DeviceCode}, &poll)
+		pollCancel()
 		if err == nil {
 			jwtToken = poll.Token
 			break
 		}
 		var httpErr *cli.HTTPError
-		if !errors.As(err, &httpErr) || httpErr.StatusCode != 400 {
+		if !errors.As(err, &httpErr) {
 			return cli.WithUserMessage("Lost contact with the server while waiting for approval.", err)
 		}
-		var body deviceTokenResponse
-		_ = json.Unmarshal([]byte(httpErr.Body), &body)
-		switch body.Error {
+		// 429 from the rate limiter behaves like slow_down: back off and
+		// keep waiting (e.g. two device logins behind one NAT).
+		pollErr := ""
+		if httpErr.StatusCode == http.StatusTooManyRequests {
+			pollErr = deviceAuthErrSlowDown
+		} else if httpErr.StatusCode == 400 {
+			var body deviceTokenResponse
+			_ = json.Unmarshal([]byte(httpErr.Body), &body)
+			pollErr = body.Error
+		}
+		switch pollErr {
 		case deviceAuthErrPending:
 			fmt.Fprint(os.Stderr, ".")
 		case deviceAuthErrSlowDown:

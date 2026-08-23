@@ -38,3 +38,7 @@ WHERE id = $1
   AND status = 'approved'
   AND consumed_at IS NULL
 RETURNING token;
+
+-- name: DeleteExpiredDeviceAuthorizations :execrows
+DELETE FROM device_authorization
+WHERE expires_at < now() - interval '1 hour';

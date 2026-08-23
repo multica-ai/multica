@@ -3,7 +3,7 @@
   "groups": [
     {
       "label": "Auth flow",
-      "description": "`onboarding` is historical, kept reserved post-removal of the route.",
+      "description": "`onboarding` is historical, kept reserved post-removal of the route. `activate` is the device-authorization approval page (`multica login --device`).",
       "slugs": [
         "login",
         "logout",
@@ -18,7 +18,8 @@
         "verify",
         "reset",
         "password",
-        "onboarding"
+        "onboarding",
+        "activate"
       ]
     },
     {
