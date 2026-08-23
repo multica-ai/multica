@@ -361,6 +361,11 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	// outbox durably journals terminal reports whose send failed, replaying
+	// them on the next healthy heartbeat (GAP-14). Nil-safe: every use goes
+	// through methods that tolerate a disabled outbox.
+	outbox *reportOutbox
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -646,6 +651,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
+		outbox:                    newReportOutbox(cfg.Profile, logger),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
@@ -3888,6 +3894,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
+		d.maybeDrainOutbox()
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
@@ -3915,7 +3922,18 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
+	d.maybeDrainOutbox()
 	return false
+}
+
+// maybeDrainOutbox replays journaled terminal reports when a heartbeat proves
+// the server is reachable. Non-blocking: the actual drain runs single-flight
+// in its own goroutine and no-ops on an empty journal.
+func (d *Daemon) maybeDrainOutbox() {
+	if d.outbox == nil || !d.outbox.pending() {
+		return
+	}
+	go d.outbox.drain(d.sendTerminalReport)
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -5572,10 +5590,30 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // parent deadlines: daemon shutdown cancels the root context before pollLoop's
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
+//
+// On delivery failure the report is journaled in the outbox (GAP-14) and
+// replayed on the next healthy heartbeat — without it, exhausted retries
+// leave the task row `running` forever on a heartbeating runtime.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
 	defer cancel()
 
+	err := d.sendTerminalReport(ctx, report)
+	if err != nil {
+		if enqErr := d.outbox.enqueue(report.kind, report); enqErr != nil {
+			d.logger.Error("terminal report AND outbox journal write failed; result at risk",
+				"task_id", report.taskID, "report_error", err, "journal_error", enqErr)
+		} else {
+			d.logger.Warn("terminal report failed; queued in outbox for replay",
+				"task_id", report.taskID, "error", err)
+		}
+	}
+	return err
+}
+
+// sendTerminalReport performs one terminal callback against the server. Used
+// both by the live report path and by outbox replay.
+func (d *Daemon) sendTerminalReport(ctx context.Context, report terminalTaskReport) error {
 	switch report.kind {
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
