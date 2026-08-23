@@ -94,14 +94,6 @@ func TestEveryUndeliveredReplyNamesItself(t *testing.T) {
 		setup      func(t *testing.T, q *fakeOutboundQueries)
 	}{
 		{
-			name: "asked in the web UI", reason: "origin_not_channel", socket: true,
-			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() },
-		},
-		{
-			name: "installation revoked mid-flight", reason: "installation_inactive", socket: true,
-			setup: func(_ *testing.T, q *fakeOutboundQueries) { q.installation.Status = "revoked" },
-		},
-		{
 			name: "no socket in this process", reason: "no_live_connection", actionable: true, socket: false,
 			setup: func(*testing.T, *fakeOutboundQueries) {},
 		},
@@ -220,13 +212,12 @@ func TestNilMetricsSinkIsSafe(t *testing.T) {
 func TestReasonStringsArePinned(t *testing.T) {
 	t.Parallel()
 	for want, got := range map[string]dropReason{
-		"no_live_connection":    dropNoConnection,
-		"origin_not_channel":    dropOriginNotChannel,
-		"installation_inactive": dropInstallationInactive,
-		"task_missing":          dropTaskMissing,
-		"platform_refused":      dropPlatformRefused,
-		"ack_timeout":           dropAckTimeout,
-		"transport_error":       dropTransport,
+		"no_live_connection":      dropNoConnection,
+		"task_missing":            dropTaskMissing,
+		"platform_refused":        dropPlatformRefused,
+		"ack_timeout":             dropAckTimeout,
+		"transport_error":         dropTransport,
+		"attachment_not_admitted": dropAttachmentNotAdmitted,
 	} {
 		if string(got) != want {
 			t.Errorf("reason = %q, want %q", got, want)
@@ -234,19 +225,63 @@ func TestReasonStringsArePinned(t *testing.T) {
 	}
 }
 
-// TestActionableSplitIsPinned — which reasons reach an operator's log at WARN
-// is a judgement, and one a refactor should have to change on purpose. The two
-// quiet ones are quiet because they are ordinary in a healthy deployment, not
-// because they matter less.
+// TestSkipReasonStringsArePinned — the skipped set is a metric label too.
+func TestSkipReasonStringsArePinned(t *testing.T) {
+	t.Parallel()
+	for want, got := range map[string]skipReason{
+		"origin_not_channel":    skipOriginNotChannel,
+		"installation_inactive": skipInstallationInactive,
+		"nothing_to_say":        skipNothingToSay,
+	} {
+		if string(got) != want {
+			t.Errorf("skip reason = %q, want %q", got, want)
+		}
+	}
+}
+
+// TestNotOwedIsSkippedNotDropped — the review finding. A question typed in the
+// web UI on a WeCom-bound session was never owed to a WeCom user, so counting
+// it as a failed delivery makes ordinary web usage read as an outage.
+func TestNotOwedIsSkippedNotDropped(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, reason string
+		setup        func(q *fakeOutboundQueries)
+	}{
+		{"asked in the web UI", "origin_not_channel", func(q *fakeOutboundQueries) { q.channelIngested = askedInTheWebUI() }},
+		{"installation revoked", "installation_inactive", func(q *fakeOutboundQueries) { q.installation.Status = "revoked" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			q := deliverableTurn(t)
+			tc.setup(q)
+			r := newOutcomeRig(t, q, true)
+
+			r.o.handleEvent(outcomeEvent())
+
+			if got := r.mx.get("outbound_skipped:" + tc.reason); got != 1 {
+				t.Errorf("skipped:%s = %d, want 1", tc.reason, got)
+			}
+			if got := r.mx.get("outbound_dropped"); got != 0 {
+				t.Errorf("dropped = %d; this reply was never owed to WeCom", got)
+			}
+			if strings.Contains(r.logs.String(), "level=WARN") {
+				t.Errorf("logged a WARN for an ordinary outcome:\n%s", r.logs.String())
+			}
+		})
+	}
+}
+
+// TestActionableSplitIsPinned — every drop reaches an operator now that the
+// ordinary outcomes have their own counter.
 func TestActionableSplitIsPinned(t *testing.T) {
 	t.Parallel()
-	quiet := map[dropReason]bool{dropOriginNotChannel: true, dropInstallationInactive: true}
 	for _, r := range []dropReason{
-		dropNoConnection, dropOriginNotChannel, dropInstallationInactive,
-		dropTaskMissing, dropPlatformRefused, dropAckTimeout, dropTransport,
+		dropNoConnection, dropTaskMissing, dropPlatformRefused,
+		dropAckTimeout, dropTransport, dropAttachmentNotAdmitted,
 	} {
-		if got := r.actionable(); got == quiet[r] {
-			t.Errorf("%s actionable = %v", r, got)
+		if !r.actionable() {
+			t.Errorf("%s is a drop and must reach an operator", r)
 		}
 	}
 }

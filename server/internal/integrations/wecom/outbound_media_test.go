@@ -755,7 +755,7 @@ func TestDeliverAttachments_AdmissionBoundsTheLookupStage(t *testing.T) {
 	const surplus = 16
 	submitted := maxAdmittedAttachmentDeliveries + surplus
 	for i := 0; i < submitted; i++ {
-		o.deliverAttachments(chatDoneEvent("done"), target)
+		o.deliverAttachments(chatDoneEvent("done"), target, false)
 	}
 
 	// Wait for the admitted ones to park in the query rather than sleeping: a
@@ -869,9 +869,9 @@ func TestDeliverAttachments_IgnoresATurnItCannotAddress(t *testing.T) {
 
 	target := attachmentTarget{InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt}
 	// No message id on the payload — nothing was bound to this turn.
-	o.deliverAttachments(events.Event{WorkspaceID: testWorkspaceID, Payload: protocol.ChatDonePayload{}}, target)
+	o.deliverAttachments(events.Event{WorkspaceID: testWorkspaceID, Payload: protocol.ChatDonePayload{}}, target, false)
 	// No workspace id.
-	o.deliverAttachments(chatDoneEvent("x"), attachmentTarget{InstallationID: instID, ChatID: ""})
+	o.deliverAttachments(chatDoneEvent("x"), attachmentTarget{InstallationID: instID, ChatID: ""}, false)
 
 	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
 		t.Errorf("upload init frames = %d, want 0", n)

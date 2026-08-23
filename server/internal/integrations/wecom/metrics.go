@@ -64,18 +64,34 @@ type Metrics interface {
 	// WeCom-bound session is not deliverable here and never was — so this is
 	// read as a breakdown, not as an error total.
 	RecordOutboundDropped(reason string)
+	// RecordOutboundSkipped — a completion this adapter was never going to
+	// deliver, because it was not owed to a WeCom user in the first place. Kept
+	// apart from dropped on purpose: counting a web-UI question's answer as a
+	// failed WeCom delivery makes ordinary web usage look like an outage.
+	RecordOutboundSkipped(reason string)
+
+	// RecordAttachmentDelivered / RecordAttachmentDropped count FILES, one per
+	// file, while the three above count REPLIES, one per reply. The two units
+	// are separate because a reply whose words arrived and whose file did not
+	// is a delivered reply with a failed attachment, and collapsing that into
+	// one number can only lie in one direction or the other.
+	RecordAttachmentDelivered()
+	RecordAttachmentDropped(reason string)
 }
 
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
 // nil-pointer dereference on the read loop.
 type nopMetrics struct{}
 
-func (nopMetrics) RecordConnectFailure()        {}
-func (nopMetrics) RecordAuthFailure()           {}
-func (nopMetrics) RecordCallbackQueued()        {}
-func (nopMetrics) RecordCallbackQueueBlocked()  {}
-func (nopMetrics) RecordOutboundDelivered()     {}
-func (nopMetrics) RecordOutboundDropped(string) {}
+func (nopMetrics) RecordConnectFailure()          {}
+func (nopMetrics) RecordAuthFailure()             {}
+func (nopMetrics) RecordCallbackQueued()          {}
+func (nopMetrics) RecordCallbackQueueBlocked()    {}
+func (nopMetrics) RecordOutboundDelivered()       {}
+func (nopMetrics) RecordOutboundDropped(string)   {}
+func (nopMetrics) RecordOutboundSkipped(string)   {}
+func (nopMetrics) RecordAttachmentDelivered()     {}
+func (nopMetrics) RecordAttachmentDropped(string) {}
 
 // orNopMetrics turns an unset sink into one that is safe to call.
 func orNopMetrics(m Metrics) Metrics {

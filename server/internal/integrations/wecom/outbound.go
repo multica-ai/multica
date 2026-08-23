@@ -157,7 +157,8 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the work away.
 	content := chatDoneContent(e.Payload)
 	if content == "" && !o.mayCarryAttachments(e) {
-		return nil // nothing to say, nothing to send
+		o.skipped(ctx, e, skipNothingToSay)
+		return nil
 	}
 	// Only bound, non-empty completions reach here, so classify the task
 	// origin before loading credentials or sending. A question asked in the
@@ -203,7 +204,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("wecom: classify task input origin: %w", err)
 	}
 	if !deliver {
-		o.dropped(ctx, e, dropOriginNotChannel, nil)
+		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
@@ -214,7 +215,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("wecom: load installation: %w", err)
 	}
 	if inst.Status != string(InstallationActive) {
-		o.dropped(ctx, e, dropInstallationInactive, nil) // revoked between trigger and reply
+		o.skipped(ctx, e, skipInstallationInactive) // revoked between trigger and reply
 		return nil
 	}
 	if o.senders == nil {
@@ -245,11 +246,15 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	}
 	// Then whatever the agent produced alongside them, as its own message — a
 	// WeCom reply cannot carry a file inline.
+	// carriesTheReply is true when the files ARE the answer: an empty
+	// completion reached here only because one is bound to it, so nothing has
+	// been counted for this reply yet and the attachment path owes its outcome.
 	o.deliverAttachments(e, attachmentTarget{
 		InstallationID: binding.InstallationID,
 		ChatID:         binding.ChannelChatID,
 		ChatType:       chatType,
-	})
+		SessionID:      e.ChatSessionID,
+	}, content == "")
 	return nil
 }
 

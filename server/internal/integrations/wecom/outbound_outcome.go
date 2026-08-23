@@ -39,15 +39,6 @@ const (
 	// replica count is what tells them apart.
 	dropNoConnection dropReason = "no_live_connection"
 
-	// dropOriginNotChannel — the turn was asked in the Multica web UI on a
-	// session that originated in WeCom, so its answer belongs in Multica only.
-	// Expected in a healthy deployment: counted, logged at DEBUG.
-	dropOriginNotChannel dropReason = "origin_not_channel"
-
-	// dropInstallationInactive — the installation was revoked between the
-	// trigger and the reply.
-	dropInstallationInactive dropReason = "installation_inactive"
-
 	// dropTaskMissing — the task the completion belongs to could not be
 	// resolved: no id on the event, or the row was reaped while its ending was
 	// in flight.
@@ -66,18 +57,41 @@ const (
 
 	// dropTransport — the write itself failed, or the lookups ahead of it did.
 	dropTransport dropReason = "transport_error"
+
+	// dropAttachmentNotAdmitted — the delivery was shed because too many were
+	// already running or pending. A file only, never a whole reply.
+	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
+)
+
+// skipReason names a completion this adapter was never going to deliver. Kept
+// in its own set, and behind its own counter, because "we chose not to send
+// this" and "we owed this and failed" answer different questions and only one
+// of them is an incident.
+type skipReason string
+
+const (
+	// skipOriginNotChannel — the turn was asked in the Multica web UI on a
+	// session that originated in WeCom, so its answer belongs in Multica only.
+	// Ordinary in a healthy deployment, and the single largest source of this
+	// counter on a busy workspace.
+	skipOriginNotChannel skipReason = "origin_not_channel"
+
+	// skipInstallationInactive — the installation was revoked between the
+	// trigger and the reply. Not a delivery failure: there is no longer an
+	// installation to deliver through, and the bot is gone from the user's
+	// side too.
+	skipInstallationInactive skipReason = "installation_inactive"
+
+	// skipNothingToSay — an empty completion carrying no file. There was never
+	// a message here.
+	skipNothingToSay skipReason = "nothing_to_say"
 )
 
 // actionable reports whether a reason is one a person should look at. The
 // others are ordinary in a healthy deployment and would drown the log.
-func (r dropReason) actionable() bool {
-	switch r {
-	case dropOriginNotChannel, dropInstallationInactive:
-		return false
-	default:
-		return true
-	}
-}
+// actionable reports whether a reason is one a person should look at. Every
+// drop is, now that the two ordinary outcomes have moved to skipReason.
+func (r dropReason) actionable() bool { return true }
 
 // errNoLiveConnection — no live WebSocket for this installation in this
 // process. A sentinel rather than a fresh errors.New at the call site, so
@@ -111,11 +125,17 @@ func classifyDrop(err error) dropReason {
 // would change what processEvent's callers — and a dozen existing tests — mean
 // by "nothing to do here".
 func (o *Outbound) dropped(ctx context.Context, e events.Event, reason dropReason, err error) {
+	o.droppedFor(ctx, e.ChatSessionID, e.Type, reason, err)
+}
+
+// droppedFor is dropped for a caller that has a session id rather than the
+// event — the attachment path, which runs long after the event is gone.
+func (o *Outbound) droppedFor(ctx context.Context, sessionID, eventType string, reason dropReason, err error) {
 	o.mx().RecordOutboundDropped(string(reason))
 	attrs := []any{
 		"reason", string(reason),
-		"chat_session_id", e.ChatSessionID,
-		"event", e.Type,
+		"chat_session_id", sessionID,
+		"event", eventType,
 	}
 	if err != nil {
 		attrs = append(attrs, "error", err)
@@ -125,6 +145,32 @@ func (o *Outbound) dropped(ctx context.Context, e events.Event, reason dropReaso
 		return
 	}
 	o.logger.DebugContext(ctx, "wecom outbound: reply not delivered", attrs...)
+}
+
+// skipped records one completion this adapter was never going to deliver.
+// Always DEBUG: none of these is an incident, and on a workspace where people
+// use the web UI against WeCom-bound sessions this is the busiest path here.
+func (o *Outbound) skipped(ctx context.Context, e events.Event, reason skipReason) {
+	o.skippedFor(ctx, e.ChatSessionID, reason)
+}
+
+func (o *Outbound) skippedFor(ctx context.Context, sessionID string, reason skipReason) {
+	o.mx().RecordOutboundSkipped(string(reason))
+	o.logger.DebugContext(ctx, "wecom outbound: reply not owed to WeCom",
+		"reason", string(reason), "chat_session_id", sessionID)
+}
+
+// attachmentDelivered / attachmentDropped record ONE FILE. See the note on the
+// Metrics interface for why files and replies are counted separately.
+func (o *Outbound) attachmentDelivered() { o.mx().RecordAttachmentDelivered() }
+
+func (o *Outbound) attachmentDropped(ctx context.Context, reason dropReason, err error) {
+	o.mx().RecordAttachmentDropped(string(reason))
+	attrs := []any{"reason", string(reason)}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	o.logger.WarnContext(ctx, "wecom outbound: attachment not delivered", attrs...)
 }
 
 // delivered records one reply that reached the user. Without it the drop

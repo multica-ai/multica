@@ -51,6 +51,9 @@ type WecomMetrics struct {
 	CallbackQueueBlocked prometheus.Counter
 	OutboundDelivered    prometheus.Counter
 	OutboundDropped      *prometheus.CounterVec
+	OutboundSkipped      *prometheus.CounterVec
+	AttachmentDelivered  prometheus.Counter
+	AttachmentDropped    *prometheus.CounterVec
 }
 
 func NewWecomMetrics() *WecomMetrics {
@@ -74,6 +77,16 @@ func NewWecomMetrics() *WecomMetrics {
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_dropped_total",
 			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Not an error total: origin_not_channel is ordinary (a question typed in Multica on a WeCom-bound session), while no_live_connection, platform_refused, ack_timeout and transport_error each mean somebody in WeCom is waiting on an answer that is not coming.",
 		}, []string{"reason"}),
+		OutboundSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_skipped_total",
+			Help: "Completions this adapter was never going to deliver to WeCom, by reason. Kept apart from dropped because none of these is a delivery failure: origin_not_channel is a question typed in Multica on a WeCom-bound session, installation_inactive means there is no longer an installation to deliver through, nothing_to_say is an empty completion carrying no file. Counting them as drops would make ordinary web usage read as a WeCom outage.",
+		}, []string{"reason"}),
+		AttachmentDelivered: counter("outbound_attachment_delivered_total",
+			"Files put in front of a WeCom user. Counts FILES; the outbound_delivered/dropped/skipped trio counts REPLIES."),
+		AttachmentDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_attachment_dropped_total",
+			Help: "Files an agent produced that did not reach the WeCom user, by reason. Separate from the reply counters because a reply whose words arrived and whose file did not is a delivered reply with a failed attachment, and one number cannot say both.",
+		}, []string{"reason"}),
 	}
 }
 
@@ -81,7 +94,8 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 	return []prometheus.Collector{
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
-		m.OutboundDelivered, m.OutboundDropped,
+		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
+		m.AttachmentDelivered, m.AttachmentDropped,
 	}
 }
 
@@ -94,4 +108,11 @@ func (m *WecomMetrics) RecordCallbackQueueBlocked() { m.CallbackQueueBlocked.Inc
 func (m *WecomMetrics) RecordOutboundDelivered()    { m.OutboundDelivered.Inc() }
 func (m *WecomMetrics) RecordOutboundDropped(reason string) {
 	m.OutboundDropped.WithLabelValues(reason).Inc()
+}
+func (m *WecomMetrics) RecordOutboundSkipped(reason string) {
+	m.OutboundSkipped.WithLabelValues(reason).Inc()
+}
+func (m *WecomMetrics) RecordAttachmentDelivered() { m.AttachmentDelivered.Inc() }
+func (m *WecomMetrics) RecordAttachmentDropped(reason string) {
+	m.AttachmentDropped.WithLabelValues(reason).Inc()
 }

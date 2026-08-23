@@ -53,6 +53,15 @@ func (m *countingMetrics) RecordOutboundDropped(reason string) {
 	m.bump("outbound_dropped")
 	m.bump("outbound_dropped:" + reason)
 }
+func (m *countingMetrics) RecordOutboundSkipped(reason string) {
+	m.bump("outbound_skipped")
+	m.bump("outbound_skipped:" + reason)
+}
+func (m *countingMetrics) RecordAttachmentDelivered() { m.bump("attachment_delivered") }
+func (m *countingMetrics) RecordAttachmentDropped(reason string) {
+	m.bump("attachment_dropped")
+	m.bump("attachment_dropped:" + reason)
+}
 
 var _ Metrics = (*countingMetrics)(nil)
 
