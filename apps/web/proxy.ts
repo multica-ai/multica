@@ -117,11 +117,12 @@ export const config = {
   // proxy routes whose upstream origins are resolved from process.env at
   // request time instead of being baked into next.config.js at build time.
   matcher: [
+    "/v1/:path*",
     "/api/:path*",
     "/auth/:path*",
     "/uploads/:path*",
     "/docs/:path*",
     "/ws",
-    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.).*)",
+    "/((?!api|v1|_next/static|_next/image|favicon.ico|.*\\.).*)",
   ],
 };

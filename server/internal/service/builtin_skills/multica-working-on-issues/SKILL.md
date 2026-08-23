@@ -185,6 +185,14 @@ multica issue property unset <issue-id> --name Environment
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice:
 
+A workspace may define custom statuses beyond the seven built-ins; when any
+exist, the runtime brief's Available Commands section lists this workspace's
+catalog. A custom status inherits its category's behavior in full, and each
+built-in key below is also the name of its category — so read these bullets as
+category rules. Two writes are literal-key exceptions, not category rules: the
+failed-task rollback below writes the literal `todo` key, and a merged PR with
+close intent writes the literal `done` key.
+
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.

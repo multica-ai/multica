@@ -154,7 +154,34 @@ WITH candidate AS (
         COALESCE(sqlc.narg('priority')::text, i.priority) AS next_priority,
         sqlc.narg('assignee_type')::text AS next_assignee_type,
         sqlc.narg('assignee_id')::uuid AS next_assignee_id,
-        COALESCE(sqlc.narg('position')::double precision, i.position) AS next_position,
+        CASE
+            -- An explicit position wins. Cross-column drag-and-drop sends
+            -- status and position together and means the slot it dropped on.
+            WHEN sqlc.narg('position')::double precision IS NOT NULL
+                THEN sqlc.narg('position')::double precision
+            -- position ranks an issue *within* its (workspace, status)
+            -- column, so it stops meaning anything the moment the column
+            -- changes: the value that put the issue on top of Todo lands it
+            -- below every hand-dragged issue in Done. Re-rank to the top of
+            -- the destination, the same policy new issues get from
+            -- NextTopPosition. Keep the two in sync.
+            --
+            -- Two status changes running at once can read the same MIN and
+            -- claim one slot. Every position-ordered query carries a unique
+            -- final key (created_at DESC, id DESC), so a tie leaves the
+            -- relative order of simultaneous moves arbitrary but never
+            -- unstable across pages. Creation avoids the tie by computing its
+            -- min under the workspace counter lock; a status change holds no
+            -- such lock and is not worth taking one for.
+            WHEN i.status IS DISTINCT FROM COALESCE(sqlc.narg('status')::text, i.status)
+                THEN (
+                    SELECT COALESCE(MIN(target.position), 0) - 1
+                    FROM issue AS target
+                    WHERE target.workspace_id = i.workspace_id
+                      AND target.status = sqlc.narg('status')::text
+                )
+            ELSE i.position
+        END AS next_position,
         sqlc.narg('start_date')::date AS next_start_date,
         sqlc.narg('due_date')::date AS next_due_date,
         sqlc.narg('parent_issue_id')::uuid AS next_parent_issue_id,
@@ -209,15 +236,25 @@ RETURNING i.*;
 
 -- name: UpdateIssueStatus :one
 -- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
-UPDATE issue SET
+-- Repositioning lives here rather than in the callers (GitHub sync, agent task
+-- completion) so a status write cannot land without one: an issue carrying its
+-- old column's rank into a new column is the bug this guards against. See the
+-- next_position CASE in UpdateIssue for the policy.
+UPDATE issue AS i SET
     status = $2,
-    revision = revision + CASE WHEN status IS DISTINCT FROM $2 THEN 1 ELSE 0 END,
-    last_activity_at = CASE WHEN status IS DISTINCT FROM $2
-        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
-        ELSE last_activity_at
+    position = CASE WHEN i.status IS DISTINCT FROM $2 THEN (
+        SELECT COALESCE(MIN(target.position), 0) - 1
+        FROM issue AS target
+        WHERE target.workspace_id = i.workspace_id
+          AND target.status = $2
+    ) ELSE i.position END,
+    revision = i.revision + CASE WHEN i.status IS DISTINCT FROM $2 THEN 1 ELSE 0 END,
+    last_activity_at = CASE WHEN i.status IS DISTINCT FROM $2
+        THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
+        ELSE i.last_activity_at
     END,
     updated_at = now()
-WHERE id = $1 AND workspace_id = $3
+WHERE i.id = $1 AND i.workspace_id = $3
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one

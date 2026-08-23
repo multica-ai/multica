@@ -1,21 +1,4 @@
-import type { PluginInstallation, PluginSurface } from "@multica/core/types";
-
-/**
- * The host generates the document a surface runs in. That is the point: CSP is
- * a response-header/meta decision made by whoever emits the document, so if the
- * plugin author's server emitted it, the `net:` scopes the admin approved would
- * be a claim we never check. Here they become a `connect-src` the browser
- * enforces.
- *
- * The frame is mounted with `sandbox="allow-scripts"` and NOT
- * `allow-same-origin` — the pairing the HTML spec calls out as defeating the
- * sandbox. That gives the document an opaque origin: no cookies, no
- * localStorage, no access to the embedder, and no shared storage between two
- * plugins. It is the same model `packages/views/editor/code-block-iframe.tsx`
- * already uses for untrusted HTML.
- */
-
-/** Design tokens forwarded into the frame so a surface looks native for free. */
+/** Design tokens forwarded over the bridge so a surface looks native. */
 export const SURFACE_THEME_TOKENS = [
   "--background",
   "--foreground",
@@ -30,6 +13,9 @@ export const SURFACE_THEME_TOKENS = [
   "--text-body",
 ] as const;
 
+export const SURFACE_BRIDGE_CONNECT_MESSAGE = "multica:plugin-bridge-connect";
+export const SURFACE_BRIDGE_PROTOCOL_VERSION = 2;
+
 export function readThemeTokens(element: Element | null): Record<string, string> {
   if (!element || typeof getComputedStyle !== "function") return {};
   const computed = getComputedStyle(element);
@@ -41,107 +27,59 @@ export function readThemeTokens(element: Element | null): Record<string, string>
   return tokens;
 }
 
-/**
- * Resolves a surface entry to an absolute script URL.
- *
- * `entry` is relative to the manifest, so the plugin's own host serves its code
- * — we never proxy or re-host third-party JavaScript. A `local:` source has no
- * URL to resolve against; those installs are for developing the manifest and
- * cannot render a surface, which the panel says out loud rather than showing an
- * empty frame.
- */
-export function resolveSurfaceEntry(installation: PluginInstallation, surface: PluginSurface): string | null {
-  const source = installation.source_url ?? "";
-  let resolved: URL;
-  try {
-    resolved = new URL(surface.entry, source);
-  } catch {
-    // A `local:` source is not a URL at all — there is nothing a browser could
-    // fetch, and guessing one would be worse than saying so.
-    return null;
-  }
-  if (resolved.protocol === "https:") return resolved.toString();
-  // Plain HTTP is allowed only from loopback, matching what browsers already
-  // treat as a secure context. That is what makes developing a surface possible
-  // — serve it from a local static server and install by URL like any other —
-  // without opening plaintext delivery on a real deployment.
-  if (resolved.protocol === "http:" && isLoopbackHost(resolved.hostname)) return resolved.toString();
-  return null;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
-}
-
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-/**
- * Builds the `connect-src` list from the granted scopes only — never from the
- * manifest the source URL serves today. `net:` is an exact host by contract, so
- * a plugin that needs a subdomain declares it.
- */
-export function surfaceConnectSources(grantedScopes: string[]): string[] {
-  return grantedScopes
-    .filter((scope) => scope.startsWith("net:"))
-    .map((scope) => `https://${scope.slice("net:".length)}`);
+function encodeUTF8(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
 }
 
-export function buildSurfaceCSP(grantedScopes: string[], scriptOrigin: string): string {
-  const connect = surfaceConnectSources(grantedScopes);
-  return [
+export interface SurfaceFrameDocumentInput {
+  /** Short-lived URL on Multica's dedicated, cookie-free content origin. */
+  url: string;
+  /** Single-use proof embedded in both trusted documents, never plugin code. */
+  bridgeToken: string;
+}
+
+/**
+ * Builds the trusted outer frame around one untrusted plugin document.
+ *
+ * The outer frame exists so its `frame-src` applies to only this plugin. A
+ * page-wide policy would also have to allow every attachment preview origin;
+ * that wider list would let a hostile surface navigate to those origins. Here
+ * the only network navigation an inner frame may make is back to the exact
+ * Multica content origin that served it.
+ *
+ * The outer frame is host-authored and same-origin with the app. The INNER
+ * frame is still `sandbox="allow-scripts"` without `allow-same-origin`, so two
+ * plugins receive distinct opaque origins and cannot inspect each other.
+ */
+export function buildSurfaceFrameDocument({ url, bridgeToken }: SurfaceFrameDocumentInput): string {
+  const parsed = new URL(url);
+  if ((parsed.protocol !== "https:" && parsed.protocol !== "http:") || !bridgeToken) {
+    throw new Error("invalid plugin surface launch");
+  }
+
+  const config = encodeUTF8(JSON.stringify({ url: parsed.toString(), bridgeToken }));
+  const csp = [
     "default-src 'none'",
-    // The surface's own script, and nothing else executable. This origin is
-    // unavoidable — the code has to load from somewhere — and it is the reason
-    // `net:` bounds THIRD-PARTY destinations rather than exfiltration in
-    // general: a script served by its author can always reach its author back,
-    // and closing that would mean re-hosting third-party code, which this design
-    // deliberately does not do.
-    `script-src ${scriptOrigin} 'unsafe-inline'`,
+    "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
-    // Narrowed to inline data rather than the script origin: an <img> or webfont
-    // URL is the cheapest possible side channel back to the author, and a
-    // surface that needs artwork can inline it. It does not make the channel
-    // impossible — a dynamic import of the author's own origin remains — but it
-    // removes the two that cost nothing to use.
-    "img-src data: blob:",
-    "font-src data:",
-    // With no net: scope this is 'none', so a surface cannot reach any
-    // third-party host. Its author's own origin is still reachable via
-    // script-src; see above.
-    `connect-src ${connect.length > 0 ? connect.join(" ") : "'none'"}`,
-    // A sandboxed frame cannot navigate the top level anyway; saying so keeps
-    // the policy honest if the sandbox attribute is ever loosened.
-    "form-action 'none'",
+    `frame-src ${parsed.origin}`,
+    "connect-src 'none'",
+    "img-src 'none'",
+    "font-src 'none'",
+    "object-src 'none'",
     "base-uri 'none'",
-    // frame-ancestors is deliberately absent: it is ignored when delivered via
-    // <meta>, and the browser logs a warning for it. Nothing is lost — the
-    // sandbox already denies this document the ability to frame anything.
+    "form-action 'none'",
   ].join("; ");
-}
 
-export interface SurfaceDocumentInput {
-  entryUrl: string;
-  grantedScopes: string[];
-  theme: Record<string, string>;
-}
-
-/**
- * The srcdoc a surface iframe renders. Everything executable in it is the
- * plugin's own entry script loaded cross-origin; the inline script only forwards
- * load failures so a broken plugin reports itself instead of showing blank.
- */
-export function buildSurfaceDocument({ entryUrl, grantedScopes, theme }: SurfaceDocumentInput): string {
-  const scriptOrigin = new URL(entryUrl).origin;
-  const csp = buildSurfaceCSP(grantedScopes, scriptOrigin);
-  const themeCss = Object.entries(theme)
-    .map(([name, value]) => `${name}: ${value};`)
-    .join(" ");
-
-  // The meta CSP must precede anything it governs, so it is the first child of
-  // <head>. Note srcdoc documents also inherit the embedder's policy — this
-  // narrows, it cannot widen.
   return `<!doctype html>
 <html>
 <head>
@@ -149,19 +87,70 @@ export function buildSurfaceDocument({ entryUrl, grantedScopes, theme }: Surface
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-:root { ${themeCss} color-scheme: light dark; }
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-body {
-  background: var(--background, transparent);
-  color: var(--foreground, inherit);
-  font: 400 var(--text-body, 14px)/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
+html, body, #multica-plugin-root, iframe { width: 100%; height: 100%; margin: 0; padding: 0; border: 0; }
+body { overflow: hidden; background: transparent; }
 </style>
 </head>
 <body>
-<div id="root"></div>
-<script src="${escapeAttribute(entryUrl)}" onerror="parent.postMessage({type:'multica:plugin-surface-error'},'*')"></script>
+<div id="multica-plugin-root"></div>
+<script>
+(function () {
+  var encoded = ${JSON.stringify(config)};
+  var binary = atob(encoded);
+  var bytes = new Uint8Array(binary.length);
+  for (var index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  var config = JSON.parse(new TextDecoder().decode(bytes));
+  var child = document.createElement("iframe");
+  child.title = "Plugin content";
+  child.setAttribute("sandbox", "allow-scripts");
+
+  var state = "launching";
+  var loadCount = 0;
+
+  function stopSurface(type) {
+    if (state === "terminal") return;
+    state = "terminal";
+    // After connection the host owns the transferred port; this terminal
+    // signal makes it close the bridge and unmount this wrapper.
+    parent.postMessage({ type: type }, "*");
+  }
+
+  document.addEventListener("securitypolicyviolation", function (event) {
+    if (event.effectiveDirective === "frame-src" || event.effectiveDirective === "child-src") {
+      stopSurface("multica:plugin-surface-navigation-blocked");
+    }
+  });
+
+  child.addEventListener("load", function () {
+    loadCount += 1;
+    if (loadCount > 1) stopSurface("multica:plugin-surface-navigated");
+  });
+
+  window.addEventListener("message", function (event) {
+    if (!child.contentWindow || event.source !== child.contentWindow) return;
+    var data = event.data || {};
+    if (data.type === "multica:plugin-surface-error" || data.type === "multica:plugin-surface-navigated") {
+      stopSurface(data.type);
+      return;
+    }
+    if (data.type !== ${JSON.stringify(SURFACE_BRIDGE_CONNECT_MESSAGE)} ||
+        data.version !== ${SURFACE_BRIDGE_PROTOCOL_VERSION} ||
+        data.challenge !== config.bridgeToken || state !== "launching" || !event.ports[0]) return;
+
+    state = "connected";
+    parent.postMessage({
+      type: ${JSON.stringify(SURFACE_BRIDGE_CONNECT_MESSAGE)},
+      version: ${SURFACE_BRIDGE_PROTOCOL_VERSION},
+      challenge: config.bridgeToken
+    }, "*", [event.ports[0]]);
+    config.bridgeToken = "";
+  });
+
+  child.src = config.url;
+  config.url = "";
+  document.getElementById("multica-plugin-root").appendChild(child);
+})();
+</script>
 </body>
 </html>`;
 }

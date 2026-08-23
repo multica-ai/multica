@@ -28,7 +28,7 @@ type invokePluginHookRequest struct {
 	Input   json.RawMessage `json:"input,omitempty"`
 }
 
-// InvokePluginHook — POST /api/v1/plugin/hooks/{key}
+// InvokePluginHook — POST /api/plugin-bridge/v1/hooks/{key}
 func (h *Handler) InvokePluginHook(w http.ResponseWriter, r *http.Request) {
 	// No scope of its own: a hook is the plugin's own capability, and what it
 	// may do on the way back is bounded by the installation's scopes when the
@@ -105,15 +105,17 @@ func rawOrNil(raw json.RawMessage) any {
 // --- Installation-scoped hook administration ---
 
 type pluginInvocationResponse struct {
-	ID        string  `json:"id"`
-	HookKey   string  `json:"hook_key"`
-	Trigger   string  `json:"trigger"`
-	Status    string  `json:"status"`
-	EventType *string `json:"event_type,omitempty"`
-	Attempt   int     `json:"attempt"`
-	LatencyMs int     `json:"latency_ms"`
-	Error     *string `json:"error,omitempty"`
-	CreatedAt string  `json:"created_at"`
+	ID         string  `json:"id"`
+	HookKey    string  `json:"hook_key"`
+	Trigger    string  `json:"trigger"`
+	Status     string  `json:"status"`
+	EventType  *string `json:"event_type,omitempty"`
+	Attempt    int     `json:"attempt"`
+	LatencyMs  int     `json:"latency_ms"`
+	Error      *string `json:"error,omitempty"`
+	DeliveryID *string `json:"delivery_id,omitempty"`
+	PlannedAt  *string `json:"planned_at,omitempty"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 // ListPluginInvocations — GET /api/workspaces/{id}/plugins/{installationId}/invocations
@@ -151,6 +153,14 @@ func (h *Handler) ListPluginInvocations(w http.ResponseWriter, r *http.Request) 
 		if row.Error.Valid {
 			value := row.Error.String
 			item.Error = &value
+		}
+		if row.DeliveryID.Valid {
+			value := row.DeliveryID.String
+			item.DeliveryID = &value
+		}
+		if row.PlannedAt.Valid {
+			value := row.PlannedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+			item.PlannedAt = &value
 		}
 		items = append(items, item)
 	}

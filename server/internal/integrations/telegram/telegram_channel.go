@@ -134,7 +134,7 @@ func (c *telegramChannel) dispatch(ctx context.Context, u Update) error {
 
 const (
 	issueErrorReplyTimeout  = 5 * time.Second
-	issueDispatchFailedText = "⚠️ 创建任务时发生内部错误，请稍后重试。"
+	issueDispatchFailedText = "⚠️ I couldn't create that issue because an internal error occurred. Please try again."
 )
 
 // notifyIssueDispatchError prevents an addressed /issue command from failing

@@ -48,6 +48,8 @@ const stripeSignatureHeader = "Stripe-Signature"
 
 const idempotencyKeyHeader = "Idempotency-Key"
 const maxCloudSubscriptionIdempotencyKeyLength = 255
+const maxCloudSubscriptionSeatPurchaseIdempotencyKeyLength = 200
+const maxCloudSubscriptionSeats = 10_000
 
 type cloudSubscriptionCheckoutRequest struct {
 	Interval       string `json:"interval"`
@@ -62,6 +64,19 @@ type cloudSubscriptionCheckoutUpstreamRequest struct {
 	Interval       string `json:"interval"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	CustomerEmail  string `json:"customer_email,omitempty"`
+}
+
+type cloudSubscriptionSeatPurchasePreviewRequest struct {
+	AdditionalSeats int `json:"additional_seats"`
+}
+
+type cloudSubscriptionSeatPurchaseRequest struct {
+	AdditionalSeats         int    `json:"additional_seats"`
+	ExpectedCurrentSeats    int    `json:"expected_current_seats"`
+	ExpectedPurchaseVersion int64  `json:"expected_purchase_version"`
+	AcceptedProrationAmount int64  `json:"accepted_proration_amount"`
+	Currency                string `json:"currency"`
+	IdempotencyKey          string `json:"idempotency_key,omitempty"`
 }
 
 // requireCloudSubscriptionWorkspace is the handler-level backstop behind the
@@ -236,6 +251,92 @@ func (h *Handler) ReconcileCloudWorkspaceSubscriptionSeats(w http.ResponseWriter
 		return
 	}
 	h.proxyCloudSubscription(w, r, http.MethodPost, "/api/v1/subscriptions/"+workspaceID+"/seats/reconcile", userID, nil, nil)
+}
+
+// PreviewCloudWorkspaceSubscriptionSeatPurchase accepts only an additive seat
+// count. Cloud reads the authoritative current quantity and returns Stripe's
+// estimated proration plus the next full recurring invoice.
+func (h *Handler) PreviewCloudWorkspaceSubscriptionSeatPurchase(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	body, ok := readCloudRuntimeJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var in cloudSubscriptionSeatPurchasePreviewRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if in.AdditionalSeats < 1 || in.AdditionalSeats > maxCloudSubscriptionSeats {
+		writeError(w, http.StatusBadRequest, "additional_seats must be within 1..10000")
+		return
+	}
+	upstreamBody, err := json.Marshal(in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build seat purchase preview")
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost,
+		"/api/v1/subscriptions/"+workspaceID+"/seats/purchase-preview", userID, upstreamBody, nil)
+}
+
+// PurchaseCloudWorkspaceSubscriptionSeats forwards a user-confirmed quote.
+// The allowlisted body omits any client workspace or absolute target quantity;
+// Cloud repeats the quote and owns concurrency, idempotency, and Stripe writes.
+func (h *Handler) PurchaseCloudWorkspaceSubscriptionSeats(w http.ResponseWriter, r *http.Request) {
+	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
+	if !ok {
+		return
+	}
+	body, ok := readCloudRuntimeJSONBody(w, r)
+	if !ok {
+		return
+	}
+	var in cloudSubscriptionSeatPurchaseRequest
+	if err := json.Unmarshal(body, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if in.AdditionalSeats < 1 || in.ExpectedCurrentSeats < 1 ||
+		in.AdditionalSeats > maxCloudSubscriptionSeats ||
+		in.ExpectedCurrentSeats > maxCloudSubscriptionSeats-in.AdditionalSeats ||
+		in.ExpectedPurchaseVersion < 1 || in.AcceptedProrationAmount < 0 || !isASCIICurrency(in.Currency) {
+		writeError(w, http.StatusBadRequest, "invalid seat purchase confirmation")
+		return
+	}
+	key, ok := requireCloudSubscriptionIdempotencyKey(w, r, in.IdempotencyKey)
+	if !ok {
+		return
+	}
+	if len(key) > maxCloudSubscriptionSeatPurchaseIdempotencyKeyLength {
+		writeError(w, http.StatusBadRequest, "seat purchase idempotency key must be at most 200 bytes")
+		return
+	}
+	in.Currency = strings.ToLower(in.Currency)
+	in.IdempotencyKey = key
+	upstreamBody, err := json.Marshal(in)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to build seat purchase request")
+		return
+	}
+	h.proxyCloudSubscription(w, r, http.MethodPost,
+		"/api/v1/subscriptions/"+workspaceID+"/seats/purchases", userID, upstreamBody,
+		http.Header{idempotencyKeyHeader: []string{key}})
+}
+
+func isASCIICurrency(value string) bool {
+	if len(value) != 3 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) CreateCloudWorkspaceSubscriptionPortal(w http.ResponseWriter, r *http.Request) {

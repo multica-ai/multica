@@ -96,8 +96,11 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      MULTICA_DATABASE_STARTUP_TIMEOUT: ${MULTICA_DATABASE_STARTUP_TIMEOUT:-3m}
+      MULTICA_DATABASE_CONNECT_TIMEOUT: ${MULTICA_DATABASE_CONNECT_TIMEOUT:-5s}
       MULTICA_SHUTDOWN_HOLD_DURATION: ${MULTICA_SHUTDOWN_HOLD_DURATION:-}
       MULTICA_RUNTIME_RECONNECT_GRACE: ${MULTICA_RUNTIME_RECONNECT_GRACE:-}
+      MULTICA_TASK_QUEUED_TTL: ${MULTICA_TASK_QUEUED_TTL:-}
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
@@ -131,6 +134,13 @@ services:
       # intentionally NOT used to derive this value, to avoid Host /
       # X-Forwarded-Host spoofing on misconfigured proxies.
       MULTICA_PUBLIC_URL: ${MULTICA_PUBLIC_URL:-}
+      # Surface HTML must use a second, cookie-free browser origin routed to
+      # this backend. Both settings are optional only in the sense that leaving
+      # either empty disables plugin surfaces rather than weakening isolation.
+      MULTICA_PLUGIN_SECRET_KEY: ${MULTICA_PLUGIN_SECRET_KEY:-}
+      MULTICA_PLUGIN_SURFACE_ORIGIN: ${MULTICA_PLUGIN_SURFACE_ORIGIN:-}
+      MULTICA_PLUGIN_API_URL: ${MULTICA_PLUGIN_API_URL:-}
+      MULTICA_PLUGIN_DIR: ${MULTICA_PLUGIN_DIR:-}
       # Comma-separated CIDRs whose source IP is allowed to set
       # X-Forwarded-For / X-Real-IP for the webhook per-IP rate limiter.
       # Empty default = headers ignored, RemoteAddr used. Set e.g.

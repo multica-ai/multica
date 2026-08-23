@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 本地 `multica` 数据库 | PostgreSQL 连接地址 |
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 容器启动过程中，migration 与 API 共享的暂时性数据库故障重试时长；设为 `0` 时每个阶段只尝试一次 |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 启动期间单次数据库连接的兜底超时；pgx 原生 `connect_timeout`、`PGCONNECT_TIMEOUT` 或 service 配置优先 |
 | `PORT` | `8080` | API 监听端口 |
 | `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
@@ -40,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途 task 的宽限时间；低于 `150s` 时按 `150s` 处理 |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | task 在队列中无人认领的最长时长，超过后以 `queued_expired` 失败；低并发运行时可能合理地排在长任务之后，此时应调大 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -173,6 +176,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
+| 插件 | `MULTICA_PLUGIN_SECRET_KEY` | base64 编码的 32 字节密钥，用于加密已存 secret 和 surface 启动 URL |
+| 插件 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到后端的独立无 Cookie 浏览器 origin；必须不同于 app/API origin，并保留 `Host` |
+| 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
+| 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 

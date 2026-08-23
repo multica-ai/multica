@@ -2185,12 +2185,11 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	}
 }
 
-// Regression test for #1276: ClaimTaskByRuntime must populate workspace_id in
-// the response for run_only autopilot tasks. Before the fix, resp.WorkspaceID
-// stayed empty because ClaimTaskByRuntime only handled IssueID and
-// ChatSessionID branches, causing the daemon's execenv to fail with
-// "workspace ID is required".
-func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
+// Regression test for #1276: ClaimTaskByRuntime must populate both
+// workspace and project context for run_only autopilot tasks. Project context
+// is what lets the daemon select a bound local_directory and materialize the
+// managed .multica/project/resources.json source manifest before launch.
+func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -2202,8 +2201,29 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
+	const projectDescription = "Use only the bound project resources."
+	projectID := dbfx.Project(t, "Run-only autopilot project", testutil.Cols{
+		"description": projectDescription,
+	})
+	const projectRepoURL = "https://github.com/example/run-only-project"
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    projectID,
+		"workspace_id":  testWorkspaceID,
+		"resource_type": "github_repo",
+		"resource_ref":  `{"url":"` + projectRepoURL + `"}`,
+		"position":      0,
+	})
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    projectID,
+		"workspace_id":  testWorkspaceID,
+		"resource_type": "local_directory",
+		"resource_ref":  `{"daemon_id":"test-daemon-claim","local_path":"/srv/run-only-project","execution_mode":"in_place"}`,
+		"position":      1,
+	})
+
 	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
 		"workspace_id":    testWorkspaceID,
+		"project_id":      projectID,
 		"title":           "claim workspace fixture",
 		"assignee_id":     agentID,
 		"execution_mode":  "run_only",
@@ -2240,8 +2260,13 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 
 	var resp struct {
 		Task *struct {
-			WorkspaceID string `json:"workspace_id"`
-			ThreadName  string `json:"thread_name"`
+			WorkspaceID        string                `json:"workspace_id"`
+			ThreadName         string                `json:"thread_name"`
+			Repos              []RepoData            `json:"repos"`
+			ProjectID          string                `json:"project_id"`
+			ProjectTitle       string                `json:"project_title"`
+			ProjectDescription string                `json:"project_description"`
+			ProjectResources   []ProjectResourceData `json:"project_resources"`
 		} `json:"task"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
@@ -2258,6 +2283,44 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	}
 	if resp.Task.ThreadName != "claim workspace fixture" {
 		t.Fatalf("autopilot task thread_name = %q, want autopilot title", resp.Task.ThreadName)
+	}
+	if resp.Task.ProjectID != projectID {
+		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
+	}
+	if resp.Task.ProjectTitle != "Run-only autopilot project" {
+		t.Errorf("project_title = %q, want run-only project title", resp.Task.ProjectTitle)
+	}
+	if resp.Task.ProjectDescription != projectDescription {
+		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
+	}
+	if len(resp.Task.ProjectResources) != 2 {
+		t.Fatalf("project_resources count = %d, want 2", len(resp.Task.ProjectResources))
+	}
+	var localDirectory struct {
+		DaemonID      string `json:"daemon_id"`
+		LocalPath     string `json:"local_path"`
+		ExecutionMode string `json:"execution_mode"`
+	}
+	foundLocalDirectory := false
+	for _, resource := range resp.Task.ProjectResources {
+		if resource.ResourceType != "local_directory" {
+			continue
+		}
+		foundLocalDirectory = true
+		if err := json.Unmarshal(resource.ResourceRef, &localDirectory); err != nil {
+			t.Fatalf("decode local_directory resource: %v", err)
+		}
+	}
+	if !foundLocalDirectory {
+		t.Fatal("local_directory project resource missing from claim")
+	}
+	if localDirectory.DaemonID != "test-daemon-claim" ||
+		localDirectory.LocalPath != "/srv/run-only-project" ||
+		localDirectory.ExecutionMode != "in_place" {
+		t.Fatalf("local_directory = %+v, want bound daemon/path/in_place", localDirectory)
+	}
+	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
+		t.Fatalf("repos = %+v, want only project repo %q", resp.Task.Repos, projectRepoURL)
 	}
 }
 
@@ -3126,6 +3189,68 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 	if task.PriorWorkDir != "/tmp/same-chat-workdir" {
 		t.Fatalf("chat runtime match: expected PriorWorkDir='/tmp/same-chat-workdir', got %q", task.PriorWorkDir)
+	}
+}
+
+// Different channel context generations have independent debounce timers. If
+// the newer generation finishes first, its Chat-wide pointer must not become
+// the resume source for a delayed task from the older generation.
+func TestClaimTask_ChannelContextRevisionScopesProviderResume(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "channel generation resume scope",
+		"session_id": "new-generation-session",
+		"work_dir":   "/tmp/new-generation-workdir",
+		"runtime_id": runtimeID,
+	})
+
+	dbfx.Exec(t, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id, status, priority,
+			started_at, completed_at, session_id, work_dir,
+			channel_context_revision
+		)
+		VALUES
+			($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes',
+			 'old-generation-session', '/tmp/old-generation-workdir', 1),
+			($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute',
+			 'new-generation-session', '/tmp/new-generation-workdir', 2)
+	`, agentID, runtimeID, chatSessionID)
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET session_rollout_missing = TRUE
+		WHERE chat_session_id = $1 AND channel_context_revision = 2
+	`, chatSessionID)
+
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":               runtimeID,
+		"chat_session_id":          chatSessionID,
+		"priority":                 1000,
+		"channel_context_revision": int64(1),
+	})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`, taskID)
+	dbfx.Insert(t, "chat_message", testutil.Cols{
+		"chat_session_id":          chatSessionID,
+		"role":                     "user",
+		"content":                  "delayed old-generation message",
+		"task_id":                  taskID,
+		"channel_context_revision": int64(1),
+	})
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "old-generation-session" {
+		t.Fatalf("prior session = %q, want old-generation-session", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/old-generation-workdir" {
+		t.Fatalf("prior workdir = %q, want /tmp/old-generation-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionResumeUnavailable {
+		t.Fatal("new-generation continuity gap leaked into old-generation claim")
 	}
 }
 

@@ -64,6 +64,8 @@ jobs:
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
               - 'scripts/worktree-db.test.sh'
+              - 'scripts/dev-env.sh'
+              - 'scripts/dev-env.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -100,6 +102,8 @@ jobs:
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
+              - 'scripts/entrypoint.test.sh'
+              - 'docker/entrypoint.sh'
               - 'scripts/test-go.sh'
               - 'scripts/test-go.test.sh'
               # makefile-build.test.sh asserts how `make build` names its
@@ -254,6 +258,10 @@ jobs:
       - name: Test worktree database cleanup
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/worktree-db.test.sh
+
+      - name: Test development environment registry
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/dev-env.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -502,6 +510,10 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
 
+      - name: Test backend entrypoint signals
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/entrypoint.test.sh
+
       - name: Test build output naming
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/makefile-build.test.sh
@@ -708,6 +720,20 @@ jobs:
         run: |
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
+
+      - name: Test Windows task temp dir sweep survives a sharing violation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The GC's task temp sweep has to cope with a file it cannot delete: a
+        # leftover child process holding one open is what left 174 directories
+        # behind in #7364. Only a real Windows filesystem produces that sharing
+        # violation — on unix an open file unlinks fine — so this is the only
+        # place we can prove the two things that matter: the failed cleanup
+        # keeps .task_lock (without it the directory reads as a pre-lock
+        # leftover and stops being reclaimable on liveness), and the next cycle
+        # removes the directory once the handle closes.
+        # -v so a skip is visible instead of passing silently as "ok".
+        run: go test ./internal/daemon/execenv -v -run '^TestPruneTaskTempDirsSurvivesRealSharingViolation$' -count=1 -timeout=5m
 
       - name: Test Windows agent executable junction resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}

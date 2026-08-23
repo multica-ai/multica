@@ -152,6 +152,11 @@ Contracts:
   do not write issue status. There is no assignee gate anymore: a guest leader
   writes nothing not because it lacks a grant but because a turn that did not
   move the issue's state has nothing to record.
+- status names are category rules: custom statuses inherit their category's
+  behavior in full (MUL-6243, `server/internal/issuestatus/issuestatus.go`
+  `Effective`/`Resolve`); the brief lists the workspace catalog when any custom
+  statuses exist (MUL-6460, `writeIssueStatusCommand` in
+  `server/internal/daemon/execenv/runtime_config_sections.go`).
 
 ## Comment / Mention
 

@@ -199,6 +199,9 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}
+	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "plugin") {
+		return db.Issue{}, false
+	}
 	return issue, true
 }
 
@@ -224,7 +227,7 @@ func (h *Handler) resolvePluginIssue(r *http.Request, caller service.PluginActio
 	return issue, true
 }
 
-// GetPluginContext — GET /api/v1/plugin/context
+// GetPluginContext — GET /v1/context
 func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 	// No scope: this is the page the user is already looking at.
 	caller, actor, ok := h.pluginCaller(w, r, "")
@@ -260,7 +263,7 @@ func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, h.PluginService.BuildPluginContext(caller, workspace, user, issue))
 }
 
-// GetPluginIssue — GET /api/v1/plugin/issues/{id}
+// GetPluginIssue — GET /v1/issues/{id}
 func (h *Handler) GetPluginIssue(w http.ResponseWriter, r *http.Request) {
 	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesRead)
 	if !ok {
@@ -278,7 +281,7 @@ type patchPluginIssueRequest struct {
 	Description *string `json:"description,omitempty"`
 }
 
-// PatchPluginIssue — PATCH /api/v1/plugin/issues/{id}
+// PatchPluginIssue — PATCH /v1/issues/{id}
 //
 // Title and description only. Status, priority, assignee, parent, project and
 // stage each carry dispatch, catalog or hierarchy semantics — a status change
@@ -349,7 +352,7 @@ func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActio
 	return issueToResponse(issue, prefix)
 }
 
-// ListPluginComments — GET /api/v1/plugin/issues/{id}/comments
+// ListPluginComments — GET /v1/issues/{id}/comments
 func (h *Handler) ListPluginComments(w http.ResponseWriter, r *http.Request) {
 	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeCommentsRead)
 	if !ok {
@@ -398,7 +401,7 @@ type createPluginCommentRequest struct {
 	ParentID *string `json:"parent_id,omitempty"`
 }
 
-// CreatePluginComment — POST /api/v1/plugin/issues/{id}/comments
+// CreatePluginComment — POST /v1/issues/{id}/comments
 //
 // The comment is authored BY THE USER and marked with the plugin that produced
 // it, so the timeline can render "Jiayuan (via Hello Panel)".
@@ -548,7 +551,7 @@ func hasGrantedScope(scopes []string, want string) bool {
 	return false
 }
 
-// ListPluginStorage — GET /api/v1/plugin/storage/{scope}
+// ListPluginStorage — GET /v1/storage/{scope}
 func (h *Handler) ListPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -566,7 +569,7 @@ func (h *Handler) ListPluginStorage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
 }
 
-// GetPluginStorage — GET /api/v1/plugin/storage/{scope}/{key}
+// GetPluginStorage — GET /v1/storage/{scope}/{key}
 func (h *Handler) GetPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -588,7 +591,7 @@ type putPluginStorageRequest struct {
 	Value string `json:"value"`
 }
 
-// PutPluginStorage — PUT /api/v1/plugin/storage/{scope}/{key}
+// PutPluginStorage — PUT /v1/storage/{scope}/{key}
 func (h *Handler) PutPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -610,7 +613,7 @@ func (h *Handler) PutPluginStorage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeletePluginStorage — DELETE /api/v1/plugin/storage/{scope}/{key}
+// DeletePluginStorage — DELETE /v1/storage/{scope}/{key}
 func (h *Handler) DeletePluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {

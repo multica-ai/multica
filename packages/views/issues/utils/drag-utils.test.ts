@@ -8,6 +8,7 @@ import {
   getMoveUpdates,
   insertIdByPosition,
   issueMatchesGroup,
+  projectGroupId,
   propertyGroupId,
 } from "./drag-utils";
 
@@ -191,5 +192,66 @@ describe("property grouping", () => {
 
   it("getMoveUpdates for property columns only carries position", () => {
     expect(getMoveUpdates({ id: "c1", title: "Staging", propertyId, propertyOptionId: "opt-staging" }, 5)).toEqual({ position: 5 });
+  });
+});
+
+describe("project grouping", () => {
+  const inProject = { id: "A", project_id: "proj-1" } as unknown as Issue;
+  const noProject = { id: "B", project_id: null } as unknown as Issue;
+  const projectColumn: BoardColumnGroup = {
+    id: projectGroupId("proj-1"),
+    title: "Acme",
+    projectId: "proj-1",
+  };
+  const noProjectColumn: BoardColumnGroup = {
+    id: projectGroupId(null),
+    title: "No project",
+    projectId: null,
+  };
+
+  it("projectGroupId mirrors the server group keys", () => {
+    // The board builds column ids from cards while the server builds them from
+    // descriptors; a mismatch silently drops every card off the board.
+    expect(projectGroupId("proj-1")).toBe("project:proj-1");
+    expect(projectGroupId(null)).toBe("project:none");
+  });
+
+  it("getIssueGroupId buckets unassigned-project cards into the none column", () => {
+    expect(getIssueGroupId(inProject, "project")).toBe(projectGroupId("proj-1"));
+    expect(getIssueGroupId(noProject, "project")).toBe(projectGroupId(null));
+  });
+
+  it("issueMatchesGroup distinguishes project and no-project columns", () => {
+    expect(issueMatchesGroup(inProject, projectColumn)).toBe(true);
+    expect(issueMatchesGroup(inProject, noProjectColumn)).toBe(false);
+    expect(issueMatchesGroup(noProject, noProjectColumn)).toBe(true);
+    expect(issueMatchesGroup(noProject, projectColumn)).toBe(false);
+  });
+
+  it("getMoveUpdates writes the column's project, clearing it on the none column", () => {
+    expect(getMoveUpdates(projectColumn, 5)).toEqual({
+      project_id: "proj-1",
+      position: 5,
+    });
+    expect(getMoveUpdates(noProjectColumn, 5)).toEqual({
+      project_id: null,
+      position: 5,
+    });
+  });
+
+  it("a project column never falls through to the unassigned-assignee update", () => {
+    // projectId/assigneeId are both optional on BoardColumnGroup, so an
+    // unguarded project column would read as "no assignee" and unassign the
+    // card on every drop.
+    expect(getMoveUpdates(projectColumn, 5)).not.toHaveProperty("assignee_type");
+  });
+
+  it("buildColumns places cards into their project column", () => {
+    expect(
+      buildColumns([inProject, noProject], [projectColumn, noProjectColumn], "project"),
+    ).toEqual({
+      [projectGroupId("proj-1")]: ["A"],
+      [projectGroupId(null)]: ["B"],
+    });
   });
 });

@@ -60,7 +60,7 @@ multica daemon start
 
 运行时离线时：
 
-- 已经排队的 task 会等待运行时恢复，最多保留 2 小时。
+- 已经排队的 task 会等待运行时恢复，默认最多保留 2 小时（可用 `MULTICA_TASK_QUEUED_TTL` 调整，见[环境变量](/environment-variables)）。
 - 正在执行的 task 会失败；符合条件的 issue 或对话 task 可以自动重试。
 - 守护进程重新启动后，会重新注册运行时，并回收上一次没有正常结束的 task。
 - 离线超过 7 天且没有任何智能体（包括已归档的）绑定的运行时，会被自动清理。

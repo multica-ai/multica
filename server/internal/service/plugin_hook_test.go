@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -137,11 +138,54 @@ func TestHookAllowsTriggerOnlyWhenDeclared(t *testing.T) {
 	if !HookAllowsTrigger(hook, plugincontract.TriggerManual) {
 		t.Fatal("a declared trigger must be allowed")
 	}
-	for _, undeclared := range []string{plugincontract.TriggerUI, plugincontract.TriggerEvent, plugincontract.TriggerAgent} {
+	for _, undeclared := range []string{plugincontract.TriggerUI, plugincontract.TriggerEvent, plugincontract.TriggerAgent, plugincontract.TriggerSchedule} {
 		if HookAllowsTrigger(hook, undeclared) {
 			t.Fatalf("%s was not declared and must not be allowed", undeclared)
 		}
 	}
+}
+
+func TestScheduledHookBodyExtendsVersionOneProtocol(t *testing.T) {
+	installationID := testInstallationID(t)
+	invocationID := parseUUIDValueForTest(t, "22222222-2222-4222-8222-222222222222")
+	plannedAt := time.Date(2026, 8, 23, 10, 15, 0, 0, time.UTC)
+	body, err := (&PluginService{}).buildHookBody(context.Background(), HookInvocation{
+		ID: invocationID,
+		Installation: db.PluginInstallation{
+			ID:          installationID,
+			WorkspaceID: parseUUIDValueForTest(t, "33333333-3333-4333-8333-333333333333"),
+		},
+		Hook:       plugincontract.Hook{Key: "digest"},
+		Trigger:    plugincontract.TriggerSchedule,
+		Actor:      HookActor{Type: "plugin", ID: installationID},
+		DeliveryID: "psd_stable",
+		PlannedAt:  pgtype.Timestamptz{Time: plannedAt, Valid: true},
+		Attempt:    2,
+	})
+	if err != nil {
+		t.Fatalf("build scheduled hook body: %v", err)
+	}
+	if body.Version != 1 {
+		t.Fatalf("version=%d, want existing protocol version 1", body.Version)
+	}
+	if body.InvocationID != uuidString(invocationID) || body.DeliveryID != "psd_stable" || body.Attempt != 2 {
+		t.Fatalf("unexpected identity fields: %+v", body)
+	}
+	if body.OccurredAt.IsZero() {
+		t.Fatal("occurred_at must be populated per request")
+	}
+	if body.Schedule == nil || !body.Schedule.PlannedAt.Equal(plannedAt) {
+		t.Fatalf("schedule.planned_at=%v, want %s", body.Schedule, plannedAt)
+	}
+}
+
+func parseUUIDValueForTest(t *testing.T, value string) pgtype.UUID {
+	t.Helper()
+	parsed, err := parseUUIDValue(value)
+	if err != nil {
+		t.Fatalf("parse uuid: %v", err)
+	}
+	return parsed
 }
 
 // FindHook reads the CONSENTED manifest on the installation row. A hook that is

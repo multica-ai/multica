@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
-import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
+import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -153,8 +153,89 @@ describe("ApiClient Plugin preview response schema", () => {
 
     await expect(new ApiClient("https://api.example.test").previewPlugin(
       "workspace-1",
-      { source_url: "https://example.test/multica.plugin.json" },
+      { version_id: "version-1" },
     )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
+  });
+
+  // A malformed launch must not become a partly trusted frame URL.
+  it("falls back to an empty surface launch when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ url: 42, bridge_token: "proof" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").getPluginSurfaceLaunch(
+      "workspace-1",
+      "installation-1",
+      "hello",
+    )).resolves.toEqual(EMPTY_PLUGIN_SURFACE_LAUNCH);
+  });
+
+  it("falls back to an empty package list when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ packages: "nope" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").listPluginPackages("workspace-1"))
+      .resolves.toEqual(EMPTY_PLUGIN_PACKAGE_LIST);
+  });
+});
+
+describe("ApiClient Plugin surface bridge routes", () => {
+  it("relays Action API calls through the session-only bridge prefix", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").callPluginAction(
+      "installation-1",
+      { method: "GET", path: "/context", issueId: "MUL-42" },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/plugin-bridge/v1/context?issue_id=MUL-42",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "GET",
+      headers: expect.objectContaining({
+        "X-Multica-Plugin-Installation": "installation-1",
+      }),
+    });
+  });
+
+  it("invokes UI hooks through the session-only bridge prefix", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "ok",
+        hook_key: "summarize",
+        trigger: "ui",
+        latency_ms: 1,
+        attempts: 1,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").invokePluginHook(
+      "installation-1",
+      "summarize",
+      { trigger: "ui", issueId: "issue-1" },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/plugin-bridge/v1/hooks/summarize",
+    );
   });
 });
 

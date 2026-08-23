@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 function makeRequest(
   path: string,
@@ -134,6 +134,10 @@ describe("proxy legacy workspace route redirects", () => {
 });
 
 describe("proxy runtime upstream rewrites", () => {
+  it("matches globally versioned Plugin API requests", () => {
+    expect(config.matcher).toContain("/v1/:path*");
+  });
+
   it("does not rewrite API requests when no runtime API origin is configured", () => {
     withoutRuntimeUpstreams(() => {
       const res = proxy(makeRequest("/api/config?x=1"));
@@ -143,6 +147,15 @@ describe("proxy runtime upstream rewrites", () => {
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
       ).toBe("en");
+    });
+  });
+
+  it("does not rewrite Plugin API requests when no runtime API origin is configured", () => {
+    withoutRuntimeUpstreams(() => {
+      const res = proxy(makeRequest("/v1/context?x=1"));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
     });
   });
 
@@ -167,6 +180,21 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("x-middleware-rewrite")).toBe(
         "http://backend:8080/api/config?x=1",
+      );
+    } finally {
+      restoreEnv("REMOTE_API_URL", previous);
+    }
+  });
+
+  it("rewrites Plugin API requests to the runtime API origin", () => {
+    const previous = process.env.REMOTE_API_URL;
+    process.env.REMOTE_API_URL = "http://backend:8080";
+    try {
+      const res = proxy(makeRequest("/v1/issues/MUL-6581?x=1"));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-rewrite")).toBe(
+        "http://backend:8080/v1/issues/MUL-6581?x=1",
       );
     } finally {
       restoreEnv("REMOTE_API_URL", previous);

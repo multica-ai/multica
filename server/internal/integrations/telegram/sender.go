@@ -12,14 +12,29 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
-// User-facing copy the bot speaks in Telegram. Chinese-first, aligned with
-// the Lark adapter's product voice (conventions.zh.mdx); the binding prompt
-// carries the redeem link.
+// User-facing copy the bot speaks in Telegram. English, matching the Slack
+// and DingTalk adapters word for word wherever they say the same thing.
+//
+// The language is chosen per channel by who is on the other end, and this is
+// the decision record so the next person does not "fix" it back (MUL-6509,
+// #7349). WeCom and Lark are Chinese-market products — WeCom is China-only
+// and their adapters keep Chinese copy on purpose. Telegram is blocked in
+// mainland China and reaches everyone else, so a Chinese-first bot there
+// speaks the wrong language to almost every user it has, starting with the
+// binding prompt they must act on before anything else works.
+//
+// English rather than a locale lookup because this bot speaks before it knows
+// who it is speaking to: the binding prompt is sent to an unbound sender, and
+// user.language is only ever written by the settings language switcher, so it
+// is NULL for anyone who never opened it. English is the product default
+// (DEFAULT_LOCALE in packages/core/i18n/types.ts).
+//
+// The binding prompt carries the redeem link.
 const (
-	msgAgentOffline     = "⚠️ 智能体当前离线，消息已记录。下次 daemon 上线后会自动继续处理。"
-	msgAgentArchived    = "⚠️ 该智能体已归档，无法回复。请联系工作区管理员。"
-	msgUnsupportedType  = "暂不支持此类消息，请发送文字内容。"
-	msgBindingGroupHint = "请先私聊我发送一条消息，再完成 Multica 账号绑定。"
+	msgAgentOffline     = "⚠️ The agent is offline right now. Your message was received and will be handled once it's back online."
+	msgAgentArchived    = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	msgUnsupportedType  = "Sorry, I can't handle this kind of message yet. Please send text."
+	msgBindingGroupHint = "Please message me in a direct chat first, then link your Multica account."
 )
 
 // maxMessageUnits caps one outbound sendMessage body. Telegram hard-caps a

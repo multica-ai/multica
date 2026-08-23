@@ -7,17 +7,13 @@ import { api } from "@multica/core/api";
  * session and returns the result. The plugin holds no credential, so this is
  * the only path from a surface into Multica.
  *
- * Identity is bound by the MessagePort, not by `event.origin`. A sandboxed
- * frame without `allow-same-origin` has the opaque origin "null" — every
- * surface would present the same string, so comparing it would authenticate
- * nothing. Instead the host creates one channel per iframe, transfers one end
- * in, and only ever listens on the other; which plugin sent a message is
- * answered by which channel it arrived on.
+ * Identity is bound by three things together: the expected outer frame window,
+ * a single-use launch challenge, and the guest-created MessagePort. Origin is
+ * not useful for the inner plugin frame because its sandbox makes it opaque.
  */
 
-const BRIDGE_PROTOCOL_VERSION = 1;
-const BRIDGE_INIT_MESSAGE = "multica:plugin-bridge-init";
-const BRIDGE_READY_MESSAGE = "multica:plugin-surface-ready";
+const BRIDGE_PROTOCOL_VERSION = 2;
+const BRIDGE_CONNECT_MESSAGE = "multica:plugin-bridge-connect";
 
 type BridgeMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -63,6 +59,8 @@ function isBridgeRequest(value: unknown): value is BridgeRequest {
 
 export interface SurfaceBridgeOptions {
   installationId: string;
+  /** Single-use proof returned with this exact hosted document URL. */
+  bridgeToken: string;
   /** Mounted-on issue, forwarded to /context so the surface knows where it is. */
   issueId?: string;
   onResize?: (height: number) => void;
@@ -70,12 +68,9 @@ export interface SurfaceBridgeOptions {
 
 export interface SurfaceBridge {
   /**
-   * Waits for the surface to announce itself, then hands it a port.
-   *
-   * Driven by the guest rather than by the iframe's load event: a srcdoc frame
-   * can finish loading before React attaches `onLoad`, so a load-driven host
-   * either never fires or sends the port before the guest is listening. Both
-   * failures look the same from outside — a blank panel.
+   * Arms the listener before the trusted outer document is assigned. The guest
+   * creates the channel; the host accepts its port only once all launch proofs
+   * match.
    */
   connect(frame: HTMLIFrameElement, theme: Record<string, string>): void;
   /** Pushes a theme change to an already-connected frame. */
@@ -84,9 +79,10 @@ export interface SurfaceBridge {
 }
 
 export function createSurfaceBridge(options: SurfaceBridgeOptions): SurfaceBridge {
-  let channel: MessageChannel | null = null;
+  let port: MessagePort | null = null;
   let closed = false;
-  const readyListeners: Array<(event: MessageEvent) => void> = [];
+  let connected = false;
+  const connectListeners: Array<(event: MessageEvent) => void> = [];
 
   const handle = async (request: BridgeRequest, port: MessagePort) => {
     if (request.kind === "ui.resize") {
@@ -121,43 +117,37 @@ export function createSurfaceBridge(options: SurfaceBridgeOptions): SurfaceBridg
   return {
     connect(frame, theme) {
       if (closed) return;
-      const onReady = (event: MessageEvent) => {
-        if ((event.data as { type?: string } | null)?.type !== BRIDGE_READY_MESSAGE) return;
-        // The only check that matters: the signal came from the window this
-        // bridge owns. Origin cannot be used — every sandboxed frame reports
-        // "null" — so identity is the window reference plus, from here on, the
-        // private port.
+      const onConnect = (event: MessageEvent) => {
+        const data = event.data as { type?: string; version?: number; challenge?: string } | null;
+        if (data?.type !== BRIDGE_CONNECT_MESSAGE) return;
+        // The outer frame is trusted host code. It forwards an inner port only
+        // after its own source, protocol and challenge checks have passed.
         if (!frame.contentWindow || event.source !== frame.contentWindow) return;
-        window.removeEventListener("message", onReady);
-        if (closed) return;
+        if (data.version !== BRIDGE_PROTOCOL_VERSION || data.challenge !== options.bridgeToken) return;
+        const guestPort = event.ports?.[0];
+        if (!guestPort || closed || connected) return;
 
-        channel?.port1.close();
-        channel = new MessageChannel();
-        channel.port1.onmessage = (portEvent) => {
+        connected = true;
+        window.removeEventListener("message", onConnect);
+        port = guestPort;
+        port.onmessage = (portEvent) => {
           if (!isBridgeRequest(portEvent.data)) return;
-          void handle(portEvent.data, channel!.port1);
+          void handle(portEvent.data, guestPort);
         };
-        channel.port1.start();
-        // targetOrigin "*" is required, not lax: an opaque origin can never
-        // match a string. The message carries no secret, and the port is
-        // transferred into this specific contentWindow.
-        frame.contentWindow.postMessage(
-          { type: BRIDGE_INIT_MESSAGE, version: BRIDGE_PROTOCOL_VERSION, theme },
-          "*",
-          [channel.port2],
-        );
+        port.start();
+        port.postMessage({ kind: "theme", theme });
       };
-      readyListeners.push(onReady);
-      window.addEventListener("message", onReady);
+      connectListeners.push(onConnect);
+      window.addEventListener("message", onConnect);
     },
     pushTheme(theme) {
-      channel?.port1.postMessage({ kind: "theme", theme });
+      port?.postMessage({ kind: "theme", theme });
     },
     close() {
       closed = true;
-      for (const listener of readyListeners.splice(0)) window.removeEventListener("message", listener);
-      channel?.port1.close();
-      channel = null;
+      for (const listener of connectListeners.splice(0)) window.removeEventListener("message", listener);
+      port?.close();
+      port = null;
     },
   };
 }

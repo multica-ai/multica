@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 로컬 `multica` 데이터베이스 | PostgreSQL 연결 주소 |
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 컨테이너 시작 중 migration과 API가 공유하는 일시적인 데이터베이스 장애 재시도 시간. `0`으로 설정하면 각 단계에서 한 번만 시도 |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 시작 중 각 연결 시도의 폴백 제한 시간. pgx 기본 `connect_timeout`, `PGCONNECT_TIMEOUT` 또는 service 설정이 우선 적용됨 |
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
@@ -40,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 작업을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | 태스크가 대기열에 점유되지 않고 머물 수 있는 최대 시간. 초과 시 `queued_expired`로 실패. 저 동시성 런타임이 긴 작업 뒤에 합리적으로 대기할 수 있으므로 이 경우 값을 키워야 함 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -173,6 +176,10 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 저장된 secret과 surface 실행 URL을 암호화하는 base64 인코딩 32바이트 키 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
+| Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
+| Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 

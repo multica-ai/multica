@@ -2,8 +2,8 @@
   "manifest_version": 1,
   "key": "ai.multica.triage-notify",
   "name": "Triage Notify",
-  "description": "Sends an issue to an external triage service and writes its answer back as a comment. Demonstrates all three host-driven hook triggers: a button in the panel, an entry in the issue menu, and automatic dispatch when an issue is created.",
-  "version": "1.0.0",
+  "description": "Sends an issue to an external triage service and writes its answer back as a comment. Also demonstrates a no-side-effect Hook that Multica wakes every five minutes.",
+  "version": "1.1.0",
   "author": {
     "name": "multica",
     "url": "https://multica.ai"
@@ -60,6 +60,23 @@
         "transport": {
           "type": "http",
           "url": "https://triage.example.com/hooks/triage"
+        },
+        "timeout_ms": 8000
+      },
+      {
+        "key": "scheduled_heartbeat",
+        "name": "Scheduled heartbeat",
+        "description": "Acknowledges a durable scheduled delivery without writing to Multica or another service.",
+        "triggers": [
+          "schedule"
+        ],
+        "schedule": {
+          "cron": "*/5 * * * *",
+          "timezone": "UTC"
+        },
+        "transport": {
+          "type": "http",
+          "url": "https://triage.example.com/hooks/heartbeat"
         },
         "timeout_ms": 8000
       }

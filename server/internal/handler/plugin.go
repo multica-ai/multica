@@ -56,12 +56,15 @@ func writePluginError(w http.ResponseWriter, err error, fallback string) {
 // encrypted table), and configured secrets appear as names in
 // `configured_secrets`.
 type pluginInstallationResponse struct {
-	ID                string                      `json:"id"`
-	PluginKey         string                      `json:"plugin_key"`
-	Name              string                      `json:"name"`
-	Description       string                      `json:"description,omitempty"`
-	Version           string                      `json:"version"`
-	SourceURL         string                      `json:"source_url"`
+	ID          string `json:"id"`
+	PluginKey   string `json:"plugin_key"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Version     string `json:"version"`
+	// The published version this installation is bound to. Nothing about it can
+	// change under the workspace's feet: upgrading means pointing at a different
+	// version id, which is a second consent.
+	PackageVersionID  string                      `json:"package_version_id"`
 	Enabled           bool                        `json:"enabled"`
 	GrantedScopes     []string                    `json:"granted_scopes"`
 	ConfigSchema      []service.PluginConfigField `json:"config_schema"`
@@ -77,12 +80,19 @@ type pluginInstallationResponse struct {
 // pluginHookResponse omits input_schema: the settings page lists what a hook is
 // and who may call it, and the raw JSON Schema is noise there.
 type pluginHookResponse struct {
-	Key         string   `json:"key"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Triggers    []string `json:"triggers"`
-	Events      []string `json:"events,omitempty"`
-	Transport   string   `json:"transport"`
+	Key         string                      `json:"key"`
+	Name        string                      `json:"name"`
+	Description string                      `json:"description"`
+	Triggers    []string                    `json:"triggers"`
+	Events      []string                    `json:"events,omitempty"`
+	Transport   string                      `json:"transport"`
+	Schedule    *pluginHookScheduleResponse `json:"schedule,omitempty"`
+}
+
+type pluginHookScheduleResponse struct {
+	Cron      string `json:"cron"`
+	Timezone  string `json:"timezone"`
+	NextRunAt string `json:"next_run_at,omitempty"`
 }
 
 func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db.PluginInstallation) (pluginInstallationResponse, error) {
@@ -106,17 +116,35 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 	if granted == nil {
 		granted = []string{}
 	}
+	scheduleRows, err := h.Queries.ListPluginHookSchedulesByInstallation(ctx, installation.ID)
+	if err != nil {
+		return pluginInstallationResponse{}, err
+	}
+	schedules := make(map[string]db.PluginHookSchedule, len(scheduleRows))
+	for _, schedule := range scheduleRows {
+		schedules[schedule.HookKey] = schedule
+	}
 
 	hooks := make([]pluginHookResponse, 0, len(manifest.Contributes.Hooks))
 	for _, hook := range manifest.Contributes.Hooks {
-		hooks = append(hooks, pluginHookResponse{
+		response := pluginHookResponse{
 			Key:         hook.Key,
 			Name:        hook.Name,
 			Description: hook.Description,
 			Triggers:    hook.Triggers,
 			Events:      hook.Events,
 			Transport:   hook.Transport.Type,
-		})
+		}
+		if schedule, ok := schedules[hook.Key]; ok {
+			response.Schedule = &pluginHookScheduleResponse{
+				Cron:     schedule.CronExpression,
+				Timezone: schedule.Timezone,
+			}
+			if schedule.NextRunAt.Valid {
+				response.Schedule.NextRunAt = schedule.NextRunAt.Time.UTC().Format(timeFormatRFC3339)
+			}
+		}
+		hooks = append(hooks, response)
 	}
 	surfaces := manifest.Contributes.Surfaces
 	if surfaces == nil {
@@ -133,7 +161,7 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           installation.Version,
-		SourceURL:         installation.SourceUrl,
+		PackageVersionID:  uuidToString(installation.PackageVersionID),
 		Enabled:           installation.Enabled,
 		GrantedScopes:     granted,
 		ConfigSchema:      service.ConfigFieldsForManifest(manifest),
@@ -176,7 +204,7 @@ func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
 }
 
 type previewPluginRequest struct {
-	SourceURL string `json:"source_url"`
+	VersionID string `json:"version_id"`
 }
 
 // PreviewPlugin — POST /api/workspaces/{id}/plugins/preview
@@ -196,7 +224,7 @@ func (h *Handler) PreviewPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	preview, err := h.PluginService.PreviewPlugin(r.Context(), workspaceID, req.SourceURL)
+	preview, err := h.PluginService.PreviewPlugin(r.Context(), workspaceID, req.VersionID)
 	if err != nil {
 		writePluginError(w, err, "failed to read the Plugin manifest")
 		return
@@ -205,7 +233,7 @@ func (h *Handler) PreviewPlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 type installPluginRequest struct {
-	SourceURL     string   `json:"source_url"`
+	VersionID     string   `json:"version_id"`
 	GrantedScopes []string `json:"granted_scopes"`
 }
 
@@ -228,7 +256,7 @@ func (h *Handler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	installation, err := h.PluginService.InstallPlugin(r.Context(), workspaceID, member.UserID, req.SourceURL, req.GrantedScopes)
+	installation, err := h.PluginService.InstallPlugin(r.Context(), workspaceID, member.UserID, req.VersionID, req.GrantedScopes)
 	if err != nil {
 		writePluginError(w, err, "failed to install the Plugin")
 		return

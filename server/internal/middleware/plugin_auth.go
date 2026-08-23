@@ -5,33 +5,20 @@ import (
 	"strings"
 )
 
-// PluginAuth lets the Action API be reached two ways without weakening either.
+// PluginBearerOnly keeps the public Action API on a machine-credential trust
+// boundary. Browser sessions use the separate, session-authenticated bridge
+// route; the public /v1 contract accepts only installation and callback tokens.
 //
-// The original way is the only one a SURFACE has: no credential at all. The
-// iframe posts a message to the host page, the host re-issues the call on the
-// signed-in user's session, and this middleware sends it through the ordinary
-// Auth chain like any other request.
-//
-// Hooks add a second way. A plugin's own server has no session and never will,
-// so when it presents a plugin bearer token this middleware steps aside and
-// lets the handler resolve the token itself — which it must, because only the
-// handler knows which installation and which scopes that token stands for.
-//
-// Stepping aside is not the same as skipping authentication: every Action API
-// handler starts by resolving a caller, and a request that arrives with neither
-// a session nor a valid token fails there. What this avoids is the session
-// chain rejecting a token-bearing request before the handler can look at it.
-func PluginAuth(sessionAuth func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		sessionProtected := sessionAuth(next)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if IsPluginBearerToken(BearerToken(r)) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			sessionProtected.ServeHTTP(w, r)
-		})
-	}
+// Prefix matching is only routing. The Action handler still resolves the token
+// against its store and rejects an invalid or expired credential.
+func PluginBearerOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !IsPluginBearerToken(BearerToken(r)) {
+			writeError(w, http.StatusUnauthorized, "plugin bearer token required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // BearerToken pulls the raw credential out of an Authorization header.

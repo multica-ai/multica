@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attributionbackfill"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/migrations"
 	"github.com/multica-ai/multica/server/internal/taskusagebackfill"
@@ -207,6 +210,9 @@ var concurrentIndexCleanups = map[string]string{
 	"305_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
+	"384_create_dingtalk_group_presence_identity_index":         "idx_dingtalk_group_presence_installation_conversation",
+	"385_create_dingtalk_group_presence_activity_index":         "idx_dingtalk_group_presence_workspace_activity",
+	"388_create_dingtalk_bot_identity_installation_index":       "idx_dingtalk_bot_identity_installation",
 	"309_agent_runtime_id_index":                                "idx_agent_runtime_id",
 	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
 	"316_workspace_mcp_server_name_unique":                      "idx_workspace_mcp_server_workspace_name",
@@ -238,6 +244,16 @@ var concurrentIndexCleanups = map[string]string{
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
 	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
 	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
+	"378_channel_chat_context_generation_key":                   "channel_chat_context_generation_session_revision_idx",
+	"390_agent_task_queue_dispatched_reclaim_v2_index":          "idx_agent_task_queue_dispatched_reclaim_v2",
+	"393_plugin_package_workspace_key_index":                    "idx_plugin_package_workspace_key",
+	"394_plugin_package_version_unique_index":                   "idx_plugin_package_version_unique",
+	"395_plugin_package_version_package_index":                  "idx_plugin_package_version_package",
+	"396_plugin_package_file_path_index":                        "idx_plugin_package_file_path",
+	"397_plugin_installation_package_version_index":             "idx_plugin_installation_package_version",
+	"398_issue_workspace_status_position_index":                 "idx_issue_workspace_status_position",
+	"400_plugin_hook_schedule_installation_key_index":           "idx_plugin_hook_schedule_installation_key",
+	"401_plugin_hook_schedule_enabled_index":                    "idx_plugin_hook_schedule_enabled",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -258,6 +274,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
 	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
 	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
+	"391_drop_agent_task_queue_dispatched_prepare_index":    "idx_agent_task_queue_dispatched_prepare",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -533,18 +550,13 @@ func main() {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dbURL)
+	startupSettings := dbstartup.SettingsFromEnv()
+	pool, err := dbstartup.NewPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		slog.Error("unable to ping database", "error", err)
-		os.Exit(1)
-	}
 
 	files, err := migrations.Files(direction)
 	if err != nil {
@@ -552,13 +564,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runMigrations(ctx, pool, runOptions{
+	options := runOptions{
 		Direction:  direction,
 		Files:      files,
 		Hooks:      hooksForDirection(direction),
 		Conditions: conditionsForDirection(direction),
-	}); err != nil {
-		slog.Error("migration run failed", "error", err)
+	}
+	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopStartup()
+	retryOptions := startupSettings.RetryOptions()
+	retryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+	retryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+		slog.Warn("database unavailable before migrations; retrying",
+			"attempt", event.Attempt,
+			"retry_in", event.Delay,
+			"error", event.Err,
+		)
+	}
+	if err := dbstartup.Retry(startupCtx, retryOptions, pool.Ping); err != nil {
+		slog.Error("unable to ping database", "error", err)
+		os.Exit(1)
+	}
+
+	migrationErr := runMigrations(startupCtx, pool, options)
+	if migrationErr != nil && startupSettings.StartupTimeout > 0 && dbstartup.IsTransientDatabaseError(migrationErr) {
+		slog.Warn("migration interrupted by database unavailability; retrying", "error", migrationErr)
+		migrationRetryOptions := startupSettings.RetryOptions()
+		migrationRetryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+		migrationRetryOptions.AllowOperationPastTimeout = true
+		migrationRetryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+			slog.Warn("database unavailable during migration retry",
+				"attempt", event.Attempt,
+				"retry_in", event.Delay,
+				"error", event.Err,
+			)
+		}
+		migrationErr = dbstartup.Retry(startupCtx, migrationRetryOptions, func(attemptCtx context.Context) error {
+			if err := pool.Ping(attemptCtx); err != nil {
+				return fmt.Errorf("ping database: %w", err)
+			}
+			return runMigrations(attemptCtx, pool, options)
+		})
+	}
+	if migrationErr != nil {
+		slog.Error("migration run failed", "error", migrationErr)
 		os.Exit(1)
 	}
 
