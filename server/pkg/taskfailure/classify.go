@@ -445,7 +445,11 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	storageError := strings.ToLower(strings.TrimSpace(rawError))
 	if legacyStorageExhaustedReasons[reason] &&
 		strings.HasPrefix(storageError, "prepare execution environment:") &&
-		strings.Contains(storageError, "no space left on device") {
+		containsAny(storageError,
+			"no space left on device",
+			"the disk is full",
+			"there is not enough space on the disk",
+		) {
 		return ReasonRuntimeStorageExhausted
 	}
 	if legacySkillBundleReasons[reason] &&

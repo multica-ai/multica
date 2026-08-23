@@ -445,16 +445,19 @@ func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
 }
 
 func TestNormalizeDaemonReasonUpgradesLegacyStorageExhaustion(t *testing.T) {
-	raw := "prepare execution environment: execenv: mkdir " +
-		"/workspaces/task: no space left on device"
-
-	for _, legacy := range []string{
-		ReasonAgentProviderAuthOrAccess.String(),
-		ReasonAgentUnknown.String(),
-		"agent_error",
+	for _, raw := range []string{
+		"prepare execution environment: execenv: mkdir /workspaces/task: no space left on device",
+		"prepare execution environment: execenv: mkdir C:\\workspaces\\task: The disk is full.",
+		"prepare execution environment: execenv: mkdir C:\\workspaces\\task: There is not enough space on the disk.",
 	} {
-		if got := NormalizeDaemonReason(legacy, raw); got != ReasonRuntimeStorageExhausted {
-			t.Errorf("NormalizeDaemonReason(%q, storage exhaustion) = %q, want %q", legacy, got, ReasonRuntimeStorageExhausted)
+		for _, legacy := range []string{
+			ReasonAgentProviderAuthOrAccess.String(),
+			ReasonAgentUnknown.String(),
+			"agent_error",
+		} {
+			if got := NormalizeDaemonReason(legacy, raw); got != ReasonRuntimeStorageExhausted {
+				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", legacy, raw, got, ReasonRuntimeStorageExhausted)
+			}
 		}
 	}
 }
