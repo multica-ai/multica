@@ -186,6 +186,21 @@ describe("proxy runtime upstream rewrites", () => {
     }
   });
 
+  it("rewrites the CLI health probe to the runtime API origin", () => {
+    const previous = process.env.REMOTE_API_URL;
+    process.env.REMOTE_API_URL = "http://backend:8080";
+    try {
+      const res = proxy(makeRequest("/health"));
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-middleware-rewrite")).toBe(
+        "http://backend:8080/health",
+      );
+    } finally {
+      restoreEnv("REMOTE_API_URL", previous);
+    }
+  });
+
   it("rewrites Plugin API requests to the runtime API origin", () => {
     const previous = process.env.REMOTE_API_URL;
     process.env.REMOTE_API_URL = "http://backend:8080";
