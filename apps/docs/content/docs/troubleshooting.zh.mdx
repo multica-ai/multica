@@ -108,6 +108,18 @@ multica issue runs <issue-id>
 - 反向代理是否转发 WebSocket 的 Upgrade 请求；
 - 浏览器登录是否已经过期。
 
+直接用 `curl` 访问 `/ws` 返回 HTTP 400 是正常现象：该端点要求已认证的守护进程 token，没有 token 的握手本来就会被拒。backend 日志里出现 400/401 记录，说明请求已经穿透整条代理链——链路本身是通的。
+
+## `multica setup` 报告服务器不可达
+
+CLI 的可达性探测会 GET `<server-url>/health` 并要求 200。backend 提供这个路径，但 web frontend 不提供——把所有流量都转给 frontend 的反向代理会返回 404，于是 CLI 误判服务不可用，而服务实际是健康的。
+
+在代理里把 `/health` 转给 backend（8080 端口）——[自托管快速上手](/self-host-quickstart#3-选择访问方式)里的两个 Caddy 示例都包含这条。确认方法：
+
+```bash
+curl -fsS <server-url>/health
+```
+
 容器只在创建时读取 `.env`，修改后需要重新创建：
 
 ```bash

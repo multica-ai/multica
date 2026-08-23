@@ -108,6 +108,18 @@ Check the `/ws` connection under **Network → WS** in the browser's developer t
 - Whether the reverse proxy forwards the WebSocket Upgrade request.
 - Whether the browser sign-in has expired.
 
+A plain `curl` against `/ws` returning HTTP 400 is expected: the endpoint requires an authenticated daemon token and rejects the handshake without one. A 400/401 recorded in the backend logs proves the request traversed the whole proxy chain — the link itself works.
+
+## `multica setup` reports the server is not reachable
+
+The CLI reachability probe GETs `<server-url>/health` and needs a 200. The backend serves this path, but the web frontend does not, so a reverse proxy that forwards everything to the frontend returns 404 and the CLI concludes the server is down while the stack is healthy.
+
+Route `/health` to the backend (port 8080) in your proxy — both Caddy examples in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) do this. Confirm with:
+
+```bash
+curl -fsS <server-url>/health
+```
+
 Containers read `.env` only at creation time; recreate them after changes:
 
 ```bash

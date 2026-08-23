@@ -57,6 +57,13 @@ Running `make selfhost` again reuses the existing `.env` and volumes; it does no
 
 <Callout type="info">
 `make selfhost` pulls published images and does not build the code in your checkout. To test local source, use `make selfhost-build`.
+
+The published images track the newest **release tag**, while a plain `git clone` checks out `main`, which usually runs ahead. If you build anything from this checkout — the CLI, or images via `make selfhost-build` — check out the matching release tag first so built binaries and the running containers stay on the same version:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. Confirm the services are ready
@@ -131,12 +138,41 @@ api.example.com {
 }
 ```
 
+If you would rather serve everything on a **single origin** (one domain, or one host with one port — common on small servers), route the daemon-critical paths to the backend explicitly and let the frontend handle the rest:
+
+```text
+multica.example.com {
+    # CLI reachability probe: `multica setup` GETs <server-url>/health and
+    # needs a 200 — the frontend does not serve it
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # Browser and daemon WebSockets — straight to the backend
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # Everything else goes to the frontend, which forwards API and login requests
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+With a single origin, point both URLs at it (`FRONTEND_ORIGIN` and `MULTICA_APP_URL` in `.env`, then `--server-url` and `--app-url` in `multica setup self-host`).
+
 Caddy obtains TLS certificates and forwards WebSockets. After editing `.env`, recreate the containers with `up -d` so the new configuration takes effect:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | jq .daemon_server_url
 ```
+
+The last command should print your public HTTPS URL. If it prints a `localhost` address, `.env` still carries local defaults: `FRONTEND_ORIGIN` and `MULTICA_APP_URL` do not follow `FRONTEND_PORT` automatically on Docker Compose releases older than 2.24 (the `${FRONTEND_PORT}` references copied from `.env.example` stay literal there), so set them explicitly.
 
 <Callout type="warning">
 `docker compose restart` only restarts existing containers and does not re-read `.env`. After changing configuration, run `docker compose -f docker-compose.selfhost.yml up -d` to re-read `.env`.
@@ -201,7 +237,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon.
+The command first checks `<server-url>/health`, then opens a browser to complete login. After login it stores local credentials and starts the daemon. A `Server not reachable` error at this step almost always means `/health` returned 404 through the proxy — see [Troubleshooting](/troubleshooting#multica-setup-reports-the-server-is-not-reachable).
 
 Confirm the connection:
 

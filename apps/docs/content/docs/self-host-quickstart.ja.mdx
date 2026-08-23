@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost` は公開済みのイメージを取得し、checkout 中のコードをビルドしません。ローカルのソースを試すには `make selfhost-build` を使ってください。
+
+公開済みのイメージは最新の **release タグ** を追跡しますが、単なる `git clone` でチェックアウトされるのは `main` で、通常リリースより先行しています。この checkout から何かをビルドする場合——CLI、または `make selfhost-build` によるイメージ——は、先に対応する release タグへ切り替えて、ビルドしたバイナリと稼働中のコンテナのバージョンを揃えてください:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. サービスの準備完了を確認する
@@ -131,12 +138,41 @@ api.example.com {
 }
 ```
 
+すべてのトラフィックを**単一オリジン**（1 つのドメイン、または 1 台のホストに 1 つのポート——小規模サーバーで一般的）で扱いたい場合は、デーモンが依存するパスを backend に明示的に転送し、残りを frontend に任せます:
+
+```text
+multica.example.com {
+    # CLI の到達確認: `multica setup` は <server-url>/health に GET を送り 200 を要求する。
+    # frontend はこのパスを提供しない
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # ブラウザとデーモンの WebSocket は backend へ直接
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 残りのパスは frontend へ。API とログインのリクエストを転送する
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+単一オリジンでは、2 つの URL をどちらもそこに向けます（`.env` の `FRONTEND_ORIGIN` と `MULTICA_APP_URL`、および `multica setup self-host` の `--server-url` と `--app-url`）。
+
 Caddy が TLS 証明書を取得し、WebSocket を転送します。`.env` を変更したら、`up -d` でコンテナを作り直して新しい設定を反映します。
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | jq .daemon_server_url
 ```
+
+最後のコマンドは公開用の HTTPS URL を出力するはずです。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: Docker Compose 2.24 未満では `FRONTEND_ORIGIN` と `MULTICA_APP_URL` は `FRONTEND_PORT` に自動追随せず（`.env.example` からコピーした `${FRONTEND_PORT}` 参照はリテラルのまま残る）、明示的な設定が必要です。
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。
@@ -201,7 +237,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。
+このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出るのは、ほぼ常にプロキシ経由の `/health` が 404 を返していることが原因です——[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
 
 接続状態を確認します。
 

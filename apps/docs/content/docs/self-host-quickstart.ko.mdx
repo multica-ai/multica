@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost`는 공개된 이미지를 pull하며 현재 checkout의 코드를 컴파일하지 않습니다. 로컬 소스 코드를 테스트하려면 `make selfhost-build`를 사용하세요.
+
+공개된 이미지는 최신 **release 태그**를 따르지만, 단순히 `git clone`하면 `main`이 체크아웃되며 보통 릴리스보다 앞서 있습니다. 이 checkout에서 무언가를 빌드할 때(CLI, 또는 `make selfhost-build`로 만드는 이미지)는 먼저 해당 release 태그로 전환해서 빌드 결과물과 실행 중인 컨테이너의 버전을 일치시키세요:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. 서비스 준비 상태 확인
@@ -131,12 +138,41 @@ api.example.com {
 }
 ```
 
+모든 트래픽을 **단일 오리진**(하나의 도메인, 또는 호스트 하나에 포트 하나로, 소규모 서버에서 흔한 형태)으로 처리하려면, 데몬이 의존하는 경로를 backend로 명시적으로 전달하고 나머지는 frontend에 맡기세요:
+
+```text
+multica.example.com {
+    # CLI 도달 확인: `multica setup`이 <server-url>/health에 GET을 보내 200을 기대합니다.
+    # frontend는 이 경로를 제공하지 않습니다
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 브라우저와 데몬의 WebSocket은 backend로 직접
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 나머지 경로는 frontend로 전달하며 frontend가 API와 로그인 요청을 proxy
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+단일 오리진에서는 두 URL을 모두 그 오리진으로 지정합니다(`.env`의 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`, 그리고 `multica setup self-host`의 `--server-url`과 `--app-url`).
+
 Caddy가 TLS 인증서를 발급하고 WebSocket을 전달합니다. `.env`를 수정한 뒤 `up -d`로 컨테이너를 다시 만들어 새 설정을 적용합니다.
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | jq .daemon_server_url
 ```
+
+마지막 명령은 공개 HTTPS URL을 출력해야 합니다. `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: Docker Compose 2.24 미만에서는 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`이 `FRONTEND_PORT`를 자동으로 따르지 않습니다(`.env.example`에서 복사한 `${FRONTEND_PORT}` 참조가 리터럴로 남습니다). 명시적으로 설정하세요.
 
 <Callout type="warning">
 `docker compose restart`는 기존 컨테이너만 다시 시작하며 `.env`를 다시 읽지 않습니다. 설정을 수정한 뒤 `.env`를 다시 읽게 하려면 `docker compose -f docker-compose.selfhost.yml up -d`를 실행하세요.
@@ -201,7 +237,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다.
+이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다. 이 단계에서 `Server not reachable` 오류가 나면 거의 항상 프록시를 거친 `/health`가 404를 반환하는 것이 원인입니다. [문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)을 참고하세요.
 
 연결 상태를 확인합니다.
 

@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost` 拉取已发布的镜像，不会编译当前 checkout 中的代码。需要测试本地源码时，使用 `make selfhost-build`。
+
+已发布的镜像跟随最新的 **release tag**，而直接 `git clone` 检出的是 `main`，通常领先于发版。如果你要在这个 checkout 上构建任何东西——CLI，或通过 `make selfhost-build` 构建镜像——先切换到与镜像对应的 release tag，让构建产物和运行中的容器保持同一版本：
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. 确认服务已经就绪
@@ -131,12 +138,41 @@ api.example.com {
 }
 ```
 
+如果想让所有流量走**单一 origin**（一个域名，或一台主机一个端口——小服务器上常见），把守护进程依赖的路径显式转给 backend，其余交给 frontend：
+
+```text
+multica.example.com {
+    # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
+    # frontend 不提供这个路径
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 浏览器和守护进程的 WebSocket 直接交给 backend
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 其余路径交给 frontend；它会转发 API 和登录请求
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+单一 origin 模式下，两个 URL 都指向它（`.env` 里的 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL`，以及 `multica setup self-host` 的 `--server-url` 和 `--app-url`）。
+
 Caddy 会申请 TLS 证书并转发 WebSocket。修改 `.env` 后，用 `up -d` 重新创建容器，让新配置生效：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | jq .daemon_server_url
 ```
+
+最后一条命令应输出你的公网 HTTPS 地址。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：`FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 在 2.24 之前的 Docker Compose 上不会自动跟随 `FRONTEND_PORT`（从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用会保持字面量），需要显式设置。
 
 <Callout type="warning">
 `docker compose restart` 只重启现有容器，不会重新读取 `.env`。修改配置后，重新读取 `.env` 需要运行 `docker compose -f docker-compose.selfhost.yml up -d`。
@@ -201,7 +237,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。
+这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。这一步报 `Server not reachable` 几乎总是因为 `/health` 经代理返回了 404——见[问题排查](/troubleshooting#multica-setup-报告服务器不可达)。
 
 确认连接状态：
 
