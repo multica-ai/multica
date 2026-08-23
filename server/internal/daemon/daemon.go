@@ -23,6 +23,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
+	"github.com/multica-ai/multica/server/internal/cerebra"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -361,6 +362,9 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	cerebraRouter *cerebra.Router
+	unavailStore  *cerebra.UnavailabilityStore
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -660,6 +664,17 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	session := cerebra.NewSessionStore(2 * time.Hour)
+	unavail := cerebra.NewUnavailabilityStore(time.Hour)
+	d.unavailStore = unavail
+	d.cerebraRouter = cerebra.NewRouter(
+		classifier, policy, session, unavail, logger,
+		nil,
+	)
+
 	return d
 }
 
@@ -7436,6 +7451,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "opencode" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
+	if d.cerebraRouter != nil {
+		var connectedAppNames []string
+		for _, app := range task.ConnectedApps {
+			connectedAppNames = append(connectedAppNames, app.ServerName)
+		}
+		meta := cerebra.TaskMeta{
+			WillUseMCPTools: detectMCPUsage(nil, connectedAppNames),
+			IssueID:         task.IssueID,
+			SessionID:       task.ChatSessionID,
+		}
+		var runtimes []cerebra.RuntimeEntry
+		if task.RuntimeID != "" {
+			runtimes = append(runtimes, cerebra.RuntimeEntry{
+				RuntimeID: task.RuntimeID,
+				TierMap:   nil,
+			})
+		}
+		model = routeBeforeDispatch(ctx, d.cerebraRouter, prompt, meta, runtimes, model)
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,
 		Model:                      model,
@@ -7692,6 +7726,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("agent finished with poisoned fallback output, classifying as blocked",
 				"failure_reason", reason,
 			)
+			if d.unavailStore != nil {
+				kind := cerebra.ParseFailure(result.Output)
+				if cerebra.ShouldMarkUnavailable(kind) {
+					d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, model, 0)
+				}
+			}
 			return TaskResult{
 				Status:        "blocked",
 				Comment:       result.Output,
