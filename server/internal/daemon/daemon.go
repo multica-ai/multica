@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
@@ -70,6 +72,12 @@ const (
 	taskSlotCapacityBackoff  = 5 * time.Second
 	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
 	repoCheckoutModeIsolated = "isolated"
+	exactReplyRequiredEnv    = "MULTICA_EXACT_REPLY_REQUIRED"
+	exactReplyFileEnv        = "MULTICA_EXACT_REPLY_FILE"
+	exactReplyFileName       = "exact-reply.md"
+	exactReplyFileMaxBytes   = 64 << 10
+	exactReplyFileIdle       = "MULTICA_EXACT_REPLY/1 state=idle\n"
+	exactReplyProviderOutput = "MULTICA_EXACT_REPLY/1 state=provider\n"
 	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
 	// claim and before StartTask succeeds: runtime resolution, skill bundles,
 	// execution-environment setup, and the StartTask request itself. It is
@@ -6769,6 +6777,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
+	exactReplyRequired, err := exactReplyRequired(agentEnvOverrides)
+	if err != nil {
+		return TaskResult{}, err
+	}
 	// Effective Codex CLI args the task will launch with, normalized through the
 	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
 	// unquoting + blocked-flag filtering), preserving its ExtraArgs
@@ -7180,6 +7192,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
 		}
 	}()
+	if exactReplyRequired {
+		if err := prepareExactReplyFile(taskTempDir); err != nil {
+			return TaskResult{}, fmt.Errorf("prepare exact reply file: %w", err)
+		}
+	}
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →
@@ -7317,6 +7334,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	if exactReplyRequired {
+		agentEnv[exactReplyFileEnv] = filepath.Join(taskTempDir, exactReplyFileName)
+	}
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
 		if err != nil {
@@ -7592,6 +7612,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		if exactReplyRequired {
+			if err := prepareExactReplyFile(taskTempDir); err != nil {
+				return TaskResult{
+					Status:        "blocked",
+					Comment:       "exact reply protocol could not be rearmed for fresh retry: " + err.Error(),
+					WorkDir:       env.WorkDir,
+					EnvRoot:       env.RootDir,
+					FailureReason: taskfailure.ReasonAgentEmptyOrUnparseableOutput.String(),
+				}, nil
+			}
+		}
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
@@ -7663,6 +7694,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// returns (SessionID is already blanked above); reportTaskResult forwards it
 	// as session_rollout_missing on the terminal callback (MUL-5305).
 	defer func() { taskResult.SessionRolloutMissing = sessionRolloutMissing }()
+
+	if reply, declared, err := readExactReplyFile(taskTempDir, exactReplyRequired); err != nil {
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       "agent declared an invalid exact reply: " + err.Error(),
+			SessionID:     result.SessionID,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			Usage:         usageEntries,
+			FailureReason: taskfailure.ReasonAgentEmptyOrUnparseableOutput.String(),
+		}, nil
+	} else if declared {
+		result.Output = reply
+	}
 
 	switch result.Status {
 	case "completed":
@@ -7848,6 +7893,93 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func exactReplyRequired(customEnv map[string]string) (bool, error) {
+	found := false
+	for key, value := range customEnv {
+		if !strings.EqualFold(key, exactReplyRequiredEnv) {
+			continue
+		}
+		if found || key != exactReplyRequiredEnv || value != "1" {
+			return false, fmt.Errorf("agent custom_env %s must be exactly 1 when set", exactReplyRequiredEnv)
+		}
+		found = true
+	}
+	return found, nil
+}
+
+func prepareExactReplyFile(taskTempDir string) error {
+	root, err := os.OpenRoot(taskTempDir)
+	if err != nil {
+		return errors.New("task temp directory is unavailable")
+	}
+	defer root.Close()
+	if err := root.RemoveAll(exactReplyFileName); err != nil {
+		return errors.New("stale declaration could not be removed")
+	}
+	if err := root.WriteFile(exactReplyFileName, []byte(exactReplyFileIdle), 0o600); err != nil {
+		return errors.New("idle declaration could not be written")
+	}
+	return nil
+}
+
+func readExactReplyFile(taskTempDir string, required bool) (string, bool, error) {
+	if !required {
+		return "", false, nil
+	}
+	root, err := os.OpenRoot(taskTempDir)
+	if err != nil {
+		return "", true, errors.New("task temp directory is unavailable")
+	}
+	defer root.Close()
+
+	declaredInfo, err := root.Lstat(exactReplyFileName)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", true, errors.New("required declaration was not written")
+	}
+	if err != nil {
+		return "", true, errors.New("declaration metadata could not be read")
+	}
+	if !declaredInfo.Mode().IsRegular() {
+		return "", true, errors.New("declaration must be a regular file")
+	}
+
+	f, err := root.Open(exactReplyFileName)
+	if err != nil {
+		return "", true, errors.New("declaration could not be opened")
+	}
+	defer f.Close()
+	openedInfo, err := f.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(declaredInfo, openedInfo) {
+		return "", true, errors.New("declaration changed while being opened")
+	}
+	currentInfo, err := root.Lstat(exactReplyFileName)
+	if err != nil || !currentInfo.Mode().IsRegular() || !os.SameFile(currentInfo, openedInfo) {
+		return "", true, errors.New("declaration changed while being opened")
+	}
+
+	data, err := io.ReadAll(io.LimitReader(f, exactReplyFileMaxBytes+1))
+	if err != nil {
+		return "", true, errors.New("declaration could not be read")
+	}
+	if len(data) > exactReplyFileMaxBytes {
+		return "", true, fmt.Errorf("declaration exceeds %d bytes", exactReplyFileMaxBytes)
+	}
+	if !utf8.Valid(data) || strings.IndexByte(string(data), 0) >= 0 {
+		return "", true, errors.New("declaration must contain valid text")
+	}
+	reply := string(data)
+	if reply == exactReplyFileIdle {
+		return "", true, errors.New("required declaration was not written")
+	}
+	if reply == exactReplyProviderOutput {
+		return "", false, nil
+	}
+	if strings.TrimSpace(reply) == "" {
+		return "", true, errors.New("declaration must not be empty")
+	}
+	return reply, true, nil
 }
 
 // shouldRetryWithFreshSession reports whether a failed run that requested
