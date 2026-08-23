@@ -2089,11 +2089,17 @@ RETURNING *;
 -- runtime_id filter is served by the partial index
 -- idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
 -- a sort step (each runtime's slice is index-ordered, but merging several
--- runtimes' rows into one priority/FIFO order is not). The per-machine
--- candidate set is small, so this is cheap in practice.
+-- runtimes' rows into one priority/FIFO order is not).
+--
+-- LIMIT is a scan bound, not a fairness knob: the claim loop consumes at most
+-- max_per_poll candidates (the daemon's maxTasks), and the ORDER BY guarantees
+-- the highest-priority FIFO head is exactly what the limit keeps. Without it a
+-- large backlog (historically 87k+ doomed rows) forces a full scan+sort on
+-- every non-empty daemon poll.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+ORDER BY priority DESC, created_at ASC
+LIMIT @max_per_poll;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all

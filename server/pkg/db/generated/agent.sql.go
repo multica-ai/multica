@@ -5728,7 +5728,13 @@ const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesB
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
 WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
+LIMIT $2
 `
+
+type ListQueuedClaimCandidatesByRuntimesParams struct {
+	RuntimeIds []pgtype.UUID `json:"runtime_ids"`
+	MaxPerPoll int32         `json:"max_per_poll"`
+}
 
 // Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
 // queued claim candidates across every runtime_id in the input set in ONE round
@@ -5738,10 +5744,15 @@ ORDER BY priority DESC, created_at ASC
 // runtime_id filter is served by the partial index
 // idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
 // a sort step (each runtime's slice is index-ordered, but merging several
-// runtimes' rows into one priority/FIFO order is not). The per-machine
-// candidate set is small, so this is cheap in practice.
-func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntimes, runtimeIds)
+// runtimes' rows into one priority/FIFO order is not).
+//
+// LIMIT is a scan bound, not a fairness knob: the claim loop consumes at most
+// max_per_poll candidates (the daemon's maxTasks), and the ORDER BY guarantees
+// the highest-priority FIFO head is exactly what the limit keeps. Without it a
+// large backlog (historically 87k+ doomed rows) forces a full scan+sort on
+// every non-empty daemon poll.
+func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, arg ListQueuedClaimCandidatesByRuntimesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntimes, arg.RuntimeIds, arg.MaxPerPoll)
 	if err != nil {
 		return nil, err
 	}
