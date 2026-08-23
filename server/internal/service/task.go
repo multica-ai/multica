@@ -3555,8 +3555,18 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		return claimed, nil
 	}
 
-	// 4. One candidate SELECT across the non-empty set.
-	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
+	// 4. One candidate SELECT across the non-empty set. Bounded by the
+	// remaining claim capacity: the loop below stops at maxTasks anyway, so
+	// fetching more candidates than that only pays scan+sort cost (the LIMIT
+	// keeps exactly the priority/FIFO head — see the query comment).
+	remaining := maxTasks - len(claimed)
+	if remaining <= 0 {
+		return claimed, nil
+	}
+	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, db.ListQueuedClaimCandidatesByRuntimesParams{
+		RuntimeIds: nonEmpty,
+		MaxPerPoll: int32(remaining),
+	})
 	if err != nil {
 		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
 		// so `claimed` may already hold tasks dispatched server-side. Dropping
