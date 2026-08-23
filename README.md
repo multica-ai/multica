@@ -225,6 +225,10 @@ Contributors: start with the [Contributing Guide](CONTRIBUTING.md).
 
 **Prerequisites:** [Node.js](https://nodejs.org/) 22, [pnpm](https://pnpm.io/) 10.28.2, [Go](https://go.dev/) 1.26.6, [Docker](https://www.docker.com/)
 
+With [Nix](https://nixos.org/) and [direnv](https://direnv.net/) installed, enter this checkout
+once and approve `.envrc` (`direnv allow`). The included `flake.nix` then supplies the supported
+Node 22, pnpm 10, and Go 1.26 toolchain automatically. Docker remains provided by the host.
+
 ```bash
 make dev
 ```
