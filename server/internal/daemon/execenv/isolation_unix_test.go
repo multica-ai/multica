@@ -83,3 +83,9 @@ func TestPrepareIsolated_PermanentFIFOBlockThenImmediateRetry(t *testing.T) {
 		t.Fatalf("retry environment = %#v, want the predicted root", env)
 	}
 }
+
+func TestUnixStorageExhaustionError(t *testing.T) {
+	if !IsStorageExhausted(syscall.ENOSPC) {
+		t.Error("ENOSPC must be classified as storage exhaustion")
+	}
+}

@@ -444,6 +444,30 @@ func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
 	}
 }
 
+func TestNormalizeDaemonReasonUpgradesLegacyStorageExhaustion(t *testing.T) {
+	raw := "prepare execution environment: execenv: mkdir " +
+		"/workspaces/task: no space left on device"
+
+	for _, legacy := range []string{
+		ReasonAgentProviderAuthOrAccess.String(),
+		ReasonAgentUnknown.String(),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, raw); got != ReasonRuntimeStorageExhausted {
+			t.Errorf("NormalizeDaemonReason(%q, storage exhaustion) = %q, want %q", legacy, got, ReasonRuntimeStorageExhausted)
+		}
+	}
+}
+
+func TestNormalizeDaemonReasonLeavesAgentStorageMessageAlone(t *testing.T) {
+	reason := ReasonAgentProviderAuthOrAccess.String()
+	raw := "agent execution failed: remote tool: no space left on device"
+
+	if got := NormalizeDaemonReason(reason, raw); got.String() != reason {
+		t.Errorf("NormalizeDaemonReason(%q, agent failure) = %q, want unchanged", reason, got)
+	}
+}
+
 // TestProviderUnconfigured pins the predicate the daemon uses to decide whether
 // a failure is worth annotating with the HERMES_HOME it actually read (GH
 // #6872). The wrapped fixture is the shape the error really arrives in — the

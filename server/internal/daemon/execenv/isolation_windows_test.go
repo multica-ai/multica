@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -138,5 +140,13 @@ func TestPrepareIsolated_WindowsKillsDescendantBeforeRetry(t *testing.T) {
 	}
 	if env == nil || env.RootDir != PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID) {
 		t.Fatalf("retry environment = %#v, want the predicted root", env)
+	}
+}
+
+func TestWindowsStorageExhaustionErrors(t *testing.T) {
+	for _, err := range []error{windows.ERROR_DISK_FULL, windows.ERROR_HANDLE_DISK_FULL} {
+		if !IsStorageExhausted(err) {
+			t.Errorf("IsStorageExhausted(%v) = false, want true", err)
+		}
 	}
 }

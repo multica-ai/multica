@@ -67,7 +67,18 @@ type preparationResponse struct {
 
 // preparationErrorKindOpenclawCLITimeout marks a helper failure caused by the
 // local openclaw CLI missing its deadline (ErrOpenclawCLITimeout).
-const preparationErrorKindOpenclawCLITimeout = "openclaw_cli_timeout"
+const (
+	preparationErrorKindOpenclawCLITimeout = "openclaw_cli_timeout"
+	preparationErrorKindStorageExhausted   = "storage_exhausted"
+)
+
+// ErrStorageExhausted preserves a platform disk-full failure across the
+// preparation helper's JSON boundary.
+var ErrStorageExhausted = errors.New("storage exhausted")
+
+func IsStorageExhausted(err error) bool {
+	return errors.Is(err, ErrStorageExhausted) || isPlatformStorageExhausted(err)
+}
 
 // preparationKindError re-attaches a sentinel to an error that crossed the
 // helper boundary as text, so the daemon's classifier sees the same
@@ -87,6 +98,9 @@ func preparationErrorKind(err error) string {
 	if errors.Is(err, ErrOpenclawCLITimeout) {
 		return preparationErrorKindOpenclawCLITimeout
 	}
+	if IsStorageExhausted(err) {
+		return preparationErrorKindStorageExhausted
+	}
 	return ""
 }
 
@@ -97,6 +111,8 @@ func rehydratePreparationError(message, kind string) error {
 	switch kind {
 	case preparationErrorKindOpenclawCLITimeout:
 		return &preparationKindError{msg: message, kind: ErrOpenclawCLITimeout}
+	case preparationErrorKindStorageExhausted:
+		return &preparationKindError{msg: message, kind: ErrStorageExhausted}
 	default:
 		return errors.New(message)
 	}

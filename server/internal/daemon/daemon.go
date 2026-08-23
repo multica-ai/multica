@@ -5254,6 +5254,9 @@ func taskRunFailureReason(err error) string {
 	if errors.Is(err, execenv.ErrOpenclawCLITimeout) {
 		return taskfailure.ReasonRuntimeCLITimeout.String()
 	}
+	if execenv.IsStorageExhausted(err) {
+		return taskfailure.ReasonRuntimeStorageExhausted.String()
+	}
 	return taskfailure.Classify(err.Error()).String()
 }
 

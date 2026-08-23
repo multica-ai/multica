@@ -11,6 +11,8 @@ import (
 
 type preparationProcessController struct{}
 
+func isPlatformStorageExhausted(err error) bool { return errors.Is(err, syscall.ENOSPC) }
+
 func newPreparationProcessController(cmd *exec.Cmd) (*preparationProcessController, error) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
