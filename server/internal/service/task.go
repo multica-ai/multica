@@ -4357,7 +4357,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligibleForSource(failureReason, parent, s.autopilotRunRetrySource(ctx, parent)) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -4808,10 +4808,39 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	return retryEligibleForSource(failureReason, t, "")
+}
+
+// retryEligibleForSource is retryEligible with the autopilot run's trigger
+// source resolved ("" = not an autopilot run). Cron-sourced runs stay excluded:
+// the scheduler owns their re-fire cadence and a retry would double-fire the
+// schedule. Webhook-sourced runs ARE eligible — nothing re-fires them (the
+// external poster is gone), the trigger payload persists on the run row, and
+// without this a transient runtime_offline/provider_network blip kills the run
+// permanently.
+func retryEligibleForSource(failureReason string, t db.AgentTaskQueue, autopilotRunSource string) bool {
+	if t.AutopilotRunID.Valid && autopilotRunSource != "webhook" {
+		return false
+	}
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
+}
+
+// autopilotRunRetrySource resolves the trigger source of an autopilot-run
+// task, or "" when the task is not an autopilot run / the row cannot be read
+// (fail closed to the legacy no-autopilot-retry behavior).
+func (s *TaskService) autopilotRunRetrySource(ctx context.Context, t db.AgentTaskQueue) string {
+	if !t.AutopilotRunID.Valid {
+		return ""
+	}
+	run, err := s.Queries.GetAutopilotRun(ctx, t.AutopilotRunID)
+	if err != nil {
+		slog.Warn("task auto-retry: load autopilot run failed; treating as cron (no retry)",
+			"task_id", util.UUIDToString(t.ID), "error", err)
+		return "cron"
+	}
+	return run.Source
 }
 
 // hasRunnableSuccessor reports whether another not-yet-started task already
@@ -4848,8 +4877,10 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // the agent can resume the conversation when the backend supports it. Returns
 // the new task, or nil when no retry was created.
 //
-// Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
+// Cron-sourced autopilot tasks are NOT auto-retried here; the autopilot
+// scheduler owns its own re-run cadence and we don't want to double-fire it.
+// Webhook-sourced runs are eligible — nothing else re-fires them (see
+// retryEligibleForSource).
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -4878,7 +4909,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// Autopilot has its own retry semantics (don't double-trigger) and a task
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	if !retryEligibleForSource(reason, parent, s.autopilotRunRetrySource(ctx, parent)) {
 		return nil, nil
 	}
 
