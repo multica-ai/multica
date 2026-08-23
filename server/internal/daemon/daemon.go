@@ -7918,8 +7918,8 @@ func prepareExactReplyFile(taskTempDir string) error {
 	if err := root.RemoveAll(exactReplyFileName); err != nil {
 		return errors.New("stale declaration could not be removed")
 	}
-	if err := root.WriteFile(exactReplyFileName, []byte(exactReplyFileIdle), 0o600); err != nil {
-		return errors.New("idle declaration could not be written")
+	if err := root.WriteFile(exactReplyFileName, []byte(exactReplyProviderOutput), 0o600); err != nil {
+		return errors.New("provider declaration could not be written")
 	}
 	return nil
 }

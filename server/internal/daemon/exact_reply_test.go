@@ -98,7 +98,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 }
 
-func TestRunTaskFreshSessionRetryMustReplacePriorAttemptExactReply(t *testing.T) {
+func TestRunTaskFreshSessionRetryDoesNotReusePriorExactReply(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script agent fixture is POSIX-only")
 	}
@@ -188,17 +188,8 @@ esac
 	if string(attempts) != "resumed\nfresh\n" {
 		t.Fatalf("agent attempts = %q, want resumed then fresh", attempts)
 	}
-	if result.Status != "blocked" {
-		t.Fatalf("runTask result = status %q, comment %q; want blocked", result.Status, result.Comment)
-	}
-	if result.FailureReason != "agent_error.empty_or_unparseable_output" {
-		t.Fatalf("failure reason = %q, want agent_error.empty_or_unparseable_output", result.FailureReason)
-	}
-	if !strings.Contains(result.Comment, "required declaration was not written") {
-		t.Fatalf("runTask comment = %q, want missing fresh declaration detail", result.Comment)
-	}
-	if strings.Contains(result.Comment, "STALE EXACT REPLY") || strings.Contains(result.Comment, "PROVIDER FALLBACK") {
-		t.Fatalf("runTask published abandoned-attempt content: %q", result.Comment)
+	if result.Status != "completed" || result.Comment != "PROVIDER FALLBACK FROM FRESH ATTEMPT" {
+		t.Fatalf("runTask result = status %q, comment %q; want fresh provider output", result.Status, result.Comment)
 	}
 }
 
@@ -422,28 +413,34 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 	}
 }
 
-func TestRunTaskRequiredExactReplyMustReplaceArmedMarker(t *testing.T) {
+func TestExactReplyIdleMarkerRequiresExactOutput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, exactReplyFileName)
+	if err := os.WriteFile(path, []byte(exactReplyFileIdle), 0o600); err != nil {
+		t.Fatalf("write idle marker: %v", err)
+	}
+
+	_, declared, err := readExactReplyFile(dir, true)
+	if !declared || err == nil || !strings.Contains(err.Error(), "required declaration was not written") {
+		t.Fatalf("readExactReplyFile() declared=%v, error=%v; want required declaration error", declared, err)
+	}
+}
+
+func TestRunTaskDeclaredExactReplyDefaultsToProviderOutput(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script agent fixture is POSIX-only")
 	}
-
 	d, _, cleanup := newLeaderReuseTestDaemon(t)
 	defer cleanup()
-
-	task := leaderReuseTestTask("task-required-exact-reply-idle")
+	task := leaderReuseTestTask("task-provider-reply")
 	task.Agent.CustomEnv = map[string]string{exactReplyRequiredEnv: "1"}
+
 	result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
 	if err != nil {
 		t.Fatalf("runTask: %v", err)
 	}
-	if result.Status != "blocked" {
-		t.Fatalf("runTask result = status %q, comment %q; want blocked", result.Status, result.Comment)
-	}
-	if !strings.Contains(result.Comment, "required declaration was not written") {
-		t.Fatalf("runTask comment = %q, want untouched-marker detail", result.Comment)
-	}
-	if strings.Contains(result.Comment, "done") {
-		t.Fatalf("untouched required declaration published provider output: %q", result.Comment)
+	if result.Status != "completed" || result.Comment != "done" {
+		t.Fatalf("runTask result = %+v, want completed provider answer", result)
 	}
 }
 
@@ -527,7 +524,7 @@ func TestExactReplyProviderMarkerKeepsProviderOutput(t *testing.T) {
 	}
 }
 
-func TestPrepareExactReplyFileRearmsStaleDeclaration(t *testing.T) {
+func TestPrepareExactReplyFileDefaultsToProviderOutput(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, exactReplyFileName)
 	if err := os.WriteFile(path, []byte("stale task output"), 0o600); err != nil {
@@ -540,7 +537,7 @@ func TestPrepareExactReplyFileRearmsStaleDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read armed declaration: %v", err)
 	}
-	if string(got) != exactReplyFileIdle {
-		t.Fatalf("armed declaration = %q, want %q", got, exactReplyFileIdle)
+	if string(got) != exactReplyProviderOutput {
+		t.Fatalf("initial declaration = %q, want %q", got, exactReplyProviderOutput)
 	}
 }
