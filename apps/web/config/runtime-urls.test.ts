@@ -276,6 +276,15 @@ describe("runtimeRewriteDestination", () => {
     ).toBe("http://multica-docs:3000/docs/zh/agents");
   });
 
+  it("maps the CLI health probe to the runtime API origin", () => {
+    expect(
+      runtimeRewriteDestination("/health", {
+        REMOTE_API_URL: "http://backend:8080",
+      }),
+    ).toBe("http://backend:8080/health");
+    expect(runtimeRewriteDestination("/health", {})).toBeUndefined();
+  });
+
   it("maps websocket paths to the runtime API origin", () => {
     expect(
       runtimeRewriteDestination("/ws", {
