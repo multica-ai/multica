@@ -5215,6 +5215,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+				// One immediate retry: a dir that silently loses its meta
+				// falls to the 72h orphan-by-mtime path instead of
+				// parent-driven cleanup, pinning disk for days.
+				if retryErr := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); retryErr != nil {
+					taskLog.Error("write gc meta retry failed; dir will age out via mtime TTL", "error", retryErr)
+				}
 			}
 		}
 	}
