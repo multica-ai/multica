@@ -197,20 +197,22 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 	}
 
 	// Backoff / deferral: runtime_offline always waits for health-gated
-	// promotion; provider_network only defers its final tier.
+	// promotion; provider_network only defers its final tier, now with ±20%
+	// jitter — assert a window instead of an exact value.
 	delayCases := []struct {
 		reason        string
 		failedAttempt int32
-		want          time.Duration
+		min, max      time.Duration
 	}{
-		{provNet, 1, 0}, // first failure → immediate retry
-		{provNet, 2, providerNetworkFinalRetryWait}, // second failure → 5s-deferred retry
-		{"runtime_offline", 1, runtimeOfflineRetryDeferral},
-		{"timeout", 2, 0}, // unrelated reason → never deferred
+		{provNet, 1, 0, 0},                             // first failure → immediate retry
+		{provNet, 2, 4 * time.Second, 6 * time.Second}, // second failure → 5s±20% deferred retry
+		{"runtime_offline", 1, runtimeOfflineRetryDeferral, runtimeOfflineRetryDeferral},
+		{"timeout", 2, 0, 0}, // unrelated reason → never deferred
 	}
 	for _, tc := range delayCases {
-		if got := retryDelayForAttempt(tc.reason, tc.failedAttempt); got != tc.want {
-			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want %s", tc.reason, tc.failedAttempt, got, tc.want)
+		got := retryDelayForAttempt(tc.reason, tc.failedAttempt)
+		if got < tc.min || got > tc.max {
+			t.Errorf("retryDelayForAttempt(%q, %d) = %s, want within [%s, %s]", tc.reason, tc.failedAttempt, got, tc.min, tc.max)
 		}
 	}
 

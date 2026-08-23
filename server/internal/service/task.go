@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -4727,16 +4728,22 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
 // it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
+// attempt is deferred ~5s with ±20% jitter; every other retry remains
+// immediate (zero delay → the child is created 'queued', claimable at once).
+// Callers pass the returned delay to CreateRetryTask via fire_at. The jitter
+// keeps tasks that failed against the same provider blip from re-queuing in
+// lockstep onto the recovering upstream.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
 	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
-		return providerNetworkFinalRetryWait
+		base := providerNetworkFinalRetryWait
+		if span := base / 5; span > 0 {
+			base += time.Duration(rand.Int63n(int64(2*span))) - span
+		}
+		return base
 	}
 	return 0
 }
