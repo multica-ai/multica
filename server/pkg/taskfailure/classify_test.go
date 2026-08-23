@@ -121,6 +121,13 @@ func TestClassifyRules(t *testing.T) {
 		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
 		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
 		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
+		// BHD-135: Pi's OpenAI-compatible SDK wording for a dropped LiteLLM
+		// call. Bare strings, then the same strings glued to "exit status 1"
+		// after pi-print-clean-exit forces a non-zero wrap-up.
+		{"pi connection error", "Connection error.", ReasonAgentProviderNetwork},
+		{"pi connection error with exit status wins over process failure", "Connection error.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"pi request timed out", "Request timed out.", ReasonAgentProviderNetwork},
+		{"pi request timed out with exit status wins over process failure", "Request timed out.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},

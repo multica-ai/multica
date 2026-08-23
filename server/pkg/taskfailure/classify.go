@@ -190,11 +190,19 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
+	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
+	//    the bare strings "Connection error." and "Request timed out." on
+	//    turn_end.errorMessage (then exits 1). Those used to fall through to
+	//    process_failure via "exit status 1" and terminate the task with no
+	//    retry (BHD-135). Matched here, before rule 13, so a composite
+	//    "Connection error.; pi exited with error: exit status 1" still
+	//    routes to the retryable provider_network bucket.
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
 		opencodeStreamEndedPrefix,
 		"connection closed",
+		"connection error",
 		"mid-response",
 		"error sending request",
 		"unable to connect",
@@ -205,6 +213,7 @@ func Classify(rawError string) Reason {
 		"i/o timeout",
 		"deadline exceeded",
 		"timeout exceeded while awaiting",
+		"request timed out",
 	):
 		return ReasonAgentProviderNetwork
 
