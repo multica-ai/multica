@@ -42,6 +42,9 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// SourceContextStorage is used only by the bounded 30-day cleanup pass for
+	// terminal quick-create captures. Nil disables it where storage is absent.
+	SourceContextStorage SourceContextObjectStore
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
@@ -80,6 +83,11 @@ type TaskService struct {
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
+}
+
+type SourceContextObjectStore interface {
+	DeleteObject(ctx context.Context, key string) error
+	KeyFromURL(rawURL string) string
 }
 
 // ComposioOverlayBuilder is the seam TaskService uses to build the per-task
@@ -1477,6 +1485,9 @@ type QuickCreateContext struct {
 	// pass `--parent <uuid>` so the sub-issue relationship is preserved
 	// across the manual→agent mode flip.
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// SourceContextID identifies the immutable pending capture that must attach
+	// to the one issue this quick-create chain produces.
+	SourceContextID string `json:"source_context_id,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -1502,6 +1513,14 @@ const QuickCreateContextType = "quick_create"
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, nil)
+}
+
+func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture SourceContextCapture) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, &capture)
+}
+
+func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1529,6 +1548,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if parentIssueID.Valid {
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	}
+	if capture != nil {
+		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}
 	if len(attachmentIDs) > 0 {
 		payload.AttachmentIDs = make([]string, 0, len(attachmentIDs))
@@ -1560,8 +1582,9 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
-	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
-		ID:                   dbid.NewV7(),
+	taskID := dbid.NewV7()
+	createParams := db.CreateQuickCreateTaskParams{
+		ID:                   taskID,
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		Priority:             priorityToInt("high"),
@@ -1573,9 +1596,50 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		OriginatorSource:     attrSource,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
-	})
+	}
+	var task db.AgentTaskQueue
+	if capture == nil {
+		task, err = s.Queries.CreateQuickCreateTask(ctx, createParams)
+	} else {
+		tx, beginErr := s.TxStarter.Begin(ctx)
+		if beginErr != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("begin quick-create source context tx: %w", beginErr)
+		}
+		defer tx.Rollback(ctx)
+		qtx := s.Queries.WithTx(tx)
+		if _, err = qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+			ID: capture.SourceIssueID, WorkspaceID: workspaceID,
+		}); err == nil {
+			var locked []pgtype.UUID
+			locked, err = qtx.LockCommentAncestorPath(ctx, db.LockCommentAncestorPathParams{
+				CommentID: capture.AnchorCommentID, WorkspaceID: workspaceID, IssueID: capture.SourceIssueID,
+			})
+			if err == nil && len(locked) == 0 {
+				err = ErrAnchorCommentDeleted
+			}
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			err = ErrSourceIssueDeleted
+		}
+		if err == nil {
+			var current SourceContextBuild
+			current, err = BuildSourceContext(ctx, qtx, workspaceID, capture.AnchorCommentID)
+			if err == nil && current.Digest != capture.Digest {
+				err = ErrSourceContextChanged
+			}
+		}
+		if err == nil {
+			task, err = qtx.CreateQuickCreateTask(ctx, createParams)
+		}
+		if err == nil {
+			_, err = PersistSourceContext(ctx, qtx, *capture, pgtype.UUID{}, task.ID)
+		}
+		if err == nil {
+			err = tx.Commit(ctx)
+		}
+	}
 	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
+		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task with source context: %w", err)
 	}
 
 	slog.Info("quick-create task enqueued",
@@ -1594,6 +1658,74 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+// RetrySourceContextQuickCreate manually retries a failed issue-less
+// quick-create while retaining the exact pending source context and cloned
+// attachments. The context row is the serialization point: only the task that
+// currently owns origin_task_id may create and receive a successor, so a
+// double-click or a race with automatic retry cannot mint two live attempts.
+//
+// Only the original requester may retry this recovery item. That keeps the
+// direct_human attribution truthful and prevents another workspace member from
+// replaying a private prompt merely by learning the task ID.
+func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspaceID, requesterID, sourceTaskID pgtype.UUID, canInvoke func(agent db.Agent) bool) (*db.AgentTaskQueue, error) {
+	parent, err := s.Queries.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
+		ID: sourceTaskID, WorkspaceID: workspaceID,
+	})
+	if err != nil || parent.Status != "failed" {
+		return nil, ErrSourceContextRetryUnavailable
+	}
+	quickCreate, ok := s.parseQuickCreateContext(parent)
+	if !ok || quickCreate.SourceContextID == "" || quickCreate.RequesterID != util.UUIDToString(requesterID) {
+		return nil, ErrSourceContextRetryUnavailable
+	}
+	contextID, err := util.ParseUUID(quickCreate.SourceContextID)
+	if err != nil {
+		return nil, ErrSourceContextRetryUnavailable
+	}
+	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
+	if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return nil, ErrSourceContextRetryUnavailable
+	}
+	if canInvoke != nil && !canInvoke(agent) {
+		return nil, ErrRerunInvokeNotAllowed
+	}
+	overlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin source context manual retry: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	locked, err := qtx.GetPendingIssueSourceContextByOriginTask(ctx, db.GetPendingIssueSourceContextByOriginTaskParams{
+		WorkspaceID: workspaceID, OriginTaskID: sourceTaskID,
+	})
+	if err != nil || locked.ID != contextID {
+		return nil, ErrSourceContextRetryUnavailable
+	}
+	child, err := qtx.CreateManualQuickCreateRetryTask(ctx, db.CreateManualQuickCreateRetryTaskParams{
+		ActorUserID:          requesterID,
+		RuntimeMcpOverlay:    overlay.Overlay,
+		RuntimeConnectedApps: overlay.ConnectedApps,
+		NewTaskID:            dbid.NewV7(),
+		SourceTaskID:         sourceTaskID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create source context manual retry: %w", err)
+	}
+	if _, err := qtx.TransferPendingIssueSourceContextTask(ctx, db.TransferPendingIssueSourceContextTaskParams{
+		NewTaskID: child.ID, WorkspaceID: workspaceID, ID: contextID, OldTaskID: sourceTaskID,
+	}); err != nil {
+		return nil, fmt.Errorf("transfer source context manual retry: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit source context manual retry: %w", err)
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
+	s.NotifyTaskEnqueued(ctx, child)
+	return &child, nil
 }
 
 // ErrChatTaskAgentArchived signals that EnqueueChatTask refused to
@@ -4507,7 +4639,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			})
 			switch {
 			case cerr == nil:
-				retried = &child
+				transferErr := transferPendingSourceContextToRetry(ctx, qtx, t, child)
+				if errors.Is(transferErr, pgx.ErrNoRows) {
+					deleted, deleteErr := qtx.DeleteUnstartedQuickCreateRetryTask(ctx, child.ID)
+					if deleteErr != nil || deleted != 1 {
+						return fmt.Errorf("discard source context retry without attach authority: changed=%d: %w", deleted, deleteErr)
+					}
+					slog.Info("fail task auto-retry skipped: source context already transferred or attached",
+						"task_id", util.UUIDToString(taskID),
+						"source_context_retry_id", util.UUIDToString(child.ID),
+					)
+				} else if transferErr != nil {
+					return fmt.Errorf("transfer pending source context to retry: %w", transferErr)
+				} else {
+					retried = &child
+				}
 			case errors.Is(cerr, pgx.ErrNoRows):
 				// The statement wrote nothing: either the owning workspace was
 				// torn down mid-flight, or a rerun took the pending slot after
@@ -4645,7 +4791,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// pending — the new attempt will write its own outcome.
 	if retried == nil {
 		if qc, ok := s.parseQuickCreateContext(task); ok {
-			s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
+			attached, attachedErr := s.sourceContextAttachedByTask(ctx, task, qc)
+			switch {
+			case attachedErr != nil:
+				slog.Error("quick-create failure: source context outcome lookup failed",
+					"task_id", util.UUIDToString(task.ID), "error", attachedErr)
+				s.notifyQuickCreateUnconfirmed(ctx, task, qc)
+			case attached:
+				// The CLI create committed before the runtime reported its own
+				// failure. The attached context is authoritative proof that the
+				// target exists, so reconcile the normal success inbox rather than
+				// inviting a duplicate retry from a misleading failure row.
+				s.notifyQuickCreateCompleted(ctx, task, qc, nil)
+			default:
+				s.notifyQuickCreateFailed(ctx, task, qc, errMsg)
+			}
 		}
 	}
 	// Reconcile agent status
@@ -4811,7 +4971,16 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid)
+		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
+}
+
+func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
+	if len(task.Context) == 0 || task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return false
+	}
+	var quickCreate QuickCreateContext
+	return json.Unmarshal(task.Context, &quickCreate) == nil &&
+		quickCreate.Type == QuickCreateContextType && quickCreate.SourceContextID != ""
 }
 
 // hasRunnableSuccessor reports whether another not-yet-started task already
@@ -4918,7 +5087,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, nil
 	}
-	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+	tx, beginErr := s.TxStarter.Begin(ctx)
+	if beginErr != nil {
+		return nil, beginErr
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	child, err := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
@@ -4944,6 +5119,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, err
 	}
+	if err := transferPendingSourceContextToRetry(ctx, qtx, parent, child); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			slog.Info("task auto-retry skipped: source context already transferred or attached",
+				"parent_task_id", util.UUIDToString(parent.ID),
+				"source_context_retry_id", util.UUIDToString(child.ID),
+			)
+			return nil, nil
+		}
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
 	slog.Info("task auto-retry enqueued",
 		"parent_task_id", util.UUIDToString(parent.ID),
 		"child_task_id", util.UUIDToString(child.ID),
@@ -4961,6 +5149,28 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		s.NotifyTaskEnqueued(ctx, child)
 	}
 	return &child, nil
+}
+
+func transferPendingSourceContextToRetry(ctx context.Context, q *db.Queries, parent, child db.AgentTaskQueue) error {
+	if len(parent.Context) == 0 {
+		return nil
+	}
+	var quickCreate QuickCreateContext
+	if json.Unmarshal(parent.Context, &quickCreate) != nil || quickCreate.Type != QuickCreateContextType || quickCreate.SourceContextID == "" {
+		return nil
+	}
+	workspaceID, err := util.ParseUUID(quickCreate.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	contextID, err := util.ParseUUID(quickCreate.SourceContextID)
+	if err != nil {
+		return err
+	}
+	_, err = q.TransferPendingIssueSourceContextTask(ctx, db.TransferPendingIssueSourceContextTaskParams{
+		NewTaskID: child.ID, WorkspaceID: workspaceID, ID: contextID, OldTaskID: parent.ID,
+	})
+	return err
 }
 
 // RerunIssue creates a fresh queued task for an agent on the issue. Used by
@@ -6614,6 +6824,28 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 	return qc, true
 }
 
+func (s *TaskService) sourceContextAttachedByTask(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) (bool, error) {
+	if qc.SourceContextID == "" {
+		return false, nil
+	}
+	workspaceID, workspaceErr := util.ParseUUID(qc.WorkspaceID)
+	contextID, contextErr := util.ParseUUID(qc.SourceContextID)
+	if workspaceErr != nil || contextErr != nil {
+		return false, nil
+	}
+	row, err := s.Queries.GetIssueSourceContextByID(ctx, db.GetIssueSourceContextByIDParams{
+		WorkspaceID: workspaceID,
+		ID:          contextID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return row.State == "attached" && row.IssueID.Valid && row.OriginTaskID == task.ID, nil
+}
+
 // maxQuickCreateFailureDetailRunes bounds the failure reason lifted from a
 // quick-create task's final output. A genuine CLI error (a duplicate message,
 // a validation error) is short; an output far larger than this is a runaway
@@ -6838,10 +7070,11 @@ func (s *TaskService) writeQuickCreateOutcomeInbox(ctx context.Context, task db.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quickCreateNotifyTimeout)
 	defer cancel()
 	details, _ := json.Marshal(map[string]any{
-		"task_id":         util.UUIDToString(task.ID),
-		"agent_id":        util.UUIDToString(task.AgentID),
-		"original_prompt": qc.Prompt,
-		"error":           redact.Text(errMsg),
+		"task_id":           util.UUIDToString(task.ID),
+		"agent_id":          util.UUIDToString(task.AgentID),
+		"original_prompt":   qc.Prompt,
+		"error":             redact.Text(errMsg),
+		"source_context_id": qc.SourceContextID,
 	})
 	item, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 		ID:            dbid.NewV7(),

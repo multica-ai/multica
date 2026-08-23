@@ -281,6 +281,40 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("comment source-context sub-issues", () => {
+    it("uses the dedicated endpoint for agent creation", async () => {
+      stubFetchJson({ task_id: "task-1" }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "sha256:digest:issue",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).resolves.toEqual({ task_id: "task-1" });
+      expect(fetch).toHaveBeenCalledWith(
+        "https://api.example.test/api/comments/comment-1/sub-issues",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it.each([404, 405])("maps server status %s to source_context_server_unsupported", async (status) => {
+      stubFetchJson({ error: "not found" }, status);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "token",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).rejects.toMatchObject({ body: { code: "source_context_server_unsupported" } });
+    });
+
+    it("rejects a malformed source-context retry response", async () => {
+      stubFetchJson({ id: 42 }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.retrySourceContextQuickCreate("task-1")).rejects.toThrow(
+        "Invalid source-context retry response",
+      );
+    });
+  });
+
   describe("searchIssues", () => {
     it("falls back to an empty result when the response is malformed", async () => {
       stubFetchJson({ issues: "not-an-array", total: 0 });

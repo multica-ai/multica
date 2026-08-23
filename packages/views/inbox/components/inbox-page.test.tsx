@@ -65,6 +65,7 @@ const markReadMutate = vi.fn();
 const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
+const retrySourceContextMutateAsync = vi.fn();
 
 vi.mock("@multica/core/inbox/mutations", () => {
   const mutation = () => ({ mutate: vi.fn() });
@@ -77,6 +78,10 @@ vi.mock("@multica/core/inbox/mutations", () => {
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
     useArchiveCompletedInbox: mutation,
+    useRetrySourceContextQuickCreate: () => ({
+      mutateAsync: retrySourceContextMutateAsync,
+      isPending: false,
+    }),
   };
 });
 
@@ -202,6 +207,8 @@ function reset() {
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
   unarchiveMutate.mockClear();
+  retrySourceContextMutateAsync.mockReset();
+  retrySourceContextMutateAsync.mockResolvedValue({});
   modalState.modal = null;
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
@@ -339,6 +346,30 @@ describe("InboxPage", () => {
     fireEvent.click(back!);
 
     expect(screen.getByTestId("row")).toBeInTheDocument();
+  });
+
+  it("retries a failed quick-create with its original source context", async () => {
+    reset();
+    listData.active = [
+      item({
+        id: "source-context-failure",
+        issue_id: null,
+        type: "quick_create_failed",
+        details: {
+          task_id: "task-1",
+          source_context_id: "context-1",
+          original_prompt: "make a child",
+        },
+      }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    fireEvent.click(screen.getByTestId("retry-source-context"));
+
+    await act(async () => undefined);
+    expect(retrySourceContextMutateAsync).toHaveBeenCalledWith("task-1");
+    expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
   it("marks the opened notification read", () => {

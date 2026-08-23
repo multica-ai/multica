@@ -2894,7 +2894,36 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, true); failure != nil {
 				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 			}
-
+			if qc.SourceContextID != "" {
+				workspaceID, workspaceErr := util.ParseUUID(qc.WorkspaceID)
+				contextID, contextIDErr := util.ParseUUID(qc.SourceContextID)
+				if workspaceErr != nil || contextIDErr != nil {
+					return resp, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
+						r.Context(), task,
+						"Captured source context is invalid. Start again from the branch point.",
+						taskfailure.ReasonAgentUnknown,
+						"error_source_context_invalid", http.StatusConflict, "captured source context is invalid",
+					)
+				}
+				captured, contextErr := h.Queries.GetIssueSourceContextByID(r.Context(), db.GetIssueSourceContextByIDParams{WorkspaceID: workspaceID, ID: contextID})
+				if contextErr != nil && !errors.Is(contextErr, pgx.ErrNoRows) {
+					if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); requeueErr != nil {
+						slog.Error("quick-create claim: requeue after source context lookup failed", "task_id", uuidToString(task.ID), "error", requeueErr)
+					}
+					return resp, nil, 0, 0, &claimBuildFailure{
+						outcome: "error_source_context_load", status: http.StatusInternalServerError, message: "failed to load captured source context",
+					}
+				}
+				if contextErr != nil || captured.State != "pending" || captured.OriginTaskID != task.ID {
+					return resp, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
+						r.Context(), task,
+						"Captured source context is no longer available. Start again from the branch point.",
+						taskfailure.ReasonAgentUnknown,
+						"error_source_context_unavailable", http.StatusConflict, "captured source context is unavailable",
+					)
+				}
+				resp.QuickCreateSourceContext = append(json.RawMessage(nil), captured.Snapshot...)
+			}
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task. A prompt-supplied project id
@@ -2929,7 +2958,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// will fail loud, which is a better outcome than silently
 			// dropping the sub-issue intent.
 			if qc.ParentIssueID != "" {
-				resp.ParentIssueID = qc.ParentIssueID
+				parentExists := true
 				if parentUUID, err := util.ParseUUID(qc.ParentIssueID); err == nil {
 					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
 						parent, perr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -2940,8 +2969,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
 								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
 							}
+						} else if qc.SourceContextID != "" && errors.Is(perr, pgx.ErrNoRows) {
+							// A contextual quick-create already owns an immutable
+							// snapshot. If its source was deleted before this first
+							// issue exists, create the eventual target as top-level —
+							// the same state application-layer detach would have
+							// produced had deletion happened just after creation.
+							// Ordinary Add sub-issue keeps its historical fail-loud
+							// behavior when its parent disappears.
+							parentExists = false
 						}
 					}
+				}
+				if parentExists {
+					resp.ParentIssueID = qc.ParentIssueID
 				}
 			}
 

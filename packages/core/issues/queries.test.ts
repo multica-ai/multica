@@ -20,10 +20,25 @@ import {
   issueKeys,
   issueTableRowPageOptions,
   projectGanttIssuesOptions,
+  sourceContextPreviewOptions,
 } from "./queries";
 
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
+
+describe("sourceContextPreviewOptions", () => {
+  it("isolates preview cache entries by workspace", () => {
+    expect(sourceContextPreviewOptions("ws-1", "comment-1").queryKey).toEqual([
+      "source-context",
+      "preview",
+      "ws-1",
+      "comment-1",
+    ]);
+    expect(sourceContextPreviewOptions("ws-2", "comment-1").queryKey).not.toEqual(
+      sourceContextPreviewOptions("ws-1", "comment-1").queryKey,
+    );
+  });
+});
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
