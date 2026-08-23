@@ -1057,7 +1057,9 @@ func WriteGCMeta(envRoot string, meta GCMeta, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("marshal gc meta: %w", err)
 	}
-	return os.WriteFile(filepath.Join(envRoot, gcMetaFile), data, 0o644)
+	// Atomic tmp+rename: a torn .gc_meta.json unmarshal-errors on read and is
+	// treated as "no meta", dropping the dir into the 72h orphan-by-mtime path.
+	return writeFileAtomic(filepath.Join(envRoot, gcMetaFile), data, 0o644)
 }
 
 // ReadGCMeta reads GC metadata from a task directory root. Pre-v2 meta files
@@ -1120,7 +1122,9 @@ func WriteManagedEnvProvenance(envRoot string, p ManagedEnvProvenance) error {
 	if err != nil {
 		return fmt.Errorf("marshal managed env provenance: %w", err)
 	}
-	return os.WriteFile(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
+	// Atomic tmp+rename: a torn provenance file fails closed on read (no
+	// reuse), silently dropping session continuity — the MUL-4886 bug class.
+	return writeFileAtomic(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
 }
 
 // ReadManagedEnvProvenance reads the Prepare-time reuse-eligibility marker from
