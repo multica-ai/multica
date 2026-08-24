@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -154,6 +155,14 @@ type Config struct {
 	// prefers a matching, executable override over resolving the profile's
 	// command_name on PATH. nil/empty means "always resolve via PATH".
 	ProfileCommandOverrides map[string]string
+
+	// ExtraHeaders are the per-deployment HTTP headers the daemon attaches
+	// to its outbound server calls (e.g. an internal reverse-proxy shared
+	// secret for self-hosted multica). Stored but not yet applied at the
+	// transport layer — wiring into the http.Transport is PR 2 of TIM-142.
+	// Source precedence (highest wins): --extra-header flag →
+	// MULTICA_EXTRA_HEADERS env → extra_headers in config.json → unset.
+	ExtraHeaders http.Header
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -186,6 +195,14 @@ type Overrides struct {
 	// Single-direction for the same reason as DisableAutoUpdate: the
 	// env/default already resolves to enabled.
 	DisableAutoReload bool
+
+	// ExtraHeaders is the per-run override parsed from one or more
+	// `--extra-header Name=value` flags. A non-nil (even empty) value
+	// wins over the env-var and config-file sources; nil means "no flag
+	// passed, fall through to env / config / default". Populated by
+	// `--extra-header` on the daemon command line; PR 2 of TIM-142 will
+	// actually attach it to the transport. PR 1 only parses it.
+	ExtraHeaders http.Header
 }
 
 // LoadConfig builds the daemon configuration from environment variables
@@ -228,6 +245,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// purely from env-var configuration. We log a warning and proceed with
 	// no overrides.
 	var profileCommandOverrides map[string]string
+	var extraHeadersFromConfig map[string]string
 	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
 		slog.Warn("could not load CLI config for backend overrides; proceeding without",
 			"profile", overrides.Profile, "err", err)
@@ -245,6 +263,17 @@ func LoadConfig(overrides Overrides) (Config, error) {
 					continue
 				}
 				profileCommandOverrides[id] = path
+			}
+		}
+		// Extra-headers config-file source (TIM-142). Same copy / nil-normalize
+		// discipline as ProfileCommandOverrides: the loaded CLIConfig is a
+		// shared on-disk-rendered object; copying here keeps later daemon
+		// mutation from leaking back, and normalising len==0 to nil keeps
+		// resolveExtraHeaders on its happy path.
+		if len(cliCfg.ExtraHeaders) > 0 {
+			extraHeadersFromConfig = make(map[string]string, len(cliCfg.ExtraHeaders))
+			for name, value := range cliCfg.ExtraHeaders {
+				extraHeadersFromConfig[name] = value
 			}
 		}
 	}
@@ -532,6 +561,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoReloadEnabled = false
 	}
 
+	// Extra HTTP headers (TIM-142). PR 1 only parses and stores; PR 2 wires
+	// them into the transport. Validation surfaces as a startup error so a
+	// misconfigured MULTICA_EXTRA_HEADERS or extra_headers entry fails
+	// loud instead of silently dropping headers on every call.
+	extraHeaders, err := resolveExtraHeaders(overrides.ExtraHeaders, extraHeadersFromConfig)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
 		DaemonID:                        daemonID,
@@ -575,6 +613,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenArgs:                        qwenArgs,
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
+		ExtraHeaders:                    extraHeaders,
 	}, nil
 }
 

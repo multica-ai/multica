@@ -425,3 +425,203 @@ func TestPollIntervalRoundTripThroughDuration(t *testing.T) {
 		t.Fatalf("parsed = %v, want %v", got, want)
 	}
 }
+
+// TestApplyConfigSetExtraHeadersRoundTrip (TIM-142 PR 1) pins the
+// accepted shape for `multica config set extra_headers '<json>'`. We
+// store map[string]string verbatim in cli.CLIConfig; the daemon's
+// resolveExtraHeaders helper turns that into http.Header at startup.
+// Multi-entry JSON must survive as-is (entries preserved, values
+// preserved byte-for-byte).
+func TestApplyConfigSetExtraHeadersRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	spec := `{"X-Auth": "bearer xyz", "X-Region": "eu-west-1"}`
+	if err := applyConfigSet(&cfg, "extra_headers", spec); err != nil {
+		t.Fatalf("applyConfigSet extra_headers: %v", err)
+	}
+	want := map[string]string{
+		"X-Auth":   "bearer xyz",
+		"X-Region": "eu-west-1",
+	}
+	if len(cfg.ExtraHeaders) != len(want) {
+		t.Fatalf("ExtraHeaders length: got %d entries, want %d (got %v)", len(cfg.ExtraHeaders), len(want), cfg.ExtraHeaders)
+	}
+	for name, val := range want {
+		if got := cfg.ExtraHeaders[name]; got != val {
+			t.Errorf("ExtraHeaders[%q]: got %q, want %q", name, got, val)
+		}
+	}
+}
+
+// TestApplyConfigSetExtraHeadersEmptyClears — `multica config set
+// extra_headers ""` (or `null`) clears a previously persisted map.
+// Parity with `config set poll_interval ""` and friends.
+func TestApplyConfigSetExtraHeadersEmptyClears(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{ExtraHeaders: map[string]string{"X-Auth": "bearer xyz"}}
+	if err := applyConfigSet(&cfg, "extra_headers", ""); err != nil {
+		t.Fatalf("clear with empty string: %v", err)
+	}
+	if cfg.ExtraHeaders != nil {
+		t.Fatalf("ExtraHeaders should be nil after empty clear, got %v", cfg.ExtraHeaders)
+	}
+	// Setting then clearing should also leave the field nil, even
+	// after re-populating. Pins the contract that "no headers" and
+	// "explicitly unset" are indistinguishable on disk.
+	cfg.ExtraHeaders = map[string]string{"X-Auth": "bearer xyz"}
+	if err := applyConfigSet(&cfg, "extra_headers", "null"); err != nil {
+		t.Fatalf("clear with null: %v", err)
+	}
+	if cfg.ExtraHeaders != nil {
+		t.Fatalf("ExtraHeaders should be nil after null clear, got %v", cfg.ExtraHeaders)
+	}
+}
+
+// TestApplyConfigSetExtraHeadersRejectsCRLFInjection pins the
+// header-injection boundary at the cmd level. A value that smuggles a
+// CRLF must surface as a hard error so the on-disk config never
+// contains a header that would let an attacker forge `Set-Cookie:` or
+// similar downstream.
+func TestApplyConfigSetExtraHeadersRejectsCRLFInjection(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		spec string
+		want string // substring of expected error
+	}{
+		{
+			name: "CR in value",
+			spec: `{"X-Bad": "foo\rSet-Cookie: bad"}`,
+			want: "carriage return",
+		},
+		{
+			name: "LF in value",
+			spec: `{"X-Bad": "foo\nSet-Cookie: bad"}`,
+			want: "line feed",
+		},
+		// The NUL case is covered at the parser level by
+		// TestExtraHeadersFromSpec and TestValidateHeaderNameValue in
+		// internal/daemon/headers_test.go. Constructing a JSON-encoded
+		// NUL inside a Go raw string is awkward, and the cmd-layer
+		// wrapper would only re-assert the same ValidateHeaderNameValue
+		// call without exercising new behaviour.
+		{
+			name: "colon in name",
+			spec: `{"X:Inj": "ok"}`,
+			want: "colon",
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := cli.CLIConfig{}
+			err := applyConfigSet(&cfg, "extra_headers", tc.spec)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %q, want substring %q", err.Error(), tc.want)
+			}
+			if cfg.ExtraHeaders != nil {
+				t.Fatalf("ExtraHeaders mutated on rejected write: got %v", cfg.ExtraHeaders)
+			}
+		})
+	}
+}
+
+// TestApplyConfigSetExtraHeadersRejectsMalformedJSON pins the JSON
+// boundary so a typo or paste-error surfaces as a parse error rather
+// than persisting an unintended empty object.
+func TestApplyConfigSetExtraHeadersRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	err := applyConfigSet(&cfg, "extra_headers", `{not json`)
+	if err == nil {
+		t.Fatalf("expected malformed-JSON error, got nil")
+	}
+	if !strings.Contains(err.Error(), "JSON object literal") {
+		t.Fatalf("err = %q, want JSON parse error message", err.Error())
+	}
+	if cfg.ExtraHeaders != nil {
+		t.Fatalf("ExtraHeaders mutated on rejected write: got %v", cfg.ExtraHeaders)
+	}
+}
+
+// TestRunConfigShowIncludesExtraHeaders verifies the new key shows up
+// in `config show` output, since the issue spec calls for in-code
+// help / show output to ship with the code.
+func TestRunConfigShowIncludesExtraHeaders(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// The workdir contains a daemon_task_context.json marker; setting
+	// MULTICA_TASK_CONFIG_ROOT to a private temp dir makes
+	// requireTaskLocalConfigRoot pass and isolates any state we'd
+	// write away from the user's repo.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	cmd := newConfigTestCmd()
+	_ = cmd.Flags().Set("profile", "dev")
+
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	if !strings.Contains(out, "extra_headers:") {
+		t.Fatalf("runConfigShow missing extra_headers line:\n%s", out)
+	}
+	// Empty config should render the "<none>" placeholder so the
+	// line is still useful (operator can confirm the field exists and
+	// is unconfigured) rather than the usual "(not set)" filler.
+	// Values are deliberately omitted from show output (see
+	// extraHeadersDisplay) because extra_headers is the primary
+	// vehicle for Authorization-style secrets.
+	if !strings.Contains(out, " <none>") {
+		t.Fatalf("runConfigShow missing empty-extra_headers placeholder:\n%s", out)
+	}
+}
+
+// TestRunConfigSetExtraHeadersEndToEnd wires the cmd through
+// SaveCLIConfigForProfile and reads it back, confirming the on-disk
+// shape survives the full cmd path.
+func TestRunConfigSetExtraHeadersEndToEnd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// See TestRunConfigShowIncludesExtraHeaders for the rationale.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+
+	cmd := newConfigTestCmd()
+	_ = cmd.Flags().Set("profile", "dev")
+	stderr := captureStderr(t)
+	defer stderr.restore()
+
+	spec := `{"X-Auth": "bearer prod-token", "X-Region": "us-west-2"}`
+	if err := runConfigSet(cmd, []string{"extra_headers", spec}); err != nil {
+		t.Fatalf("runConfigSet extra_headers: %v", err)
+	}
+	_ = stderr.read()
+
+	loaded, err := cli.LoadCLIConfigForProfile("dev")
+	if err != nil {
+		t.Fatalf("LoadCLIConfigForProfile: %v", err)
+	}
+	if got, want := loaded.ExtraHeaders["X-Auth"], "bearer prod-token"; got != want {
+		t.Errorf("ExtraHeaders[X-Auth]: got %q, want %q", got, want)
+	}
+	if got, want := loaded.ExtraHeaders["X-Region"], "us-west-2"; got != want {
+		t.Errorf("ExtraHeaders[X-Region]: got %q, want %q", got, want)
+	}
+
+	// Round-tripping once more with an empty string clears it.
+	if err := runConfigSet(cmd, []string{"extra_headers", ""}); err != nil {
+		t.Fatalf("runConfigSet clear: %v", err)
+	}
+	loaded, err = cli.LoadCLIConfigForProfile("dev")
+	if err != nil {
+		t.Fatalf("LoadCLIConfigForProfile: %v", err)
+	}
+	if loaded.ExtraHeaders != nil {
+		t.Fatalf("ExtraHeaders should be nil after clear, got %v", loaded.ExtraHeaders)
+	}
+}

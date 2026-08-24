@@ -156,6 +156,18 @@ type CLIConfig struct {
 	// intentionally local-only (it is never sent to the server) because the
 	// path is a property of this machine, not of the shared profile.
 	ProfileCommandOverrides map[string]string `json:"profile_command_overrides,omitempty"`
+
+	// ExtraHeaders is the per-deployment set of HTTP headers the daemon
+	// attaches to its outbound server calls (e.g. an internal reverse-proxy
+	// shared secret for self-hosted multica). Persisted via
+	// `multica config set extra_headers '{...}'` and read by the daemon at
+	// startup; the equivalent env var MULTICA_EXTRA_HEADERS takes
+	// precedence at load time. nil / empty / `{}` means "no extra headers".
+	// Reserved for self-host operators gating the server behind a proxy or
+	// mutual-TLS front-end that needs a per-call token. PR 1 only parses
+	// and stores the value; PR 2 (linked sub-issue) wires it into the
+	// outbound transport.
+	ExtraHeaders map[string]string `json:"extra_headers,omitempty"`
 }
 
 // BackendOverrides holds per-backend configuration overrides. Each field is
