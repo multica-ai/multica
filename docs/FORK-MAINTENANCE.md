@@ -62,6 +62,7 @@ health-gated retry + hasRunnableSuccessor slot guard).
 7. `fc8f4e3` feat(verify): opt-in verifier agent runs after branch delivery (GAP-24, migration 403)
 8. feat(service): hollow-completion flag — agent comment when an issue task completes with no branch (GAP-29, issue #24)
 9. feat(service): dead-letter case file comment on retry exhaustion (GAP-27, issue #22)
+10. fix(daemon): GC spares agent branches whose taskKey task dir still exists under WorkspacesRoot — crash between finalize and report no longer loses committed work (GAP-16, issue #21)
 
 Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
 AND the desktop-bundled binary (see below). Server-side pieces require

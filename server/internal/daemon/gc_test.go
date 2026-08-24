@@ -1241,6 +1241,39 @@ func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
 	}
 }
 
+// TestPruneWorktree_SparesBranchWithLiveTaskDir guards GAP-16 (#21): a crash
+// after worktree finalize but before the terminal report leaves the agent
+// branch as the only copy of committed work. While a task dir named after the
+// branch's taskKey still exists under WorkspacesRoot, GC must not delete it.
+func TestPruneWorktree_SparesBranchWithLiveTaskDir(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	staleBranch := "agent/stale/87654321"
+	taskDir := filepath.Join(d.cfg.WorkspacesRoot, "ws1", "87654321")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.pruneWorktree(barePath)
+	if !gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected %q to survive while task dir %s exists", staleBranch, taskDir)
+	}
+
+	if err := os.RemoveAll(taskDir); err != nil {
+		t.Fatal(err)
+	}
+	d.pruneWorktree(barePath)
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected %q to be deleted once its task dir is gone", staleBranch)
+	}
+}
+
 func TestMaintainRepoCacheRunsLightCleanupWhileTaskActive(t *testing.T) {
 	t.Parallel()
 
