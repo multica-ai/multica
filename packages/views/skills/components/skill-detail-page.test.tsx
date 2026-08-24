@@ -485,4 +485,3 @@ describe("SkillDetailPage export", () => {
     expect(downloadSkillArchive).toHaveBeenCalledWith("skill-1");
   });
 });
-
