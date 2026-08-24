@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func writeFakeMcodeACP(t *testing.T, loadSession bool) (string, string, string) {
@@ -47,6 +48,70 @@ done
 		t.Fatalf("write fake mcode: %v", err)
 	}
 	return bin, requests, args
+}
+
+func writeFakeMcodeACPReadyAfterInitialize(t *testing.T, readyAfter time.Duration) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "mcode")
+	requests := filepath.Join(dir, "requests.jsonl")
+	ready := filepath.Join(dir, "ready")
+	script := fmt.Sprintf(`#!/bin/sh
+while IFS= read -r line; do
+  printf '%%s\n' "$line" >> %q
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ( sleep %.3f; : > %q ) &
+      ;;
+    *'"method":"session/new"'*)
+      if [ ! -f %q ]; then
+        exit 42
+      fi
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"mcode-ready-session"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"mcode-ready-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ready"}}}}\n'
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`, requests, readyAfter.Seconds(), ready, ready)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake mcode: %v", err)
+	}
+	return bin, requests
+}
+
+func writeFakeMcodeACPExitsOnSessionNew(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "mcode")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf 'mcode exited while starting a session\n' >&2
+      exit 42
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake mcode: %v", err)
+	}
+	return bin
 }
 
 func TestNewReturnsMcodeBackend(t *testing.T) {
@@ -117,6 +182,57 @@ func TestMcodeFreshSessionUsesACPAndForwardsMCP(t *testing.T) {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("requests missing %s:\n%s", want, raw)
 		}
+	}
+}
+
+func TestMcodeWaitsForSessionNewReadinessAfterInitialize(t *testing.T) {
+	t.Parallel()
+	bin, requestsFile := writeFakeMcodeACPReadyAfterInitialize(t, 50*time.Millisecond)
+	backend, err := New("mcode", Config{ExecutablePath: bin, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("New(mcode): %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "ship it", ExecOptions{Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.SessionID != "mcode-ready-session" {
+		t.Fatalf("result = %+v", result)
+	}
+	requests, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests: %v", err)
+	}
+	if !strings.Contains(string(requests), `"method":"session/new"`) {
+		t.Fatalf("session/new was not sent:\n%s", requests)
+	}
+}
+
+func TestMcodeSessionNewExitAfterInitializeReportsStartupFailure(t *testing.T) {
+	t.Parallel()
+	bin := writeFakeMcodeACPExitsOnSessionNew(t)
+	backend, err := New("mcode", Config{ExecutablePath: bin, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("New(mcode): %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "ship it", ExecOptions{Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("result = %+v, want failed", result)
+	}
+	if !strings.Contains(result.Error, "session/new failed after initialize") {
+		t.Fatalf("error = %q, want session/new startup failure", result.Error)
+	}
+	if strings.Contains(result.Error, "initialize failed") {
+		t.Fatalf("error = %q, must not blame initialize", result.Error)
 	}
 }
 
