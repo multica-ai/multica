@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getIssueMetrics,
+  getPendingInvitations,
   getRecentActivity,
   getTaskOutcomeCounts,
   getWorkspaceMembers,
@@ -10,6 +11,7 @@ import {
 import { findKeyForSlug, resolveTeamName } from "@/lib/litellm-join";
 import { listLiteLlmKeys, listLiteLlmTeams } from "@/lib/litellm";
 import { deriveHealth, deriveSuccessRate } from "@/lib/derive";
+import { computeInviteEligibility } from "@/lib/invite-eligibility";
 import type { LiteLlmSection, WorkspaceDetail } from "@/lib/types";
 
 async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
@@ -49,12 +51,13 @@ export async function GET(
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
-    const [status, activity, issues, outcomes, members, litellmBase] = await Promise.all([
+    const [status, activity, issues, outcomes, members, pendingInvitations, litellmBase] = await Promise.all([
       getWorkspaceStatus(id),
       getRecentActivity(id),
       getIssueMetrics(id),
       getTaskOutcomeCounts(id),
       getWorkspaceMembers(id),
+      getPendingInvitations(id),
       buildLiteLlmSection(metadata.slug).catch((error) => {
         console.error("[admin] LiteLLM lookup failed", error);
         return {
@@ -89,6 +92,8 @@ export async function GET(
       issues,
       litellm,
       members,
+      pendingInvitations,
+      inviteEligibility: computeInviteEligibility(members),
       insights: { successRate, health },
     };
     return NextResponse.json(detail);

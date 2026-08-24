@@ -78,6 +78,14 @@ spec:
               value: "3002"
             - name: HOSTNAME
               value: 0.0.0.0
+            # Workspace-invite writes go to the Go backend as the bot PAT
+            # (BOT_PAT arrives via envFrom above — no new secret wiring
+            # needed, see /agentfarm/tools/BOT_PAT in secret-store.yaml's
+            # glob). Unlike gandalf, which runs outside the cluster and must
+            # hit the public origin, admin can reach the backend in-cluster —
+            # see service-backend.yaml's agentfarm-backend ClusterIP Service.
+            - name: AGENTFARM_API_BASE_URL
+              value: http://agentfarm-backend:8080
             # Same $(VAR) composition as deployment-backend.yaml's DATABASE_URL
             # — admin is a read-only consumer of the same agentfarm Postgres
             # cluster (see apps/admin/lib/db.ts).

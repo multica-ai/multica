@@ -7,6 +7,7 @@ import type {
   IssueMetrics,
   ListWorkspacesParams,
   ListWorkspacesResult,
+  PendingInvitation,
   WorkspaceListItem,
   WorkspaceMember,
   WorkspaceMetadata,
@@ -361,6 +362,38 @@ export async function getWorkspaceMembers(id: string): Promise<WorkspaceMember[]
     name: r.name,
     email: r.email,
     role: r.role as WorkspaceMember["role"],
+  }));
+}
+
+/**
+ * Live (pending, not-yet-expired) invitations for a workspace — used both to
+ * render the "pending" state in MembersSection and, more importantly, as an
+ * LBYL pre-check: the invite dialog and route handler read this before
+ * attempting a write, so "already invited" is caught up front instead of via
+ * the Go API's 409. `status = 'pending' AND expires_at > now()` mirrors the
+ * partial unique index (idx_invitation_unique_pending) the Go backend itself
+ * enforces — see server/migrations/041_workspace_invitation.up.sql.
+ */
+export async function getPendingInvitations(id: string): Promise<PendingInvitation[]> {
+  const rows = await query<{
+    invitee_email: string;
+    role: string;
+    created_at: string;
+    expires_at: string;
+  }>(
+    `
+    SELECT invitee_email, role, created_at, expires_at
+    FROM workspace_invitation
+    WHERE workspace_id = $1 AND status = 'pending' AND expires_at > now()
+    ORDER BY created_at DESC
+    `,
+    [id],
+  );
+  return rows.map((r) => ({
+    email: r.invitee_email,
+    role: r.role as PendingInvitation["role"],
+    createdAt: r.created_at,
+    expiresAt: r.expires_at,
   }));
 }
 

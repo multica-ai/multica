@@ -75,6 +75,35 @@ export interface WorkspaceMember {
   role: "owner" | "admin" | "member";
 }
 
+/** A live (non-expired) `workspace_invitation` row — see
+ * server/migrations/041_workspace_invitation.up.sql. Only 'admin'/'member'
+ * are invitable roles; the Go backend rejects 'owner' invites outright. */
+export interface PendingInvitation {
+  email: string;
+  role: "admin" | "member";
+  createdAt: string;
+  expiresAt: string;
+}
+
+/**
+ * Whether the invite feature can actually write right now, computed
+ * up front (LBYL, not "attempt the POST and interpret the 403") from data
+ * this app already reads: is the bot account admin uses to call the Go API
+ * (AGENTFARM_BOT_EMAIL) itself an owner/admin member of this workspace? See
+ * app/api/workspaces/[id]/invitations/route.ts for the write path this
+ * gates, and lib/queries.ts's getWorkspaceMembers for the source data.
+ *
+ * `reason` distinguishes *why* `eligible` is false — a deployment
+ * misconfiguration ("pat-missing", BOT_PAT isn't set at all) reads very
+ * differently to an operator than a per-workspace condition
+ * ("not-workspace-admin", the bot account just needs to be added/promoted).
+ */
+export interface InviteEligibility {
+  eligible: boolean;
+  botEmail: string;
+  reason: "pat-missing" | "not-workspace-admin" | null;
+}
+
 export interface WorkspaceDetail {
   metadata: WorkspaceMetadata;
   status: WorkspaceStatus;
@@ -82,6 +111,8 @@ export interface WorkspaceDetail {
   issues: IssueMetrics;
   litellm: LiteLlmSection;
   members: WorkspaceMember[];
+  pendingInvitations: PendingInvitation[];
+  inviteEligibility: InviteEligibility;
   insights: DerivedInsights;
 }
 

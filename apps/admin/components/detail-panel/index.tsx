@@ -51,7 +51,12 @@ export function DetailPanel({ workspace, onClose }: DetailPanelProps) {
                 a summary, so it belongs after the at-a-glance sections. */}
             <DetailHeader workspace={workspace} status={data.status} />
             <MetadataGrid metadata={data.metadata} />
-            <MembersSection members={data.members} />
+            <MembersSection
+              workspaceId={data.metadata.id}
+              members={data.members}
+              pendingInvitations={data.pendingInvitations}
+              inviteEligibility={data.inviteEligibility}
+            />
             <LiteLlmSection litellm={data.litellm} />
             <IssueMetricsSection issues={data.issues} />
             <DerivedInsights insights={data.insights} />

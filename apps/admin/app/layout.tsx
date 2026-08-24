@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { Toaster } from "@multica/ui/components/ui/sonner";
+import { ThemeProvider } from "@/components/theme-provider";
 import { Providers } from "./providers";
 import { Nav } from "@/components/nav";
 import "./globals.css";
@@ -16,12 +18,15 @@ export const metadata: Metadata = {
 // gate this app with real auth before flipping that switch.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body className="h-full font-sans antialiased">
-        <Providers>
-          <Nav />
-          {children}
-        </Providers>
+        <ThemeProvider>
+          <Providers>
+            <Nav />
+            {children}
+          </Providers>
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );
