@@ -7465,10 +7465,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if task.RuntimeID != "" {
 			runtimes = append(runtimes, cerebra.RuntimeEntry{
 				RuntimeID: task.RuntimeID,
-				TierMap:   nil,
+				TierMap:   deriveRuntimeTierMap(provider),
 			})
 		}
-		model = routeBeforeDispatch(ctx, d.cerebraRouter, prompt, meta, runtimes, model)
+		routingPrompt := prompt
+		if task.ChatMessage != "" {
+			routingPrompt = task.ChatMessage + "\n" + routingPrompt
+		}
+		if task.TriggerCommentContent != "" {
+			routingPrompt = task.TriggerCommentContent + "\n" + routingPrompt
+		}
+		if task.ThreadName != "" {
+			routingPrompt = task.ThreadName + "\n" + routingPrompt
+		}
+		model = routeBeforeDispatch(ctx, d.cerebraRouter, routingPrompt, meta, runtimes, model)
 	}
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,

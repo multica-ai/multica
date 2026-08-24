@@ -146,6 +146,19 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
+	// Forward LLM API keys for multi-model routing
+	for _, key := range []string{
+		"GEMINI_API_KEY", "GOOGLE_GENERATIVE_AI_API_KEY",
+		"OPENROUTER_API_KEY", "NVIDIA_API_KEY",
+		"ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+	} {
+		if val := os.Getenv(key); val != "" {
+			env = append(env, key+"="+val)
+		}
+	}
+	if val := os.Getenv("GEMINI_API_KEY"); val != "" {
+		env = append(env, "GOOGLE_GENERATIVE_AI_API_KEY="+val)
+	}
 	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
 	// OpenCode's general inline-config injection mechanism that merges at
 	// "local" scope (after the project-config loop, before remote / managed

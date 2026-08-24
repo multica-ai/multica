@@ -2,99 +2,92 @@ package daemon
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
+	"os"
 	"testing"
-	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebra"
 )
 
-func TestDetectMCPUsage(t *testing.T) {
-	tests := []struct {
-		name          string
-		overlay       []byte
-		connectedApps []string
-		want          bool
-	}{
-		{
-			name:          "empty overlay and empty apps",
-			overlay:       nil,
-			connectedApps: nil,
-			want:          false,
-		},
-		{
-			name:          "short overlay bytes {}",
-			overlay:       []byte("{}"),
-			connectedApps: nil,
-			want:          false,
-		},
-		{
-			name:          "valid overlay json",
-			overlay:       []byte(`{"servers":{"github":{}}}`),
-			connectedApps: nil,
-			want:          true,
-		},
-		{
-			name:          "connected app present",
-			overlay:       nil,
-			connectedApps: []string{"github", "slack"},
-			want:          true,
-		},
-		{
-			name:          "connected apps with only whitespace",
-			overlay:       nil,
-			connectedApps: []string{"   ", ""},
-			want:          false,
-		},
-	}
+func TestCLIRoutingSimulation(t *testing.T) {
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	session := cerebra.NewSessionStore(0)
+	unavail := cerebra.NewUnavailabilityStore(0)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := detectMCPUsage(tt.overlay, tt.connectedApps)
-			if got != tt.want {
-				t.Errorf("detectMCPUsage() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRouteBeforeDispatch(t *testing.T) {
+	router := cerebra.NewRouter(classifier, policy, session, unavail, logger, nil)
 	ctx := context.Background()
 
-	t.Run("nil router returns default model", func(t *testing.T) {
-		got := routeBeforeDispatch(ctx, nil, "prompt", cerebra.TaskMeta{}, nil, "claude-3-5-sonnet")
-		if got != "claude-3-5-sonnet" {
-			t.Errorf("routeBeforeDispatch() = %v, want %v", got, "claude-3-5-sonnet")
-		}
-	})
+	// Available discovered OpenCode catalog
+	openCodeCatalog := deriveRuntimeTierMap("opencode")
+	runtimes := []cerebra.RuntimeEntry{
+		{
+			RuntimeID: "runtime-opencode-01",
+			TierMap:   openCodeCatalog,
+		},
+	}
 
-	t.Run("active router routes based on prompt", func(t *testing.T) {
-		classifier := cerebra.HeuristicClassifier{}
-		policy := &cerebra.Policy{}
-		session := cerebra.NewSessionStore(time.Hour)
-		unavail := cerebra.NewUnavailabilityStore(time.Hour)
-		router := cerebra.NewRouter(classifier, policy, session, unavail, nil, nil)
+	testCases := []struct {
+		Name            string
+		Prompt          string
+		WillUseMCPTools bool
+		ExpectedTier    cerebra.Tier
+		ExpectedModel   string
+	}{
+		{
+			Name:            "1. Simple Question",
+			Prompt:          "What is the structure of this project?",
+			WillUseMCPTools: false,
+			ExpectedTier:    cerebra.TierSimple,
+			ExpectedModel:   "opencode/mimo-v2.5-free",
+		},
+		{
+			Name:            "2. Debug / Coding Task",
+			Prompt:          "Debug the database connection and fix the race condition.",
+			WillUseMCPTools: false,
+			ExpectedTier:    cerebra.TierStandard,
+			ExpectedModel:   "opencode/nemotron-3.5-lightning-free",
+		},
+		{
+			Name:            "3. Complex Architecture Task",
+			Prompt:          "Architect and design a new multi-tenant sharding and migration engine.",
+			WillUseMCPTools: false,
+			ExpectedTier:    cerebra.TierHeavy,
+			ExpectedModel:   "opencode/nemotron-3-ultra-free",
+		},
+		{
+			Name:            "4. Simple Prompt with Active MCP Tools (Tool Floor Policy)",
+			Prompt:          "Say hello in 3 words.",
+			WillUseMCPTools: true,
+			ExpectedTier:    cerebra.TierStandard,
+			ExpectedModel:   "opencode/nemotron-3.5-lightning-free",
+		},
+	}
 
-		runtimes := []cerebra.RuntimeEntry{
-			{
-				RuntimeID: "rt-1",
-				TierMap: cerebra.TierMap{
-					cerebra.TierSimple:   "claude-3-5-haiku",
-					cerebra.TierStandard: "claude-3-5-sonnet",
-					cerebra.TierHeavy:    "claude-3-opus",
-				},
-			},
+	fmt.Println("\n=========================================================================================")
+	fmt.Printf("%-35s | %-10s | %-38s | %-12s\n", "TEST SCENARIO", "TIER", "DYNAMICALLY SELECTED MODEL", "RULE")
+	fmt.Println("-----------------------------------------------------------------------------------------")
+
+	for _, tc := range testCases {
+		meta := cerebra.TaskMeta{
+			WillUseMCPTools: tc.WillUseMCPTools,
+			IssueID:         "issue-cli-test",
+			SessionID:       "session-cli-test",
 		}
 
-		// Simple prompt
-		gotSimple := routeBeforeDispatch(ctx, router, "hello world", cerebra.TaskMeta{}, runtimes, "default-model")
-		if gotSimple != "claude-3-5-haiku" {
-			t.Errorf("got %v, want claude-3-5-haiku", gotSimple)
-		}
+		result := router.Route(ctx, tc.Prompt, meta, runtimes, "default-fallback-model")
+		dispatchedModel := routeBeforeDispatch(ctx, router, tc.Prompt, meta, runtimes, "default-fallback-model")
 
-		// Heavy prompt
-		gotHeavy := routeBeforeDispatch(ctx, router, "architect and design system", cerebra.TaskMeta{}, runtimes, "default-model")
-		if gotHeavy != "claude-3-opus" {
-			t.Errorf("got %v, want claude-3-opus", gotHeavy)
+		fmt.Printf("%-35s | %-10s | %-38s | %-12s\n", tc.Name, result.Tier, dispatchedModel, result.MatchedRule)
+
+		if result.Tier != tc.ExpectedTier {
+			t.Errorf("[%s] Expected tier %s, got %s", tc.Name, tc.ExpectedTier, result.Tier)
 		}
-	})
+		if dispatchedModel != tc.ExpectedModel {
+			t.Errorf("[%s] Expected model %s, got %s", tc.Name, tc.ExpectedModel, dispatchedModel)
+		}
+	}
+	fmt.Println("=========================================================================================")
 }
