@@ -369,6 +369,8 @@ export function ProviderLogo({
       return <HermesLogo className={className} />;
     case "pi":
       return <PiLogo className={className} />;
+    case "devin":
+      return <KiroLogo className={className} />;
     case "omp":
       return <PiLogo className={className} />;
     case "copilot":
