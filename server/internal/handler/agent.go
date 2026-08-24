@@ -330,6 +330,53 @@ type TaskIssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// TaskIssueContextData is the bounded, revision-stamped issue snapshot that a
+// daemon writes to .agent_context/issue_context.md. It is intentionally a
+// compact operational brief, not a replacement for the issue API: an agent
+// fetches the full issue only when this snapshot is truncated or a task needs
+// a detail that is not represented here. That keeps revision/repair turns from
+// paying for the entire issue record and comment history again.
+//
+// Mirror: internal/daemon/types.go.
+type TaskIssueContextData struct {
+	Revision  int64  `json:"revision"`
+	Content   string `json:"content"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Bytes     int    `json:"bytes"`
+}
+
+const taskIssueContextMaxBytes = 12 * 1024
+
+func buildTaskIssueContext(issue db.Issue) *TaskIssueContextData {
+	var b strings.Builder
+	fmt.Fprintf(&b, "**Title:** %s\n\n", issue.Title)
+
+	if issue.Description.Valid && strings.TrimSpace(issue.Description.String) != "" {
+		b.WriteString("## Description\n\n")
+		b.WriteString(issue.Description.String)
+		b.WriteString("\n\n")
+	}
+
+	if len(issue.AcceptanceCriteria) > 0 && string(issue.AcceptanceCriteria) != "null" {
+		b.WriteString("## Acceptance Criteria\n\n")
+		b.WriteString(string(issue.AcceptanceCriteria))
+		b.WriteString("\n")
+	}
+
+	content := b.String()
+	truncated := false
+	if len(content) > taskIssueContextMaxBytes {
+		marker := "\n\n[context capsule truncated]"
+		end := taskIssueContextMaxBytes - len(marker)
+		for end > 0 && end < len(content) && !utf8.RuneStart(content[end]) {
+			end--
+		}
+		content = content[:end] + marker
+		truncated = true
+	}
+	return &TaskIssueContextData{Revision: issue.Revision, Content: content, Truncated: truncated, Bytes: len(content)}
+}
+
 type AgentTaskResponse struct {
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
@@ -352,6 +399,10 @@ type AgentTaskResponse struct {
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
 	WorkspaceContext string `json:"workspace_context,omitempty"`
+	// IssueContext is the compact, revision-stamped issue snapshot built at
+	// claim time. The daemon renders its content only in the local sidecar.
+	IssueContext *TaskIssueContextData `json:"issue_context,omitempty"`
+
 	// IssueStatuses is the workspace's ACTIVE CUSTOM status catalog (MUL-6460),
 	// injected into the agent brief so agents can see and use statuses beyond
 	// the seven built-ins. Built-ins are omitted: their keys, names, and

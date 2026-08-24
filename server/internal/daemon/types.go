@@ -78,6 +78,16 @@ type IssueStatusData struct {
 	Description string `json:"description,omitempty"`
 }
 
+// IssueContextData is a compact, revision-stamped issue snapshot supplied at
+// claim time so agents can begin from local context instead of fetching the
+// complete issue on every follow-up.
+type IssueContextData struct {
+	Revision  int64  `json:"revision"`
+	Content   string `json:"content"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Bytes     int    `json:"bytes"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -99,6 +109,9 @@ type Task struct {
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext string `json:"workspace_context,omitempty"`
+	// IssueContext mirrors the compact, revision-stamped issue snapshot from
+	// the claim payload. It is rendered only into the task-local sidecar.
+	IssueContext *IssueContextData `json:"issue_context,omitempty"`
 	// IssueStatuses mirrors the claim payload's active CUSTOM status catalog
 	// (MUL-6460): key/name/category/description per status, already in catalog
 	// order. Rendered into the brief's status-command line; empty (including on
