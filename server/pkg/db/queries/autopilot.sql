@@ -399,6 +399,18 @@ WHERE autopilot_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
 
+-- name: GetAutopilotRunInFlight :one
+-- Mutex gate for the scheduler: returns the most recent run that has not yet
+-- reached a terminal state. The status list mirrors the partial index
+-- idx_autopilot_run_status (migration 042), which is also the authoritative
+-- definition of "in flight". Returns no rows when the autopilot is free to
+-- dispatch a new run.
+SELECT * FROM autopilot_run
+WHERE autopilot_id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+ORDER BY created_at DESC
+LIMIT 1;
+
 -- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run
 SET status = 'issue_created', issue_id = $2
