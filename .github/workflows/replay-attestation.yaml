@@ -12,7 +12,7 @@ on:
       repo:
         required: false
         type: string
-        description: "owner/repo to target for backfill discovery or cross-verify (defaults to this repo, g2crowd/ai-attribution)"
+        description: "owner/repo to target for backfill discovery or cross-verify (defaults to this repo)"
       limit:
         required: false
         type: string
@@ -27,85 +27,11 @@ on:
     - cron: '17 */6 * * *'
 
 jobs:
-  discover:
-    if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '43 */6 * * *') ||
-      (github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] == '' && inputs['run-cross-verify'] == false)
-    runs-on: arc-runner-set
-    outputs:
-      pr-numbers: ${{ steps.discover.outputs.pr-numbers }}
-    env:
-      NOTES_API_URL: ${{ secrets.NOTES_API_URL }}
-      NOTES_API_KEY: ${{ secrets.NOTES_API_KEY }}
-      TARGET_REPO: ${{ inputs.repo || github.repository }}
-      REPLAY_LIMIT: ${{ inputs.limit || '100' }}
-    steps:
-      - name: Find PRs needing a replay attempt
-        id: discover
-        run: |
-          response=$(curl -sS -G -w '\n%{http_code}' \
-            "${NOTES_API_URL}/worker/pr-facts/needing-replay" \
-            --data-urlencode "repo=${TARGET_REPO}" \
-            --data-urlencode "limit=${REPLAY_LIMIT}" \
-            -H "X-API-Key: ${NOTES_API_KEY}")
-          status="${response##*$'\n'}"
-          body="${response%$'\n'*}"
-          echo "$body" | jq . || echo "$body"
-
-          if [ "$status" != "200" ]; then
-            echo "::error::needing-replay request failed with status $status"
-            exit 1
-          fi
-
-          pr_numbers=$(echo "$body" | jq -r '[.prs[].pr_number] | join(",")')
-          echo "### Backfill discovery: $TARGET_REPO" >> "$GITHUB_STEP_SUMMARY"
-          echo "found $(echo "$body" | jq '.prs | length') PR(s) with no CI-note coverage and no prior replay attempt" >> "$GITHUB_STEP_SUMMARY"
-          echo "pr-numbers=$pr_numbers" >> "$GITHUB_OUTPUT"
-
-  replay:
-    needs: discover
-    if: >-
-      always() && (
-        github.event_name == 'repository_dispatch' ||
-        (github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] != '' && inputs['run-cross-verify'] == false) ||
-        (needs.discover.result == 'success' && needs.discover.outputs.pr-numbers != '')
-      )
+  orchestrate:
     uses: g2crowd/gh-actions/.github/workflows/replay-attestation.yml@main
     with:
-      pr-numbers: >-
-        ${{
-          github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] != '' && inputs['pr-numbers']
-          || (github.event_name == 'repository_dispatch' && format('{0}', github.event.client_payload.pr_number))
-          || needs.discover.outputs.pr-numbers
-        }}
+      pr-numbers: ${{ inputs['pr-numbers'] || '' }}
+      repo: ${{ inputs.repo || '' }}
+      limit: ${{ inputs.limit || '' }}
+      run-cross-verify: ${{ inputs['run-cross-verify'] || false }}
     secrets: inherit
-
-  verify:
-    if: >-
-      (github.event_name == 'schedule' && github.event.schedule == '17 */6 * * *') ||
-      (github.event_name == 'workflow_dispatch' && inputs['run-cross-verify'] == true)
-    runs-on: arc-runner-set
-    env:
-      NOTES_API_URL: ${{ secrets.NOTES_API_URL }}
-      NOTES_API_KEY: ${{ secrets.NOTES_API_KEY }}
-      TARGET_REPO: ${{ inputs.repo || github.repository }}
-    steps:
-      - name: Cross-verify pending replay runs
-        run: |
-          response=$(curl -sS -w '\n%{http_code}' -X POST \
-            "${NOTES_API_URL}/worker/replay-runs/verify?repo=${TARGET_REPO}" \
-            -H "X-API-Key: ${NOTES_API_KEY}")
-          status="${response##*$'\n'}"
-          body="${response%$'\n'*}"
-          echo "$body" | jq . || echo "$body"
-
-          if [ "$status" != "200" ]; then
-            echo "::error::cross-verify request failed with status $status"
-            exit 1
-          fi
-
-          promoted_count=$(echo "$body" | jq '.promoted | length')
-          echo "### Cross-verification: $TARGET_REPO" >> "$GITHUB_STEP_SUMMARY"
-          echo "$body" | jq '.summary' >> "$GITHUB_STEP_SUMMARY"
-          echo "batch_cleared_confidence_gate: $(echo "$body" | jq '.batch_cleared_confidence_gate')" >> "$GITHUB_STEP_SUMMARY"
-          echo "promoted: $promoted_count row(s)" >> "$GITHUB_STEP_SUMMARY"
