@@ -143,7 +143,7 @@ api.example.com {
 ```text
 multica.example.com {
     # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
-    # frontend 不提供这个路径
+    # 旧版 frontend 不转发这个路径，直接路由到 backend
     handle /health {
         reverse_proxy 127.0.0.1:8080
     }
@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最后一条命令输出 `daemon_server_url`——daemon 连接 API 用的地址（设了 `MULTICA_PUBLIC_URL` 时用它，否则用 `MULTICA_APP_URL`；输出为空说明两者都没设）。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：`FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 在 2.24 之前的 Docker Compose 上不会自动跟随 `FRONTEND_PORT`（从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用会保持字面量），需要显式设置。
+最后一条命令输出 `daemon_server_url`——daemon 连接 API 用的地址（设了 `MULTICA_PUBLIC_URL` 时用它，否则用 `MULTICA_APP_URL`；输出为空说明两者都没设）。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：不要依赖从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用，把 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 显式设置为公网地址，然后重建容器。
 
 <Callout type="warning">
 `docker compose restart` 只重启现有容器，不会重新读取 `.env`。修改配置后，重新读取 `.env` 需要运行 `docker compose -f docker-compose.selfhost.yml up -d`。
@@ -245,7 +245,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。这一步报 `Server not reachable` 几乎总是因为 `/health` 经代理返回了 404——见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)。
+这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。这一步报 `Server not reachable`，说明 `/health` 没有通过探测拿到 200：可能是代理把所有流量转给了不转发该路径的旧版 frontend，可能是代理根本没把 `/health` 路由到 backend，也可能是更底层的问题（DNS、TLS、防火墙、超时、backend 返回 5xx）——见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)。
 
 确认连接状态：
 
@@ -343,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration 自动执行
 
-和[第 1 步](#1-拉取项目--一键启动后端)一样，backend 容器启动时会在对外提供服务之前先跑 `./migrate up`（`docker/entrypoint.sh`）。没有单独的升级命令——把新镜像起起来，本身就是升级这一步。想看过程：
+和[第 1 步](#1-启动-multica)一样，backend 容器启动时会在对外提供服务之前先跑 `./migrate up`（`docker/entrypoint.sh`）。没有单独的升级命令——把新镜像起起来，本身就是升级这一步。想看过程：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -378,7 +378,7 @@ Helm 有自己的升级路径：在 values 文件里把 `images.backend.tag` / `
 |---|---|
 | `/readyz` 没有返回 `ok` | 运行 `docker compose -f docker-compose.selfhost.yml logs backend postgres`。 |
 | 收不到验证码 | 请求一次验证码，再从 backend 日志中查找 `Verification code`。 |
-| `setup self-host` 提示 server 不可达 | 在执行电脑上请求 `https://api.example.com/health`，确认 DNS、TLS 和反向代理都可达。返回 404 说明代理把 `/health` 转给了 frontend——改为转给 backend（见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)）。 |
+| `setup self-host` 提示 server 不可达 | 在执行电脑上请求 `https://api.example.com/health`，确认 DNS、TLS 和反向代理都可达。返回 404 说明代理把 `/health` 转给了不转发该路径的旧版 frontend——改为直通 backend（见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)）。 |
 | 守护进程没有列出 `Agents` | 确认 AI 编程工具在 `PATH` 中并已登录，然后运行 `multica daemon restart`。 |
 | issue 一直排队 | 运行 `multica daemon status`，确认守护进程正在运行并连接了工作区。 |
 

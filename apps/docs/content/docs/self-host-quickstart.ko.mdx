@@ -143,7 +143,7 @@ api.example.com {
 ```text
 multica.example.com {
     # CLI 도달 확인: `multica setup`이 <server-url>/health에 GET을 보내 200을 기대합니다.
-    # frontend는 이 경로를 제공하지 않습니다
+    # 구버전 frontend는 이 경로를 전달하지 않으므로 backend로 직접 라우팅합니다
     handle /health {
         reverse_proxy 127.0.0.1:8080
     }
@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다(`MULTICA_PUBLIC_URL`이 설정되어 있으면 그 값을, 아니면 `MULTICA_APP_URL`을 사용합니다. 출력이 비어 있으면 둘 다 설정되지 않은 것입니다). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: Docker Compose 2.24 미만에서는 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`이 `FRONTEND_PORT`를 자동으로 따르지 않습니다(`.env.example`에서 복사한 `${FRONTEND_PORT}` 참조가 리터럴로 남습니다). 명시적으로 설정하세요.
+마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다(`MULTICA_PUBLIC_URL`이 설정되어 있으면 그 값을, 아니면 `MULTICA_APP_URL`을 사용합니다. 출력이 비어 있으면 둘 다 설정되지 않은 것입니다). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: `.env.example`에서 복사한 `${FRONTEND_PORT}` 참조에 의존하지 말고 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`을 공개 URL로 명시적으로 설정한 뒤 컨테이너를 다시 만드세요.
 
 <Callout type="warning">
 `docker compose restart`는 기존 컨테이너만 다시 시작하며 `.env`를 다시 읽지 않습니다. 설정을 수정한 뒤 `.env`를 다시 읽게 하려면 `docker compose -f docker-compose.selfhost.yml up -d`를 실행하세요.
@@ -245,7 +245,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다. 이 단계에서 `Server not reachable` 오류가 나면 거의 항상 프록시를 거친 `/health`가 404를 반환하는 것이 원인입니다. [문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)을 참고하세요.
+이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다. 이 단계에서 `Server not reachable` 오류가 나면 `/health` 프로브가 200을 받지 못했다는 뜻입니다: 프록시가 모든 트래픽을 이 경로를 전달하지 않는 구버전 frontend로 보내고 있거나, 프록시가 `/health`를 backend로 라우팅하지 않거나, DNS·TLS·방화벽·타임아웃·backend의 5xx 같은 하위 계층의 문제일 수 있습니다. [문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)을 참고하세요.
 
 연결 상태를 확인합니다.
 
@@ -343,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration은 자동으로 실행됩니다
 
-[1단계](#1-프로젝트-받아오기-및-백엔드-시작하기)와 마찬가지로, 백엔드 컨테이너는 트래픽을 받기 전에 시작 시점에 `./migrate up`을 실행합니다(`docker/entrypoint.sh`). 별도의 업그레이드 명령은 없습니다 — 새 이미지를 띄우는 것 자체가 migration 단계입니다. 진행 상황을 보려면:
+[1단계](#1-multica-시작)와 마찬가지로, 백엔드 컨테이너는 트래픽을 받기 전에 시작 시점에 `./migrate up`을 실행합니다(`docker/entrypoint.sh`). 별도의 업그레이드 명령은 없습니다 — 새 이미지를 띄우는 것 자체가 migration 단계입니다. 진행 상황을 보려면:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -378,7 +378,7 @@ Helm은 자체 업그레이드 경로가 있습니다. values 파일에서 `imag
 |---|---|
 | `/readyz`가 `ok`를 반환하지 않음 | `docker compose -f docker-compose.selfhost.yml logs backend postgres`를 실행합니다. |
 | 인증 코드를 받지 못함 | 인증 코드를 한 번 요청한 뒤 backend 로그에서 `Verification code`를 찾습니다. |
-| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. 404가 반환되면 `/health`를 backend로 전달해야 합니다([문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)). |
+| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. 404가 반환되면 프록시가 `/health`를 이 경로를 전달하지 않는 구버전 web 릴리스로 보내고 있다는 뜻이니 backend로 직접 라우팅해야 합니다([문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)). |
 | 데몬의 `Agents`가 비어 있음 | AI 코딩 도구가 `PATH`에 있고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다. |
 | 이슈가 계속 큐에서 기다림 | `multica daemon status`를 실행해 데몬이 실행 중이며 워크스페이스에 연결되었는지 확인합니다. |
 

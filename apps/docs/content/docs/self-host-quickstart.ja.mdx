@@ -143,7 +143,7 @@ api.example.com {
 ```text
 multica.example.com {
     # CLI の到達確認: `multica setup` は <server-url>/health に GET を送り 200 を要求する。
-    # frontend はこのパスを提供しない
+    # 古い frontend はこのパスを転送しないため、backend に直接ルーティングする
     handle /health {
         reverse_proxy 127.0.0.1:8080
     }
@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します（`MULTICA_PUBLIC_URL` が設定されていればそれを、なければ `MULTICA_APP_URL` を使います。出力が空ならどちらも未設定です）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: Docker Compose 2.24 未満では `FRONTEND_ORIGIN` と `MULTICA_APP_URL` は `FRONTEND_PORT` に自動追随せず（`.env.example` からコピーした `${FRONTEND_PORT}` 参照はリテラルのまま残る）、明示的な設定が必要です。
+最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します（`MULTICA_PUBLIC_URL` が設定されていればそれを、なければ `MULTICA_APP_URL` を使います。出力が空ならどちらも未設定です）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: `.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。
@@ -245,7 +245,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出るのは、ほぼ常にプロキシ経由の `/health` が 404 を返していることが原因です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
+このコマンドはまず `<server-url>/health` を確認し、次にブラウザを開いてログインを完了します。ログイン後はローカルに認証情報を保存し、デーモンを起動します。このステップで `Server not reachable` エラーが出る場合、`/health` のプローブが 200 を取得できなかったことを意味します: プロキシがすべてのトラフィックをこのパスを転送しない古い frontend に向けているか、プロキシが `/health` を backend にルーティングしていないか、あるいは DNS・TLS・ファイアウォール・タイムアウト・backend からの 5xx といったより下位の障害です。詳細は[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)を参照してください。
 
 接続状態を確認します。
 
@@ -343,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration は自動で実行されます
 
-[ステップ1](#1-プロジェクトを取得してバックエンドを起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
+[ステップ1](#1-multica-を起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -378,7 +378,7 @@ Helm には独自のアップグレード経路があります。values ファ�
 |---|---|
 | `/readyz` が `ok` を返さない | `docker compose -f docker-compose.selfhost.yml logs backend postgres` を実行する。 |
 | 認証コードが届かない | コードを一度リクエストし、backend のログで `Verification code` を探す。 |
-| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合は `/health` を backend へ転送すること（[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)）。 |
+| `setup self-host` が server に到達できないと報告する | 実行用コンピュータから `https://api.example.com/health` をリクエストし、DNS、TLS、リバースプロキシがすべて到達可能か確認する。404 が返る場合、プロキシが `/health` をこのパスを転送しない古い web リリースに向けているため、backend へ直接ルーティングすること（[トラブルシューティング](/troubleshooting#multica-setup-がサーバーに到達できないと報告する)）。 |
 | デーモンが `Agents` を表示しない | AI コーディングツールが `PATH` にありログイン済みであることを確認し、`multica daemon restart` を実行する。 |
 | イシューがキューにとどまり続ける | `multica daemon status` を実行し、デーモンが起動していてワークスペースに接続していることを確認する。 |
 
