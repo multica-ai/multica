@@ -753,3 +753,51 @@ func TestTaskWakeupHandshakeCarriesExtraHeaders(t *testing.T) {
 		t.Errorf("X-Client-Capabilities missing on upgrade")
 	}
 }
+
+// TestBuildTaskWakeupHeaders_SkipsReservedFromExtra is the
+// defence-in-depth pin for the WS path: even if a reserved header
+// somehow landed in c.extraHeaders (a future code path that bypassed
+// the parser, a third-party embedder, a hand-built http.Header), the
+// buildTaskWakeupHeaders append site must NOT carry it onto the WS
+// upgrade request. The Upgrade itself is set by gorilla/websocket, so
+// the operator-injected "Upgrade: websocket" must be skipped — leaving
+// gorilla's value alone. Authorization must come from c.Token, not
+// from extras. Sec-WebSocket-* entries must be skipped entirely so
+// they cannot collide with gorilla's own handshake wiring.
+func TestBuildTaskWakeupHeaders_SkipsReservedFromExtra(t *testing.T) {
+	c := NewClient("ws://localhost:8080")
+	c.SetToken("real-token")
+	c.SetVersion("9.9.9")
+	// Every one of these is on the reserved blocklist; the parser
+	// would normally refuse to let them land in c.extraHeaders.
+	c.SetExtraHeaders(http.Header{
+		"Authorization":     {"forged-token"},
+		"X-Client-Platform": {"forged"},
+		"X-Forwarded-For":   {"1.2.3.4"},
+		"Upgrade":           {"websocket"},
+		"Sec-Websocket-Key": {"forged-key"},
+		"Content-Type":      {"text/plain"},
+		"X-Allowed":         {"kept"},
+	})
+
+	headers := buildTaskWakeupHeaders(c)
+
+	if got := headers.Get("Authorization"); got != "Bearer real-token" {
+		t.Errorf("Authorization = %q, want Bearer real-token (operator override must lose)", got)
+	}
+	if got := headers.Get("X-Client-Platform"); got != "daemon" {
+		t.Errorf("X-Client-Platform = %q, want daemon (operator override must lose)", got)
+	}
+	if vals := headers.Values("X-Forwarded-For"); len(vals) != 0 {
+		t.Errorf("X-Forwarded-For = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if vals := headers.Values("Sec-Websocket-Key"); len(vals) != 0 {
+		t.Errorf("Sec-Websocket-Key = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if vals := headers.Values("Content-Type"); len(vals) != 0 {
+		t.Errorf("Content-Type = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if got := headers.Get("X-Allowed"); got != "kept" {
+		t.Errorf("X-Allowed = %q, want kept (non-reserved extras must still pass through)", got)
+	}
+}

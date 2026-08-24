@@ -479,7 +479,14 @@ func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
 //  1. Authorization from the configured bearer token, if any.
 //  2. Operator-configured extra headers (TIM-142), added with Header.Add so
 //     multi-value entries (e.g. several X-Forwarded-For lines from a chained
-//     proxy) survive the round trip.
+//     proxy) survive the round trip. Reserved headers (Authorization,
+//     Host, Content-Length, Content-Type, Connection, Upgrade, the
+//     X-Client-* family, X-Forwarded-*, Sec-WebSocket-*, X-Workspace-Id,
+//     X-Agent-Id, X-Task-Id, Forwarded) are SKIPPED from this pass so an
+//     extra-headers entry that bypassed the parser cannot collide with
+//     gorilla's own handshake wiring or smuggle a forbidden override onto
+//     the upgrade request. Parse-time rejection in headers.go is the
+//     primary defence; this is belt-and-suspenders.
 //  3. The X-Client-* identity headers the daemon identifies itself with.
 //     Set (not Add) is used here so an operator who accidentally puts an
 //     X-Client-* override into extra-headers cannot forge the daemon's
@@ -492,6 +499,9 @@ func buildTaskWakeupHeaders(client *Client) http.Header {
 		headers.Set("Authorization", "Bearer "+token)
 	}
 	for name, values := range client.ExtraHeaders() {
+		if IsReservedHeader(name) {
+			continue
+		}
 		for _, v := range values {
 			headers.Add(name, v)
 		}

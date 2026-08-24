@@ -114,8 +114,11 @@ func init() {
 	// `--extra-header "X-A: 1" --extra-header "X-B: 2"` in the same
 	// shell call; the env var path uses a newline-separated "Name:
 	// Value" spec (same as the config-file format) so a long list of
-	// headers stays out of shell history.
-	f.StringArray("extra-header", nil, "Attach Name: value to every daemon->server request; repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
+	// headers stays out of shell history. Only the `Name: Value`
+	// (HTTP-header) form is accepted — `Name=value` errors with a
+	// "expected 'Name: Value'" message so operators don't have to
+	// remember which separator goes with which input.
+	f.StringArray("extra-header", nil, "Attach 'Name: Value' to every daemon->server request; use the 'Name: Value' form (not 'Name=value'); repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -138,7 +141,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
-	rf.StringArray("extra-header", nil, "Attach Name: value to every daemon->server request; repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
+	rf.StringArray("extra-header", nil, "Attach 'Name: Value' to every daemon->server request; use the 'Name: Value' form (not 'Name=value'); repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -1104,23 +1107,25 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// We split the resolution into two paths so the "explicit empty override"
 	// semantic survives: `--extra-header ""` (the user typed the flag with
 	// no real value) must mean "no extras, ignore MULTICA_EXTRA_HEADERS and
-	// extra_headers in config.json". cli.FlagOrEnvArray collapses an
-	// all-empty flag-set to nil (its "unset / no headers" uniform contract),
-	// which would silently fall through to the env. Checking
-	// cmd.Flags().Changed("extra-header") directly keeps the two signals
-	// separate: Changed + at least one real value → populate
-	// overrides.ExtraHeaders with those values; Changed + no real values
-	// → set overrides.ExtraHeaders to a non-nil empty http.Header so
-	// resolveExtraHeaders returns it as the authoritative "no extras";
-	// !Changed → leave overrides.ExtraHeaders nil so the env / config-file
-	// path inside LoadConfig fires.
+	// extra_headers in config.json". Checking cmd.Flags().Changed(
+	// "extra-header") directly keeps the two signals separate: Changed +
+	// at least one real value → populate overrides.ExtraHeaders with those
+	// values; Changed + no real values → set overrides.ExtraHeaders to a
+	// non-nil empty http.Header so resolveExtraHeaders returns it as the
+	// authoritative "no extras"; !Changed → leave overrides.ExtraHeaders
+	// nil so the env / config-file path inside LoadConfig fires.
 	//
-	// Validation (CR/LF/NUL/colon rejection) lives in
-	// daemon.ValidateHeaderNameValue so every entry point shares the same
-	// defence.
+	// Validation (CR/LF/NUL/colon rejection, reserved-header blocklist,
+	// httpguts RFC 7230 check, count + byte bounds) lives in
+	// daemon.ValidateHeaderNameValue + daemon.MaxExtraHeaders{Bytes} so
+	// every entry point shares the same defence. Each parsed entry
+	// counts toward the bounds incrementally; an oversized flag list
+	// fails at the offending entry rather than after building a giant
+	// header map.
 	if cmd.Flags().Changed("extra-header") {
 		rawValues, _ := cmd.Flags().GetStringArray("extra-header")
 		hdr := make(http.Header)
+		var totalBytes int
 		for _, token := range rawValues {
 			trimmed := strings.TrimSpace(token)
 			if trimmed == "" {
@@ -1130,7 +1135,15 @@ func runDaemonForeground(cmd *cobra.Command) error {
 			if err != nil {
 				return fmt.Errorf("invalid --extra-header %q: %w", token, err)
 			}
+			if len(hdr) >= daemon.MaxExtraHeaders {
+				return fmt.Errorf("too many --extra-header entries (limit %d)", daemon.MaxExtraHeaders)
+			}
+			next := totalBytes + len(name) + len(value)
+			if next > daemon.MaxExtraHeadersBytes {
+				return fmt.Errorf("--extra-header aggregate size %d bytes exceeds limit %d", next, daemon.MaxExtraHeadersBytes)
+			}
 			hdr.Add(name, value)
+			totalBytes = next
 		}
 		// Preserve the non-nil-empty contract even when every value
 		// was whitespace: a Changed flag with no real entries is the
