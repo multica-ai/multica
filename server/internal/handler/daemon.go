@@ -984,6 +984,9 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 type DaemonHeartbeatRequest struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// DiskFreePercent is optional daemon-reported disk-pressure telemetry
+	// (percent free on the workspaces filesystem). Nil = unknown.
+	DiskFreePercent *float64 `json:"disk_free_percent,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1114,7 +1117,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
+	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport, req.DiskFreePercent)
 	updateMs = m.UpdateMs
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
@@ -1168,7 +1171,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // and tells the daemon to drop the stale runtime and re-register. Other DB
 // errors still propagate as errors so they keep their existing Warn logging
 // and the daemon does not mistake a hiccup for a deletion.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, diskFreePct *float64) (*protocol.DaemonHeartbeatAckPayload, error) {
 	runtimeUUID, err := util.ParseUUID(runtimeID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
@@ -1187,7 +1190,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport, diskFreePct)
 	return ack, err
 }
 
@@ -1248,7 +1251,7 @@ type heartbeatMetrics struct {
 // the WebSocket daemon:heartbeat path: records liveness and pulls any pending
 // actions queued for the runtime. Auth and request decoding live in the
 // caller because they differ between transports.
-func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supportsBatchImport bool, diskFreePct *float64) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 	runtimeID := uuidToString(rt.ID)
 
@@ -1260,6 +1263,17 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	m.UpdateMs = time.Since(updateStart).Milliseconds()
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
+
+	// Disk-pressure telemetry (GAP-8): log-only warning below the threshold.
+	// Local const, not daemon.DiskFreePercentWarnThreshold — daemon tests
+	// import handler, so handler cannot import daemon back.
+	// ponytail: warn threshold 10%; enrich with GC trigger when pressure sustained
+	const diskFreeWarnThreshold = 10.0
+	if diskFreePct != nil && *diskFreePct < diskFreeWarnThreshold {
+		slog.Warn("daemon runtime disk pressure",
+			"runtime_id", runtimeID,
+			"free_percent", *diskFreePct)
+	}
 
 	ack := &protocol.DaemonHeartbeatAckPayload{
 		RuntimeID:          runtimeID,

@@ -165,8 +165,9 @@ func (c *client) markSeen(eventID string) bool {
 // HeartbeatHandler processes a daemon:heartbeat frame. It must verify that
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
-// the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+// the ack and is logged at debug level. diskFreePct is optional telemetry
+// from the frame (nil = absent or old daemon).
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, diskFreePct *float64) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -892,7 +893,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.DiskFreePercent)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

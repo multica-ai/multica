@@ -324,6 +324,12 @@ type ChatSessionUpdatedPayload struct {
 type DaemonHeartbeatRequestPayload struct {
 	RuntimeID           string `json:"runtime_id"`
 	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	// DiskFreePercent is optional disk-pressure telemetry: percent free on
+	// the filesystem holding the daemon's workspaces root (0-100). Nil =
+	// unknown (old daemons, probe failure, Windows). The server logs a
+	// warning below DiskFreePercentWarnThreshold; additive on the wire so
+	// old servers ignore it.
+	DiskFreePercent *float64 `json:"disk_free_percent,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
