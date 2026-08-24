@@ -1061,6 +1061,47 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		// GAP-30 (#25): hard-deny destructive commands before any
+		// auto-grant selector runs. The daemon cannot prompt a human,
+		// so a blocklist match denies this action (reject_once when
+		// offered, protocol error otherwise) and the agent surfaces
+		// the failure. ponytail: static blocklist; approval-request UI
+		// when block rate measured.
+		var gate struct {
+			ToolCall struct {
+				Title string `json:"title"`
+			} `json:"toolCall"`
+			Options []acpPermissionOption `json:"options"`
+		}
+		if len(raw["params"]) > 0 {
+			if err := json.Unmarshal(raw["params"], &gate); err != nil {
+				gate.Options = nil
+			}
+		}
+		if pat := matchDestructiveCommand(gate.ToolCall.Title); pat != "" {
+			c.cfg.Logger.Warn("destructive op blocked pending approval", "command", gate.ToolCall.Title, "pattern", pat)
+			for _, opt := range gate.Options {
+				if opt.OptionID != "" && strings.EqualFold(strings.TrimSpace(opt.Kind), acpKindRejectOnce) {
+					resp = map[string]any{
+						"jsonrpc": "2.0",
+						"id":      json.RawMessage(rawID),
+						"result": map[string]any{
+							"outcome": map[string]any{"outcome": "selected", "optionId": opt.OptionID},
+						},
+					}
+					goto respond
+				}
+			}
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32603,
+					"message": "destructive command blocked pending human approval: " + gate.ToolCall.Title,
+				},
+			}
+			goto respond
+		}
 		selector := c.selectPermission
 		if selector == nil {
 			selector = selectACPPermissionOption
@@ -1118,6 +1159,7 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 		c.cfg.Logger.Debug("unhandled agent→client request", "method", method)
 	}
 
+respond:
 	data, err := json.Marshal(resp)
 	if err != nil {
 		c.cfg.Logger.Warn("marshal agent-request response", "method", method, "error", err)

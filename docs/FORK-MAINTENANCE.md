@@ -64,6 +64,7 @@ health-gated retry + hasRunnableSuccessor slot guard).
 9. feat(service): dead-letter case file comment on retry exhaustion (GAP-27, issue #22)
 10. fix(daemon): GC spares agent branches whose taskKey task dir still exists under WorkspacesRoot — crash between finalize and report no longer loses committed work (GAP-16, issue #21)
 11. fix(daemon): retry RecoverOrphans 3x with capped backoff at workspace registration — transient DB error no longer leaves prior incarnation's running rows stuck until restart (GAP-18, issue #28)
+12. feat(agent): destructive-command gate on ACP permission requests — rm -rf /, force-push to main/master, DROP DATABASE/TABLE, TRUNCATE, fork bombs are hard-denied before auto-grant (reject_once or protocol error) instead of silently approved; v1 is a static blocklist with warn log, no approval UI yet (GAP-30, issue #25)
 
 Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
 AND the desktop-bundled binary (see below). Server-side pieces require
