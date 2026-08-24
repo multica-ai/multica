@@ -397,6 +397,12 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+var legacyStorageExhaustedReasons = map[string]bool{
+	string(ReasonAgentProviderAuthOrAccess): true,
+	string(ReasonAgentUnknown):              true,
+	"agent_error":                           true,
+}
+
 // opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
 // guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
 // is a PREFIX of the whole error rather than a phrase somewhere inside it, so
@@ -436,6 +442,16 @@ var legacyOpencodeStreamEndedReasons = map[string]bool{
 // can be deleted once no daemon old enough to produce its wire shape is still
 // reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
+	storageError := strings.ToLower(strings.TrimSpace(rawError))
+	if legacyStorageExhaustedReasons[reason] &&
+		strings.HasPrefix(storageError, "prepare execution environment:") &&
+		containsAny(storageError,
+			"no space left on device",
+			"the disk is full",
+			"there is not enough space on the disk",
+		) {
+		return ReasonRuntimeStorageExhausted
+	}
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable

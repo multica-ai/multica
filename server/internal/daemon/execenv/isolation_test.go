@@ -259,6 +259,19 @@ func TestRehydratePreparationErrorUnknownKind(t *testing.T) {
 	}
 }
 
+func TestPreparationErrorKindRoundTripsStorageExhaustion(t *testing.T) {
+	err := fmt.Errorf("mkdir task workspace: %w", ErrStorageExhausted)
+	kind := preparationErrorKind(err)
+	if kind != "storage_exhausted" {
+		t.Fatalf("preparationErrorKind = %q, want storage_exhausted", kind)
+	}
+
+	rehydrated := rehydratePreparationError(err.Error(), kind)
+	if !IsStorageExhausted(rehydrated) {
+		t.Errorf("storage exhaustion sentinel did not survive helper boundary: %v", rehydrated)
+	}
+}
+
 // TestPrepareIsolatedKeepsTheClaimWithTheParent is the production-path
 // regression. Every real daemon prepares through PrepareIsolated, and the
 // helper is a short-lived child process: a lock taken inside it is released by

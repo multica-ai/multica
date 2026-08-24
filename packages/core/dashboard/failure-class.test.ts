@@ -18,6 +18,7 @@ describe("failureClassOf", () => {
     // MUL-5370: the run never reached the model provider, so this belongs
     // with the substrate failures an operator fixes by checking the daemon.
     expect(failureClassOf("skill_bundle_unavailable")).toBe("runtime");
+    expect(failureClassOf("runtime_storage_exhausted")).toBe("runtime");
     expect(failureClassOf("agent_error.process_failure")).toBe("agent");
     // MUL-5722: the daemon and the provider are both healthy — codex could
     // not hand its own stored thread back — so this reads as an agent-side
