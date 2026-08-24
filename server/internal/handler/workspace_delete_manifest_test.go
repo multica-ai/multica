@@ -55,6 +55,9 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"contact_sales_inquiry":           workspaceDeleteKeep,
 	"daemon_connection":               workspaceDelete,
 	"daemon_token":                    workspaceDelete,
+	// Device authorizations are user-scoped (no workspace_id): a login flow
+	// in flight survives a workspace teardown, like verification codes.
+	"device_authorization":            workspaceDeleteKeep,
 	"dingtalk_group_presence":         workspaceDelete,
 	"dingtalk_bot_identity":           workspaceDelete,
 	"dingtalk_group_route":            workspaceDelete,
