@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/service"
 )
 
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
@@ -83,6 +84,28 @@ func TestBuildQuickCreatePromptSeparatesInstructionFromCapturedContext(t *testin
 	}
 	if strings.Index(out, "New sub-issue instruction:") > strings.Index(out, "Captured source context") {
 		t.Fatal("captured history appeared before the new instruction")
+	}
+}
+
+func TestBuildQuickCreatePromptLargestAcceptedSourceContextFitsBudget(t *testing.T) {
+	const emptyObject = `{"text":""}`
+	snapshot := []byte(`{"text":"` + strings.Repeat("x", service.SourceContextMaxAgentSnapshotBytes-len(emptyObject)) + `"}`)
+	if len(snapshot) != service.SourceContextMaxAgentSnapshotBytes || !json.Valid(snapshot) {
+		t.Fatalf("test snapshot length=%d valid=%v, want length=%d valid JSON", len(snapshot), json.Valid(snapshot), service.SourceContextMaxAgentSnapshotBytes)
+	}
+	instruction := strings.Repeat("p", service.SourceContextMaxAgentInputBytes-service.SourceContextMaxAgentSnapshotBytes)
+	out := buildQuickCreatePrompt(Task{QuickCreatePrompt: instruction, QuickCreateSourceContext: snapshot})
+	if len(out) > service.SourceContextMaxAgentPromptBytes {
+		t.Fatalf("largest accepted quick-create prompt is %d bytes, budget is %d", len(out), service.SourceContextMaxAgentPromptBytes)
+	}
+}
+
+func TestIssuePromptsKeepSourceContextRuleOutOfPerTurnMessage(t *testing.T) {
+	const rule = "If the issue JSON contains `source_context`"
+	assignment := buildPromptBody(Task{IssueID: "issue-1"}, "claude")
+	comment := buildCommentPrompt(Task{IssueID: "issue-1", TriggerCommentID: "comment-1"}, "claude")
+	if strings.Contains(assignment, rule) || strings.Contains(comment, rule) {
+		t.Fatal("source-context precedence rule must live in the cache-stable runtime brief, not per-turn prompts")
 	}
 }
 

@@ -20,12 +20,22 @@ import (
 )
 
 const (
-	SourceContextVersion            = int16(1)
-	SourceContextUsage              = "read_only_historical_background"
-	SourceContextMaxComments        = 256
-	SourceContextMaxTextBytes       = 1 << 20
-	SourceContextMaxAttachments     = 100
-	SourceContextMaxAttachmentBytes = int64(500 << 20)
+	SourceContextVersion     = int16(1)
+	SourceContextUsage       = "read_only_historical_background"
+	SourceContextMaxComments = 256
+	// SourceContextMaxTextBytes preserves the general/manual capture limit.
+	SourceContextMaxTextBytes = 1 << 20
+	// SourceContextMaxAgentSnapshotBytes is lower because agent mode quotes the
+	// immutable snapshot into its first user prompt.
+	SourceContextMaxAgentSnapshotBytes = 64 << 10
+	// SourceContextMaxAgentInputBytes includes the snapshot plus the new
+	// instruction. A tokenizer cannot emit more tokens than the input has bytes;
+	// keeping the dynamic input below 72 KiB leaves more than 100k tokens for the
+	// stable quick-create wrapper, runtime brief, system prompt, and tools.
+	SourceContextMaxAgentInputBytes  = 72 << 10
+	SourceContextMaxAgentPromptBytes = 96 << 10
+	SourceContextMaxAttachments      = 100
+	SourceContextMaxAttachmentBytes  = int64(500 << 20)
 )
 
 var (
@@ -36,6 +46,45 @@ var (
 	ErrSourceContextTooLarge         = errors.New("source context too large")
 	ErrSourceContextRetryUnavailable = errors.New("source context retry unavailable")
 )
+
+func validateSourceContextAgentBytes(snapshotBytes int, prompt string) error {
+	if snapshotBytes < 0 || snapshotBytes > SourceContextMaxAgentSnapshotBytes || snapshotBytes+len(prompt) > SourceContextMaxAgentInputBytes {
+		return ErrSourceContextTooLarge
+	}
+	return nil
+}
+
+// ValidateSourceContextAgentInput keeps every accepted source-context
+// quick-create within the prompt budget that the daemon regression test locks
+// against its complete user-message wrapper. Project the persisted snapshot,
+// including capture metadata, cloned attachment IDs, and rewritten URLs, so
+// the preview payload cannot undercount what the daemon will actually quote.
+// This runs before object cloning or task enqueue and has no external effects.
+func ValidateSourceContextAgentInput(build SourceContextBuild, capturedBy pgtype.UUID, prompt string) error {
+	projectedCloneID := pgtype.UUID{Valid: true}
+	clones := make([]SourceContextClone, len(build.Rows))
+	for i := range clones {
+		clones[i].ID = projectedCloneID
+	}
+	// RFC3339Nano emits its longest representation when nanoseconds are nonzero.
+	projectedCapturedAt := time.Date(2000, time.January, 1, 0, 0, 0, 999999999, time.UTC)
+	projected, err := PrepareSourceContextCapture(
+		build,
+		pgtype.UUID{Valid: true},
+		pgtype.UUID{Valid: true},
+		capturedBy,
+		projectedCapturedAt,
+		clones,
+	)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(projected.Snapshot)
+	if err != nil {
+		return fmt.Errorf("marshal projected source context: %w", err)
+	}
+	return validateSourceContextAgentBytes(len(payload), prompt)
+}
 
 type SourceContextLimitUsage struct {
 	CommentCount    int   `json:"comment_count"`

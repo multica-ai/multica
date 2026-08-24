@@ -71,6 +71,46 @@ func sourceContextTestSnapshot() SourceContextSnapshot {
 	}
 }
 
+func TestValidateSourceContextAgentInputBudget(t *testing.T) {
+	maxInstructionBytes := SourceContextMaxAgentInputBytes - SourceContextMaxAgentSnapshotBytes
+	if err := validateSourceContextAgentBytes(SourceContextMaxAgentSnapshotBytes, strings.Repeat("p", maxInstructionBytes)); err != nil {
+		t.Fatalf("largest accepted agent input rejected: %v", err)
+	}
+	if err := validateSourceContextAgentBytes(SourceContextMaxAgentSnapshotBytes, strings.Repeat("p", maxInstructionBytes+1)); !errors.Is(err, ErrSourceContextTooLarge) {
+		t.Fatalf("combined input above budget error = %v, want %v", err, ErrSourceContextTooLarge)
+	}
+	if err := validateSourceContextAgentBytes(SourceContextMaxAgentSnapshotBytes+1, ""); !errors.Is(err, ErrSourceContextTooLarge) {
+		t.Fatalf("snapshot above agent budget error = %v, want %v", err, ErrSourceContextTooLarge)
+	}
+	if err := validateSourceContextAgentBytes(-1, ""); !errors.Is(err, ErrSourceContextTooLarge) {
+		t.Fatalf("negative snapshot size error = %v, want %v", err, ErrSourceContextTooLarge)
+	}
+}
+
+func TestValidateSourceContextAgentInputCountsPersistedCaptureMetadata(t *testing.T) {
+	build := SourceContextBuild{Snapshot: sourceContextTestSnapshot()}
+	capturedBy := issueUUID("33333333-3333-4333-8333-333333333333")
+	projected, err := PrepareSourceContextCapture(
+		build,
+		pgtype.UUID{Valid: true},
+		pgtype.UUID{Valid: true},
+		capturedBy,
+		time.Date(2000, time.January, 1, 0, 0, 0, 999999999, time.UTC),
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(projected.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := strings.Repeat("p", SourceContextMaxAgentInputBytes-len(payload)+1)
+	if err := ValidateSourceContextAgentInput(build, capturedBy, prompt); !errors.Is(err, ErrSourceContextTooLarge) {
+		t.Fatalf("projected persisted snapshot overflow error = %v, want %v", err, ErrSourceContextTooLarge)
+	}
+}
+
 func TestSourceContextDigestIgnoresRevisionMetadataButNotContent(t *testing.T) {
 	base := sourceContextTestSnapshot()
 	originalUpdatedAt := base.CommentThread[0].UpdatedAt

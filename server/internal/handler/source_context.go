@@ -477,6 +477,10 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 			writeError(w, http.StatusBadRequest, "quick_create is required for agent mode")
 			return
 		}
+		if err := service.ValidateSourceContextAgentInput(build, userUUID, strings.TrimSpace(req.QuickCreate.Prompt)); err != nil {
+			h.writeSourceContextError(w, err, build.Limits)
+			return
+		}
 		preparedAgent, err = h.prepareAgentCommentSubIssue(w, r, wsUUID, *req.QuickCreate)
 		if err != nil {
 			if !errors.Is(err, errSourceContextResponseWritten) {
