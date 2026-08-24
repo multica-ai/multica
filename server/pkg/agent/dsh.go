@@ -292,7 +292,12 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[dsh:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := cmd.Start(); err != nil {
+	// Start and take ownership of the process tree in one step. On Windows the
+	// child is created suspended and placed in a Job Object before it runs, so
+	// every startup-failure cleanup below reaches the runtime's descendants,
+	// not just the direct child. On Unix the process group configured above
+	// already covers that and this is a plain Start.
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start dsh: %w", err)
 	}
@@ -358,6 +363,11 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		}
 		exitErr := cmd.Wait()
 		close(procDone)
+		// The tree has been waited on and fully observed; drop ownership. On
+		// Windows this is the only safe point — releasing closes the Job
+		// Object, which kills anything still inside it, exactly what should
+		// happen to stragglers that outlived the reap above. No-op on Unix.
+		releaseProcessGroup(cmd)
 
 		result := state.result
 		if result == nil {

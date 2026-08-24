@@ -60,14 +60,18 @@ func assertProcessGone(t *testing.T, pid int) {
 // Unix-only: the shell fixture and signal-0 liveness probing need POSIX.
 func TestDshBackendStartupCancellationKillsProcessTree(t *testing.T) {
 	dir := t.TempDir()
-	marker := filepath.Join(dir, "alive")
 	pidFile := filepath.Join(dir, "pid")
+	// The fixture starts a long-lived child, records its pid, and never
+	// emits a protocol `ready` frame on stdout — Execute must still be
+	// waiting for the handshake when the context is cancelled. The pid file
+	// alone is the spawn signal: no separate marker write, so there is no
+	// ordering window between "child spawned" and "observable" for the test
+	// to race against (review 5004702473).
 	bin := writeDshFixture(t, fmt.Sprintf(`
 sleep 30 &
 echo $! > %q
-printf '%%s' alive > %q
 wait
-`, pidFile, marker))
+`, pidFile))
 	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-startup-cancel", Logger: slog.Default()})
 	if err != nil {
 		t.Fatal(err)
@@ -88,9 +92,6 @@ wait
 	// Wait until the fixture is actually running with its child spawned,
 	// then cancel externally.
 	pid := waitForPidFile(t, pidFile)
-	if _, statErr := os.Stat(marker); statErr != nil {
-		t.Fatalf("fixture marker %s missing: %v", marker, statErr)
-	}
 	cancel()
 	select {
 	case err := <-resultCh:
