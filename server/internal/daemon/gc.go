@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,6 +178,9 @@ func (d *Daemon) gcWorkspaceRoots() []gcRoot {
 		if profile == d.cfg.Profile {
 			continue
 		}
+		// Another daemon's active task set only exists in that daemon's
+		// process. Even though this daemon can see the root on disk, sweeping
+		// it would bypass isActiveEnvRoot and could delete in-flight workdirs.
 		if d.profileDaemonActive(profile) {
 			continue
 		}
@@ -194,18 +198,25 @@ func (d *Daemon) gcWorkspaceRoots() []gcRoot {
 }
 
 // profileDaemonActive reports whether the daemon for the given profile appears
-// to be running, based on the presence of its daemon.pid file. A live daemon
-// removes that file on exit, so an absent file means the profile is not running
-// and its workspace root is safe to garbage-collect. This is intentionally
-// conservative: a stale pid file left by a crash only skips cleanup; it can
-// never cause a live daemon's workdirs to be deleted.
+// to be running. The pid file is only a pointer to the process: SIGKILL, OOM,
+// and host power loss can leave it behind, so its presence alone is not proof
+// of liveness. Unreadable or malformed files and inconclusive process probes
+// fail safe to active. PID reuse can also produce a false positive, but that
+// only postpones cleanup instead of risking another daemon's workdirs.
 func (d *Daemon) profileDaemonActive(profile string) bool {
 	profileDir, err := cli.ProfileDir(profile)
 	if err != nil {
 		return true
 	}
-	_, err = os.Stat(filepath.Join(profileDir, "daemon.pid"))
-	return err == nil
+	pidBytes, err := os.ReadFile(filepath.Join(profileDir, "daemon.pid"))
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil || pid <= 0 {
+		return true
+	}
+	return processAlive(pid)
 }
 
 // gcRoot performs the per-root portion of a GC scan: walking workspace

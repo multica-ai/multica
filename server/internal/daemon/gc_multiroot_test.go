@@ -6,9 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
+
+const nonexistentTestPID = 2147483647
 
 // TestGCWorkspaceRootsMultiProfile verifies that a single GC pass walks the
 // current profile's root plus roots abandoned by a previous profile whose
@@ -34,18 +37,33 @@ func TestGCWorkspaceRootsMultiProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A live profile: daemon.pid is present, so its root must be skipped. GC
-	// must never delete workdirs another daemon is actively using.
+	// A live profile points at this test process, so its root must be skipped.
+	// GC must never delete workdirs another daemon is actively using.
 	live := "live-profile"
 	liveProfileDir := filepath.Join(home, ".multica", "profiles", live)
 	if err := os.MkdirAll(liveProfileDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(liveProfileDir, "daemon.pid"), []byte("12345"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(liveProfileDir, "daemon.pid"), []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	liveRoot := filepath.Join(home, "multica_workspaces_"+live)
 	if err := os.MkdirAll(liveRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A stale pid file left by a crashed daemon must not strand the profile's
+	// workspace root forever.
+	stale := "stale-profile"
+	staleProfileDir := filepath.Join(home, ".multica", "profiles", stale)
+	if err := os.MkdirAll(staleProfileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(staleProfileDir, "daemon.pid"), []byte(strconv.Itoa(nonexistentTestPID)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	staleRoot := filepath.Join(home, "multica_workspaces_"+stale)
+	if err := os.MkdirAll(staleRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -74,67 +92,80 @@ func TestGCWorkspaceRootsMultiProfile(t *testing.T) {
 	if got[liveRoot] {
 		t.Errorf("live root %q present in roots (should be skipped: daemon running)", liveRoot)
 	}
+	if !got[staleRoot] {
+		t.Errorf("stale-pid root %q missing from roots (should be scanned)", staleRoot)
+	}
 	neverUsedRoot := filepath.Join(home, "multica_workspaces_"+neverUsed)
 	if got[neverUsedRoot] {
 		t.Errorf("never-used root %q present in roots (should be skipped: root does not exist)", neverUsedRoot)
 	}
 }
 
-// TestProfileDaemonActive verifies ownership detection is driven by the
-// presence of a profile's daemon.pid file.
+// TestProfileDaemonActive verifies that ownership detection distinguishes a
+// live process from a stale pid file while failing safe on malformed content.
 func TestProfileDaemonActive(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	live := "live"
-	liveDir := filepath.Join(home, ".multica", "profiles", live)
-	if err := os.MkdirAll(liveDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(liveDir, "daemon.pid"), []byte("1"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	dead := "dead"
-	deadDir := filepath.Join(home, ".multica", "profiles", dead)
-	if err := os.MkdirAll(deadDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
 	d := New(Config{}, slog.Default())
-
-	if !d.profileDaemonActive(live) {
-		t.Errorf("profile %q with daemon.pid should be active", live)
+	tests := []struct {
+		name     string
+		pid      string
+		want     bool
+		writePID bool
+	}{
+		{name: "missing", want: false},
+		{name: "live", pid: strconv.Itoa(os.Getpid()), want: true, writePID: true},
+		{name: "live-whitespace", pid: " \n" + strconv.Itoa(os.Getpid()) + "\t", want: true, writePID: true},
+		{name: "stale", pid: strconv.Itoa(nonexistentTestPID), want: false, writePID: true},
+		{name: "malformed", pid: "not-a-pid", want: true, writePID: true},
+		{name: "non-positive", pid: "0", want: true, writePID: true},
 	}
-	if d.profileDaemonActive(dead) {
-		t.Errorf("profile %q without daemon.pid should be inactive", dead)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			profileDir := filepath.Join(home, ".multica", "profiles", tt.name)
+			if err := os.MkdirAll(profileDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tt.writePID {
+				if err := os.WriteFile(filepath.Join(profileDir, "daemon.pid"), []byte(tt.pid), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := d.profileDaemonActive(tt.name); got != tt.want {
+				t.Errorf("profileDaemonActive(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
 	}
 }
 
-// TestRunGCReclaimsAbandonedProfileRoot 是端到端验证：真实构造一个
-// 废弃 profile 的 workspace root（daemon 已退出、无 daemon.pid），里面留一个
-// 无 .gc_meta.json 且 mtime 超过 GCOrphanTTL 的孤儿 task 目录，然后真实调用
-// runGC，断言孤儿目录被删除、而 mtime 较新的活跃目录被保留。
+// TestRunGCReclaimsAbandonedProfileRoot exercises the real GC entry point
+// against a profile root whose crashed daemon left a stale pid file. An orphan
+// older than GCOrphanTTL is removed while a recent task directory is preserved.
 func TestRunGCReclaimsAbandonedProfileRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	// 当前 profile (default) 的 workspace root（空）
+	// The current default profile's workspace root is empty.
 	currentRoot := filepath.Join(home, "multica_workspaces")
 	if err := os.MkdirAll(currentRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	// 废弃 profile：daemon 已退出，profiles 目录存在但无 daemon.pid
+	// The abandoned profile has the stale pid file a crash would leave behind.
 	const abandoned = "old-profile"
 	abandonedProfileDir := filepath.Join(home, ".multica", "profiles", abandoned)
 	if err := os.MkdirAll(abandonedProfileDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(abandonedProfileDir, "daemon.pid"), []byte(strconv.Itoa(nonexistentTestPID)), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	abandonedRoot := filepath.Join(home, "multica_workspaces_"+abandoned)
 	wsDir := filepath.Join(abandonedRoot, "ws-abc")
 
-	// 孤儿 task 目录：无 .gc_meta.json，mtime 73 小时前
+	// The orphan has no .gc_meta.json and is older than the 72-hour TTL.
 	orphanTask := filepath.Join(wsDir, "task-orphan")
 	if err := os.MkdirAll(orphanTask, 0o755); err != nil {
 		t.Fatal(err)
@@ -147,7 +178,7 @@ func TestRunGCReclaimsAbandonedProfileRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 活跃 task 目录：mtime 1 小时前，不应被删除
+	// A recent task directory must be preserved.
 	activeTask := filepath.Join(wsDir, "task-active")
 	if err := os.MkdirAll(activeTask, 0o755); err != nil {
 		t.Fatal(err)
@@ -165,9 +196,9 @@ func TestRunGCReclaimsAbandonedProfileRoot(t *testing.T) {
 	d.runGC(context.Background())
 
 	if _, err := os.Stat(orphanTask); !os.IsNotExist(err) {
-		t.Errorf("废弃 profile 的孤儿 task 目录未被 GC 删除: %v", err)
+		t.Errorf("abandoned profile's orphan task was not removed: %v", err)
 	}
 	if _, err := os.Stat(activeTask); err != nil {
-		t.Errorf("活跃 task 目录不应被删除: %v", err)
+		t.Errorf("recent task directory should be preserved: %v", err)
 	}
 }
