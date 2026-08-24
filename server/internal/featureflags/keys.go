@@ -47,13 +47,7 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
-<<<<<<< HEAD
-	// The settings UI needs this to decide whether to offer status creation at
-	// all. Without it the tab would show a "New status" button that 403s.
-	CustomIssueStatuses,
 	CerebraRouting,
-=======
->>>>>>> origin/main
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -68,14 +62,6 @@ func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, PluginsV1, false)
 }
 
-<<<<<<< HEAD
-// CustomIssueStatusesEnabled reports whether creating custom issue statuses is
-// allowed. Default false: a fleet mid-rollout must not be able to mint a status
-// value its older pods cannot interpret.
-func CustomIssueStatusesEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, CustomIssueStatuses, false)
-}
-
 // CerebraRoutingEnabled reports whether Cerebra model routing is enabled.
 func CerebraRoutingEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	if flags == nil {
@@ -84,8 +70,6 @@ func CerebraRoutingEnabled(ctx context.Context, flags *featureflag.Service) bool
 	return flags.IsEnabled(ctx, CerebraRouting, false)
 }
 
-=======
->>>>>>> origin/main
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
 	out := make(map[string]bool, len(frontendPublicFlags)+3)
 	for _, key := range frontendPublicFlags {
