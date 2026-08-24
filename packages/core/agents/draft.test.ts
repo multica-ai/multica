@@ -140,6 +140,15 @@ describe("agent starter prompts", () => {
       { label: "Plan a release", prompt: "Plan the next release." },
     ]);
   });
+
+  it("omits the field when there are no prompts", () => {
+    const request = buildCreateAgentRequest({
+      draft: draft(),
+      runtimeId: "runtime-1",
+    });
+
+    expect(request).not.toHaveProperty("starter_prompts");
+  });
 });
 
 // MUL-5390: thinking_level / service_tier are runtime + model scoped. The create

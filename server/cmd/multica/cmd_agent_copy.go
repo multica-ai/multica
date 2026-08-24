@@ -28,8 +28,10 @@ var agentCopyCmd = &cobra.Command{
 The source agent is left untouched. By default the copy lands on the same
 runtime as the source; pass --runtime-id to fork it onto a different runtime.
 
+Copied by default without a dedicated override flag: starter prompts.
+
 Copied by default, each overridable with the matching flag: name (suffixed
-" (copy)"), description, instructions, starter prompts, avatar, custom_args, max_concurrent_tasks,
+" (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
 invocation permission (permission_mode + allow-list), assigned workspace skills,
 and — only when the target runtime is unchanged — model, thinking_level and
 service_tier.

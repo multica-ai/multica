@@ -90,8 +90,9 @@ multica agent copy <source-agent-id> --name "My Agent (copy)"   # same runtime
 multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cross-runtime fork
 ```
 
+- Copied by default without a dedicated override flag: `starter_prompts`.
 - Copied by default, each overridable with the matching flag: `name` (suffixed
-  `" (copy)"`), `description`, `instructions`, `starter_prompts`, avatar, `custom_args`,
+  `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
   allow-list), and assigned workspace skills.
 - A copied `max_concurrent_tasks` is included only when the source value is

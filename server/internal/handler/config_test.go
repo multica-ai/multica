@@ -493,3 +493,30 @@ func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
 		t.Fatal("local_worktree_supported missing from the JSON body")
 	}
 }
+
+// Web/Desktop can run ahead of a manually deployed backend. Handlers that
+// predate starter_prompts ignore the unknown JSON field and still answer 200,
+// so clients must see an explicit declaration before sending either create or
+// update writes that contain it.
+func TestGetConfigDeclaresAgentStarterPromptsSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.AgentStarterPromptsSupported {
+		t.Fatal("this build persists starter_prompts but does not advertise the contract")
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["agent_starter_prompts_supported"]; !ok {
+		t.Fatal("agent_starter_prompts_supported missing from the JSON body")
+	}
+}

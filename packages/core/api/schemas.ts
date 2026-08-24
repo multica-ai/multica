@@ -666,6 +666,9 @@ export interface AppConfigResponse {
    * signal do validate but cannot say so, and are treated as unable: the client
    * has no way to tell them apart, and only one of the two answers is safe. */
   local_worktree_supported?: boolean;
+  /** Whether agent create/update persists `starter_prompts`. Older servers
+   * silently ignored the unknown field, so absent must be treated as false. */
+  agent_starter_prompts_supported?: boolean;
   server_version?: string;
 }
 
@@ -862,6 +865,7 @@ export const AppConfigSchema = z.object({
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   local_worktree_supported: BooleanWithDefaultSchema(false),
+  agent_starter_prompts_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -877,6 +881,8 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: an unreadable config must not look like a server that
   // validates execution_mode.
   local_worktree_supported: false,
+  // Fail closed: old servers returned success while dropping the field.
+  agent_starter_prompts_supported: false,
   feature_flags: {},
 };
 

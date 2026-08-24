@@ -220,10 +220,14 @@ export function buildCreateAgentRequest(options: {
     name: draft.name.trim(),
     description: draft.description.trim(),
     instructions: draft.instructions.trim() || undefined,
-    starter_prompts: draft.starterPrompts.map((item) => ({
-      label: item.label.trim(),
-      prompt: item.prompt.trim(),
-    })),
+    ...(draft.starterPrompts.length > 0
+      ? {
+          starter_prompts: draft.starterPrompts.map((item) => ({
+            label: item.label.trim(),
+            prompt: item.prompt.trim(),
+          })),
+        }
+      : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
     model: draft.model.trim() || undefined,

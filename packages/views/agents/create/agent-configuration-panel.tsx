@@ -8,6 +8,7 @@ import {
   type AgentDraft,
   type AgentPermissionScope,
 } from "@multica/core/agents";
+import { useConfigStore } from "@multica/core/config";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
@@ -67,6 +68,9 @@ export function AgentConfigurationPanel({
   runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
+  const starterPromptsSupported = useConfigStore(
+    (state) => state.agentStarterPromptsSupported,
+  );
   const selectedRuntime =
     runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) =>
@@ -171,12 +175,14 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          <div className="px-4 py-4">
-            <StarterPromptsEditor
-              value={draft.starterPrompts}
-              onChange={(value) => set("starterPrompts", value)}
-            />
-          </div>
+          {starterPromptsSupported ? (
+            <div className="px-4 py-4">
+              <StarterPromptsEditor
+                value={draft.starterPrompts}
+                onChange={(value) => set("starterPrompts", value)}
+              />
+            </div>
+          ) : null}
           <div className="px-4 py-4">
             <SkillMultiSelect
               selectedIds={draft.skillIds}

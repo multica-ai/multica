@@ -926,6 +926,26 @@ describe("AppConfigSchema local_worktree_supported drift", () => {
   });
 });
 
+describe("AppConfigSchema agent_starter_prompts_supported drift", () => {
+  it("defaults to false when the server predates the persistence contract", () => {
+    expect(AppConfigSchema.parse({}).agent_starter_prompts_supported).toBe(false);
+  });
+
+  it("coerces a malformed declaration to false", () => {
+    expect(
+      AppConfigSchema.parse({ agent_starter_prompts_supported: "yes" })
+        .agent_starter_prompts_supported,
+    ).toBe(false);
+  });
+
+  it("carries a genuine declaration through", () => {
+    expect(
+      AppConfigSchema.parse({ agent_starter_prompts_supported: true })
+        .agent_starter_prompts_supported,
+    ).toBe(true);
+  });
+});
+
 describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
