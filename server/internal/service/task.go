@@ -5487,6 +5487,7 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 			AuthorID:     pgtype.UUID{Valid: true},
 			Content:      delegatedFailureRecoveryContent(target.failed, target.source),
 			Type:         delegatedFailureRecoveryCommentType,
+			ParentID:     target.source.TriggerCommentID,
 			SourceTaskID: failed.ID,
 		})
 		if err != nil {
@@ -5593,6 +5594,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			AuthorID:     pgtype.UUID{Valid: true},
 			Content:      delegatedFailureRecoveryExhaustionContent(target),
 			Type:         "system",
+			ParentID:     target.source.TriggerCommentID,
 			SourceTaskID: target.failed.ID,
 		})
 		if err != nil {
