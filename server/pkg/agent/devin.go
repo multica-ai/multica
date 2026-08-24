@@ -426,9 +426,10 @@ func selectDevinAuthMethod(methods []string, haveWindsurfKey bool) (string, erro
 	}
 	// Standalone `devin acp` advertises interactive browser login. Multica
 	// cannot complete that from a daemon; skip the handshake and rely on
-	// stored `devin auth` / WINDSURF_API_KEY. session/new fails closed if
-	// neither is present.
-	if offered["devin-browser"] && !offered[devinAuthMethodWindsurfAPIKey] {
+	// stored `devin auth` / WINDSURF_API_KEY. If both browser and
+	// windsurf-api-key are advertised and no key is set, still skip — do
+	// not treat it as "windsurf-only".
+	if offered["devin-browser"] {
 		return "", nil
 	}
 	if offered[devinAuthMethodWindsurfAPIKey] {

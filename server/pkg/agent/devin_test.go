@@ -224,6 +224,12 @@ func TestSelectDevinAuthMethod(t *testing.T) {
 	if got, err := selectDevinAuthMethod([]string{"devin-browser"}, false); err != nil || got != "" {
 		t.Fatalf("devin-browser should skip handshake: got %q err %v", got, err)
 	}
+	if got, err := selectDevinAuthMethod([]string{"devin-browser", "windsurf-api-key"}, false); err != nil || got != "" {
+		t.Fatalf("browser+windsurf without key should skip handshake: got %q err %v", got, err)
+	}
+	if got, err := selectDevinAuthMethod([]string{"devin-browser", "windsurf-api-key"}, true); err != nil || got != "windsurf-api-key" {
+		t.Fatalf("browser+windsurf with key: got %q err %v", got, err)
+	}
 }
 
 func TestParseDevinModels(t *testing.T) {
