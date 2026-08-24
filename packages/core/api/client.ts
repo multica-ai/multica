@@ -618,6 +618,23 @@ function workspaceHeader(
   return slug ? { "X-Workspace-Slug": slug } : undefined;
 }
 
+/**
+ * Parses the filename out of a `Content-Disposition: attachment; filename="…"`
+ * response header, or null when the header is absent or carries no usable
+ * filename. Guards against CR/LF so a hostile header cannot smuggle extra
+ * lines into the browser's download UI.
+ */
+export function parseContentDispositionFilename(
+  disposition: string | null,
+): string | null {
+  if (!disposition) return null;
+  const match = disposition.match(/filename\*?=(?:UTF-8''|")?([^;"]+)/i);
+  if (!match) return null;
+  const filename = match[1]?.trim();
+  if (!filename || /[\r\n]/.test(filename)) return null;
+  return filename;
+}
+
 function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
   const search = new URLSearchParams();
   if (params.activity) search.set("activity", params.activity);
@@ -3019,6 +3036,20 @@ export class ApiClient {
     return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
       endpoint: "POST /api/skills/:id/refresh",
     });
+  }
+
+  // Downloads a skill as a portable .tar.gz archive so it can be shared
+  // outside the workspace and re-imported through the archive import path
+  // (POST /api/skills/import). Returns the raw bytes plus the server's
+  // attachment filename (sanitized skill name + ".tar.gz"). Any member who can
+  // view the skill may export it — no edit permission required.
+  async exportSkillArchive(
+    id: string,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const res = await this.fetchRaw(`/api/skills/${id}/export`);
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition");
+    return { blob, filename: parseContentDispositionFilename(disposition) ?? `${id}.tar.gz` };
   }
 
   async listAgentSkills(agentId: string): Promise<SkillSummary[]> {

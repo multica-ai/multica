@@ -76,6 +76,9 @@
     "has_partial": "{{owned}}/{{total}} added",
     "added_toast": "Added to {{name}}",
     "add_failed_toast": "Failed to add skill",
+    "export": "Export",
+    "export_toast": "Exported {{name}}",
+    "export_failed": "Failed to export skill",
     "delete": "Delete",
     "selected": "{{count}} selected",
     "clear_selection": "Clear selection",
@@ -122,6 +125,7 @@
   "detail": {
     "all_skills": "All skills",
     "read_only": "Read-only",
+    "export_button": "Export",
     "delete_aria": "Delete skill",
     "delete_tooltip": "Delete skill",
     "supporting_data_warning": "Some workspace data failed to load. Creator attribution, runtime names, or edit permissions may appear incomplete until the next refresh.",
