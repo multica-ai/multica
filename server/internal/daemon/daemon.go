@@ -6733,6 +6733,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	//
+	// GAP-11 (fork issue #12): the env root is deterministic before Prepare
+	// runs, so repos flagged additional_checkout can have their sibling
+	// checkout path (<envRoot>/extra/<name>) named in the brief up front;
+	// the daemon materialises them in prepareExtraCheckouts below.
+	extraCheckoutRoot := filepath.Join(execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID), "extra")
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
@@ -6751,7 +6757,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
-		Repos:                            convertReposForEnv(task.Repos),
+		Repos:                            convertReposForEnv(task.Repos, extraCheckoutRoot),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -7193,6 +7199,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.RootDir != predictedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
+	}
+	// GAP-11 (fork issue #12): materialise opt-in sibling checkouts before the
+	// agent starts. Runs for both fresh Prepare and Reuse — CreateWorktree
+	// updates a checkout that already exists at the target path.
+	if err := d.prepareExtraCheckouts(task.Repos, task.WorkspaceID, env.RootDir, agentName, task.ID, taskLog); err != nil {
+		return TaskResult{}, fmt.Errorf("additional checkouts: %w", err)
 	}
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
@@ -8704,13 +8716,63 @@ func convertPriorAttemptForEnv(pa *PriorAttemptData) *execenv.PriorAttemptData {
 	}
 }
 
-func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
-	if len(repos) == 0 {
+// prepareExtraCheckouts materialises opt-in sibling checkouts (GAP-11, fork
+// issue #12) under <envRoot>/extra/<name> for workspace repos flagged
+// additional_checkout. Reuses the bare-repo cache: sync-on-miss, then
+// CreateWorktree (which also updates a checkout left by a reused env).
+// No-op when nothing is flagged — the default single-repo path is untouched.
+//
+// ponytail: linked worktrees keep gitdir under the shared cache; if Codex's
+// sandbox ever refuses writes to these out-of-workdir siblings, switch them
+// to IsolatedGitMetadata like codex workdir checkouts.
+func (d *Daemon) prepareExtraCheckouts(repos []RepoData, workspaceID, envRoot, agentName, taskID string, log *slog.Logger) error {
+	var flagged []RepoData
+	for _, r := range repos {
+		if r.AdditionalCheckout {
+			flagged = append(flagged, r)
+		}
+	}
+	if len(flagged) == 0 || d.repoCache == nil {
+		return nil
+	}
+	extraDir := filepath.Join(envRoot, "extra")
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", extraDir, err)
+	}
+	for _, r := range flagged {
+		if d.repoCache.Lookup(workspaceID, r.URL) == "" {
+			if err := d.repoCache.Sync(workspaceID, []repocache.RepoInfo{{URL: r.URL}}); err != nil {
+				return fmt.Errorf("sync %s into repo cache: %w", r.URL, err)
+			}
+		}
+		res, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: workspaceID,
+			RepoURL:     r.URL,
+			WorkDir:     extraDir,
+			Ref:         r.Ref,
+			AgentName:   agentName,
+			TaskID:      taskID,
+		})
+		if err != nil {
+			return fmt.Errorf("checkout %s: %w", r.URL, err)
+		}
+		log.Info("additional checkout ready", "url", r.URL, "path", res.Path, "branch", res.BranchName)
+	}
+	return nil
+}
+
+func convertReposForEnv(repos []RepoData, extraCheckoutRoot string) []execenv.RepoContextForEnv {	if len(repos) == 0 {
 		return nil
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
+		// GAP-11: name the sibling checkout path in the brief. The daemon
+		// creates it in prepareExtraCheckouts; same repoNameFromURL the
+		// cache uses, so brief and disk agree (fork issue #12).
+		if r.AdditionalCheckout && extraCheckoutRoot != "" {
+			result[i].ExtraCheckoutPath = filepath.Join(extraCheckoutRoot, repocache.RepoNameFromURL(r.URL))
+		}
 	}
 	return result
 }

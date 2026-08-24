@@ -279,6 +279,10 @@ type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// AdditionalCheckout opts the repo into a sibling checkout under the
+	// task env root at task start (GAP-11, fork issue #12). Mirrored in
+	// internal/daemon/types.go, same JSON name.
+	AdditionalCheckout bool `json:"additional_checkout,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a

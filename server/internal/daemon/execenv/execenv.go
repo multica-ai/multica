@@ -18,9 +18,14 @@ import (
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
-	URL         string // remote URL
-	Description string // optional repo description
-	Ref         string // optional default checkout ref for this task
+	URL         string `json:"url"`         // remote URL
+	Description string `json:"description,omitempty"` // optional repo description
+	Ref         string `json:"ref,omitempty"`         // optional default checkout ref for this task
+	// ExtraCheckoutPath, when set (GAP-11), is the sibling path under the
+	// env root the daemon pre-checks this repo into before the agent starts.
+	// Rendered into the Repositories section so the agent works there
+	// directly instead of running `multica repo checkout`.
+	ExtraCheckoutPath string `json:"extra_checkout_path,omitempty"`
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's

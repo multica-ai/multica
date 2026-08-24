@@ -40,6 +40,11 @@ type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// AdditionalCheckout opts this repo into a sibling checkout under the
+	// task env root (<envRoot>/extra/<name>) at task start, so cross-repo
+	// work needs no manual `multica repo checkout` (GAP-11, fork issue #12).
+	// Opt-in: false keeps the default on-demand behavior untouched.
+	AdditionalCheckout bool `json:"additional_checkout,omitempty"`
 }
 
 // ProjectResourceData mirrors handler.ProjectResourceData — a single project

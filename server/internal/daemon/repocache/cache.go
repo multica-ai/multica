@@ -1742,6 +1742,11 @@ func excludeFromGitContext(ctx context.Context, worktreePath, pattern string) er
 	return nil
 }
 
+// RepoNameFromURL is the exported form of repoNameFromURL, for callers that
+// must predict a checkout's directory name (GAP-11 additional checkouts)
+// without creating it.
+func RepoNameFromURL(url string) string { return repoNameFromURL(url) }
+
 // repoNameFromURL extracts a short directory name from a git remote URL.
 // e.g. "https://github.com/org/my-repo.git" → "my-repo"
 func repoNameFromURL(url string) string {
