@@ -5044,12 +5044,12 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 // retryEligibleForSource is retryEligible with the autopilot run's trigger
 // source resolved ("" = not an autopilot run). Cron-sourced runs stay excluded:
 // the scheduler owns their re-fire cadence and a retry would double-fire the
-// schedule. Webhook-sourced runs ARE eligible — nothing re-fires them (the
-// external poster is gone), the trigger payload persists on the run row, and
-// without this a transient runtime_offline/provider_network blip kills the run
-// permanently.
+// schedule. Webhook- and event-sourced runs ARE eligible — nothing re-fires
+// them (the external poster / bus subscription is gone at failure time), the
+// trigger payload persists on the run row, and without this a transient
+// runtime_offline/provider_network blip kills the run permanently.
 func retryEligibleForSource(failureReason string, t db.AgentTaskQueue, autopilotRunSource string) bool {
-	if t.AutopilotRunID.Valid && autopilotRunSource != "webhook" {
+	if t.AutopilotRunID.Valid && autopilotRunSource != "webhook" && autopilotRunSource != "event" {
 		return false
 	}
 	return retryableReasons[failureReason] &&

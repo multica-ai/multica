@@ -147,7 +147,7 @@ type Task struct {
 	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                     // autopilot that spawned this run
 	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`                  // autopilot title used as task context
 	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
-	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
+	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, api, or event
 	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
 	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
 	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
