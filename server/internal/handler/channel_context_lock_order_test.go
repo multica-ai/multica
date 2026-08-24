@@ -141,7 +141,7 @@ func TestChannelContextLockOrder(t *testing.T) {
 	}
 	enqueueResult := make(chan error, 1)
 	go func() {
-		_, err := enqueueService.EnqueueChannelChatTask(ctx, chatSession, initiator, true, 2)
+		_, err := enqueueService.EnqueueChannelChatTask(ctx, chatSession, initiator, true, 2, service.ChatTaskEnqueueOptions{})
 		enqueueResult <- err
 	}()
 	waitContextLockSignal(t, generationLocked, "enqueue did not lock generation")

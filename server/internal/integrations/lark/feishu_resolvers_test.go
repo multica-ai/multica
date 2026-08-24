@@ -67,7 +67,7 @@ func TestFeishuIdentityResolver_AllowsSameTenantGuestWhenEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveSender: %v", err)
 	}
-	if !got.External || got.UserID != installer || got.ChannelUserID != "ou_sender" {
+	if !got.External || got.UserID != installer {
 		t.Fatalf("guest identity = %+v", got)
 	}
 	if got.TaskInitiatorUserID().Valid {

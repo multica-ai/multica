@@ -4272,8 +4272,8 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/lark/installations/${installationId}`,
       {
-      method: "PATCH",
-      body: JSON.stringify(body),
+        method: "PATCH",
+        body: JSON.stringify(body),
       },
     );
     return parseWithFallback(raw, LarkInstallationSchema, EMPTY_LARK_INSTALLATION, {

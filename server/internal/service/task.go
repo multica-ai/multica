@@ -1718,15 +1718,15 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 // context revision; its batch seal and history reads cannot cross that boundary.
 // The daemon skips prior provider-session resume for a fresh dispatch without
 // clearing the Chat's stored resume pointer for later generations.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, options ...ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
-	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, 0, options...)
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, 0, ChatTaskEnqueueOptions{})
 }
 
-func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ...ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
-	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, contextRevision, options...)
+func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
+	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, contextRevision, options)
 }
 
-func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ...ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1754,12 +1754,8 @@ func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, err
 	}
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	var enqueueOptions ChatTaskEnqueueOptions
-	if len(options) > 0 {
-		enqueueOptions = options[0]
-	}
 	runtimeMCPOverlay := disabledRuntimeMCPOverlay()
-	if !enqueueOptions.DisableOwnerConnectedApps {
+	if !options.DisableOwnerConnectedApps {
 		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 	}
 

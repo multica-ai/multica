@@ -143,7 +143,7 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 			}
 			_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
 				ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
-			}, util.MustParseUUID(userID), false, 1)
+			}, util.MustParseUUID(userID), false, 1, ChatTaskEnqueueOptions{})
 			if !errors.Is(err, injectedErr) {
 				t.Fatalf("EnqueueChannelChatTask error = %v, want injected clear failure", err)
 			}
@@ -180,7 +180,7 @@ func TestEnqueueChannelChatTask_RejectsRetiredBinding(t *testing.T) {
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
 		ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
-	}, util.MustParseUUID(userID), false, 1)
+	}, util.MustParseUUID(userID), false, 1, ChatTaskEnqueueOptions{})
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("EnqueueChannelChatTask error = %v, want missing binding", err)
 	}

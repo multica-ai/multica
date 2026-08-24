@@ -145,9 +145,8 @@ func (r *feishuIdentityResolver) ResolveSender(ctx context.Context, inst engine.
 			return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
 		}
 		return engine.ResolvedIdentity{
-			UserID:        inst.InstallerUserID,
-			External:      true,
-			ChannelUserID: msg.Source.SenderID,
+			UserID:   inst.InstallerUserID,
+			External: true,
 		}, nil
 	}
 	if errors.Is(err, pgx.ErrNoRows) {

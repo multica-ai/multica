@@ -96,8 +96,6 @@ type ResolvedIdentity struct {
 	// It prevents the router from treating the ownership principal as the real
 	// task initiator and leaking that member's connected-app overlay.
 	External bool
-	// ChannelUserID is the platform-native sender id for audit/debug context.
-	ChannelUserID string
 }
 
 // TaskInitiatorUserID returns an attributable Multica member only. External
@@ -373,7 +371,7 @@ type IssueCreator interface {
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options ...service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, options service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }

@@ -322,7 +322,7 @@ func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pg
 	return nil
 }
 
-func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64, options ...service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64, options service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
@@ -332,12 +332,8 @@ func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, 
 	f.initiator = initiator
 	f.initiators = append(f.initiators, initiator)
 	f.contextRevisions = append(f.contextRevisions, contextRevision)
-	if len(options) > 0 {
-		f.options = options[0]
-		f.disableOwnerConnectedAppsArgs = append(f.disableOwnerConnectedAppsArgs, options[0].DisableOwnerConnectedApps)
-	} else {
-		f.disableOwnerConnectedAppsArgs = append(f.disableOwnerConnectedAppsArgs, false)
-	}
+	f.options = options
+	f.disableOwnerConnectedAppsArgs = append(f.disableOwnerConnectedAppsArgs, options.DisableOwnerConnectedApps)
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
@@ -1461,9 +1457,8 @@ func TestRouter_P2PSessionCreatorIsSender(t *testing.T) {
 func TestRouter_ExternalChannelUserDoesNotInheritInstallerIdentity(t *testing.T) {
 	h := newHarness(t)
 	h.ident.id = ResolvedIdentity{
-		UserID:        h.inst.inst.InstallerUserID,
-		External:      true,
-		ChannelUserID: "ou_external",
+		UserID:   h.inst.inst.InstallerUserID,
+		External: true,
 	}
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1504,9 +1499,8 @@ func TestRouter_GuestContainingBatchKeepsConnectedAppsDisabled(t *testing.T) {
 			h.router.batcher = newTestBatcher(timers)
 			member := ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}
 			guest := ResolvedIdentity{
-				UserID:        h.inst.inst.InstallerUserID,
-				External:      true,
-				ChannelUserID: "ou_external",
+				UserID:   h.inst.inst.InstallerUserID,
+				External: true,
 			}
 			first, second := member, guest
 			if tt.firstExternal {
@@ -1544,9 +1538,8 @@ func TestRouter_GuestContainingBatchKeepsConnectedAppsDisabled(t *testing.T) {
 func TestRouter_ExternalIssueIsAttributedToAgentNotInstaller(t *testing.T) {
 	h := newHarness(t)
 	h.ident.id = ResolvedIdentity{
-		UserID:        h.inst.inst.InstallerUserID,
-		External:      true,
-		ChannelUserID: "ou_external",
+		UserID:   h.inst.inst.InstallerUserID,
+		External: true,
 	}
 	h.binder.appendResult = AppendResult{
 		DedupMarked:  true,

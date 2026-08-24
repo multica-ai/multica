@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
 
@@ -53,6 +54,55 @@ func TestLarkInstallationResponseIncludesInboundAccessMode(t *testing.T) {
 	})
 	if resp.InboundAccessMode != lark.InboundAccessFeishuUsers {
 		t.Fatalf("inbound access mode = %q", resp.InboundAccessMode)
+	}
+}
+
+func TestUpdateLarkInstallation_AuthorizesValidatesAndPersists(t *testing.T) {
+	wireLarkInstallServices(t)
+	agentID, ownerID, memberID := privateAgentTestFixture(t)
+	installationID := dbfx.Insert(t, "channel_installation", testutil.Cols{
+		"workspace_id":      testWorkspaceID,
+		"agent_id":          agentID,
+		"channel_type":      "feishu",
+		"config":            []byte(`{"app_id":"lark-update-policy","tenant_key":"tenant-a"}`),
+		"installer_user_id": ownerID,
+		"status":            "active",
+	})
+
+	patch := func(userID string, body any, want int) *testutil.Response {
+		path := "/api/workspaces/" + testWorkspaceID + "/lark/installations/" + installationID
+		req := newRequestAs(userID, http.MethodPatch, path, body)
+		req = testutil.WithURLParams(req, "id", testWorkspaceID, "installationId", installationID)
+		return testutil.Call(t, testHandler.UpdateLarkInstallation, req).Want(want)
+	}
+	readMode := func() string {
+		var mode string
+		dbfx.QueryRow(t, `SELECT COALESCE(config->>'inbound_access_mode', '') FROM channel_installation WHERE id = $1`, installationID).Scan(&mode)
+		return mode
+	}
+
+	patch(memberID, map[string]any{"inbound_access_mode": "feishu_users"}, http.StatusForbidden)
+	if got := readMode(); got != "" {
+		t.Fatalf("unauthorized update persisted mode %q", got)
+	}
+
+	patch(ownerID, map[string]any{"inbound_access_mode": "everyone"}, http.StatusBadRequest)
+	if got := readMode(); got != "" {
+		t.Fatalf("invalid update persisted mode %q", got)
+	}
+
+	var response LarkInstallationResponse
+	patch(ownerID, map[string]any{"inbound_access_mode": "feishu_users"}, http.StatusOK).JSON(&response)
+	if response.InboundAccessMode != lark.InboundAccessFeishuUsers {
+		t.Fatalf("response mode = %q, want %q", response.InboundAccessMode, lark.InboundAccessFeishuUsers)
+	}
+	if got := readMode(); got != string(lark.InboundAccessFeishuUsers) {
+		t.Fatalf("persisted mode = %q, want %q", got, lark.InboundAccessFeishuUsers)
+	}
+
+	patch(testUserID, map[string]any{"inbound_access_mode": "workspace_members"}, http.StatusOK)
+	if got := readMode(); got != string(lark.InboundAccessWorkspaceMembers) {
+		t.Fatalf("workspace owner persisted mode = %q, want %q", got, lark.InboundAccessWorkspaceMembers)
 	}
 }
 
