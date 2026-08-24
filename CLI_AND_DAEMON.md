@@ -876,7 +876,24 @@ multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
 multica autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
 
-Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
+### Webhook Triggers
+
+```bash
+multica autopilot trigger-add <autopilot-id> --kind webhook   # prints the signed webhook URL
+multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
+```
+
+Webhook triggers take no cron/timezone. To scope which GitHub events fire the
+autopilot, pass `event_filters` via the REST endpoint
+`POST /api/autopilots/<autopilot-id>/triggers`:
+
+```bash
+curl -X POST "$BASE_URL/api/autopilots/<autopilot-id>/triggers" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"kind":"webhook","event_filters":[{"event":"issues","actions":["opened"]}]}'
+```
+
+The `api` kind has no server endpoint yet and is not exposed.
 
 ## Other Commands
 
