@@ -14,6 +14,7 @@ import {
 export const taskStatusConfig: Record<string, { icon: typeof CheckCircle2; color: string }> = {
   queued: { icon: Clock, color: "text-muted-foreground" },
   dispatched: { icon: Play, color: "text-info" },
+  waiting_local_directory: { icon: Clock, color: "text-muted-foreground" },
   running: { icon: Loader2, color: "text-brand" },
   completed: { icon: CheckCircle2, color: "text-success" },
   failed: { icon: XCircle, color: "text-destructive" },

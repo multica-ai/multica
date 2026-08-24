@@ -32,6 +32,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useTimeAgo } from "../../i18n";
+import { taskStatusConfig } from "../../agents/config";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
@@ -39,6 +40,7 @@ import {
   memberListOptions,
   selectSkillAssignments,
   skillDetailOptions,
+  skillTasksOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -440,6 +442,8 @@ function UsedByList({ agents }: { agents: Agent[] }) {
 
 function OverviewTab({
   skill,
+  skillId,
+  wsId,
   name,
   description,
   canEdit,
@@ -450,6 +454,8 @@ function OverviewTab({
   onAddToAgents,
 }: {
   skill: Skill;
+  skillId: string;
+  wsId: string;
   name: string;
   description: string;
   canEdit: boolean;
@@ -540,6 +546,13 @@ function OverviewTab({
             ? t(($) => $.detail.overview.permissions_locked_creator, { name: creatorName })
             : t(($) => $.detail.overview.permissions_locked)}
       </p>
+
+      <section className="mt-10">
+        <h2 className="text-title-sm font-medium">{t(($) => $.detail.tabs.tasks)}</h2>
+        <div className="mt-3">
+          <TasksTab skillId={skillId} wsId={wsId} />
+        </div>
+      </section>
     </div>
   );
 }
@@ -1298,6 +1311,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         {activeView === "overview" ? (
           <OverviewTab
             skill={skill}
+            skillId={skill.id}
+            wsId={wsId}
             name={name}
             description={description}
             canEdit={canEdit}
@@ -1448,6 +1463,132 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         // draft must be replaced instead of tripping the conflict banner.
         onRefreshed={(updated) => adoptServerVersion(updated)}
       />
+    </div>
+  );
+}
+
+/**
+ * TasksTab shows agent tasks that used this skill, ordered by most recent
+ * usage. The data comes from the skill_usage_event table populated by the
+ * background SkillUsageProcessorJob scheduler.
+ */
+function TasksTab({ skillId, wsId }: { skillId: string; wsId: string }) {
+  const { t } = useT("skills");
+  const timeAgo = useTimeAgo();
+  const paths = useWorkspacePaths();
+  const [displayLimit, setDisplayLimit] = useState(10);
+
+  function statusLabel(status: string): string {
+    switch (status) {
+      case "queued":
+        return t(($) => $.detail.tasks.status.queued);
+      case "dispatched":
+        return t(($) => $.detail.tasks.status.dispatched);
+      case "waiting_local_directory":
+        return t(($) => $.detail.tasks.status.waiting_local_directory);
+      case "running":
+        return t(($) => $.detail.tasks.status.running);
+      case "completed":
+        return t(($) => $.detail.tasks.status.completed);
+      case "failed":
+        return t(($) => $.detail.tasks.status.failed);
+      case "cancelled":
+        return t(($) => $.detail.tasks.status.cancelled);
+      default:
+        return status;
+    }
+  }
+
+  const { data: tasks = [], isLoading } = useQuery(
+    skillTasksOptions(wsId, skillId),
+  );
+
+  const visibleTasks = tasks.slice(0, displayLimit);
+  const hasMore = tasks.length > displayLimit;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (tasks.length === 0) {
+    return (
+      <div className="py-16 text-center text-body text-muted-foreground">
+        {t(($) => $.detail.tasks.empty)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 sm:p-6">
+      <div className="overflow-hidden rounded-lg border divide-y">
+        {visibleTasks.map((task) => {
+          const cfg = taskStatusConfig[task.status] ?? taskStatusConfig.queued!;
+          const Icon = cfg.icon;
+          const isRunning = task.status === "running";
+          let durationText: string | null = null;
+          if (task.started_at && task.completed_at) {
+            const dur = new Date(task.completed_at).getTime() - new Date(task.started_at).getTime();
+            if (dur > 0) {
+              const secs = Math.round(dur / 1000);
+              durationText = secs >= 60 ? `${Math.floor(secs / 60)}m${secs % 60}s` : `${secs}s`;
+            }
+          }
+          return (
+            <AppLink
+              key={task.id}
+              href={paths.issueDetail(task.issue_id)}
+              className="group flex items-center gap-3 px-3 py-3 transition-colors hover:bg-muted/30"
+            >
+              <Icon
+                className={`h-4 w-4 shrink-0 ${cfg.color} ${isRunning ? "animate-spin motion-reduce:animate-none" : ""}`}
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  {task.issue_identifier && (
+                    <span className="shrink-0 font-mono text-caption text-muted-foreground">
+                      {task.issue_identifier}
+                    </span>
+                  )}
+                  <span className="truncate text-body">
+                    {task.issue_title ?? task.id}
+                  </span>
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
+                  <span className={cfg.color}>{statusLabel(task.status)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>
+                    {task.completed_at
+                      ? timeAgo(task.completed_at)
+                      : timeAgo(task.created_at)}
+                  </span>
+                  {durationText && (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span>{durationText}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </AppLink>
+          );
+        })}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setDisplayLimit((prev) => prev + 10)}
+          className="mt-2 self-start rounded text-caption text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {t(($) => $.detail.tasks.show_more, {
+            remaining: tasks.length - displayLimit,
+          })}
+        </button>
+      )}
     </div>
   );
 }

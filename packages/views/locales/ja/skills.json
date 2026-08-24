@@ -50,6 +50,7 @@
     "name": "名前",
     "created_by": "追加者",
     "used_by": "使用中",
+    "use_count": "使用回数",
     "source": "ソース",
     "updated": "更新日",
     "created": "作成日",
@@ -198,7 +199,21 @@
     "tabs": {
       "aria": "スキルのセクション",
       "overview": "概要",
-      "files_other": "ファイル {{count}}"
+      "files_other": "ファイル {{count}}",
+      "tasks": "作業"
+    },
+    "tasks": {
+      "empty": "このスキルを使用した作業はまだありません。",
+      "show_more": "さらに表示（残り{{remaining}}件）",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     },
     "overview": {
       "properties": "プロパティ",

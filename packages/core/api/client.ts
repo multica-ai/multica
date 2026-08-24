@@ -2892,6 +2892,10 @@ export class ApiClient {
     return this.fetch(`/api/skills/${id}`);
   }
 
+  async listSkillTasks(id: string): Promise<AgentTask[]> {
+    return this.fetch(`/api/skills/${id}/tasks`);
+  }
+
   async createSkill(data: CreateSkillRequest): Promise<Skill> {
     return this.fetch("/api/skills", {
       method: "POST",

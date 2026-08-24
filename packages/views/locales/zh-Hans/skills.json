@@ -50,6 +50,7 @@
     "name": "名称",
     "created_by": "添加者",
     "used_by": "被谁使用",
+    "use_count": "使用次数",
     "source": "来源",
     "updated": "更新时间",
     "created": "创建时间",
@@ -198,7 +199,21 @@
     "tabs": {
       "aria": "技能分区",
       "overview": "概览",
-      "files_other": "文件 {{count}}"
+      "files_other": "文件 {{count}}",
+      "tasks": "Tasks"
+    },
+    "tasks": {
+      "empty": "暂无 task 使用该技能",
+      "show_more": "显示更多（剩余 {{remaining}} 条）",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     },
     "overview": {
       "properties": "属性",

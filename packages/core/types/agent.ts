@@ -346,6 +346,10 @@ export interface AgentTask {
    * or deleted.
    */
   trigger_summary?: string;
+  /** Issue title, populated when the task is returned from a skill-tasks endpoint. */
+  issue_title?: string;
+  /** Issue identifier (e.g. "WRJ-3"), populated when the task is returned from a skill-tasks endpoint. */
+  issue_identifier?: string;
   /**
    * Handoff instruction the assigner attached when starting this run (MUL-3375).
    * Present only on assignment-triggered runs that carried a note; the execution
@@ -825,8 +829,10 @@ export interface SkillSummary {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-	/** Present only when returned from an agent-scoped assignment endpoint. */
-	enabled?: boolean;
+/** Number of times this skill has been used (async stats from skill_usage_event). */
+  use_count: number;
+  /** Present only when returned from an agent-scoped assignment endpoint. */
+  enabled?: boolean;
 }
 
 export interface Skill extends SkillSummary {
