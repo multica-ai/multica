@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -224,6 +224,35 @@ describe("TaskCommentCoverage", () => {
     );
 
     expect(screen.getByText("包含 3 条评论")).toBeInTheDocument();
+  });
+});
+
+describe("execution log failure reasons", () => {
+  it("renders a failed run's reason in the active locale", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    queryClient.setQueryData(issueKeys.tasks("issue-1"), [
+      makeTask({
+        status: "failed",
+        completed_at: "2026-06-08T08:04:00Z",
+        error: "provider returned 402",
+        failure_reason: "agent_error.provider_quota_limit",
+      }),
+    ]);
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示历史运行（1）" }));
+    expect(screen.getByText(/提供商配额已用尽/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Provider quota exhausted/),
+    ).not.toBeInTheDocument();
   });
 });
 

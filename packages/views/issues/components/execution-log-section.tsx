@@ -427,6 +427,7 @@ export function ActiveTaskRow({
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const { t: tAgents } = useT("agents");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const label = useStatusLabel(task.status);
@@ -437,8 +438,8 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // delivery) — a user-initiated cancel stays a plain "Cancelled".
   const failureLabel =
     task.status === "failed"
-      ? failureReasonLabel(task.failure_reason)
-      : cancelReasonLabel(task);
+      ? failureReasonLabel(task.failure_reason, tAgents)
+      : cancelReasonLabel(task, tAgents);
   // Hovering the status mark reveals the actionable text ("upgrade the daemon
   // on that machine", "work preserved at …"), not just the reason bucket.
   const statusTitle =

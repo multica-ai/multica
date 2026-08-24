@@ -716,7 +716,7 @@ export function AgentTranscriptDialog({
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
         // cancels have no reason and keep the plain label.
-        const cancelReason = cancelReasonLabel(task);
+        const cancelReason = cancelReasonLabel(task, t);
         return (
           <span className={cn(base, "bg-muted text-muted-foreground")} title={task.error ?? undefined}>
             <XCircle className="h-3 w-3" />

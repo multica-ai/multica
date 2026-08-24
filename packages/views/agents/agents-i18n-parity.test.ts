@@ -4,8 +4,35 @@ import en from "../locales/en/agents.json";
 import zhHans from "../locales/zh-Hans/agents.json";
 import ja from "../locales/ja/agents.json";
 import ko from "../locales/ko/agents.json";
+import { FAILURE_REASON_I18N_KEYS } from "./components/tabs/task-failure";
 
 const LOCALES = { en, "zh-Hans": zhHans, ja, ko } as const;
+
+describe("task failure reason i18n parity across all 4 locales", () => {
+  const expectedKeys = Object.values(FAILURE_REASON_I18N_KEYS).toSorted();
+
+  it("covers every mapped reason with the exact same key set", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      expect(
+        Object.keys(locale.task_failure.reasons).toSorted(),
+        `${name}: task_failure.reasons keys drifted`,
+      ).toEqual(expectedKeys);
+    }
+  });
+
+  it("keeps every failure label and the system-cancel fallback non-empty", () => {
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      expect(
+        locale.task_failure.cancelled_by_system.length,
+        `${name}: task_failure.cancelled_by_system is empty`,
+      ).toBeGreaterThan(0);
+      for (const [key, label] of Object.entries(locale.task_failure.reasons)) {
+        expect(typeof label, `${name}: ${key} is not a string`).toBe("string");
+        expect(label.length, `${name}: ${key} is empty`).toBeGreaterThan(0);
+      }
+    }
+  });
+});
 
 /**
  * Verify new access-scope / bulk-access keys are present in every locale
