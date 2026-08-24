@@ -132,6 +132,10 @@ type AppendParams struct {
 	Message             channel.InboundMessage
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
+	// DisableOwnerConnectedApps is persisted on the durable context generation.
+	// It is monotonic within that generation so crash recovery cannot weaken a
+	// guest-containing batch after the in-memory debouncer is lost.
+	DisableOwnerConnectedApps bool
 }
 
 // AppendResult reports what AppendMessage decided.
@@ -158,8 +162,9 @@ type AppendResult struct {
 // initiator can be absent only for legacy or corrupt data; recovery fails
 // closed for such older generations rather than impersonating a new sender.
 type PendingContext struct {
-	Revision        int64
-	InitiatorUserID pgtype.UUID
+	Revision                  int64
+	InitiatorUserID           pgtype.UUID
+	DisableOwnerConnectedApps bool
 }
 
 // BindMediaParams carries stored media references to the post-append

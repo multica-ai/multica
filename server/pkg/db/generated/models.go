@@ -321,14 +321,15 @@ type ChannelBindingToken struct {
 }
 
 type ChannelChatContextGeneration struct {
-	ChatSessionID          pgtype.UUID        `json:"chat_session_id"`
-	Revision               int64              `json:"revision"`
-	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
-	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
-	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
-	PendingFresh           bool               `json:"pending_fresh"`
-	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID             pgtype.UUID        `json:"chat_session_id"`
+	Revision                  int64              `json:"revision"`
+	HistoryStartMessageID     pgtype.Text        `json:"history_start_message_id"`
+	HistoryEndMessageID       pgtype.Text        `json:"history_end_message_id"`
+	HistoryBoundaryPending    bool               `json:"history_boundary_pending"`
+	PendingFresh              bool               `json:"pending_fresh"`
+	InitiatorUserID           pgtype.UUID        `json:"initiator_user_id"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	DisableOwnerConnectedApps bool               `json:"disable_owner_connected_apps"`
 }
 
 type ChannelChatSessionBinding struct {

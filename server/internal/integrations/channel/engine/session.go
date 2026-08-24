@@ -108,8 +108,9 @@ func (a dbSessionQueries) ListUnownedChannelChatContextRevisions(ctx context.Con
 	contexts := make([]PendingContext, 0, len(rows))
 	for _, row := range rows {
 		contexts = append(contexts, PendingContext{
-			Revision:        row.ContextRevision,
-			InitiatorUserID: row.InitiatorUserID,
+			Revision:                  row.ContextRevision,
+			InitiatorUserID:           row.InitiatorUserID,
+			DisableOwnerConnectedApps: row.DisableOwnerConnectedApps,
 		})
 	}
 	return contexts, nil
@@ -322,16 +323,17 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 // its own binding row, recording the real thread here per session does not clash
 // across sibling threads.
 type AppendInput struct {
-	SessionID           pgtype.UUID
-	Sender              pgtype.UUID
-	InstallationID      pgtype.UUID
-	Body                string
-	CommandText         string
-	MessageID           string
-	ThreadID            string
-	ClaimToken          pgtype.UUID
-	MediaPendingSeconds float64
-	ForceFresh          bool
+	SessionID                 pgtype.UUID
+	Sender                    pgtype.UUID
+	InstallationID            pgtype.UUID
+	Body                      string
+	CommandText               string
+	MessageID                 string
+	ThreadID                  string
+	ClaimToken                pgtype.UUID
+	MediaPendingSeconds       float64
+	ForceFresh                bool
+	DisableOwnerConnectedApps bool
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
@@ -417,6 +419,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	if contextRevision > 0 && cmd == nil {
 		if _, err := qtx.SetChannelChatContextInitiator(ctx, db.SetChannelChatContextInitiatorParams{
 			ChatSessionID: in.SessionID, Revision: contextRevision, InitiatorUserID: in.Sender,
+			DisableOwnerConnectedApps: in.DisableOwnerConnectedApps,
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("snapshot channel context initiator: %w", err)
 		}

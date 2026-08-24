@@ -293,18 +293,19 @@ func (f *fakeIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtype
 }
 
 type fakeTasks struct {
-	mu                  sync.Mutex
-	called              bool
-	callCount           int
-	promotions          int
-	issueTaskPromotions []pgtype.UUID
-	forceFresh          bool
-	forceFreshArgs      []bool
-	initiator           pgtype.UUID
-	initiators          []pgtype.UUID
-	contextRevisions    []int64
-	options             service.ChatTaskEnqueueOptions
-	err                 error
+	mu                            sync.Mutex
+	called                        bool
+	callCount                     int
+	promotions                    int
+	issueTaskPromotions           []pgtype.UUID
+	forceFresh                    bool
+	forceFreshArgs                []bool
+	initiator                     pgtype.UUID
+	initiators                    []pgtype.UUID
+	contextRevisions              []int64
+	options                       service.ChatTaskEnqueueOptions
+	disableOwnerConnectedAppsArgs []bool
+	err                           error
 }
 
 func (f *fakeTasks) PromoteChannelChatTasksIfMediaReady(_ context.Context, _ pgtype.UUID) error {
@@ -333,6 +334,9 @@ func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, 
 	f.contextRevisions = append(f.contextRevisions, contextRevision)
 	if len(options) > 0 {
 		f.options = options[0]
+		f.disableOwnerConnectedAppsArgs = append(f.disableOwnerConnectedAppsArgs, options[0].DisableOwnerConnectedApps)
+	} else {
+		f.disableOwnerConnectedAppsArgs = append(f.disableOwnerConnectedAppsArgs, false)
 	}
 	return db.AgentTaskQueue{}, f.err
 }
@@ -368,6 +372,11 @@ func (f *fakeTasks) optionsArg() service.ChatTaskEnqueueOptions {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.options
+}
+func (f *fakeTasks) connectedAppsPolicyArgs() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.disableOwnerConnectedAppsArgs...)
 }
 
 type fakeReader struct {
@@ -938,6 +947,36 @@ func TestRouter_RecoveryWithoutInitiatorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestRouter_RecoveryWithoutMemberInitiatorKeepsGuestRestriction(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, DisableOwnerConnectedApps: true},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation flushes = %d, want 2", h.tasks.calls())
+	}
+	revisions := h.tasks.revisions()
+	policies := h.tasks.connectedAppsPolicyArgs()
+	initiators := h.tasks.initiatorArgs()
+	if len(revisions) != 2 || len(policies) != 2 || len(initiators) != 2 {
+		t.Fatalf("recovered calls = revisions:%v policies:%v initiators:%v", revisions, policies, initiators)
+	}
+	for i, revision := range revisions {
+		if revision == 1 && (!policies[i] || initiators[i].Valid) {
+			t.Fatalf("recovered guest context = policy:%t initiator:%v, want true/invalid", policies[i], initiators[i])
+		}
+	}
+}
+
 func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
 	h := newHarness(t)
 	timers := &fakeTimerFactory{}
@@ -1434,6 +1473,9 @@ func TestRouter_ExternalChannelUserDoesNotInheritInstallerIdentity(t *testing.T)
 	}
 	if h.binder.lastAppend.Sender != h.inst.inst.InstallerUserID {
 		t.Fatalf("external message persistence must use the installation principal")
+	}
+	if !h.binder.lastAppend.DisableOwnerConnectedApps {
+		t.Fatal("external message must persist the connected-app restriction with its context")
 	}
 	if !waitFor(time.Second, h.tasks.wasCalled) {
 		t.Fatal("external message did not schedule an agent run")

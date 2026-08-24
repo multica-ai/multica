@@ -77,9 +77,9 @@ WITH closed AS (
            NOT $4::boolean,
            TRUE
     FROM advanced
-    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at
+    RETURNING chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, disable_owner_connected_apps
 )
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM opened
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, disable_owner_connected_apps FROM opened
 `
 
 type AdvanceChannelChatContextGenerationParams struct {
@@ -90,14 +90,15 @@ type AdvanceChannelChatContextGenerationParams struct {
 }
 
 type AdvanceChannelChatContextGenerationRow struct {
-	ChatSessionID          pgtype.UUID        `json:"chat_session_id"`
-	Revision               int64              `json:"revision"`
-	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
-	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
-	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
-	PendingFresh           bool               `json:"pending_fresh"`
-	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID             pgtype.UUID        `json:"chat_session_id"`
+	Revision                  int64              `json:"revision"`
+	HistoryStartMessageID     pgtype.Text        `json:"history_start_message_id"`
+	HistoryEndMessageID       pgtype.Text        `json:"history_end_message_id"`
+	HistoryBoundaryPending    bool               `json:"history_boundary_pending"`
+	PendingFresh              bool               `json:"pending_fresh"`
+	InitiatorUserID           pgtype.UUID        `json:"initiator_user_id"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	DisableOwnerConnectedApps bool               `json:"disable_owner_connected_apps"`
 }
 
 // Opens a new agent-visible context while retaining the same Multica Chat.
@@ -120,6 +121,7 @@ func (q *Queries) AdvanceChannelChatContextGeneration(ctx context.Context, arg A
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.DisableOwnerConnectedApps,
 	)
 	return i, err
 }
@@ -1023,7 +1025,7 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 }
 
 const getChannelChatContextGeneration = `-- name: GetChannelChatContextGeneration :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, disable_owner_connected_apps FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 `
@@ -1045,6 +1047,7 @@ func (q *Queries) GetChannelChatContextGeneration(ctx context.Context, arg GetCh
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.DisableOwnerConnectedApps,
 	)
 	return i, err
 }
@@ -1597,7 +1600,7 @@ func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg L
 }
 
 const lockChannelChatContextGenerationByRevision = `-- name: LockChannelChatContextGenerationByRevision :one
-SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at FROM channel_chat_context_generation
+SELECT chat_session_id, revision, history_start_message_id, history_end_message_id, history_boundary_pending, pending_fresh, initiator_user_id, created_at, disable_owner_connected_apps FROM channel_chat_context_generation
 WHERE chat_session_id = $1
   AND revision = $2
 FOR UPDATE
@@ -1620,6 +1623,7 @@ func (q *Queries) LockChannelChatContextGenerationByRevision(ctx context.Context
 		&i.PendingFresh,
 		&i.InitiatorUserID,
 		&i.CreatedAt,
+		&i.DisableOwnerConnectedApps,
 	)
 	return i, err
 }
@@ -2096,23 +2100,33 @@ func (q *Queries) ResolveChannelChatContextHistoryStart(ctx context.Context, arg
 
 const setChannelChatContextInitiator = `-- name: SetChannelChatContextInitiator :one
 UPDATE channel_chat_context_generation
-SET initiator_user_id = $1
-WHERE chat_session_id = $2
-  AND revision = $3
+SET initiator_user_id = $1,
+    disable_owner_connected_apps = disable_owner_connected_apps
+        OR $2::boolean
+WHERE chat_session_id = $3
+  AND revision = $4
 RETURNING initiator_user_id
 `
 
 type SetChannelChatContextInitiatorParams struct {
-	InitiatorUserID pgtype.UUID `json:"initiator_user_id"`
-	ChatSessionID   pgtype.UUID `json:"chat_session_id"`
-	Revision        int64       `json:"revision"`
+	InitiatorUserID           pgtype.UUID `json:"initiator_user_id"`
+	DisableOwnerConnectedApps bool        `json:"disable_owner_connected_apps"`
+	ChatSessionID             pgtype.UUID `json:"chat_session_id"`
+	Revision                  int64       `json:"revision"`
 }
 
 // Snapshots the latest authenticated sender whose durable input belongs to a
 // generation. Crash recovery must use this identity rather than the sender of
-// a later generation that happened to re-arm the lost debounce timer.
+// a later generation that happened to re-arm the lost debounce timer. The
+// connected-app restriction is monotonic within a generation: one external
+// sender makes the whole task batch fail closed regardless of arrival order.
 func (q *Queries) SetChannelChatContextInitiator(ctx context.Context, arg SetChannelChatContextInitiatorParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, setChannelChatContextInitiator, arg.InitiatorUserID, arg.ChatSessionID, arg.Revision)
+	row := q.db.QueryRow(ctx, setChannelChatContextInitiator,
+		arg.InitiatorUserID,
+		arg.DisableOwnerConnectedApps,
+		arg.ChatSessionID,
+		arg.Revision,
+	)
 	var initiator_user_id pgtype.UUID
 	err := row.Scan(&initiator_user_id)
 	return initiator_user_id, err

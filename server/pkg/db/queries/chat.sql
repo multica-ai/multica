@@ -632,7 +632,10 @@ WITH pending AS (
       AND task_id IS NULL
       AND message_kind != 'channel_command'
 )
-SELECT pending.context_revision, generation.initiator_user_id
+SELECT pending.context_revision,
+       generation.initiator_user_id,
+       COALESCE(generation.disable_owner_connected_apps, FALSE)::boolean
+           AS disable_owner_connected_apps
 FROM pending
 LEFT JOIN channel_chat_context_generation AS generation
   ON generation.chat_session_id = $1

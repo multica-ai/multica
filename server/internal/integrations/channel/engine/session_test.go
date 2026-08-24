@@ -80,20 +80,21 @@ type fakeSessionQueries struct {
 	reconcilerOwnedKeys   map[string]bool
 	issueLookupErr        error
 
-	markRows           int64 // MarkChannelInboundDedupProcessed result
-	pendingFresh       bool
-	legacyPendingFresh bool
-	contextRevision    int64
-	contextInitiator   pgtype.UUID
-	boundaryPending    bool
-	ensureContextErr   error
-	lockContextErr     error
-	advanceContextErr  error
-	resolveContextErr  error
-	setInitiatorErr    error
-	pendingContextsErr error
-	createBindingErr   error // simulate a unique violation on create
-	raceWinner         pgtype.UUID
+	markRows                  int64 // MarkChannelInboundDedupProcessed result
+	pendingFresh              bool
+	legacyPendingFresh        bool
+	contextRevision           int64
+	contextInitiator          pgtype.UUID
+	disableOwnerConnectedApps bool
+	boundaryPending           bool
+	ensureContextErr          error
+	lockContextErr            error
+	advanceContextErr         error
+	resolveContextErr         error
+	setInitiatorErr           error
+	pendingContextsErr        error
+	createBindingErr          error // simulate a unique violation on create
+	raceWinner                pgtype.UUID
 }
 
 func newFake() *fakeSessionQueries {
@@ -147,7 +148,10 @@ func (f *fakeSessionQueries) ListUnownedChannelChatContextRevisions(context.Cont
 	if f.pendingContextsErr != nil {
 		return nil, f.pendingContextsErr
 	}
-	return []PendingContext{{Revision: f.contextRevision, InitiatorUserID: f.contextInitiator}}, nil
+	return []PendingContext{{
+		Revision: f.contextRevision, InitiatorUserID: f.contextInitiator,
+		DisableOwnerConnectedApps: f.disableOwnerConnectedApps,
+	}}, nil
 }
 
 func (f *fakeSessionQueries) ClearChatMessageChannelMediaPending(context.Context, db.ClearChatMessageChannelMediaPendingParams) error {
@@ -232,6 +236,7 @@ func (f *fakeSessionQueries) AdvanceChannelChatContextGeneration(_ context.Conte
 	f.contextRevision = arg.CurrentRevision + 1
 	f.pendingFresh = true
 	f.boundaryPending = !arg.HasMessageBody
+	f.disableOwnerConnectedApps = false
 	return db.AdvanceChannelChatContextGenerationRow{Revision: f.contextRevision, PendingFresh: true, HistoryBoundaryPending: f.boundaryPending}, nil
 }
 
@@ -248,6 +253,7 @@ func (f *fakeSessionQueries) SetChannelChatContextInitiator(_ context.Context, a
 		return pgtype.UUID{}, f.setInitiatorErr
 	}
 	f.contextInitiator = arg.InitiatorUserID
+	f.disableOwnerConnectedApps = f.disableOwnerConnectedApps || arg.DisableOwnerConnectedApps
 	return arg.InitiatorUserID, nil
 }
 
@@ -829,6 +835,44 @@ func TestAppendUserMessage_AdvancesLegacyPendingFreshFromRollingDeploy(t *testin
 	}
 	if f.contextRevision != 2 || res.ContextRevision != 2 || f.lastCreate.ChannelContextRevision.Int64 != 2 {
 		t.Fatalf("legacy pending fresh context = generation:%d result:%d row:%d, want 2", f.contextRevision, res.ContextRevision, f.lastCreate.ChannelContextRevision.Int64)
+	}
+}
+
+func TestAppendUserMessage_ConnectedAppRestrictionIsMonotonicWithinContext(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(2), Body: "guest", DisableOwnerConnectedApps: true,
+	}); err != nil {
+		t.Fatalf("append guest: %v", err)
+	}
+	result, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(3), Body: "member",
+	})
+	if err != nil {
+		t.Fatalf("append member: %v", err)
+	}
+	if len(result.PendingContexts) != 1 || !result.PendingContexts[0].DisableOwnerConnectedApps {
+		t.Fatalf("pending context policy = %+v, want connected apps disabled", result.PendingContexts)
+	}
+}
+
+func TestAppendUserMessage_FreshContextResetsConnectedAppRestriction(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(2), Body: "guest", DisableOwnerConnectedApps: true,
+	}); err != nil {
+		t.Fatalf("append guest: %v", err)
+	}
+	result, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(3), Body: "member after new", ForceFresh: true,
+	})
+	if err != nil {
+		t.Fatalf("append fresh member: %v", err)
+	}
+	if len(result.PendingContexts) != 1 || result.PendingContexts[0].DisableOwnerConnectedApps {
+		t.Fatalf("fresh context policy = %+v, want owner apps allowed", result.PendingContexts)
 	}
 }
 

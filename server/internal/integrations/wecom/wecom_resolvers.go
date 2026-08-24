@@ -242,14 +242,15 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		commandText = p.Message.Text
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:      p.SessionID,
-		Sender:         p.Sender,
-		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		CommandText:    commandText,
-		MessageID:      p.Message.MessageID,
-		ClaimToken:     p.ClaimToken,
-		ForceFresh:     p.Message.ForceFresh,
+		SessionID:                 p.SessionID,
+		Sender:                    p.Sender,
+		InstallationID:            p.InstallationID,
+		Body:                      p.Message.Text,
+		CommandText:               commandText,
+		MessageID:                 p.Message.MessageID,
+		ClaimToken:                p.ClaimToken,
+		ForceFresh:                p.Message.ForceFresh,
+		DisableOwnerConnectedApps: p.DisableOwnerConnectedApps,
 		// How long the chat task waits before it runs. Without this the run
 		// fires the moment the message lands and the agent is handed the
 		// "[Image]" placeholder while the download is still going.

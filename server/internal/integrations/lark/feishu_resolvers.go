@@ -253,16 +253,17 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		commandText = p.Message.Text
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:           p.SessionID,
-		Sender:              p.Sender,
-		InstallationID:      p.InstallationID,
-		Body:                p.Message.Text,
-		CommandText:         commandText,
-		MessageID:           p.Message.MessageID,
-		ThreadID:            p.Message.Source.ThreadID,
-		ClaimToken:          p.ClaimToken,
-		MediaPendingSeconds: p.MediaPendingSeconds,
-		ForceFresh:          p.Message.ForceFresh,
+		SessionID:                 p.SessionID,
+		Sender:                    p.Sender,
+		InstallationID:            p.InstallationID,
+		Body:                      p.Message.Text,
+		CommandText:               commandText,
+		MessageID:                 p.Message.MessageID,
+		ThreadID:                  p.Message.Source.ThreadID,
+		ClaimToken:                p.ClaimToken,
+		MediaPendingSeconds:       p.MediaPendingSeconds,
+		ForceFresh:                p.Message.ForceFresh,
+		DisableOwnerConnectedApps: p.DisableOwnerConnectedApps,
 	})
 }
 

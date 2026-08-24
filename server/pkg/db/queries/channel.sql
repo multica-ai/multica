@@ -680,9 +680,13 @@ WHERE chat_session_id = @chat_session_id
 -- name: SetChannelChatContextInitiator :one
 -- Snapshots the latest authenticated sender whose durable input belongs to a
 -- generation. Crash recovery must use this identity rather than the sender of
--- a later generation that happened to re-arm the lost debounce timer.
+-- a later generation that happened to re-arm the lost debounce timer. The
+-- connected-app restriction is monotonic within a generation: one external
+-- sender makes the whole task batch fail closed regardless of arrival order.
 UPDATE channel_chat_context_generation
-SET initiator_user_id = @initiator_user_id
+SET initiator_user_id = @initiator_user_id,
+    disable_owner_connected_apps = disable_owner_connected_apps
+        OR @disable_owner_connected_apps::boolean
 WHERE chat_session_id = @chat_session_id
   AND revision = @revision
 RETURNING initiator_user_id;

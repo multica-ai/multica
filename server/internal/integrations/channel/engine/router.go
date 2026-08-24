@@ -386,12 +386,13 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		mediaPendingSeconds = r.mediaTimeout.Seconds()
 	}
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
-		SessionID:           sessionID,
-		Sender:              identity.UserID,
-		InstallationID:      inst.ID,
-		Message:             msg,
-		ClaimToken:          claimToken,
-		MediaPendingSeconds: mediaPendingSeconds,
+		SessionID:                 sessionID,
+		Sender:                    identity.UserID,
+		InstallationID:            inst.ID,
+		Message:                   msg,
+		ClaimToken:                claimToken,
+		MediaPendingSeconds:       mediaPendingSeconds,
+		DisableOwnerConnectedApps: identity.External,
 	})
 	if err != nil {
 		if errors.Is(err, ErrClaimLost) {
@@ -508,15 +509,22 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			// crash-recovery field still schedule the appended generation normally.
 			pendingContexts = []PendingContext{{
 				Revision: appendRes.ContextRevision, InitiatorUserID: identity.TaskInitiatorUserID(),
+				DisableOwnerConnectedApps: identity.External,
 			}}
 		}
 		for _, pending := range pendingContexts {
 			revision := pending.Revision
 			forceFresh := revision == appendRes.ContextRevision && msg.ForceFresh
+			disableOwnerConnectedApps := pending.DisableOwnerConnectedApps
 			if revision == appendRes.ContextRevision {
-				r.scheduleRunWithFresh(set, inst, msg, sessionID, identity.TaskInitiatorUserID(), forceFresh, revision, identity.External)
-			} else if pending.InitiatorUserID.Valid {
-				r.scheduleRecoveredRun(set, inst, msg, sessionID, pending.InitiatorUserID, revision, false)
+				disableOwnerConnectedApps = disableOwnerConnectedApps || identity.External
+				initiator := pending.InitiatorUserID
+				if !initiator.Valid && !disableOwnerConnectedApps {
+					initiator = identity.TaskInitiatorUserID()
+				}
+				r.scheduleRunWithFresh(set, inst, msg, sessionID, initiator, forceFresh, revision, disableOwnerConnectedApps)
+			} else if pending.InitiatorUserID.Valid || disableOwnerConnectedApps {
+				r.scheduleRecoveredRun(set, inst, msg, sessionID, pending.InitiatorUserID, revision, disableOwnerConnectedApps)
 			} else {
 				slog.Warn("skipping recovered channel context without initiator snapshot",
 					"chat_session_id", util.UUIDToString(sessionID),

@@ -2344,7 +2344,10 @@ WITH pending AS (
       AND task_id IS NULL
       AND message_kind != 'channel_command'
 )
-SELECT pending.context_revision, generation.initiator_user_id
+SELECT pending.context_revision,
+       generation.initiator_user_id,
+       COALESCE(generation.disable_owner_connected_apps, FALSE)::boolean
+           AS disable_owner_connected_apps
 FROM pending
 LEFT JOIN channel_chat_context_generation AS generation
   ON generation.chat_session_id = $1
@@ -2353,8 +2356,9 @@ ORDER BY pending.context_revision
 `
 
 type ListUnownedChannelChatContextRevisionsRow struct {
-	ContextRevision int64       `json:"context_revision"`
-	InitiatorUserID pgtype.UUID `json:"initiator_user_id"`
+	ContextRevision           int64       `json:"context_revision"`
+	InitiatorUserID           pgtype.UUID `json:"initiator_user_id"`
+	DisableOwnerConnectedApps bool        `json:"disable_owner_connected_apps"`
 }
 
 // Returns every durable context generation that still has channel input without
@@ -2370,7 +2374,7 @@ func (q *Queries) ListUnownedChannelChatContextRevisions(ctx context.Context, ch
 	items := []ListUnownedChannelChatContextRevisionsRow{}
 	for rows.Next() {
 		var i ListUnownedChannelChatContextRevisionsRow
-		if err := rows.Scan(&i.ContextRevision, &i.InitiatorUserID); err != nil {
+		if err := rows.Scan(&i.ContextRevision, &i.InitiatorUserID, &i.DisableOwnerConnectedApps); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
