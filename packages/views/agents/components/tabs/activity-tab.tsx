@@ -585,15 +585,15 @@ function TaskRow({
 
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape.
-  // failureReasonLabel takes the raw open string — the taxonomy has 21
-  // values and grows, so there is no enum to cast to. Cancelled rows get a
+  // failureReasonLabel takes the raw open string because the taxonomy grows,
+  // so there is no enum to cast to. Cancelled rows get a
   // label only when the SERVER cancelled them for a persisted reason
   // (worktree claim gate, preserved-work delivery); a user's own cancel
   // stays a plain "Cancelled".
   const failureLabel =
     task.status === "failed"
-      ? failureReasonLabel(task.failure_reason)
-      : cancelReasonLabel(task);
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a

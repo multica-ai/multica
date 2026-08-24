@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { api } from "@multica/core/api";
+import type { SupportedLocale } from "@multica/core/i18n";
 import type { AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import { useTranscriptViewStore } from "@multica/core/agents/stores";
 import { renderWithI18n } from "../../test/i18n";
@@ -210,7 +211,11 @@ const items: TimelineItem[] = [
 
 function renderDialog(
   dialogItems: TimelineItem[] = items,
-  options: { task?: AgentTask; isLive?: boolean } = {},
+  options: {
+    task?: AgentTask;
+    isLive?: boolean;
+    locale?: SupportedLocale;
+  } = {},
 ) {
   return renderWithI18n(
     <AgentTranscriptDialog
@@ -221,6 +226,7 @@ function renderDialog(
       agentName="Codex"
       isLive={options.isLive}
     />,
+    { locale: options.locale },
   );
 }
 
@@ -811,6 +817,23 @@ describe("AgentTranscriptDialog — cancel reason", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Run details" }));
     expect(screen.getByText(gateError)).toBeInTheDocument();
+  });
+
+  it("renders a server cancellation reason in the active locale", () => {
+    renderDialog(items, {
+      locale: "zh-Hans",
+      task: {
+        ...baseTask,
+        status: "cancelled",
+        error: gateError,
+        failure_reason: "local_directory_error",
+      },
+    });
+
+    expect(screen.getByText(/本地目录出错/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Local directory error/),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps a user-initiated cancel a plain Cancelled", () => {
