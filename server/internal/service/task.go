@@ -760,9 +760,9 @@ const VerificationContextType = "verification"
 // VerificationContextData is the context JSONB payload carried by a verifier
 // task: what to verify and where the deliverable lives.
 type VerificationContextData struct {
-	Type         string `json:"type"`                    // always VerificationContextType
-	TargetTaskID string `json:"target_task_id"`          // completed task under verification
-	BranchName   string `json:"branch_name"`             // branch the work agent delivered
+	Type         string `json:"type"`           // always VerificationContextType
+	TargetTaskID string `json:"target_task_id"` // completed task under verification
+	BranchName   string `json:"branch_name"`    // branch the work agent delivered
 }
 
 // maybeEnqueueVerifier enqueues the opt-in verification pass for a completed
