@@ -740,6 +740,11 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
 -- whose completion lookup would race over "most recent issue by this agent".
+-- GAP-13: an issue task with a 'blocked_by' issue_dependency edge whose blocker
+-- is not yet terminal (done/cancelled) stays queued. Opt-in: no dependency rows
+-- means the NOT EXISTS is trivially true and dispatch is unchanged. Raw-status
+-- check covers built-in statuses; a custom status in the done/cancelled category
+-- does not unblock (safe direction — work stays queued).
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
@@ -772,6 +777,17 @@ WHERE id = (
                 AND active.autopilot_run_id IS NULL
               )
             )
+      )
+      AND (
+          atq.issue_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM issue_dependency dep
+              JOIN issue blocker ON blocker.id = dep.depends_on_issue_id
+              WHERE dep.issue_id = atq.issue_id
+                AND dep.type = 'blocked_by'
+                AND blocker.status NOT IN ('done', 'cancelled')
+          )
       )
     ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
     LIMIT 1
