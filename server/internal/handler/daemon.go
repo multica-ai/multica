@@ -2880,6 +2880,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
+	// Prior-attempt failure digest (GAP-23): retry children carry a
+	// context.prior_attempt blob stamped by FailTask. Lift it into the claim
+	// payload so the daemon's issue_context.md opens with what already failed.
+	if task.Context != nil {
+		var wrapper struct {
+			PriorAttempt *service.PriorAttemptContextData `json:"prior_attempt"`
+		}
+		if err := json.Unmarshal(task.Context, &wrapper); err == nil && wrapper.PriorAttempt != nil {
+			resp.PriorAttempt = wrapper.PriorAttempt
+		}
+	}
+
 	hasQuickCreate := false
 	if task.Context != nil && !task.IssueID.Valid && !task.ChatSessionID.Valid && !task.AutopilotRunID.Valid {
 		var qc service.QuickCreateContext

@@ -149,6 +149,12 @@ type Task struct {
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+	// PriorAttempt is the failure digest stamped onto retry children by the
+	// server (GAP-23): what attempt failed, why (classified reason), and the
+	// redacted error tail. Rendered into issue_context.md as "## Prior Attempt"
+	// so the retry starts from the diagnosis instead of rediscovering it. Nil
+	// on fresh tasks and servers predating the field.
+	PriorAttempt *PriorAttemptData `json:"prior_attempt,omitempty"`
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -207,6 +213,17 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+}
+
+// PriorAttemptData mirrors the server-side service.PriorAttemptContextData
+// (GAP-23): the failure digest of the attempt this retry follows. Rendered
+// into issue_context.md so the run opens with the diagnosis instead of
+// rediscovering it.
+type PriorAttemptData struct {
+	Attempt       int32  `json:"attempt"`              // attempt number that failed (this run = Attempt+1)
+	FailureReason string `json:"failure_reason"`       // classified reason from the taskfailure taxonomy
+	ErrorText     string `json:"error_text,omitempty"` // redacted tail of the raw error message
+	FailedAt      string `json:"failed_at"`            // RFC3339, when the parent was marked failed
 }
 
 // AgentData holds agent details returned by the claim endpoint.

@@ -4519,6 +4519,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			switch {
 			case cerr == nil:
 				retried = &child
+				// GAP-23: hand the child the failure digest so its run starts
+				// from "attempt N failed because X" instead of blind
+				// rediscovery. Same transaction as the insert; child still
+				// unclaimed, no concurrent writer. Best-effort: a digest
+				// write failure must not abort the parent's failed status.
+				if paErr := stampPriorAttemptContext(ctx, qtx, &child, t.Attempt, failureReason, errMsg); paErr != nil {
+					slog.Warn("fail task auto-retry: prior-attempt context stamp failed (non-fatal)",
+						"task_id", util.UUIDToString(child.ID), "error", paErr)
+				}
 			case errors.Is(cerr, pgx.ErrNoRows):
 				// The statement wrote nothing: either the owning workspace was
 				// torn down mid-flight, or a rerun took the pending slot after
@@ -4756,6 +4765,58 @@ func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 		return base
 	}
 	return 0
+}
+
+// PriorAttemptContextKey is the context-JSONB key carrying the failure digest
+// stamped onto retry children (GAP-23). The claim mapper lifts it into the
+// daemon payload; the daemon renders it into issue_context.md as
+// "## Prior Attempt".
+const PriorAttemptContextKey = "prior_attempt"
+
+// priorAttemptErrorTailMax caps the raw error text carried in the digest. The
+// value lands verbatim in the next run's prompt: unbounded, a runaway stack
+// trace or giant provider payload would bloat every subsequent attempt's
+// context. The tail (not head) keeps the final error line, which is usually
+// the diagnosis.
+const priorAttemptErrorTailMax = 2000
+
+// PriorAttemptContextData is the JSON shape stored under
+// PriorAttemptContextKey and surfaced to the daemon on claim.
+type PriorAttemptContextData struct {
+	Attempt       int32  `json:"attempt"`              // parent's attempt number that failed
+	FailureReason string `json:"failure_reason"`       // classified reason (taskfailure taxonomy)
+	ErrorText     string `json:"error_text,omitempty"` // redacted tail of the raw error message
+	FailedAt      string `json:"failed_at"`            // RFC3339, when the parent was marked failed
+}
+
+// priorAttemptErrorTail caps raw error text to its final
+// priorAttemptErrorTailMax bytes, marked with a leading ellipsis. The tail (not
+// head) keeps the final error line, which is usually the diagnosis.
+func priorAttemptErrorTail(errMsg string) string {
+	if len(errMsg) <= priorAttemptErrorTailMax {
+		return errMsg
+	}
+	return "…" + errMsg[len(errMsg)-priorAttemptErrorTailMax:]
+}
+
+// stampPriorAttemptContext writes the failure digest onto a just-created
+// retry child. failedAttempt = the parent's attempt number that just failed
+// (the child row already carries attempt+1). Caller runs inside the FailTask
+// transaction.
+func stampPriorAttemptContext(ctx context.Context, qtx *db.Queries, child *db.AgentTaskQueue, failedAttempt int32, failureReason, errMsg string) error {
+	digest, err := json.Marshal(PriorAttemptContextData{
+		Attempt:       failedAttempt,
+		FailureReason: failureReason,
+		ErrorText:     priorAttemptErrorTail(errMsg),
+		FailedAt:      time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal prior-attempt digest: %w", err)
+	}
+	return qtx.SetTaskPriorAttemptContext(ctx, db.SetTaskPriorAttemptContextParams{
+		ID:           child.ID,
+		PriorAttempt: digest,
+	})
 }
 
 func resumeUnsafeFailureReason(reason string) bool {

@@ -2101,6 +2101,16 @@ WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
 LIMIT @max_per_poll;
 
+-- name: SetTaskPriorAttemptContext :exec
+-- Stamps the prior-attempt failure digest into a retry child's context JSONB
+-- (key "prior_attempt") so the next run's issue_context.md can tell the agent
+-- what already failed and why, instead of rediscovering it. Called inside the
+-- FailTask transaction right after CreateRetryTask; the child is still
+-- unclaimed, so no concurrent writer races the jsonb_set.
+UPDATE agent_task_queue
+SET context = jsonb_set(COALESCE(context, '{}'::jsonb), '{prior_attempt}', @prior_attempt::jsonb)
+WHERE id = @id;
+
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
 -- due deferred tasks across the runtime set in one UPDATE. Carries the same two

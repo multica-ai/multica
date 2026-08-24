@@ -194,7 +194,11 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
+	// PriorAttempt is the failure digest of the attempt this retry follows
+	// (GAP-23). Rendered as "## Prior Attempt" in issue_context.md. Nil on
+	// fresh tasks.
+	PriorAttempt  *PriorAttemptData
+	IsSquadLeader bool // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -1010,6 +1014,16 @@ const (
 	GCKindAutopilotRun GCMetaKind = "autopilot_run"
 	GCKindQuickCreate  GCMetaKind = "quick_create"
 )
+
+// PriorAttemptData mirrors daemon.PriorAttemptData (GAP-23): the failure
+// digest of the attempt a retry child follows. Kept as a local type because
+// execenv cannot import the daemon package (reverse dependency).
+type PriorAttemptData struct {
+	Attempt       int32  `json:"attempt"`
+	FailureReason string `json:"failure_reason"`
+	ErrorText     string `json:"error_text,omitempty"`
+	FailedAt      string `json:"failed_at"`
+}
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
 // can decide whether the directory is reclaimable. It is a discriminated

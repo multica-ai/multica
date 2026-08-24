@@ -6659,6 +6659,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		HandoffNote:                      task.HandoffNote,
+		PriorAttempt:                     convertPriorAttemptForEnv(task.PriorAttempt),
 		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -8564,6 +8565,21 @@ func convertIssueStatusesForEnv(statuses []IssueStatusData) []execenv.IssueStatu
 		result[i] = execenv.IssueStatusForEnv{Key: s.Key, Name: s.Name, Category: s.Category, Description: s.Description}
 	}
 	return result
+}
+
+// convertPriorAttemptForEnv maps the claim payload's failure digest into the
+// execenv context type (GAP-23). Nil-safe: fresh tasks and old servers carry
+// no digest.
+func convertPriorAttemptForEnv(pa *PriorAttemptData) *execenv.PriorAttemptData {
+	if pa == nil {
+		return nil
+	}
+	return &execenv.PriorAttemptData{
+		Attempt:       pa.Attempt,
+		FailureReason: pa.FailureReason,
+		ErrorText:     pa.ErrorText,
+		FailedAt:      pa.FailedAt,
+	}
 }
 
 func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {

@@ -7838,6 +7838,27 @@ func (q *Queries) SetTaskDeliveredCommentIDs(ctx context.Context, arg SetTaskDel
 	return delivered_comment_ids, err
 }
 
+const setTaskPriorAttemptContext = `-- name: SetTaskPriorAttemptContext :exec
+UPDATE agent_task_queue
+SET context = jsonb_set(COALESCE(context, '{}'::jsonb), '{prior_attempt}', $1::jsonb)
+WHERE id = $2
+`
+
+type SetTaskPriorAttemptContextParams struct {
+	PriorAttempt []byte      `json:"prior_attempt"`
+	ID           pgtype.UUID `json:"id"`
+}
+
+// Stamps the prior-attempt failure digest into a retry child's context JSONB
+// (key "prior_attempt") so the next run's issue_context.md can tell the agent
+// what already failed and why, instead of rediscovering it. Called inside the
+// FailTask transaction right after CreateRetryTask; the child is still
+// unclaimed, so no concurrent writer races the jsonb_set.
+func (q *Queries) SetTaskPriorAttemptContext(ctx context.Context, arg SetTaskPriorAttemptContextParams) error {
+	_, err := q.db.Exec(ctx, setTaskPriorAttemptContext, arg.PriorAttempt, arg.ID)
+	return err
+}
+
 const startAgentTask = `-- name: StartAgentTask :one
 UPDATE agent_task_queue
 SET status = 'running',

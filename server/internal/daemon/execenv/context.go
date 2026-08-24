@@ -1032,6 +1032,23 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		fmt.Fprintf(&b, "> %s\n\n", ctx.HandoffNote)
 	}
 
+	// Prior-attempt failure digest (GAP-23): this run is an automatic retry of
+	// a failed attempt. Lead with the diagnosis so the agent fixes the root
+	// cause instead of replaying the same approach.
+	if ctx.PriorAttempt != nil {
+		pa := ctx.PriorAttempt
+		b.WriteString("## Prior Attempt\n\n")
+		fmt.Fprintf(&b, "This task is **automatic retry #%d**. The previous attempt (attempt %d) failed at %s.\n\n",
+			pa.Attempt+1, pa.Attempt, pa.FailedAt)
+		fmt.Fprintf(&b, "**Classified failure reason:** `%s`\n\n", pa.FailureReason)
+		if pa.ErrorText != "" {
+			b.WriteString("**Raw error (tail):**\n\n```\n")
+			b.WriteString(pa.ErrorText)
+			b.WriteString("\n```\n\n")
+		}
+		b.WriteString("Before repeating what the last attempt did, form a hypothesis about WHY it failed and address that cause directly. If the failure was environmental (network, provider capacity), verify the condition has cleared before proceeding.\n\n")
+	}
+
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
