@@ -434,6 +434,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
+	// GAP-6 (#9): opt-in outbound notification sinks; unset env = disabled.
+	taskSvc.NotifySinks = service.NotifySinksFromEnv()
 	// Chat follow-up suggestions run through the same internal LLM layer that
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
 	// a disabled client, which turns the feature off rather than failing.

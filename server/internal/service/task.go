@@ -56,6 +56,9 @@ type TaskService struct {
 	// stale dispatched task. It removes the unconditional reclaim UPDATE from
 	// idle claim polls while missing/error states preserve the DB fallback.
 	ReclaimCheck *ReclaimCheckCache
+	// NotifySinks is the opt-in outbound notification sink list (GAP-6 #9),
+	// parsed from MULTICA_NOTIFY_SINKS. Empty = disabled.
+	NotifySinks []string
 	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
 	// epic, MUL-3721) — the integration's "current user's connected apps
 	// → MCP session URL" hook called from each Enqueue* path. Optional: a
@@ -6416,12 +6419,20 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	if len(s.NotifySinks) > 0 {
+		s.dispatchNotifySinks(task)
+	}
 }
 
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
 func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+	if len(s.NotifySinks) > 0 {
+		for _, t := range tasks {
+			s.dispatchNotifySinks(t)
+		}
+	}
 	seen := make(map[string]struct{}, len(tasks))
 	for _, task := range tasks {
 		if !task.RuntimeID.Valid {
