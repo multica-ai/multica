@@ -109,6 +109,15 @@ type Client struct {
 	version  string
 	os       string
 
+	// extraHeaders are the deployment-specific HTTP headers the daemon
+	// attaches to every server call (TIM-142). Populated by SetExtraHeaders
+	// after LoadConfig resolves the three-tier precedence (flag > env >
+	// config.json). nil or empty means "no extra headers"; see the per-call
+	// setIdentityHeaders / WS dial block for how they are applied with
+	// Header.Add so multi-value entries (e.g. several X-Forwarded-For lines)
+	// survive the round trip.
+	extraHeaders http.Header
+
 	workspaceMu                    sync.Mutex
 	workspaceETag                  string
 	workspaceCache                 []WorkspaceInfo
@@ -167,8 +176,60 @@ func (c *Client) SetVersion(v string) {
 	c.version = v
 }
 
-// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
+// SetExtraHeaders records the deployment-specific headers that
+// setIdentityHeaders and the wakeup WS dial attach to every outbound
+// request/handshake (TIM-142). The map is copied so later mutations of the
+// caller's http.Header (or by SetExtraHeaders itself) don't leak into the
+// already-snapshotted transport — there is no guarantee the caller outlives
+// the daemon. nil or empty clears the override and returns the client to its
+// default "no extra headers" behaviour.
+func (c *Client) SetExtraHeaders(h http.Header) {
+	if len(h) == 0 {
+		c.extraHeaders = nil
+		return
+	}
+	clone := make(http.Header, len(h))
+	for name, values := range h {
+		dup := make([]string, len(values))
+		copy(dup, values)
+		clone[name] = dup
+	}
+	c.extraHeaders = clone
+}
+
+// ExtraHeaders returns a copy of the currently configured extra headers, or
+// nil when none are set. Used by the wakeup WS dial block to mirror the
+// HTTP-path headers onto the upgrade request (they have to be applied in a
+// second place because gorilla/websocket.Dialer doesn't share
+// http.Client's RoundTripper hook). The returned map is a fresh copy so
+// callers cannot mutate the client's live state.
+func (c *Client) ExtraHeaders() http.Header {
+	if len(c.extraHeaders) == 0 {
+		return nil
+	}
+	clone := make(http.Header, len(c.extraHeaders))
+	for name, values := range c.extraHeaders {
+		dup := make([]string, len(values))
+		copy(dup, values)
+		clone[name] = dup
+	}
+	return clone
+}
+
+// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set,
+// then layers every configured extra header (TIM-142) on top. Header.Add is
+// used for the extra headers so multi-value pairs (e.g. several
+// X-Forwarded-For entries from a chained proxy) survive intact — Set would
+// drop the second value on the floor. Existing identity headers always win
+// over an operator-configured extra header with the same name: Set runs
+// AFTER the Add pass so a deliberate X-Client-* override is impossible to
+// forge from the daemon's transport.
 func (c *Client) setIdentityHeaders(req *http.Request) {
+	for name, values := range c.extraHeaders {
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+	}
 	if c.platform != "" {
 		req.Header.Set("X-Client-Platform", c.platform)
 	}

@@ -617,6 +617,13 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	// Layer the deployment-specific extra headers (TIM-142) onto every
+	// daemon->server request and wakeup WS handshake. nil/empty is the
+	// default — operators only see behaviour changes once they actually
+	// configure extra_headers / MULTICA_EXTRA_HEADERS / --extra-header.
+	if len(cfg.ExtraHeaders) > 0 {
+		client.SetExtraHeaders(cfg.ExtraHeaders)
+	}
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,

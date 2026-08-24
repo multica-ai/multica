@@ -107,6 +107,15 @@ func init() {
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	// --extra-header is the multi-value counterpart to the
+	// config-file extra_headers / MULTICA_EXTRA_HEADERS env var: each
+	// repetition becomes one outbound HTTP / WS header on every daemon
+	// request (TIM-142). StringArray is what lets operators pass
+	// `--extra-header "X-A: 1" --extra-header "X-B: 2"` in the same
+	// shell call; the env var path uses a newline-separated "Name:
+	// Value" spec (same as the config-file format) so a long list of
+	// headers stays out of shell history.
+	f.StringArray("extra-header", nil, "Attach Name: value to every daemon->server request; repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
 
 	daemonLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
@@ -129,6 +138,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.StringArray("extra-header", nil, "Attach Name: value to every daemon->server request; repeat for multiple headers (env: MULTICA_EXTRA_HEADERS)")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
@@ -896,6 +906,40 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if b, _ := cmd.Flags().GetBool("no-auto-reload"); b {
 		args = append(args, "--no-auto-reload")
 	}
+	// Forward --extra-header as a multi-value list (TIM-142). Each repetition
+	// becomes its own --extra-header "<value>" arg, declaration order
+	// preserved, so the child parses them with the same precedence the
+	// parent applied. Flag values always win over the env / config-file
+	// path, so re-execing through buildDaemonStartArgs with a non-empty
+	// --extra-header set must carry every entry forward — a missing one
+	// would silently turn off a header the operator passed twice.
+	//
+	// The "explicit empty override" semantic (--extra-header "" meaning
+	// "clear, ignore env / config.json") also has to survive the
+	// foreground re-exec: a Changed flag whose values were all
+	// whitespace must still set cmd.Flags().Changed("extra-header") on
+	// the child, otherwise runDaemonForeground would see Changed=false
+	// and silently fall through to the env. We forward one synthetic
+	// `--extra-header ""` arg whenever Changed is true and every real
+	// value was dropped — enough to flip Changed=true on the child
+	// without polluting the wire (the empty token is filtered again on
+	// the receiving side).
+	if cmd.Flags().Changed("extra-header") {
+		values, _ := cmd.Flags().GetStringArray("extra-header")
+		kept := 0
+		for _, v := range values {
+			if strings.TrimSpace(v) == "" {
+				continue
+			}
+			args = append(args, "--extra-header", v)
+			kept++
+		}
+		if kept == 0 {
+			// All values were whitespace. Forward a single empty
+			// arg so the child sees Changed=true and clears.
+			args = append(args, "--extra-header", "")
+		}
+	}
 
 	// Forward global persistent flags.
 	if v, _ := cmd.Flags().GetString("server-url"); v != "" {
@@ -1051,6 +1095,47 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	if autoUpdateOverride > 0 {
 		overrides.AutoUpdateCheckInterval = autoUpdateOverride
+	}
+	// Extra HTTP headers attached to every daemon->server request (TIM-142).
+	// Flag wins over env wins over config.json (already enforced by
+	// daemon.resolveExtraHeaders: a non-nil Overrides.ExtraHeaders — even
+	// empty — short-circuits both env and config-file sources).
+	//
+	// We split the resolution into two paths so the "explicit empty override"
+	// semantic survives: `--extra-header ""` (the user typed the flag with
+	// no real value) must mean "no extras, ignore MULTICA_EXTRA_HEADERS and
+	// extra_headers in config.json". cli.FlagOrEnvArray collapses an
+	// all-empty flag-set to nil (its "unset / no headers" uniform contract),
+	// which would silently fall through to the env. Checking
+	// cmd.Flags().Changed("extra-header") directly keeps the two signals
+	// separate: Changed + at least one real value → populate
+	// overrides.ExtraHeaders with those values; Changed + no real values
+	// → set overrides.ExtraHeaders to a non-nil empty http.Header so
+	// resolveExtraHeaders returns it as the authoritative "no extras";
+	// !Changed → leave overrides.ExtraHeaders nil so the env / config-file
+	// path inside LoadConfig fires.
+	//
+	// Validation (CR/LF/NUL/colon rejection) lives in
+	// daemon.ValidateHeaderNameValue so every entry point shares the same
+	// defence.
+	if cmd.Flags().Changed("extra-header") {
+		rawValues, _ := cmd.Flags().GetStringArray("extra-header")
+		hdr := make(http.Header)
+		for _, token := range rawValues {
+			trimmed := strings.TrimSpace(token)
+			if trimmed == "" {
+				continue
+			}
+			name, value, err := daemon.ExtraHeaderFromFlag(token)
+			if err != nil {
+				return fmt.Errorf("invalid --extra-header %q: %w", token, err)
+			}
+			hdr.Add(name, value)
+		}
+		// Preserve the non-nil-empty contract even when every value
+		// was whitespace: a Changed flag with no real entries is the
+		// "explicitly clear" signal, distinct from "flag not passed".
+		overrides.ExtraHeaders = hdr
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)

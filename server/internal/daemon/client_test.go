@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -161,6 +162,201 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+}
+
+// TestClient_ExtraHeaders_PostGetAndListWorkspaces pins TIM-142 PR 2's
+// transport contract: an extra-headers set injected via SetExtraHeaders
+// arrives on every daemon->server request, including the manually-built
+// ListWorkspaces request (which uses http.NewRequestWithContext directly
+// instead of going through postJSON / getJSON) and alongside the existing
+// Authorization + X-Client-* identity headers. Multi-value entries must
+// round-trip intact so a chained proxy's several X-Forwarded-For lines
+// survive a single request.
+func TestClient_ExtraHeaders_PostGetAndListWorkspaces(t *testing.T) {
+	type observed struct {
+		method string
+		path   string
+		auth   string
+		extras map[string][]string
+		// xAfter is the wire-level X-After values, captured into a fresh
+		// slice by `record` so a post-SetExtraHeaders caller-side mutation
+		// that adds a brand-new header cannot escape the asserted contract
+		// (the pre-declared `extras` map only sees the keys we asked for).
+		xAfter []string
+		ident  map[string][]string
+	}
+	var (
+		mu    sync.Mutex
+		notes []observed
+	)
+	record := func(r *http.Request) {
+		extras := map[string][]string{}
+		for _, name := range []string{"X-Test", "X-Multi", "Authorization"} {
+			extras[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		// Capture "X-After" into a separate slice too: the caller mutates
+		// its injected http.Header AFTER SetExtraHeaders returns, so the
+		// check below must observe the actual wire-level values rather
+		// than just the keys present in the pre-declared extras map (a
+		// post-Set mutation could add an entirely new header name).
+		observedXAfter := append([]string(nil), r.Header.Values("X-After")...)
+		ident := map[string][]string{}
+		for _, name := range []string{"X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-Client-Capabilities"} {
+			ident[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		mu.Lock()
+		notes = append(notes, observed{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			extras: extras,
+			xAfter: observedXAfter,
+			ident:  ident,
+		})
+		mu.Unlock()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("ETag", `W/"ws-v1"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"ws-1","name":"One"}]`))
+	})
+	mux.HandleFunc("/api/daemon/post", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/daemon/get", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("tok")
+	c.SetVersion("9.9.9")
+	// Inject extra headers via the new PR-2 API. Multi-value entries are
+	// critical: Header.Add (not Set) on the wire path is the only thing
+	// keeping the second X-Multi from being silently dropped.
+	injected := http.Header{
+		"X-Test":  []string{"alpha", "beta"},
+		"X-Multi": []string{"one", "two", "three"},
+	}
+	c.SetExtraHeaders(injected)
+	// Mutate the caller's map after SetExtraHeaders returns. The client must
+	// have snapshotted its own copy so the wire request still sees the
+	// original values.
+	injected["X-Test"] = []string{"mutated"}
+	injected["X-After"] = []string{"should-not-appear"}
+
+	if err := c.postJSON(context.Background(), "/api/daemon/post", map[string]any{}, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+	var out map[string]any
+	if err := c.getJSON(context.Background(), "/api/daemon/get", &out); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+	if _, err := c.ListWorkspaces(context.Background()); err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(notes) != 3 {
+		t.Fatalf("observed %d requests, want 3 (post, get, ListWorkspaces): %+v", len(notes), notes)
+	}
+	wantPaths := []string{"/api/daemon/post", "/api/daemon/get", "/api/daemon/workspaces"}
+	for i, want := range wantPaths {
+		if notes[i].path != want {
+			t.Errorf("request %d path = %q, want %q", i, notes[i].path, want)
+		}
+		if notes[i].auth != "Bearer tok" {
+			t.Errorf("request %d Authorization = %q, want %q", i, notes[i].auth, "Bearer tok")
+		}
+		if got := notes[i].extras["X-Test"]; len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+			t.Errorf("request %d X-Test = %v, want [alpha beta] (caller-side mutation must not leak)", i, got)
+		}
+		if got := notes[i].extras["X-Multi"]; len(got) != 3 || got[0] != "one" || got[1] != "two" || got[2] != "three" {
+			t.Errorf("request %d X-Multi = %v, want [one two three]", i, got)
+		}
+		if got := notes[i].xAfter; len(got) != 0 {
+			t.Errorf("request %d carried X-After from a post-SetExtraHeaders mutation: %v", i, got)
+		}
+		if notes[i].ident["X-Client-Platform"] == nil {
+			t.Errorf("request %d missing X-Client-Platform identity header", i)
+		}
+		if notes[i].ident["X-Client-Version"] == nil || notes[i].ident["X-Client-Version"][0] != "9.9.9" {
+			t.Errorf("request %d X-Client-Version = %v, want [9.9.9]", i, notes[i].ident["X-Client-Version"])
+		}
+	}
+}
+
+// TestClient_ExtraHeaders_NilOrEmptyClearsOverride ensures SetExtraHeaders
+// can revert the client to its default "no extra headers" behaviour, which
+// the runDaemonForeground path uses when the resolved Config.ExtraHeaders
+// is nil.
+func TestClient_ExtraHeaders_NilOrEmptyClearsOverride(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the calls after a SetExtraHeaders clear must omit X-Test. The
+		// initial "headers are set" call is supposed to carry them.
+		n := calls.Add(1)
+		if n >= 2 {
+			if vals := r.Header.Values("X-Test"); len(vals) != 0 {
+				t.Errorf("call %d X-Test present after clear: %v", n, vals)
+			}
+		} else {
+			if vals := r.Header.Values("X-Test"); len(vals) != 1 || vals[0] != "alpha" {
+				t.Errorf("call %d X-Test = %v, want [alpha]", n, vals)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetExtraHeaders(http.Header{"X-Test": []string{"alpha"}})
+	// First call: extra header is present.
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON with extra headers: %v", err)
+	}
+	// Clear with nil.
+	c.SetExtraHeaders(nil)
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON after clear nil: %v", err)
+	}
+	// Clear with an empty (non-nil) header.
+	c.SetExtraHeaders(http.Header{})
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON after clear empty: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("calls = %d, want 3", got)
+	}
+}
+
+// TestClient_ExtraHeaders_IdentityWinsOverOperatorOverride pins the
+// defence-in-depth contract: an operator who injects X-Client-Platform via
+// extra-headers must NOT be able to override the daemon's identity header.
+// Otherwise an operator-controlled reverse proxy could spoof the daemon
+// identity and bypass the worktree / capability gates that rely on it
+// (MUL-5707 / DaemonCapabilityLocalWorktreeV1).
+func TestClient_ExtraHeaders_IdentityWinsOverOperatorOverride(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Client-Platform"); got != "daemon" {
+			t.Errorf("X-Client-Platform = %q, want daemon (operator override must lose)", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetExtraHeaders(http.Header{"X-Client-Platform": []string{"forged"}})
 	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
 		t.Fatalf("postJSON: %v", err)
 	}

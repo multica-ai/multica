@@ -119,6 +119,77 @@ func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
 	}
 }
 
+// TestBuildDaemonStartArgsForwardsExtraHeader pins TIM-142's flag-forwarding
+// contract: every --extra-header value the parent parsed must reach the
+// child verbatim, declaration order preserved. `daemon start` re-execs
+// itself as a foreground child (cmd_daemon.go), so a flag the parent
+// parsed but doesn't forward is silently dropped — the operator's headers
+// would never reach the wire, and the symptom (a 401 from the
+// reverse-proxy-protected server) would look like a misconfiguration
+// rather than a wiring bug. Multi-value forwarding is what makes the
+// `--extra-header "X-A: 1" --extra-header "X-B: 2"` documented example
+// actually work.
+func TestBuildDaemonStartArgsForwardsExtraHeader(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().StringArray("extra-header", nil, "")
+	for _, v := range []string{"X-A: 1", "X-B: 2"} {
+		if err := cmd.Flags().Set("extra-header", v); err != nil {
+			t.Fatalf("set --extra-header %q: %v", v, err)
+		}
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{
+		"daemon", "start", "--foreground",
+		"--extra-header", "X-A: 1",
+		"--extra-header", "X-B: 2",
+	}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestBuildDaemonStartArgsOmitsUnsetExtraHeader: when the parent never
+// received --extra-header, the child must not see one either — neither
+// nil nor a single empty entry. Otherwise a "fall through to env / config"
+// user would suddenly inherit `--extra-header ""` on the child and trip
+// daemon.ExtraHeaderFromFlag's "name must be non-empty" guard.
+func TestBuildDaemonStartArgsOmitsUnsetExtraHeader(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().StringArray("extra-header", nil, "")
+
+	args := buildDaemonStartArgs(cmd)
+	for i, a := range args {
+		if a == "--extra-header" {
+			t.Fatalf("buildDaemonStartArgs() injected --extra-header at index %d when flag was unset: %q", i, args)
+		}
+	}
+}
+
+// TestBuildDaemonStartArgsForwardsExplicitEmptyOverride pins TIM-142 PR 2's
+// "explicit empty override" semantic on the re-exec path: when the parent
+// runs with `--extra-header ""` (no real values, just the explicit signal),
+// the child must still see Changed=true so runDaemonForeground can set
+// overrides.ExtraHeaders to a non-nil empty http.Header. If the parent
+// silently dropped the empty value during forwarding, the child would see
+// Changed=false and silently fall through to MULTICA_EXTRA_HEADERS /
+// config.json — exactly the bug the empty-override contract is meant to
+// prevent.
+func TestBuildDaemonStartArgsForwardsExplicitEmptyOverride(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().StringArray("extra-header", nil, "")
+	// Set the flag to a single empty value (the "explicit clear" shape).
+	if err := cmd.Flags().Set("extra-header", ""); err != nil {
+		t.Fatalf("set --extra-header empty: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--extra-header", ""}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q (empty-override must reach the child)", args, want)
+	}
+}
+
 // TestBuildDaemonStartArgsForwardsNoAutoReload matters because `daemon start`
 // re-execs itself as a foreground child: a flag the parent parsed but doesn't
 // forward is silently dropped, so the opt-out would appear to work and not.
@@ -155,6 +226,29 @@ func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
 	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
 		if cmd.Flags().Lookup("workspaces-root") == nil {
 			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
+		}
+	}
+}
+
+// TestExtraHeaderFlagRegisteredOnBothDaemonCommands mirrors the
+// workspaces-root / no-auto-reload pair tests for TIM-142: a knob registered
+// on `daemon start` but not on `daemon restart` parses fine on start,
+// then explodes the first time an operator runs `multica daemon restart
+// --extra-header "X-Auth: bearer …"`. The fix is mechanical (mirror the
+// flag) but easy to miss at code-review time, so the test stays.
+func TestExtraHeaderFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		flag := cmd.Flags().Lookup("extra-header")
+		if flag == nil {
+			t.Errorf("daemon %s is missing --extra-header", cmd.Name())
+			continue
+		}
+		// The flag must accept repeated values (StringArray); a plain
+		// String flag would drop everything after the first --extra-header.
+		if flag.Value.Type() != "stringArray" {
+			t.Errorf("daemon %s --extra-header Value.Type() = %q, want stringArray", cmd.Name(), flag.Value.Type())
 		}
 	}
 }

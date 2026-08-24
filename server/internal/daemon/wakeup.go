@@ -102,22 +102,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		return 0, err
 	}
 
-	headers := http.Header{}
-	if token := d.client.Token(); token != "" {
-		headers.Set("Authorization", "Bearer "+token)
-	}
-	if d.client.platform != "" {
-		headers.Set("X-Client-Platform", d.client.platform)
-	}
-	if d.client.version != "" {
-		headers.Set("X-Client-Version", d.client.version)
-	}
-	if d.client.os != "" {
-		headers.Set("X-Client-OS", d.client.os)
-	}
-	// Advertise the same capabilities as the HTTP path so a claim built over
-	// this WS connection gets identical capability gating (MUL-4257).
-	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
+	headers := buildTaskWakeupHeaders(d.client)
 
 	// A hand-built websocket.Dialer has Proxy == nil, which gorilla reads as
 	// "dial direct" — unlike websocket.DefaultDialer, it does not fall back to
@@ -481,6 +466,47 @@ func signalTaskWakeup(taskWakeups chan<- taskWakeup, runtimeID string) {
 	case taskWakeups <- taskWakeup{runtimeID: runtimeID}:
 	default:
 	}
+}
+
+// buildTaskWakeupHeaders assembles the HTTP header set the daemon attaches
+// to every task-wakeup WS upgrade request. Extracted from
+// runTaskWakeupConnection so the layered set of identity / extra /
+// capability headers is testable on its own (a real WS handshake is a lot
+// of moving parts to set up just to assert header wiring).
+//
+// Layering order matches the HTTP control-plane path (see Client.setIdentityHeaders):
+//
+//  1. Authorization from the configured bearer token, if any.
+//  2. Operator-configured extra headers (TIM-142), added with Header.Add so
+//     multi-value entries (e.g. several X-Forwarded-For lines from a chained
+//     proxy) survive the round trip.
+//  3. The X-Client-* identity headers the daemon identifies itself with.
+//     Set (not Add) is used here so an operator who accidentally puts an
+//     X-Client-* override into extra-headers cannot forge the daemon's
+//     identity — the same defence-in-depth as the HTTP path.
+//  4. X-Client-Capabilities so a claim built over WS gets the same gating as
+//     the HTTP path (MUL-4257).
+func buildTaskWakeupHeaders(client *Client) http.Header {
+	headers := http.Header{}
+	if token := client.Token(); token != "" {
+		headers.Set("Authorization", "Bearer "+token)
+	}
+	for name, values := range client.ExtraHeaders() {
+		for _, v := range values {
+			headers.Add(name, v)
+		}
+	}
+	if client.platform != "" {
+		headers.Set("X-Client-Platform", client.platform)
+	}
+	if client.version != "" {
+		headers.Set("X-Client-Version", client.version)
+	}
+	if client.os != "" {
+		headers.Set("X-Client-OS", client.os)
+	}
+	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
+	return headers
 }
 
 func taskWakeupURL(baseURL string, runtimeIDs []string) (string, error) {
