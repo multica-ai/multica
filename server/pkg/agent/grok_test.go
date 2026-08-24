@@ -756,6 +756,13 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	if catalog.Models[0].Thinking == nil {
 		t.Fatal("discovered grok-4.6 must advertise documented effort levels")
 	}
+	got := make([]string, 0, len(catalog.Models[0].Thinking.SupportedLevels))
+	for _, level := range catalog.Models[0].Thinking.SupportedLevels {
+		got = append(got, level.Value)
+	}
+	if strings.Join(got, ",") != "low,medium,high,xhigh" {
+		t.Fatalf("discovered grok-4.6 levels = %v, want low/medium/high/xhigh", got)
+	}
 	if catalog.Fallback {
 		t.Error("a successful ACP discovery must not be marked Fallback")
 	}
@@ -825,7 +832,11 @@ func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 	if len(models) != 3 || models[0].ID != "grok-4.6" || !models[0].Default {
 		t.Fatalf("static fallback must default to grok-4.6: %+v", models)
 	}
-	for _, id := range []string{"grok-4.6", "grok-4.5"} {
+	want := map[string]string{
+		"grok-4.6": "low,medium,high,xhigh",
+		"grok-4.5": "low,medium,high",
+	}
+	for id, levels := range want {
 		model := grokMustFindModel(t, models, id)
 		if model.Thinking == nil {
 			t.Fatalf("%s should advertise documented effort levels", id)
@@ -834,8 +845,8 @@ func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 		for _, level := range model.Thinking.SupportedLevels {
 			got = append(got, level.Value)
 		}
-		if strings.Join(got, ",") != "low,medium,high" {
-			t.Fatalf("%s levels = %v, want low/medium/high", id, got)
+		if strings.Join(got, ",") != levels {
+			t.Fatalf("%s levels = %v, want %s", id, got, levels)
 		}
 	}
 	composer := grokMustFindModel(t, models, "grok-composer-2.5-fast")
@@ -857,7 +868,7 @@ func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
 	}{
 		{model: "grok-4.6", level: "high", want: true},
 		{model: "grok-4.6", level: "low", want: true},
-		{model: "grok-4.6", level: "xhigh", want: false},
+		{model: "grok-4.6", level: "xhigh", want: true},
 		{model: "grok-4.5", level: "low", want: true},
 		{model: "grok-4.5", level: "none", want: false},
 		{model: "grok-4.5", level: "xhigh", want: false},
@@ -902,12 +913,12 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 
 func TestGrokIsKnownThinkingValue(t *testing.T) {
 	t.Parallel()
-	for _, level := range []string{"", "low", "medium", "high"} {
+	for _, level := range []string{"", "low", "medium", "high", "xhigh"} {
 		if !IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = false", level)
 		}
 	}
-	for _, level := range []string{"none", "minimal", "xhigh", "bogus", "max"} {
+	for _, level := range []string{"none", "minimal", "bogus", "max"} {
 		if IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}

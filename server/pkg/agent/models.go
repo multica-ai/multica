@@ -2274,20 +2274,30 @@ func grokStaticModels() []Model {
 // table covers, so unknown and composer models deliberately keep Thinking
 // nil instead of exposing values that may fail at runtime.
 //
-// grok-4.6's API also documents `xhigh`. Multica delivers effort through
-// `grok agent --effort`, which is the same low/medium/high vocabulary as
-// grok-4.5, so xhigh stays off this list until that CLI flag accepts it.
+// grok-4.6 documents and accepts `xhigh` (docs.x.ai/developers/grok-4-6,
+// grok 1.0.5 `--effort`). grok-4.5 does not; the server enum lets the
+// token through and ValidateThinkingLevel still fails it closed for 4.5.
 func annotateGrokThinking(models []Model) {
 	for i := range models {
 		switch models[i].ID {
-		case "grok-4.5", "grok-4.6":
-			models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
-				{Value: "low", Label: "Low"},
-				{Value: "medium", Label: "Medium"},
-				{Value: "high", Label: "High"},
-			}}
+		case "grok-4.6":
+			models[i].Thinking = grokThinkingCatalog(true)
+		case "grok-4.5":
+			models[i].Thinking = grokThinkingCatalog(false)
 		}
 	}
+}
+
+func grokThinkingCatalog(includeXHigh bool) *ModelThinking {
+	levels := []ThinkingLevel{
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+	}
+	if includeXHigh {
+		levels = append(levels, ThinkingLevel{Value: "xhigh", Label: "Extra high"})
+	}
+	return &ModelThinking{SupportedLevels: levels}
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

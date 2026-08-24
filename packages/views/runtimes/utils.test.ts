@@ -503,7 +503,9 @@ describe("estimateCost", () => {
     ).toBeCloseTo(8.3, 5);
   });
 
-  it("prices grok-4.6 at the same published $2.00 / $6.00 tier as grok-4.5", () => {
+  it("prices grok-4.6 at xAI's short-context $2.00 / $6.00 tier with $0.50 cached input", () => {
+    // grok-4.6 cached input is $0.50/1M, not grok-4.5's $0.30.
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.50.
     expect(
       estimateCost({
         ...zeroUsage,
@@ -513,7 +515,7 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
         cache_read_tokens: 1_000_000,
       }),
-    ).toBeCloseTo(8.3, 5);
+    ).toBeCloseTo(8.5, 5);
   });
 
   it("prices the rest of the published Grok catalog", () => {
