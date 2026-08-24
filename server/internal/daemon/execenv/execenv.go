@@ -752,6 +752,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
 	}
+	// GAP-15: a leftover writer-liveness marker means the prior run never
+	// completed cleanly — the workdir may hold half-finished state. Decline so
+	// the caller falls back to a fresh Prepare (which resets the env root).
+	if WriterAliveMarkerPresent(params.WorkDir) {
+		if logger != nil {
+			logger.Warn("execenv: stale writer-liveness marker on reused workdir; forcing fresh prepare", "workdir", params.WorkDir)
+		}
+		return nil
+	}
 
 	// Self-heal the root-level daemon marker on the reuse path too, so a marker
 	// removed while the daemon runs is restored before a reused task spawns —

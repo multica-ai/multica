@@ -7352,6 +7352,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease()
 	prepareComplete = true
 	cancelPrepare()
+	// GAP-15: mark this run live in the workdir so a crash mid-task leaves a
+	// marker the next Reuse declines. Only managed workdirs are marked —
+	// local_directory and worktree tasks never go through PriorWorkDir reuse,
+	// and a marker there would pollute the user's tree or the delivered branch.
+	if localAssignment == nil {
+		if err := execenv.MarkWriterAlive(env.WorkDir); err != nil {
+			taskLog.Warn("writer-liveness marker not written; reuse protection off for this run", "error", err)
+		}
+	}
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
@@ -7862,6 +7871,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
+		}
+		// GAP-15: clean completion — drop the marker so the next task on this
+		// issue may reuse the workdir. Failure/blocked/cancel paths keep it.
+		if localAssignment == nil {
+			execenv.ClearWriterAlive(env.WorkDir)
 		}
 		return taskResult, nil
 	case "timeout":
