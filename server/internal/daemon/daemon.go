@@ -381,6 +381,12 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// providerRunning tracks in-flight task counts per provider for
+	// cfg.ProviderCeilings enforcement (GAP-21, issue #29). Guarded by its own
+	// mutex; lazily initialized so Daemon literals without it still work.
+	providerRunningMu sync.Mutex
+	providerRunning   map[string]int
+
 	// registerSerial holds one mutex per workspace (workspace_id ->
 	// *sync.Mutex), serializing the "send Register, record what it carried"
 	// critical section (workspaceRegisterLock). Entries are never deleted — a
@@ -2105,6 +2111,81 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 		return &rt
 	}
 	return nil
+}
+
+// providerFor resolves the provider serving runtimeID ("" if unknown).
+func (d *Daemon) providerFor(runtimeID string) string {
+	if rt := d.findRuntime(runtimeID); rt != nil {
+		return rt.Provider
+	}
+	return ""
+}
+
+// providerRunningCount returns in-flight tasks for provider (GAP-21, #29).
+func (d *Daemon) providerRunningCount(provider string) int {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	return d.providerRunning[provider]
+}
+
+// providerRunningInc/Dec adjust the per-provider in-flight counter.
+func (d *Daemon) providerRunningInc(provider string) {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	if d.providerRunning == nil {
+		d.providerRunning = make(map[string]int)
+	}
+	d.providerRunning[provider]++
+}
+
+func (d *Daemon) providerRunningDec(provider string) {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	if n := d.providerRunning[provider]; n <= 1 {
+		delete(d.providerRunning, provider)
+	} else {
+		d.providerRunning[provider] = n - 1
+	}
+}
+
+// claimGroup is one claim request: which runtimes to ask and how many tasks.
+type claimGroup struct {
+	runtimeIDs []string
+	maxTasks   int
+}
+
+// claimGroups splits runtimes into claim batches honoring
+// cfg.ProviderCeilings (GAP-21, issue #29): providers with headroom get their
+// own capped batch; everything else pools into one uncapped batch. With no
+// ceilings configured this returns a single group covering all runtimes —
+// byte-identical behavior to the pre-ceiling single claim.
+func (d *Daemon) claimGroups(runtimeIDs []string, freeSlots int) []claimGroup {
+	if len(d.cfg.ProviderCeilings) == 0 {
+		return []claimGroup{{runtimeIDs: runtimeIDs, maxTasks: freeSlots}}
+	}
+	var open []string
+	byProvider := make(map[string][]string)
+	for _, id := range runtimeIDs {
+		p := d.providerFor(id)
+		if p != "" {
+			if _, limited := d.cfg.ProviderCeilings[p]; limited {
+				byProvider[p] = append(byProvider[p], id)
+				continue
+			}
+		}
+		open = append(open, id)
+	}
+	var groups []claimGroup
+	if len(open) > 0 {
+		groups = append(groups, claimGroup{runtimeIDs: open, maxTasks: freeSlots})
+	}
+	for p, ids := range byProvider {
+		headroom := min(d.cfg.ProviderCeilings[p]-d.providerRunningCount(p), freeSlots)
+		if headroom > 0 {
+			groups = append(groups, claimGroup{runtimeIDs: ids, maxTasks: headroom})
+		}
+	}
+	return groups
 }
 
 // recordProfileLaunch remembers the absolute executable path and fixed launch
@@ -4750,6 +4831,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		}
 	}
 
+pollerCycle:
 	for {
 		if pollerCtx.Err() != nil {
 			return
@@ -4790,17 +4872,30 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
-		if err != nil {
-			d.exitClaim()
-			releaseSlots(slots)
-			if pollerCtx.Err() == nil {
-				d.logger.Warn("batch claim failed", "error", err)
+		// GAP-21 (issue #29): split the claim by provider when ceilings are
+		// configured so a batch can never over-claim a capped provider. With
+		// no ceilings this is one group — the pre-ceiling behavior.
+		var tasks []*Task
+		for _, g := range d.claimGroups(runtimeIDs, len(slots)) {
+			if g.maxTasks <= 0 || len(g.runtimeIDs) == 0 {
+				continue
 			}
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
+			got, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, g.runtimeIDs, g.maxTasks)
+			if err != nil {
+				d.exitClaim()
+				releaseSlots(slots)
+				if pollerCtx.Err() == nil {
+					d.logger.Warn("batch claim failed", "error", err)
+				}
+				if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+					return
+				}
+				continue pollerCycle
 			}
-			continue
+			tasks = append(tasks, got...)
+			if len(tasks) >= len(slots) {
+				break
+			}
 		}
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
@@ -4820,6 +4915,10 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
+			// Track per-provider in-flight count for ProviderCeilings (GAP-21,
+			// issue #29); unknown providers get "" and are never capped.
+			prov := d.providerFor(t.RuntimeID)
+			d.providerRunningInc(prov)
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
 				// A task can reuse an existing worktree and never enter the
 				// checkout path that normally preempts repository maintenance.
@@ -4830,6 +4929,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
+				defer d.providerRunningDec(prov)
 				defer func() {
 					// Release local capacity before waking the poller. The task's
 					// terminal callback and local cleanup have both finished at this

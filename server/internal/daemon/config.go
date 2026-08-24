@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -111,6 +112,10 @@ type Config struct {
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
+	// ProviderCeilings caps in-flight tasks per provider (GAP-21, issue #29),
+	// parsed from MULTICA_PROVIDER_CEILING="codex:2,claude:3". Providers not
+	// listed fall back to MaxConcurrentTasks. nil = no per-provider limits.
+	ProviderCeilings map[string]int
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -388,6 +393,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.MaxConcurrentTasks > 0 {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
+	providerCeilings := parseProviderCeilings(os.Getenv("MULTICA_PROVIDER_CEILING"))
 
 	// Profile
 	profile := overrides.Profile
@@ -560,6 +566,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoReloadEnabled:               autoReloadEnabled,
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
+		ProviderCeilings:                providerCeilings,
 		PollInterval:                    pollInterval,
 		HeartbeatInterval:               heartbeatInterval,
 		AgentTimeout:                    agentTimeout,
@@ -576,6 +583,30 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
+}
+
+// parseProviderCeilings parses MULTICA_PROVIDER_CEILING="codex:2,claude:3"
+// (GAP-21, issue #29). Malformed entries are skipped with a warning; an unset
+// or empty value returns nil (no per-provider limits).
+func parseProviderCeilings(raw string) map[string]int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	m := make(map[string]int)
+	for _, entry := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if !ok || k == "" || err != nil || n < 1 {
+			slog.Warn("ignoring bad MULTICA_PROVIDER_CEILING entry", "entry", entry)
+			continue
+		}
+		m[k] = n
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only
