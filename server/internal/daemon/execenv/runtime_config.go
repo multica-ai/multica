@@ -199,7 +199,10 @@ func runtimeConfigPath(workDir, provider string) string {
 	// and delegate to the family's switch case. This avoids hardcoding
 	// "AGENTS.md" for every descriptor; a compatible runtime on Claude,
 	// CodeBuddy, or Qwen would otherwise write the wrong file.
-	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+	//
+	// Skip when ProtocolFamily == ID (devin is both). Recursing would
+	// overflow the stack — that is what red'd upstream backend-tests.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok && desc.ProtocolFamily != provider {
 		return runtimeConfigPath(workDir, desc.ProtocolFamily)
 	}
 	switch provider {

@@ -1062,6 +1062,17 @@ func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigPathDevinUsesAgentsMd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	got := runtimeConfigPath(dir, "devin")
+	want := filepath.Join(dir, "AGENTS.md")
+	if got != want {
+		t.Fatalf("devin runtime config path = %q, want %q", got, want)
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
