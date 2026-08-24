@@ -752,6 +752,129 @@ func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQ
 	}
 }
 
+// VerificationContextType marks a task as a post-completion verification run
+// (GAP-24). Stored under context.verification at insert; checked here to stop
+// verifier runs from recursively scheduling more verifiers.
+const VerificationContextType = "verification"
+
+// VerificationContextData is the context JSONB payload carried by a verifier
+// task: what to verify and where the deliverable lives.
+type VerificationContextData struct {
+	Type         string `json:"type"`                    // always VerificationContextType
+	TargetTaskID string `json:"target_task_id"`          // completed task under verification
+	BranchName   string `json:"branch_name"`             // branch the work agent delivered
+}
+
+// maybeEnqueueVerifier enqueues the opt-in verification pass for a completed
+// issue task that produced a branch (GAP-24). No-op unless the completing
+// agent has verify_agent_id set, the target is valid, and this task is not
+// itself a verification run (loop guard). Every failure mode logs and returns:
+// verification must never block or fail a completion.
+func (s *TaskService) maybeEnqueueVerifier(ctx context.Context, completed db.AgentTaskQueue, branchName string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("verifier enqueue panicked (non-fatal)", "task_id", util.UUIDToString(completed.ID), "panic", r)
+		}
+	}()
+
+	if !completed.IssueID.Valid {
+		return // chat / autopilot-only tasks have no thread to report into
+	}
+	// Loop guard: never verify a verification run.
+	if completed.Context != nil {
+		var wrapper struct {
+			Verification *VerificationContextData `json:"verification"`
+		}
+		if json.Unmarshal(completed.Context, &wrapper) == nil && wrapper.Verification != nil {
+			return
+		}
+	}
+
+	completingAgent, err := s.Queries.GetAgent(ctx, completed.AgentID)
+	if err != nil {
+		slog.Warn("verifier enqueue: load completing agent failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	if !completingAgent.VerifyAgentID.Valid {
+		return // feature off for this agent — the default
+	}
+	if completingAgent.VerifyAgentID == completingAgent.ID {
+		return // self-verify would recurse through one agent; treat as misconfig
+	}
+
+	verifier, err := s.Queries.GetAgent(ctx, completingAgent.VerifyAgentID)
+	if err != nil {
+		slog.Warn("verifier enqueue: verifier agent not found; skipping",
+			"task_id", util.UUIDToString(completed.ID),
+			"verify_agent_id", util.UUIDToString(completingAgent.VerifyAgentID), "error", err)
+		return
+	}
+	if verifier.ArchivedAt.Valid {
+		slog.Info("verifier enqueue skipped: verifier archived", "task_id", util.UUIDToString(completed.ID))
+		return
+	}
+	if !verifier.RuntimeID.Valid {
+		slog.Warn("verifier enqueue skipped: verifier has no runtime", "task_id", util.UUIDToString(completed.ID))
+		return
+	}
+	if verifier.WorkspaceID != completingAgent.WorkspaceID {
+		slog.Warn("verifier enqueue skipped: verifier in different workspace",
+			"task_id", util.UUIDToString(completed.ID),
+			"verifier_workspace", util.UUIDToString(verifier.WorkspaceID),
+			"agent_workspace", util.UUIDToString(completingAgent.WorkspaceID))
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, completed.IssueID)
+	if err != nil {
+		slog.Warn("verifier enqueue: load issue failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+
+	ctxData, err := json.Marshal(VerificationContextData{
+		Type:         VerificationContextType,
+		TargetTaskID: util.UUIDToString(completed.ID),
+		BranchName:   branchName,
+	})
+	if err != nil {
+		slog.Warn("verifier enqueue: marshal context failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	handoff := fmt.Sprintf(
+		"Verification run for task %s on this issue. The delivering agent pushed branch %q. Check out that branch, run this repo's tests/lint (or the checks your instructions define), and report PASS or FAIL with concrete evidence as a comment. Do not fix code yourself — report only.",
+		util.UUIDToString(completed.ID), branchName)
+
+	vt, err := s.Queries.CreateVerifierTask(ctx, db.CreateVerifierTaskParams{
+		AgentID:              verifier.ID,
+		RuntimeID:            verifier.RuntimeID,
+		IssueID:              completed.IssueID,
+		Priority:             priorityToInt(issue.Priority),
+		TriggerSummary:       pgtype.Text{String: "Verification of task " + util.UUIDToString(completed.ID), Valid: true},
+		ForceFreshSession:    pgtype.Bool{Bool: true, Valid: true},
+		HandoffNote:          pgtype.Text{String: handoff, Valid: true},
+		Context:              ctxData,
+		OriginatorUserID:     completed.OriginatorUserID,
+		AccountableUserID:    completed.AccountableUserID,
+		DelegatedFromTaskID:  completed.ID,
+		TriggerEvidenceRefID: completed.ID,
+	})
+	switch {
+	case err == nil:
+		slog.Info("verifier task enqueued",
+			"verifier_task_id", util.UUIDToString(vt.ID),
+			"target_task_id", util.UUIDToString(completed.ID),
+			"branch", branchName,
+			"issue_id", util.UUIDToString(completed.IssueID))
+	case errors.Is(err, pgx.ErrNoRows):
+		// Workspace torn down mid-flight or pending-slot conflict — same fence
+		// semantics as CreateRetryTask. Completion stands; no verifier.
+		slog.Info("verifier task not created: no row written", "task_id", util.UUIDToString(completed.ID))
+	default:
+		slog.Warn("verifier task enqueue failed (completion unaffected)",
+			"task_id", util.UUIDToString(completed.ID), "error", err)
+	}
+}
+
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
@@ -4021,6 +4144,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+
+	// GAP-24: opt-in verification pass. When the completing agent declares a
+	// verifier and the run produced a branch, enqueue a follow-up task for the
+	// verifier agent on the same issue. Best-effort: verification is an
+	// enhancement, never a completion blocker.
+	if branchName != "" {
+		s.maybeEnqueueVerifier(ctx, task, branchName)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run

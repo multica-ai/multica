@@ -110,7 +110,11 @@ type AgentResponse struct {
 	// mirroring the existing mcp_config redaction contract.
 	ComposioToolkitAllowlist         []string               `json:"composio_toolkit_allowlist,omitempty"`
 	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
-	OwnerID                          *string                `json:"owner_id"`
+	// VerifyAgentID (GAP-24): agent that runs a verification pass whenever
+	// this agent completes an issue task that produced a branch. Empty =
+	// verification disabled.
+	VerifyAgentID    string                 `json:"verify_agent_id,omitempty"`
+	OwnerID          *string                `json:"owner_id"`
 	Skills                           []AgentSkillSummary    `json:"skills"`
 	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
 	CreatedAt                        string                 `json:"created_at"`
@@ -202,6 +206,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
 		ComposioToolkitAllowlist: composioAllowlist,
+		VerifyAgentID:            uuidToString(a.VerifyAgentID),
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
 		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
@@ -1440,6 +1445,12 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
+	// VerifyAgentID (GAP-24) tri-state, same pattern: omitted preserves,
+	// null clears (ClearAgentVerifyAgent), non-empty sets — validated to be
+	// an existing non-archived agent in the SAME workspace that is not the
+	// agent itself. The named agent runs a verification pass whenever this
+	// agent completes an issue task that produced a branch.
+	VerifyAgentID *string `json:"verify_agent_id"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -1924,6 +1935,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// keeps working — same "silent ignore" stance the issue calls out, and
 	// the same one mcp_config takes for the broader admin pattern.
 	shouldClearComposioAllowlist := false
+	shouldClearVerifyAgent := false
 	if _, hasAllowlist := rawFields["composio_toolkit_allowlist"]; hasAllowlist {
 		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
 		if !h.composioMCPAppsEnabled(r.Context()) {
@@ -1943,6 +1955,41 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// either way, but the column tells UX whether to show a primed
 			// vs empty picker).
 			params.ComposioToolkitAllowlist = normaliseComposioToolkitAllowlist(*req.ComposioToolkitAllowlist)
+		}
+	}
+
+	// verify_agent_id (GAP-24). Tri-state: omitted → preserve, null → clear,
+	// non-empty → validate + set. Manager-level write (canManageAgent already
+	// passed) — verification is an operational setting, not an ownership one.
+	if rawVerify, hasVerify := rawFields["verify_agent_id"]; hasVerify {
+		if bytes.Equal(bytes.TrimSpace(rawVerify), []byte("null")) {
+			shouldClearVerifyAgent = true
+		} else if req.VerifyAgentID != nil && *req.VerifyAgentID != "" {
+			targetID, parseErr := util.ParseUUID(*req.VerifyAgentID)
+			if parseErr != nil {
+				writeError(w, http.StatusBadRequest, "invalid verify_agent_id")
+				return
+			}
+			if targetID == existing.ID {
+				writeError(w, http.StatusBadRequest, "an agent cannot verify its own work")
+				return
+			}
+			target, err := h.Queries.GetAgent(r.Context(), targetID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "verify_agent_id does not reference a known agent")
+				return
+			}
+			if target.WorkspaceID != existing.WorkspaceID {
+				writeError(w, http.StatusBadRequest, "verify_agent_id must be an agent in the same workspace")
+				return
+			}
+			if target.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "verify_agent_id references an archived agent")
+				return
+			}
+			params.VerifyAgentID = targetID
+		} else if req.VerifyAgentID != nil && *req.VerifyAgentID == "" {
+			shouldClearVerifyAgent = true // explicit "" treated as clear, friendlier than null-only
 		}
 	}
 
@@ -2000,6 +2047,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
+			return
+		}
+	}
+	if shouldClearVerifyAgent {
+		updated, err = h.Queries.ClearAgentVerifyAgent(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent verify_agent_id failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear verify_agent_id: "+err.Error())
 			return
 		}
 	}

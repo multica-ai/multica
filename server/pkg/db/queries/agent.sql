@@ -143,7 +143,16 @@ UPDATE agent SET
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    verify_agent_id = COALESCE(sqlc.narg('verify_agent_id'), verify_agent_id),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentVerifyAgent :one
+-- Explicit NULL-clear for verify_agent_id (GAP-24). The COALESCE-based
+-- UpdateAgent cannot set the column back to NULL — same two-query pattern as
+-- thinking_level / mcp_config / composio_toolkit_allowlist.
+UPDATE agent SET verify_agent_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -2110,6 +2119,38 @@ LIMIT @max_per_poll;
 UPDATE agent_task_queue
 SET context = jsonb_set(COALESCE(context, '{}'::jsonb), '{prior_attempt}', @prior_attempt::jsonb)
 WHERE id = @id;
+
+-- name: CreateVerifierTask :one
+-- Enqueues the post-completion verification pass (GAP-24): a task for the
+-- verify_agent that re-checks the branch a work agent just delivered. Runs on
+-- the SAME issue (comments land in the thread) with the completing run's
+-- attribution inherited — the verifier acts on behalf of the same originator.
+-- context carries the verification marker so the claim payload can tell the
+-- daemon (and future guard rails) this is a verifier run; handoff_note carries
+-- the human-readable brief. Fenced by lock_task_owner_rows like every insert.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority,
+    trigger_summary, force_fresh_session, handoff_note, context,
+    originator_user_id, accountable_user_id,
+    originator_source, delegated_from_task_id,
+    trigger_evidence_kind, trigger_evidence_ref_id,
+    id
+)
+SELECT
+    $1, $2, $3, 'queued', $4,
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, TRUE),
+    sqlc.narg(handoff_note),
+    @context::jsonb,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    'system',
+    sqlc.narg(delegated_from_task_id),
+    'task_completion',
+    $5,
+    gen_random_uuid()
+WHERE lock_task_owner_rows($1, $3, $2)
+RETURNING *;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
