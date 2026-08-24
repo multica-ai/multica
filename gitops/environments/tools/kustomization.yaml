@@ -41,4 +41,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "bea168a2"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
-    newTag: "3a4100f7"
+    newTag: "bea168a2"
