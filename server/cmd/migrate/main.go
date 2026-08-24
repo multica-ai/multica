@@ -296,12 +296,29 @@ var preMigrationHooks = func() map[string]preMigrationHook {
 }()
 
 var preRollbackHooks = func() map[string]preMigrationHook {
-	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups))
+	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups)+len(sourceContextMigrationVersions))
 	for version, index := range concurrentDownIndexCleanups {
 		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
 	}
+	// Source-context indexes are split into one-statement concurrent
+	// migrations. Register the guard on every step so a rollback from any
+	// partially applied version fails before dropping its first live index.
+	for _, version := range sourceContextMigrationVersions {
+		hooks[version] = ensureSourceContextRollbackSafe
+	}
 	return hooks
 }()
+
+var sourceContextMigrationVersions = []string{
+	"407_issue_source_context",
+	"408_issue_source_context_id_index",
+	"409_issue_source_context_issue_index",
+	"410_issue_source_context_origin_task_index",
+	"411_attachment_source_context_index",
+	"412_issue_source_context_object_intent_key_index",
+	"413_issue_source_context_object_intent_due_index",
+	"414_issue_source_context_object_intent_context_index",
+}
 
 var upMigrationConditions = map[string]migrationCondition{
 	// Fresh databases that successfully built the CJK-friendly bigram index do
@@ -322,6 +339,21 @@ func hooksForDirection(direction string) map[string]preMigrationHook {
 	default:
 		return nil
 	}
+}
+
+func ensureSourceContextRollbackSafe(ctx context.Context, pool *pgxpool.Pool) error {
+	var dataExists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM issue_source_context)
+		    OR EXISTS (SELECT 1 FROM attachment WHERE source_context_id IS NOT NULL)
+		    OR EXISTS (SELECT 1 FROM issue_source_context_object_intent)
+	`).Scan(&dataExists); err != nil {
+		return fmt.Errorf("inspect source-context rollback ownership: %w", err)
+	}
+	if dataExists {
+		return errors.New("cannot roll back issue source context while captured data or stored objects still exist; remove source-context captures and their stored objects through application cleanup, then retry")
+	}
+	return nil
 }
 
 func conditionsForDirection(direction string) map[string]migrationCondition {

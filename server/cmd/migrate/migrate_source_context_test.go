@@ -57,6 +57,8 @@ func TestSourceContextMigrationsRollbackFailsClosedWithCapturedData(t *testing.T
 	}
 
 	assertSourceContextSchema(t, pool, schema, true)
+	assertSourceContextIndexes(t, pool, schema, true)
+	assertSourceContextMigrationLedger(t, pool, schema, versions, true)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO issue_source_context (
 			id, workspace_id, issue_id, origin_task_id, source_issue_id,
@@ -114,6 +116,8 @@ func TestSourceContextMigrationsRollbackFailsClosedWithCapturedData(t *testing.T
 		t.Fatalf("rollback with captured data error = %v, want fail-closed source-context error", err)
 	}
 	assertSourceContextSchema(t, pool, schema, true)
+	assertSourceContextIndexes(t, pool, schema, true)
+	assertSourceContextMigrationLedger(t, pool, schema, versions, true)
 	for table, want := range map[string]int{
 		"issue_source_context":               1,
 		"issue_source_context_object_intent": 1,
@@ -140,6 +144,8 @@ func TestSourceContextMigrationsRollbackFailsClosedWithCapturedData(t *testing.T
 	}
 
 	assertSourceContextSchema(t, pool, schema, false)
+	assertSourceContextIndexes(t, pool, schema, false)
+	assertSourceContextMigrationLedger(t, pool, schema, versions, false)
 	var attachmentExists bool
 	if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".attachment").Scan(&attachmentExists); err != nil {
 		t.Fatalf("read attachment table existence after rollback: %v", err)
@@ -162,6 +168,14 @@ func TestSourceContextMigrationsRollbackFailsClosedWithCapturedData(t *testing.T
 	}
 	if count != 0 {
 		t.Fatalf("source contexts after guarded rollback and reapply = %d, want 0", count)
+	}
+}
+
+func TestSourceContextRollbackGuardRegisteredForEveryMigrationStep(t *testing.T) {
+	for _, version := range sourceContextMigrationVersions {
+		if preRollbackHooks[version] == nil {
+			t.Errorf("source-context rollback guard is not registered for %s", version)
+		}
 	}
 }
 
@@ -194,5 +208,57 @@ func assertSourceContextSchema(t *testing.T, pool interface {
 	}
 	if columnExists != want {
 		t.Fatalf("attachment.source_context_id existence = %v, want %v", columnExists, want)
+	}
+}
+
+func assertSourceContextIndexes(t *testing.T, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, schema string, want bool) {
+	t.Helper()
+	ctx := context.Background()
+	for _, index := range []string{
+		"idx_issue_source_context_id",
+		"idx_issue_source_context_issue",
+		"idx_issue_source_context_origin_task",
+		"idx_attachment_source_context",
+		"idx_issue_source_context_object_intent_key",
+		"idx_issue_source_context_object_intent_due",
+		"idx_issue_source_context_object_intent_context",
+	} {
+		var usable bool
+		if err := pool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_class index_relation
+				JOIN pg_namespace namespace ON namespace.oid = index_relation.relnamespace
+				JOIN pg_index index_state ON index_state.indexrelid = index_relation.oid
+				WHERE namespace.nspname = $1
+				  AND index_relation.relname = $2
+				  AND index_state.indisvalid
+				  AND index_state.indisready
+			)
+		`, schema, index).Scan(&usable); err != nil {
+			t.Fatalf("read %s usability: %v", index, err)
+		}
+		if usable != want {
+			t.Fatalf("%s usable = %v, want %v", index, usable, want)
+		}
+	}
+}
+
+func assertSourceContextMigrationLedger(t *testing.T, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, schema string, versions []string, want bool) {
+	t.Helper()
+	ctx := context.Background()
+	table := pgx.Identifier{schema, "schema_migrations"}.Sanitize()
+	for _, version := range versions {
+		var recorded bool
+		if err := pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM "+table+" WHERE version = $1)", version).Scan(&recorded); err != nil {
+			t.Fatalf("read migration ledger entry %s: %v", version, err)
+		}
+		if recorded != want {
+			t.Fatalf("migration ledger entry %s recorded = %v, want %v", version, recorded, want)
+		}
 	}
 }
