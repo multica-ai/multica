@@ -95,7 +95,6 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
 }));
 
 import { SkillDetailPage } from "./skill-detail-page";
-import { downloadSkillArchive } from "../lib/export-skill";
 
 const LONG_DESCRIPTION =
   "Animation for product interfaces — when to animate and when not to. " +
