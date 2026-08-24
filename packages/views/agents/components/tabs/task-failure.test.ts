@@ -50,6 +50,12 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel("local_directory_error")).toBe("Local directory error");
   });
 
+  it("covers an abandoned local-directory waiter", () => {
+    expect(failureReasonLabel("waiting_local_directory_abandoned")).toBe(
+      "Local directory wait abandoned",
+    );
+  });
+
   it("still falls back to the raw wire value for unknown reasons", () => {
     expect(failureReasonLabel("brand_new_reason")).toBe("brand_new_reason");
   });

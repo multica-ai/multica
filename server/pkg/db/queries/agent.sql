@@ -1245,12 +1245,11 @@ RETURNING *;
 --     while blocked on the path mutex. A live lease means a live waiter and
 --     must not be killed — a legitimate queue ahead of this task can exceed
 --     the dispatch / running timeouts without being "stuck". An expired (or
---     absent) lease means the daemon stopped proving the wait is still in
---     progress: the waiter goroutine died, the process wedged without
---     releasing capacity, or the runtime vanished without
---     RecoverOrphanedTasksForRuntime. Reclaiming those rows is what stops
---     #7427's capacity leak (waiters forever in waiting_local_directory
---     after their holder was force-stopped).
+--     absent) lease may fail immediately on a healthy runtime, or after the
+--     runtime has missed the full reconnect grace. Reclaiming those rows is
+--     what stops #7427's capacity leak (waiters forever in
+--     waiting_local_directory after their holder was force-stopped) without
+--     burning retries during a transient daemon disconnect.
 --
 -- The daemon-dead case is recovered immediately when that daemon restarts via
 -- RecoverOrphanedTasksForRuntime. Until then, this query and
@@ -1314,6 +1313,26 @@ WHERE (
    OR (
     status = 'waiting_local_directory'
     AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+    AND (
+      runtime_id IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+          AND (
+            (
+              r.status = 'online'
+              AND COALESCE(r.last_seen_at, r.updated_at) >=
+                  now() - make_interval(secs => @runtime_stale_secs::double precision)
+            )
+            OR COALESCE(r.last_seen_at, r.updated_at) <
+               now() - make_interval(secs => @runtime_reconnect_grace_secs::double precision)
+          )
+      )
+    )
   )
 RETURNING *;
 
