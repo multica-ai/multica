@@ -24,6 +24,41 @@ func inboxWorkspaceHandler(handler http.HandlerFunc) http.HandlerFunc {
 	return middleware.RequireWorkspaceMember(testHandler.Queries)(handler).ServeHTTP
 }
 
+func TestListInboxProjectsCurrentIssueStatusAndPriority(t *testing.T) {
+	workspaceID := dbfx.Workspace(t, "Inbox filter projections", "inbox-filter-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	issueID := dbfx.Issue(t, "Filtered issue", testutil.Cols{
+		"workspace_id": workspaceID,
+		"status":       "in_review",
+		"priority":     "high",
+	})
+	dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   workspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "status_changed",
+		"severity":       "info",
+		"issue_id":       issueID,
+		"title":          "Projected issue",
+	})
+
+	var items []InboxItemResponse
+	testutil.Call(t, inboxWorkspaceHandler(testHandler.ListInbox),
+		inboxRequest(http.MethodGet, "/api/inbox", workspaceID)).
+		Want(http.StatusOK).
+		JSON(&items)
+
+	if len(items) != 1 {
+		t.Fatalf("inbox items = %d, want 1: %+v", len(items), items)
+	}
+	if items[0].IssueStatus == nil || *items[0].IssueStatus != "in_review" {
+		t.Errorf("issue_status = %v, want in_review", items[0].IssueStatus)
+	}
+	if items[0].IssuePriority == nil || *items[0].IssuePriority != "high" {
+		t.Errorf("issue_priority = %v, want high", items[0].IssuePriority)
+	}
+}
+
 func TestListArchivedInboxLimitsIssueGroupsNotRows(t *testing.T) {
 	workspaceID := dbfx.Workspace(t, "Archived inbox groups", "archived-groups-"+uuid.NewString())
 	dbfx.Member(t, workspaceID, testUserID, "owner")
