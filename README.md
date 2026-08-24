@@ -17,7 +17,7 @@
 G2's managed agents platform — powered by [Multica](UPSTREAM_README.md).<br/>
 Turn coding agents into real teammates — assign tasks, track progress, compound skills.
 
-[AgentFarm](https://agentfarm.g2.com) · [Upstream Multica README](UPSTREAM_README.md) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md)
+[AgentFarm](https://agentfarm.g2.com) · [Upstream Multica README](UPSTREAM_README.md) · [Self-Hosting](SELF_HOSTING.md) · [Contributing](CONTRIBUTING.md) · [Wiki](https://g2crowd.atlassian.net/wiki/x/roB4gwE)
 
 </div>
 
