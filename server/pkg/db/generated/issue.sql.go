@@ -446,7 +446,10 @@ WHERE workspace_id = $1
   AND issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM $2::uuid
   AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
-  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
+  AND lower(btrim(regexp_replace(
+    regexp_replace(title, '[[:space:]]*([-:|][[:space:]]*)?[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[[:space:]]*$', ''),
+    '[[:space:]]+', ' ', 'g'
+  ))) = $4
 ORDER BY created_at ASC
 LIMIT 1
 `
@@ -506,7 +509,10 @@ WHERE i.workspace_id = $1
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM $3::uuid
-  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = $4
+  AND lower(btrim(regexp_replace(
+    regexp_replace(i.title, '[[:space:]]*([-:|][[:space:]]*)?[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[[:space:]]*$', ''),
+    '[[:space:]]+', ' ', 'g'
+  ))) = $4
   AND i.created_at >= $5::timestamptz
   AND EXISTS (
     SELECT 1

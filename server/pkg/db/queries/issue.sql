@@ -282,7 +282,10 @@ WHERE workspace_id = $1
   AND issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
-  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
+  AND lower(btrim(regexp_replace(
+    regexp_replace(title, '[[:space:]]*([-:|][[:space:]]*)?[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[[:space:]]*$', ''),
+    '[[:space:]]+', ' ', 'g'
+  ))) = sqlc.arg('normalized_title')
 ORDER BY created_at ASC
 LIMIT 1;
 
@@ -293,7 +296,10 @@ WHERE i.workspace_id = $1
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
-  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
+  AND lower(btrim(regexp_replace(
+    regexp_replace(i.title, '[[:space:]]*([-:|][[:space:]]*)?[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}(:[0-9]{2})?[[:space:]]*$', ''),
+    '[[:space:]]+', ' ', 'g'
+  ))) = sqlc.arg('normalized_title')
   AND i.created_at >= sqlc.arg('created_after')::timestamptz
   AND EXISTS (
     SELECT 1

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -13,7 +14,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+var volatileTitleTimestampSuffix = regexp.MustCompile(`(?i)\s*(?:[-:|]\s*)?[0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}[ T][0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*$`)
+
 func NormalizeTitle(title string) string {
+	title = volatileTitleTimestampSuffix.ReplaceAllString(title, "")
 	return strings.ToLower(strings.Join(strings.Fields(title), " "))
 }
 
