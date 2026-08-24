@@ -98,6 +98,21 @@ var BuiltinRuntimes = []BuiltinRuntime{
 		ProviderLabel:     "omp",
 		ModelDiscovery:    discoverOmpModels,
 	},
+	{
+		// Host-local Devin CLI over ACP. Not cloud Devin VMs / Playbooks / Secrets.
+		// ProtocolFamily is "devin" so ResolveBackend/New dispatch to devinBackend.
+		ID:                "devin",
+		ProtocolFamily:    "devin",
+		DefaultCommand:    "devin",
+		EnvPrefix:         "MULTICA_DEVIN",
+		DisplayName:       "Devin",
+		SkillsDir:         ".devin/skills",
+		UserSkillsDir:     ".config/devin/skills",
+		LaunchHeader:      "devin acp",
+		DefaultExecutable: "devin",
+		ProviderLabel:     "devin",
+		ModelDiscovery:    discoverDevinModels,
+	},
 }
 
 // BuiltinRuntimeByID returns the descriptor for the given runtime identity,
