@@ -2,6 +2,7 @@ package cerebra
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -51,6 +52,20 @@ func TestHeuristicClassifier_KeywordScoring(t *testing.T) {
 			wantTier:    TierStandard,
 			wantRuleSub: "mcp_floor",
 		},
+		{
+			name:        "substrings like prefix do not falsely trigger fix keyword",
+			prompt:      "What prefix should I use for these environment variables?",
+			meta:        TaskMeta{},
+			wantTier:    TierSimple,
+			wantRuleSub: "default:simple",
+		},
+		{
+			name:        "exact word fix triggers standard tier",
+			prompt:      "Can you fix this typo in the readme?",
+			meta:        TaskMeta{},
+			wantTier:    TierStandard,
+			wantRuleSub: "keyword:fix",
+		},
 	}
 
 	for _, tt := range tests {
@@ -62,7 +77,7 @@ func TestHeuristicClassifier_KeywordScoring(t *testing.T) {
 			if gotTier != tt.wantTier {
 				t.Errorf("Score() gotTier = %v, want %v", gotTier, tt.wantTier)
 			}
-			if tt.wantRuleSub != "" && !containsWord(gotRule, tt.wantRuleSub) && gotRule != tt.wantRuleSub {
+			if tt.wantRuleSub != "" && !strings.Contains(gotRule, tt.wantRuleSub) {
 				t.Errorf("Score() gotRule = %v, want substring %v", gotRule, tt.wantRuleSub)
 			}
 		})

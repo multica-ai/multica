@@ -152,22 +152,24 @@ func tokenize(s string) []string {
 
 // containsWord reports whether word appears as a whole word in text.
 func containsWord(text, word string) bool {
-	idx := strings.Index(text, word)
-	for idx >= 0 {
-		end := idx + len(word)
-		beforeOK := idx == 0 || !unicode.IsLetter(rune(text[idx-1]))
-		afterOK := end == len(text) || !unicode.IsLetter(rune(text[end]))
+	offset := 0
+	for {
+		idx := strings.Index(text[offset:], word)
+		if idx == -1 {
+			return false
+		}
+		absIdx := offset + idx
+		end := absIdx + len(word)
+		beforeOK := absIdx == 0 || !unicode.IsLetter(rune(text[absIdx-1])) && !unicode.IsDigit(rune(text[absIdx-1]))
+		afterOK := end == len(text) || !unicode.IsLetter(rune(text[end])) && !unicode.IsDigit(rune(text[end]))
 		if beforeOK && afterOK {
 			return true
 		}
-		idx = strings.Index(text[idx+1:], word)
-		if idx >= 0 {
-			idx += (strings.Index(text, word) + 1)
-		} else {
-			break
+		offset = absIdx + 1
+		if offset >= len(text) {
+			return false
 		}
 	}
-	return strings.Contains(text, word) // fallback: substring match
 }
 
 func itoa(n int) string {
