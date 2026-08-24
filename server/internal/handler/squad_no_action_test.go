@@ -16,6 +16,7 @@ type runningSquadLeaderTaskFixture struct {
 	IssueID          string
 	SquadID          string
 	LeaderID         string
+	OtherID          string
 	TaskID           string
 	TriggerCommentID string
 }
@@ -47,6 +48,7 @@ func newRunningSquadLeaderTaskFixture(t *testing.T) runningSquadLeaderTaskFixtur
 		IssueID:          issueID,
 		SquadID:          fx.SquadID,
 		LeaderID:         fx.LeaderID,
+		OtherID:          fx.OtherID,
 		TaskID:           taskID,
 		TriggerCommentID: triggerCommentID,
 	}
@@ -146,6 +148,28 @@ func TestCompleteTask_SquadLeaderActionStillSynthesizesComment(t *testing.T) {
 
 	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 1 {
 		t.Fatalf("expected action completion to synthesize one comment, got %d", got)
+	}
+}
+
+func TestCompleteTask_SquadLeaderFallbackMentionEnqueuesWorker(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	fx := newRunningSquadLeaderTaskFixture(t)
+	recordSquadLeaderEvaluationForTask(t, fx, "action")
+
+	completeRunningTask(t, fx, "Please [@Worker](mention://agent/"+fx.OtherID+") take the implementation.")
+
+	var queued int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = FALSE
+	`, fx.IssueID, fx.OtherID).Scan(&queued); err != nil {
+		t.Fatalf("count worker tasks: %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("expected fallback @agent delegation to enqueue one worker task, got %d", queued)
 	}
 }
 
