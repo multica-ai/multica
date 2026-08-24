@@ -51,6 +51,7 @@ type SkillResponse struct {
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	UseCount    int64   `json:"use_count"`
 }
 
 // SkillSummaryResponse is the list-endpoint shape: everything SkillResponse
@@ -67,6 +68,7 @@ type SkillSummaryResponse struct {
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	UseCount    int64   `json:"use_count"`
 	// Enabled is only populated for agent-scoped skill responses. Workspace
 	// skill lists describe the skill itself, so they omit assignment state.
 	Enabled *bool `json:"enabled,omitempty"`
@@ -300,6 +302,13 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		count, err := h.Queries.CountSkillUsageEvents(r.Context(), s.ID)
+		if err != nil {
+			slog.Warn("skill: failed to count usage events",
+				"skill_id", s.ID, "error", err)
+		} else {
+			resp[i].UseCount = count
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -337,13 +346,22 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	skillResp := skillToResponse(skill)
+	count, err := h.Queries.CountSkillUsageEvents(r.Context(), skill.ID)
+	if err != nil {
+		slog.Warn("skill: failed to count usage events",
+			"skill_id", skill.ID, "error", err)
+	} else {
+		skillResp.UseCount = count
+	}
+
 	fileResps := make([]SkillFileResponse, len(files))
 	for i, f := range files {
 		fileResps[i] = skillFileToResponse(f)
 	}
 
 	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: skillResp,
 		Files:         fileResps,
 	})
 }
@@ -2614,5 +2632,135 @@ func (h *Handler) writeUpdatedAgentSkills(w http.ResponseWriter, r *http.Request
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(agent.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(agent.WorkspaceID), actorType, actorID, map[string]any{"agent_id": uuidToString(agent.ID), "skills": resp})
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// SkillTaskResponse is a task that used this skill, including issue info.
+type SkillTaskResponse struct {
+	AgentTaskResponse
+
+	IssueTitle      string `json:"issue_title"`
+	IssueIdentifier string `json:"issue_identifier"`
+}
+
+// ListSkillTasks (GET /api/skills/{id}/tasks) returns tasks that used this
+// skill, ordered by most recent usage. The skill_usage_event table is populated
+// asynchronously by a background scheduler (SkillUsageProcessorJob), so new
+// tasks may not appear immediately.
+func (h *Handler) ListSkillTasks(w http.ResponseWriter, r *http.Request) {
+	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+
+	workspaceID := uuidToString(skill.WorkspaceID)
+
+	// Look up workspace issue prefix for identifier formatting.
+	ws, err := h.Queries.GetWorkspace(r.Context(), skill.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get workspace")
+		return
+	}
+	issuePrefix := ws.IssuePrefix
+
+	rows, err := h.DB.Query(r.Context(), `
+		SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority,
+		       atq.dispatched_at, atq.started_at, atq.completed_at,
+		       atq.result, atq.error, atq.created_at, atq.context,
+		       atq.runtime_id, atq.session_id, atq.work_dir,
+		       atq.trigger_comment_id, atq.chat_session_id,
+		       atq.autopilot_run_id, atq.attempt, atq.max_attempts,
+		       atq.parent_task_id, atq.failure_reason, atq.trigger_summary,
+		       atq.force_fresh_session, atq.is_leader_task, atq.wait_reason,
+		       atq.initiator_user_id, atq.handoff_note,
+		       atq.prepare_lease_expires_at, atq.squad_id,
+		       atq.runtime_mcp_overlay, atq.escalation_for_task_id,
+		       atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps,
+		       atq.coalesced_comment_ids, atq.delivered_comment_ids,
+		       atq.chat_input_task_id, atq.chat_finalize_deferred_at,
+		       atq.originator_source, atq.delegated_from_task_id,
+		       atq.retry_of_task_id, atq.rerun_of_task_id,
+		       atq.rule_version_id, atq.trigger_evidence_kind,
+		       atq.trigger_evidence_ref_id, atq.accountable_user_id,
+		       atq.session_rollout_missing, atq.retired_session_id,
+		       atq.quick_actions_disabled, atq.regenerate_quick_actions_for,
+		       atq.branch_name, atq.durable_work_dir,
+		       COALESCE(i.title, '') AS issue_title,
+		       i.number AS issue_number
+		FROM agent_task_queue atq
+		JOIN skill_usage_event sue ON sue.task_id = atq.id
+		LEFT JOIN issue i ON i.id = atq.issue_id
+		WHERE sue.skill_id = $1
+		ORDER BY sue.created_at DESC
+		LIMIT 50
+	`, skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list tasks")
+		return
+	}
+	defer rows.Close()
+
+	type skillTaskRow struct {
+		db.AgentTaskQueue
+		IssueTitle  string
+		IssueNumber int32
+	}
+
+	taskRows := make([]skillTaskRow, 0, 50)
+	for rows.Next() {
+		var t skillTaskRow
+		if err := rows.Scan(
+			&t.ID, &t.AgentID, &t.IssueID, &t.Status, &t.Priority,
+			&t.DispatchedAt, &t.StartedAt, &t.CompletedAt,
+			&t.Result, &t.Error, &t.CreatedAt, &t.Context,
+			&t.RuntimeID, &t.SessionID, &t.WorkDir,
+			&t.TriggerCommentID, &t.ChatSessionID,
+			&t.AutopilotRunID, &t.Attempt, &t.MaxAttempts,
+			&t.ParentTaskID, &t.FailureReason, &t.TriggerSummary,
+			&t.ForceFreshSession, &t.IsLeaderTask, &t.WaitReason,
+			&t.InitiatorUserID, &t.HandoffNote,
+			&t.PrepareLeaseExpiresAt, &t.SquadID,
+			&t.RuntimeMcpOverlay, &t.EscalationForTaskID,
+			&t.FireAt, &t.OriginatorUserID, &t.RuntimeConnectedApps,
+			&t.CoalescedCommentIds, &t.DeliveredCommentIds,
+			&t.ChatInputTaskID, &t.ChatFinalizeDeferredAt,
+			&t.OriginatorSource, &t.DelegatedFromTaskID,
+			&t.RetryOfTaskID, &t.RerunOfTaskID,
+			&t.RuleVersionID, &t.TriggerEvidenceKind,
+			&t.TriggerEvidenceRefID, &t.AccountableUserID,
+			&t.SessionRolloutMissing, &t.RetiredSessionID,
+			&t.QuickActionsDisabled, &t.RegenerateQuickActionsFor,
+			&t.BranchName, &t.DurableWorkDir,
+			&t.IssueTitle, &t.IssueNumber,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to scan task")
+			return
+		}
+		taskRows = append(taskRows, t)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to iterate tasks")
+		return
+	}
+	if len(taskRows) == 0 {
+		writeJSON(w, http.StatusOK, []SkillTaskResponse{})
+		return
+	}
+
+	resp := make([]SkillTaskResponse, len(taskRows))
+	for i, tr := range taskRows {
+		base := taskToResponse(tr.AgentTaskQueue, workspaceID)
+		// Format the issue identifier: PREFIX-NUMBER (e.g. "WRJ-3")
+		identifier := ""
+		if tr.IssueNumber > 0 {
+			identifier = fmt.Sprintf("%s-%d", issuePrefix, tr.IssueNumber)
+		}
+		resp[i] = SkillTaskResponse{
+			AgentTaskResponse: base,
+			IssueTitle:        tr.IssueTitle,
+			IssueIdentifier:   identifier,
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -50,6 +50,7 @@
     "name": "Name",
     "created_by": "Added by",
     "used_by": "Used by",
+    "use_count": "Used",
     "source": "Source",
     "updated": "Updated",
     "created": "Created",
@@ -211,7 +212,21 @@
       "aria": "Skill sections",
       "overview": "Overview",
       "files_one": "Files {{count}}",
-      "files_other": "Files {{count}}"
+      "files_other": "Files {{count}}",
+      "tasks": "Tasks"
+    },
+    "tasks": {
+      "empty": "No tasks have used this skill yet.",
+      "show_more": "Show more ({{remaining}} remaining)",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     },
     "overview": {
       "properties": "Properties",

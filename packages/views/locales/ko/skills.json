@@ -50,6 +50,7 @@
     "name": "이름",
     "created_by": "추가한 사람",
     "used_by": "사용 중",
+    "use_count": "사용 횟수",
     "source": "출처",
     "updated": "수정일",
     "created": "생성일",
@@ -198,7 +199,21 @@
     "tabs": {
       "aria": "스킬 섹션",
       "overview": "개요",
-      "files_other": "파일 {{count}}"
+      "files_other": "파일 {{count}}",
+      "tasks": "작업"
+    },
+    "tasks": {
+      "empty": "아직 이 스킬을 사용한 작업이 없습니다.",
+      "show_more": "더 보기 ({{remaining}}개 남음)",
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting",
+        "running": "Running",
+        "completed": "Completed",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      }
     },
     "overview": {
       "properties": "속성",

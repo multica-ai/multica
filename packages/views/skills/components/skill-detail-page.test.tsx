@@ -23,6 +23,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["skill", wsId, id],
     queryFn: () => Promise.resolve(skillRef.current),
   }),
+  skillTasksOptions: (wsId: string, id: string) => ({
+    queryKey: ["skills", wsId, id, "tasks"],
+    queryFn: () => Promise.resolve([]),
+  }),
   agentListOptions: (wsId: string) => ({
     queryKey: ["agents", wsId],
     queryFn: () => Promise.resolve(agentsRef.current),
@@ -103,6 +107,7 @@ const baseSkill: Skill = {
   name: "aiforui-animations",
   description: LONG_DESCRIPTION,
   config: {},
+  use_count: 0,
   created_by: "user-1",
   created_at: "2026-07-28T18:11:37Z",
   updated_at: "2026-07-28T18:14:40Z",

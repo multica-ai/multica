@@ -1171,6 +1171,21 @@ type SkillToLabel struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type SkillUsageEvent struct {
+	ID          pgtype.UUID        `json:"id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type SkillUsageProcessCursor struct {
+	ID              int32              `json:"id"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LastCompletedAt pgtype.Timestamptz `json:"last_completed_at"`
+}
+
 type Squad struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
