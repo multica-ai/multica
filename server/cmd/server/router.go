@@ -1300,6 +1300,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
+	// Device authorization flow (RFC 8628 adapted): start is one call per
+	// login attempt (authRL); the token poll runs at the advertised interval
+	// (default 5s = 12/min, within authVerifyRL's 20/min).
+	r.With(authRL).Post("/auth/device/start", h.StartDeviceAuthorization)
+	r.With(authVerifyRL).Post("/auth/device/token", h.DeviceToken)
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
@@ -1441,6 +1446,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
+		// Device authorization approval: the /activate page calls this from
+		// an authenticated browser session to bind the typed user code.
+		// Auth already gates it; the limiter just caps unauthenticated-DB-
+		// load-style hammering by any signed-in client (codes are 31^8, so
+		// brute force is not the concern — volume is).
+		r.With(authVerifyRL).Post("/api/device/approve", h.ApproveDeviceAuthorization)
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)

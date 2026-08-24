@@ -17,6 +17,8 @@
 export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // Auth flow
   // `onboarding` is historical, kept reserved post-removal of the route.
+  // `activate` is the device-authorization approval page (`multica login
+  // --device`).
   "login",
   "logout",
   "signin",
@@ -31,6 +33,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "reset",
   "password",
   "onboarding",
+  "activate",
 
   // Platform / marketing routes (current + likely-future)
   // `multica` is reserved as the brand name to block impersonation workspaces.

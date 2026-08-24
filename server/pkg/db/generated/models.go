@@ -564,6 +564,21 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DeviceAuthorization struct {
+	ID              pgtype.UUID        `json:"id"`
+	DeviceCode      string             `json:"device_code"`
+	UserCodeHash    string             `json:"user_code_hash"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	Status          string             `json:"status"`
+	Token           pgtype.Text        `json:"token"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	IntervalSeconds int32              `json:"interval_seconds"`
+	LastPolledAt    pgtype.Timestamptz `json:"last_polled_at"`
+	ApprovedAt      pgtype.Timestamptz `json:"approved_at"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type DingtalkBotIdentity struct {
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 	InstallationID   pgtype.UUID        `json:"installation_id"`
