@@ -254,6 +254,7 @@ Daemon behavior is configured via flags or environment variables:
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
+| Extra HTTP headers | `--extra-header` (repeatable) | `MULTICA_EXTRA_HEADERS` | none |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
@@ -267,6 +268,30 @@ Daemon behavior is configured via flags or environment variables:
 | GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
 | GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
+
+#### Extra HTTP headers
+
+`--extra-header "Name: value"` (repeatable, or `MULTICA_EXTRA_HEADERS` as a newline-separated `Name: value` spec, or the persisted `extra_headers` map in `~/.multica/config.json`) attaches those headers to **every** outbound daemon request — REST calls, heartbeat polls, and the wakeup WebSocket handshake. The intended use is to authorize the daemon against a reverse proxy or ZTN that protects your self-hosted Multica server: Cloudflare Access service tokens, Tailscale / oauth2-proxy / Authelia / Authentik / Pomerium / Keycloak gatekeeper / Ory Oathkeeper / Traefik `forwardAuth` / Caddy `forward_auth`, etc. See the worked Cloudflare Access walkthrough and the full provider list in [Self-Hosted Multica Behind a ZTN or Header-Injecting Reverse Proxy](SELF_HOSTING_ADVANCED.md#self-hosted-multica-behind-a-ztn-or-header-injecting-reverse-proxy). Precedence (highest wins): `--extra-header` flag → `MULTICA_EXTRA_HEADERS` env → `extra_headers` in config.json. Header names must not contain CR, LF, NUL, or colons; values must not contain CR, LF, or NUL — these are rejected at startup to prevent header injection.
+
+**Clearing configured headers.** Each precedence layer can be cleared without editing the others, which matters when a stored Cloudflare secret rotates or stops being valid:
+
+```bash
+# Clear the flag-driven override for this run. The child foreground
+# daemon sees --extra-header "" and treats it as "explicitly no
+# extra headers", bypassing MULTICA_EXTRA_HEADERS and extra_headers.
+multica daemon start --extra-header ""
+
+# Clear the env var for this shell.
+unset MULTICA_EXTRA_HEADERS
+
+# Clear the persisted config-file value (empty string OR the JSON
+# literal `null` both clear it). The next `multica daemon start`
+# without --extra-header / MULTICA_EXTRA_HEADERS sends no extras.
+multica config set extra_headers ''
+multica config set extra_headers 'null'
+```
+
+The empty-override rule applies per layer: a non-empty lower-precedence layer is *not* consulted when a higher-precedence layer is explicitly cleared. So `--extra-header ""` alone is enough to retire stale proxy credentials without touching the config file or the env.
 
 #### Workspace garbage collection
 

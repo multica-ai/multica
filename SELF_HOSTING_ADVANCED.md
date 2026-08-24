@@ -543,6 +543,134 @@ See [WebSocket for LAN / Non-localhost Access](#websocket-for-lan--non-localhost
 
 This keeps cookies, CORS, and the WebSocket origin check on a single origin. It is both the configuration least likely to break and the safer one: the session cookie stays host-only, so no sibling subdomain can ever receive it. An `api.example.com` vhost can still be kept for CLI and daemon use: those clients authenticate with a `mul_` personal access token over `Authorization: Bearer`, which never goes through the cookie or CSRF path.
 
+## Self-Hosted Multica Behind a ZTN or Header-Injecting Reverse Proxy
+
+A reverse proxy or ZTN that authenticates requests by injecting one or more HTTP headers (Cloudflare Access, Tailscale, oauth2-proxy, ...) protects your Multica server from anonymous traffic, but the daemon — a long-running CLI process that talks to the server over its own REST + WebSocket — has no browser to log in. The proxy would reject every daemon request because no `Cf-Access-Jwt-Assertion` (or equivalent) is attached.
+
+The daemon accepts a list of `Name: value` headers and attaches them to **every** outbound HTTP request and to the WebSocket wakeup handshake. Set them once at startup and the daemon keeps using them on every poll, every heartbeat, every claim, until you restart.
+
+### Common solutions
+
+Any reverse proxy that can authenticate the daemon's bearer token AND inject one extra header is a fit. The list below is intentionally narrow — every entry is a project we have actually wired this against — but the daemon does not know or care which one is upstream.
+
+| Provider | Identity model | What the daemon sends |
+| --- | --- | --- |
+| Cloudflare Access | Service token (`CF-Access-Client-Id` + `CF-Access-Client-Secret`) | Two static headers on every request |
+| Tailscale (network layer) | Tailnet membership only — no header injection | None — the daemon reaches the server over the tailnet; the proxy is unnecessary |
+| Tailscale (with HTTPS reverse proxy) | Tailnet identity gates the proxy; the proxy then injects a header for the Multica server | Whatever header the proxy's forward-auth middleware sets (commonly `X-Forwarded-User`); the daemon's own `Authorization: Bearer <token>` is separate and is sent regardless |
+| Authelia / Authentik / oauth2-proxy / Pomerium | Forward-auth injects an identifying header (the daemon has no session cookie to forward — it authenticates with `Authorization: Bearer <token>` against the Multica server, separate from the proxy's identity header) | `X-Forwarded-User` (or provider-specific) |
+| Keycloak gatekeeper | Same shape as Authelia | `X-Forwarded-User` |
+| Ory Oathkeeper | Mutator attaches a `X-User` header | `X-User` |
+| Traefik `forwardAuth` | Reads the upstream auth service, injects header | Whatever header the forward-auth middleware sets |
+| Caddy `forward_auth` | Same shape as Traefik | Same as Traefik |
+
+Two distinct identity layers are in play at the same time:
+
+- **Proxy identity** — the Cloudflare Access service token / Authelia `X-Forwarded-User` / Oathkeeper `X-User` etc. that the proxy uses to decide whether to forward the request to the Multica server. This is what `extra_headers` carries. It never reaches the Multica server's auth logic; the proxy strips or rewrites it before forwarding.
+- **Multica daemon identity** — the `Authorization: Bearer <mul_…>` token the daemon uses to authenticate against the Multica server itself. The daemon sets this from `~/.multica/config.json`'s `token` field (populated by `multica login`); it is NOT configurable via `extra_headers`, and any `--extra-header "Authorization: …"` is silently dropped (the daemon's own Authorization always wins). The Multica server has no concept of a `multica_auth` session cookie for daemon-originated requests — that path is the browser flow only.
+
+If your provider is not in the list, the only thing that matters is "does it inject a fixed header I can pin to a value?". If yes, the daemon supports it without code changes.
+
+### Walkthrough: Cloudflare Access
+
+The example is Cloudflare Access; the same six steps apply to every other entry in the table — swap the headers, swap the values, keep the structure.
+
+**1. Provision a service token in Cloudflare Access.**
+
+In the Cloudflare Zero Trust dashboard, go to *Access → Service Auth → Create Service Token*. Note the `Client ID` and `Client Secret`. Cloudflare expects them on every request as:
+
+```text
+Cf-Access-Client-Id: <Client ID>
+Cf-Access-Client-Secret: <Client Secret>
+```
+
+These are the headers the daemon will attach.
+
+**2. Configure the daemon.**
+
+Pick the source that fits your operator workflow:
+
+```bash
+# Per-start flag (highest precedence, only this run uses it). The
+# service-token values are read from protected files so they never
+# appear on the command line — `cat` substitution means the secret
+# exists only in the spawned child process's environment, not in
+# your shell history or in `ps` output.
+multica daemon start \
+  --extra-header "Cf-Access-Client-Id: $(cat ~/.cloudflare-access-client-id)" \
+  --extra-header "Cf-Access-Client-Secret: $(cat ~/.cloudflare-access-client-secret)"
+
+# Persistent env var (read on every daemon start, survives restarts).
+# Same protected-file pattern keeps the secret out of shell history
+# and process-argument listings (`env` is far less exposed than argv,
+# but the cat-on-stdin form is still the lowest-friction choice).
+read -r -s CF_ID < ~/.cloudflare-access-client-id
+read -r -s CF_SECRET < ~/.cloudflare-access-client-secret
+export MULTICA_EXTRA_HEADERS="Cf-Access-Client-Id: ${CF_ID}
+Cf-Access-Client-Secret: ${CF_SECRET}"
+
+# Or persist on disk via the CLI config file (no shell export needed).
+# `config set` echoes only the redacted summary back to the terminal,
+# and the file is created with mode 0600 by default, but if you pipe
+# the literal secret into the command make sure your shell history
+# is clean (set HISTCONTROL=ignorespace and prefix the line with a
+# space, or use the read -s form above).
+multica config set extra_headers "$(cat <<JSON
+{"Cf-Access-Client-Id":"$(cat ~/.cloudflare-access-client-id)","Cf-Access-Client-Secret":"$(cat ~/.cloudflare-access-client-secret)"}
+JSON
+)"
+```
+
+> **Treat the service token like a database root password.** Never paste a live `Cf-Access-Client-Secret` into a shell command, a script committed to git, a chat message, or a log file. The `<Client ID>` / `<Client Secret>` placeholders above are exactly that — placeholders. Substitute via `$(cat <protected-file>)` (or your secret manager's CLI), and store the protected files with mode `0600` under a directory only the daemon user can read.
+
+Resolution order (highest wins): `--extra-header` flag → `MULTICA_EXTRA_HEADERS` env var → `extra_headers` in `~/.multica/config.json`. Set the most persistent layer you are comfortable with.
+
+**3. Restart the daemon.**
+
+```bash
+multica daemon restart
+```
+
+The new values take effect on the next child exec. Existing `multica daemon start` sessions keep their old value until they exit.
+
+**4. Verify the headers arrive.**
+
+```bash
+# The simplest check: hit the heartbeat and see whether the server accepts it.
+multica daemon status
+```
+
+If the daemon reports `status: running` and a non-empty `cli_version`, the headers were accepted and the proxy let the request through. If the proxy denies the request, `multica daemon start` will surface the proxy's status code (`returned 401`, `returned 403`, ...) in the startup failure error. The exact log path depends on the active profile — `multica daemon logs --profile <name>` tails the live log, and the raw crash sink lives under the profile's resolved state directory (`multica daemon disk-usage --profile <name>` prints it). On a default profile that's `~/.multica/daemon.err.log`; on a named profile (`multica --profile staging daemon start`) it's `~/.multica/profiles/staging/daemon.err.log`.
+
+For a lower-level probe (the one we use while debugging this ourselves), watch your proxy's access log immediately after a fresh `multica daemon restart` and confirm both `Cf-Access-Client-Id` and `Cf-Access-Client-Secret` are present on the request line targeting `/api/daemon/heartbeat`:
+
+```bash
+# Cloudflare Access (Zero Trust dashboard → Logs → Access → Request logs):
+#   filter by Service Token = "<the token you just provisioned>",
+#   then verify the most recent /api/daemon/heartbeat row carries both
+#   Cf-Access-* headers and a 200 status.
+
+# Traefik / Caddy / nginx: tail the access log of the proxy the daemon
+# talks to, e.g.
+#   tail -F /var/log/traefik/access.log | grep /api/daemon/heartbeat
+# then look for a 200 line whose request headers include both
+# Cf-Access-* values.
+```
+
+If the headers are missing on the wire, the daemon never attached them — re-check `multica config show` (the redaction in `extra_headers` lists the names but not the values, by design) and confirm the source layer you think is winning actually has the key set.
+
+**5. Configure the multica-server side.**
+
+Make sure the Cloudflare Access application for your Multica server **allows** the service token (the default policy denies everything that is not on its allow-list). With the service token allowed, every daemon request reaches the server with a verified Cloudflare identity attached, and the server's own session-cookie auth layer takes over from there.
+
+**6. Retire the old proxy hop.**
+
+If you previously worked around this by routing the daemon's traffic through a separate, locally-running reverse proxy (e.g. a Traefik on the same host that injected the Cloudflare headers), you can now remove that proxy: the daemon attaches the headers itself. Delete the proxy service, drop the firewall pinhole, and point `MULTICA_SERVER_URL` at the public URL.
+
+### Boundary: daemon → server is not the same knob as MCP server → server
+
+The `extra_headers` knob only attaches headers to the daemon's HTTP / WebSocket traffic to the Multica server. If you have an MCP server (e.g. a hosted MCP tool) sitting behind the same auth realm, configure **its** outbound headers separately through the MCP server's own `http_headers` config — see the workspace MCP settings. Each tool is a separate client and gets its own header set; the daemon's headers do not propagate to children it spawns.
+
 ## LAN / Non-localhost Access
 
 By default, Multica works on `localhost`. If you access it from another machine on the LAN (e.g. `http://192.168.1.100:3000`), you need to tell the backend to accept that origin:
