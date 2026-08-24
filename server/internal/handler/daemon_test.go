@@ -3109,8 +3109,10 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	t.Run("different_agent_source_starts_fresh", func(t *testing.T) {
 		issueNum++
 		issueID := dbfx.Issue(t, "manual-retry-cross-agent fixture", testutil.Cols{
-			"status": "in_progress",
-			"number": issueNum,
+			"status":        "in_progress",
+			"number":        issueNum,
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
 		})
 		otherAgentID := dbfx.Agent(t, "Rerun Source Other Agent", runtimeID, testutil.Cols{})
 		sourceID := dbfx.Task(t, otherAgentID, testutil.Cols{
@@ -4469,7 +4471,14 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 
 	ids := []string{
 		dbfx.Issue(t, "gc-batch-builtin-1", testutil.Cols{"status": "done", "priority": "medium", "number": 92611}),
-		dbfx.Issue(t, "gc-batch-builtin-2", testutil.Cols{"status": "in_progress", "priority": "medium", "number": 92612}),
+		// in_progress now requires an assignee (I4127.DP): seed one inline.
+		func() string {
+			agentID := dbfx.Agent(t, "GC Batch Builtin Agent", "", testutil.Cols{})
+			return dbfx.Issue(t, "gc-batch-builtin-2", testutil.Cols{
+				"status": "in_progress", "priority": "medium", "number": 92612,
+				"assignee_type": "agent", "assignee_id": agentID,
+			})
+		}(),
 	}
 
 	counter := withCountingCatalog(t)

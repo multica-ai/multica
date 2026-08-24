@@ -88,7 +88,15 @@ func TestIssueInProgressRequiresAssigneeMigration(t *testing.T) {
 	}
 
 	// A legacy zombie (in_progress, no assignee) can still be inserted BEFORE
-	// the migration runs — that is exactly the gap 349 closes.
+	// the migration runs — that is exactly the gap 349 closes. The shared test
+	// DB may already have 349's constraint applied (CI runs `migrate up` before
+	// tests), so drop it inside this transaction to restore the pre-migration
+	// state; the rollback at the end undoes the drop.
+	if _, err := tx.Exec(ctx,
+		`ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_in_progress_requires_assignee_check`,
+	); err != nil {
+		t.Fatalf("drop pre-existing constraint: %v", err)
+	}
 	if err := insertIssue("in_progress", nil, nil); err != nil {
 		t.Fatalf("insert legacy zombie pre-migration: %v", err)
 	}

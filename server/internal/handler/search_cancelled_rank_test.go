@@ -38,9 +38,9 @@ func seedRankIssue(t *testing.T, title, status string) string {
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (
 			workspace_id, title, status, priority, creator_type, creator_id,
-			position, number, created_at, updated_at
+			assignee_type, assignee_id, position, number, created_at, updated_at
 		)
-		VALUES ($1, $2, $3, 'none', 'member', $4, 0, $5, now(), now())
+		VALUES ($1, $2, $3, 'none', 'member', $4, 'member', $4, 0, $5, now(), now())
 		RETURNING id
 	`, testWorkspaceID, title, status, testUserID, number).Scan(&id); err != nil {
 		t.Fatalf("create issue %q (%s): %v", title, status, err)
