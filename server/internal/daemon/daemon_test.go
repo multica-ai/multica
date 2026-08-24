@@ -59,6 +59,38 @@ func TestNormalizeServerBaseURL(t *testing.T) {
 	}
 }
 
+func TestStageTaskCLI_CopiesExecutableIntoTaskTempDir(t *testing.T) {
+	t.Parallel()
+	source := filepath.Join(t.TempDir(), "multica.exe")
+	want := []byte("fake executable")
+	if err := os.WriteFile(source, want, 0o755); err != nil {
+		t.Fatalf("write source executable: %v", err)
+	}
+	taskTempDir := t.TempDir()
+	staged, err := stageTaskCLI(source, taskTempDir)
+	if err != nil {
+		t.Fatalf("stageTaskCLI: %v", err)
+	}
+	if filepath.Dir(staged) != taskTempDir {
+		t.Fatalf("staged path = %q, want under %q", staged, taskTempDir)
+	}
+	got, err := os.ReadFile(staged)
+	if err != nil {
+		t.Fatalf("read staged executable: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("staged contents = %q, want %q", got, want)
+	}
+}
+
+func TestStageTaskCLI_ReportsMissingSource(t *testing.T) {
+	t.Parallel()
+	_, err := stageTaskCLI(filepath.Join(t.TempDir(), "missing-multica"), t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "stat source executable") {
+		t.Fatalf("stageTaskCLI error = %v, want explicit source stat failure", err)
+	}
+}
+
 func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
@@ -581,6 +613,59 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 	}
 	if env["MULTICA_TOKEN"] != fakeToken {
 		t.Fatal("custom env replaced task-scoped token")
+	}
+}
+
+func TestPreferWindowsCodexPowerShellPrefersRealUserPathOverWindowsAppsAlias(t *testing.T) {
+	aliasDir := t.TempDir()
+	realDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(aliasDir, "pwsh.exe"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, "pwsh.exe"), []byte("real pwsh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := preferWindowsCodexPowerShell("codex", "windows", `C:\\task\\bin;C:\\WindowsApps`, windowsPowerShellPathDeps{
+		UserHomeDir:  func() (string, error) { return t.TempDir(), nil },
+		UserPath:     aliasDir + ";" + realDir,
+		Lstat:        os.Lstat,
+		LocalAppData: t.TempDir(),
+	})
+	if want := realDir + `;C:\\task\\bin;C:\\WindowsApps`; got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func TestPreferWindowsCodexPowerShellKeepsPathWithoutRealPowerShell(t *testing.T) {
+	aliasDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(aliasDir, "pwsh.exe"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := `C:\\task\\bin;C:\\WindowsApps`
+	got := preferWindowsCodexPowerShell("codex", "windows", path, windowsPowerShellPathDeps{
+		UserHomeDir:  func() (string, error) { return t.TempDir(), nil },
+		UserPath:     aliasDir,
+		Lstat:        os.Lstat,
+		LocalAppData: t.TempDir(),
+	})
+	if got != path {
+		t.Fatalf("PATH = %q, want unchanged %q", got, path)
+	}
+}
+
+func TestPreferWindowsCodexPowerShellLeavesOtherProvidersUntouched(t *testing.T) {
+	called := false
+	path := `C:\\task\\bin;C:\\WindowsApps`
+	got := preferWindowsCodexPowerShell("claude", "windows", path, windowsPowerShellPathDeps{
+		UserHomeDir: func() (string, error) {
+			called = true
+			return "", nil
+		},
+		Lstat: os.Lstat,
+	})
+	if got != path || called {
+		t.Fatalf("non-Codex provider changed PATH or consulted the filesystem: path=%q called=%v", got, called)
 	}
 }
 

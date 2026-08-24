@@ -612,7 +612,7 @@ func buildChatPrompt(task Task) string {
 				fmt.Fprintf(&b, "- id=%s filename=%q\n", a.ID, a.Filename)
 			}
 		}
-		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
+		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it. If the `multica` command is not found, use the task-provided absolute CLI path instead: PowerShell `& $env:MULTICA_CLI_PATH attachment download <id>`; POSIX shells `\"$MULTICA_CLI_PATH\" attachment download <id>`. Do not conclude that the attachment is unavailable until both forms have been tried.\n")
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
 	// Outbound attachments: how the agent puts an image/file INTO its reply.

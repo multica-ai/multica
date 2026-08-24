@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"io"
 	"log/slog"
 	"math/rand"
 	"net"
@@ -165,6 +166,68 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+}
+
+type windowsPowerShellPathDeps struct {
+	UserHomeDir  func() (string, error)
+	LocalAppData string
+	UserPath     string
+	Lstat        func(string) (os.FileInfo, error)
+}
+
+// preferWindowsCodexPowerShell prepends a verified PowerShell directory for
+// Codex tasks. The desktop daemon can outlive a user PATH update, leaving its
+// inherited PATH pointed at the zero-byte WindowsApps execution alias.
+func preferWindowsCodexPowerShell(provider, goos, path string, deps windowsPowerShellPathDeps) string {
+	if provider != "codex" || goos != "windows" {
+		return path
+	}
+	if deps.UserHomeDir == nil || deps.Lstat == nil {
+		return path
+	}
+	home, err := deps.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return path
+	}
+
+	candidates := make([]string, 0, 8)
+	for _, dir := range strings.Split(deps.UserPath, ";") {
+		if dir = strings.TrimSpace(dir); dir != "" {
+			candidates = append(candidates, dir)
+		}
+	}
+	localAppData := strings.TrimSpace(deps.LocalAppData)
+	if localAppData == "" {
+		localAppData = filepath.Join(home, "AppData", "Local")
+	}
+	candidates = append(candidates,
+		filepath.Join(localAppData, "Programs", "PowerShell", "7"),
+		filepath.Join(home, ".cache", "codex-runtimes", "codex-primary-runtime", "dependencies", "native", "powershell"),
+	)
+
+	for _, dir := range candidates {
+		dir = filepath.Clean(dir)
+		info, err := deps.Lstat(filepath.Join(dir, "pwsh.exe"))
+		// WindowsApps aliases are reparse points or zero-byte placeholders. A
+		// regular, non-empty file is the minimum safe contract for the child.
+		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+			continue
+		}
+		if path == "" {
+			return dir
+		}
+		return dir + ";" + path
+	}
+	return path
+}
+
+func windowsCodexPowerShellPath(provider, goos, path string) string {
+	return preferWindowsCodexPowerShell(provider, goos, path, windowsPowerShellPathDeps{
+		UserHomeDir:  os.UserHomeDir,
+		LocalAppData: os.Getenv("LOCALAPPDATA"),
+		UserPath:     windowsUserPath(),
+		Lstat:        os.Lstat,
+	})
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -7353,14 +7416,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
+	// Stage a task-local copy because provider sandboxes may not be able to
+	// access the daemon's install directory (especially on Windows).
+	selfBin, err := resolveSelfExecutable()
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve multica CLI executable: %w", err)
+	}
+	taskCLIPath, err := stageTaskCLI(selfBin, taskTempDir)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("stage multica CLI executable: %w", err)
+	}
+
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
-	}
+	// inherit the daemon's PATH. Prepend the task-local copy so that `multica`
+	// commands in the agent always resolve within the sandbox.
+	agentEnv["PATH"] = filepath.Dir(taskCLIPath) + string(os.PathListSeparator) + os.Getenv("PATH")
+	agentEnv["PATH"] = windowsCodexPowerShellPath(provider, runtime.GOOS, agentEnv["PATH"])
+	// PATH can still be filtered by a provider sandbox or shell policy. Expose
+	// the task-local executable explicitly for deterministic fallback commands.
+	agentEnv["MULTICA_CLI_PATH"] = taskCLIPath
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {
@@ -8930,6 +9005,46 @@ func socketSafeTempBaseDir() string {
 		}
 	}
 	return os.TempDir()
+}
+
+func stageTaskCLI(sourcePath, taskTempDir string) (string, error) {
+	sourcePath = strings.TrimSpace(sourcePath)
+	if sourcePath == "" {
+		return "", errors.New("source executable path is empty")
+	}
+	taskTempDir = strings.TrimSpace(taskTempDir)
+	if taskTempDir == "" {
+		return "", errors.New("task temp dir is empty")
+	}
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("stat source executable: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("source executable is not a regular file: %s", sourcePath)
+	}
+	if err := os.MkdirAll(taskTempDir, 0o700); err != nil {
+		return "", fmt.Errorf("create task temp dir: %w", err)
+	}
+	targetPath := filepath.Join(taskTempDir, filepath.Base(sourcePath))
+	in, err := os.Open(sourcePath)
+	if err != nil {
+		return "", fmt.Errorf("open source executable: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode().Perm())
+	if err != nil {
+		return "", fmt.Errorf("create staged executable: %w", err)
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		return "", fmt.Errorf("copy executable: %w", copyErr)
+	}
+	if closeErr != nil {
+		return "", fmt.Errorf("close staged executable: %w", closeErr)
+	}
+	return targetPath, nil
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-
