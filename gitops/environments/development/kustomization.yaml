@@ -43,4 +43,4 @@ images:
     newTag: "c4701fe7"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "461fcbaf"
+    newTag: "c4701fe7"
