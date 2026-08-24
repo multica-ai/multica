@@ -99,6 +99,72 @@ describe("resolveRuntimeModels", () => {
     expect(getListModelsResult).toHaveBeenLastCalledWith("rt-1", "req-1");
   });
 
+  // MUL-6606 review: the client budget has to cover the server's pending AND
+  // running windows, which are sequential. A request the daemon claims at ~29s
+  // (still inside modelListPendingTimeout) and then spends hermes' ~40s
+  // discovery on reports at ~69s — while the server still holds the record
+  // open. A 60s client budget gave up first and replaced the daemon's reason
+  // with a generic "model discovery timed out", which is precisely the message
+  // this issue exists to stop showing.
+  it("waits out a claim near the pending limit plus a full discovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+      initiateListModels.mockResolvedValue(request({ status: "pending" }));
+      getListModelsResult.mockImplementation(async () =>
+        Date.now() - start >= 69_000
+          ? request({ status: "completed", models: catalog })
+          : request({ status: "running" }),
+      );
+
+      const pending = resolveRuntimeModels("rt-1");
+      // Surface a rejection as the test failure instead of an unhandled one.
+      const settled = pending.then(
+        (value) => ({ ok: true as const, value }),
+        (error: Error) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(75_000);
+
+      const outcome = await settled;
+      if (!outcome.ok) {
+        throw new Error(
+          `client gave up while the server still held the request: ${outcome.error.message}`,
+        );
+      }
+      expect(outcome.value.models).toEqual(catalog);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The budget is not unbounded: once BOTH server windows have elapsed the
+  // record is terminal, so continuing to poll would spin forever against a
+  // server that will never answer again.
+  it("does eventually give up once the server's own windows have closed", async () => {
+    vi.useFakeTimers();
+    try {
+      initiateListModels.mockResolvedValue(request({ status: "pending" }));
+      getListModelsResult.mockResolvedValue(request({ status: "running" }));
+
+      const pending = resolveRuntimeModels("rt-1");
+      const settled = pending.then(
+        () => ({ ok: true as const }),
+        (error: Error) => ({ ok: false as const, error }),
+      );
+
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      const outcome = await settled;
+      expect(outcome.ok).toBe(false);
+      if (!outcome.ok) {
+        expect(outcome.error.message).toContain("timed out");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("surfaces a failed discovery as an error", async () => {
     initiateListModels.mockResolvedValue(
       request({ status: "failed", error: "claude not installed" }),

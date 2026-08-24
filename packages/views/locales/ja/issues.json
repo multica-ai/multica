@@ -355,7 +355,7 @@
       "hint_jump": "移動",
       "hint_close": "閉じる"
     },
-    "sidebar_tooltip": "サイドバーの開閉",
+    "sidebar_tooltip": "右サイドバーの開閉",
     "find": {
       "placeholder": "タスク内を検索...",
       "count": "{{current}}/{{total}}",

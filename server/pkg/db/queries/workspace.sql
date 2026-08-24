@@ -99,6 +99,9 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
+),
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
 ),
@@ -114,6 +117,11 @@ cleared_skill_label_assignments AS (
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
+),
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own

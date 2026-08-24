@@ -1789,6 +1789,94 @@ type claimBuildFailure struct {
 	message string
 }
 
+// rejectClaimSourceLoad settles a claim whose SOURCE row — the issue, chat
+// session, autopilot_run or autopilot the task hangs off — could not be read.
+//
+// Every one of these branches used to swallow the error and fall through on
+// `err == nil`. That is a fail-open: taskToResponse has already seeded
+// resp.WorkspaceID with the RUNTIME's workspace, so a swallowed read ran on to
+// the builder's backstop isolation check, which compared that seeded value
+// against itself and passed. The agent was then dispatched with no issue, no
+// chat input, or no autopilot instructions at all — and, for chat, past the
+// empty-input guard that lives inside the success branch.
+//
+// The two failures settle differently:
+//
+//   - The read FAILED (transient: DB blip, timeout, reset). Preserve the
+//     just-dispatched task so the stale-dispatched reclaim redelivers it,
+//     exactly as the chat-input load does (MUL-4351). This is the reachable
+//     case and the one worth fixing.
+//   - The row is GONE (ErrNoRows). Cancel: the task can never run, and
+//     preserving it would spin in the reclaim loop forever. Legacy FKs
+//     currently keep every one of these states from arising —
+//     agent_task_queue.issue_id ON DELETE CASCADE,
+//     agent_task_queue.chat_session_id ON DELETE SET NULL, and
+//     autopilot_run.autopilot_id ON DELETE CASCADE feeding
+//     agent_task_queue.autopilot_run_id ON DELETE SET NULL — so this branch is
+//     defensive. It is what protects the claim path when those FKs are dropped
+//     for the repo's no-FK rule.
+func (h *Handler) rejectClaimSourceLoad(ctx context.Context, task *db.AgentTaskQueue, err error, source, sourceID string) *claimBuildFailure {
+	if errors.Is(err, pgx.ErrNoRows) {
+		slog.Error("task claim: source row is missing; cancelling task",
+			"task_id", uuidToString(task.ID), "source", source, "source_id", sourceID)
+		if _, cerr := h.TaskService.CancelTask(ctx, task.ID); cerr != nil {
+			slog.Error("task claim: cancel after missing source row failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		return &claimBuildFailure{
+			outcome: "error_source_missing",
+			status:  http.StatusInternalServerError,
+			message: fmt.Sprintf("task is missing its %s", source),
+		}
+	}
+	slog.Error("task claim: source load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "source", source, "source_id", sourceID, "error", err)
+	return &claimBuildFailure{
+		outcome: "error_source_load",
+		status:  http.StatusInternalServerError,
+		message: fmt.Sprintf("failed to load task %s", source),
+	}
+}
+
+// rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
+// the workspace that OWNS the task's context (issue / chat session / autopilot
+// / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
+// agent env. An empty value would make the CLI silently fall back to the
+// user-global config and talk to whatever workspace the user happened to last
+// configure; a value that doesn't match the runtime's workspace means upstream
+// routed a foreign-workspace task here. Both cases hard-fail AND cancel the
+// just-dispatched task so the queue / agent status don't sit stuck until the
+// stale-task sweeper fires minutes later.
+//
+// Every branch calls this as soon as it knows its authoritative workspace and
+// BEFORE it hydrates project context, so "prove ownership, then load" is a
+// property of the structure rather than a check each branch remembers to
+// repeat. Returns nil when the claim may proceed.
+func (h *Handler) rejectClaimOnWorkspaceMismatch(ctx context.Context, task *db.AgentTaskQueue, resolvedWorkspaceID, runtimeID, runtimeWorkspaceID string, hasQuickCreate bool) *claimBuildFailure {
+	if resolvedWorkspaceID != "" && resolvedWorkspaceID == runtimeWorkspaceID {
+		return nil
+	}
+	slog.Error("task claim: workspace isolation check failed, cancelling task",
+		"task_id", uuidToString(task.ID),
+		"runtime_id", runtimeID,
+		"runtime_workspace", runtimeWorkspaceID,
+		"resolved_workspace", resolvedWorkspaceID,
+		"has_issue", task.IssueID.Valid,
+		"has_chat", task.ChatSessionID.Valid,
+		"has_autopilot_run", task.AutopilotRunID.Valid,
+		"has_quick_create", hasQuickCreate,
+	)
+	if _, cerr := h.TaskService.CancelTask(ctx, task.ID); cerr != nil {
+		slog.Error("task claim: cancel after workspace check failed",
+			"task_id", uuidToString(task.ID), "error", cerr)
+	}
+	return &claimBuildFailure{
+		outcome: "error_workspace",
+		status:  http.StatusInternalServerError,
+		message: "task workspace isolation check failed",
+	}
+}
+
 // remoteMCPDaemonTokenForClaim prepares the short-lived credential the daemon
 // uses to resolve write-only Remote MCP secrets for this task. The raw token is
 // returned only in the claim response; its hash is committed atomically with
@@ -2132,154 +2220,120 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
-	//
-	// Repo precedence: project-bound github_repo resources override workspace
-	// repos when present. Mixing both would just confuse the agent — if a
-	// project explicitly attached its repos, those are the authoritative set
-	// for issues inside that project. When the project has no github_repo
-	// resources (or no project at all), we fall back to the workspace repos.
+	// Project context, repo precedence and the tenant/failure rules around both
+	// live in resolveClaimProjectContext, which every claim path shares.
 	if task.IssueID.Valid {
-		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
-			resp.ThreadName = issue.Title
+		issue, issueErr := h.Queries.GetIssue(r.Context(), task.IssueID)
+		if issueErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, issueErr, "issue", uuidToString(task.IssueID))
+		}
+		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+		}
+		resp.ThreadName = issue.Title
 
-			// Squad-leader briefing injection: keyed off the task being a
-			// leader-task (is_leader_task) carrying a squad_id — NOT off the
-			// issue being assigned to a squad. The task flag is stamped at
-			// enqueue time and is true for every ISSUE-BOUND path that routes
-			// work to a squad leader: direct assign-to-squad, comment
-			// @squad-mention (even when the issue itself is assigned to a
-			// plain agent — the MUL-3724 case), sub-issue done callback,
-			// autopilot squad-assignee, and retry-clone inheritance. The old
-			// issue.AssigneeType=="squad" gate missed the comment-mention
-			// path, so the leader booted with zero squad context and
-			// degraded into doing the work itself instead of orchestrating.
-			//
-			// NOTE: quick-create tasks do NOT reach this block — they have a
-			// NULL issue_id (so the enclosing `task.IssueID.Valid` is false)
-			// and do NOT carry is_leader_task / squad_id columns. They route
-			// their squad through the task CONTEXT JSON (QuickCreateContext.
-			// SquadID) and get their briefing from the separate quick-create
-			// branch further below (search `qc.SquadID`). Do not "unify" the
-			// two by deleting that branch: it also sets resp.SquadID /
-			// resp.SquadName so the new issue defaults to the squad assignee,
-			// and there is no issue row to hang this column-based path on.
-			//
-			// We resolve the squad directly from task.SquadID rather than
-			// reverse-looking-up "which squad is this agent the leader of",
-			// which is ambiguous when one agent leads multiple squads. The
-			// uuidToString(squad.LeaderID) == resp.Agent.ID re-check is kept
-			// as a defensive gate: if the squad's leader was swapped after the
-			// task was enqueued, we never feed a stale briefing to a
-			// non-leader. It also doubles as the dangling-squad_id guard: a
-			// squad hard-deleted after enqueue makes GetSquadInWorkspace
-			// return no row (err != nil) — we skip injection silently, which
-			// is exactly the same observable result as "condition not
-			// matched". Claim still succeeds; no stale briefing is emitted.
-			// (No FK on squad_id — see migration 127.) We append (not replace)
-			// so per-agent instructions stay authoritative; the squad briefing
-			// stacks on top as task-specific squad context.
-			if task.IsLeaderTask {
-				injected := false
-				if resp.Agent != nil && task.SquadID.Valid {
-					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-						ID:          task.SquadID,
-						WorkspaceID: issue.WorkspaceID,
-					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						// Parent-status authority is deliberately NARROWER than
-						// briefing injection. Injection is keyed off is_leader_task
-						// (see above) and therefore also fires on the MUL-3724 path,
-						// where the issue belongs to a plain agent and this squad was
-						// only @mentioned for help. Granting status ownership there
-						// would let a guest squad push someone else's in-flight issue
-						// to in_review, so we gate it on the issue actually being
-						// assigned to this squad.
-						ownsIssueStatus := issue.AssigneeType.Valid &&
-							issue.AssigneeType.String == "squad" &&
-							uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
-						if strings.TrimSpace(resp.Agent.Instructions) == "" {
-							resp.Agent.Instructions = briefing
-						} else {
-							resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
-						}
-						injected = true
-						slog.Debug("injected squad leader briefing",
-							"squad_id", uuidToString(squad.ID),
-							"squad_name", squad.Name,
-							"leader_agent_id", resp.Agent.ID,
-							"owns_issue_status", ownsIssueStatus,
-						)
+		// Squad-leader briefing injection: keyed off the task being a
+		// leader-task (is_leader_task) carrying a squad_id — NOT off the
+		// issue being assigned to a squad. The task flag is stamped at
+		// enqueue time and is true for every ISSUE-BOUND path that routes
+		// work to a squad leader: direct assign-to-squad, comment
+		// @squad-mention (even when the issue itself is assigned to a
+		// plain agent — the MUL-3724 case), sub-issue done callback,
+		// autopilot squad-assignee, and retry-clone inheritance. The old
+		// issue.AssigneeType=="squad" gate missed the comment-mention
+		// path, so the leader booted with zero squad context and
+		// degraded into doing the work itself instead of orchestrating.
+		//
+		// NOTE: quick-create tasks do NOT reach this block — they have a
+		// NULL issue_id (so the enclosing `task.IssueID.Valid` is false)
+		// and do NOT carry is_leader_task / squad_id columns. They route
+		// their squad through the task CONTEXT JSON (QuickCreateContext.
+		// SquadID) and get their briefing from the separate quick-create
+		// branch further below (search `qc.SquadID`). Do not "unify" the
+		// two by deleting that branch: it also sets resp.SquadID /
+		// resp.SquadName so the new issue defaults to the squad assignee,
+		// and there is no issue row to hang this column-based path on.
+		//
+		// We resolve the squad directly from task.SquadID rather than
+		// reverse-looking-up "which squad is this agent the leader of",
+		// which is ambiguous when one agent leads multiple squads. The
+		// uuidToString(squad.LeaderID) == resp.Agent.ID re-check is kept
+		// as a defensive gate: if the squad's leader was swapped after the
+		// task was enqueued, we never feed a stale briefing to a
+		// non-leader. It also doubles as the dangling-squad_id guard: a
+		// squad hard-deleted after enqueue makes GetSquadInWorkspace
+		// return no row (err != nil) — we skip injection silently, which
+		// is exactly the same observable result as "condition not
+		// matched". Claim still succeeds; no stale briefing is emitted.
+		// (No FK on squad_id — see migration 127.) We append (not replace)
+		// so per-agent instructions stay authoritative; the squad briefing
+		// stacks on top as task-specific squad context.
+		if task.IsLeaderTask {
+			injected := false
+			if resp.Agent != nil && task.SquadID.Valid {
+				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+					ID:          task.SquadID,
+					WorkspaceID: issue.WorkspaceID,
+				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+					// Parent-status authority is deliberately NARROWER than
+					// briefing injection. Injection is keyed off is_leader_task
+					// (see above) and therefore also fires on the MUL-3724 path,
+					// where the issue belongs to a plain agent and this squad was
+					// only @mentioned for help. Granting status ownership there
+					// would let a guest squad push someone else's in-flight issue
+					// to in_review, so we gate it on the issue actually being
+					// assigned to this squad.
+					ownsIssueStatus := issue.AssigneeType.Valid &&
+						issue.AssigneeType.String == "squad" &&
+						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
+					if strings.TrimSpace(resp.Agent.Instructions) == "" {
+						resp.Agent.Instructions = briefing
+					} else {
+						resp.Agent.Instructions = resp.Agent.Instructions + "\n\n" + briefing
 					}
-				}
-				// Every skip above (NULL squad_id, squad hard-deleted, leader
-				// swapped after enqueue) leaves a task the daemon must NOT run
-				// as a leader: it has no roster to delegate to and no protocol
-				// to follow. The daemon derives its leader role from this flag
-				// (MUL-5811), so clearing it here is what keeps
-				// "is_leader_task on the wire ⇔ briefing injected" true, and the
-				// run degrades to an ordinary agent turn exactly as it did when
-				// the daemon inferred the role from the briefing text itself.
-				if !injected {
-					resp.IsLeaderTask = false
-					slog.Warn("squad leader briefing not injected; claim delivered as a non-leader task",
-						"task_id", uuidToString(task.ID),
-						"squad_id", uuidToString(task.SquadID),
-						"agent_id", uuidToString(task.AgentID),
+					injected = true
+					slog.Debug("injected squad leader briefing",
+						"squad_id", uuidToString(squad.ID),
+						"squad_name", squad.Name,
+						"leader_agent_id", resp.Agent.ID,
+						"owns_issue_status", ownsIssueStatus,
 					)
 				}
 			}
-
-			var projectRepos []RepoData
-			if issue.ProjectID.Valid {
-				resp.ProjectID = uuidToString(issue.ProjectID)
-				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
-					resp.ProjectTitle = proj.Title
-					resp.ProjectDescription = proj.Description.String
-				}
-				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
-					out := make([]ProjectResourceData, 0, len(rows))
-					for _, row := range rows {
-						label := ""
-						if row.Label.Valid {
-							label = row.Label.String
-						}
-						ref := json.RawMessage(row.ResourceRef)
-						if len(ref) == 0 {
-							ref = json.RawMessage("{}")
-						}
-						out = append(out, ProjectResourceData{
-							ID:           uuidToString(row.ID),
-							ResourceType: row.ResourceType,
-							ResourceRef:  ref,
-							Label:        label,
-						})
-						// Lift github_repo resources into the daemon's repo list
-						// so `multica repo checkout` and the meta-skill render
-						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
-							var payload struct {
-								URL string `json:"url"`
-								Ref string `json:"ref,omitempty"`
-							}
-							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-							}
-						}
-					}
-					resp.ProjectResources = out
-				}
-			}
-
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
+			// Every skip above (NULL squad_id, squad hard-deleted, leader
+			// swapped after enqueue) leaves a task the daemon must NOT run
+			// as a leader: it has no roster to delegate to and no protocol
+			// to follow. The daemon derives its leader role from this flag
+			// (MUL-5811), so clearing it here is what keeps
+			// "is_leader_task on the wire ⇔ briefing injected" true, and the
+			// run degrades to an ordinary agent turn exactly as it did when
+			// the daemon inferred the role from the briefing text itself.
+			if !injected {
+				resp.IsLeaderTask = false
+				slog.Warn("squad leader briefing not injected; claim delivered as a non-leader task",
+					"task_id", uuidToString(task.ID),
+					"squad_id", uuidToString(task.SquadID),
+					"agent_id", uuidToString(task.AgentID),
+				)
 			}
 		}
+
+		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), issue.ProjectID, issue.WorkspaceID)
+		if projectErr != nil {
+			slog.Error("issue claim: load project context failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+				"error", projectErr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load project context",
+			}
+		}
+		projectCtx.applyTo(&resp)
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain
@@ -2514,269 +2568,251 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 
 	// Chat task: populate workspace/session info from the chat_session table.
 	if task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
-			resp.ChatSessionID = uuidToString(cs.ID)
-			resp.ThreadName = cs.Title
-			// Legacy compatibility: agent creation no longer creates intro chats,
-			// but historical is_agent_intro sessions can still be resumed. Such a
-			// session carries no user message on its opening turn, so flag it for
-			// the historical self-introduction prompt (MUL-4230). The column stays true for the
-			// session's whole life, so gate the intro prompt on the session still
-			// having zero human messages — otherwise every follow-up turn after the
-			// creator replies would re-run the "introduce yourself" prompt and the
-			// agent keeps repeating the same introduction (MUL-4259).
-			if cs.IsAgentIntro {
-				if hasUser, herr := h.Queries.ChatSessionHasUserMessage(r.Context(), cs.ID); herr != nil {
-					slog.Warn("chat intro gate: has-user-message check failed",
-						"chat_session_id", uuidToString(cs.ID), "error", herr)
-				} else {
-					resp.ChatIntro = !hasUser
-				}
-			}
-			// Flag a channel-backed session so the daemon makes the agent aware it
-			// is operating inside an IM conversation and not the Multica web app
-			// (MUL-3871). Empty for a web-only chat session.
-			//
-			// The binding is read WITHOUT naming a channel. Every channel writes
-			// the same channel_chat_session_binding row and differs only in
-			// channel_type, and UNIQUE (chat_session_id) allows at most one, so
-			// the row itself is the answer. Enumerating candidate channels here
-			// was the bug twice over: the Slack-only lookup reported a Feishu
-			// chat as web-backed (MUL-4899), and the {slack, feishu} list that
-			// replaced it did the same to WeCom. Downstream that mis-flag makes
-			// the brief inject `multica attachment upload` guidance into a
-			// conversation that cannot carry attachments at all.
-			//
-			// ChatInThread stays Slack-only on purpose. It selects between
-			// `multica chat history` and `multica chat thread`, and those two
-			// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
-			// is no history reader on any other channel, so the flag has nothing
-			// to select between there and must not imply one exists.
-			//
-			// chat_type rides along on the same row. It is what lets the
-			// per-turn prompt tell the agent whether this chat_session is a room
-			// shared by many people or a 1:1 with the bot; the prompt used to
-			// describe every chat run as a private 1:1 whatever the room. The
-			// shared session service writes the column for every channel
-			// (channel/engine/session.go), so no channel needs naming here
-			// either.
-			if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
-				resp.ChatChannelType = binding.ChannelType
-				resp.ChatType = binding.ChatType
-				// Whether a file the agent produces reaches this
-				// conversation is the server's question, not the daemon's.
-				// It takes an adapter that goes back for the bound
-				// attachment AND storage for it to go back to, and only
-				// this process knows both. Answered here so the daemon
-				// never has to infer it from the channel type — an
-				// inference that promises delivery on any deployment
-				// running WeCom without object storage.
-				resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
-				if binding.ChannelType == string(slack.TypeSlack) {
-					// The latest trigger was a thread reply iff its reply-target
-					// thread (last_thread_id) differs from its own message id (a
-					// top-level @mention records its own ts as both).
-					resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-						binding.LastThreadID.String != binding.LastMessageID.String
-				}
-			}
-			// A web chat can opt into the same durable project context as an
-			// issue-bound task. Revalidate the soft reference in this workspace at
-			// claim time: a deleted/stale project degrades to workspace context and
-			// can never leak a project from another tenant.
-			var projectRepos []RepoData
-			if cs.ProjectID.Valid {
-				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-					ID:          cs.ProjectID,
-					WorkspaceID: cs.WorkspaceID,
-				}); err == nil {
-					resp.ProjectID = uuidToString(project.ID)
-					resp.ProjectTitle = project.Title
-					resp.ProjectDescription = project.Description.String
-					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
-						resources := make([]ProjectResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							resources = append(resources, ProjectResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
-							}
-						}
-						resp.ProjectResources = resources
-					}
-				}
-			}
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
-			if !task.ForceFreshSession {
-				// Resume chat sessions only when the stored pointer was produced
-				// by the same runtime as the claiming task. When the chat_session
-				// pointer is missing (legacy NULL runtime_id), stale (last task
-				// failed before reporting completion), or runtime-mismatched, fall
-				// back to the most recent task row that recorded a session_id —
-				// otherwise a single failed turn would silently drop the entire
-				// conversation memory on the next message. The fallback also
-				// requires runtime to match.
-				if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = cs.SessionID.String
-				}
-				if cs.WorkDir.Valid {
-					resp.PriorWorkDir = cs.WorkDir.String
-				}
-			}
-			// Resolve the user-message input batch for this run. A task-owned
-			// task (chat_input_task_id set) reads exactly the user messages
-			// tagged with its own input owner, so a message that arrived after
-			// this turn was sealed can never be absorbed here. Direct-chat
-			// tasks have owned their single message since MUL-4351; channel
-			// (Slack/Lark) tasks now seal their trailing batch at enqueue too.
-			// Only legacy tasks created before that deploy carry a NULL owner
-			// and keep the trailing-message selector — the run of user messages
-			// after the last assistant row, which also covers a debounced burst
-			// (MUL-2968: "看上海天气" then "还有青岛" must both be delivered) —
-			// so a rolling deploy never replays their history. Attachments are
-			// collected per included message so the agent can
-			// `multica attachment download <id>` (the inline markdown URL is
-			// signed + 30-min expiring on the CDN).
-			var unanswered []db.ChatMessage
-			var inputLoadErr error
-			if task.ChatInputTaskID.Valid {
-				unanswered, inputLoadErr = h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID)
-			} else if msgs, err := h.Queries.ListChatMessagesForLegacyTask(r.Context(), cs.ID); err == nil {
-				unanswered = trailingUserMessages(msgs)
+		cs, chatErr := h.Queries.GetChatSession(r.Context(), task.ChatSessionID)
+		if chatErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, chatErr, "chat session", uuidToString(task.ChatSessionID))
+		}
+		resp.WorkspaceID = uuidToString(cs.WorkspaceID)
+		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+		}
+		resp.ChatSessionID = uuidToString(cs.ID)
+		resp.ThreadName = cs.Title
+		// Legacy compatibility: agent creation no longer creates intro chats,
+		// but historical is_agent_intro sessions can still be resumed. Such a
+		// session carries no user message on its opening turn, so flag it for
+		// the historical self-introduction prompt (MUL-4230). The column stays true for the
+		// session's whole life, so gate the intro prompt on the session still
+		// having zero human messages — otherwise every follow-up turn after the
+		// creator replies would re-run the "introduce yourself" prompt and the
+		// agent keeps repeating the same introduction (MUL-4259).
+		if cs.IsAgentIntro {
+			if hasUser, herr := h.Queries.ChatSessionHasUserMessage(r.Context(), cs.ID); herr != nil {
+				slog.Warn("chat intro gate: has-user-message check failed",
+					"chat_session_id", uuidToString(cs.ID), "error", herr)
 			} else {
-				inputLoadErr = err
+				resp.ChatIntro = !hasUser
 			}
-			// A read failure must NOT masquerade as "zero input". Preserve the
-			// just-dispatched task (the stale-dispatched reclaim redelivers it)
-			// and reject the claim with 5xx, rather than cancelling a valid direct
-			// task on a transient DB error (MUL-4351 review).
-			if inputLoadErr != nil {
-				slog.Error("chat claim: load chat input messages failed; preserving task for redelivery",
-					"task_id", uuidToString(task.ID),
-					"chat_session_id", uuidToString(cs.ID),
-					"error", inputLoadErr)
-				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-					outcome: "error_chat_input_load",
-					status:  http.StatusInternalServerError,
-					message: "failed to load chat input",
-				}
+		}
+		// Flag a channel-backed session so the daemon makes the agent aware it
+		// is operating inside an IM conversation and not the Multica web app
+		// (MUL-3871). Empty for a web-only chat session.
+		//
+		// The binding is read WITHOUT naming a channel. Every channel writes
+		// the same channel_chat_session_binding row and differs only in
+		// channel_type, and UNIQUE (chat_session_id) allows at most one, so
+		// the row itself is the answer. Enumerating candidate channels here
+		// was the bug twice over: the Slack-only lookup reported a Feishu
+		// chat as web-backed (MUL-4899), and the {slack, feishu} list that
+		// replaced it did the same to WeCom. Downstream that mis-flag makes
+		// the brief inject `multica attachment upload` guidance into a
+		// conversation that cannot carry attachments at all.
+		//
+		// ChatInThread stays Slack-only on purpose. It selects between
+		// `multica chat history` and `multica chat thread`, and those two
+		// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
+		// is no history reader on any other channel, so the flag has nothing
+		// to select between there and must not imply one exists.
+		//
+		// chat_type rides along on the same row. It is what lets the
+		// per-turn prompt tell the agent whether this chat_session is a room
+		// shared by many people or a 1:1 with the bot; the prompt used to
+		// describe every chat run as a private 1:1 whatever the room. The
+		// shared session service writes the column for every channel
+		// (channel/engine/session.go), so no channel needs naming here
+		// either.
+		if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
+			resp.ChatChannelType = binding.ChannelType
+			resp.ChatType = binding.ChatType
+			// Whether a file the agent produces reaches this
+			// conversation is the server's question, not the daemon's.
+			// It takes an adapter that goes back for the bound
+			// attachment AND storage for it to go back to, and only
+			// this process knows both. Answered here so the daemon
+			// never has to infer it from the channel type — an
+			// inference that promises delivery on any deployment
+			// running WeCom without object storage.
+			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
+			if binding.ChannelType == string(slack.TypeSlack) {
+				// The latest trigger was a thread reply iff its reply-target
+				// thread (last_thread_id) differs from its own message id (a
+				// top-level @mention records its own ts as both).
+				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+					binding.LastThreadID.String != binding.LastMessageID.String
 			}
+		}
+		// A web chat can opt into the same durable project context as an
+		// issue-bound task.
+		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
+		if projectErr != nil {
+			slog.Error("chat claim: load project context failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"chat_session_id", uuidToString(cs.ID),
+				"error", projectErr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load project context",
+			}
+		}
+		projectCtx.applyTo(&resp)
+		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
+			// Resume chat sessions only when the stored pointer was produced
+			// by the same runtime as the claiming task. When the chat_session
+			// pointer is missing (legacy NULL runtime_id), stale (last task
+			// failed before reporting completion), or runtime-mismatched, fall
+			// back to the most recent task row that recorded a session_id —
+			// otherwise a single failed turn would silently drop the entire
+			// conversation memory on the next message. The fallback also
+			// requires runtime to match.
+			if cs.SessionID.Valid && cs.RuntimeID.Valid && cs.RuntimeID == task.RuntimeID {
+				resp.PriorSessionID = cs.SessionID.String
+			}
+			if cs.WorkDir.Valid {
+				resp.PriorWorkDir = cs.WorkDir.String
+			}
+		}
+		// Resolve the user-message input batch for this run. A task-owned
+		// task (chat_input_task_id set) reads exactly the user messages
+		// tagged with its own input owner, so a message that arrived after
+		// this turn was sealed can never be absorbed here. Direct-chat
+		// tasks have owned their single message since MUL-4351; channel
+		// (Slack/Lark) tasks now seal their trailing batch at enqueue too.
+		// Only legacy tasks created before that deploy carry a NULL owner
+		// and keep the trailing-message selector — the run of user messages
+		// after the last assistant row, which also covers a debounced burst
+		// (MUL-2968: "看上海天气" then "还有青岛" must both be delivered) —
+		// so a rolling deploy never replays their history. Attachments are
+		// collected per included message so the agent can
+		// `multica attachment download <id>` (the inline markdown URL is
+		// signed + 30-min expiring on the CDN).
+		var unanswered []db.ChatMessage
+		var inputLoadErr error
+		if task.ChatInputTaskID.Valid {
+			unanswered, inputLoadErr = h.Queries.ListChatInputMessages(r.Context(), task.ChatInputTaskID)
+		} else if msgs, err := h.Queries.ListChatMessagesForLegacyTask(r.Context(), cs.ID); err == nil {
+			unanswered = trailingUserMessages(msgs)
+		} else {
+			inputLoadErr = err
+		}
+		// A read failure must NOT masquerade as "zero input". Preserve the
+		// just-dispatched task (the stale-dispatched reclaim redelivers it)
+		// and reject the claim with 5xx, rather than cancelling a valid direct
+		// task on a transient DB error (MUL-4351 review).
+		if inputLoadErr != nil {
+			slog.Error("chat claim: load chat input messages failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"chat_session_id", uuidToString(cs.ID),
+				"error", inputLoadErr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_chat_input_load",
+				status:  http.StatusInternalServerError,
+				message: "failed to load chat input",
+			}
+		}
 
-			// Input ownership is the claim's fail-closed boundary. Resume-history
-			// reads belong after it: a task that cannot load its input is preserved
-			// for redelivery and must not spend two more queries before returning.
-			if !task.ForceFreshSession {
-				// GetLastChatTaskSession currently has exactly two consumers: the
-				// prior session and prior workdir fields. Keep this guard coupled to
-				// both so adding a third consumer cannot silently skip its fallback.
-				if chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
-					h.Metrics.RecordChatClaimSessionFallbackNeeded()
-					started := time.Now()
-					prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID)
-					h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
-					switch {
-					case err == nil && prior.SessionID.Valid:
-						h.Metrics.RecordChatClaimSessionFallbackHit()
-						if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-							resp.PriorSessionID = prior.SessionID.String
-						}
-						if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-							resp.PriorWorkDir = prior.WorkDir.String
-						}
-					case errors.Is(err, pgx.ErrNoRows):
-						h.Metrics.RecordChatClaimSessionFallbackMiss()
-					case err == nil:
-						// Defensive only: the SQL excludes NULL session ids, but
-						// preserve miss semantics if that contract ever changes.
-						h.Metrics.RecordChatClaimSessionFallbackMiss()
-					default:
-						h.Metrics.RecordChatClaimSessionFallbackError()
-					}
-				}
-
-				// MUL-5305: continuity-gap disclosure is independent of whether
-				// either pointer field needed fallback, so this query stays
-				// unconditional for non-force-fresh chat claims.
+		// Input ownership is the claim's fail-closed boundary. Resume-history
+		// reads belong after it: a task that cannot load its input is preserved
+		// for redelivery and must not spend two more queries before returning.
+		if !task.ForceFreshSession {
+			contextRevision := pgtype.Int8{}
+			if task.ChannelContextRevision.Valid {
+				contextRevision = task.ChannelContextRevision
+			}
+			// GetLastChatTaskSession currently has exactly two consumers: the
+			// prior session and prior workdir fields. Keep this guard coupled to
+			// both so adding a third consumer cannot silently skip its fallback.
+			// Context-scoped channel tasks always resolve both fields from task
+			// rows in their own generation; the Chat-wide pointer may belong to a
+			// different generation when independent debounce timers race.
+			if task.ChannelContextRevision.Valid || chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
+				h.Metrics.RecordChatClaimSessionFallbackNeeded()
 				started := time.Now()
-				missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID)
-				h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
-				if err == nil && missing {
-					resp.PriorSessionResumeUnavailable = true
-				}
-			}
-
-			parts := make([]string, 0, len(unanswered))
-			for _, m := range unanswered {
-				if strings.TrimSpace(m.Content) != "" {
-					parts = append(parts, m.Content)
-				}
-				if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
-					ChatMessageID: m.ID,
-					WorkspaceID:   parseUUID(resp.WorkspaceID),
-				}); attErr == nil && len(atts) > 0 {
-					for _, a := range atts {
-						resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
-							ID:          uuidToString(a.ID),
-							Filename:    a.Filename,
-							ContentType: a.ContentType,
-						})
+				prior, err := h.Queries.GetLastChatTaskSession(r.Context(), db.GetLastChatTaskSessionParams{
+					ChatSessionID:          cs.ID,
+					ChannelContextRevision: contextRevision,
+				})
+				h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
+				switch {
+				case err == nil && prior.SessionID.Valid:
+					h.Metrics.RecordChatClaimSessionFallbackHit()
+					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+						resp.PriorSessionID = prior.SessionID.String
 					}
-				}
-			}
-			resp.ChatMessage = strings.Join(parts, "\n\n")
-
-			// Fail closed: a task-owned direct task that resolves to no user text
-			// (and is not the agent's proactive intro) must never dispatch an
-			// empty prompt. The send path creates the owning user message in the
-			// same transaction as the task, so this only fires on genuinely
-			// corrupt state — cancel the just-dispatched task and reject the claim
-			// rather than run the agent with nothing to answer (MUL-4351).
-			if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
-				slog.Error("chat claim: task-owned direct task has no user input; cancelling",
-					"task_id", uuidToString(task.ID),
-					"chat_session_id", uuidToString(cs.ID),
-					"chat_input_task_id", uuidToString(task.ChatInputTaskID),
-				)
-				if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
-					slog.Error("chat claim: cancel after empty input failed",
-						"task_id", uuidToString(task.ID), "error", cerr)
-				}
-				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-					outcome: "error_empty_chat_input",
-					status:  http.StatusInternalServerError,
-					message: "chat task has no user input",
+					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+						resp.PriorWorkDir = prior.WorkDir.String
+					}
+				case errors.Is(err, pgx.ErrNoRows):
+					h.Metrics.RecordChatClaimSessionFallbackMiss()
+				case err == nil:
+					// Defensive only: the SQL excludes NULL session ids, but
+					// preserve miss semantics if that contract ever changes.
+					h.Metrics.RecordChatClaimSessionFallbackMiss()
+				default:
+					h.Metrics.RecordChatClaimSessionFallbackError()
 				}
 			}
 
-			if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
-				resp.ThreadName = resp.ChatMessage
+			// MUL-5305: continuity-gap disclosure is independent of whether
+			// either pointer field needed fallback, so this query stays
+			// unconditional for non-force-fresh chat claims.
+			started := time.Now()
+			missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), db.GetLatestChatTaskRolloutMissingParams{
+				ChatSessionID:          cs.ID,
+				ChannelContextRevision: contextRevision,
+			})
+			h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
+			if err == nil && missing {
+				resp.PriorSessionResumeUnavailable = true
 			}
+		}
+
+		parts := make([]string, 0, len(unanswered))
+		for _, m := range unanswered {
+			if strings.TrimSpace(m.Content) != "" {
+				parts = append(parts, m.Content)
+			}
+			if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
+				ChatMessageID: m.ID,
+				WorkspaceID:   parseUUID(resp.WorkspaceID),
+			}); attErr == nil && len(atts) > 0 {
+				for _, a := range atts {
+					resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
+						ID:          uuidToString(a.ID),
+						Filename:    a.Filename,
+						ContentType: a.ContentType,
+					})
+				}
+			}
+		}
+		resp.ChatMessage = strings.Join(parts, "\n\n")
+
+		// Fail closed: a task-owned direct task that resolves to no user text
+		// (and is not the agent's proactive intro) must never dispatch an
+		// empty prompt. The send path creates the owning user message in the
+		// same transaction as the task, so this only fires on genuinely
+		// corrupt state — cancel the just-dispatched task and reject the claim
+		// rather than run the agent with nothing to answer (MUL-4351).
+		if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
+			slog.Error("chat claim: task-owned direct task has no user input; cancelling",
+				"task_id", uuidToString(task.ID),
+				"chat_session_id", uuidToString(cs.ID),
+				"chat_input_task_id", uuidToString(task.ChatInputTaskID),
+			)
+			if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+				slog.Error("chat claim: cancel after empty input failed",
+					"task_id", uuidToString(task.ID), "error", cerr)
+			}
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_empty_chat_input",
+				status:  http.StatusInternalServerError,
+				message: "chat task has no user input",
+			}
+		}
+
+		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
+			resp.ThreadName = resp.ChatMessage
 		}
 	}
 
@@ -2784,31 +2820,57 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.
 	if task.AutopilotRunID.Valid {
-		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
-			resp.AutopilotID = uuidToString(run.AutopilotID)
-			resp.AutopilotSource = run.Source
-			if run.TriggerPayload != nil {
-				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
-			}
-			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
-				resp.AutopilotTitle = ap.Title
-				resp.ThreadName = ap.Title
-				if ap.Description.Valid {
-					resp.AutopilotDescription = ap.Description.String
-				}
-				if resp.WorkspaceID == "" {
-					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
-				}
-				if len(resp.Repos) == 0 {
-					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						var repos []RepoData
-						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-							resp.Repos = repos
-						}
-					}
-				}
+		run, runErr := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID)
+		if runErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, runErr, "autopilot run", uuidToString(task.AutopilotRunID))
+		}
+		ap, apErr := h.Queries.GetAutopilot(r.Context(), run.AutopilotID)
+		if apErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, apErr, "autopilot", uuidToString(run.AutopilotID))
+		}
+
+		// The autopilot owns this task's workspace. taskToResponse seeded
+		// resp.WorkspaceID with the RUNTIME's workspace, so the old
+		// `if resp.WorkspaceID == ""` guard never fired and left the isolation
+		// check comparing the runtime workspace against itself. Assign
+		// authoritatively, then prove ownership before exposing any
+		// autopilot-owned context.
+		resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+		}
+
+		resp.AutopilotID = uuidToString(run.AutopilotID)
+		resp.AutopilotSource = run.Source
+		if run.TriggerPayload != nil {
+			resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
+		}
+		resp.AutopilotTitle = ap.Title
+		resp.ThreadName = ap.Title
+		if ap.Description.Valid {
+			resp.AutopilotDescription = ap.Description.String
+		}
+
+		// A run_only autopilot has no issue from which to inherit project
+		// context, so its configured project is hydrated here. That gives the
+		// daemon the same resource contract as issue-bound and quick-create
+		// tasks: project repositories scope the checkout, while local_directory
+		// lets the daemon select the bound path and write its managed manifest.
+		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), ap.ProjectID, ap.WorkspaceID)
+		if projectErr != nil {
+			slog.Error("autopilot claim: load project context failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"autopilot_id", uuidToString(run.AutopilotID),
+				"error", projectErr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load project context",
 			}
 		}
+		projectCtx.applyTo(&resp)
 	}
 
 	// Handoff note (MUL-3375) is populated by taskToResponse (the shared mapper
@@ -2829,61 +2891,33 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, true); failure != nil {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
-			// it would for an issue-bound task: the prompt template can name
-			// the project, and `multica repo checkout` sees the project's
-			// github_repo resources instead of the workspace fallback.
-			var projectRepos []RepoData
+			// it would for an issue-bound task. A prompt-supplied project id
+			// that does not parse is treated as no project at all.
+			var quickCreateProjectID pgtype.UUID
 			if qc.ProjectID != "" {
-				projectUUID, err := util.ParseUUID(qc.ProjectID)
-				if err == nil {
-					resp.ProjectID = qc.ProjectID
-					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
-						resp.ProjectTitle = proj.Title
-						resp.ProjectDescription = proj.Description.String
-					}
-					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
-						out := make([]ProjectResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							out = append(out, ProjectResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
-							}
-						}
-						resp.ProjectResources = out
-					}
+				if parsed, err := util.ParseUUID(qc.ProjectID); err == nil {
+					quickCreateProjectID = parsed
 				}
 			}
-
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+			projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), quickCreateProjectID, parseUUID(qc.WorkspaceID))
+			if projectErr != nil {
+				slog.Error("quick-create claim: load project context failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"project_id", qc.ProjectID,
+					"error", projectErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_project_context",
+					status:  http.StatusInternalServerError,
+					message: "failed to load project context",
 				}
 			}
+			projectCtx.applyTo(&resp)
 
 			// Parent-issue resolution for quick-create tasks opened from
 			// "Add sub issue". The handler already verified workspace
@@ -2951,34 +2985,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	// Workspace isolation check: the daemon uses this response's workspace_id
-	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
-	// empty value would make the CLI silently fall back to the user-global
-	// config and talk to whatever workspace the user happened to last
-	// configure; a value that doesn't match the runtime's workspace means
-	// upstream routed a foreign-workspace task here. Both cases must hard-
-	// fail AND cancel the just-dispatched task so the queue / agent status
-	// don't sit stuck until the stale-task sweeper fires minutes later.
-	if resp.WorkspaceID == "" || resp.WorkspaceID != runtimeWorkspaceID {
-		slog.Error("task claim: workspace isolation check failed, cancelling task",
-			"task_id", uuidToString(task.ID),
-			"runtime_id", runtimeID,
-			"runtime_workspace", runtimeWorkspaceID,
-			"resolved_workspace", resp.WorkspaceID,
-			"has_issue", task.IssueID.Valid,
-			"has_chat", task.ChatSessionID.Valid,
-			"has_autopilot_run", task.AutopilotRunID.Valid,
-			"has_quick_create", hasQuickCreate,
-		)
-		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
-			slog.Error("task claim: cancel after workspace check failed",
-				"task_id", uuidToString(task.ID), "error", cerr)
-		}
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-			outcome: "error_workspace",
-			status:  http.StatusInternalServerError,
-			message: "task workspace isolation check failed",
-		}
+	// Catch-all workspace isolation check. Every context branch above already
+	// ran this the moment it resolved its owning workspace, which is what makes
+	// "prove ownership, then hydrate" structural rather than per-branch
+	// discipline. This final call is the backstop for a task that reached here
+	// without any branch claiming it.
+	if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, hasQuickCreate); failure != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 	}
 
 	// Surface a bounded snapshot of the same agent's other in-flight issue

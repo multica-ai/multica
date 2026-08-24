@@ -61,7 +61,7 @@
     "icon_tooltip": "アイコンを変更",
     "pin_tooltip": "サイドバーに固定",
     "unpin_tooltip": "サイドバーの固定を解除",
-    "sidebar_tooltip": "サイドバーの開閉",
+    "sidebar_tooltip": "右サイドバーの開閉",
     "copy_link": "リンクをコピー",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",

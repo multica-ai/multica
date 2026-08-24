@@ -168,6 +168,7 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "kimi", binary: "kimi", notification: "session/update"},
 	{backend: "reasonix", binary: "reasonix", notification: "session/update"},
 	{backend: "dim", binary: "dim", notification: "session/update"},
+	{backend: "zeroclaw", binary: "zeroclaw", notification: "session/update"},
 	{backend: "traecli", binary: "traecli", notification: "session/update"},
 	{backend: "grok", binary: "grok", notification: "session/update"},
 	{backend: "mcode", binary: "mcode", notification: "session/update"},

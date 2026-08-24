@@ -322,6 +322,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
 	"dim":         dimBlockedArgs,
+	"zeroclaw":    zeroclawBlockedArgs,
 }
 
 // FilterLaunchPrefix is the exported form for callers outside this package —

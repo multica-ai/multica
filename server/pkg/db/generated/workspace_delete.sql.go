@@ -407,6 +407,10 @@ deleted_github_check_suites AS (
 deleted_pending_github_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
+deleted_channel_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
 deleted_vcs_commit_statuses AS (
     DELETE FROM vcs_commit_status
     WHERE connection_id IN (SELECT id FROM ws_vcs_connections)
@@ -497,6 +501,10 @@ deleted_storage AS (
 ),
 deleted_secrets AS (
     DELETE FROM plugin_secret
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_hook_schedules AS (
+    DELETE FROM plugin_hook_schedule
     WHERE installation_id IN (SELECT id FROM installations)
 ),
 deleted_invocations AS (

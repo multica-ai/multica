@@ -126,6 +126,21 @@ type AppendResult struct {
 	// DedupMarked is true when AppendMessage finalized the dedup claim in its
 	// own tx; the Router then skips the post-pipeline finalize.
 	DedupMarked bool
+	// ContextRevision is the durable agent-visible context generation assigned
+	// to this message. The batcher keys and task snapshot use it as a boundary.
+	ContextRevision int64
+	// PendingContexts includes every generation with durable unowned input and
+	// its authenticated sender snapshot. It re-arms debounce windows lost on
+	// process crash without borrowing the sender of a later generation.
+	PendingContexts []PendingContext
+}
+
+// PendingContext identifies durable unowned input that needs a run timer. The
+// initiator can be absent only for legacy or corrupt data; recovery fails
+// closed for such older generations rather than impersonating a new sender.
+type PendingContext struct {
+	Revision        int64
+	InitiatorUserID pgtype.UUID
 }
 
 // BindMediaParams carries stored media references to the post-append
@@ -201,7 +216,7 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
-	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
 	BindMedia(ctx context.Context, p BindMediaParams) error
 }
@@ -334,7 +349,7 @@ type IssueCreator interface {
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }

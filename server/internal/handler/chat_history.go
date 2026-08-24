@@ -55,7 +55,7 @@ type ChatChannelHistoryResponse struct {
 // reconstruct the conversation after a lost resume instead of being told nothing
 // is readable (see the continuity-notice split in execenv).
 func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := h.chatHistorySession(w, r)
+	scope, ok := h.chatHistorySession(w, r)
 	if !ok {
 		return
 	}
@@ -66,15 +66,15 @@ func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) 
 		// serve the stored transcript directly. Without this a no-Slack deployment
 		// — the exact one this feature targets — would dead-end on a "no channel
 		// integration" note and never reach the transcript.
-		page, err = h.chatMessageHistory(r, sessionID)
+		page, err = h.chatMessageHistory(r, scope)
 	} else {
-		page, err = h.SlackHistory.ChannelOverview(r.Context(), sessionID, historyOptionsFrom(r))
+		page, err = h.SlackHistory.ChannelOverview(r.Context(), scope.sessionID, scope.historyOptions(r))
 		if errors.Is(err, slack.ErrNoSlackSession) {
 			// Not Slack-backed: read the session's own stored transcript instead.
-			page, err = h.chatMessageHistory(r, sessionID)
+			page, err = h.chatMessageHistory(r, scope)
 		}
 	}
-	h.respondChatHistory(w, r, sessionID, page, err)
+	h.respondChatHistory(w, r, scope.sessionID, page, err)
 }
 
 // chatMessageHistory reads a chat session's own stored transcript (chat_message)
@@ -84,15 +84,22 @@ func (h *Handler) GetChatChannelHistory(w http.ResponseWriter, r *http.Request) 
 // Multica — there is no platform to read back. It pages through the same
 // (created_at, id) cursor the frontend's message list uses, so an agent can walk
 // a long session back without re-reading the recent window each time.
-func (h *Handler) chatMessageHistory(r *http.Request, sessionID pgtype.UUID) (channel.HistoryPage, error) {
+func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (channel.HistoryPage, error) {
 	limit := clampTranscriptLimit(parseHistoryLimit(r.URL.Query().Get("limit")))
 	beforeCreatedAt, beforeID := parseTranscriptCursor(r.URL.Query().Get("before"))
-	messages, err := h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
-		ChatSessionID:   sessionID,
-		Limit:           int32(limit),
-		BeforeCreatedAt: beforeCreatedAt,
-		BeforeID:        beforeID,
-	})
+	var messages []db.ChatMessage
+	var err error
+	if scope.contextRevision.Valid {
+		messages, err = h.Queries.ListChatMessagesPageForChannelContext(r.Context(), db.ListChatMessagesPageForChannelContextParams{
+			ChatSessionID: scope.sessionID, ChannelContextRevision: scope.contextRevision,
+			PageLimit: int32(limit), BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		})
+	} else {
+		messages, err = h.Queries.ListChatMessagesPage(r.Context(), db.ListChatMessagesPageParams{
+			ChatSessionID: scope.sessionID, Limit: int32(limit),
+			BeforeCreatedAt: beforeCreatedAt, BeforeID: beforeID,
+		})
+	}
 	if err != nil {
 		return channel.HistoryPage{}, err
 	}
@@ -118,7 +125,7 @@ func (h *Handler) chatMessageHistory(r *http.Request, sessionID pgtype.UUID) (ch
 	// unset here would tell a Feishu/WeCom/DingTalk agent it is in a web-only
 	// chat — and would disagree with the empty-read path below, which already
 	// reports the bound platform for the very same session.
-	channelType, err := h.sessionChannelType(r.Context(), sessionID)
+	channelType, err := h.sessionChannelType(r.Context(), scope.sessionID)
 	if err != nil {
 		return channel.HistoryPage{}, fmt.Errorf("%w: %w", errChannelBindingRead, err)
 	}
@@ -193,7 +200,7 @@ func transcriptAuthor(role channel.HistoryRole) string {
 // channel stays server-pinned to the session, so the id is only a within-channel
 // locator.
 func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
-	sessionID, ok := h.chatHistorySession(w, r)
+	scope, ok := h.chatHistorySession(w, r)
 	if !ok {
 		return
 	}
@@ -202,8 +209,8 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	threadID := r.URL.Query().Get("id")
-	page, err := h.SlackHistory.Thread(r.Context(), sessionID, threadID, historyOptionsFrom(r))
-	h.respondChatHistory(w, r, sessionID, page, err)
+	page, err := h.SlackHistory.Thread(r.Context(), scope.sessionID, threadID, scope.historyOptions(r))
+	h.respondChatHistory(w, r, scope.sessionID, page, err)
 }
 
 // chatHistorySession authorizes the request and returns the caller's own chat
@@ -212,29 +219,48 @@ func (h *Handler) GetChatThread(w http.ResponseWriter, r *http.Request) {
 // mul_ PAT leaves X-Actor-Source empty and does NOT strip a client-forged
 // X-Task-ID), so requiring the task-token actor is load-bearing — without it a
 // member could forge X-Task-ID and read another session's history.
-func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
+type chatHistoryScope struct {
+	sessionID       pgtype.UUID
+	contextRevision pgtype.Int8
+	historyStart    string
+	historyEnd      string
+	boundaryPending bool
+}
+
+func (s chatHistoryScope) historyOptions(r *http.Request) channel.HistoryOptions {
+	opts := historyOptionsFrom(r)
+	opts.BoundaryPending = s.boundaryPending
+	opts.After = s.historyStart
+	opts.Until = s.historyEnd
+	if s.contextRevision.Valid {
+		opts.ContextRevision = s.contextRevision.Int64
+	}
+	return opts
+}
+
+func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (chatHistoryScope, bool) {
 	if r.Header.Get("X-Actor-Source") != "task_token" {
 		writeError(w, http.StatusForbidden, "chat history is only available from within an agent task")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	taskIDHeader := r.Header.Get("X-Task-ID")
 	if taskIDHeader == "" {
 		writeError(w, http.StatusBadRequest, "missing task context")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	taskUUID, err := util.ParseUUID(taskIDHeader)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid task id")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "task not found")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	if !task.ChatSessionID.Valid {
 		writeError(w, http.StatusBadRequest, "this task is not a chat task")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	// Defense in depth: load the session and confirm it lives in the token's
 	// stamped workspace. The token→task binding already guarantees the agent can
@@ -242,13 +268,26 @@ func (h *Handler) chatHistorySession(w http.ResponseWriter, r *http.Request) (pg
 	session, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "chat session not found")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
 	if ws := ctxWorkspaceID(r.Context()); ws != "" && uuidToString(session.WorkspaceID) != ws {
 		writeError(w, http.StatusForbidden, "chat session does not belong to this workspace")
-		return pgtype.UUID{}, false
+		return chatHistoryScope{}, false
 	}
-	return task.ChatSessionID, true
+	scope := chatHistoryScope{sessionID: task.ChatSessionID, contextRevision: task.ChannelContextRevision}
+	if task.ChannelContextRevision.Valid {
+		generation, err := h.Queries.GetChannelChatContextGeneration(r.Context(), db.GetChannelChatContextGenerationParams{
+			ChatSessionID: task.ChatSessionID, Revision: task.ChannelContextRevision.Int64,
+		})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "chat context generation not found")
+			return chatHistoryScope{}, false
+		}
+		scope.historyStart = generation.HistoryStartMessageID.String
+		scope.historyEnd = generation.HistoryEndMessageID.String
+		scope.boundaryPending = generation.HistoryBoundaryPending
+	}
+	return scope, true
 }
 
 // respondChatHistory writes the shared response: a note (200) when the session

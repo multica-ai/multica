@@ -168,8 +168,12 @@
         "description": "優先するタスク作成フローを開きます。"
       },
       "toggleSidebar": {
-        "label": "サイドバーを切り替え",
-        "description": "メインサイドバーの表示を切り替えます。"
+        "label": "左サイドバーを切り替え",
+        "description": "左サイドバーの表示を切り替えます。"
+      },
+      "toggleRightSidebar": {
+        "label": "右サイドバーを切り替え",
+        "description": "現在のページに右サイドバーがある場合、その表示を切り替えます。"
       },
       "toggleChat": {
         "label": "チャットウィンドウを切り替え",
@@ -363,6 +367,19 @@
       "installed": "Plugin をインストールしました",
       "upgrade_from": " · v{{version}} からアップグレード",
       "new_scope": "新規"
+    },
+    "schedule": {
+      "title": "自動スケジュール",
+      "consent_title": "この Plugin はフックを自動実行します",
+      "consent_description": "インストールまたはアップグレードすると、次のスケジュールが有効になります。複数回分を逃した場合は、直近の実行だけを配信します。",
+      "next_run": "次回：{{time}}",
+      "activity_title": "最近の配信",
+      "activity_last": "{{status}} · 予定 {{planned}} · 送信 {{actual}} · 試行 {{attempt}}",
+      "activity_empty": "まだ配信されていません",
+      "frequency_minutes_other": "{{count}} 分ごと",
+      "frequency_hourly": "毎時 {{minute}} 分",
+      "frequency_daily": "毎日 {{hour}}:{{minute}}",
+      "frequency_custom": "カスタム繰り返しスケジュール"
     },
     "config": {
       "title": "設定",

@@ -237,7 +237,9 @@ var issueReorderCmd = &cobra.Command{
 		"  --top          move it to the top of its column\n" +
 		"  --bottom       move it to the bottom of its column\n\n" +
 		"Reorder stays inside the issue's current column. To move an issue to a\n" +
-		"different column, change its status first with `multica issue status`.",
+		"different column, change its status first with `multica issue status`,\n" +
+		"which lands it at the top of the destination column — no follow-up\n" +
+		"reorder needed.",
 	Args: exactArgs(1),
 	RunE: runIssueReorder,
 }

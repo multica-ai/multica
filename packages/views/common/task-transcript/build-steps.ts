@@ -354,6 +354,16 @@ export function timelineTicks(totalMs: number, maxTicks = 6): number[] {
   const interval = steps.find((step) => totalMs / step <= maxTicks) ?? steps[steps.length - 1]!;
   const ticks: number[] = [];
   for (let at = 0; at < totalMs; at += interval) ticks.push(at);
+  const lastRoundTick = ticks[ticks.length - 1];
+  // The exact run end is more useful than a nearby round tick. Keeping both
+  // makes labels such as `2m` and `2m 2s` occupy the same right-edge pixels.
+  if (
+    lastRoundTick !== undefined &&
+    lastRoundTick > 0 &&
+    totalMs - lastRoundTick < interval / 2
+  ) {
+    ticks.pop();
+  }
   ticks.push(totalMs);
   return ticks;
 }

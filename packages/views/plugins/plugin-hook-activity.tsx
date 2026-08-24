@@ -3,9 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle } from "lucide-react";
 import { pluginInvocationsOptions } from "@multica/core/plugins";
-import type { PluginInvocation } from "@multica/core/types";
+import type { PluginHook, PluginInvocation } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
-import { useT } from "../i18n";
+import { useLocale, useT } from "../i18n";
 
 /**
  * Why a plugin's hook is failing, where the admin who installed it will look.
@@ -76,4 +76,61 @@ export function PluginHookActivity({ wsId, installationId }: { wsId: string; ins
       </div>
     </div>
   );
+}
+
+export function PluginScheduleActivity({
+  wsId,
+  installationId,
+  hooks,
+}: {
+  wsId: string;
+  installationId: string;
+  hooks: readonly PluginHook[];
+}) {
+  const { t } = useT("settings");
+  const locale = useLocale();
+  const { data } = useQuery(pluginInvocationsOptions(wsId, installationId));
+  const scheduled = hooks.filter((hook) => hook.schedule !== undefined);
+  if (scheduled.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5">
+      <div className="text-caption font-medium">{t(($) => $.plugins.schedule.activity_title)}</div>
+      <ul className="space-y-1">
+        {scheduled.map((hook) => {
+          const last = (data ?? []).find((invocation) => (
+            invocation.trigger === "schedule" && invocation.hook_key === hook.key
+          ));
+          return (
+            <li key={hook.key} className="text-caption text-muted-foreground">
+              <span className="font-medium text-foreground">{hook.name}</span>
+              {last ? (
+                <span>
+                  {" · "}
+                  {t(($) => $.plugins.schedule.activity_last, {
+                    status: last.status,
+                    planned: formatInvocationTime(last.planned_at, locale),
+                    actual: formatInvocationTime(last.created_at, locale),
+                    attempt: last.attempt,
+                  })}
+                </span>
+              ) : (
+                <span>{" · "}{t(($) => $.plugins.schedule.activity_empty)}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function formatInvocationTime(value: string | undefined, locale: string): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp));
 }

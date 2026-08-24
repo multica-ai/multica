@@ -27,6 +27,7 @@ type outboundQueries interface {
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	SetChatMessageChannelOutboundProvenanceByTask(ctx context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error)
 }
 
 // replySender posts one reply. Satisfied by *slackSender, so the outbound path
@@ -137,12 +138,33 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("decode slack credentials: %w", err)
 	}
 	channelID, threadTS := outboundTarget(binding)
-	if _, err := o.newSender(creds).Send(ctx, channel.OutboundMessage{
+	result, err := o.newSender(creds).Send(ctx, channel.OutboundMessage{
 		ChatID:   channelID,
 		Text:     content,
 		ThreadID: threadTS,
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("post slack reply: %w", err)
+	}
+	messageIDs := result.MessageIDs
+	if len(messageIDs) == 0 && result.MessageID != "" {
+		messageIDs = []string{result.MessageID}
+	}
+	if len(messageIDs) == 0 {
+		return errors.New("post slack reply: provider returned no message id")
+	}
+	rows, err := o.q.SetChatMessageChannelOutboundProvenanceByTask(ctx, db.SetChatMessageChannelOutboundProvenanceByTaskParams{
+		ChannelType:    pgtype.Text{String: string(TypeSlack), Valid: true},
+		InstallationID: binding.InstallationID,
+		ChannelChatID:  pgtype.Text{String: channelID, Valid: true},
+		MessageIds:     messageIDs,
+		TaskID:         taskID,
+	})
+	if err != nil {
+		return fmt.Errorf("record slack reply provenance: %w", err)
+	}
+	if rows != 1 {
+		return fmt.Errorf("record slack reply provenance: updated %d assistant rows, want 1", rows)
 	}
 	return nil
 }

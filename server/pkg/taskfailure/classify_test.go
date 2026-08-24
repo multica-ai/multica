@@ -121,6 +121,14 @@ func TestClassifyRules(t *testing.T) {
 		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
 		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
 		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
+		// BHD-135: Pi's OpenAI-compatible SDK wording for a dropped LiteLLM
+		// call. Bare strings, then the same strings glued to "exit status 1"
+		// after pi-print-clean-exit forces a non-zero wrap-up.
+		{"pi connection error", "Connection error.", ReasonAgentProviderNetwork},
+		{"pi connection error with exit status wins over process failure", "Connection error.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"pi request timed out", "Request timed out.", ReasonAgentProviderNetwork},
+		{"pi request timed out with exit status wins over process failure", "Request timed out.; pi exited with error: exit status 1", ReasonAgentProviderNetwork},
+		{"omp connection error with exit status wins over process failure", "Connection error.; omp exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -158,6 +166,12 @@ func TestClassifyRules(t *testing.T) {
 		// 14. Catchall.
 		{"unrecognized", "the agent gave up for reasons unknown", ReasonAgentUnknown},
 		{"sentence with no marker", "Hello world.", ReasonAgentUnknown},
+		// Pi's two short provider messages must not become broad substring
+		// matches: local tool and MCP failures are deterministic and retrying
+		// them only repeats the same failure.
+		{"local tool connection error is not provider network", "local tool connection error while opening its database", ReasonAgentUnknown},
+		{"mcp request timeout is not provider network", "MCP server request timed out while loading configuration", ReasonAgentUnknown},
+		{"local connection error with exit remains process failure", "MCP server connection error; agent exited with error: exit status 1", ReasonAgentProcessFailure},
 
 		// 15. Digit-boundary regression: 3-digit HTTP status codes must NOT
 		//     match when embedded in a longer number. Before the fix these

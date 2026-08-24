@@ -105,7 +105,7 @@ func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pg
 	}
 	return f.ensureID, f.ensureErr
 }
-func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID) error {
+func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.pendingFresh++
@@ -299,7 +299,10 @@ type fakeTasks struct {
 	promotions          int
 	issueTaskPromotions []pgtype.UUID
 	forceFresh          bool
+	forceFreshArgs      []bool
 	initiator           pgtype.UUID
+	initiators          []pgtype.UUID
+	contextRevisions    []int64
 	err                 error
 }
 
@@ -317,18 +320,31 @@ func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pg
 	return nil
 }
 
-func (f *fakeTasks) EnqueueChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, contextRevision int64) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
 	f.callCount++
 	f.forceFresh = forceFresh
+	f.forceFreshArgs = append(f.forceFreshArgs, forceFresh)
 	f.initiator = initiator
+	f.initiators = append(f.initiators, initiator)
+	f.contextRevisions = append(f.contextRevisions, contextRevision)
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
 func (f *fakeTasks) calls() int      { f.mu.Lock(); defer f.mu.Unlock(); return f.callCount }
+func (f *fakeTasks) revisions() []int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int64(nil), f.contextRevisions...)
+}
+func (f *fakeTasks) freshArgs() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.forceFreshArgs...)
+}
 func (f *fakeTasks) promotionCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -338,6 +354,11 @@ func (f *fakeTasks) initiatorArg() pgtype.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.initiator
+}
+func (f *fakeTasks) initiatorArgs() []pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pgtype.UUID(nil), f.initiators...)
 }
 
 type fakeReader struct {
@@ -820,6 +841,118 @@ func TestRouter_MediaQueuePreservesSessionOrderWithoutCancellingRunBoundary(t *t
 	close(releaseSecond)
 	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
 		t.Fatalf("media completion promotions = %d, want 2", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_ContextGenerationsUseIndependentBatchWindows(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	msg := p2pMessage(t)
+	sessionID := h.binder.ensureID
+	initiator := h.ident.id.UserID
+
+	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 1)
+	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg, sessionID, initiator, 2)
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("pending generation windows = %d, want 2", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation flushes = %d, want 2", h.tasks.calls())
+	}
+	revisions := h.tasks.revisions()
+	if len(revisions) != 2 || revisions[0] != 1 || revisions[1] != 2 {
+		t.Fatalf("enqueued context revisions = %v, want [1 2]", revisions)
+	}
+}
+
+func TestRouter_RearmsUnownedContextGenerationsAfterBatcherRestart(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	alice := uuidFromString(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	bob := h.ident.id.UserID
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: alice},
+		{Revision: 2, InitiatorUserID: bob},
+	}
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 2 {
+		t.Fatalf("rearmed generation windows = %d, want 2", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation recovery flushes = %d, want 2", h.tasks.calls())
+	}
+	if got := h.tasks.revisions(); len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("recovered context revisions = %v, want [1 2]", got)
+	}
+	if got := h.tasks.freshArgs(); len(got) != 2 || got[0] || !got[1] {
+		t.Fatalf("recovered force-fresh flags = %v, want [false true]", got)
+	}
+	if got := h.tasks.initiatorArgs(); len(got) != 2 || got[0] != alice || got[1] != bob {
+		t.Fatalf("recovered initiators = %v, want [%v %v]", got, alice, bob)
+	}
+}
+
+func TestRouter_RecoveryWithoutInitiatorFailsClosed(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("scheduled generation windows = %d, want 1", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 1 }) {
+		t.Fatalf("generation flushes = %d, want 1", h.tasks.calls())
+	}
+	if got := h.tasks.revisions(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("enqueued context revisions = %v, want [2]", got)
+	}
+}
+
+func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	msg := p2pMessage(t)
+	h.router.scheduleRun(h.router.sets[channel.TypeFeishu], h.inst.inst, msg,
+		h.binder.ensureID, h.ident.id.UserID, 1)
+
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: h.ident.id.UserID},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+	msg.ForceFresh = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := timers.createdCount(); got != 2 {
+		t.Fatalf("timers created = %d, want 2; recovery reset the live revision-1 window", got)
+	}
+
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 2 }) {
+		t.Fatalf("generation flushes = %d, want 2", h.tasks.calls())
 	}
 }
 

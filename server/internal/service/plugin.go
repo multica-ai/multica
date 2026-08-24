@@ -402,6 +402,9 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 		if skillErr := s.InstallSkillResources(ctx, queries, installation, manifest, userID); skillErr != nil {
 			return db.PluginInstallation{}, skillErr
 		}
+		if scheduleErr := s.reconcilePluginHookSchedules(ctx, queries, installation, manifest); scheduleErr != nil {
+			return db.PluginInstallation{}, scheduleErr
+		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit install", Err: commitErr}
 		}
@@ -456,6 +459,9 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	// pruned. Same transaction as the manifest snapshot: the two must never
 	// disagree about what this version contributes.
 	if err := s.InstallSkillResources(ctx, queries, updated, manifest, userID); err != nil {
+		return db.PluginInstallation{}, err
+	}
+	if err := s.reconcilePluginHookSchedules(ctx, queries, updated, manifest); err != nil {
 		return db.PluginInstallation{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -691,19 +697,35 @@ func (s *PluginService) ConfiguredSecretKeys(ctx context.Context, installationID
 // SetEnabled toggles an installation. Disabling hides every contribution
 // immediately but keeps storage and secrets, so re-enabling is not a reinstall.
 func (s *PluginService) SetEnabled(ctx context.Context, installation db.PluginInstallation, enabled bool) (db.PluginInstallation, error) {
-	updated, err := s.Queries.SetPluginInstallationEnabled(ctx, db.SetPluginInstallationEnabledParams{
+	if installation.Enabled == enabled {
+		return installation, nil
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "begin plugin state update", Err: err}
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	queries := s.Queries.WithTx(tx)
+
+	updated, err := queries.SetPluginInstallationEnabled(ctx, db.SetPluginInstallationEnabledParams{
 		ID:      installation.ID,
 		Enabled: enabled,
 	})
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "update plugin state", Err: err}
 	}
+	if err := s.setPluginHookSchedulesEnabled(ctx, queries, installation.ID, enabled); err != nil {
+		return db.PluginInstallation{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit plugin state update", Err: err}
+	}
 	return updated, nil
 }
 
-// Uninstall removes the installation with its storage and secrets. There are no
-// foreign keys or cascades by repository policy, so the three deletes share one
-// transaction: a partial uninstall would strand plugin-owned rows nothing can
+// Uninstall removes the installation and all of its application-owned rows.
+// There are no foreign keys or cascades by repository policy, so the deletes
+// share one transaction: a partial uninstall would strand rows nothing can
 // reach or clean up later.
 func (s *PluginService) Uninstall(ctx context.Context, installation db.PluginInstallation) error {
 	tx, err := s.TxStarter.Begin(ctx)
@@ -713,6 +735,9 @@ func (s *PluginService) Uninstall(ctx context.Context, installation db.PluginIns
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	queries := s.Queries.WithTx(tx)
+	if err := queries.DeletePluginHookSchedulesByInstallation(ctx, installation.ID); err != nil {
+		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin hook schedules", Err: err}
+	}
 	if err := queries.DeletePluginStorageByInstallation(ctx, installation.ID); err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin storage", Err: err}
 	}
