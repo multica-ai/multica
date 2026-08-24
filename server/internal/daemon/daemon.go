@@ -5334,6 +5334,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
+	// A conversation is not a second writer. Everything above still applied —
+	// the mode was checked, the path was validated, and the assignment stands,
+	// so this task keeps the user's directory as its working directory. Only
+	// the queueing is skipped, which is what stops a chat turn from sitting
+	// behind a 20-minute build with nothing to contribute to it (issue #7344).
+	// See localDirectoryLockExempt for why the mutex does not owe this task a
+	// slot.
+	if localDirectoryLockExempt(task) {
+		taskLog.Info("local_directory: chat task, skipping path mutex")
+		return nil, false
+	}
+
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
 	// per-task watcher only starts after the lock is acquired. If the user
@@ -5371,8 +5383,17 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// server status update below fails.
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
-		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
+		// Rendered to the user, so it names the directory rather than its path
+		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
+		// the daemon's own logs, which is where an operator debugging a wedged
+		// lock looks for it.
+		reason := assignment.DisplayName()
 		if holder != "" {
+			// Known rough edge: this clause is English and the client renders it
+			// inside a localized "Waiting for {reason}" label, so a zh/ja/ko user
+			// sees mixed script. Fixing it properly means sending the directory
+			// and the holder as separate fields and localizing the join on the
+			// client — worth doing if this hint grows, not for one parenthetical.
 			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 		}
 		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
@@ -5684,8 +5705,31 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // the conversation's session store got mounted (execenv.Environment
 // HermesSessionStore) — and false drops the resume with the same disclosure as
 // a workdir mismatch.
+// sameExistingDir reports whether two paths name the same existing directory.
+// False when either cannot be stat'd, which is the safe answer here: an absent
+// prior workdir means there is nothing to resume from.
+func sameExistingDir(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(ai, bi)
+}
+
 func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir && sessionHomeReachable
+	// Compare the directories, not the spelling. Reuse runs in the canonical
+	// path it validated and locked, which need not be character-identical to
+	// the PriorWorkDir the server sent — a symlinked workspaces root is enough
+	// to make them differ. A string compare would then silently drop the prior
+	// session on every follow-up task in that installation.
+	reused := task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
 	if !reused && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: session store not reachable from this run",
 			"session_id", task.PriorSessionID,
@@ -5753,33 +5797,33 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 // terminal file raced and dropped the session (MUL-4886). Both proofs this
 // function reads — the env-root provenance and the workdir task-context marker
 // — are written at Prepare time, so neither depends on completion ordering.
-func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
+func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) (string, bool) {
 	if task.PriorWorkDir == "" || localAssignment != nil {
-		return false
+		return "", false
 	}
 
 	root, err := filepath.EvalSymlinks(workspacesRoot)
 	if err != nil {
-		return false
+		return "", false
 	}
 	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
 	if err != nil {
-		return false
+		return "", false
 	}
 	info, err := os.Stat(workdir)
 	if err != nil || !info.IsDir() {
-		return false
+		return "", false
 	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
-		return false
+		return "", false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
-		return false
+		return "", false
 	}
 	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
-		return false
+		return "", false
 	}
 	// Managed-env provenance is written only for non-local resumable envs, so
 	// its presence (plus the workspace/scope/agent match) proves this is a
@@ -5788,12 +5832,12 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
 		prov.WorkspaceID != task.WorkspaceID ||
 		prov.AgentID != task.AgentID {
-		return false
+		return "", false
 	}
 
 	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
 	if err != nil {
-		return false
+		return "", false
 	}
 	var marker struct {
 		ManagedBy     string `json:"managed_by"`
@@ -5802,15 +5846,21 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		ChatSessionID string `json:"chat_session_id"`
 	}
 	if json.Unmarshal(data, &marker) != nil {
-		return false
+		return "", false
 	}
 	if marker.ManagedBy != execenv.TaskContextMarkerManagedBy || marker.AgentID != task.AgentID {
-		return false
+		return "", false
 	}
 	if task.IssueID != "" {
-		return prov.IssueID == task.IssueID && marker.IssueID == task.IssueID
+		if prov.IssueID != task.IssueID || marker.IssueID != task.IssueID {
+			return "", false
+		}
+		return workdir, true
 	}
-	return prov.ChatSessionID == task.ChatSessionID && marker.ChatSessionID == task.ChatSessionID
+	if prov.ChatSessionID != task.ChatSessionID || marker.ChatSessionID != task.ChatSessionID {
+		return "", false
+	}
+	return workdir, true
 }
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
@@ -6078,6 +6128,126 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
+// lockReusablePriorEnvRoot decides whether this task may continue in a prior
+// task's env root and, if so, takes the exclusion lock on it.
+//
+// Order matters and is the point of this function. The lock WRITES a file into
+// the directory, so eligibility has to be proven first:
+// shouldReusePriorWorkdir resolves symlinks, checks the
+// {workspace}/{task}/workdir shape and verifies managed provenance, and only
+// the canonical path it returns is ever opened. Locking on
+// filepath.Dir(task.PriorWorkDir) before that would drop .task_lock into
+// whatever the path happened to point at — a symlink target outside the
+// workspaces root, or a user's own local_directory.
+//
+// The re-check under the lock closes the gap between proving eligibility and
+// acting on it. Declining is always safe: the caller falls back to a fresh
+// Prepare, which costs session continuity, not correctness.
+func (d *Daemon) lockReusablePriorEnvRoot(task Task, localAssignment *localDirectoryAssignment, heldRoot string) (*execenv.EnvRootClaim, string, os.FileInfo, bool) {
+	// Pin the workspaces root BEFORE validating anything. Opening it after,
+	// from a name validation just approved, would re-resolve that name: rename
+	// the root aside, leave a symlink to a look-alike tree, and os.Root
+	// faithfully pins the replacement. Root promises you cannot escape the tree
+	// it opened — not that it opened the tree you meant. Holding the handle
+	// first makes that ordering impossible.
+	wsRoot, err := os.OpenRoot(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+	defer wsRoot.Close()
+
+	workDir, ok := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !ok {
+		return nil, "", nil, false
+	}
+	priorRoot := filepath.Dir(workDir)
+	// workDir came back through EvalSymlinks, so the root it is measured
+	// against has to be resolved the same way — otherwise a symlinked
+	// workspaces root (macOS /tmp -> /private/tmp, a home on a linked volume)
+	// makes the two look unrelated and every reuse is refused.
+	canonicalWorkspacesRoot, err := filepath.EvalSymlinks(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+	rel, err := filepath.Rel(canonicalWorkspacesRoot, priorRoot)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, "", nil, false
+	}
+	// Already covered by this run's own claim (a task re-dispatched onto its
+	// own directory); taking a second lock on it would only deadlock against
+	// ourselves.
+	if priorRoot == heldRoot {
+		return nil, workDir, nil, true
+	}
+
+	// Pin the identity of the directory that just passed validation. Every
+	// later step is checked against THIS, not against whatever the name
+	// resolves to next: a path string cannot tell "the directory I validated"
+	// apart from "a different directory now answering to that name".
+	validatedInfo, err := os.Stat(priorRoot)
+	if err != nil {
+		return nil, "", nil, false
+	}
+
+	// Deterministic seam for the TOCTOU regressions: tests swap the validated
+	// directory here, between proving eligibility and taking the lock.
+	if reuseLockTestHook != nil {
+		reuseLockTestHook()
+	}
+
+	claim, lockedInfo, err := execenv.LockEnvRootForReuse(wsRoot, rel, priorRoot)
+	switch {
+	case errors.Is(err, execenv.ErrEnvRootBusy):
+		d.logger.Info("prior workdir is in use by another execution; starting a fresh environment",
+			"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot))
+		return nil, "", nil, false
+	case err != nil:
+		d.logger.Warn("could not lock prior workdir; starting a fresh environment",
+			"task", shortID(task.ID), "error", err)
+		return nil, "", nil, false
+	case claim == nil:
+		return nil, "", nil, false
+	}
+	// The lock has to have landed on the directory validation approved.
+	if !os.SameFile(validatedInfo, lockedInfo) {
+		d.logger.Info("prior workdir changed identity before it could be claimed; starting a fresh environment",
+			"task", shortID(task.ID))
+		claim.Release()
+		return nil, "", nil, false
+	}
+
+	// Re-validate while holding the lock, and require the answer to be the SAME
+	// directory. Equality of the canonical path is not enough on its own: the
+	// tree can be rearranged so a different-but-equally-valid env root now
+	// answers to that name, which would leave us holding a lock on one
+	// directory while handing another to Reuse. os.SameFile compares identity,
+	// not spelling.
+	recheckedWorkDir, stillOK := shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot)
+	if !stillOK || recheckedWorkDir != workDir {
+		claim.Release()
+		return nil, "", nil, false
+	}
+	// ...and the directory we are about to hand to Reuse has to be that same
+	// one, so the object locked and the object used cannot diverge.
+	currentInfo, err := os.Stat(filepath.Dir(recheckedWorkDir))
+	if err != nil || !os.SameFile(lockedInfo, currentInfo) {
+		d.logger.Info("prior workdir changed identity while being claimed; starting a fresh environment",
+			"task", shortID(task.ID))
+		claim.Release()
+		return nil, "", nil, false
+	}
+	return claim, workDir, lockedInfo, true
+}
+
+// reuseLockTestHook runs between reuse eligibility validation and taking the
+// prior-root lock. Nil outside tests; the TOCTOU regressions use it to make the
+// swap deterministic instead of racing it.
+var reuseLockTestHook func()
+
+// reuseBeforeUseTestHook runs after the prior-root claim is settled and before
+// Reuse resolves that path by name. Nil outside tests.
+var reuseBeforeUseTestHook func()
+
 func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv.PrepareParams) (*execenv.Environment, error) {
 	if d.executionEnvironmentCommand == nil {
 		// Focused runTask tests construct a zero-valued Daemon and keep setup
@@ -6138,6 +6308,171 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 		FileCount: manifest.FileCount,
 		Files:     fileRefs,
 	}
+}
+
+// taskModelSelection is what a task actually launches with: the model
+// selector plus the capability overrides that survived validation.
+type taskModelSelection struct {
+	Model         string
+	ThinkingLevel string
+	ServiceTier   string
+}
+
+// resolveTaskModelSelection settles the model selector and its capability
+// overrides against the runtime's own model catalog, reading that catalog at
+// most once per task — and not at all when nothing needs it.
+//
+// The single read is the point. Discovery is a CLI subprocess with a 15-30s
+// ceiling, and cachedDiscovery deliberately does not memoize a result that
+// came back empty or as a fallback (#3729, MUL-5549) so a transient failure
+// can retry immediately. A logged-out or timing-out runtime therefore pays
+// that ceiling in full on every read, and a task that read the catalog once to
+// qualify its model and again to validate thinking_level would pay it twice
+// before the agent even starts (MUL-6471 review).
+//
+// Who asks for the catalog:
+//   - opencode and its DevEco fork cannot execute an unqualified selector, so
+//     a pinned model has to be resolved against the catalog before launch.
+//   - thinking_level / service_tier are catalog-owned and keyed on the
+//     catalog's own model id, so they need it whenever they are set.
+//
+// A pi task with no capability override asks for neither: pi's own resolver
+// accepts the persisted id in every shape it can take, so the daemon has
+// nothing to add and skips discovery entirely. Same for claude, codex, and any
+// task that pins no model.
+//
+// Qualification runs first because both checks below match on the catalog's
+// canonical id: an unqualified id silently fails every lookup and drops a
+// perfectly valid level (GH #7300).
+func resolveTaskModelSelection(
+	ctx context.Context,
+	provider string,
+	runtimeCmd agent.Command,
+	sel taskModelSelection,
+	taskLog *slog.Logger,
+) taskModelSelection {
+	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
+
+	read := false
+	var (
+		catalog    agent.Catalog
+		catalogErr error
+	)
+	loadCatalog := func() (agent.Catalog, error) {
+		if !read {
+			read = true
+			catalog, catalogErr = listModels(ctx, provider, runtimeCmd)
+		}
+		return catalog, catalogErr
+	}
+
+	sel.Model = qualifyTaskModel(provider, sel.Model, capabilityChecksPending, loadCatalog, taskLog)
+
+	// service_tier is catalog-owned and currently Codex-only. As with
+	// thinking_level, stale or incompatible persisted values degrade to the
+	// runtime default instead of failing the task. Catalog lookup errors pass
+	// through so a transient discovery failure does not silently disable a
+	// previously valid user choice.
+	if sel.ServiceTier != "" {
+		ok, err := agent.ValidateServiceTierWith(loadCatalog, provider, sel.Model, sel.ServiceTier)
+		if err != nil {
+			taskLog.Warn("service_tier: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", sel.Model,
+				"service_tier", sel.ServiceTier,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("service_tier: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", sel.Model,
+				"service_tier", sel.ServiceTier,
+			)
+			sel.ServiceTier = ""
+		}
+	}
+	// Per-model guard: the server validates the literal token against the
+	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
+	// model, Codex's per-model `supported_reasoning_levels`) only resolve
+	// here, against the daemon's local CLI catalog. Invalid combinations
+	// log a warning and drop the level rather than failing the task, so a
+	// stale persisted value never blocks execution. An empty model is
+	// resolved by ValidateThinkingLevelWith to the provider's default model so
+	// default-model tasks aren't misjudged — except for codex, whose empty
+	// model follows config.toml (any model) and so fails closed, dropping the
+	// level here without a catalog read at all. Discovery errors fail open for
+	// resolved models: if we can't list models, we keep the persisted level
+	// and let the CLI object.
+	if sel.ThinkingLevel != "" {
+		ok, err := agent.ValidateThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
+		if err != nil {
+			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", sel.Model,
+				"thinking_level", sel.ThinkingLevel,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", sel.Model,
+				"thinking_level", sel.ThinkingLevel,
+			)
+			sel.ThinkingLevel = ""
+		}
+	}
+
+	return sel
+}
+
+// qualifyTaskModel promotes a persisted model id to the canonical
+// `<provider>/<id>` selector its runtime catalog advertises, and returns the
+// model to actually launch with.
+//
+// agent.model holds whatever was persisted, and for gateway-style providers a
+// bare model id is itself slash-shaped (`claude/claude-opus-5` under provider
+// `multica-anthropic`), so the delimiter cannot tell a missing provider from a
+// present one — only the catalog knows (GH #7300).
+//
+// It reads the catalog for two distinct reasons, and neither is "because we
+// can": either the runtime refuses to launch without a qualified selector, or
+// a capability check is about to read the catalog anyway and will match
+// nothing unless the id is canonical first. When neither holds, the persisted
+// value goes to the CLI untouched and no subprocess is spawned.
+func qualifyTaskModel(
+	provider, model string,
+	capabilityChecksPending bool,
+	loadCatalog func() (agent.Catalog, error),
+	taskLog *slog.Logger,
+) string {
+	if model == "" {
+		return model
+	}
+	if !agent.ModelSelectorMustBeProviderQualified(provider) && !capabilityChecksPending {
+		return model
+	}
+	catalog, err := loadCatalog()
+	if err != nil {
+		// Same fail-open posture as the capability checks: an unreachable
+		// catalog must not stop a task whose model may well be exactly what
+		// the CLI expects.
+		taskLog.Warn("model: catalog lookup failed; using the configured model as-is",
+			"provider", provider,
+			"model", model,
+			"error", err,
+		)
+		return model
+	}
+	qualified, rewritten := agent.QualifyModelID(catalog, model)
+	if !rewritten {
+		return model
+	}
+	taskLog.Info("model: qualified against the runtime catalog",
+		"provider", provider,
+		"configured_model", model,
+		"model", qualified,
+	)
+	return qualified
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
@@ -6305,6 +6640,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
+
+	// Claim the env root HERE, in the daemon parent, and hold it for the whole
+	// task run — the same lifetime as unmarkActiveEnvRoot above.
+	//
+	// It cannot be claimed inside preparation: production preparation runs in a
+	// short-lived helper process (prepareExecutionEnvironment ->
+	// PrepareIsolated), so a lock taken there dies with the helper and the
+	// *os.File cannot cross its JSON response back to us. Claiming there would
+	// leave the agent running with no protection at all — which is exactly the
+	// re-dispatch window this guards.
+	envClaim, err := execenv.ClaimEnvRoot(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
+	}
+	defer envClaim.Release()
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -6526,12 +6876,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	envReused := false
-	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
+	if priorClaim, priorWorkDir, lockedPriorInfo, ok := d.lockReusablePriorEnvRoot(task, localAssignment, envClaim.RootDir()); ok {
+		defer priorClaim.Release()
+		// Deterministic seam for the last-window regression: tests swap the
+		// directory here, after the claim is settled and before Reuse resolves
+		// the path by name.
+		if reuseBeforeUseTestHook != nil {
+			reuseBeforeUseTestHook()
+		}
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkDir:               task.PriorWorkDir,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			// The canonical path the lock was taken on. Handing Reuse the raw
+			// PriorWorkDir instead would re-resolve it, so the directory we
+			// locked and the directory we use could differ.
+			WorkDir:               priorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
 			ResumeSessionID:       task.PriorSessionID,
@@ -6551,6 +6911,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
 		}
+		// Reuse resolves priorWorkDir by name, so confirm what it actually
+		// opened is still the directory we hold the lock on. An fd cannot cross
+		// into the preparation helper process, so the name is the only thing
+		// that can be handed over; this turns "silently ran somewhere else"
+		// into "declined and started clean". See lockReusablePriorEnvRoot for
+		// what remains uncovered.
+		if env != nil && lockedPriorInfo != nil {
+			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
+			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
+				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment",
+					"task", shortID(task.ID))
+				env = nil
+			}
+		}
 		// Reuse can decline (nil) and fall through to a fresh Prepare below.
 		// Whether it did decides whether an env-root-scoped session store — the
 		// Hermes overlay's task-local state.db — carried over from the prior task.
@@ -6559,11 +6933,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkspaceID:           task.WorkspaceID,
-			TaskID:                task.ID,
-			AgentName:             agentName,
+			WorkspacesRoot: d.cfg.WorkspacesRoot,
+			Profile:        d.cfg.Profile,
+			WorkspaceID:    task.WorkspaceID,
+			TaskID:         task.ID,
+			AgentName:      agentName,
+			// This run already holds the claim (envClaim above) and the reset
+			// it implies; preparation must not try to take it again.
+			EnvRootPreclaimed:     true,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
 			OpenclawBin:           openclawBin,
@@ -6826,7 +7203,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	prompt := BuildPrompt(task, provider)
+	// An exempt turn runs in the user's directory without having queued for it,
+	// so a sibling coding task may be writing to the same tree right now. That
+	// is the one thing it cannot work out from its own context — tell it.
+	// Worktree mode is excluded: there the tree is this task's private checkout.
+	var promptOptions []PromptOption
+	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+	}
+	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -6973,10 +7358,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
+	// Two-tier model resolution: an explicit agent.model wins,
+	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
+	// both are empty we deliberately pass "" through — each
+	// backend omits `--model` from the CLI invocation, so the
+	// provider picks its own default (Claude Code's shipped
+	// default, codex app-server's account-scoped default, etc.).
+	// Baking a Go-side "recommended default" here is how the
+	// cursor regression happened — static guesses drift from
+	// whatever the upstream CLI actually accepts.
+	//
+	// Resolved before the start log rather than at first use: logging
+	// entry.Model there reported the env-var tier alone, so every task whose
+	// model came from agent.model — the common case — announced itself with an
+	// empty model and looked like the selection had been dropped (GH #7300).
+	model := ""
+	if task.Agent != nil && task.Agent.Model != "" {
+		model = task.Agent.Model
+	}
+	if model == "" {
+		model = entry.Model
+	}
+
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", entry.Model,
+		"model", model,
 		"reused", reused,
 	)
 	if task.PriorSessionID != "" {
@@ -7002,80 +7409,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// has no overlay to protect and keeps its flags untouched.
 		customArgs = hermesOverlayCustomArgs
 	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
 	thinkingLevel := ""
 	serviceTier := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	// service_tier is catalog-owned and currently Codex-only. As with
-	// thinking_level, stale or incompatible persisted values degrade to the
-	// runtime default instead of failing the task. Catalog lookup errors pass
-	// through so a transient discovery failure does not silently disable a
-	// previously valid user choice.
-	if serviceTier != "" {
-		ok, err := agent.ValidateServiceTier(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs), model, serviceTier)
-		if err != nil {
-			taskLog.Warn("service_tier: catalog lookup failed; passing through",
-				"provider", provider,
-				"model", model,
-				"service_tier", serviceTier,
-				"error", err,
-			)
-		} else if !ok {
-			taskLog.Warn("service_tier: not valid for this (provider, model); skipping injection",
-				"provider", provider,
-				"model", model,
-				"service_tier", serviceTier,
-			)
-			serviceTier = ""
-		}
-	}
-	// Per-model guard: the server validates the literal token against the
-	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
-	// model, Codex's per-model `supported_reasoning_levels`) only resolve
-	// here, against the daemon's local CLI catalog. Invalid combinations
-	// log a warning and drop the level rather than failing the task, so a
-	// stale persisted value never blocks execution. An empty model is
-	// resolved by ValidateThinkingLevel to the provider's default model so
-	// default-model tasks aren't misjudged — except for codex, whose empty
-	// model follows config.toml (any model) and so fails closed, dropping the
-	// level here. Discovery errors fail open for resolved models: if we can't
-	// list models, we keep the persisted level and let the CLI object.
-	if thinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevel(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs), model, thinkingLevel)
-		if err != nil {
-			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
-				"provider", provider,
-				"model", model,
-				"thinking_level", thinkingLevel,
-				"error", err,
-			)
-		} else if !ok {
-			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
-				"provider", provider,
-				"model", model,
-				"thinking_level", thinkingLevel,
-			)
-			thinkingLevel = ""
-		}
-	}
+	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
@@ -7235,7 +7578,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider)
+		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {

@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 로컬 `multica` 데이터베이스 | PostgreSQL 연결 주소 |
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 컨테이너 시작 중 migration과 API가 공유하는 일시적인 데이터베이스 장애 재시도 시간. `0`으로 설정하면 각 단계에서 한 번만 시도 |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 시작 중 각 연결 시도의 폴백 제한 시간. pgx 기본 `connect_timeout`, `PGCONNECT_TIMEOUT` 또는 service 설정이 우선 적용됨 |
 | `PORT` | `8080` | API listen port |
 | `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |

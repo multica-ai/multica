@@ -512,6 +512,22 @@ WHERE id = $1 AND issue_id IS NULL
 -- locks the owners' workspace rows in the writer's own transaction and returns
 -- false once they are gone, so this statement writes no row instead of stranding
 -- a task in a workspace that has just been deleted (MUL-5999).
+--
+-- Fenced against slot contention too: ON CONFLICT DO NOTHING yields the single
+-- queued/dispatched slot idx_one_pending_task_per_issue_agent_v2 allows per
+-- (issue, agent) rather than raising 23505. A manual rerun may now be enqueued
+-- behind a still-running task, and it can commit at any point — including
+-- between a caller's "is a successor already pending?" check and this insert,
+-- since that check takes no lock. Raising here would abort the caller's
+-- transaction, and on the FailTask path that transaction also carries the
+-- parent's failed status, so the failure would roll back and leave the task
+-- stuck in 'running'. Yielding instead makes the policy explicit: whoever
+-- already holds the slot keeps it, and a deliberate human rerun therefore wins
+-- over an automatic retry.
+--
+-- Both fences surface the same way — zero rows, i.e. pgx.ErrNoRows from this
+-- :one query. Callers must treat that as "no retry was created" and still commit
+-- their own work, NOT as a failure.
 -- Clones a parent task into a fresh queued attempt. Carries forward the
 -- agent's resume context (session_id/work_dir) so the child can continue
 -- the conversation when the backend supports it. Resume-unsafe failures are
@@ -599,6 +615,9 @@ SELECT
 FROM agent_task_queue p
 WHERE p.id = $1
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+ON CONFLICT (issue_id, agent_id) WHERE status IN ('queued', 'dispatched')
+       OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
+DO NOTHING
 RETURNING *;
 
 -- name: CancelAgentTasksByIssue :many
@@ -612,20 +631,33 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
--- name: CancelAgentTasksByIssueAndAgent :many
--- Cancels active tasks for a single (issue, agent) pair without touching
--- tasks belonging to other agents on the same issue. Used by the manual
--- rerun flow so re-running the assignee doesn't collateral-cancel a
--- still-running @-mention agent on the same issue.
+-- name: CancelPendingTasksByIssueAndAgent :many
+-- Cancels the not-yet-started tasks for a single (issue, agent) pair, so the
+-- manual rerun flow can enqueue a replacement without colliding with
+-- idx_one_pending_task_per_issue_agent_v2 and without dropping the rerun's own
+-- attribution onto a row somebody else created.
+--
+-- 'running' and 'waiting_local_directory' are deliberately NOT cancelled: an
+-- agent is executing in them. Neither status appears in that unique index, so a
+-- fresh queued row can be inserted alongside one, and ClaimAgentTask's
+-- per-(issue, agent) serialization holds the new row until the active run
+-- reaches a terminal state. Cancelling them made a manual rerun kill the pass
+-- the agent was still working on; interrupting an in-flight run is CancelTask's
+-- job, not rerun's.
+--
+-- Everything that has NOT begun executing is still cleared, including deferred
+-- escalations, so rerun keeps its prior "replace the pending plan" behaviour for
+-- those rows.
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
-WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+WHERE issue_id = $1 AND agent_id = $2
+  AND status IN ('queued', 'dispatched', 'deferred')
 RETURNING *;
 
 -- name: CancelAgentTasksByAgent :many
 -- Bulk-cancel every active (queued/dispatched/running) task for an agent.
 -- Returns the affected rows so callers can broadcast task:cancelled events.
--- Mirrors the shape of CancelAgentTasksByIssue / CancelAgentTasksByIssueAndAgent
+-- Mirrors the shape of CancelAgentTasksByIssue / CancelPendingTasksByIssueAndAgent
 -- (also :many + RETURNING + completed_at) so the three sibling cancel paths
 -- behave consistently.
 UPDATE agent_task_queue
@@ -1951,19 +1983,96 @@ SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC;
 
+-- name: CancelSupersededDeferredRetriesForRuntimes :many
+-- Cancels deferred auto-retry rows that a newer active task has already
+-- superseded, so one rerun click still means exactly one more run.
+--
+-- The narrow race: a manual rerun clears the pending slot, a concurrent FailTask
+-- commits a deferred retry (runtime_offline / provider_network's final attempt
+-- arm fire_at), and the rerun's own enqueue then succeeds because 'deferred' is
+-- outside idx_one_pending_task_per_issue_agent_v2. Both rows now exist. Merely
+-- refusing to promote the retry is not enough: once the rerun stops occupying the
+-- slot the retry promotes and runs a SECOND time, duplicating the agent's
+-- comments, side effects and cost with nothing to signal it. That contradicts
+-- both "a manual rerun replaces the pending plan" and FailTask's own "a runnable
+-- successor already exists, so no retry is needed".
+--
+-- Scope is deliberately tight:
+--   * retry_of_task_id IS NOT NULL — only auto-retry clones, never a fresh run.
+--   * escalation_for_task_id IS NULL — assignee-fallback escalations own their
+--     fire_at lifecycle and are SUPPOSED to coexist with an active primary.
+--   * channel-media pending rows are excluded for the same reason: that deferred
+--     row is the issue's own task waiting on media, not a superseded retry.
+--   * issue_id IS NOT NULL — chat / quick-create tasks have no slot semantics.
+--
+-- 'running' and 'waiting_local_directory' count as superseding: the duplicate
+-- fires precisely when the rerun has STARTED, which is when the row would
+-- otherwise no longer look blocked.
+UPDATE agent_task_queue r
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE r.runtime_id = ANY(@runtime_ids::uuid[])
+  AND r.status = 'deferred'
+  AND r.issue_id IS NOT NULL
+  AND r.retry_of_task_id IS NOT NULL
+  AND r.escalation_for_task_id IS NULL
+  AND COALESCE(r.context->>'channel_issue_media_pending', '') <> 'true'
+  AND EXISTS (
+    SELECT 1 FROM agent_task_queue successor
+    WHERE successor.issue_id = r.issue_id
+      AND successor.agent_id = r.agent_id
+      AND successor.id <> r.id
+      AND successor.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+  )
+RETURNING *;
+
 -- name: PromoteDueDeferredTasksForRuntime :many
+-- Promotion is fenced against the single queued/dispatched slot
+-- idx_one_pending_task_per_issue_agent_v2 allows per (issue, agent). A deferred
+-- row is NOT covered by that index, so it can legitimately coexist with a queued
+-- one — a manual rerun enqueued behind a running task, plus the deferred retry
+-- that task's failure armed (runtime_offline, provider_network's final attempt).
+-- Flipping such a row to 'queued' unconditionally violates the index, and because
+-- the claim loop promotes before it claims, that error blocked every claim on the
+-- runtime — including the rerun the operator was waiting for.
+--
+-- Two fences: skip a row whose (issue, agent) slot is already occupied, and
+-- promote at most ONE row per (issue, agent) so a single statement cannot collide
+-- with itself. A skipped row stays deferred with fire_at in the past and is
+-- promoted by a later tick once the slot frees, so nothing is lost — the human's
+-- rerun simply goes first. Chat / quick-create rows (issue_id NULL) are outside
+-- the index and bypass both fences.
+WITH due AS (
+    SELECT t.id,
+           t.issue_id,
+           row_number() OVER (
+               PARTITION BY t.issue_id, t.agent_id
+               ORDER BY t.priority DESC, t.created_at ASC, t.id
+           ) AS rn
+    FROM agent_task_queue t
+    WHERE t.runtime_id = @runtime_id
+      AND t.status = 'deferred'
+      AND t.fire_at <= now()
+      AND EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = t.runtime_id
+          AND r.status = 'online'
+          AND COALESCE(r.last_seen_at, r.updated_at) >=
+              now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue occupant
+        WHERE occupant.issue_id = t.issue_id
+          AND occupant.agent_id = t.agent_id
+          AND occupant.id <> t.id
+          AND (
+            occupant.status IN ('queued', 'dispatched')
+            OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
+          )
+      )
+)
 UPDATE agent_task_queue
 SET status = 'queued'
-WHERE runtime_id = @runtime_id
-  AND status = 'deferred'
-  AND fire_at <= now()
-  AND EXISTS (
-    SELECT 1 FROM agent_runtime r
-    WHERE r.id = agent_task_queue.runtime_id
-      AND r.status = 'online'
-      AND COALESCE(r.last_seen_at, r.updated_at) >=
-          now() - make_interval(secs => @runtime_stale_secs::double precision)
-  )
+WHERE id IN (SELECT id FROM due WHERE issue_id IS NULL OR rn = 1)
 RETURNING *;
 
 -- name: ListQueuedClaimCandidatesByRuntimes :many
@@ -1983,19 +2092,40 @@ ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
--- due deferred tasks across the runtime set in one UPDATE.
+-- due deferred tasks across the runtime set in one UPDATE. Carries the same two
+-- fences as the singular query; see its comment for why.
+WITH due AS (
+    SELECT t.id,
+           t.issue_id,
+           row_number() OVER (
+               PARTITION BY t.issue_id, t.agent_id
+               ORDER BY t.priority DESC, t.created_at ASC, t.id
+           ) AS rn
+    FROM agent_task_queue t
+    WHERE t.runtime_id = ANY(@runtime_ids::uuid[])
+      AND t.status = 'deferred'
+      AND t.fire_at <= now()
+      AND EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = t.runtime_id
+          AND r.status = 'online'
+          AND COALESCE(r.last_seen_at, r.updated_at) >=
+              now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM agent_task_queue occupant
+        WHERE occupant.issue_id = t.issue_id
+          AND occupant.agent_id = t.agent_id
+          AND occupant.id <> t.id
+          AND (
+            occupant.status IN ('queued', 'dispatched')
+            OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
+          )
+      )
+)
 UPDATE agent_task_queue
 SET status = 'queued'
-WHERE runtime_id = ANY(@runtime_ids::uuid[])
-  AND status = 'deferred'
-  AND fire_at <= now()
-  AND EXISTS (
-    SELECT 1 FROM agent_runtime r
-    WHERE r.id = agent_task_queue.runtime_id
-      AND r.status = 'online'
-      AND COALESCE(r.last_seen_at, r.updated_at) >=
-          now() - make_interval(secs => @runtime_stale_secs::double precision)
-  )
+WHERE id IN (SELECT id FROM due WHERE issue_id IS NULL OR rn = 1)
 RETURNING *;
 
 -- name: CancelDeferredEscalationsForTask :many

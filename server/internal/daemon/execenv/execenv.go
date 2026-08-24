@@ -5,10 +5,12 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -39,6 +41,15 @@ type PrepareParams struct {
 	WorkspaceID    string // workspace UUID — tasks are grouped under this
 	TaskID         string // task UUID — used for directory name
 	AgentName      string // for git branch naming only
+	// EnvRootPreclaimed says the CALLER already holds this env root's claim
+	// (see ClaimEnvRoot) and has already reset it. Prepare then skips claiming.
+	//
+	// This exists because production preparation runs in a short-lived helper
+	// process (PrepareIsolated): a lock taken here would be released by the
+	// kernel the moment that helper exits, and the *os.File cannot cross the
+	// JSON boundary back to the daemon. The claim therefore has to be held by
+	// the parent, whose lifetime is the task run.
+	EnvRootPreclaimed bool
 	// Profile is the daemon's profile name (empty = default). It namespaces the
 	// per-issue Codex session store so a second profile-daemon sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
@@ -309,6 +320,9 @@ type Environment struct {
 	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
+	// lockFile holds the env root's exclusive execution lock for as long as
+	// this Environment is alive. Released by Cleanup. See claimEnvRoot.
+	lockFile *os.File
 }
 
 // PredictRootDir returns the env root path that Prepare would create for the
@@ -318,7 +332,7 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 	if workspacesRoot == "" || workspaceID == "" || taskID == "" {
 		return ""
 	}
-	return filepath.Join(workspacesRoot, workspaceID, shortID(taskID))
+	return filepath.Join(workspacesRoot, workspaceID, taskKey(taskID))
 }
 
 // Prepare creates an isolated execution environment for a task.
@@ -335,7 +349,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
+	envRoot := PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID)
 
 	// Self-heal the root-level daemon marker on every task start so a marker
 	// removed while the daemon runs is restored before the agent spawns. The
@@ -347,10 +361,50 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
 	}
 
-	// Remove existing env if present (defensive — task IDs are unique).
-	if _, err := os.Stat(envRoot); err == nil {
-		if err := os.RemoveAll(envRoot); err != nil {
-			return nil, fmt.Errorf("execenv: remove existing env: %w", err)
+	// Take exclusive ownership of the env root before touching anything in it.
+	// What follows wipes the directory, and while the segment was a UUIDv7
+	// prefix that routinely wiped a live sibling task's workdir, worktree and
+	// task-scoped config (#7326). taskKey now reads the id's random tail, which
+	// makes a shared path improbable rather than impossible — so prove
+	// ownership instead of assuming it. A task that refuses to start is
+	// recoverable; one that deletes a running sibling's uncommitted work is not.
+	//
+	// claimEnvRoot is the only thing standing between two same-key tasks, so it
+	// has to be atomic end to end: a read-then-delete would let both pass the
+	// check and one still delete the other. Once claimed, the claim is held for
+	// the rest of Prepare — the reset below clears the directory's CONTENTS and
+	// leaves the marker in place, so there is never a moment where the env root
+	// looks unowned to a racing task.
+	var lockFile *os.File
+	lockClaimed := false
+	if params.EnvRootPreclaimed {
+		// The caller holds the claim and already reset the root; just make sure
+		// the directory is there before populating it.
+		if err := os.MkdirAll(envRoot, 0o755); err != nil {
+			return nil, fmt.Errorf("execenv: create env root %s: %w", envRoot, err)
+		}
+	} else {
+		lock, reset, err := claimEnvRoot(envRoot, params.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: %w", err)
+		}
+		lockFile = lock
+		// Release the lock on every failure path below. The successful path
+		// hands it to the Environment.
+		lockClaimed = true
+		defer func() {
+			if lockClaimed {
+				releaseEnvRootLock(lockFile)
+			}
+		}()
+		// reset means this task already owned the directory and the execution
+		// that left it there is gone — a rerun, which is meant to start from a
+		// clean tree. Reuse of a PRIOR task's directory never reaches here;
+		// that is Reuse, which takes an explicit WorkDir and deletes nothing.
+		if reset {
+			if err := resetEnvRootContents(envRoot); err != nil {
+				return nil, fmt.Errorf("execenv: reset existing env: %w", err)
+			}
 		}
 	}
 
@@ -423,6 +477,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		LocalWorktree:     localWorktree,
 		MulticaConfigRoot: multicaConfigRoot,
 		logger:            logger,
+		lockFile:          lockFile,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -599,6 +654,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
 	prepareSucceeded = true
+	lockClaimed = false // ownership of any lock passes to the Environment
 	return env, nil
 }
 
@@ -1068,6 +1124,11 @@ func (env *Environment) Cleanup(removeAll bool) error {
 	if env == nil {
 		return nil
 	}
+	// Drop the execution lock first. Until it is released the env root still
+	// reads as "a live execution owns this", which would make a legitimate
+	// rerun fail closed. The daemon also defers ReleaseLock for the task run;
+	// both paths are idempotent.
+	env.ReleaseLock()
 
 	if env.LocalDirectory {
 		// Never touch the user's directory. RootDir is the daemon's own
@@ -1096,4 +1157,308 @@ func (env *Environment) Cleanup(removeAll bool) error {
 		return err
 	}
 	return nil
+}
+
+// EnvRootClaim is a held claim on a task's env root. It exists so the claim can
+// outlive the code that prepares the directory.
+//
+// Production preparation runs in a short-lived helper process
+// (PrepareIsolated / ReuseIsolated). A lock taken inside that helper is
+// released by the kernel as soon as it exits, and *os.File cannot travel back
+// through the helper's JSON response — so a claim taken there protects
+// nothing by the time the agent actually runs. The daemon parent takes the
+// claim instead and holds it for the whole task run.
+type EnvRootClaim struct {
+	rootDir string
+	lock    *os.File
+}
+
+// RootDir is the env root this claim covers.
+func (c *EnvRootClaim) RootDir() string {
+	if c == nil {
+		return ""
+	}
+	return c.rootDir
+}
+
+// Release drops the claim. Safe on nil and safe to call twice.
+func (c *EnvRootClaim) Release() {
+	if c == nil || c.lock == nil {
+		return
+	}
+	releaseEnvRootLock(c.lock)
+	c.lock = nil
+}
+
+// ClaimEnvRoot takes the full claim for a fresh preparation of taskID: it
+// proves ownership, refuses a root a live execution or another task holds, and
+// resets a stale root this task owns so the caller receives a clean directory.
+//
+// Callers that pass the claim to Prepare must also set
+// PrepareParams.EnvRootPreclaimed, or Prepare will try to take a lock this
+// claim already holds and fail.
+func ClaimEnvRoot(workspacesRoot, workspaceID, taskID string) (*EnvRootClaim, error) {
+	envRoot := PredictRootDir(workspacesRoot, workspaceID, taskID)
+	if envRoot == "" {
+		return nil, fmt.Errorf("execenv: claim env root: workspaces root, workspace ID and task ID are all required")
+	}
+	lock, reset, err := claimEnvRoot(envRoot, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: %w", err)
+	}
+	if reset {
+		if err := resetEnvRootContents(envRoot); err != nil {
+			releaseEnvRootLock(lock)
+			return nil, fmt.Errorf("execenv: reset existing env: %w", err)
+		}
+	}
+	return &EnvRootClaim{rootDir: envRoot, lock: lock}, nil
+}
+
+// ErrEnvRootBusy reports that a live execution already holds an env root. On
+// the reuse path it is a reason to fall back to a fresh Prepare, not to fail
+// the task.
+var ErrEnvRootBusy = errors.New("env root is held by a running execution")
+
+// LockEnvRootForReuse takes the exclusion half of a claim, without the identity
+// half, for a task continuing in a PRIOR task's directory.
+//
+// Reuse adopts another task's env root on purpose, so the owner marker names
+// that earlier task and must not be reinterpreted or overwritten — but two
+// continuations of the same task still must not refresh and run the same
+// directory at once.
+//
+// wsRoot must be a Root the CALLER opened before it validated anything, and
+// rel the env root's path within it. Both matter:
+//
+//   - Opening the Root here, from a name the caller validated a moment ago,
+//     would re-resolve that name. Renaming the whole workspaces root aside and
+//     leaving a symlink to a look-alike tree in its place would have os.Root
+//     faithfully pin the replacement — Root guarantees you cannot escape the
+//     tree it opened, not that it opened the tree you meant.
+//   - Every operation below goes through ONE sub-Root pinned on the env root,
+//     so the directory whose identity is returned and the directory the lock
+//     file is created in cannot be two different directories. Resolving rel
+//     twice from wsRoot would allow exactly that: A on the first resolution,
+//     B on the second.
+//
+// It returns that directory's FileInfo so the caller can confirm it is the one
+// validation approved; Root still follows symlinks that stay inside the tree,
+// so "locked A, reused B" has to be ruled out by identity, not containment.
+//
+// Returns a nil claim and no error when the env root is missing, and
+// ErrEnvRootBusy when another execution holds it — both mean "fall back to a
+// fresh Prepare".
+func LockEnvRootForReuse(wsRoot *os.Root, rel, envRoot string) (*EnvRootClaim, os.FileInfo, error) {
+	if wsRoot == nil || rel == "" || !filepath.IsLocal(rel) {
+		return nil, nil, fmt.Errorf("execenv: env root %s is not inside the workspaces root", envRoot)
+	}
+
+	// Pin the env root itself. From here on nothing is resolved by name again.
+	envRootHandle, err := wsRoot.OpenRoot(rel)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("execenv: open env root %s: %w", envRoot, err)
+	}
+	defer envRootHandle.Close()
+
+	info, err := envRootHandle.Stat(".")
+	if err != nil {
+		return nil, nil, fmt.Errorf("execenv: inspect env root %s: %w", envRoot, err)
+	}
+	if !info.IsDir() {
+		return nil, nil, nil
+	}
+
+	lock, err := envRootHandle.OpenFile(envRootLockFile, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, nil, fmt.Errorf("execenv: open env root lock for %s: %w", envRoot, err)
+	}
+	locked, err := lockFileExclusiveNonBlocking(lock)
+	if err != nil {
+		lock.Close()
+		return nil, nil, fmt.Errorf("execenv: lock env root %s: %w", envRoot, err)
+	}
+	if !locked {
+		lock.Close()
+		return nil, nil, fmt.Errorf("execenv: reuse %s: %w", envRoot, ErrEnvRootBusy)
+	}
+	return &EnvRootClaim{rootDir: envRoot, lock: lock}, info, nil
+}
+
+// envRootOwnerFile records which task an env root belongs to: WHO owns it.
+const envRootOwnerFile = ".task_owner"
+
+// envRootLockFile carries the env root's exclusive execution lock: whether the
+// owner is STILL RUNNING. The two answer different questions and both are
+// needed — a dead task's directory still holds its work, and a live task's
+// directory must not be reset even by another execution of the same task.
+const envRootLockFile = ".task_lock"
+
+// claimEnvRoot takes exclusive ownership of envRoot for taskID.
+//
+// It returns the held lock file — the caller owns it until Cleanup — and
+// whether the directory needs resetting before use.
+//
+// The lock is an OS advisory lock, and the kernel releases it when the holding
+// process exits for any reason. That is what makes it a lock rather than a
+// third marker file: it answers "is the previous execution still alive?"
+// across processes, with no heartbeat, no PID table and no stale-state cleanup
+// path. An identity marker alone cannot answer it, which is how the previous
+// design let a re-dispatched execution of the SAME task id wipe the directory
+// of an execution that was still running (#7326 follow-up):
+//
+//   - The server re-delivers a task row whose prepare lease expired
+//     (ReclaimStaleDispatchedTaskForRuntime) using the same task id.
+//   - A failing lease renewal only logs; it does not cancel the Prepare that
+//     is still in flight.
+//   - So two Prepare calls for one task id could overlap, and "owner == mine"
+//     read as "my own rerun, safe to reset".
+//
+// Holding the lock also serialises everything below it, which is what makes
+// repairing a torn marker safe: no other execution can be mid-claim.
+func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err error) {
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		return nil, false, fmt.Errorf("create env root %s: %w", envRoot, err)
+	}
+
+	lockFile, err = openEnvRootLockFile(filepath.Join(envRoot, envRootLockFile))
+	if err != nil {
+		return nil, false, fmt.Errorf("open env root lock for %s: %w", envRoot, err)
+	}
+	locked, err := lockFileExclusiveNonBlocking(lockFile)
+	if err != nil {
+		lockFile.Close()
+		return nil, false, fmt.Errorf("lock env root %s: %w", envRoot, err)
+	}
+	if !locked {
+		lockFile.Close()
+		return nil, false, fmt.Errorf("env root %s is held by a running execution; refusing to reset it for task %s", envRoot, taskID)
+	}
+	// Past this point we are the only execution touching this env root, in this
+	// process or any other, so the checks below cannot race.
+	defer func() {
+		if err != nil {
+			releaseEnvRootLock(lockFile)
+			lockFile = nil
+		}
+	}()
+
+	owner, err := readEnvRootOwner(envRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("read env root owner for %s: %w", envRoot, err)
+	}
+	switch {
+	case owner == taskID:
+		// Ours, and the execution that left it is provably gone — we hold the
+		// lock it would still be holding.
+		return lockFile, true, nil
+	case owner != "":
+		return nil, false, fmt.Errorf("env root %s belongs to task %s; refusing to reset it for task %s", envRoot, owner, taskID)
+	}
+
+	// No owner recorded. Either the directory is new, or a crash tore the
+	// marker before it named anyone. Work with no owner is never ours to
+	// delete; an env root with nothing in it costs nothing to adopt.
+	hasWork, err := envRootHoldsWork(envRoot)
+	if err != nil {
+		return nil, false, fmt.Errorf("inspect env root %s: %w", envRoot, err)
+	}
+	if hasWork {
+		return nil, false, fmt.Errorf("env root %s already holds files but names no owning task; refusing to delete it", envRoot)
+	}
+	if err := writeEnvRootOwner(envRoot, taskID); err != nil {
+		return nil, false, err
+	}
+	return lockFile, false, nil
+}
+
+// ReleaseLock drops the env root's execution lock. The daemon defers this for
+// the duration of a task run: the lock's lifetime is the EXECUTION, not this
+// value. Cleanup is not the right place on its own — production never calls it
+// (the GC reclaims env roots later), so a lock released only there would be
+// held until the daemon exits and would fail-closed every legitimate rerun of
+// that task. Safe on nil and safe to call twice.
+func (env *Environment) ReleaseLock() {
+	if env == nil || env.lockFile == nil {
+		return
+	}
+	releaseEnvRootLock(env.lockFile)
+	env.lockFile = nil
+}
+
+// releaseEnvRootLock drops the execution lock and closes the file. Safe on nil.
+func releaseEnvRootLock(f *os.File) {
+	if f == nil {
+		return
+	}
+	_ = unlockFile(f)
+	_ = f.Close()
+}
+
+// writeEnvRootOwner records taskID as the owner. Callers must hold the env
+// root lock, which is what lets this overwrite a marker torn by an earlier
+// crash without racing another execution mid-claim.
+func writeEnvRootOwner(envRoot, taskID string) error {
+	path := filepath.Join(envRoot, envRootOwnerFile)
+	if err := os.WriteFile(path, []byte(taskID), 0o644); err != nil {
+		return fmt.Errorf("record env root owner for %s: %w", envRoot, err)
+	}
+	return nil
+}
+
+// readEnvRootOwner returns the task id that owns envRoot, or "" when no marker
+// is present or it was never written through. An unreadable marker is an
+// error, not an empty owner: treating it as unowned would hand the caller a
+// licence to delete the very directory it could not identify.
+func readEnvRootOwner(envRoot string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(envRoot, envRootOwnerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// resetEnvRootContents empties an env root the caller already owns and holds
+// the lock on, keeping the bookkeeping files. Removing and recreating the
+// directory instead would drop both the claim and the lock for as long as the
+// recreate takes, which is exactly the window claimEnvRoot exists to close.
+func resetEnvRootContents(envRoot string) error {
+	entries, err := os.ReadDir(envRoot)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if isEnvRootBookkeeping(e.Name()) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(envRoot, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// envRootHoldsWork reports whether envRoot contains anything beyond the owner
+// marker and the lock file — that is, anything a task could lose.
+func envRootHoldsWork(envRoot string) (bool, error) {
+	entries, err := os.ReadDir(envRoot)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range entries {
+		if !isEnvRootBookkeeping(e.Name()) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isEnvRootBookkeeping(name string) bool {
+	return name == envRootOwnerFile || name == envRootLockFile
 }

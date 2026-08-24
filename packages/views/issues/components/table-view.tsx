@@ -89,6 +89,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -262,6 +263,7 @@ function rebaseServerBranchState(
 function tableGroupSpec(grouping: string): IssueTableGroupSpec {
   if (grouping === "status") return { kind: "status" };
   if (grouping === "assignee") return { kind: "assignee" };
+  if (grouping === "project") return { kind: "project" };
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) return { kind: "property", property_id: propertyId };
   return { kind: "none" };
@@ -1370,6 +1372,23 @@ export function TableView({
     [effectiveTableGrouping],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
+  // Project group rows carry only a project id; the title comes from the
+  // shared projects query the surface already primes for this grouping.
+  //
+  // Read `data` rather than defaulting it in the destructure: an un-settled
+  // query has no data, so `= []` would hand this memo a fresh array on every
+  // render and churn every consumer of the map below (MUL-5477).
+  const groupProjectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: serverGroupSpec.kind === "project",
+  });
+  const groupProjectMap = useMemo(
+    () =>
+      new Map(
+        (groupProjectsQuery.data ?? []).map((project) => [project.id, project]),
+      ),
+    [groupProjectsQuery.data],
+  );
   const serverGroupsRequestGroup =
     serverGroupSpec.kind === "none"
       ? ({ kind: "status" } as const)
@@ -1772,9 +1791,13 @@ export function TableView({
           : t(($) => $.table.unassigned);
       }
       if (value.kind === "project") {
-        return value.project_id
-          ? value.project_id
-          : t(($) => $.swimlane.no_project);
+        if (!value.project_id) return t(($) => $.swimlane.no_project);
+        // A project the query cannot resolve (deleted, or not visible to this
+        // member) reads as unavailable — never as its raw id.
+        return (
+          groupProjectMap.get(value.project_id)?.title ??
+          t(($) => $.table.value_unavailable)
+        );
       }
       if (value.kind === "parent") {
         if (value.value_state === "unset") {
@@ -1797,7 +1820,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {

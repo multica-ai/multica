@@ -195,6 +195,7 @@
       "retrying": "Retrying",
       "queued": "Queued",
       "waiting_local_directory": "Waiting for local directory",
+      "waiting_local_directory_reason": "Waiting for {{reason}}",
       "starting_up": "Starting up",
       "thinking": "Thinking",
       "typing": "Typing"

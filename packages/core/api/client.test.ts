@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
-import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
+import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_SCRIPT } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -153,8 +153,44 @@ describe("ApiClient Plugin preview response schema", () => {
 
     await expect(new ApiClient("https://api.example.test").previewPlugin(
       "workspace-1",
-      { source_url: "https://example.test/multica.plugin.json" },
+      { version_id: "version-1" },
     )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
+  });
+
+  // A surface's code is what the host inlines into a sandboxed frame. A
+  // malformed response must fall back to an EMPTY script, which the frame
+  // renders as "could not load" — not to a partial one that runs.
+  it("falls back to an empty surface script when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 42 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").getPluginSurfaceScript(
+      "workspace-1",
+      "installation-1",
+      "hello",
+    )).resolves.toEqual(EMPTY_PLUGIN_SURFACE_SCRIPT);
+  });
+
+  it("falls back to an empty package list when the response is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ packages: "nope" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").listPluginPackages("workspace-1"))
+      .resolves.toEqual(EMPTY_PLUGIN_PACKAGE_LIST);
   });
 });
 

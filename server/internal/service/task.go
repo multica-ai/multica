@@ -51,6 +51,10 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// ReclaimCheck schedules the next time a runtime can plausibly contain a
+	// stale dispatched task. It removes the unconditional reclaim UPDATE from
+	// idle claim polls while missing/error states preserve the DB fallback.
+	ReclaimCheck *ReclaimCheckCache
 	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
 	// epic, MUL-3721) — the integration's "current user's connected apps
 	// → MCP session URL" hook called from each Enqueue* path. Optional: a
@@ -177,6 +181,52 @@ const (
 	claimResponseRecoveryWindow = 90 * time.Second
 	prepareLeaseDuration        = 45 * time.Second
 )
+
+func (s *TaskService) trackTaskForReclaim(task db.AgentTaskQueue, checkAfter time.Time) {
+	if !task.RuntimeID.Valid || !task.ID.Valid || task.Status != "dispatched" {
+		return
+	}
+	// The Redis hint is advisory and intentionally uses an application-clock
+	// elapsed deadline captured beside the DB command. Comparing PostgreSQL's
+	// absolute dispatched_at/lease timestamps with time.Now would mix clocks;
+	// PostgreSQL remains authoritative when the reclaim query actually runs.
+	// A bounded background context lets this best-effort write outlive a request
+	// cancellation without allowing Redis to stall the hot path indefinitely.
+	s.ReclaimCheck.Track(
+		context.Background(),
+		util.UUIDToString(task.RuntimeID),
+		util.UUIDToString(task.ID),
+		checkAfter,
+	)
+}
+
+func (s *TaskService) extendTaskReclaimHint(task db.AgentTaskQueue, checkAfter time.Time) {
+	if !task.RuntimeID.Valid || !task.ID.Valid || task.Status != "dispatched" {
+		return
+	}
+	// Preserve a later initial recovery deadline; a short prepare lease should
+	// only move the hint when repeated extensions actually protect the task for
+	// longer. See trackTaskForReclaim for the clock/context rationale.
+	s.ReclaimCheck.TrackLater(
+		context.Background(),
+		util.UUIDToString(task.RuntimeID),
+		util.UUIDToString(task.ID),
+		checkAfter,
+	)
+}
+
+func (s *TaskService) forgetTaskReclaim(task db.AgentTaskQueue) {
+	if !task.RuntimeID.Valid || !task.ID.Valid {
+		return
+	}
+	// This cleanup is best-effort and uses the cache's bounded timeout; request
+	// cancellation must not make a committed task transition leave a stale hint.
+	s.ReclaimCheck.Forget(
+		context.Background(),
+		util.UUIDToString(task.RuntimeID),
+		util.UUIDToString(task.ID),
+	)
+}
 
 // buildCommentTriggerSummary fetches the comment content and truncates
 // it for storage on the task row. Returns an invalid pgtype.Text when
@@ -604,6 +654,20 @@ func isDuplicatePendingTaskErr(err error) bool {
 	default:
 		return false
 	}
+}
+
+// pendingSlotTakenErr reports whether err means "the (issue, agent) pending slot
+// was already occupied when we tried to enqueue".
+//
+// Two shapes reach RerunIssue. The issue-assignee path surfaces the raw unique
+// violation, while enqueueMentionTaskWithCommentPlan normalizes it into the bare
+// ErrDuplicatePendingTask sentinel — and that is the path taken by EVERY rerun
+// whose target is not the issue's current agent assignee: a squad leader, a
+// displaced agent re-fired by task_id, a mentioned agent. Matching only the raw
+// pgconn error meant the reclaim never ran for those, so a system retry winning
+// the slot surfaced as a hard error instead.
+func pendingSlotTakenErr(err error) bool {
+	return isDuplicatePendingTaskErr(err) || errors.Is(err, ErrDuplicatePendingTask)
 }
 
 // applyAttributionFallback applies the workspace's degraded-attribution policy to a
@@ -2984,6 +3048,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 	outcome := "unknown"
 	var getAgentMs, countRunningMs, claimAgentMs, reanchorMs, updateStatusMs, dispatchMs int64
 	var claimed *db.AgentTaskQueue
+	var reclaimCheckAfter time.Time
 	defer func() {
 		s.maybeLogClaimSlow(agentID, outcome, start, getAgentMs, countRunningMs, claimAgentMs, reanchorMs, updateStatusMs, dispatchMs)
 	}()
@@ -3019,6 +3084,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		}
 
 		t0 = time.Now()
+		reclaimCheckAfter = t0.Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,
 			RuntimeID:        claimRuntimeID,
@@ -3070,6 +3136,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 	if claimed == nil {
 		return nil, nil
 	}
+	s.trackTaskForReclaim(*claimed, reclaimCheckAfter)
 
 	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
 	s.captureTaskDispatched(ctx, *claimed)
@@ -3130,27 +3197,45 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		return nil, err
 	}
 
-	// Check this before EmptyClaim: a lost claim response moves the task out of
-	// `queued`, so the empty-queued cache cannot represent recoverability.
-	stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
-		RuntimeID:         runtimeID,
-		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
-		RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
-	})
-	if err == nil {
-		outcome = "reclaimed_dispatched"
-		claimedFlag = true
-		slog.Info("stale dispatched task reclaimed",
-			"task_id", util.UUIDToString(stale.ID),
-			"runtime_id", runtimeKey,
-			"agent_id", util.UUIDToString(stale.AgentID),
+	// Keep stale-response recovery before EmptyClaim because the queued-only
+	// cache cannot represent dispatched work. ReclaimCheck independently skips
+	// the UPDATE until a task hint or bounded DB backstop is due.
+	checkStarted := time.Now()
+	if due := s.ReclaimCheck.DueRuntimeIDs(ctx, []string{runtimeKey}, checkStarted); len(due) > 0 {
+		reclaimCheckAfter := time.Now().Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
+		stale, err := s.Queries.ReclaimStaleDispatchedTaskForRuntime(ctx, db.ReclaimStaleDispatchedTaskForRuntimeParams{
+			RuntimeID:         runtimeID,
+			ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+			PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
+			RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
+		})
+		if err == nil {
+			s.ReclaimCheck.MarkChecked(
+				ctx,
+				[]string{runtimeKey},
+				checkStarted,
+				time.Now().Add(ReclaimCheckRetryInterval),
+			)
+			s.trackTaskForReclaim(stale, reclaimCheckAfter)
+			outcome = "reclaimed_dispatched"
+			claimedFlag = true
+			slog.Info("stale dispatched task reclaimed",
+				"task_id", util.UUIDToString(stale.ID),
+				"runtime_id", runtimeKey,
+				"agent_id", util.UUIDToString(stale.AgentID),
+			)
+			return &stale, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			outcome = "error_reclaim_dispatched"
+			return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
+		}
+		s.ReclaimCheck.MarkChecked(
+			ctx,
+			[]string{runtimeKey},
+			checkStarted,
+			time.Now().Add(ReclaimCheckRetryInterval),
 		)
-		return &stale, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		outcome = "error_reclaim_dispatched"
-		return nil, fmt.Errorf("reclaim stale dispatched task: %w", err)
 	}
 
 	if s.EmptyClaim.IsEmpty(ctx, runtimeKey) {
@@ -3279,6 +3364,7 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 	if err != nil {
 		return nil, fmt.Errorf("requeue task after claim failure: %w", err)
 	}
+	s.forgetTaskReclaim(requeued)
 	s.ReconcileAgentStatus(ctx, requeued.AgentID)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, requeued)
 	s.notifyTaskAvailable(requeued)
@@ -3342,11 +3428,18 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// MarkEmpty from a prior idle poll would short-circuit the runtime and the
 	// promoted task would sit unclaimed until the empty key's TTL. Also emits
 	// the deferred→queued UI event and the enqueue analytics sample.
+	s.cancelSupersededDeferredRetries(ctx, uniqueIDs)
 	promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, db.PromoteDueDeferredTasksForRuntimesParams{
 		RuntimeIds:       uniqueIDs,
 		RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
 	})
-	if err != nil {
+	if isDuplicatePendingTaskErr(err) {
+		// Same tolerance as the single-runtime path, and it matters more here:
+		// one contended row would otherwise fail the claim for EVERY runtime in
+		// the batch. Promote nothing this tick and let the claim continue.
+		slog.Info("promote deferred tasks (batch): slot taken by a concurrent enqueue, skipping this tick")
+		promoted = nil
+	} else if err != nil {
 		return nil, fmt.Errorf("promote deferred tasks: %w", err)
 	}
 	for _, task := range promoted {
@@ -3359,18 +3452,43 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		s.NotifyTaskEnqueued(ctx, task)
 	}
 
-	// 2. Reclaim lost-response dispatched tasks across the set, up to maxTasks.
-	reclaimed, err := s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
-		RuntimeIds:        uniqueIDs,
-		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
-		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
-		RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
-		MaxTasks:          int32(maxTasks),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+	// 2. Reclaim lost-response dispatched tasks when any runtime's task schedule
+	// or bounded DB backstop is due. The query always receives the complete
+	// machine-level set so per-runtime backstops stay aligned and fixed UPDATE
+	// setup/locking cost is paid at a predictable cadence. A nil/missing/failed
+	// cache preserves the historical query path.
+	runtimeKeys := make([]string, 0, len(uniqueIDs))
+	for _, rid := range uniqueIDs {
+		runtimeKeys = append(runtimeKeys, util.UUIDToString(rid))
+	}
+	checkStarted := time.Now()
+	dueKeys := s.ReclaimCheck.DueRuntimeIDs(ctx, runtimeKeys, checkStarted)
+	var reclaimed []db.AgentTaskQueue
+	var reclaimCheckAfter time.Time
+	if len(dueKeys) > 0 {
+		reclaimCheckAfter = time.Now().Add(claimResponseRecoveryWindow + ReclaimCheckHintSafetyMargin)
+		reclaimed, err = s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
+			RuntimeIds:        uniqueIDs,
+			ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+			PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
+			RuntimeStaleSecs:  RuntimeClaimFreshnessSeconds,
+			MaxTasks:          int32(maxTasks),
+		})
+		if err != nil {
+			return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+		}
+		// The UPDATE's fixed setup/locking cost dominates array width. Query and
+		// advance the complete machine-level set together so per-runtime backstops
+		// cannot drift into one UPDATE on almost every daemon poll.
+		s.ReclaimCheck.MarkChecked(
+			ctx,
+			runtimeKeys,
+			checkStarted,
+			time.Now().Add(ReclaimCheckRetryInterval),
+		)
 	}
 	for i := range reclaimed {
+		s.trackTaskForReclaim(reclaimed[i], reclaimCheckAfter)
 		claimed = append(claimed, reclaimed[i])
 		slog.Info("stale dispatched task reclaimed (batch)",
 			"task_id", util.UUIDToString(reclaimed[i].ID),
@@ -3473,11 +3591,48 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	return claimed, nil
 }
 
+// cancelSupersededDeferredRetries drops deferred auto-retry rows that an active
+// task already supersedes, so a single rerun click still produces exactly one
+// more run. Runs immediately before promotion — promotion is the moment a stale
+// retry would otherwise become claimable. Best-effort: a failure here must not
+// stop the claim loop, it just leaves the row for the next tick.
+func (s *TaskService) cancelSupersededDeferredRetries(ctx context.Context, runtimeIDs []pgtype.UUID) {
+	if len(runtimeIDs) == 0 {
+		return
+	}
+	cancelled, err := s.Queries.CancelSupersededDeferredRetriesForRuntimes(ctx, runtimeIDs)
+	if err != nil {
+		slog.Warn("cancel superseded deferred retries failed", "error", err)
+		return
+	}
+	for _, task := range cancelled {
+		slog.Info("deferred auto-retry cancelled: superseded by an active task",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		s.captureTaskCancelled(ctx, task)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	}
+}
+
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	s.cancelSupersededDeferredRetries(ctx, []pgtype.UUID{runtimeID})
 	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, db.PromoteDueDeferredTasksForRuntimeParams{
 		RuntimeID:        runtimeID,
 		RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
 	})
+	if isDuplicatePendingTaskErr(err) {
+		// The NOT EXISTS fence inside the query cannot see an enqueue that has
+		// not committed yet, so a rerun landing in the same instant still
+		// collides here. One row losing its slot must not fail the whole claim:
+		// the row stays deferred and the next tick — by which time the rerun is
+		// visible — skips it cleanly. Costs one poll interval, never a stall.
+		slog.Info("promote due deferred tasks: slot taken by a concurrent enqueue, skipping this tick",
+			"runtime_id", util.UUIDToString(runtimeID))
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("promote due deferred tasks: %w", err)
 	}
@@ -3523,6 +3678,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
+	s.forgetTaskReclaim(task)
 	s.cancelDeferredEscalationsForTask(ctx, task.ID)
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
@@ -3590,6 +3746,15 @@ func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtim
 	if err != nil {
 		return nil, fmt.Errorf("extend task prepare lease: %w", err)
 	}
+	if task.Status == "dispatched" {
+		// Use the successful response time as a conservative application-clock
+		// approximation of the DB lease start. Scheduling slightly late by query
+		// latency is safer than an early failed check suppressing the hint until
+		// the next backstop.
+		s.extendTaskReclaimHint(task, time.Now().Add(prepareLeaseDuration))
+	} else {
+		s.forgetTaskReclaim(task)
+	}
 	return &task, nil
 }
 
@@ -3600,7 +3765,7 @@ func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtim
 // next to the status. Returns the updated row so the daemon can confirm the
 // transition and so the broadcast carries the up-to-date snapshot.
 func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
-	reason = strings.TrimSpace(reason)
+	reason = sanitizeWaitReason(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
 		ID:               taskID,
 		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
@@ -3609,6 +3774,7 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 	if err != nil {
 		return nil, fmt.Errorf("mark task waiting_local_directory: %w", err)
 	}
+	s.forgetTaskReclaim(task)
 
 	slog.Info("task waiting_local_directory",
 		"task_id", util.UUIDToString(task.ID),
@@ -3620,8 +3786,71 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 	// reconcile immediately when it parks instead of leaving that persisted
 	// status stale until a terminal transition.
 	s.ReconcileAgentStatus(ctx, task.AgentID)
-	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task)
+	// Carry the reason on the event, not just in the row. Without it the client
+	// learns WHY a task parked only on the follow-up refetch, so the pill spends
+	// that round-trip saying nothing useful — which is the gap this hint exists
+	// to close. Already sanitized above, so the socket cannot carry a path the
+	// REST payload would have withheld.
+	extra := map[string]any{}
+	if reason != "" {
+		extra["wait_reason"] = reason
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task, extra)
 	return &task, nil
+}
+
+// legacyLocalDirectoryWaitPrefix is how daemons before the display-name change
+// opened a wait reason: the literal word, a space, then the absolute path.
+const legacyLocalDirectoryWaitPrefix = "local_directory "
+
+// sanitizeWaitReason drops a wait reason that carries an absolute filesystem
+// path, then trims what remains.
+//
+// Version skew makes this load-bearing rather than defensive. Current daemons
+// send a display name (localDirectoryAssignment.DisplayName) precisely because
+// this text reaches every client on the session and lands in screenshots. An
+// OLDER daemon paired with this server still sends `local_directory /Users/
+// <name>/repo (held by task abc12345)`, and since clients now render the field
+// instead of ignoring it, passing that through would put the user's home path
+// — and account name — on screen. The leak would be introduced BY surfacing
+// the field, so the guard belongs with it.
+//
+// Dropping the whole string rather than editing it: clients already handle an
+// absent reason (older servers never sent one) by showing the plain waiting
+// label, which is exactly the pre-change behaviour and is never wrong.
+//
+// Remove once no supported daemon emits the legacy format.
+func sanitizeWaitReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	rest, ok := strings.CutPrefix(reason, legacyLocalDirectoryWaitPrefix)
+	if ok && startsWithAbsolutePath(rest) {
+		return ""
+	}
+	return reason
+}
+
+// startsWithAbsolutePath reports whether s opens with an absolute path on any
+// platform the daemon runs on: POSIX (/…), Windows drive (C:\… or C:/…), or a
+// UNC share (\\host\share). Checked against the daemon's own output, so the
+// question is only "did an old daemon put a path here", not general parsing.
+//
+// It deliberately does NOT match the holder clause a current daemon appends —
+// `local_directory (held by task abc12345)` is what this server produces when
+// a directory is genuinely NAMED "local_directory", and that name is the user's
+// own label, not a path.
+func startsWithAbsolutePath(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '/' || strings.HasPrefix(s, `\\`) {
+		return true
+	}
+	// Drive-letter form: a single ASCII letter, a colon, then a separator.
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		c := s[0]
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+	return false
 }
 
 // CompleteTask marks a task as completed.
@@ -4204,7 +4433,30 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		// Create the retry child atomically with the fail. CreateRetryTask reads
 		// the just-failed parent row (same tx), so it inherits chat_input_task_id
 		// and the bumped chat-retry priority; broadcast/notify happen after commit.
-		if wantRetry {
+		// This check is an optimisation, NOT the safety mechanism. It is a plain
+		// count at READ COMMITTED and takes no lock, so a rerun can always commit
+		// between it and the insert below; it only saves the work when a
+		// successor is already visible and gives the skip a readable log line.
+		// Correctness under that race belongs to CreateRetryTask's
+		// ON CONFLICT DO NOTHING, which yields the slot instead of raising and so
+		// can never abort this transaction — which also carries the parent's
+		// failed status.
+		createRetry := wantRetry
+		if createRetry {
+			successor, herr := hasRunnableSuccessor(ctx, qtx, t)
+			if herr != nil {
+				return fmt.Errorf("check runnable successor: %w", herr)
+			}
+			if successor {
+				slog.Info("fail task auto-retry skipped: a successor is already pending",
+					"task_id", util.UUIDToString(taskID),
+					"issue_id", util.UUIDToString(t.IssueID),
+					"agent_id", util.UUIDToString(t.AgentID),
+				)
+				createRetry = false
+			}
+		}
+		if createRetry {
 			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 				NewTaskID:            dbid.NewV7(),
 				ID:                   taskID,
@@ -4213,10 +4465,24 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
 			})
-			if cerr != nil {
+			switch {
+			case cerr == nil:
+				retried = &child
+			case errors.Is(cerr, pgx.ErrNoRows):
+				// The statement wrote nothing: either the owning workspace was
+				// torn down mid-flight, or a rerun took the pending slot after
+				// the unlocked check above (ON CONFLICT DO NOTHING). Neither is
+				// a reason to abort — this transaction still owns the parent's
+				// failed status, and losing that would leave the task stuck in
+				// 'running'. Record the failure and move on without a retry.
+				slog.Info("fail task auto-retry not created: no row written",
+					"task_id", util.UUIDToString(taskID),
+					"issue_id", util.UUIDToString(t.IssueID),
+					"agent_id", util.UUIDToString(t.AgentID),
+				)
+			default:
 				return fmt.Errorf("create retry task: %w", cerr)
 			}
-			retried = &child
 		}
 
 		// A terminal non-retried chat failure is a visible assistant outcome.
@@ -4508,6 +4774,32 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 
+// hasRunnableSuccessor reports whether another not-yet-started task already
+// occupies the single queued/dispatched slot that
+// idx_one_pending_task_per_issue_agent_v2 allows per (issue, agent).
+//
+// Both auto-retry paths consult this before inserting a retry child. A manual
+// rerun can now be enqueued BEHIND a still-running task instead of cancelling
+// it, so by the time that task fails its slot may already be taken, and the
+// retry exists to give the issue a runnable successor that already exists.
+//
+// This is advisory only: the query takes no lock, so a rerun committing after it
+// returns is always possible. CreateRetryTask's ON CONFLICT DO NOTHING is what
+// makes losing that race harmless. Skipping early just avoids pointless work and
+// records why no retry was made.
+//
+// Chat / quick-create tasks carry no issue_id, so the index cannot apply to them
+// and their retries can never collide.
+func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) (bool, error) {
+	if !task.IssueID.Valid {
+		return false, nil
+	}
+	return q.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: task.IssueID,
+		AgentID: task.AgentID,
+	})
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -4572,6 +4864,20 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 	}
+	// Same advisory slot check as FailTask's path, for the same reason: skip the
+	// work when a successor is already visible. Losing the race is handled by
+	// CreateRetryTask yielding the slot, which this caller reads as "no retry".
+	if successor, herr := hasRunnableSuccessor(ctx, s.Queries, parent); herr != nil {
+		slog.Warn("task auto-retry: successor check failed; attempting retry anyway",
+			"parent_task_id", util.UUIDToString(parent.ID), "error", herr)
+	} else if successor {
+		slog.Info("task auto-retry skipped: a successor is already pending",
+			"parent_task_id", util.UUIDToString(parent.ID),
+			"issue_id", util.UUIDToString(parent.IssueID),
+			"agent_id", util.UUIDToString(parent.AgentID),
+		)
+		return nil, nil
+	}
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
@@ -4580,6 +4886,16 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Workspace torn down, or the pending slot was taken between the check
+		// above and this insert. Same contract as FailTask's path: no retry, no
+		// error.
+		slog.Info("task auto-retry not created: no row written",
+			"parent_task_id", util.UUIDToString(parent.ID),
+			"reason", reason,
+		)
+		return nil, nil
+	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -4734,27 +5050,40 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 	}
 
-	// Cancel only the target agent's active/queued tasks on this issue. A manual
-	// rerun is a request to resume the issue, not to dismiss planned recovery
-	// signals, so this intentionally stays on the server-cancel query. Any
-	// undelivered delegated-failure signal remains an outbox obligation and the
-	// sweeper can merge it into the fresh rerun task.
-	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
-		IssueID: issueID,
-		AgentID: agentID,
-	})
-	if err != nil {
-		slog.Warn("rerun: cancel prior tasks failed",
-			"issue_id", util.UUIDToString(issueID),
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
+	// Clear only the tasks that have not begun executing. Those are the rows the
+	// fresh enqueue would collide with under
+	// idx_one_pending_task_per_issue_agent_v2, and replacing them costs no work
+	// while keeping the new run attributed to the rerunning member (MUL-4302 §5)
+	// rather than inheriting whoever created the pending row.
+	//
+	// A running / waiting_local_directory task is deliberately left alone: an
+	// agent is executing in it. Neither status appears in that unique index, so
+	// the enqueue below inserts a queued row BEHIND the active one, and
+	// ClaimAgentTask's per-(issue, agent) serialization holds it there until the
+	// active run reaches a terminal state. Rerun used to cancel these too, so
+	// asking an agent for another pass silently killed the pass it was still
+	// working on; interrupting an in-flight run is what CancelTask /
+	// `multica issue cancel-task` is for.
+	clearPendingSlot := func() int {
+		cancelled, cerr := s.Queries.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+			IssueID: issueID,
+			AgentID: agentID,
+		})
+		if cerr != nil {
+			slog.Warn("rerun: cancel pending tasks failed",
+				"issue_id", util.UUIDToString(issueID),
+				"agent_id", util.UUIDToString(agentID),
+				"error", cerr,
+			)
+		}
+		for _, t := range cancelled {
+			s.captureTaskCancelled(ctx, t)
+			s.ReconcileAgentStatus(ctx, t.AgentID)
+			s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
+		}
+		return len(cancelled)
 	}
-	for _, t := range cancelled {
-		s.captureTaskCancelled(ctx, t)
-		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
-	}
+	cancelledCount := clearPendingSlot()
 
 	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
 	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
@@ -4762,6 +5091,23 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// (rerun_of_task_id) so the queued event / daemon claim never sees a NULL
 	// lineage, and it stays distinct from system-retry's retry_of_task_id (§5).
 	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID)
+	if pendingSlotTakenErr(err) {
+		// The clear above and this enqueue are separate commits, so a system
+		// retry created by a concurrent FailTask can take the pending slot in
+		// between. CreateRetryTask yields the slot when it is already occupied,
+		// but it cannot yield to a row that does not exist yet, so a retry
+		// committing inside this window gets there first. Clear once more and
+		// retry: the deliberate human action is the one that should hold the
+		// slot. Bounded to a single extra attempt — a second collision would mean
+		// something is enqueueing in a loop, which is worth surfacing rather than
+		// spinning on.
+		slog.Info("issue rerun: pending slot taken concurrently, reclaiming",
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+		)
+		cancelledCount += clearPendingSlot()
+		task, err = s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -4771,7 +5117,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		"agent_id", util.UUIDToString(agentID),
 		"source_task_id", util.UUIDToString(sourceTaskID),
 		"is_leader", isLeader,
-		"cancelled_prior", len(cancelled),
+		"cancelled_pending", cancelledCount,
 	)
 	return &task, nil
 }
@@ -5765,6 +6111,7 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // is not available; the hint only means that a queued successor may have
 // become claimable because an agent-capacity or serialization barrier cleared.
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
+	s.forgetTaskReclaim(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 }
 
@@ -5777,6 +6124,7 @@ func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
 		if !task.RuntimeID.Valid {
 			continue
 		}
+		s.forgetTaskReclaim(task)
 		runtimeKey := util.UUIDToString(task.RuntimeID)
 		if _, ok := seen[runtimeKey]; ok {
 			continue

@@ -504,6 +504,9 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return d.orphanByMTime(taskDir, "issue not accessible")
 	}
 
+	// result.Status is a CATEGORY, normalized server-side, so this literal
+	// comparison covers custom statuses too — an issue on a `done`-category
+	// custom status is terminal here. (MUL-6243)
 	if (result.Status == "done" || result.Status == "cancelled") &&
 		time.Since(result.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
@@ -575,6 +578,14 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 // isKnownIssueStatus mirrors the issue status constraint enforced by the
 // server. Full task cleanup must fail closed when an older daemon receives a
 // future status or a malformed response from the GC check endpoint.
+//
+// The 7 names below stay correct after custom statuses (MUL-6243) because the
+// gc-check endpoints answer with the status's CATEGORY, not the stored key —
+// see BatchIssueGCCheck / GetIssueGCCheck, which resolve through
+// issuestatus.Effective. Do not teach this function about custom statuses: an
+// installed daemon has no catalog to resolve them against, and daemons
+// predating the feature must keep making correct decisions against an upgraded
+// server. Pinned by TestIssueGCChecksReportCategoryNotRawCustomStatus.
 func isKnownIssueStatus(status string) bool {
 	switch status {
 	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":

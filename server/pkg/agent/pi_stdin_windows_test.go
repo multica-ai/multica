@@ -234,7 +234,7 @@ func assertPiPromptSurvivesShim(t *testing.T) {
 		}
 	}
 	gotArgv := string(argvRaw)
-	for _, want := range []string{"-p", "--mode", "json", "--session", "--provider", "cpa", "--model", "grok-4.5-high"} {
+	for _, want := range []string{"-p", "--mode", "json", "--session", "--model", "cpa/grok-4.5-high"} {
 		if !strings.Contains(gotArgv, want) {
 			t.Errorf("expected %q to reach native child; argv=%q", want, gotArgv)
 		}

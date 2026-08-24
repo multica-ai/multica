@@ -575,12 +575,18 @@ WITH doomed AS (
         SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
     )
 ),
-cleared_chat_sessions AS (
-    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
-    RETURNING chat_session_id
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
 ),
 cleared_outbound_cards AS (
     -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)
@@ -1539,14 +1545,19 @@ WITH dead AS (
       )
     RETURNING ci.id
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
     RETURNING chat_session_id
-),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route
-    WHERE installation_id IN (SELECT id FROM dead)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,

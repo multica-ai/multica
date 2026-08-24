@@ -116,7 +116,10 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	}
 
 	chatType := dingtalkChatType(data.ConversationType)
-	rawEvent := dingtalkRawEvent{AppID: appID, ConversationTitle: strings.TrimSpace(data.ConversationTitle)}
+	rawEvent := dingtalkRawEvent{
+		AppID:             appID,
+		ConversationTitle: strings.TrimSpace(data.ConversationTitle),
+	}
 	msg := channel.InboundMessage{
 		EventID:        data.MsgId,
 		MessageID:      data.MsgId,

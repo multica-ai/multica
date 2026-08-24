@@ -267,6 +267,90 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	}
 }
 
+// ModelSelectorMustBeProviderQualified reports whether a runtime's CLI
+// refuses a model id that does not carry its `<provider>/` prefix.
+//
+// This is an execution contract, not a statement about catalog shape. It
+// decides one thing: whether the daemon has to read the runtime catalog before
+// launching a task that pins a model. That read costs a CLI subprocess with a
+// 15-30s ceiling which cachedDiscovery deliberately does not memoize when it
+// comes back empty or as a fallback (#3729, MUL-5549), so a logged-out runtime
+// pays the ceiling on every read — worth spending only where the launch
+// genuinely fails without it (MUL-6471 review).
+//
+// opencode's `run --model` and the DevEco fork of it resolve strictly through
+// `provider/model` and reject anything else — verified against opencode
+// 1.18.14, which answers a bare id with `UnknownError` before any provider
+// call. pi is deliberately absent: its resolver accepts a canonical selector,
+// a bare id, AND an id containing a slash (see buildPiArgs), so a pi task
+// launches correctly without the daemon qualifying anything first.
+//
+// Built-in runtime identities resolve through their protocol family, so a fork
+// inherits the contract from its descriptor entry rather than a name here.
+func ModelSelectorMustBeProviderQualified(providerType string) bool {
+	if desc, ok := BuiltinRuntimeByID(providerType); ok {
+		providerType = desc.ProtocolFamily
+	}
+	switch providerType {
+	case "opencode", "deveco":
+		return true
+	default:
+		return false
+	}
+}
+
+// QualifyModelID resolves a persisted model string to the canonical ID the
+// runtime's own catalog advertises, and reports whether it rewrote anything.
+// catalog is the runtime's discovered catalog; callers already holding one
+// (the daemon reads it for the thinking-level and service-tier checks) pay
+// nothing extra.
+//
+// Runtimes that namespace their catalog (opencode's `provider/model`, pi's
+// `provider/id` selector) want the qualified form, but `agent.model` holds
+// whatever was persisted — and for gateway-style providers the bare model id
+// is itself slash-shaped (`claude/claude-opus-5` under provider
+// `multica-anthropic`). The slash is therefore not a provider boundary and
+// cannot be guessed at: the catalog is the only thing that knows which
+// provider owns an id. Callers get the qualified id when exactly one provider
+// claims the value, and the input untouched otherwise.
+//
+// Untouched is the deliberate answer for every uncertain case — the catalog is
+// a static fallback rather than the runtime's real list, the value already
+// matches a catalog ID, or two providers expose the same bare id. Manual model
+// entry is supported everywhere, so a value this function cannot confidently
+// place must still reach the CLI verbatim; the CLI's own resolver is a better
+// judge than a guess here would be.
+func QualifyModelID(catalog Catalog, model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	// A fallback catalog is a static stand-in, not what the runtime actually
+	// supports (see Catalog.Fallback) — qualifying against it would rewrite a
+	// working id into one the CLI never advertised.
+	if model == "" || catalog.Fallback {
+		return model, false
+	}
+	for _, m := range catalog.Models {
+		if m.ID == model {
+			return model, false
+		}
+	}
+	qualified := ""
+	for _, m := range catalog.Models {
+		if m.Provider == "" || m.ID != m.Provider+"/"+model {
+			continue
+		}
+		if qualified != "" && qualified != m.ID {
+			// Two providers expose this same bare id. Picking one would be a
+			// coin flip that silently routes the task to the wrong gateway.
+			return model, false
+		}
+		qualified = m.ID
+	}
+	if qualified == "" {
+		return model, false
+	}
+	return qualified, true
+}
+
 // ModelSelectionSupported reports whether setting `agent.model` has
 // any effect for the given provider. Every built-in provider now honours
 // `opts.Model` end-to-end — Hermes routes it through the ACP
@@ -1223,11 +1307,10 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 //	{"models":[{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5",...}]}
 //
 // The persistable Model.ID is the selector (provider/id), matching the
-// convention parsePiModels uses: buildPiArgs splits Model.ID on "/" and
-// emits --provider + --model. Using the bare id would drop --provider and
-// let omp's internal provider priority ranking pick a different backend
-// for the same model id. Provider is kept for UI grouping. The dedup key
-// is the selector when present, falling back to provider/id.
+// convention parsePiModels uses: buildPiArgs hands Model.ID to --model whole.
+// Using the bare id would let omp's internal provider priority ranking pick a
+// different backend for the same model id. Provider is kept for UI grouping.
+// The dedup key is the selector when present, falling back to provider/id.
 func parseOmpModels(data []byte) ([]Model, error) {
 	var wrapper struct {
 		Models []struct {
@@ -1249,9 +1332,9 @@ func parseOmpModels(data []byte) ([]Model, error) {
 		}
 		provider := strings.TrimSpace(e.Provider)
 		// Model.ID is the qualified selector (provider/id) so buildPiArgs
-		// emits both --provider and --model. When selector is absent, fall
-		// back to provider/id; when provider is also absent, the bare id is
-		// the only form available.
+		// forwards a selector omp can resolve unambiguously. When selector is
+		// absent, fall back to provider/id; when provider is also absent, the
+		// bare id is the only form available.
 		selector := strings.TrimSpace(e.Selector)
 		if selector == "" {
 			if provider != "" {

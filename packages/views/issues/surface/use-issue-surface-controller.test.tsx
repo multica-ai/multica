@@ -797,6 +797,47 @@ describe("useIssueSurfaceController", () => {
     },
   );
 
+  it.each([
+    { grouping: "assignee" as const, expected: { kind: "assignee" } },
+    { grouping: "project" as const, expected: { kind: "project" } },
+  ])(
+    "asks the server for $grouping groups when the board is grouped that way",
+    async ({ grouping, expected }) => {
+      // The board's columns ARE the server's group descriptors, so the group
+      // spec it requests is the whole contract — a board that asks for the
+      // wrong dimension renders another dimension's columns.
+      const store = getIssueSurfaceViewStore("project:p1");
+      store.getState().setViewMode("board");
+      store.getState().setGrouping(grouping);
+      const tableMethods = statusTableMethodsFromLegacy(listIssues);
+      const listIssueTableGroups = vi.fn(tableMethods.listIssueTableGroups);
+      setApiInstance({
+        listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+        listIssues,
+        ...tableMethods,
+        listIssueTableGroups,
+        listGroupedIssues: vi.fn(() => never()),
+        listProjects: vi.fn(() => Promise.resolve({ projects: [], total: 0 })),
+        getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+        getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      } as unknown as ApiClient);
+
+      renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p1" },
+            modes: ["board", "list", "swimlane"],
+          }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      await waitFor(() => expect(listIssueTableGroups).toHaveBeenCalled());
+      expect(listIssueTableGroups.mock.calls[0]?.[0]).toEqual(
+        expect.objectContaining({ group: expected }),
+      );
+    },
+  );
+
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");

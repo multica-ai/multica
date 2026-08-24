@@ -29,7 +29,7 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 	}, slog.Default())
 
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514", "--thinking high"} {
+	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--model anthropic/claude-sonnet-4-20250514", "--thinking high"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
@@ -455,6 +455,58 @@ func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
 		got += flushPiTextBuffer(&buf)
 		if got != want {
 			t.Fatalf("unexpected flushed text: %q, want %q", got, want)
+		}
+	}
+}
+
+// TestBuildPiArgsKeepsSlashShapedModelIDIntact is the GH #7300 regression.
+// A gateway-style provider registers model ids that themselves contain a
+// slash (`claude/claude-opus-5` under provider `multica-anthropic`). Splitting
+// on that slash to fill --provider produced `--provider claude --model
+// claude-opus-5`, and pi answers an unknown --provider with a hard
+// `Unknown provider "claude"` before it ever looks at --model. The whole
+// selector must reach --model instead, where pi's resolver matches it as a
+// raw model id.
+func TestBuildPiArgsKeepsSlashShapedModelIDIntact(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model claude/claude-opus-5") {
+		t.Errorf("model id was not passed through intact: %v", args)
+	}
+	for _, arg := range args {
+		if arg == "--provider" {
+			t.Errorf("buildPiArgs synthesized --provider from a model id: %v", args)
+		}
+	}
+}
+
+// A fully-qualified selector is passed through the same way: pi infers the
+// provider from the prefix itself, so the daemon never has to take it apart.
+func TestBuildPiArgsPassesQualifiedSelectorWhole(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "multica-anthropic/claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model multica-anthropic/claude/claude-opus-5") {
+		t.Errorf("qualified selector was not passed through intact: %v", args)
+	}
+	if strings.Contains(joined, "--provider") {
+		t.Errorf("buildPiArgs synthesized --provider: %v", args)
+	}
+}
+
+// A bare model id stays bare, and an empty model still omits --model entirely
+// so pi resolves its own default.
+func TestBuildPiArgsBareAndEmptyModels(t *testing.T) {
+	bare := buildPiArgs("", ExecOptions{Model: "  claude-opus-5  "}, slog.Default())
+	if joined := strings.Join(bare, " "); !strings.Contains(joined, "--model claude-opus-5") {
+		t.Errorf("bare model not forwarded (or not trimmed): %v", bare)
+	}
+
+	empty := buildPiArgs("", ExecOptions{Model: "   "}, slog.Default())
+	for _, arg := range empty {
+		if arg == "--model" {
+			t.Errorf("blank model should omit --model so pi picks its default: %v", empty)
 		}
 	}
 }

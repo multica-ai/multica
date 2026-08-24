@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -1900,6 +1901,36 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
+	if task.IssueID.Valid {
+		if policy, enabled := h.issueWindowPolicy(r.Context(), runtime.WorkspaceID); enabled {
+			visible, visibilityErr := h.issueIDsWithinWindow(r.Context(), runtime.WorkspaceID, policy, []pgtype.UUID{task.IssueID})
+			if visibilityErr != nil {
+				h.recordIssueWindow(policy.action, "agent_context", "error")
+				if policy.action == entitlement.ActionEnforce {
+					if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); requeueErr != nil {
+						slog.Error("task claim: requeue after issue window failure failed", "task_id", uuidToString(task.ID), "error", requeueErr)
+					}
+					return resp, nil, 0, 0, &claimBuildFailure{
+						outcome: "error_issue_window_check", status: http.StatusInternalServerError, message: "failed to check issue access",
+					}
+				}
+			} else if !visible {
+				if policy.action == entitlement.ActionObserve {
+					h.recordIssueWindow(policy.action, "agent_context", "would_block")
+				} else {
+					h.recordIssueWindow(policy.action, "agent_context", "blocked")
+					return resp, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
+						r.Context(), task,
+						"This issue is outside the workspace's recently created issue window.",
+						taskfailure.ReasonIssueWindowRestricted,
+						"error_issue_window_restricted", http.StatusPaymentRequired, "issue is outside the recently created window",
+					)
+				}
+			} else {
+				h.recordIssueWindow(policy.action, "agent_context", "allowed")
+			}
+		}
+	}
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
 	// from the briefing text. Set unconditionally — on every claim, leader or
@@ -4405,36 +4436,51 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verify the caller owns this task's workspace.
-	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	// Verify the caller owns this task's workspace. The access check already
+	// resolves the workspace id (it needs it to authorize the daemon), so take
+	// it from there instead of re-running GetIssue / GetChatSession: this
+	// endpoint fires every 500ms for every running task, and that second
+	// lookup was a whole extra query per batch on the hottest write path in
+	// the system (MUL-6523).
+	task, wsID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
 	if !ok {
 		return
 	}
 
+	// Broadcast reach is deliberately unchanged: only issue- and chat-backed
+	// tasks streamed live messages before, and widening that to autopilot /
+	// quick-create tasks is a product decision, not part of this optimization.
 	workspaceID := ""
-	if task.IssueID.Valid {
-		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
-			workspaceID = uuidToString(issue.WorkspaceID)
-		}
-	}
-	if workspaceID == "" && task.ChatSessionID.Valid {
-		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
-			workspaceID = uuidToString(cs.WorkspaceID)
-		}
+	if task.IssueID.Valid || task.ChatSessionID.Valid {
+		workspaceID = wsID
 	}
 
-	messageIDs := make([]pgtype.UUID, len(req.Messages))
-	for i := range messageIDs {
+	// Column-wise parameters for the single batch insert below. Building them
+	// as parallel arrays rather than as one JSON document is deliberate: these
+	// strings were just decoded out of the request, and re-encoding content /
+	// output into JSON would make the server escape every byte a second time
+	// and Postgres parse the envelope back out — measurably worse on exactly
+	// the large messages that are already the most expensive (MUL-6523). Empty
+	// string means SQL NULL, applied by the query's NULLIF.
+	n := len(req.Messages)
+	params := db.CreateTaskMessagesParams{
+		TaskID:   parseUUID(taskID),
+		Ids:      make([]pgtype.UUID, 0, n),
+		Seqs:     make([]int32, 0, n),
+		Types:    make([]string, 0, n),
+		Tools:    make([]string, 0, n),
+		Contents: make([]string, 0, n),
+		Inputs:   make([]string, 0, n),
+		Outputs:  make([]string, 0, n),
+	}
+	for _, msg := range req.Messages {
 		id, err := uuid.NewV7()
 		if err != nil {
 			slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to persist task message")
 			return
 		}
-		messageIDs[i] = pgtype.UUID{Bytes: [16]byte(id), Valid: true}
-	}
 
-	for i, msg := range req.Messages {
 		// Redact sensitive information before persisting or broadcasting.
 		msg.Content = redact.Text(msg.Content)
 		msg.Output = redact.Text(msg.Output)
@@ -4446,7 +4492,9 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// binary, or a Windows tool emitting UTF-16 — and this endpoint has no
 		// retry on the daemon side, so an unsanitized batch is silently lost
 		// (GH #7098). Input is a JSONB column, so it needs the deep walk: the
-		// offending byte can sit at any depth of a tool's arguments.
+		// offending byte can sit at any depth of a tool's arguments. Batching
+		// raises the stakes: one bad byte now fails the whole statement rather
+		// than a single row, which is inherent to one-statement writes.
 		msg.Type = util.SanitizeTextForPostgres(msg.Type)
 		msg.Tool = util.SanitizeTextForPostgres(msg.Tool)
 		msg.Content = util.SanitizeTextForPostgres(msg.Content)
@@ -4457,29 +4505,50 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		var inputJSON []byte
+		inputJSON := ""
 		if msg.Input != nil {
-			inputJSON, _ = json.Marshal(msg.Input)
-		}
-		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
-			ID:      messageIDs[i],
-			TaskID:  parseUUID(taskID),
-			Seq:     int32(msg.Seq),
-			Type:    msg.Type,
-			Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
-			Content: pgtype.Text{String: msg.Content, Valid: msg.Content != ""},
-			Input:   inputJSON,
-			Output:  pgtype.Text{String: msg.Output, Valid: msg.Output != ""},
-		})
-		if createErr != nil {
-			slog.Error("failed to create task message", "task_id", taskID, "seq", msg.Seq, "error", createErr)
-			writeError(w, http.StatusInternalServerError, "failed to persist task message")
-			return
+			// Fail loud rather than dropping the field: a tool call whose
+			// arguments silently vanish is worse than a 500 the daemon logs,
+			// because the transcript then shows a tool_use with no input and
+			// nothing anywhere records that it was lost.
+			encoded, err := json.Marshal(msg.Input)
+			if err != nil {
+				slog.Error("failed to encode task message input", "task_id", taskID, "seq", msg.Seq, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to persist task message")
+				return
+			}
+			inputJSON = string(encoded)
 		}
 
-		if workspaceID != "" {
+		params.Ids = append(params.Ids, pgtype.UUID{Bytes: [16]byte(id), Valid: true})
+		params.Seqs = append(params.Seqs, int32(msg.Seq))
+		params.Types = append(params.Types, msg.Type)
+		params.Tools = append(params.Tools, msg.Tool)
+		params.Contents = append(params.Contents, msg.Content)
+		params.Inputs = append(params.Inputs, inputJSON)
+		params.Outputs = append(params.Outputs, msg.Output)
+	}
+
+	created, err := h.Queries.CreateTaskMessages(r.Context(), params)
+	if err != nil {
+		slog.Error("failed to create task messages", "task_id", taskID, "count", n, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+
+	if workspaceID != "" {
+		// CreateTaskMessages orders its result by seq, which is the daemon's
+		// own within-batch ordering — so this publishes in the same order the
+		// per-message loop did. A bare INSERT ... RETURNING has no row-order
+		// guarantee, and subscribers render these events as they arrive, so the
+		// ordering lives in the query rather than in the clients.
+		for _, m := range created {
+			// The ordered CTE makes sqlc name the row type after the query
+			// rather than reusing the table model; the columns are the table's,
+			// in order, so the conversion is checked by the compiler and breaks
+			// loudly if the query ever stops returning the whole row.
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
-				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
+				taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)))
 		}
 	}
 
@@ -4934,6 +5003,14 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ONE resolver for the whole batch, not a point lookup per row. The
+	// package-level Effective issues a GetIssueStatusEntryByKey for every custom
+	// key it sees, so resolving inside this loop cost up to maxIssueGCBatchSize
+	// catalog queries per request — on an endpoint whose entire purpose is to
+	// replace per-issue requests, and which every installed daemon runs on a
+	// timer. The resolver reads the catalog lazily and at most once, so an
+	// all-built-in batch still costs zero. (MUL-6243)
+	resolver := issuestatus.NewResolver(workspaceUUID)
 	items := make([]batchIssueGCCheckItem, 0, len(req.IssueIDs))
 	for i, issueID := range req.IssueIDs {
 		row, found := rows[canonicalIDs[i]]
@@ -4944,7 +5021,7 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 			// database of its own, so the canonical status is resolved here.
 			// Normalizing server-side also means daemons that predate custom
 			// statuses keep making correct GC decisions. (MUL-6243)
-			item.Status = issuestatus.Effective(r.Context(), h.Queries, workspaceUUID, row.Status)
+			item.Status = resolver.Effective(r.Context(), h.issueStatusCatalog(), row.Status)
 			updatedAt := row.UpdatedAt.Time
 			item.UpdatedAt = &updatedAt
 		}
@@ -4973,7 +5050,7 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		// Same reasoning as BatchIssueGCCheck: normalize server-side so the
 		// daemon's terminal-status test stays correct. (MUL-6243)
-		"status":     issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status),
+		"status":     issuestatus.Effective(r.Context(), h.issueStatusCatalog(), issue.WorkspaceID, issue.Status),
 		"updated_at": issue.UpdatedAt.Time,
 	})
 }

@@ -95,6 +95,10 @@ export type {
   PluginResource,
   PluginInstallationListResponse,
   PluginManifestSummary,
+  PluginPackage,
+  PluginPackageVersion,
+  PluginPackageListResponse,
+  PluginSurfaceScript,
   PluginPreview,
   PluginPreviewRequest,
   PluginInstallRequest,
@@ -220,12 +224,13 @@ export type {
 } from "./slack";
 export type {
   DingTalkInstallation,
-  DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
-  ListDingTalkGroupRoutesResponse,
+  DingTalkGroupBot,
+  DingTalkGroup,
+  ListDingTalkGroupsResponse,
+  ListDingTalkGroupsParams,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
 } from "./dingtalk";
 export type {
   WecomInstallation,
@@ -306,10 +311,15 @@ export type {
   WorkspaceSubscriptionInterval,
   WorkspaceSubscriptionEntitlements,
   WorkspaceSubscriptionSummary,
+  WorkspaceSeatPurchaseSummary,
   WorkspaceSubscriptionPrice,
   WorkspaceSubscriptionPrices,
   CreateWorkspaceSubscriptionCheckoutRequest,
   CreateWorkspaceSubscriptionCheckoutResponse,
+  PreviewWorkspaceSeatPurchaseRequest,
+  WorkspaceSeatPurchasePreview,
+  PurchaseWorkspaceSeatsRequest,
+  PurchaseWorkspaceSeatsResponse,
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
 } from "./billing";
