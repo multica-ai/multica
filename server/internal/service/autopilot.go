@@ -1268,6 +1268,27 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
 func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, dispatch.ReasonCode, bool) {
+	// Mutex / lease gate (ALL-206): never dispatch a new slot while the
+	// autopilot still has an in-flight run. The in-flight statuses
+	// (pending / issue_created / running) mirror the partial index
+	// idx_autopilot_run_status from migration 042 — a scheduled run that
+	// outlives its slot interval used to let the next slot start a second
+	// concurrent run for the same autopilot. When one is in flight the new
+	// slot is recorded as skipped (with a clear failure_reason) instead of
+	// creating a concurrent run.
+	prior, err := s.Queries.GetAutopilotRunInFlight(ctx, ap.ID)
+	if err == nil {
+		return "previous run still in flight (" + util.UUIDToString(prior.ID) + ")", dispatch.ReasonAlreadyActive, true
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		// Transient DB error — fail-open so the next scheduler tick gets a
+		// chance to succeed, consistent with the rest of the admission gate.
+		slog.Warn("autopilot admission: failed to check for in-flight run",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"error", err,
+		)
+		return "", "", false
+	}
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", dispatch.ReasonTargetUnavailable, true
 	}

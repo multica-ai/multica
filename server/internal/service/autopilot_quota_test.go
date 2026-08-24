@@ -605,6 +605,15 @@ func TestAutopilotQuotaSchedulePersistsSkippedRun(t *testing.T) {
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, workspaceID)
 	})
 
+	// seedRunOnlyAutopilot leaves a `running` run for the fixture. The ALL-206
+	// mutex gate would short-circuit the dispatch on that in-flight run, so
+	// close it out first — this test exercises the quota gate in isolation.
+	if _, err := pool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'completed', completed_at = now() WHERE autopilot_id = $1`,
+		util.MustParseUUID(autopilotIDString)); err != nil {
+		t.Fatalf("close seeded in-flight run: %v", err)
+	}
+
 	start := time.Now().UTC().Truncate(time.Second)
 	end := start.Add(13 * time.Hour)
 	limit := 0
