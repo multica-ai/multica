@@ -264,6 +264,13 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverDimModels(ctx, runtimeCmd)
 		})
+	case "zeroclaw":
+		// ZeroClaw's ACP server advertises no catalog: session/new answers
+		// exactly {sessionId, workspaceDir} (verified against 0.8.4), and it
+		// has no session-scoped model selection to consume one anyway — see
+		// ModelSelectionSupported. Return an empty list rather than spawning
+		// an ACP subprocess that can only ever come back empty.
+		return Catalog{Models: []Model{}}, nil
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -367,7 +374,7 @@ func QualifyModelID(catalog Catalog, model string) (string, bool) {
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
 	switch providerType {
-	case "qwenpaw", "mcode":
+	case "qwenpaw", "mcode", "zeroclaw":
 		// QwenPaw's `session/set_model` persists to agent.json at the agent
 		// scope, not the session scope. Calling it would mutate the user's
 		// shared, persistent agent config. Model override is therefore
@@ -375,7 +382,11 @@ func ModelSelectionSupported(providerType string) bool {
 		// the agent profile. If QwenPaw makes model selection session-scoped
 		// upstream, this can be reverted to `true`. MCode similarly exposes no
 		// model option through ACP, so its runtime configuration remains the
-		// source of truth.
+		// source of truth. ZeroClaw goes further: `session/set_model` is not in
+		// its ACP dispatch table at all (0.8.4 answers -32601) and no handler
+		// reads a model param, so the model comes from the ZeroClaw agent
+		// profile (`agents.<alias>.model_provider`) and nothing Multica sends
+		// can change it.
 		return false
 	default:
 		return true
