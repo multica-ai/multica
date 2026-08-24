@@ -181,7 +181,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-The last command prints `daemon_server_url`, the URL daemons use to reach the API (`MULTICA_PUBLIC_URL` when set, otherwise `MULTICA_APP_URL`; empty output means neither is set). If it prints a `localhost` address, `.env` still carries local defaults: set `FRONTEND_ORIGIN` and `MULTICA_APP_URL` explicitly to the public URLs instead of relying on the `${FRONTEND_PORT}` references copied from `.env.example`, then recreate the containers.
+The last command prints `daemon_server_url`, the URL daemons use to reach the API: `MULTICA_PUBLIC_URL` when set, otherwise the app URL — `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. When neither `MULTICA_APP_URL` nor `FRONTEND_ORIGIN` is set, the field is omitted from the response entirely (so the grep prints nothing), even if `MULTICA_PUBLIC_URL` is set. If it prints a `localhost` address, `.env` still carries local defaults: set `FRONTEND_ORIGIN` and `MULTICA_APP_URL` explicitly to the public URLs instead of relying on the `${FRONTEND_PORT}` references copied from `.env.example`, then recreate the containers.
 
 <Callout type="warning">
 `docker compose restart` only restarts existing containers and does not re-read `.env`. After changing configuration, run `docker compose -f docker-compose.selfhost.yml up -d` to re-read `.env`.
