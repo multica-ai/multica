@@ -4798,6 +4798,19 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
+	// GAP-27: terminal failure with no retry enqueued gets a structured
+	// case file on the issue so human triage starts from facts.
+	if errMsg != "" && task.IssueID.Valid && retried == nil { // ponytail: comment-only dead-letter; full file/write to workdir if volume grows
+		var b strings.Builder
+		fmt.Fprintf(&b, "🗃️ **Dead-letter case file: retries exhausted**\n\n- task: `%s`\n- reason: `%s`\n- attempt: %d / %d",
+			util.UUIDToString(task.ID), failureReason, task.Attempt, task.MaxAttempts)
+		if task.BranchName.Valid {
+			fmt.Fprintf(&b, "\n- branch: `%s`", task.BranchName.String)
+		}
+		fmt.Fprintf(&b, "\n- last error tail:\n\n```\n%s\n```\n\nCheck verifier/hollow flags on the task row before re-running.", priorAttemptErrorTail(redact.Text(errMsg)))
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, b.String(), "system", task.TriggerCommentID, task.ID)
+	}
+
 	// Quick-create tasks: push a failure inbox notification to the
 	// requester so they can either retry or fall back to the advanced form
 	// without losing their original prompt. Skipped when an auto-retry is
