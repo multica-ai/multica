@@ -7465,6 +7465,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CursorDataDir != "" {
 		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
+	// GAP-1: per-task opencode data isolation. opencode resolves its data
+	// root as $XDG_DATA_HOME/opencode; redirecting it into the env root stops
+	// concurrent tasks from contending on one shared SQLite db. Exported
+	// before custom_env so a user-set XDG_DATA_HOME still wins.
+	if env.OpenCodeDataDir != "" {
+		agentEnv["XDG_DATA_HOME"] = env.OpenCodeDataDir
+	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
 	// task workdir, so the CLI's native skill scanner picks up the per-task

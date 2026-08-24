@@ -77,6 +77,9 @@ health-gated retry + hasRunnableSuccessor slot guard).
 
 22. docs(cli): webhook autopilot triggers are CLI-exposed + documented — `multica autopilot trigger-add <id> --kind webhook` (upstream MUL-5421 code, docs lagged); CLI_AND_DAEMON.md no longer claims webhook/api unimplemented; documents event_filters scoping via POST /api/autopilots/<id>/triggers and trigger-rotate-url signing-secret rotation; api kind still server-less (GAP-12, issue #7)
 
+23. skip GAP-10 encrypt agent custom_env at rest — deferred (secretbox wiring bigger than ponytail slot, opt-in default plaintext unchanged). Retry when provider stable.
+24. fix(daemon): per-task opencode data-dir isolation — execenv prepares `<envRoot>/opencode-data` (mkdir 0700) for provider=opencode on fresh prepare and reuse, daemon exports it as `XDG_DATA_HOME` before agent start (before custom_env so a user-set XDG_DATA_HOME still wins); mkdir failure falls back to the shared `~/.local/share/opencode` default instead of blocking dispatch; dir is GC'd with the env root. Kills the SQLite lock-collision failure class when concurrent opencode tasks share one db (GAP-1, issue #5)
+
 Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
 AND the desktop-bundled binary (see below). Server-side pieces require
 redeploying the self-host server from this branch.

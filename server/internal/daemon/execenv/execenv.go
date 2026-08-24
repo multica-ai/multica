@@ -322,6 +322,11 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
+	// OpenCodeDataDir is the per-task XDG_DATA_HOME root for opencode tasks
+	// (GAP-1): opencode resolves its data dir (session/auth SQLite state) as
+	// $XDG_DATA_HOME/opencode, so concurrent tasks stop contending on one
+	// shared ~/.local/share/opencode/opencode.db. Empty = shared default.
+	OpenCodeDataDir string
 	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
 	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
@@ -651,6 +656,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CursorDataDir = cursorDataDir
 	}
 
+	// For opencode, isolate the per-task data dir (GAP-1). Degraded, not
+	// fatal: on mkdir failure the task falls back to the shared default
+	// rather than blocking dispatch.
+	if params.Provider == "opencode" {
+		if dir, err := prepareOpenCodeDataDir(envRoot); err != nil {
+			logger.Warn("execenv: prepare opencode data dir failed; using shared default", "error", err)
+		} else {
+			env.OpenCodeDataDir = dir
+		}
+	}
+
 	if err := writeSidecarManifest(envRoot, manifest); err != nil {
 		// In place the manifest is the ONLY record of what we wrote into the
 		// user's own directory, so losing it strands the sidecar tree there
@@ -947,6 +963,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			return nil
 		}
 		env.CursorDataDir = cursorDataDir
+	}
+
+	// Refresh opencode's per-task data dir on reuse (GAP-1). Same fallback
+	// contract as fresh prepare: failure keeps the shared default.
+	if params.Provider == "opencode" && env.RootDir != "" {
+		dir, err := prepareOpenCodeDataDir(env.RootDir)
+		if err != nil {
+			logger.Warn("execenv: refresh opencode data dir failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.OpenCodeDataDir = dir
 	}
 
 	if env.RootDir != "" {
