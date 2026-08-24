@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "タスクステータス",
+    "description": "タスクが辿るワークフローを定義します。各ステータスの挙動は所属するカテゴリが決めます。",
+    "loading": "ステータスを読み込み中…",
+    "add": "ステータスを追加",
+    "show_archived": "アーカイブ済みを表示（{{count}}）",
+    "archived_badge": "アーカイブ済み",
+    "archived_hint": "新規の割り当てには使えません。すでにこのステータスのタスクはそのままです。",
+    "flag_off": "このデプロイではカスタムステータスがまだ有効化されていません。下の組み込みステータスは通常どおり使えます。",
+    "reorder_failed": "並び順を保存できませんでした。",
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "archive": "アーカイブ",
+      "reorder": "{{name}} を並べ替え"
+    },
+    "editor": {
+      "create_title": "新しいステータス",
+      "edit_title": "ステータスを編集",
+      "behavior_hint": "このステータスは「{{category}}」とまったく同じ挙動になります。",
+      "name": "名前",
+      "name_placeholder": "例: Code Review",
+      "key_hint": "API と CLI では {{key}} として参照されます。",
+      "category": "カテゴリ",
+      "category_locked": "カテゴリは変更できません。すでにこのステータスのタスクが依存しています。",
+      "description": "説明",
+      "description_placeholder": "チームにとってこのステータスが意味すること",
+      "color": "色",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "saving": "保存中…",
+      "save_failed": "ステータスを保存できませんでした。"
+    },
+    "archive_dialog": {
+      "title": "このステータスをアーカイブしますか？",
+      "description": "「{{name}}」は新しいタスクに割り当てられなくなります。すでにこのステータスのタスクはそのまま残り、挙動も変わりません。",
+      "cancel": "キャンセル",
+      "confirm": "アーカイブ",
+      "failed": "アーカイブできませんでした。"
+    },
+    "categories": {
+      "backlog": "保留。ここに移動してもエージェントは起動しません。",
+      "todo": "待機中。ここに移動すると担当エージェントが起動します。",
+      "in_progress": "作業中。",
+      "in_review": "納品済み、レビュー待ち。オートパイロットの実行を完了します。",
+      "done": "完了。",
+      "blocked": "外部依存でブロック中。",
+      "cancelled": "見送り。"
+    }
+  },
   "quick_actions": {
     "title": "クイックアクション",
     "description": "実行するエージェントとプロンプトを事前に設定し、任意のタスクのサイドバーからワンクリックで実行します。",
@@ -109,29 +159,103 @@
       "navigation": "ナビゲーション"
     },
     "actions": {
-      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
-      "createIssue": { "label": "タスクを作成", "description": "優先するタスク作成フローを開きます。" },
-      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
-      "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
-      "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
-      "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
-      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
-      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
-      "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },
-      "goIssues": { "label": "タスクへ移動", "description": "タスク一覧を開きます。" },
-      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
-      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
-      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
-      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
-      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
-      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
-      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
-      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+      "openSearch": {
+        "label": "検索を開く",
+        "description": "どこからでも検索やコマンドを実行します。"
+      },
+      "createIssue": {
+        "label": "タスクを作成",
+        "description": "優先するタスク作成フローを開きます。"
+      },
+      "toggleSidebar": {
+        "label": "左サイドバーを切り替え",
+        "description": "左サイドバーの表示を切り替えます。"
+      },
+      "toggleRightSidebar": {
+        "label": "右サイドバーを切り替え",
+        "description": "現在のページに右サイドバーがある場合、その表示を切り替えます。"
+      },
+      "toggleChat": {
+        "label": "チャットウィンドウを切り替え",
+        "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。"
+      },
+      "findInIssue": {
+        "label": "タスク内を検索",
+        "description": "開いているタスクの詳細を検索します。"
+      },
+      "openThreadNav": {
+        "label": "スレッドナビゲーターを開く",
+        "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。"
+      },
+      "archiveInboxItem": {
+        "label": "通知をアーカイブ",
+        "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
+      },
+      "send": {
+        "label": "送信",
+        "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。"
+      },
+      "goBack": {
+        "label": "戻る",
+        "description": "ブラウザーのように履歴を戻ります。"
+      },
+      "goForward": {
+        "label": "進む",
+        "description": "ブラウザーのように履歴を進みます。"
+      },
+      "goInbox": {
+        "label": "受信トレイへ移動",
+        "description": "ワークスペースの受信トレイを開きます。"
+      },
+      "goChat": {
+        "label": "チャットへ移動",
+        "description": "ワークスペースのチャットを開きます。"
+      },
+      "goMyIssues": {
+        "label": "自分のタスクへ移動",
+        "description": "自分に割り当てられたタスクを開きます。"
+      },
+      "goIssues": {
+        "label": "タスクへ移動",
+        "description": "タスク一覧を開きます。"
+      },
+      "goProjects": {
+        "label": "プロジェクトへ移動",
+        "description": "プロジェクト一覧を開きます。"
+      },
+      "goAutopilots": {
+        "label": "自動化へ移動",
+        "description": "ワークスペースの自動化を開きます。"
+      },
+      "goAgents": {
+        "label": "エージェントへ移動",
+        "description": "エージェント一覧を開きます。"
+      },
+      "goSquads": {
+        "label": "Squadsへ移動",
+        "description": "Squad一覧を開きます。"
+      },
+      "goUsage": {
+        "label": "使用量へ移動",
+        "description": "使用量分析を開きます。"
+      },
+      "goRuntimes": {
+        "label": "ランタイムへ移動",
+        "description": "ランタイム設定を開きます。"
+      },
+      "goSkills": {
+        "label": "Skillsへ移動",
+        "description": "Skillライブラリを開きます。"
+      },
+      "goSettings": {
+        "label": "設定へ移動",
+        "description": "ワークスペース設定を開きます。"
+      }
     },
     "fixed": {
       "title": "固定のシステムショートカット",
       "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
+      "open_settings": "設定を開く",
       "close_tab": "アクティブなタブを閉じる",
       "zoom_in": "拡大",
       "zoom_out": "縮小",
@@ -160,6 +284,28 @@
       "start_date": "開始日"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "このワークスペースの MCP サーバーライブラリ。ここに追加してもどのエージェントにも割り当てられません。エージェントの所有者が各エージェントの MCP タブで割り当て、エージェントごとにオン/オフを切り替えます。",
+    "servers_title": "共有サーバー",
+    "write_only_note": "保存された設定は書き込み専用です — url、コマンド、ヘッダー、環境変数は二度と表示されないため、サーバーの編集は設定の置き換えになります。名前の変更は安全です。割り当ては維持されます。",
+    "add_server": "サーバーを追加",
+    "edit_server": "サーバーを編集",
+    "remove_server": "サーバーを削除",
+    "empty_title": "共有 MCP サーバーはありません",
+    "empty_description": "まずここにサーバーを追加し、使用するエージェントの MCP タブから割り当ててください。",
+    "disabled_badge": "無効",
+    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
+    "delete_title": "共有サーバーを削除しますか？",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次のタスクから反映されます。",
+    "delete_confirm": "削除",
+    "cancel": "キャンセル",
+    "added_toast": "共有 MCP サーバーを追加しました",
+    "updated_toast": "共有 MCP サーバーを更新しました",
+    "removed_toast": "共有 MCP サーバーを削除しました",
+    "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -179,8 +325,106 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
+      "issue_statuses": "ステータス",
       "properties": "プロパティ",
-      "quick_actions": "クイックアクション"
+      "quick_actions": "クイックアクション",
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "請求とプラン"
+    }
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "このワークスペースにプラグインを公開し、特定のバージョンをインストールして、何にアクセスできるかを確認します。",
+    "loading": "Plugins を読み込み中",
+    "load_failed": "Plugins を読み込めませんでした",
+    "load_failed_description": "再試行してください。インストール済みの Plugin には影響しません。",
+    "read_only": "読み取り専用",
+    "read_only_description": "ワークスペースの owner と admin が Plugin をインストール、設定、削除できます。",
+    "empty": "インストール済みの Plugin はありません。",
+    "action_failed": "Plugin 操作に失敗しました",
+    "enabled": "Plugin を有効にしました",
+    "disabled": "Plugin を無効にしました",
+    "enabled_label": "Plugin を有効化",
+    "uninstall": "アンインストール",
+    "uninstalled": "Plugin をアンインストールし、保存データとシークレットも削除しました",
+    "granted_scopes": "許可したアクセス",
+    "contributes": "提供する機能",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "states": {
+      "disabled": "無効"
+    },
+    "installed": {
+      "title": "インストール済み"
+    },
+    "consent": {
+      "title": "この Plugin は次のアクセスを要求しています",
+      "description": "承認するのは特定のバージョンです。そのコードは Multica が保存し、アップグレードするまで変わりません。Plugin はこれらの権限の範囲内でのみ動作し、利用者本人の権限を超えることはありません。",
+      "cancel": "キャンセル",
+      "confirm": "許可してインストール",
+      "confirm_upgrade": "許可してアップグレード",
+      "installed": "Plugin をインストールしました",
+      "upgrade_from": " · v{{version}} からアップグレード",
+      "new_scope": "新規"
+    },
+    "schedule": {
+      "title": "自動スケジュール",
+      "consent_title": "この Plugin はフックを自動実行します",
+      "consent_description": "インストールまたはアップグレードすると、次のスケジュールが有効になります。複数回分を逃した場合は、直近の実行だけを配信します。",
+      "next_run": "次回：{{time}}",
+      "activity_title": "最近の配信",
+      "activity_last": "{{status}} · 予定 {{planned}} · 送信 {{actual}} · 試行 {{attempt}}",
+      "activity_empty": "まだ配信されていません",
+      "frequency_minutes_other": "{{count}} 分ごと",
+      "frequency_hourly": "毎時 {{minute}} 分",
+      "frequency_daily": "毎日 {{hour}}:{{minute}}",
+      "frequency_custom": "カスタム繰り返しスケジュール"
+    },
+    "config": {
+      "title": "設定",
+      "save": "保存",
+      "saved": "設定を保存しました",
+      "secret_set": "保存済み — 新しい値を入力すると置き換わります"
+    },
+    "scopes": {
+      "issues_read": "issue を読み取る",
+      "issues_write": "issue を作成・編集する",
+      "comments_read": "コメントを読み取る",
+      "comments_write": "コメントを投稿する",
+      "tasks_read": "agent task を読み取る",
+      "tasks_write": "agent task を開始・更新する",
+      "agents_read": "agent 一覧を読み取る",
+      "members_read": "メンバー一覧を読み取る",
+      "storage_user": "メンバーごとにデータを保存する",
+      "storage_workspace": "ワークスペース共有のデータを保存する",
+      "net": "{{domain}} にデータを送信する",
+      "unknown": "認識できない権限です — インストールしないでください"
+    },
+    "hook_circuit_open": "連続失敗のためフックの配信を停止しました。",
+    "hook_recent_failures": "最近 {{count}} 件のフック呼び出しが失敗しました。",
+    "mcp": {
+      "badge": "MCP",
+      "description": "このフックはプラグイン作者自身の MCP サーバーのツールを採用します。エージェントが呼び出せるツールを承認してください。後から追加されたツールは、承認するまで採用されません。",
+      "loading": "ツールを読み込み中",
+      "unreachable": "プラグインの MCP サーバーに接続できませんでした。",
+      "empty": "この MCP サーバーは現在ツールを提供していません。",
+      "drifted": "スキーマが変更されました",
+      "save": "承認を保存",
+      "approved": "承認済みツールを更新しました。"
+    },
+    "publish": {
+      "title": "プラグインを公開",
+      "description": "プラグインパッケージをアップロードします。Multica が保存と配信を行うため、作者自身のサーバーは不要です。",
+      "hint": "multica.plugin.json とそれが参照するすべてのファイルを含む .zip。",
+      "upload": "パッケージをアップロード",
+      "published": "{{name}} {{version}} を公開しました",
+      "empty": "このワークスペースではまだ何も公開されていません。",
+      "delete": "公開したプラグインを削除",
+      "deleted": "公開したプラグインを削除しました",
+      "installed_version": "使用中",
+      "review_install": "確認してインストール",
+      "review_upgrade": "確認してアップグレード"
     }
   },
   "properties": {
@@ -211,7 +455,9 @@
       "multi_select": "複数選択",
       "date": "日付",
       "checkbox": "チェックボックス",
-      "url": "URL"
+      "url": "URL",
+      "actor": "メンバー",
+      "multi_actor": "メンバー（複数選択）"
     },
     "actions": {
       "open": "{{name}} の操作",
@@ -686,12 +932,39 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "各 Multica エージェントを専用の DingTalk ロボットに接続します。メンバーはボットに DM したり、グループで @メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "page_description": "各 Multica エージェントを専用の DingTalk ロボットに接続します。メンバーはボットに DM したり、グループで @メンションしたり、/issue と入力して新しい Multica タスクを作成できます。",
+    "agent_page_description": "専用の DingTalk ロボットを使って、このエージェントに DM を送ったり、グループで @メンションしたり、/issue から Multica タスクを作成したりできます。",
+    "groups_title": "最近のグループ",
+    "groups_description": "ワークスペースのメンバーが DingTalk アカウントを連携し、グループでこのボットを @メンションすると表示されます。通常は直近 90 日間に利用されたグループだけを表示します。",
+    "groups_overview_description": "各接続に、エージェント、DingTalk ロボット、最近やり取りしたグループを表示します。",
+    "groups_loading": "グループを読み込み中…",
+    "groups_empty": "グループからのメッセージはまだありません。",
+    "groups_no_recent": "直近 90 日間に利用されたグループはありません。",
+    "groups_inactive": "長期間未使用（{{count}}）",
+    "groups_load_more": "さらに読み込む",
+    "groups_error": "DingTalk グループを読み込めませんでした。",
+    "groups_retry": "再試行",
+    "group_untitled": "名称未設定の DingTalk グループ",
+    "groups_count": "{{count}}",
+    "conversation_id_label": "DingTalk グループ会話 ID",
+    "group_last_active": "最終アクティブ {{time}}",
+    "group_mentions_other": "{{count}} 件のメンション",
+    "group_forget": "一覧から削除",
+    "group_forget_title": "このグループを一覧から削除しますか？",
+    "group_forget_description": "Multica の一覧からのみ削除します。会話やメッセージは残り、ボットが再度 @メンションされると一覧に戻ります。",
+    "group_forget_cancel": "キャンセル",
+    "group_forget_confirm": "一覧から削除",
+    "group_forget_success": "グループを一覧から削除しました",
+    "group_forget_failed": "グループを一覧から削除できませんでした",
+    "bot_identity_unavailable": "識別情報を取得できません",
+    "bot_permission_tooltip_prefix": "DingTalk オープンプラットフォームで、このボットのアプリに",
+    "bot_permission_tooltip_suffix": "権限を付与し、このボットが追加されている DingTalk グループでもう一度 @メンションしてください。",
     "not_enabled_title": "DingTalk 連携が有効になっていません",
     "not_enabled_description_prefix": "サーバーで",
     "not_enabled_description_suffix": "を設定すると DingTalk ロボットのインストールが有効になります。",
     "not_enabled_self_host_hint": "セルフホストの場合: 詳細はプロジェクトの README を参照してください。",
-    "connected_bots": "接続済みのボット",
+    "connections_title": "接続",
+    "deleted_agent": "削除済みのエージェント",
     "loading": "読み込み中…",
     "empty_title": "まだボットが接続されていません",
     "empty_description_prefix": "このワークスペースのエージェントを開き、",
@@ -699,6 +972,7 @@
     "empty_description_suffix": "をクリックしてロボットをインストールします。",
     "revoked_badge": "取り消し済み",
     "installed_at_label": "{{when}} にインストール",
+    "identity_label": "連携済みの Staff ID：{{identity}}",
     "disconnect": "切断",
     "disconnecting": "切断中…",
     "disconnect_confirm_title": "この DingTalk ボットを切断しますか？",
@@ -708,7 +982,7 @@
     "toast_disconnect_failed": "切断に失敗しました",
     "bind_button": "DingTalk を接続",
     "bind_button_title": "{{agent}} を DingTalk ボットに接続",
-    "agent_bot_connected_label": "DingTalk に接続済み",
+    "agent_bot_connected_label": "接続済みボット：",
     "agent_bot_disconnect_tooltip": "この DingTalk ボットをエージェントから解除します。ボットは DingTalk メッセージを受信しなくなります。",
     "byo_dialog_title": "DingTalk ボットを接続",
     "byo_docs_link": "Step-by-step：Multica エージェントを DingTalk に接続する",
@@ -769,6 +1043,47 @@
     "byo_credentials_unverifiable": "WeCom に接続できず、このボットを検証できませんでした。認証情報は変更されていません。少し時間をおいてもう一度お試しください。",
     "byo_install_failed": "ボットを保存できませんでした。こちら側の問題です。認証情報は変更されていません。もう一度お試しいただき、続くようならサポートにご連絡ください。",
     "byo_failed_toast": "WeCom ボットを接続できませんでした"
+  },
+  "telegram": {
+    "section_title": "Telegram",
+    "page_description": "各 Multica エージェントを専用の Telegram ボットに接続します。メンバーはボットに DM を送ったり、グループで @メンションしたり、/issue と入力して Multica タスクを作成したり、エージェントの返信をリアルタイムで確認できます。",
+    "not_enabled_title": "Telegram 連携が有効になっていません",
+    "not_enabled_description_prefix": "サーバーで",
+    "not_enabled_description_suffix": "を設定すると Telegram ボットのインストールが有効になります。",
+    "not_enabled_self_host_hint": "セルフホストの場合はプロジェクトの README をご覧ください。",
+    "preview_title": "Telegram インストールは近日公開",
+    "preview_description": "暗号化キーは設定済みですが、このデプロイではまだインストールできません。利用可能になると接続ボタンがここに表示されます。",
+    "connected_bots": "接続済みのボット",
+    "loading": "読み込み中…",
+    "load_failed": "Telegram のインストールを読み込めませんでした",
+    "empty_title": "接続済みのボットはまだありません",
+    "empty_description_prefix": "このワークスペースのエージェントを開き、",
+    "empty_description_cta": "Telegram に接続",
+    "empty_description_suffix": "をクリックしてボットをインストールします。",
+    "revoked_badge": "無効化済み",
+    "installed_at_label": "インストール日時 {{when}}",
+    "disconnect": "切断",
+    "disconnecting": "切断中…",
+    "disconnect_confirm_title": "この Telegram ボットを切断しますか？",
+    "disconnect_confirm_description": "ボットはこのワークスペースの Telegram メッセージを受信しなくなります。Multica 内のチャット履歴は保持され、同じエージェントから再接続できます。",
+    "disconnect_confirm_cancel": "キャンセル",
+    "toast_disconnected": "Telegram ボットを切断しました",
+    "toast_disconnect_failed": "切断に失敗しました",
+    "bind_button": "Telegram に接続",
+    "bind_button_title": "{{agent}} を Telegram ボットに接続",
+    "agent_bot_connected_label": "Telegram に接続済み",
+    "agent_bot_disconnect_tooltip": "このエージェントと Telegram ボットのバインドを解除します。ボットはメッセージを受信しなくなります。",
+    "agent_bot_manage_link": "Telegram で開く",
+    "agent_bot_manage_tooltip": "Telegram でこのボットとのチャットを開きます。",
+    "connect_dialog_title": "Telegram ボットを接続",
+    "connect_dialog_description": "Telegram の @BotFather でボットを作成し、そのトークンを以下に貼り付けてください。トークンは即時検証され、暗号化して保存されます。",
+    "connect_docs_link": "手順ガイド：Multica エージェントを Telegram に接続する",
+    "bot_token_label": "ボットトークン",
+    "connect_submit": "接続",
+    "connect_submitting": "接続中…",
+    "connect_cancel": "キャンセル",
+    "connect_success_toast": "Telegram ボットを接続しました",
+    "connect_failed_toast": "Telegram ボットを接続できませんでした"
   },
   "repositories": {
     "section_title": "リポジトリ",
@@ -873,6 +1188,26 @@
         "label": "メンバー",
         "description": "タスクの作成と作業"
       }
-    }
+    },
+    "share_links_title": "共有リンク",
+    "role_field": "ロール：",
+    "expiry_field": "有効期限：",
+    "share_links_create_title": "共有リンクを作成",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "{{used}} / {{max}} 回使用",
+    "share_link_expires": "有効期限 {{date}}",
+    "share_link_copy_tooltip": "リンクをコピー",
+    "share_link_revoke_tooltip": "リンクを取り消す",
+    "toast_share_link_created": "共有リンクを作成しました",
+    "toast_share_link_failed": "共有リンクの作成に失敗しました",
+    "toast_share_link_revoked": "共有リンクを取り消しました",
+    "toast_share_link_revoke_failed": "共有リンクの取り消しに失敗しました",
+    "toast_share_link_copied": "リンクをコピーしました",
+    "toast_share_link_copy_failed": "リンクのコピーに失敗しました",
+    "expiry_24h": "24時間",
+    "expiry_7d": "7日",
+    "expiry_30d": "30日",
+    "expiry_never": "無期限"
   }
 }

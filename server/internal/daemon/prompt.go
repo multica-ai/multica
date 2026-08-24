@@ -10,8 +10,8 @@ import (
 // sessionContinuityNoticeFor picks the notice matching what this surface
 // actually lost. See the constants in execenv for the full reasoning; the
 // question is whether the conversation is still READABLE, not whether it is a
-// chat — an issue's comments and a Slack channel's history both are, a web
-// chat's and a Feishu channel's are not (MUL-5722).
+// chat — an issue's comments, a Slack channel's history, and a web chat's /
+// Feishu's / WeCom's / DingTalk's chat_message transcript all are (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatSessionID == "" {
 		return execenv.SessionContinuityNoticeIssue
@@ -19,7 +19,13 @@ func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatChannelType == execenv.ChannelTypeSlack {
 		return execenv.SessionContinuityNoticeChannelHistory
 	}
-	// Web chat (no channel type) and every channel Multica cannot read back.
+	// Every other chat session that persists a transcript (web chat, Feishu,
+	// WeCom, DingTalk) reads it back via `multica chat history`; Slack alone
+	// reads the live channel. Only a surface that never stored a transcript
+	// falls through to Unrecoverable — see SurfacePersistsTranscript.
+	if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
+		return execenv.SessionContinuityNoticeChatTranscript
+	}
 	return execenv.SessionContinuityNoticeUnrecoverable
 }
 
@@ -41,20 +47,6 @@ func backendResumeContinuityNotice(task Task) string {
 	return sessionContinuityNoticeFor(task)
 }
 
-// Turn-mode markers consumed by the runtime brief's mode router
-// (execenv.writeWorkflowIssue). The brief is byte-identical on every run and
-// therefore cannot say what triggered this turn; these lines do, and they are
-// emitted unconditionally from the same branches BuildPrompt uses to pick a
-// path, so the two can never disagree.
-//
-// Reply mode = respond to the triggering comment, do not touch issue status.
-// Ownership mode = an assignment/status change started this run; own the
-// status arc. Applying the wrong one silently changes issue status.
-const (
-	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
-	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
-)
-
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
@@ -68,13 +60,86 @@ const (
 // changing them costs only this turn's own tokens (MUL-5377).
 //
 // Returns "" when none of the blocks apply.
-func perTurnContextBlocks(task Task) string {
+func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
+	b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
+	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
 	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
+	return b.String()
+}
+
+// promptOpts carries per-run facts the claimed Task does not: things only the
+// daemon's own execution context can answer. Kept behind PromptOption so the
+// common BuildPrompt(task, provider) call sites stay unchanged.
+type promptOpts struct {
+	sharedLocalDirectory bool
+}
+
+// PromptOption tunes per-turn prompt copy with run-scoped context.
+type PromptOption func(*promptOpts)
+
+// WithSharedLocalDirectory marks a turn that runs inside the user's own
+// directory WITHOUT holding its path mutex — today, a chat turn on an in_place
+// local_directory resource (see localDirectoryLockExempt). Such a turn may
+// overlap a coding task writing to the same tree, and unlike every other task
+// it got there by design rather than by winning the lock, so it is the one that
+// has to be told (issue #7344).
+func WithSharedLocalDirectory() PromptOption {
+	return func(o *promptOpts) { o.sharedLocalDirectory = true }
+}
+
+// buildSharedLocalDirectoryBlock warns an unlocked turn that its working
+// directory is shared live. Deliberately guidance and not a prohibition: the
+// mutex never covered the user's own editor either, so refusing writes here
+// would buy a restriction the surrounding system does not actually enforce.
+// What the turn cannot infer on its own is that a sibling task may be mid-edit
+// in the same tree — so state that, and let it size its writes accordingly.
+func buildSharedLocalDirectoryBlock(shared bool) string {
+	if !shared {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Shared working directory\n\n")
+	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
+	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
+	return b.String()
+}
+
+func buildActiveSiblingRunsBlock(currentIssueID string, runs []ActiveSiblingRunData) string {
+	// Sibling issue work is useful context only for another issue task. Chat,
+	// autopilot, and quick-create tasks have no current target issue whose claim
+	// history they could inspect, so rendering this block there creates an
+	// unactionable warning.
+	if currentIssueID == "" || len(runs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Active sibling runs\n\n")
+	b.WriteString("This agent has other in-flight issue tasks. Before starting overlapping code or PR work, check this issue's comment history for a claim or handoff")
+	fmt.Fprintf(&b, " (`multica issue comment list %s --roots-only --summary --compact --output json`)", currentIssueID)
+	b.WriteString(" and inspect relevant siblings with the `run-messages` commands below — coordinate with existing work instead of opening a second PR. For writes that only record ownership or status of work already underway, use `--no-start` on `multica issue assign`/`update`/`status`.\n\n")
+	for _, run := range runs {
+		issueLabel := run.IssueIdentifier
+		if issueLabel == "" {
+			issueLabel = run.IssueID
+		}
+		fmt.Fprintf(&b, "- %s — task `%s`, status `%s`", issueLabel, run.TaskID, run.Status)
+		if run.StartedAt != "" {
+			fmt.Fprintf(&b, ", started %s", run.StartedAt)
+		} else if run.CreatedAt != "" {
+			fmt.Fprintf(&b, ", created %s", run.CreatedAt)
+		}
+		title := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(run.IssueTitle))
+		if title != "" {
+			fmt.Fprintf(&b, ": %s", title)
+		}
+		fmt.Fprintf(&b, "; inspect: `multica issue run-messages %s`\n", run.TaskID)
+	}
+	b.WriteString("\n")
 	return b.String()
 }
 
@@ -85,12 +150,16 @@ func perTurnContextBlocks(task Task) string {
 // is provider-agnostic AND host-agnostic now (every OS → write a UTF-8 file,
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
-func BuildPrompt(task Task, provider string) string {
+func BuildPrompt(task Task, provider string, options ...PromptOption) string {
+	var opts promptOpts
+	for _, apply := range options {
+		apply(&opts)
+	}
 	body := buildPromptBody(task, provider)
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).
-	if blocks := perTurnContextBlocks(task); blocks != "" {
+	if blocks := perTurnContextBlocks(task, opts); blocks != "" {
 		if !strings.HasSuffix(body, "\n\n") {
 			body += "\n"
 		}
@@ -115,7 +184,6 @@ func buildPromptBody(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	b.WriteString(turnModeOwnership)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a
 	// comment to reply to — there is no comment thread to answer here.
@@ -242,16 +310,11 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	// Mode marker for the brief's router. Emitted unconditionally from the same
-	// branch that selects this code path, so the brief and the prompt can never
-	// disagree about which mode this turn is in. It must NOT be gated on
-	// TriggerCommentContent: an empty comment body (or an older server that
-	// doesn't send one) would otherwise leave the turn unlabelled, and the
-	// agent would fall through to Ownership mode and change the issue status.
-	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
-		if task.TriggerAuthorType == "agent" {
+		if task.TriggerAuthorType == "system" {
+			authorLabel = "The platform"
+		} else if task.TriggerAuthorType == "agent" {
 			name := task.TriggerAuthorName
 			if name == "" {
 				name = "another agent"
@@ -272,7 +335,9 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
 			for _, cc := range task.CoalescedComments {
 				authorLabel := "A user"
-				if cc.AuthorType == "agent" {
+				if cc.AuthorType == "system" {
+					authorLabel = "The platform"
+				} else if cc.AuthorType == "agent" {
 					name := cc.AuthorName
 					if name == "" {
 						name = "another agent"
@@ -331,7 +396,7 @@ func buildCommentPrompt(task Task, provider string) string {
 				task.IssueID)
 		}
 		if taskIsSquadLeader(task) {
-			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
+			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise. The comment prohibition is conditional on that call SUCCEEDING: if it exits non-zero, your decision has no trace anywhere, so post exactly ONE short comment stating the outcome and the error instead of exiting silently. That failure comment is this turn's only comment — it does not license a second one.\n\n", task.IssueID)
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
@@ -455,14 +520,20 @@ func buildChatPrompt(task Task) string {
 	// channel conversation. A web-only chat session gets no such block — its
 	// history is the Multica chat_session the agent already resumes.
 	//
-	// The history half is Slack-only, and that is a real server constraint, not a
-	// simplification: `multica chat history` / `multica chat thread` are served by
-	// handlers hardwired to h.SlackHistory (handler/chat_history.go), so on a
-	// Feishu session both commands return "no channel integration". Teaching them
-	// there would send the agent down a path that always fails. A Feishu run works
-	// from the context the inbound enricher already injected, so it gets the
-	// awareness statement without the commands, and ChatInThread — which only ever
-	// picks between those two commands — does not apply to it (MUL-4899).
+	// The history half: `multica chat history` is served by handler/chat_history.go,
+	// which reads the live channel for Slack and falls back to the stored
+	// chat_message transcript for every other surface — so Slack, Feishu, WeCom
+	// and DingTalk can all read the conversation back. Slack additionally has
+	// `multica chat thread` (thread expansion); the transcript surfaces have no
+	// thread reader, so they get the transcript command without the thread
+	// drill-down (MUL-4899).
+	//
+	// WHERE the conversation lives is therefore per-branch, not shared: only the
+	// unconditional "don't go looking in issues/comments" survives up top. Saying
+	// "its history lives in the channel, NOT in Multica" for every channel type
+	// contradicted the very next line on a transcript surface, which tells the
+	// agent Multica stored it and hands it the command to read it back. An agent
+	// given both reasonably believes the read cannot work and skips it.
 	//
 	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
 	// property of delivering to an IM channel at all, so it is emitted for every
@@ -471,9 +542,9 @@ func buildChatPrompt(task Task) string {
 	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. This conversation and its history live in %s, NOT in Multica; never look in Multica issues or comments for it.\n", platform, platform)
+		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Never look in Multica issues or comments for this conversation.\n", platform)
 		if task.ChatChannelType == execenv.ChannelTypeSlack {
-			b.WriteString("The message below may be only what triggered you. Read the conversation with:\n")
+			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica. The message below may be only what triggered you. Read the conversation with:\n", platform)
 			b.WriteString("- `multica chat history --output json` — the channel overview: recent top-level messages, each thread tagged with a `thread_id` and `reply_count`. It does NOT expand thread contents.\n")
 			b.WriteString("- `multica chat thread [<thread_id>] --output json` — read one thread's messages; omit the id to read the thread you are in, or pass a `thread_id` from the overview to read a specific thread.\n")
 			if task.ChatInThread {
@@ -485,8 +556,10 @@ func buildChatPrompt(task Task) string {
 			// into a chat reply reads as noise (the user reported every reply being
 			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
 			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
+		} else if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
+			fmt.Fprintf(&b, "The conversation happens in %s, and Multica stores a transcript of it. The message below may be only what triggered you — read it back with `multica chat history` when you need earlier context that is not below.\n", platform)
 		} else {
-			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
+			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica, and Multica has no history reader for it. Work from the context already provided to you below — no command can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
 		}
 		// Scoped to process, not results — a completion confirmation IS the deliverable.
 		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
@@ -543,15 +616,29 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
 	// Outbound attachments: how the agent puts an image/file INTO its reply.
-	// Web/mobile chat only — for IM-channel chats the reply is delivered to
-	// that platform, not the Multica chat UI, so this binding does not apply.
-	// This is the DELIVERY layer of the channel policy and keys off "is there a
-	// channel at all", unlike the history block above which is Slack-only; the
-	// two layers must not be collapsed into one condition (MUL-4899). The brief's
-	// `## Output` section states the same policy for every surface.
-	if task.ChatChannelType == "" {
+	// This is the DELIVERY layer of the channel policy, and it has three
+	// answers, not two (MUL-4899). `attachment upload` binds a file to the
+	// Multica chat reply on every surface; what differs is whether anything
+	// goes back for it. Web/mobile renders it as a card in the browser. A
+	// channel-backed chat gets the upload guidance only where the server said
+	// this deployment performs the last hop, and otherwise the upload reaches
+	// nobody and the agent must say so in words. The answer arrives on the
+	// claim; do not re-derive it from the channel type, do not collapse it back
+	// into "is there a channel at all", and do not collapse it into the HISTORY
+	// layer above, which is Slack-only and asks a different question.
+	//
+	// This is the ONLY place the verdict is stated. The brief's `## Output`
+	// section carries the web/mobile answer, which is fixed, and for a
+	// channel-backed chat points here instead of answering — the verdict flips
+	// under a resumed session, and the brief is the prompt-cache prefix
+	// (MUL-5377). So a channel chat learns how to deliver a file only from the
+	// line below, which means one must be emitted on every turn.
+	switch {
+	case task.ChatChannelType == "":
 		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
-	} else {
+	case execenv.ChannelCarriesFiles(task.ChatChannelType, task.ChatChannelDeliversFiles):
+		fmt.Fprintf(&b, "\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. It binds to your reply and Multica sends it into the %s conversation as a separate message right after your text — there is no way to place it inline, so write your reply to read correctly with the file arriving after it.\n", channelDisplayName(task.ChatChannelType))
+	default:
 		fmt.Fprintf(&b, "\nThis reply is delivered to %s as text. You cannot attach a file to it: `multica attachment upload` binds to a Multica chat reply, which this is not. If you produce a file, describe it in words — never write its local path as a link, and never upload it and then write as though it arrived.\n", channelDisplayName(task.ChatChannelType))
 	}
 	return b.String()

@@ -207,7 +207,7 @@ export function buildDuplicateDraft(
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
   runtimeId: string;
-  /** Template attribution for the `agent_created` event, not a template create. */
+  /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {

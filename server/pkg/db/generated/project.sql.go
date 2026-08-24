@@ -92,32 +92,6 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 	return err
 }
 
-const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
-WHERE id = $1
-`
-
-func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, error) {
-	row := q.db.QueryRow(ctx, getProject, id)
-	var i Project
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Icon,
-		&i.Status,
-		&i.LeadType,
-		&i.LeadID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Priority,
-		&i.StartDate,
-		&i.DueDate,
-	)
-	return i, err
-}
-
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
 SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
 WHERE id = $1 AND workspace_id = $2
@@ -152,7 +126,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 const getProjectIssueStats = `-- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done_count
+       count(*) FILTER (WHERE issue_effective_status(workspace_id, status) IN ('done', 'cancelled'))::bigint AS done_count
 FROM issue
 WHERE project_id = ANY($1::uuid[])
 GROUP BY project_id

@@ -22,12 +22,17 @@ import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useT } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
   total: number;
+  visibleDone?: number;
+  visibleTotal?: number;
+  hiddenTotal?: number;
 }
 
 function formatDate(date: string): string {
@@ -53,6 +58,7 @@ function ListRowContent({
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
+  const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -114,12 +120,20 @@ function ListRowContent({
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
+            {/* List sections are categories, so a custom status needs to name
+                itself on the row. Silent for built-ins. (MUL-6243) */}
+            <CustomStatusChip status={issue.status} className="shrink-0" />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
+                {(childProgress!.hiddenTotal ?? 0) > 0 && (
+                  <span className="text-micro text-warning tabular-nums font-medium">
+                    {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
+                  </span>
+                )}
               </span>
             )}
             {showLabels && (

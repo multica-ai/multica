@@ -12,6 +12,7 @@ import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
+import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
@@ -219,41 +220,6 @@ function getSystemLocale(): string {
   return app.getPreferredSystemLanguages()[0] ?? "en";
 }
 
-function createRendererWebPreferences(
-  systemLocale: string,
-  additionalArguments: string[] = [],
-): Electron.WebPreferences {
-  return {
-    preload: join(__dirname, "../preload/index.js"),
-    sandbox: false,
-    webSecurity: false,
-    // Required for the Chromium PDF viewer (PDFium) to activate inside
-    // iframes — used by the attachment preview modal for application/pdf
-    // files. Default is false in Electron; without it <iframe src=*.pdf>
-    // renders blank.
-    //
-    // Security trade-off, accepted intentionally:
-    //   1. These windows already run with `webSecurity: false` +
-    //      `sandbox: false`, so `plugins: true` does not meaningfully widen
-    //      the renderer's attack surface beyond what is already accepted.
-    //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
-    //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
-    //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
-    //      cannot land in this renderer.
-    //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
-    //      and only handles the `application/pdf` MIME.
-    //
-    // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
-    // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
-    // to that view, keeping the main renderer plugin-free.
-    plugins: true,
-    additionalArguments: [
-      `--multica-locale=${systemLocale}`,
-      ...additionalArguments,
-    ],
-  };
-}
-
 function loadRenderer(window: BrowserWindow): void {
   const rendererEntry = join(__dirname, "../renderer/index.html");
   const rendererURL =
@@ -295,6 +261,13 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
     if (result === "close-tab") {
       event.preventDefault();
       window.webContents.send("tab:close-active");
+    } else if (result === "open-settings") {
+      event.preventDefault();
+      // Settings is a tab, so it can only live in the tabbed main window.
+      // Routing through the queue means the chord also works from a
+      // dedicated issue window — and from one that outlived the main window,
+      // which is recreated and only then handed the request.
+      dispatchToMainRenderer("settings:open", null);
     } else if (result) {
       event.preventDefault();
     }
@@ -341,7 +314,10 @@ function createWindow(): BrowserWindow {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+    ),
   });
   const window = mainWindow;
 
@@ -494,9 +470,11 @@ function createIssueWindow(context: IssueWindowContext): void {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: createRendererWebPreferences(systemLocale, [
-      encodeIssueWindowArgument(context),
-    ]),
+    webPreferences: createRendererWebPreferences(
+      join(__dirname, "../preload/index.js"),
+      systemLocale,
+      [encodeIssueWindowArgument(context)],
+    ),
   });
 
   issueWindows.add(window);
@@ -668,8 +646,8 @@ if (!gotTheLock) {
     // IPC: open URL in default browser (used by renderer for Google login).
     // All scheme-allowlist enforcement lives in openExternalSafely — this
     // is the single audit point for renderer-controlled URLs reaching the
-    // OS shell under the app's intentional webSecurity: false + sandbox:
-    // false configuration.
+    // OS shell under the app's intentional webSecurity: false configuration
+    // (the renderer itself runs sandboxed).
     ipcMain.handle("shell:openExternal", (_event, url: string) => {
       return openExternalSafely(url);
     });

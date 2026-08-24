@@ -9,10 +9,14 @@ export type ShortcutActionId =
   | "openSearch"
   | "createIssue"
   | "toggleSidebar"
+  | "toggleRightSidebar"
   | "toggleChat"
   | "findInIssue"
   | "openThreadNav"
+  | "archiveInboxItem"
   | "send"
+  | "goBack"
+  | "goForward"
   | "goInbox"
   | "goChat"
   | "goMyIssues"
@@ -77,6 +81,12 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "openSearch", category: "general", defaultShortcut: primary("K"), allowInEditable: true },
   { id: "createIssue", category: "general", defaultShortcut: createShortcutChord("C"), allowInEditable: false },
   { id: "toggleSidebar", category: "general", defaultShortcut: primary("B"), allowInEditable: false },
+  {
+    id: "toggleRightSidebar",
+    category: "general",
+    defaultShortcut: primary("/"),
+    allowInEditable: false,
+  },
   // Mod+J follows the "toggle a docked panel" convention, and is one of the few
   // letters this module's own policy leaves free on every platform and runtime:
   // it is neither app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
@@ -100,7 +110,20 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
     defaultShortcut: createShortcutChord("O", { primary: true, shift: true }),
     allowInEditable: true,
   },
+  {
+    id: "archiveInboxItem",
+    category: "general",
+    defaultShortcut: createShortcutChord("E"),
+    allowInEditable: false,
+  },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
+  // Browser-style history navigation (Mod+[ / Mod+]). Neither bracket is
+  // app-owned (PRIMARY_RESERVED_KEYS) nor browser-owned
+  // (BROWSER_ONLY_PRIMARY_RESERVED_KEYS), so both are recordable on every
+  // platform and runtime. `allowInEditable` is false so the chord never steps
+  // away from the page while the caret sits in an input, textarea, or editor.
+  { id: "goBack", category: "navigation", defaultShortcut: primary("["), allowInEditable: false },
+  { id: "goForward", category: "navigation", defaultShortcut: primary("]"), allowInEditable: false },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goChat", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goMyIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },
@@ -263,10 +286,29 @@ export function isEditableShortcutTarget(target: EventTarget | null): boolean {
   );
 }
 
+const PORTAL_LAYER_SELECTOR =
+  '[role="menu"], [role="dialog"], [role="alertdialog"], [role="listbox"]';
+
+/**
+ * Whether an open popup (menu, dialog, listbox) owns the keyboard. Popups are
+ * portaled to the body, so page-level listeners still see their keypresses;
+ * the `data-base-ui-inert` marker catches modal layers even when focus never
+ * left the page.
+ */
+export function isPortalLayerShortcutTarget(target: EventTarget | null): boolean {
+  if (typeof document === "undefined") return false;
+  if (document.querySelector("[data-base-ui-inert]") !== null) return true;
+  return target instanceof Element && target.closest(PORTAL_LAYER_SELECTOR) !== null;
+}
+
 const PRIMARY_RESERVED_KEYS = new Set([
   // Window operations the app itself owns on every runtime: W closes the
   // tab, R/F5 is the reload guard, Q quits.
   "W", "R", "Q",
+  // Preferences: the desktop app opens Settings from the main process, and on
+  // web the browser opens its own settings — neither leaves the chord free for
+  // a product action.
+  ",",
   // Fundamental editing operations should never become product actions.
   "A", "C", "V", "X", "Y", "Z",
   // Zoom accelerators: fixed app shortcuts on desktop, browser zoom on web.

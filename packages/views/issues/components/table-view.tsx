@@ -1,5 +1,6 @@
 "use client";
 
+import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
   useEffect,
@@ -72,7 +73,8 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import {
   issueKeys,
   issueTableGroupsOptions,
@@ -87,6 +89,7 @@ import {
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyListOptions } from "@multica/core/properties";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { buildActorNameResolver, useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -98,7 +101,6 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
-  IssueStatus,
   IssueTableGroupDescriptor,
   IssueTableGroupSpec,
   IssueTableQuerySpec,
@@ -107,12 +109,18 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import {
+  actorRefsFromValue,
+  formatActorRef,
+  isActorPropertyType,
+} from "@multica/core/types";
+import {
   useInfiniteQuery,
   useQueries,
   useQuery,
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
@@ -255,6 +263,7 @@ function rebaseServerBranchState(
 function tableGroupSpec(grouping: string): IssueTableGroupSpec {
   if (grouping === "status") return { kind: "status" };
   if (grouping === "assignee") return { kind: "assignee" };
+  if (grouping === "project") return { kind: "project" };
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) return { kind: "property", property_id: propertyId };
   return { kind: "none" };
@@ -883,6 +892,9 @@ export function IssueTableGroupRow({
 function propertyDisplayValue(
   property: IssueProperty,
   value: IssuePropertyValue | undefined,
+  // Actor values are "<kind>:<uuid>" references; without a resolver they would
+  // export as raw ids, so callers that can export an actor column must pass one.
+  getActorName?: (type: string, id: string) => string,
 ) {
   if (value === undefined) return "";
   const options = property.config.options ?? [];
@@ -894,6 +906,11 @@ function propertyDisplayValue(
     return options
       .filter((option) => ids.includes(option.id))
       .map((option) => option.name)
+      .join(", ");
+  }
+  if (isActorPropertyType(property.type)) {
+    return actorRefsFromValue(value)
+      .map((ref) => (getActorName ? getActorName(ref.kind, ref.id) : formatActorRef(ref.kind, ref.id)))
       .join(", ");
   }
   return String(value);
@@ -921,7 +938,9 @@ type TableViewMeta = {
    *  remounts and freezes the table structure while it is up. */
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
-  updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
+  /** Takes the ISSUE, not its id: the run-confirm gate reads its status
+   *  category and owner to decide whether the write needs confirming first. */
+  updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
   openIssue: (issue: Issue, event?: React.MouseEvent) => void;
   createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
@@ -1043,7 +1062,8 @@ function IssueTableHeaderCell({
   const propertyId = propertyIdFromViewKey(key);
   const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
   const staticSort = propertyId
-    ? property && !["multi_select", "checkbox"].includes(property.type)
+    ? property &&
+      !["multi_select", "checkbox", "actor", "multi_actor"].includes(property.type)
       ? (`property:${propertyId}` as SortField)
       : undefined
     : SORTABLE_COLUMNS[key as TableSystemColumnKey];
@@ -1095,7 +1115,7 @@ function IssueTableBodyCell({
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);
   const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-    meta.updateIssue(issue.id, updates);
+    meta.updateIssue(issue, updates);
 
   const propertyId = propertyIdFromViewKey(key);
   if (propertyId) {
@@ -1267,6 +1287,9 @@ export function TableView({
 }: TableViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const resolveStatusLabel = useStatusLabel(wsId);
+  const { entryOf } = useIssueStatuses(wsId);
+  const openModal = useModalStore((s) => s.open);
   const queryClient = useQueryClient();
   const intentNavigate = useIntentNavigate();
   const paths = useWorkspacePaths();
@@ -1349,6 +1372,23 @@ export function TableView({
     [effectiveTableGrouping],
   );
   const usesServerGrouping = serverGroupSpec.kind !== "none";
+  // Project group rows carry only a project id; the title comes from the
+  // shared projects query the surface already primes for this grouping.
+  //
+  // Read `data` rather than defaulting it in the destructure: an un-settled
+  // query has no data, so `= []` would hand this memo a fresh array on every
+  // render and churn every consumer of the map below (MUL-5477).
+  const groupProjectsQuery = useQuery({
+    ...projectListOptions(wsId),
+    enabled: serverGroupSpec.kind === "project",
+  });
+  const groupProjectMap = useMemo(
+    () =>
+      new Map(
+        (groupProjectsQuery.data ?? []).map((project) => [project.id, project]),
+      ),
+    [groupProjectsQuery.data],
+  );
   const serverGroupsRequestGroup =
     serverGroupSpec.kind === "none"
       ? ({ kind: "status" } as const)
@@ -1738,13 +1778,12 @@ export function TableView({
     (descriptor: IssueTableGroupDescriptor) => {
       const value = descriptor.value;
       if (value.kind === "status") {
-        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
-          return t(($) => $.status[value.status as IssueStatus]);
-        }
-        // Installed clients can receive a status introduced by a newer
-        // backend. Keep the group usable instead of collapsing the response
-        // to the schema fallback or rendering an empty label.
-        return value.status;
+        // A group is one status KEY, so it shows that status's own name — a
+        // custom status must not read as its category. `resolveStatusLabel`
+        // falls back to the raw key, which is also what keeps a status
+        // introduced by a NEWER backend usable on an installed client instead
+        // of collapsing to the schema fallback or an empty label. (MUL-6243)
+        return resolveStatusLabel(value.status);
       }
       if (value.kind === "assignee") {
         return value.actor
@@ -1752,9 +1791,13 @@ export function TableView({
           : t(($) => $.table.unassigned);
       }
       if (value.kind === "project") {
-        return value.project_id
-          ? value.project_id
-          : t(($) => $.swimlane.no_project);
+        if (!value.project_id) return t(($) => $.swimlane.no_project);
+        // A project the query cannot resolve (deleted, or not visible to this
+        // member) reads as unavailable — never as its raw id.
+        return (
+          groupProjectMap.get(value.project_id)?.title ??
+          t(($) => $.table.value_unavailable)
+        );
       }
       if (value.kind === "parent") {
         if (value.value_state === "unset") {
@@ -1777,7 +1820,7 @@ export function TableView({
           ?.name ?? String(value.value ?? "")
       );
     },
-    [getActorName, propertyById, t],
+    [getActorName, groupProjectMap, propertyById, t],
   );
 
   const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
@@ -2079,10 +2122,20 @@ export function TableView({
     [propertyById, t],
   );
 
+  // Inline row edits are single-issue writes like the picker in the issue
+  // detail or the right-click menu, so they route on the same gate: a status
+  // change that promotes an agent-owned issue out of the backlog category
+  // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
-    (issueId: string, updates: Partial<UpdateIssueRequest>) =>
-      actions?.updateIssue(issueId, updates),
-    [actions],
+    (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
+      actions?.updateIssue(issue.id, updates);
+    },
+    [actions, entryOf, openModal],
   );
 
   const openIssue = useCallback(
@@ -2247,9 +2300,12 @@ export function TableView({
         const propertyId = propertyIdFromViewKey(column.key);
         return !propertyId || exportPropertyById.has(propertyId);
       });
-      const needsActors = csvColumns.some(
-        (column) => column.key === "assignee" || column.key === "creator",
-      );
+      const needsActors = csvColumns.some((column) => {
+        if (column.key === "assignee" || column.key === "creator") return true;
+        const propertyId = propertyIdFromViewKey(column.key);
+        const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
+        return property ? isActorPropertyType(property.type) : false;
+      });
       const [rows, exportLookups, exportActorName] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
@@ -2279,7 +2335,11 @@ export function TableView({
           if (propertyId) {
             const property = exportPropertyById.get(propertyId);
             return property
-              ? propertyDisplayValue(property, issue.properties[propertyId])
+              ? propertyDisplayValue(
+                  property,
+                  issue.properties[propertyId],
+                  exportActorName,
+                )
               : "";
           }
           switch (column.key) {
@@ -2288,7 +2348,7 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return t(($) => $.status[issue.status]);
+              return resolveStatusLabel(issue.status);
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":

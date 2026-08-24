@@ -63,7 +63,7 @@ func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(rawError)
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
-		// but that bucket is not part of the canonical 22. In-flight
+		// but that bucket is not part of the canonical taxonomy. In-flight
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
@@ -97,7 +97,7 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "missing environment variable"),
 		strings.Contains(lower, "missing") && strings.Contains(lower, "api_key"),
 		strings.Contains(lower, "api key") && strings.Contains(lower, "required"),
-		strings.Contains(lower, "no llm provider configured"),
+		strings.Contains(lower, providerUnconfiguredPhrase),
 		strings.Contains(lower, "no provider configured"):
 		return ReasonAgentMissingConfig
 
@@ -193,22 +193,30 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
-	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
-	case containsAny(lower,
-		"stream disconnected",
-		opencodeStreamEndedPrefix,
-		"connection closed",
-		"mid-response",
-		"error sending request",
-		"unable to connect",
-		"dial tcp",
-		"connection refused",
-		"connectionrefused",
-		"dns",
-		"i/o timeout",
-		"deadline exceeded",
-		"timeout exceeded while awaiting",
-	):
+	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
+	//    the bare strings "Connection error." and "Request timed out." on
+	//    turn_end.errorMessage (then exits 1). Those used to fall through to
+	//    process_failure via "exit status 1" and terminate the task with no
+	//    retry (BHD-135). isPiProviderNetworkError matches only the exact bare
+	//    messages and the stable Pi/OMP exit composite, rather than treating
+	//    the same broad substrings from local tools or MCP servers as retryable.
+	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
+	case isPiProviderNetworkError(lower),
+		containsAny(lower,
+			"stream disconnected",
+			opencodeStreamEndedPrefix,
+			"connection closed",
+			"mid-response",
+			"error sending request",
+			"unable to connect",
+			"dial tcp",
+			"connection refused",
+			"connectionrefused",
+			"dns",
+			"i/o timeout",
+			"deadline exceeded",
+			"timeout exceeded while awaiting",
+		):
 		return ReasonAgentProviderNetwork
 
 	// 8. Model not found / unavailable. The SQL uses `%model%not%found%`,
@@ -238,8 +246,15 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "timed out after"):
 		return ReasonAgentTimeout
 
-	// 11. Runner CLI binary missing.
-	case strings.Contains(lower, "executable not found"):
+	// 11. Runner CLI binary missing, or present but not runnable on this
+	//     machine — the npm placeholder stub left behind when a package's
+	//     postinstall was blocked passes every "is it installed" check and
+	//     only fails at execve (MUL-6164). Operationally the two are the same
+	//     verdict: this host has no usable CLI, and re-running cannot fix it.
+	case containsAny(lower,
+		"executable not found",
+		"exec format error",
+	):
 		return ReasonAgentRuntimeMissingExecutable
 
 	// 12. Runner CLI version too old / incompatible protocol.
@@ -261,6 +276,7 @@ func Classify(rawError string) Reason {
 		"panic",
 		"sigsegv",
 		"process exited",
+		"start codex:",
 		"pipe has been ended",
 		"file already closed",
 		"initialize failed",
@@ -269,6 +285,36 @@ func Classify(rawError string) Reason {
 	}
 
 	return ReasonAgentUnknown
+}
+
+// providerUnconfiguredPhrase is the runtime's wording for "I resolved no LLM
+// provider at all" — structurally a configuration gap, not a rejected
+// credential. This const is the single source of truth for its two readers:
+// rule 2 of Classify above (which maps it to ReasonAgentMissingConfig) and
+// ProviderUnconfigured below. Keep them together; a second literal copy is how
+// the two drift apart.
+const providerUnconfiguredPhrase = "no llm provider configured"
+
+// ProviderUnconfigured reports whether an agent error is the runtime refusing
+// to start because it resolved no provider whatsoever. Callers use it to
+// attach context about WHERE the runtime looked — the failure text names a
+// remedy ("run `hermes model`") without naming the home it would apply to, so
+// a runtime reading a different config directory than the user edited sends
+// them to fix the wrong file (GH #6872).
+//
+// Substring, not equality: the phrase reaches us wrapped in the ACP transport's
+// own framing (`hermes session/new failed: session/new: Internal error
+// (code=-32603, data={"details":"No LLM provider configured. …`).
+//
+// This says nothing about which credential is missing or whether one would
+// help — it is strictly "the runtime resolved no provider". An expired key, a
+// 401, or a provider the user configured but mistyped are all different
+// failures and must not be widened into this.
+func ProviderUnconfigured(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(errText), providerUnconfiguredPhrase)
 }
 
 // contextWindowExceededWitnesses are the two wordings for an overflow reported
@@ -361,6 +407,43 @@ var legacyCodexCapacityReasons = map[string]bool{
 	"agent_error":                                 true,
 }
 
+// legacyOpenclawCLITimeoutWitnesses identify an OpenClaw config-discovery
+// timeout in the wire text of a daemon that predates the sentinel
+// (execenv.ErrOpenclawCLITimeout). Both halves must appear: the prep-stage
+// wrapper naming this exact call site, and the deadline phrase. That pair is
+// only produced by execOpenclawCLI's cancellation branch.
+var legacyOpenclawCLITimeoutWitnesses = []string{
+	"prepare openclaw config",
+	"deadline exceeded",
+}
+
+// legacyOpenclawCLITimeoutReasons are the buckets an older daemon lands that
+// timeout in. provider_network is what its own rule 7 produces from
+// "deadline exceeded" text, and agent_error / agent_error.unknown cover the
+// coarser pre-MUL-1949 shapes.
+//
+// Worth upgrading at the server rather than waiting for the fleet: the stale
+// label is not merely imprecise, it is actively harmful — it puts a
+// deterministic local failure on the retry allowlist (each retry re-pays the
+// same 8-11s and fails identically) and shows "check your network" copy for a
+// stall that has nothing to do with the network (#7112).
+var legacyOpenclawCLITimeoutReasons = map[string]bool{
+	string(ReasonAgentUnknown):         true,
+	string(ReasonAgentProviderNetwork): true,
+	"agent_error":                      true,
+}
+
+func isPiProviderNetworkError(lower string) bool {
+	for _, message := range []string{"connection error.", "request timed out."} {
+		if lower == message ||
+			strings.HasPrefix(lower, message+"; pi exited with error: ") ||
+			strings.HasPrefix(lower, message+"; omp exited with error: ") {
+			return true
+		}
+	}
+	return false
+}
+
 // opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
 // guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
 // is a PREFIX of the whole error rather than a phrase somewhere inside it, so
@@ -435,7 +518,28 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
 		return ReasonAgentProviderNetwork
 	}
+	// #7112: same mixed-version gap. A daemon predating the OpenClaw CLI
+	// timeout sentinel reports provider_network for a local config-discovery
+	// stall, which both misleads the user and burns auto-retries on a failure
+	// that cannot succeed until the host gets faster or the deadline is raised.
+	if legacyOpenclawCLITimeoutReasons[reason] &&
+		containsAll(strings.ToLower(rawError), legacyOpenclawCLITimeoutWitnesses...) {
+		return ReasonRuntimeCLITimeout
+	}
 	return Reason(reason)
+}
+
+// containsAll reports whether s contains every one of the supplied substrings.
+// Used where a single phrase would be ambiguous and only the combination
+// identifies the failure. Caller pre-lowercases s, same contract as
+// containsAny.
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return len(subs) > 0
 }
 
 // containsAny reports whether s contains any of the supplied substrings.

@@ -172,6 +172,7 @@
     "issue_prefix_label": "태스크 접두사",
     "issue_prefix_prefix": "태스크는 ",
     "issue_prefix_suffix": "처럼 표시됩니다. 나중에 설정에서 바꿀 수 있습니다.",
+    "issue_prefix_pending": "위의 URL을 입력하면 태스크 번호가 그에 맞춰 정해집니다. 여기에 직접 입력할 수도 있습니다.",
     "create_new_title": "새 워크스페이스 만들기",
     "create_new_subtitle": "새로 시작합니다. 다른 업무 영역을 위한 별도 공간입니다.",
     "hint_opening": "{{name}} 여는 중.",

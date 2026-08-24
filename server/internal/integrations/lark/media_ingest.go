@@ -51,8 +51,9 @@ func NewFeishuMediaResolver(api APIClient, creds CredentialsResolver, storage me
 }
 
 // HasMedia reports whether the message carries downloadable Feishu resources
-// (standalone image/video or post-embedded img/media spans). Pure in-memory
-// decode of the already-received payload — it runs on the connector ACK path.
+// (standalone image/video/file/audio or post-embedded img/media spans). Pure
+// in-memory decode of the already-received payload — it runs on the connector
+// ACK path.
 func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	lm, err := larkMsgFromRaw(msg)
 	if err != nil {
@@ -118,13 +119,7 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			r.logMediaWarn("lark media download failed", lm, err)
 			continue
 		}
-		contentType := got.ContentType
-		if contentType == "" {
-			contentType = res.mimeType
-		}
-		if contentType == "" {
-			contentType = "application/octet-stream"
-		}
+		contentType := mediaContentType(res, got)
 		filename := mediaFilename(lm, res, got, contentType, resIndex)
 		uploadedBytes, err := r.uploadResource(ctx, key, got.Body, got.SizeBytes, contentType, filename)
 		if err != nil {
@@ -285,6 +280,23 @@ func mediaResourcesFromMessage(lm InboundMessage) []larkMediaResource {
 			sizeBytes: sizeBytes,
 			messageID: lm.MessageID,
 		}}
+	case "file", "audio":
+		if payload.FileKey == "" {
+			return nil
+		}
+		kind := channel.MsgTypeFile
+		if lm.MessageType == "audio" {
+			kind = channel.MsgTypeAudio
+		}
+		return []larkMediaResource{{
+			key:       payload.FileKey,
+			kind:      kind,
+			fetchType: "file",
+			filename:  filename,
+			mimeType:  mimeType,
+			sizeBytes: sizeBytes,
+			messageID: lm.MessageID,
+		}}
 	default:
 		return nil
 	}
@@ -348,7 +360,7 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResourceStream, contentType string, index int) string {
 	for _, candidate := range []string{got.Filename, res.filename} {
 		if name := cleanFilename(candidate); name != "" {
-			return name
+			return ensureAudioFilenameExtension(name, res.kind, contentType)
 		}
 	}
 	prefix := "feishu-file"
@@ -357,10 +369,51 @@ func mediaFilename(lm InboundMessage, res larkMediaResource, got DownloadedResou
 		prefix = "feishu-image"
 	case channel.MsgTypeVideo:
 		prefix = "feishu-video"
+	case channel.MsgTypeAudio:
+		prefix = "feishu-audio"
 	}
 	name := prefix + "-" + safePathSegment(lm.MessageID)
 	if index > 0 {
 		name += "-" + strconv.Itoa(index+1)
+	}
+	return name + mediaExtension(contentType)
+}
+
+func mediaContentType(res larkMediaResource, got DownloadedResourceStream) string {
+	contentType := strings.TrimSpace(got.ContentType)
+	if res.kind == channel.MsgTypeAudio && isGenericBinaryContentType(contentType) {
+		if hinted := strings.TrimSpace(res.mimeType); !isGenericBinaryContentType(hinted) {
+			return hinted
+		}
+		// Feishu audio messages are Opus. Its resource endpoint can return an
+		// extensionless Content-Disposition filename together with the generic
+		// audio/octet-stream type, so preserve the protocol-level format here.
+		return "audio/opus"
+	}
+	if contentType == "" {
+		contentType = strings.TrimSpace(res.mimeType)
+	}
+	if contentType == "" {
+		return "application/octet-stream"
+	}
+	return contentType
+}
+
+func isGenericBinaryContentType(contentType string) bool {
+	if semi := strings.IndexByte(contentType, ';'); semi >= 0 {
+		contentType = contentType[:semi]
+	}
+	switch strings.ToLower(strings.TrimSpace(contentType)) {
+	case "", "application/octet-stream", "audio/octet-stream":
+		return true
+	default:
+		return false
+	}
+}
+
+func ensureAudioFilenameExtension(name string, kind channel.MsgType, contentType string) string {
+	if kind != channel.MsgTypeAudio || path.Ext(name) != "" {
+		return name
 	}
 	return name + mediaExtension(contentType)
 }
@@ -396,6 +449,14 @@ func mediaExtension(contentType string) string {
 		return ".webp"
 	case "video/mp4":
 		return ".mp4"
+	case "audio/opus":
+		return ".opus"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/amr":
+		return ".amr"
+	case "audio/mpeg":
+		return ".mp3"
 	case "application/pdf":
 		// mime.ExtensionsByType returns ExtensionsByType(".pdf") on most
 		// systems, but it reads /etc/mime.types — which a slim container

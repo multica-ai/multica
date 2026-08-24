@@ -57,7 +57,6 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import {
-  ALL_STATUSES,
   PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
@@ -75,6 +74,7 @@ import type {
   IssueTableFacetsResponse,
   WorkingAgentSummary,
 } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -112,7 +112,11 @@ import {
 } from "@multica/core/issues/stores/issues-scope-store";
 import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useStatusOptions } from "../utils/status-options";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -655,7 +659,10 @@ function LabelSubContent({
 /**
  * Option checkboxes for one custom property inside the Filter dropdown.
  * Select/multi_select list the definition's options (dot + name); checkbox
- * definitions expose the "true"/"false" pseudo-options with Yes/No labels.
+ * definitions expose the "true"/"false" pseudo-options with Yes/No labels;
+ * actor definitions have no config options at all, so their candidates come
+ * from the member directory instead, with the signed-in member first so
+ * "this property is me" stays one click away.
  */
 function PropertyFilterOptions({
   property,
@@ -673,17 +680,63 @@ function PropertyFilterOptions({
   fixedTitle?: string;
 }) {
   const { t } = useT("issues");
-  const options =
-    property.type === "checkbox"
-      ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
-        ]
-      : (property.config.options ?? []).map((option) => ({
+  const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const actorProperty = isActorPropertyType(property.type);
+  const { data: actorMembers = [] } = useQuery({
+    ...memberListOptions(wsId),
+    enabled: actorProperty,
+  });
+
+  const actorOptions = useMemo(() => {
+    if (!actorProperty) return [];
+    return actorMembers
+      .slice()
+      .sort((a, b) => {
+        if (a.user_id === currentUserId) return -1;
+        if (b.user_id === currentUserId) return 1;
+        return 0;
+      })
+      .map((m) => ({
+        id: formatActorRef("member", m.user_id),
+        name: m.name,
+        actorType: "member" as const,
+        actorId: m.user_id,
+      }));
+  }, [actorProperty, actorMembers, currentUserId]);
+
+  // "No value" is offered for every property type: it selects issues where the
+  // property is unset, the inverse of picking one of the options below.
+  const noValueOption = {
+    id: NO_PROPERTY_VALUE,
+    name: t(($) => $.pickers.custom_property.none),
+    color: undefined as string | undefined,
+    actorType: undefined as string | undefined,
+    actorId: undefined as string | undefined,
+  };
+  const options = [
+    ...(actorProperty
+      ? actorOptions.map((option) => ({
           id: option.id,
           name: option.name,
-          color: option.color as string | undefined,
-        }));
+          color: undefined as string | undefined,
+          actorType: option.actorType as string | undefined,
+          actorId: option.actorId as string | undefined,
+        }))
+      : property.type === "checkbox"
+        ? [
+            { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+            { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
+          ]
+        : (property.config.options ?? []).map((option) => ({
+            id: option.id,
+            name: option.name,
+            color: option.color as string | undefined,
+            actorType: undefined as string | undefined,
+            actorId: undefined as string | undefined,
+          }))),
+    noValueOption,
+  ];
 
   return (
     <>
@@ -700,6 +753,9 @@ function PropertyFilterOptions({
             className={FILTER_ITEM_CLASS}
           >
             <HoverCheck checked={checked} />
+            {option.actorType && option.actorId && (
+              <ActorAvatar actorType={option.actorType} actorId={option.actorId} size="sm" />
+            )}
             {option.color && (
               <span
                 className="size-2.5 shrink-0 rounded-full"
@@ -994,7 +1050,7 @@ export function IssuesHeader({
 
   return (
     <>
-    <div className="min-h-12 shrink-0 px-4 py-2 [-webkit-overflow-scrolling:touch]">
+    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
       <div className="flex w-full min-w-0 items-start justify-between gap-2">
         {/* Left: the view bar — built-in tabs and saved views as one flat,
             per-user ordered row; wraps instead of overflowing. */}
@@ -1169,11 +1225,16 @@ export function IssueFilterMenu({
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const wsId = useWorkspaceId();
+  const statusOptions = useStatusOptions(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter((p) =>
-        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      workspaceProperties.filter(
+        (p) =>
+          p.type === "select" ||
+          p.type === "multi_select" ||
+          p.type === "checkbox" ||
+          isActorPropertyType(p.type),
       ),
     [workspaceProperties],
   );
@@ -1259,22 +1320,33 @@ export function IssueFilterMenu({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
-                  const fixed = viewBaseline?.status.has(s) === true;
+                {/* Options come from the workspace catalog, so a custom status
+                    is filterable — otherwise an issue moved onto one could not
+                    be narrowed to. One flat list in category order: the icon
+                    already carries the category, and a heading per category
+                    doubled the menu's height for no added information
+                    (MUL-6243, MUL-6399). */}
+                {statusOptions.map((option) => {
+                  const checked = statusFilters.includes(option.key);
+                  const count = counts.status.get(option.key) ?? 0;
+                  const fixed = viewBaseline?.status.has(option.key) === true;
                   return (
                     <DropdownMenuCheckboxItem
-                      key={s}
+                      key={option.key}
                       checked={checked}
                       disabled={fixed}
                       title={fixed ? fixedTitle : undefined}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
+                      onCheckedChange={() => act.toggleStatusFilter(option.key)}
                       className={FILTER_ITEM_CLASS}
                     >
                       <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
+                      <StatusIcon
+                        status={option.key}
+                        category={option.category}
+                        color={option.color}
+                        className="h-3.5 w-3.5"
+                      />
+                      {option.label}
                       {count > 0 && (
                         <span className="ml-auto text-caption text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
@@ -1595,8 +1667,12 @@ export function IssueDisplayControls({
   );
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter((p) =>
-        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      workspaceProperties.filter(
+        (p) =>
+          p.type === "select" ||
+          p.type === "multi_select" ||
+          p.type === "checkbox" ||
+          isActorPropertyType(p.type),
       ),
     [workspaceProperties],
   );
@@ -1655,9 +1731,10 @@ export function IssueDisplayControls({
     updated_at: "sort_updated",
     title: "sort_title",
   };
-  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
+  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
     status: "group_status",
     assignee: "group_assignee",
+    project: "group_project",
   };
   const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_project" | "group_assignee"> = {
     parent: "group_parent",
@@ -1698,7 +1775,9 @@ export function IssueDisplayControls({
       ? t(($) => $.table.columns.status)
       : effectiveTableGrouping === "assignee"
         ? t(($) => $.table.columns.assignee)
-        : t(($) => $.table.group_none);
+        : effectiveTableGrouping === "project"
+          ? t(($) => $.table.columns.project)
+          : t(($) => $.table.group_none);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
@@ -1775,6 +1854,9 @@ export function IssueDisplayControls({
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="assignee">
                   {t(($) => $.table.columns.assignee)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="project">
+                  {t(($) => $.table.columns.project)}
                 </DropdownMenuRadioItem>
                 {tableGroupableProperties.map((property) => (
                   <DropdownMenuRadioItem

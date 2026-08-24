@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -29,7 +30,7 @@ func TestBuildPiArgsBasicFlags(t *testing.T) {
 	}, slog.Default())
 
 	joined := strings.Join(args, " ")
-	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--provider anthropic", "--model claude-sonnet-4-20250514", "--thinking high"} {
+	for _, want := range []string{"-p", "--mode json", "--session /tmp/s.jsonl", "--model anthropic/claude-sonnet-4-20250514", "--thinking high"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in args, got: %v", want, args)
 		}
@@ -229,6 +230,13 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 // piEventStreamScript builds a sh script that prints each JSON event on
 // its own stdout line. Fixtures must not contain single quotes.
 func piEventStreamScript(events []string) string {
+	return piEventStreamScriptWithExit(events, 0)
+}
+
+// piEventStreamScriptWithExit is piEventStreamScript plus an explicit
+// process exit code. Real Pi (and pi-print-clean-exit) exits 1 after a
+// turn whose last assistant stopReason is "error".
+func piEventStreamScriptWithExit(events []string, exitCode int) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	// Real Pi reads the piped prompt to EOF before emitting events, so the fake
@@ -241,6 +249,9 @@ func piEventStreamScript(events []string) string {
 		b.WriteString("printf '%s\\n' '")
 		b.WriteString(e)
 		b.WriteString("'\n")
+	}
+	if exitCode != 0 {
+		b.WriteString(fmt.Sprintf("exit %d\n", exitCode))
 	}
 	return b.String()
 }
@@ -292,6 +303,157 @@ func TestPiExecuteRetainsOnlyLastTurnOutput(t *testing.T) {
 		}
 		if result.Output != "final answer" {
 			t.Fatalf("Output: got %q, want %q", result.Output, "final answer")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestPiExecuteFailsOnUnretriedTurnError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Pi ends the turn with stopReason=error and declines to retry (401, 429
+	// and friends). It emits no `error` event and no auto_retry_end, and exits
+	// 0, so the terminal state lives only on turn_end.
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"OpenAI API error (401): invalid token"}}`,
+		`{"type":"agent_end","messages":[],"willRetry":false}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScript(events)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "invalid token") {
+			t.Fatalf("Error: got %q, want it to carry the provider message", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestPiExecuteSucceedsWhenRetryFollowsTurnError(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// The same stopReason=error precedes an automatic retry. The retry
+	// succeeds, so the run must not inherit the first turn's failure.
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"OpenAI API error (503): no available channel"}}`,
+		`{"type":"agent_end","messages":[],"willRetry":true}`,
+		`{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1}`,
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"recovered"}}`,
+		`{"type":"turn_end","message":{"role":"assistant","model":"test","usage":{"input":2,"output":2}}}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScript(events)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if result.Output != "recovered" {
+			t.Fatalf("Output: got %q, want %q", result.Output, "recovered")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestPiExecuteKeepsTurnErrorWhenProcessExitsNonZero(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Real Pi (and pi-print-clean-exit) exits 1 after stopReason=error.
+	// Wait() used to win the completed-branch and drop lastTurnError, so
+	// the classifier only saw "exit status 1" (non-retryable
+	// process_failure). The provider message must survive so
+	// "Connection error." / "Request timed out." classify as
+	// provider_network.
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"Connection error."}}`,
+		`{"type":"agent_end","messages":[],"willRetry":false}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScriptWithExit(events, 1)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Connection error.") {
+			t.Fatalf("Error: got %q, want it to carry the provider message", result.Error)
+		}
+		if !strings.Contains(result.Error, "exited with error") {
+			t.Fatalf("Error: got %q, want the process exit still visible as a suffix", result.Error)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
@@ -357,6 +519,58 @@ func TestFlushPiTextBufferKeepsUnmatchedToolPrefixes(t *testing.T) {
 		got += flushPiTextBuffer(&buf)
 		if got != want {
 			t.Fatalf("unexpected flushed text: %q, want %q", got, want)
+		}
+	}
+}
+
+// TestBuildPiArgsKeepsSlashShapedModelIDIntact is the GH #7300 regression.
+// A gateway-style provider registers model ids that themselves contain a
+// slash (`claude/claude-opus-5` under provider `multica-anthropic`). Splitting
+// on that slash to fill --provider produced `--provider claude --model
+// claude-opus-5`, and pi answers an unknown --provider with a hard
+// `Unknown provider "claude"` before it ever looks at --model. The whole
+// selector must reach --model instead, where pi's resolver matches it as a
+// raw model id.
+func TestBuildPiArgsKeepsSlashShapedModelIDIntact(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model claude/claude-opus-5") {
+		t.Errorf("model id was not passed through intact: %v", args)
+	}
+	for _, arg := range args {
+		if arg == "--provider" {
+			t.Errorf("buildPiArgs synthesized --provider from a model id: %v", args)
+		}
+	}
+}
+
+// A fully-qualified selector is passed through the same way: pi infers the
+// provider from the prefix itself, so the daemon never has to take it apart.
+func TestBuildPiArgsPassesQualifiedSelectorWhole(t *testing.T) {
+	args := buildPiArgs("/tmp/s.jsonl", ExecOptions{Model: "multica-anthropic/claude/claude-opus-5"}, slog.Default())
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--model multica-anthropic/claude/claude-opus-5") {
+		t.Errorf("qualified selector was not passed through intact: %v", args)
+	}
+	if strings.Contains(joined, "--provider") {
+		t.Errorf("buildPiArgs synthesized --provider: %v", args)
+	}
+}
+
+// A bare model id stays bare, and an empty model still omits --model entirely
+// so pi resolves its own default.
+func TestBuildPiArgsBareAndEmptyModels(t *testing.T) {
+	bare := buildPiArgs("", ExecOptions{Model: "  claude-opus-5  "}, slog.Default())
+	if joined := strings.Join(bare, " "); !strings.Contains(joined, "--model claude-opus-5") {
+		t.Errorf("bare model not forwarded (or not trimmed): %v", bare)
+	}
+
+	empty := buildPiArgs("", ExecOptions{Model: "   "}, slog.Default())
+	for _, arg := range empty {
+		if arg == "--model" {
+			t.Errorf("blank model should omit --model so pi picks its default: %v", empty)
 		}
 	}
 }

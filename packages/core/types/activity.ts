@@ -20,6 +20,7 @@ export interface TimelineEntry {
   content?: string;
   parent_id?: string | null;
   updated_at?: string;
+  revision?: number;
   comment_type?: string;
   /** Set only on comments a quick action produced (MUL-5465). Unforgeable. */
   quick_action_id?: string | null;

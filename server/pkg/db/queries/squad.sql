@@ -117,7 +117,7 @@ ORDER BY s.created_at ASC;
 
 -- name: TransferSquadAssignees :exec
 -- Transfer all issues assigned to a squad to the squad's leader agent.
-UPDATE issue SET assignee_type = 'agent', assignee_id = $2, updated_at = now()
+UPDATE issue SET assignee_type = 'agent', assignee_id = $2, revision = revision + 1, updated_at = now()
 WHERE assignee_type = 'squad' AND assignee_id = $1;
 
 -- name: TransferSquadAutopilotsToLeader :exec

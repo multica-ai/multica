@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "Issue Statuses",
+    "description": "Define the workflow your issues move through. Each status inherits its behavior from its category.",
+    "loading": "Loading statuses…",
+    "add": "Add status",
+    "show_archived": "Show archived ({{count}})",
+    "archived_badge": "Archived",
+    "archived_hint": "Retired from new assignments. Issues already on it keep it.",
+    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
+    "reorder_failed": "Could not save the new order.",
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "reorder": "Reorder {{name}}"
+    },
+    "editor": {
+      "create_title": "New status",
+      "edit_title": "Edit status",
+      "behavior_hint": "This status behaves exactly like {{category}}.",
+      "name": "Name",
+      "name_placeholder": "e.g. Code Review",
+      "key_hint": "Referred to as {{key}} by the API and the CLI.",
+      "category": "Category",
+      "category_locked": "Category cannot be changed — issues already on this status depend on it.",
+      "description": "Description",
+      "description_placeholder": "What this status means for your team",
+      "color": "Color",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_failed": "Could not save the status."
+    },
+    "archive_dialog": {
+      "title": "Archive this status?",
+      "description": "\"{{name}}\" stops being available for new issues. Issues already on it keep it and keep behaving exactly as they do now.",
+      "cancel": "Cancel",
+      "confirm": "Archive",
+      "failed": "Could not archive the status."
+    },
+    "categories": {
+      "backlog": "Parked. Assigning an issue here never starts an agent run.",
+      "todo": "Queued. Moving an issue here starts the assigned agent.",
+      "in_progress": "Actively being worked on.",
+      "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
+      "done": "Completed.",
+      "blocked": "Stalled on an external dependency.",
+      "cancelled": "Decided not to do."
+    }
+  },
   "quick_actions": {
     "title": "Quick Actions",
     "description": "Preset an agent and a prompt once, then trigger it from any issue's sidebar with a single click.",
@@ -109,29 +159,103 @@
       "navigation": "Navigation"
     },
     "actions": {
-      "openSearch": { "label": "Open search", "description": "Search and run commands from anywhere." },
-      "createIssue": { "label": "Create issue", "description": "Open your preferred issue creation flow." },
-      "toggleSidebar": { "label": "Toggle sidebar", "description": "Show or hide the main sidebar." },
-      "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
-      "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
-      "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
-      "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
-      "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
-      "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
-      "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
-      "goIssues": { "label": "Go to Issues", "description": "Open the issue list." },
-      "goProjects": { "label": "Go to Projects", "description": "Open the project list." },
-      "goAutopilots": { "label": "Go to Autopilot", "description": "Open workspace automations." },
-      "goAgents": { "label": "Go to Agents", "description": "Open the agent list." },
-      "goSquads": { "label": "Go to Squads", "description": "Open the squad list." },
-      "goUsage": { "label": "Go to Usage", "description": "Open usage analytics." },
-      "goRuntimes": { "label": "Go to Runtimes", "description": "Open runtime configuration." },
-      "goSkills": { "label": "Go to Skills", "description": "Open the skill library." },
-      "goSettings": { "label": "Go to Settings", "description": "Open workspace settings." }
+      "openSearch": {
+        "label": "Open search",
+        "description": "Search and run commands from anywhere."
+      },
+      "createIssue": {
+        "label": "Create issue",
+        "description": "Open your preferred issue creation flow."
+      },
+      "toggleSidebar": {
+        "label": "Toggle left sidebar",
+        "description": "Show or hide the left sidebar."
+      },
+      "toggleRightSidebar": {
+        "label": "Toggle right sidebar",
+        "description": "Show or hide the right sidebar when the current page has one."
+      },
+      "toggleChat": {
+        "label": "Toggle chat window",
+        "description": "Open or close the floating chat window. Opening it focuses the message input."
+      },
+      "findInIssue": {
+        "label": "Find in issue",
+        "description": "Search within the open issue detail."
+      },
+      "openThreadNav": {
+        "label": "Open thread navigator",
+        "description": "List, search, and jump between the comment threads of the open issue."
+      },
+      "archiveInboxItem": {
+        "label": "Archive notification",
+        "description": "Archive the open inbox notification, or restore it while reading the archive."
+      },
+      "send": {
+        "label": "Send",
+        "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog."
+      },
+      "goBack": {
+        "label": "Go back",
+        "description": "Navigate back through history, like a browser."
+      },
+      "goForward": {
+        "label": "Go forward",
+        "description": "Navigate forward through history, like a browser."
+      },
+      "goInbox": {
+        "label": "Go to Inbox",
+        "description": "Open the workspace inbox."
+      },
+      "goChat": {
+        "label": "Go to Chat",
+        "description": "Open workspace chat."
+      },
+      "goMyIssues": {
+        "label": "Go to My Issues",
+        "description": "Open issues assigned to you."
+      },
+      "goIssues": {
+        "label": "Go to Issues",
+        "description": "Open the issue list."
+      },
+      "goProjects": {
+        "label": "Go to Projects",
+        "description": "Open the project list."
+      },
+      "goAutopilots": {
+        "label": "Go to Autopilot",
+        "description": "Open workspace automations."
+      },
+      "goAgents": {
+        "label": "Go to Agents",
+        "description": "Open the agent list."
+      },
+      "goSquads": {
+        "label": "Go to Squads",
+        "description": "Open the squad list."
+      },
+      "goUsage": {
+        "label": "Go to Usage",
+        "description": "Open usage analytics."
+      },
+      "goRuntimes": {
+        "label": "Go to Runtimes",
+        "description": "Open runtime configuration."
+      },
+      "goSkills": {
+        "label": "Go to Skills",
+        "description": "Open the skill library."
+      },
+      "goSettings": {
+        "label": "Go to Settings",
+        "description": "Open workspace settings."
+      }
     },
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -160,6 +284,28 @@
       "start_date": "Start date"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "A library of MCP servers for this workspace. Adding one here gives it to no agent — an agent owner assigns it on the agent's own MCP tab, where it also gets a per-agent on/off toggle.",
+    "servers_title": "Shared servers",
+    "write_only_note": "Saved configurations are write-only — urls, commands, headers, and environment values are never shown again, so editing a server replaces its configuration. Renaming is safe: agents keep their assignment.",
+    "add_server": "Add server",
+    "edit_server": "Edit server",
+    "remove_server": "Remove server",
+    "empty_title": "No shared MCP servers",
+    "empty_description": "Add a server here, then assign it to the agents that should use it from their own MCP tab.",
+    "disabled_badge": "Disabled",
+    "admin_only_note": "Only workspace owners and admins can change the shared MCP servers.",
+    "delete_title": "Remove shared server?",
+    "delete_description": "{{name}} will be removed from the library and from every agent it is assigned to, taking effect on their next task.",
+    "delete_confirm": "Remove",
+    "cancel": "Cancel",
+    "added_toast": "Shared MCP server added",
+    "updated_toast": "Shared MCP server updated",
+    "removed_toast": "Shared MCP server removed",
+    "save_failed_toast": "Could not save the shared MCP server",
+    "remove_failed_toast": "Could not remove the shared MCP server"
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -179,8 +325,107 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
+      "issue_statuses": "Issue Statuses",
       "properties": "Properties",
-      "quick_actions": "Quick Actions"
+      "quick_actions": "Quick Actions",
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "Billing"
+    }
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "Publish plugins into this workspace, then install a specific version and review exactly what it is allowed to reach.",
+    "loading": "Loading Plugins",
+    "load_failed": "Plugins couldn't be loaded",
+    "load_failed_description": "Try again. Installed Plugins are unaffected.",
+    "read_only": "Read-only access",
+    "read_only_description": "Workspace owners and admins can install, configure, and remove Plugins.",
+    "empty": "No Plugins are installed yet.",
+    "action_failed": "Plugin action failed",
+    "enabled": "Plugin enabled",
+    "disabled": "Plugin disabled",
+    "enabled_label": "Enable Plugin",
+    "uninstall": "Uninstall",
+    "uninstalled": "Plugin uninstalled. Its stored data and secrets were removed.",
+    "granted_scopes": "Granted access",
+    "contributes": "Contributes",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "states": {
+      "disabled": "Disabled"
+    },
+    "installed": {
+      "title": "Installed"
+    },
+    "consent": {
+      "title": "This Plugin is asking for the following access",
+      "description": "You are approving one specific version. Its code is stored by Multica and will not change until you upgrade. A Plugin can only do what these scopes allow, and never more than the person using it can already do.",
+      "cancel": "Cancel",
+      "confirm": "Grant and install",
+      "confirm_upgrade": "Grant and upgrade",
+      "installed": "Plugin installed",
+      "upgrade_from": " · upgrading from v{{version}}",
+      "new_scope": "New"
+    },
+    "schedule": {
+      "title": "Automatic schedules",
+      "consent_title": "This Plugin will run hooks automatically",
+      "consent_description": "Installing or upgrading enables these schedules. If several times are missed, only the latest due run is delivered.",
+      "next_run": "Next: {{time}}",
+      "activity_title": "Recent deliveries",
+      "activity_last": "{{status}} · planned {{planned}} · sent {{actual}} · attempt {{attempt}}",
+      "activity_empty": "Not delivered yet",
+      "frequency_minutes_one": "Every minute",
+      "frequency_minutes_other": "Every {{count}} minutes",
+      "frequency_hourly": "Every hour at minute {{minute}}",
+      "frequency_daily": "Every day at {{hour}}:{{minute}}",
+      "frequency_custom": "Custom recurring schedule"
+    },
+    "config": {
+      "title": "Configuration",
+      "save": "Save",
+      "saved": "Configuration saved",
+      "secret_set": "Saved — enter a new value to replace it"
+    },
+    "scopes": {
+      "issues_read": "Read issues",
+      "issues_write": "Create and edit issues",
+      "comments_read": "Read comments",
+      "comments_write": "Post comments",
+      "tasks_read": "Read agent tasks",
+      "tasks_write": "Start and update agent tasks",
+      "agents_read": "Read the agent list",
+      "members_read": "Read the member list",
+      "storage_user": "Store data for each member individually",
+      "storage_workspace": "Store data shared by the workspace",
+      "net": "Send data to {{domain}}",
+      "unknown": "Unrecognized access — do not install"
+    },
+    "hook_circuit_open": "Hook delivery has stopped after repeated failures.",
+    "hook_recent_failures": "{{count}} recent hook calls failed.",
+    "mcp": {
+      "badge": "MCP",
+      "description": "This hook adopts tools from the Plugin author's own MCP server. Approve the ones agents may call — a tool that appears later is not adopted until you approve it.",
+      "loading": "Loading tools",
+      "unreachable": "Could not reach the Plugin's MCP server.",
+      "empty": "This MCP server currently offers no tools.",
+      "drifted": "Schema changed",
+      "save": "Save approvals",
+      "approved": "Approved tools updated."
+    },
+    "publish": {
+      "title": "Publish a Plugin",
+      "description": "Upload a plugin package. Multica stores and serves it, so a plugin author needs no server of their own.",
+      "hint": "A .zip holding multica.plugin.json and every file it names.",
+      "upload": "Upload package",
+      "published": "Published {{name}} {{version}}",
+      "empty": "Nothing has been published in this workspace yet.",
+      "delete": "Delete published Plugin",
+      "deleted": "Published Plugin deleted",
+      "installed_version": "In use",
+      "review_install": "Review and install",
+      "review_upgrade": "Review and upgrade"
     }
   },
   "properties": {
@@ -212,7 +457,9 @@
       "multi_select": "Multi-select",
       "date": "Date",
       "checkbox": "Checkbox",
-      "url": "URL"
+      "url": "URL",
+      "actor": "Member",
+      "multi_actor": "Members"
     },
     "actions": {
       "open": "Actions for {{name}}",
@@ -688,11 +935,39 @@
   "dingtalk": {
     "section_title": "DingTalk",
     "page_description": "Connect each Multica Agent to its own DingTalk robot. Members can DM the bot, @mention it in a group, and type /issue to spin up a new Multica issue.",
+    "agent_page_description": "Use a dedicated DingTalk bot to DM this Agent, @mention it in a group, or type /issue to create a Multica issue.",
+    "groups_title": "Recent groups",
+    "groups_description": "A group appears after a workspace member links their DingTalk account and @mentions this bot there. Groups active in the last 90 days are shown by default.",
+    "groups_overview_description": "Each connection shows its Agent, DingTalk bot, and recently observed groups.",
+    "groups_loading": "Loading groups…",
+    "groups_empty": "No group messages observed yet.",
+    "groups_no_recent": "No groups were active in the last 90 days.",
+    "groups_inactive": "Long inactive ({{count}})",
+    "groups_load_more": "Load more",
+    "groups_error": "Could not load DingTalk groups.",
+    "groups_retry": "Retry",
+    "group_untitled": "Untitled DingTalk group",
+    "groups_count": "{{count}}",
+    "conversation_id_label": "DingTalk group conversation ID",
+    "group_last_active": "Last active {{time}}",
+    "group_mentions_one": "{{count}} mention",
+    "group_mentions_other": "{{count}} mentions",
+    "group_forget": "Forget",
+    "group_forget_title": "Forget this group?",
+    "group_forget_description": "This removes the group from Multica's inventory without deleting conversations or messages. It will reappear after someone @mentions the bot again.",
+    "group_forget_cancel": "Cancel",
+    "group_forget_confirm": "Forget group",
+    "group_forget_success": "Group removed from the inventory",
+    "group_forget_failed": "Could not remove the group",
+    "bot_identity_unavailable": "Identity unavailable",
+    "bot_permission_tooltip_prefix": "In DingTalk Open Platform, grant this bot's app the",
+    "bot_permission_tooltip_suffix": "permission, then @mention the bot again in a DingTalk group where it has been added.",
     "not_enabled_title": "DingTalk integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable DingTalk robot installations.",
     "not_enabled_self_host_hint": "Self-hosters: see the project README for details.",
-    "connected_bots": "Connected bots",
+    "connections_title": "Connections",
+    "deleted_agent": "Deleted Agent",
     "loading": "Loading…",
     "empty_title": "No bots connected yet",
     "empty_description_prefix": "Open an Agent in this workspace and click",
@@ -700,6 +975,7 @@
     "empty_description_suffix": "to install a robot for it.",
     "revoked_badge": "revoked",
     "installed_at_label": "Installed {{when}}",
+    "identity_label": "Linked staff ID: {{identity}}",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect this DingTalk bot?",
@@ -709,7 +985,7 @@
     "toast_disconnect_failed": "Disconnect failed",
     "bind_button": "Connect DingTalk",
     "bind_button_title": "Connect {{agent}} to a DingTalk bot",
-    "agent_bot_connected_label": "Connected to DingTalk",
+    "agent_bot_connected_label": "Connected bot:",
     "agent_bot_disconnect_tooltip": "Unbind this DingTalk bot from the Agent. The bot will stop receiving DingTalk messages.",
     "byo_dialog_title": "Connect a DingTalk bot",
     "byo_docs_link": "Step-by-step: connect your Multica agent to DingTalk",
@@ -770,6 +1046,47 @@
     "byo_credentials_unverifiable": "Couldn't reach WeCom to verify this bot. Your credentials were not changed — try again in a moment.",
     "byo_install_failed": "Couldn't save this bot — something went wrong on our side. Your credentials were not changed; try again, and contact support if it keeps failing.",
     "byo_failed_toast": "Could not connect the WeCom bot"
+  },
+  "telegram": {
+    "section_title": "Telegram",
+    "page_description": "Connect each Multica Agent to its own Telegram bot. Members can DM the bot, @mention it in a group, type /issue to spin up a new Multica issue, and watch the agent's reply stream live.",
+    "not_enabled_title": "Telegram integration not enabled",
+    "not_enabled_description_prefix": "Set",
+    "not_enabled_description_suffix": "on the server to enable Telegram bot installations.",
+    "not_enabled_self_host_hint": "Self-hosters: see the project README for details.",
+    "preview_title": "Telegram install coming soon",
+    "preview_description": "The at-rest key is set, but installs are not available in this deployment yet. The Connect button will appear here once they are.",
+    "connected_bots": "Connected bots",
+    "loading": "Loading…",
+    "load_failed": "Failed to load Telegram installations",
+    "empty_title": "No bots connected yet",
+    "empty_description_prefix": "Open an Agent in this workspace and click",
+    "empty_description_cta": "Connect Telegram",
+    "empty_description_suffix": "to install a bot for it.",
+    "revoked_badge": "revoked",
+    "installed_at_label": "Installed {{when}}",
+    "disconnect": "Disconnect",
+    "disconnecting": "Disconnecting…",
+    "disconnect_confirm_title": "Disconnect this Telegram bot?",
+    "disconnect_confirm_description": "The bot will stop receiving Telegram messages for this workspace. Chat history in Multica is kept; you can re-connect later from the same Agent.",
+    "disconnect_confirm_cancel": "Cancel",
+    "toast_disconnected": "Disconnected Telegram bot",
+    "toast_disconnect_failed": "Disconnect failed",
+    "bind_button": "Connect Telegram",
+    "bind_button_title": "Connect {{agent}} to a Telegram bot",
+    "agent_bot_connected_label": "Connected to Telegram",
+    "agent_bot_disconnect_tooltip": "Unbind this Telegram bot from the Agent. The bot will stop receiving Telegram messages.",
+    "agent_bot_manage_link": "Open in Telegram",
+    "agent_bot_manage_tooltip": "Open a chat with this bot in Telegram.",
+    "connect_dialog_title": "Connect a Telegram bot",
+    "connect_dialog_description": "Create a bot with @BotFather in Telegram, then paste its token below. The token is verified live and stored encrypted.",
+    "connect_docs_link": "Step-by-step: connect your Multica agent to Telegram",
+    "bot_token_label": "Bot token",
+    "connect_submit": "Connect",
+    "connect_submitting": "Connecting…",
+    "connect_cancel": "Cancel",
+    "connect_success_toast": "Telegram bot connected",
+    "connect_failed_toast": "Could not connect the Telegram bot"
   },
   "repositories": {
     "section_title": "Repositories",
@@ -874,6 +1191,26 @@
         "label": "Member",
         "description": "Create and work on issues"
       }
-    }
+    },
+    "share_links_title": "Share links",
+    "role_field": "Role:",
+    "expiry_field": "Expiry:",
+    "share_links_create_title": "Create share link",
+    "share_links_create_button": "Generate",
+    "share_links_creating": "Generating...",
+    "share_link_uses": "{{used}} / {{max}} uses",
+    "share_link_expires": "Expires {{date}}",
+    "share_link_copy_tooltip": "Copy link",
+    "share_link_revoke_tooltip": "Revoke link",
+    "toast_share_link_created": "Share link created",
+    "toast_share_link_failed": "Failed to create share link",
+    "toast_share_link_revoked": "Share link revoked",
+    "toast_share_link_revoke_failed": "Failed to revoke share link",
+    "toast_share_link_copied": "Link copied",
+    "toast_share_link_copy_failed": "Failed to copy link",
+    "expiry_24h": "24 hours",
+    "expiry_7d": "7 days",
+    "expiry_30d": "30 days",
+    "expiry_never": "Never"
   }
 }

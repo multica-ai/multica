@@ -119,7 +119,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
-| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. A runtime with no reasoning control (e.g. `hermes`) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
+| `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum/safe-token gate; unknown literal → 400. Pi accepts only `off|minimal|low|medium|high|xhigh|max`, then the daemon checks the selected model's RPC-discovered subset. ACP runtimes that advertise an effort selector in `session/new` (currently `reasonix` and `hermes`) take the safe-token path and are checked against the discovered catalog by the daemon; that catalog covers only the model the discovery session was on, so other models show no picker until per-model probing exists. `hermes` covers two binaries — jcode advertises and applies an effort, Hermes Agent advertises none and gets no picker — so the answer there comes from the runtime's discovered catalog, not the provider name. Because that catalog is only written once a client requests a model list, a `hermes` runtime that has never been discovered is refused with a distinct "has not reported a model catalog yet" 400 rather than being assumed capable; `reasonix`, whose provider name does determine the binary, is allowed in that state. A runtime with no reasoning control at all (e.g. `copilot`, which executes outside ACP) rejects EVERY non-empty value and says so — that 400 is a capability answer, not a bad token | daemon; empty = runtime default |
 | `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
@@ -136,11 +136,10 @@ Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
 
-The 1–50 concurrency range applies consistently to manual create, update, and
-the create-from-template HTTP path. On create paths, an omitted field defaults
-to 6 while an explicitly supplied 0 is rejected; on update, omission preserves
-the current value. The CLI performs the same range check before sending create
-or update requests.
+The 1–50 concurrency range applies consistently to create and update. On
+create, an omitted field defaults to 6 while an explicitly supplied 0 is
+rejected; on update, omission preserves the current value. The CLI performs the
+same range check before sending create or update requests.
 
 `thinking_level` is validated only at the provider level: fixed-vocabulary
 providers reject an unrecognized literal, while dynamic-vocabulary providers
@@ -174,12 +173,25 @@ explicit model fail closed because the effective config.toml model is unknown.
 ### model vs custom_args
 
 `model` is a first-class persisted column the daemon reads directly.
-`custom_args` are raw provider CLI args. The CLI help notes that some providers
-(codex app-server, openclaw) reject `--model` inside `custom_args` — but that is
-documented CLI guidance, not a server-enforced invariant; nothing in the create
-handler inspects `custom_args` for a model flag. Pi is stricter at invocation
-time: `--thinking` in `custom_args` is filtered because the first-class
-`thinking_level` field owns that flag and must be the only source of its value.
+`custom_args` are normally raw provider CLI args. The CLI help notes that some
+providers (codex app-server, openclaw) reject `--model` inside `custom_args` —
+but that is documented CLI guidance, not a server-enforced invariant; nothing
+in the create handler inspects `custom_args` for a model flag. Provider
+backends may consume protocol selectors before launch:
+
+- Pi filters `--thinking` because the first-class `thinking_level` field owns
+  that flag and must be its only source.
+- ZeroClaw consumes `--agent <alias>` / `--agent-alias <alias>` (including
+  `=value` forms) and sends the value as the ACP `session/new.agentAlias`
+  parameter. `zeroclaw acp` has no such CLI flag. Set one of these custom args
+  when ZeroClaw has multiple agents and no `[acp].default_agent`; omit it for a
+  sole-agent config so ZeroClaw can auto-select that agent.
+
+Never put credentials or other secrets in `custom_args`. Daemon command logs
+redact argument values, but values that a backend does not consume still live
+in the provider process's argv and may be visible to other local processes
+through `ps` or `/proc`. Put provider credentials in `custom_env` instead,
+using its stdin or 0600 file input where possible.
 
 ## Env & secrets
 
@@ -242,6 +254,37 @@ Two ways `mcp_config` differs from `custom_env`:
   it, and a workspace may force redaction for everyone.
 
 Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
+
+#### Workspace MCP servers
+
+A workspace keeps a LIBRARY of MCP servers (workspace Settings → MCP, or
+`multica workspace mcp list|add|update|remove`). Adding one there gives it to
+NO agent — same shape as a workspace skill. It reaches an agent only when
+someone assigns it:
+
+```bash
+multica workspace mcp list --output table        # find the server id
+multica agent mcp add <agent-id> <server-id>     # give it to one agent
+multica agent mcp disable <agent-id> <server-id> # stop sending it, keep the assignment
+multica agent mcp remove <agent-id> <server-id>  # take it away
+```
+
+At claim time the effective set is:
+
+| Layer | Reaches the agent when |
+| --- | --- |
+| runtime-local servers | always (the daemon merges the runtime's own file) |
+| workspace servers | assigned to THIS agent and left enabled |
+| the agent's own `mcp_config` | always; it WINS on a name collision |
+
+Two consequences worth knowing before writing an agent's config: assigning a
+shared server does not require re-listing it in `mcp_config` (they merge), and
+`mcp_config` is now only about servers private to that agent — a
+managed-but-empty `{}` no longer means anything about the workspace layer,
+because nothing is inherited in the first place.
+
+The stored entry is **write-only** — reads return the server's name and
+transport, never urls, commands, headers, or env, for any role.
 
 ## Skill binding
 

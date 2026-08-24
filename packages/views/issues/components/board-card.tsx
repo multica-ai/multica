@@ -6,11 +6,11 @@ import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
-import { stripChannelMediaMarkers } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { propertyListOptions } from "@multica/core/properties";
 import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
+import { descriptionPreview } from "./description-preview";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -27,27 +27,12 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
-}
-
-// Flatten description Markdown into the card's one-line preview. Channel-media
-// provenance is server-owned merge metadata, not authored content, so it is
-// stripped first: the image Markdown it annotates is removed a line below, and
-// without this the bare HTML comment survives every remaining pass and becomes
-// visible preview text. Exported for tests.
-export function descriptionPreview(markdown: string): string {
-  return stripChannelMediaMarkers(markdown)
-    .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_`~]+/g, "")
-    .replace(/^[\s>#]+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /** Stops event from bubbling to Link/drag handlers */
@@ -107,6 +92,9 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  // Keeps the chip row from rendering an empty flex container when the status
+  // chip is the only thing in it and it decides to render nothing.
+  const showCustomStatus = useIsCustomStatus(issue.status);
 
   const showAssigneeName = showAssigneeSection && hasAssignee && !showStartDate && !showDueDate;
   const showUpdatedHint = showAssigneeName && !showChildProgress;
@@ -157,6 +145,7 @@ export const BoardCardContent = memo(function BoardCardContent({
         actorId={issue.assignee_id!}
         size="sm"
         enableHoverCard
+        profileLink={false}
         className="shrink-0"
       />
       {assigneeName && (
@@ -211,9 +200,12 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels + custom property values */}
-      {(showProject || showLabels || cardCustomProperties.length > 0) && (
+      {/* Chip row: status + project + labels + custom property values.
+          The status chip renders only for a CUSTOM status — the column header
+          already names the category. (MUL-6243) */}
+      {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          <CustomStatusChip status={issue.status} />
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />
@@ -300,11 +292,16 @@ export const BoardCardContent = memo(function BoardCardContent({
                 )
               )}
               {showChildProgress && (
-                <div className="inline-flex shrink-0 items-center gap-1">
+                <div className="inline-flex shrink-0 items-center gap-1.5">
                   <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                   <span className="text-micro text-muted-foreground tabular-nums font-medium">
                     {childProgress!.done}/{childProgress!.total}
                   </span>
+                  {(childProgress!.hiddenTotal ?? 0) > 0 && (
+                    <span className="text-micro text-warning tabular-nums font-medium">
+                      {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
+                    </span>
+                  )}
                 </div>
               )}
               {showUpdatedHint && (
@@ -362,6 +359,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
       <div
         ref={setNodeRef}
         style={style}
+        data-board-card=""
         {...attributes}
         {...listeners}
         className={`group/card ${isDragging ? "opacity-30" : ""}`}

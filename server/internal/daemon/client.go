@@ -8,12 +8,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -187,6 +190,10 @@ func daemonClientCapabilities() string {
 	return strings.Join([]string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
+		protocol.DaemonCapabilityExecutionManifestV1,
+		protocol.DaemonCapabilityAgentSkillV1,
+		protocol.DaemonCapabilityRemoteMCPV1,
+		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
 	}, ",")
 }
@@ -209,6 +216,30 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, taskID, contributionID string) (http.Header, error) {
+	var response struct {
+		CredentialHeader string `json:"credential_header"`
+		Credential       string `json:"credential"`
+	}
+	// A Plugin-contributed connection keeps its credential in the Plugin's own
+	// secret storage, which a different route serves. The marker travels on the
+	// contribution id because that is all the broker hands back at dial time.
+	route := "remote-mcp"
+	if strings.HasPrefix(contributionID, remotemcp.PluginContributionPrefix) {
+		route = "plugin-mcp"
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/%s/%s/credential",
+		url.PathEscape(taskID), route, url.PathEscape(contributionID))
+	if err := c.getJSONWithToken(ctx, path, daemonToken, &response); err != nil {
+		return nil, err
+	}
+	headers := make(http.Header)
+	if response.CredentialHeader != "" {
+		headers.Set(response.CredentialHeader, response.Credential)
+	}
+	return headers, nil
 }
 
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
@@ -337,13 +368,50 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 	}, nil)
 }
 
+// TaskCancelAck is the payload of the daemon's cancel acknowledgement.
+type TaskCancelAck struct {
+	// BranchName: a cancelled worktree task has already finalized — its
+	// partial work is committed to a branch in the user's repo. The cancel
+	// path discards the rest of the result, so this ack is the only channel
+	// left to report where that work went.
+	BranchName string
+	// DurableWorkDir is the configured local_directory path that became
+	// authoritative after the disposable task worktree was removed.
+	DurableWorkDir string
+	// ErrorMessage / FailureReason: set when the cancelled run additionally
+	// FAILED to persist its work (worktree Finalize abort). There is no branch
+	// then; the error text carrying the preserved-worktree path is the only
+	// pointer to the agent's work, and without this the cancel path would
+	// swallow it entirely.
+	ErrorMessage  string
+	FailureReason string
+}
+
 // AckTaskCancelled tells the server this daemon observed the task's
 // cancellation and has finished flushing the transcript (runner.run only
 // returns after executeAndDrain's drain wait), so the server can settle its
 // deferred chat finalization now instead of waiting out the sweeper grace
 // period (#5219). Idempotent server-side.
-func (c *Client) AckTaskCancelled(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), map[string]any{}, nil)
+//
+// Retried on transient errors like the complete/fail callbacks: when the ack
+// carries a branch or an error it is a terminal delivery — the only pointer to
+// the cancelled task's work — and a single lost POST would lose it forever.
+// The server never overwrites already-recorded values, so replays are safe.
+func (c *Client) AckTaskCancelled(ctx context.Context, taskID string, ack TaskCancelAck) error {
+	body := map[string]any{}
+	if ack.BranchName != "" {
+		body["branch_name"] = ack.BranchName
+	}
+	if ack.DurableWorkDir != "" {
+		body["durable_work_dir"] = ack.DurableWorkDir
+	}
+	if ack.ErrorMessage != "" {
+		body["error_message"] = ack.ErrorMessage
+	}
+	if ack.FailureReason != "" {
+		body["failure_reason"] = ack.FailureReason
+	}
+	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
@@ -370,7 +438,7 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID string) error {
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -380,6 +448,9 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if durableWorkDir != "" {
+		body["durable_work_dir"] = durableWorkDir
 	}
 	if sessionRolloutMissing {
 		body["session_rollout_missing"] = true
@@ -399,13 +470,22 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool, retiredSessionID string) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
 	}
 	if workDir != "" {
 		body["work_dir"] = workDir
+	}
+	if durableWorkDir != "" {
+		body["durable_work_dir"] = durableWorkDir
+	}
+	// A failed run can still have delivered a branch: worktree mode commits
+	// whatever the agent left before removing the worktree, so partial work
+	// survives — but only if its name travels with the failure report.
+	if branchName != "" {
+		body["branch_name"] = branchName
 	}
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
@@ -749,10 +829,32 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 	return &resp, nil
 }
 
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
-	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
-		"runtime_ids": runtimeIDs,
-	}, nil)
+// RuntimeOfflineCodeNotExecutable marks a runtime taken offline because the OS
+// refuses to execute its agent CLI. It is the one deregistration cause that no
+// amount of waiting fixes, which is what the server needs to know: work for an
+// offline machine may queue until the machine returns, but work for this one
+// must be refused with an explanation (MUL-6164).
+const RuntimeOfflineCodeNotExecutable = "not_executable"
+
+// RuntimeOfflineReason is why a runtime went offline, in the form clients can
+// act on: a stable code they switch on and localize, and the command that
+// repairs the install. Prose stays in Detail for logs — never as the thing a
+// client parses.
+type RuntimeOfflineReason struct {
+	Code   string                  `json:"code"`
+	Detail string                  `json:"detail,omitempty"`
+	Repair *agent.ExecFormatRepair `json:"repair,omitempty"`
+}
+
+// Deregister takes runtimes offline. reasons is optional and keyed by runtime
+// id: a daemon shutting down has nothing to explain, while one that condemned a
+// broken CLI does.
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
+	body := map[string]any{"runtime_ids": runtimeIDs}
+	if len(reasons) > 0 {
+		body["offline_reasons"] = reasons
+	}
+	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.
@@ -982,12 +1084,19 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
+	return c.getJSONWithToken(ctx, path, c.token, respBody)
+}
+
+// getJSONWithToken performs one GET with an explicit credential. It is used by
+// the Remote MCP broker so its short-lived daemon token cannot replace or race
+// the client's long-lived PAT used by concurrent control-plane requests.
+func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	c.setIdentityHeaders(req)
 
@@ -1006,4 +1115,70 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// postJSONWithToken is getJSONWithToken's write counterpart, for the daemon's
+// task-scoped calls that carry a body.
+func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqBody, respBody any) error {
+	encoded, err := json.Marshal(reqBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(encoded))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	c.setIdentityHeaders(req)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+	if respBody == nil {
+		io.Copy(io.Discard, resp.Body)
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+// InvokeAgentPluginHook asks the server to make one agent-triggered hook call.
+//
+// The daemon deliberately does not call the plugin itself: the signing secret
+// is derived from the deployment key and stays on the server, and routing
+// through it keeps the rate limit, circuit breaker, `net:` destination check
+// and invocation record on one code path for every trigger.
+func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
+	var response struct {
+		Status string          `json:"status"`
+		Output json.RawMessage `json:"output,omitempty"`
+		Error  string          `json:"error,omitempty"`
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/plugin-hooks", url.PathEscape(taskID))
+	body := map[string]any{"installation_id": installationID, "hook_key": hookKey}
+	if len(input) > 0 {
+		body["input"] = input
+	}
+	if err := c.postJSONWithToken(ctx, path, daemonToken, body, &response); err != nil {
+		return nil, err
+	}
+	// A refused or failed hook comes back as a 200 with a status, so that the
+	// caller can render it as a TOOL error rather than a broken transport —
+	// an unreachable plugin endpoint must not fail the agent's task.
+	if response.Status != "ok" {
+		if response.Error != "" {
+			return nil, errors.New(response.Error)
+		}
+		return nil, errors.New("the plugin hook did not succeed")
+	}
+	return response.Output, nil
 }

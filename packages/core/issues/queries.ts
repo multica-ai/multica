@@ -4,11 +4,11 @@ import {
   queryOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatus,
+  IssueStatusCategory,
   IssueTableFacetsRequest,
   IssueTableGroupSpec,
   IssueTableGroupsRequest,
@@ -217,18 +217,24 @@ export type AssigneeGroupedIssuesFilter = Omit<
 export const ISSUE_PAGE_SIZE = 50;
 
 /**
- * Statuses fetched and paginated into the list/board cache — every lifecycle
- * status, `cancelled` included. `cancelled` is a first-class default status
- * (MUL-4290), so it lives in the cache and renders like any other column;
- * there is no separate "visible board" subset. This constant governs
- * fetch/cache membership.
+ * CATEGORIES fetched and paginated into the list/board cache — all 7,
+ * `cancelled` included. `cancelled` is a first-class default (MUL-4290), so it
+ * lives in the cache and renders like any other column; there is no separate
+ * "visible board" subset. This constant governs fetch/cache membership.
+ *
+ * Keyed on category, not on status key (MUL-6243). A workspace can define any
+ * number of custom statuses, and bucketing by status would mean one more
+ * parallel `listIssues` request on every board load per status added. Bucketing
+ * by category keeps the fan-out fixed at 7 forever; a custom status appears in
+ * the column of the category it inherits, and the card's own badge is what
+ * shows which specific status it is on.
  */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
+export const PAGINATED_CATEGORIES: readonly IssueStatusCategory[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
   const out = [];
-  for (const status of PAGINATED_STATUSES) {
+  for (const status of PAGINATED_CATEGORIES) {
     const bucket = data.byStatus[status];
     if (bucket) out.push(...bucket.issues);
   }
@@ -237,12 +243,12 @@ export function flattenIssueBuckets(data: ListIssuesCache) {
 
 async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const responses = await Promise.all(
-    PAGINATED_STATUSES.map((status) =>
-      api.listIssues({ status, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
+    PAGINATED_CATEGORIES.map((category) =>
+      api.listIssues({ status_category: category, limit: ISSUE_PAGE_SIZE, offset: 0, ...sort, ...filter }),
     ),
   );
   const byStatus: ListIssuesCache["byStatus"] = {};
-  PAGINATED_STATUSES.forEach((status, i) => {
+  PAGINATED_CATEGORIES.forEach((status: IssueStatusCategory, i: number) => {
     const res = responses[i]!;
     byStatus[status] = { issues: res.issues, total: res.total };
   });
@@ -413,11 +419,18 @@ export function issueDetailOptions(wsId: string, id: string) {
 /**
  * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
  *
- * Backs the Linear-style autolink: the backend `q` search matches an
- * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
- * both hit number 123), so the exact `identifier === value` filter here is
- * what enforces the workspace prefix. A non-existent or wrong-prefix
- * identifier resolves to `null` and renders as plain text.
+ * Backs the Linear-style autolink. This is an EXACT lookup, so it goes to
+ * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER`, checks
+ * the prefix against the workspace's own `issue_prefix`, and reads the issue
+ * through the unique `(workspace_id, number)` index. A non-existent or
+ * wrong-prefix identifier 404s, which maps to `null` here and renders as
+ * plain text — the same contract the previous implementation had.
+ *
+ * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
+ * workspace-wide full-text query (title/description/comment `LIKE`, ranking,
+ * snippet subquery, `COUNT(*) OVER()`) which is orders of magnitude more
+ * expensive than a point read, and autolink resolution was the dominant
+ * caller of it (MUL-6268).
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates
@@ -427,13 +440,15 @@ export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
     queryFn: async ({ signal }) => {
-      const res = await api.searchIssues({
-        q: identifier,
-        limit: 10,
-        include_closed: true,
-        signal,
-      });
-      return res.issues.find((i) => i.identifier === identifier) ?? null;
+      try {
+        return await api.getIssue(identifier, { signal });
+      } catch (err) {
+        // Unknown identifier / wrong workspace prefix → render as plain text.
+        // Any other failure (401/5xx/abort) must keep propagating so the query
+        // is retried or cancelled instead of being cached as "no such issue".
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
     },
     // Identifier→issue mapping is effectively immutable; avoid refetch churn
     // when the same key renders across many comments/messages.
@@ -446,9 +461,21 @@ export function childIssueProgressOptions(wsId: string) {
     queryKey: issueKeys.childProgress(wsId),
     queryFn: () => api.getChildIssueProgress(),
     select: (data) => {
-      const map = new Map<string, { done: number; total: number }>();
+      const map = new Map<string, {
+        done: number;
+        total: number;
+        visibleDone: number;
+        visibleTotal: number;
+        hiddenTotal: number;
+      }>();
       for (const entry of data.progress) {
-        map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
+        map.set(entry.parent_issue_id, {
+          done: entry.done,
+          total: entry.total,
+          visibleDone: entry.visible_done ?? entry.done,
+          visibleTotal: entry.visible_total ?? entry.total,
+          hiddenTotal: entry.hidden_total ?? 0,
+        });
       }
       return map;
     },

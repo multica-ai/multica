@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { homedir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";

@@ -13,7 +13,6 @@ import { api } from "@multica/core/api";
 import {
   chatKeys,
   isTaskMessageTaskId,
-  mergeTaskMessagesBySeq,
   taskMessagesOptions,
 } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types/agent";
@@ -229,7 +228,8 @@ function LiveTranscriptDialog({
   // `taskMessagesOptions` is `staleTime: Infinity`, so a plain subscription
   // never refetches — a WS reconnect gap (or the final tail of messages a
   // completed issue task never re-broadcasts) would otherwise leave a hole.
-  // Merge by seq so the fetch and any concurrent WS append both survive.
+  // The query's `structuralSharing` folds this response into whatever the
+  // realtime stream has already written, so neither side loses a seq.
   useEffect(() => {
     if (!isTaskMessageTaskId(task.id)) return;
     let cancelled = false;
@@ -239,7 +239,7 @@ function LiveTranscriptDialog({
         if (cancelled) return;
         queryClient.setQueryData<TaskMessagePayload[]>(
           chatKeys.taskMessages(task.id),
-          (old = []) => mergeTaskMessagesBySeq(old, msgs),
+          msgs,
         );
       })
       .catch((err) => {

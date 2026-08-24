@@ -40,7 +40,7 @@ const (
 	// pre-engine IssueCommandProcessor: without them the user's command
 	// vanishes with no signal that it will never be handled.
 	issueNotMemberText = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
-	issueDisabledText  = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	issueDisabledText  = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask the agent owner or a workspace owner/admin to reconnect it."
 )
 
 // bindingMinter is the binding-token surface the replier needs.

@@ -128,8 +128,12 @@
       "public": "공개"
     },
     "visibility_hint": {
-      "private": "본인과 워크스페이스 관리자만 이 런타임에 에이전트를 만들 수 있습니다.",
+      "private": "본인만 이 런타임에 에이전트를 만들 수 있습니다.",
       "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다."
+    },
+    "visibility_hint_readonly": {
+      "private": "이 런타임에 에이전트를 만들 수 있는 사람은 런타임 owner뿐이며, 공개로 바꿀 수 있는 사람도 owner뿐입니다.",
+      "public": "워크스페이스 멤버라면 누구나 이 런타임에 에이전트를 만들 수 있습니다. 다시 비공개로 바꿀 수 있는 사람은 런타임 owner뿐입니다."
     },
     "visibility_toast_updated": "공개 범위를 {{visibility}}(으)로 설정했습니다",
     "visibility_toast_failed": "공개 범위를 업데이트하지 못했습니다",
@@ -271,6 +275,12 @@
   "charts": {
     "heatmap_less": "적음",
     "heatmap_more": "많음",
+    "heatmap_no_activity": "활동 없음",
+    "heatmap_busiest_day": "가장 활발한 날짜",
+    "heatmap_most_active_weekday": "가장 활발한 요일",
+    "heatmap_quietest_weekday": "가장 한산한 요일",
+    "heatmap_average": "평균 {{value}}",
+    "heatmap_window_total_other": "{{count}}일 합계",
     "tooltip_total": "합계"
   },
   "list": {

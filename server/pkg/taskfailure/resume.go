@@ -1,6 +1,9 @@
 package taskfailure
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
 // UnresumableHistory reports whether an agent error means the conversation
 // history itself can no longer be sent to the provider: a message already
@@ -38,6 +41,39 @@ func UnresumableHistory(errText string) bool {
 	}
 	return emptyContentRe.MatchString(errText) && historyMessageLocatorRe.MatchString(errText)
 }
+
+// AuthMethodUnresolved reports whether an agent error is the provider
+// SDK refusing to resolve its own credentials — no api_key, no auth_token, and
+// no explicitly-omitted auth header. On a RESUMED session this is
+// deterministic rather than transient: the credential-bearing provider
+// identity lives in the session state the runtime rebuilt, so replaying the
+// same session reproduces the same error forever. A fresh session re-resolves
+// the provider from current config and succeeds (GH #6777).
+//
+// Deliberately the exact provider phrase and nothing looser. Every other
+// authentication-shaped error — an expired token, a revoked key, a 401 — is
+// about the credential itself and is NOT cured by a new session, so widening
+// this would discard healthy conversation pointers on failures a retry cannot
+// fix. Classify leaves this text as agent_error.unknown (resume-safe), which
+// is why the guard has to key on the text rather than the reason.
+//
+// This is the single source of truth for the phrase. Keep it in sync with the
+// GetLastTaskSession / GetLastChatTaskSession resume queries (pkg/db/queries),
+// which apply the same guard server-side so rows written by a daemon too old
+// to carry the in-turn retry are still excluded from resume.
+func AuthMethodUnresolved(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(errText), authMethodUnresolvedPhrase)
+}
+
+// authMethodUnresolvedPhrase is the lowercase provider phrase
+// AuthMethodUnresolved matches. It appears verbatim in the runtime's error
+// however the failure reached us — session/resume, session/set_model or
+// session/prompt — because every ACP adapter wraps the underlying message
+// with %v rather than replacing it.
+const authMethodUnresolvedPhrase = "could not resolve authentication method"
 
 // emptyContentRe matches the provider's complaint that a content field is
 // empty, in the wordings observed across providers.

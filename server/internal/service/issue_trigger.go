@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -32,10 +33,17 @@ const (
 //
 // IsSelfLoop reports whether promoting this issue out of backlog would be the
 // calling agent re-triggering its own running task. Only the status source
-// consults it; create and assign never do. A nil func means "not a self-loop".
+// consults it. A nil func means "not a self-loop".
+//
+// SuppressActiveSelfAssignment reports whether a direct agent assignment is a
+// trusted agent claiming ownership for itself while the target (issue, agent)
+// pair already has a non-terminal task. The ownership update still succeeds;
+// only the duplicate enqueue is suppressed. Cross-issue handoffs to a fresh
+// target remain runnable. A nil func means "do not suppress".
 type IssueTriggerProbe struct {
-	CanAccessAgent func(agent db.Agent) bool
-	IsSelfLoop     func() bool
+	CanAccessAgent               func(agent db.Agent) bool
+	IsSelfLoop                   func() bool
+	SuppressActiveSelfAssignment func(agentID pgtype.UUID) bool
 }
 
 // IssueTriggerInput describes one prospective issue write in its post-write
@@ -96,16 +104,33 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		canAccess = allowAllAgents
 	}
 
+	// The status source also requires LEAVING the backlog category, not merely
+	// changing the status key. Before custom statuses a key change out of
+	// `backlog` was always a category change, so the two were the same
+	// condition; now `backlog` → a custom status in the `backlog` category is a
+	// move within the parking lot, and starting a run on it would break the one
+	// promise backlog makes. (MUL-6463)
+	//
+	// Both sides of the transition are normalized to the canonical status they
+	// inherit, so a custom status in the `backlog` category parks exactly like
+	// Backlog and a custom status in the `todo` category starts a run exactly
+	// like Todo. Built-in keys resolve to themselves without a query, leaving
+	// this decision bit-identical for workspaces with no custom statuses —
+	// which is the whole set of them until an admin defines one. (MUL-6243)
+	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
+
 	var source RunEnqueueSource
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
-		if issue.Status == "backlog" {
+		if currentStatus == "backlog" {
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && in.PrevStatus == "backlog" &&
-		issue.Status != "done" && issue.Status != "cancelled":
+	case in.StatusChanged && prevStatus == "backlog" &&
+		currentStatus != "backlog" &&
+		currentStatus != "done" && currentStatus != "cancelled":
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
@@ -123,6 +148,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(agent) {
 			return IssueRunTrigger{}, false
 		}
+		if source == RunSourceAssign && !in.IsCreate && probe.SuppressActiveSelfAssignment != nil &&
+			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
+			return IssueRunTrigger{}, false
+		}
 		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
@@ -134,6 +163,12 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 
 	case "squad":
+		// Pair-scoped self-assignment suppression intentionally applies only to
+		// direct agent ownership. Assigning a squad changes execution context
+		// (leader briefing, roles, and member routing), so even when the acting
+		// agent is that squad's leader it is an intentional group handoff rather
+		// than a redundant direct self-claim. The status path below still uses
+		// the leader's pending-task guard.
 		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 			ID:          issue.AssigneeID,
 			WorkspaceID: issue.WorkspaceID,
@@ -145,8 +180,8 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		ready, _, err := AgentReadiness(ctx, s.Queries, leader)
-		if err != nil || !ready {
+		verdict, err := AgentReadiness(ctx, s.Queries, leader)
+		if err != nil || !verdict.Ready() {
 			return IssueRunTrigger{}, false
 		}
 		if !canAccess(leader) {

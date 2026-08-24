@@ -1,7 +1,8 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { Eye, MoreHorizontal } from "lucide-react";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatusCategory } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -27,8 +28,8 @@ export function HiddenColumnsPanel({
   hiddenStatuses,
   renderRow,
 }: {
-  hiddenStatuses: IssueStatus[];
-  renderRow: (status: IssueStatus) => React.ReactNode;
+  hiddenStatuses: IssueStatusCategory[];
+  renderRow: (status: IssueStatusCategory) => React.ReactNode;
 }) {
   const { t } = useT("issues");
   return (
@@ -53,7 +54,7 @@ export function HiddenColumnRow({
   status,
   total,
 }: {
-  status: IssueStatus;
+  status: IssueStatusCategory;
   total?: number;
 }) {
   const { t } = useT("issues");
@@ -62,7 +63,7 @@ export function HiddenColumnRow({
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
         <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-body">{t(($) => $.status[status])}</span>
+        <span className="text-body">{t(($) => $.status[statusCategoryOfKey(status)])}</span>
       </div>
       <div className="flex items-center gap-1.5">
         {total !== undefined && (

@@ -1,10 +1,11 @@
 // Package dingtalk is the DingTalk integration for the channel-agnostic engine.
-// It uses the bring-your-own-app (BYO) model: a workspace admin creates their
-// own DingTalk Stream-mode robot and pastes its AppKey (client id) and AppSecret
-// (client secret) into Multica. Each channel_installation carries its OWN
-// AppSecret and gets its OWN Stream-mode connection, supervised per-installation
-// by the engine like Feishu and Slack (dingtalk_channel.go) — so several agents
-// can each have a distinct bot identity in one DingTalk organization.
+// It uses the bring-your-own-app (BYO) model: an agent owner or workspace admin
+// creates a DingTalk Stream-mode robot and pastes its AppKey (client id) and
+// AppSecret (client secret) into Multica. Each channel_installation carries its
+// OWN AppSecret and gets its OWN Stream-mode connection, supervised
+// per-installation by the engine like Feishu and Slack (dingtalk_channel.go) —
+// so several agents can each have a distinct bot identity in one DingTalk
+// organization.
 //
 // Each installation's Stream connection only ever delivers events for its own
 // robot, so the per-installation connection stamps its AppKey into the inbound
@@ -13,16 +14,13 @@
 // from AppKey/AppSecret, so the outbound path caches it like Feishu's
 // tenant_access_token (token.go).
 //
-// Maintenance: this package is COMMUNITY-MAINTAINED. @yyclaw contributed it and
-// is its code owner — the first stop for DingTalk-specific bugs and behavior
-// questions, on a best-effort volunteer basis. The Multica team keeps this
-// package compiling and its tests green through shared-layer refactors, but
-// does not use DingTalk and cannot verify behavior against the real platform;
-// that part depends on the code owner. If the integration breaks in a way that
-// cannot be fixed without real DingTalk access and no fix lands for a few
-// releases, it may be deprecated rather than left quietly broken. Changing the
-// shared channel engine? Keep this adapter building — and loop in the code
-// owner for anything that changes DingTalk-visible behavior.
+// Maintenance: this package is COMMUNITY-MAINTAINED. Its maintainers, the
+// support boundary and the retirement rule are published at
+// https://multica.ai/docs/community-maintained
+// (apps/docs/content/docs/community-maintained.mdx, four locales). That page
+// is the single source of truth — record ownership changes there, not here.
+// Changing the shared channel engine? Keep this adapter building, and loop in
+// its maintainers for anything that changes DingTalk-visible behavior.
 package dingtalk
 
 import (

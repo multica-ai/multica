@@ -20,10 +20,12 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  /** Called after the server accepts the comment and the composer is cleared. */
+  onAccepted?: (commentId: string) => void;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -135,6 +137,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // leave a mid-flight draft in place: dropping the caret then would yank it
   // out of the sentence the user is still typing.
   const editorScrubbedRef = useRef(false);
+  const acceptedCommentIdRef = useRef<string | null>(null);
 
   const { submitting, submit } = useComposerSubmit({
     editorRef,
@@ -164,7 +167,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-      );
+      ).then((commentId) => {
+        acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
+        return !!commentId;
+      });
     },
     onAccepted: () => {
       // Success may only consume the entry it submitted (MUL-5181 P0): edits
@@ -184,6 +190,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       setIsEmpty(true);
       setSuppressedAgentIds(new Set());
       editorScrubbedRef.current = true;
+      if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
   });
 

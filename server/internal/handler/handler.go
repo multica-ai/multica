@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -29,7 +30,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -83,14 +86,19 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used only to build webhook_url responses for autopilot webhook triggers
-	// — never for auth, routing, or workspace resolution. Empty when unset,
-	// in which case clients fall back to webhook_path + their own origin.
+	// Used to build webhook_url responses and the fixed Remote MCP OAuth
+	// callback URI — never to decide request identity, routing, or workspace
+	// scope. Empty when unset; webhook clients can fall back to their own origin,
+	// while OAuth Connect fails closed because providers require an exact URI.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
 	// the server into minting webhook URLs pointing at an attacker-controlled
 	// host.
 	PublicURL string
+	// AppURL is the browser application's canonical origin, resolved from
+	// MULTICA_APP_URL (falling back to FRONTEND_ORIGIN). It is kept separate
+	// from PublicURL because split app/API deployments use different origins.
+	AppURL string
 	// TrustedProxies are CIDRs whose source IP we trust to set
 	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
 	// limiter uses r.RemoteAddr exclusively. Populated via the
@@ -111,6 +119,10 @@ type Config struct {
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments
 	// can frame API-hosted PDFs without allowing arbitrary third-party frames.
 	AttachmentFrameAncestors []string
+	// PluginSurfaceOrigin is the dedicated, cookie-free browser origin that
+	// routes /plugin-surfaces/* back to this server. It must not be the app/API
+	// origin: the route serves stored third-party JavaScript as HTML.
+	PluginSurfaceOrigin string
 	// LLM* configure the basic LLM API layer (MUL-4238). They back the
 	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
 	// The generic OpenAI-compatible passthrough endpoints were removed in
@@ -120,12 +132,20 @@ type Config struct {
 	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
+	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
+	// LLMMaxRetries is the parsed MULTICA_LLM_MAX_RETRIES budget. nil means
+	// unset (llm.DefaultMaxRetries applies); llm.Retries(0) disables retries.
+	// The type carries the validation: it can only be built through llm.Retries,
+	// and cmd/server additionally fails the boot on an out-of-range value before
+	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
+	LLMMaxRetries *llm.RetryOverride
 	// CodexCapacityRetryCount is the deployment-wide number of additional
 	// immediate retries for Codex's exact selected-model capacity error. Zero
-	// disables only that dedicated policy.
+	// disables only that dedicated policy. cmd/server clamps it to
+	// service.MaxCodexCapacityRetryCount before it reaches this struct.
 	CodexCapacityRetryCount int32
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
@@ -157,28 +177,42 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
-	Queries                *db.Queries
-	DB                     dbExecutor
-	TxStarter              txStarter
+	Queries   *db.Queries
+	DB        dbExecutor
+	TxStarter txStarter
+	// issueTableWindowCache is initialized only on the request-local Handler
+	// copy used by a repeatable-read table request. It lets facets reuse one
+	// visible-id snapshot without adding mutable state to the shared Handler.
+	issueTableWindowCache  *issueTableWindowCache
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
 	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
+	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
-	EmailService           *service.EmailService
-	UpdateStore            UpdateStore
-	ModelListStore         ModelListStore
-	LocalSkillListStore    LocalSkillListStore
-	LocalSkillImportStore  LocalSkillImportStore
-	FeatureFlags           *featureflag.Service
-	LivenessStore          LivenessStore
-	HeartbeatScheduler     HeartbeatScheduler
-	Storage                storage.Storage
-	CFSigner               *auth.CloudFrontSigner
-	Analytics              analytics.Client
+	// Entitlements supplies workspace-scoped commercial gates. A nil provider
+	// preserves the self-hosted and pre-rollout behavior without extra reads.
+	Entitlements          entitlement.Provider
+	EmailService          *service.EmailService
+	UpdateStore           UpdateStore
+	ModelListStore        ModelListStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
+	FeatureFlags          *featureflag.Service
+	// IssueStatusCatalog reads the workspace status catalog. Defaults to
+	// Queries; a test can substitute a counting wrapper to assert HOW MANY
+	// catalog reads a request performs, which is the only property that
+	// distinguishes the current one-read derivation from the N+1 it replaced.
+	// (MUL-6243)
+	IssueStatusCatalog issuestatus.Querier
+	LivenessStore      LivenessStore
+	HeartbeatScheduler HeartbeatScheduler
+	Storage            storage.Storage
+	CFSigner           *auth.CloudFrontSigner
+	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -200,6 +234,7 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// Lark integration. All three are nil when the Lark master key
@@ -231,9 +266,10 @@ type Handler struct {
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it UNCONDITIONALLY — it drives any
-	// channel type, not just Feishu, so it does not depend on the Lark
-	// master key; each platform registers its Factory only when configured
+	// engine). The router constructs it independently of platform secrets — it
+	// drives any channel type, not just Feishu. It remains nil when lease
+	// configuration is unsafe or a selected Redis backend fails its startup
+	// readiness check; each platform registers its Factory only when configured
 	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
 	// call Run; the process owner (main.go) starts it under a long-running
 	// context and joins via WaitWithTimeout (bounded, fenced by
@@ -289,6 +325,41 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// TelegramInstall owns the Telegram bot install lifecycle (register a
+	// pasted BotFather token / list / revoke) and the at-rest encryption of
+	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
+	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Telegram account" prompt. Nil unless Telegram is configured.
+	TelegramBindingTokens *telegram.BindingTokenService
+	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
+	// The process owner starts and joins it; the synchronous event bus only
+	// enqueues EventChatDone work.
+	TelegramOutbound *telegram.Outbound
+
+	// channelFileDelivery names the channel types that can, IN THIS
+	// DEPLOYMENT, carry a file the agent produced the last hop into the
+	// conversation. It answers the claim response's
+	// chat_channel_delivers_files, which the agent's PER-TURN prompt turns into
+	// either "run `multica attachment upload`" or "describe the file in words"
+	// (daemon/prompt.go). Not the brief: the brief is the prompt cache prefix and
+	// this is a per-turn verdict, so stating it there made one session render two
+	// briefs (MUL-5377).
+	//
+	// It is a deployment fact, not a property of the channel type, and that
+	// distinction is the whole reason it lives here. Whether the file arrives
+	// takes TWO things: an adapter that goes back for the bound attachment,
+	// and object storage for it to go back to. The first is a property of the
+	// code, the second of the configuration, and only the process that wired
+	// both knows the conjunction. A daemon that answers this from the channel
+	// type alone promises delivery a storage-less deployment cannot perform.
+	//
+	// Written once at boot by DeclareChannelFileDelivery (cmd/server/router.go,
+	// in the same branch that passes the storage to the adapter, so the two
+	// cannot drift), read-only from then on. Nil means no channel delivers
+	// files, which is what a deployment with no storage configured gets.
+	channelFileDelivery map[string]bool
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -303,6 +374,9 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
+	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
+	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
+	PluginSurfaceTokens *secretbox.Box
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
@@ -347,7 +421,21 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		APIKey:       cfg.LLMAPIKey,
 		BaseURL:      cfg.LLMBaseURL,
 		DefaultModel: cfg.LLMDefaultModel,
+		MaxRetries:   cfg.LLMMaxRetries,
 	})
+	// Report the effective retry policy so an operator can confirm from the
+	// boot log alone what a misbehaving upstream will cost, instead of inferring
+	// it from an env var whose semantics used to be unguessable (MUL-6364).
+	// Read off the client, not off cfg, so the line cannot drift from what the
+	// SDK actually enforces. Counts and an enum only — never the key or the base
+	// URL, since a self-hosted gateway URL routinely embeds a token.
+	llmRetry := llmClient.RetryBudget()
+	slog.Info("llm retry policy",
+		"max_retries", llmRetry.MaxRetries,
+		"source", llmRetry.Source,
+		"request_timeout", llmRetry.RequestTimeout,
+		"enabled", llmClient.Enabled(),
+	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
@@ -366,6 +454,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
+		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
@@ -382,6 +471,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,
@@ -456,6 +546,26 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
+func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID, expected, actual int64) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             "resource changed since it was loaded",
+		"code":              "revision_conflict",
+		"resource_type":     resourceType,
+		"resource_id":       uuidToString(resourceID),
+		"expected_revision": expected,
+		"actual_revision":   actual,
+	})
+}
+
+func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":         "resource field changed since it was loaded",
+		"code":          "revision_conflict",
+		"resource_type": resourceType,
+		"resource_id":   uuidToString(resourceID),
+	})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site
@@ -475,8 +585,11 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
-func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func timestampToNanoPtr(t pgtype.Timestamptz) *string {
+	return util.TimestampToNanoPtr(t)
+}
+func dateToPtr(d pgtype.Date) *string { return util.DateToPtr(d) }
+func uuidToPtr(u pgtype.UUID) *string { return util.UUIDToPtr(u) }
 
 // uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
 // entries. Returns nil (not an empty slice) when there is nothing to emit so
@@ -540,6 +653,45 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
+}
+
+// DeclareChannelFileDelivery records that this deployment can put a file the
+// agent produced into a channelType conversation. Call it at boot, from the
+// same branch that gives the adapter what it needs to perform the delivery —
+// the point is that one condition produces both the capability and the claim
+// it is announced under, so a deployment cannot end up promising a hop it does
+// not have.
+//
+// Not safe to call once the server is serving: the map it writes is read
+// without a lock by every task claim.
+func (h *Handler) DeclareChannelFileDelivery(channelType string) {
+	if channelType == "" {
+		return
+	}
+	if h.channelFileDelivery == nil {
+		h.channelFileDelivery = map[string]bool{}
+	}
+	h.channelFileDelivery[channelType] = true
+}
+
+// channelDeliversFiles answers chat_channel_delivers_files for one claim.
+//
+// The default is false in every direction that is not an explicit declaration:
+// a channel nobody declared, a deployment with no object storage, an adapter
+// that was never wired. False is the safe answer because of what the two
+// answers cost. False when the file could have travelled loses a delivery the
+// agent then describes in words. True when it cannot has the agent write "the
+// chart is attached" into a room where nothing is attached, and the reader is
+// left hunting for it.
+//
+// Web chat (empty channel type) is not answered here. It has no adapter and no
+// last hop to have — the browser renders the attachment card off the same bind
+// — and the prompt handles it in its own branch.
+func (h *Handler) channelDeliversFiles(channelType string) bool {
+	if channelType == "" {
+		return false
+	}
+	return h.channelFileDelivery[channelType]
 }
 
 // publish sends a domain event through the event bus.
@@ -833,6 +985,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -854,6 +1009,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
 		return db.Issue{}, false
 	}
 	return issue, true
@@ -929,18 +1087,33 @@ func splitIdentifier(id string) *identifierParts {
 	return &identifierParts{prefix: id[:idx], number: int32(num)}
 }
 
-// getIssuePrefix fetches the issue_prefix for a workspace.
-// Falls back to generating a prefix from the workspace name if the stored
-// prefix is empty (e.g. workspaces created before the prefix was introduced).
+// issuePrefixForWorkspace resolves a workspace row's effective issue prefix:
+// the configured value, or one generated from the workspace name when the
+// stored prefix is empty (e.g. workspaces created before the prefix was
+// introduced). Split out from getIssuePrefix so callers that already hold the
+// row — such as the GitHub close-intent scan, which must not re-read it — can
+// reuse the rule.
+//
+// The empty-prefix fallback stays on the FROZEN name-based derivation, not the
+// slug-based one new workspaces get (MUL-6050): identifiers are computed at
+// read time, so switching this path would rewrite the identifier of every
+// issue in those legacy workspaces. New workspaces always persist a prefix at
+// creation, so they never reach this branch.
+func issuePrefixForWorkspace(ws db.Workspace) string {
+	if ws.IssuePrefix != "" {
+		return ws.IssuePrefix
+	}
+	return legacyIssuePrefixFromName(ws.Name)
+}
+
+// getIssuePrefix fetches the effective issue_prefix for a workspace, and
+// returns "" when the workspace row cannot be loaded.
 func (h *Handler) getIssuePrefix(ctx context.Context, workspaceID pgtype.UUID) string {
 	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return ""
 	}
-	if ws.IssuePrefix != "" {
-		return ws.IssuePrefix
-	}
-	return generateIssuePrefix(ws.Name)
+	return issuePrefixForWorkspace(ws)
 }
 
 func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agentID string) (db.Agent, bool) {
@@ -1010,6 +1183,9 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 
 	if item.RecipientType != "member" || uuidToString(item.RecipientID) != userID {
 		writeError(w, http.StatusNotFound, "inbox item not found")
+		return db.InboxItem{}, false
+	}
+	if item.IssueID.Valid && !h.authorizeIssueWindow(w, r, item.IssueID, item.WorkspaceID, "inbox") {
 		return db.InboxItem{}, false
 	}
 	return item, true

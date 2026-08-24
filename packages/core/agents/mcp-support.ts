@@ -14,6 +14,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "hermes",
   "kimi",
   "reasonix",
+  "dsh",
   "kiro",
   "opencode",
   "openclaw",
@@ -21,7 +22,9 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "qoderclicn",
   "qwen",
   "qwenpaw",
+  "mcode",
   "traecli",
+  "dim",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

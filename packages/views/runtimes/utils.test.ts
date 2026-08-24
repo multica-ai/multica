@@ -4,6 +4,7 @@ import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
+  aggregateByDate,
   aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
@@ -500,6 +501,21 @@ describe("estimateCost", () => {
         cache_read_tokens: 1_000_000,
       }),
     ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices grok-4.6 at xAI's short-context $2.00 / $6.00 tier with $0.50 cached input", () => {
+    // grok-4.6 cached input is $0.50/1M, not grok-4.5's $0.30.
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.50.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.5, 5);
   });
 
   it("prices the rest of the published Grok catalog", () => {
@@ -1095,6 +1111,109 @@ describe("sliceWindow (timezone-aware)", () => {
   });
 });
 
+describe("aggregateByDate", () => {
+  // MUL-6334: the daily cost stack computed `estimateCostBreakdown` and then
+  // summed only three of its four components, silently dropping cache-read
+  // spend from every bar and from the tooltip Total that sums them.
+  function makeUsage(
+    date: string,
+    tokens: Partial<{
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }>,
+    model = "gpt-5.6-sol",
+  ): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "openai",
+      model,
+      input_tokens: tokens.input ?? 0,
+      output_tokens: tokens.output ?? 0,
+      cache_read_tokens: tokens.cacheRead ?? 0,
+      cache_write_tokens: tokens.cacheWrite ?? 0,
+    };
+  }
+
+  it("bills cache reads in the daily stack and its total", () => {
+    // gpt-5.6-sol: input $5/M, output $30/M, cacheRead $0.50/M.
+    const rows = [
+      makeUsage("2026-05-11", { input: 1_000_000, cacheRead: 10_000_000 }),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    const day = dailyCostStack[0];
+    expect(day?.cacheRead).toBeCloseTo(5, 2);
+    expect(day?.total).toBeCloseTo(10, 2);
+  });
+
+  it("keeps every daily bucket's total equal to the sum of estimateCost", () => {
+    // The invariant the reporter asked for. A cache-read-dominated workload is
+    // the only shape that catches the regression: with zero cache reads the
+    // broken and fixed totals are identical.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+      makeUsage("2026-05-11", { input: 1_000, output: 500 }),
+      makeUsage("2026-05-12", { cacheRead: 50_000_000 }),
+      // Anthropic rows exercise the cache-write segment too.
+      makeUsage(
+        "2026-05-12",
+        { input: 200_000, output: 20_000, cacheRead: 8_000_000, cacheWrite: 400_000 },
+        "claude-sonnet-4-6",
+      ),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack).toHaveLength(2);
+    for (const day of dailyCostStack) {
+      const expected = rows
+        .filter((r) => r.date === day.date)
+        .reduce((sum, r) => sum + estimateCost(r), 0);
+      // Each of the four segments is rounded to cents before being summed —
+      // that is what keeps the tooltip footer equal to the bars above it — so
+      // the bucket can sit up to half a cent per segment off the exact figure.
+      // The tolerance is the rounding, not slack for a dropped category: a
+      // missing segment shows up as dollars, not cents.
+      expect(Math.abs(day.total - expected)).toBeLessThanOrEqual(0.02);
+      // Total is what the tooltip footer prints; the segments are what it
+      // sums to get there. They have to be exactly the same number.
+      expect(day.input + day.output + day.cacheRead + day.cacheWrite).toBeCloseTo(
+        day.total,
+        10,
+      );
+    }
+  });
+
+  it("reproduces the reported gpt-5.6-sol undercount", () => {
+    // The exact workload from the bug report: the chart showed $35.19 against
+    // a true $74.84, hiding $39.65 (53%) of spend.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+    ];
+    const { dailyCostStack, dailyCost } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(74.84, 2);
+    // The non-stacked series always included cache reads; the stack now agrees
+    // with it, which is what makes the chart agree with the Cost KPI.
+    expect(dailyCostStack[0]?.total).toBeCloseTo(dailyCost[0]?.cost ?? 0, 2);
+  });
+
+  it("still reports a non-zero total when spend is entirely cache reads", () => {
+    // `total` gates the chart's empty state, which blames an unmapped model
+    // when it reads 0. A cache-read-only bucket used to trip that.
+    const rows = [makeUsage("2026-05-11", { cacheRead: 20_000_000 })];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(10, 2);
+  });
+});
+
 describe("aggregateByWeek", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1107,6 +1226,8 @@ describe("aggregateByWeek", () => {
     date: string,
     input: number,
     output: number,
+    cacheRead = 0,
+    cacheWrite = 0,
   ): RuntimeUsage {
     return {
       runtime_id: "r",
@@ -1115,8 +1236,8 @@ describe("aggregateByWeek", () => {
       model: "claude-sonnet-4-6",
       input_tokens: input,
       output_tokens: output,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
     };
   }
 
@@ -1177,6 +1298,24 @@ describe("aggregateByWeek", () => {
     const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
     expect(weeklyCostStack).toHaveLength(1);
     expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
+  });
+
+  it("bills cache reads in the weekly stack and its total (MUL-6334)", () => {
+    vi.setSystemTime(new Date("2026-05-17T12:00:00Z"));
+    // claude-sonnet-4-6: input $3/M, output $15/M, cacheRead $0.30/M,
+    // cacheWrite $3.75/M. Row: $3 + $15 + $6 (20M cache reads) + $3.75 = $27.75.
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 1_000_000, 20_000_000, 1_000_000),
+    ];
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    const week = weeklyCostStack[0];
+    expect(week?.cacheRead).toBeCloseTo(6, 2);
+    expect(week?.total).toBeCloseTo(27.75, 2);
+    // Same invariant the daily stack holds: bucket total === sum of estimateCost.
+    expect(week?.total).toBeCloseTo(
+      rows.reduce((sum, r) => sum + estimateCost(r), 0),
+      2,
+    );
   });
 
   it("emits trailing calendar weeks pinned to today, dropping older populated weeks", () => {

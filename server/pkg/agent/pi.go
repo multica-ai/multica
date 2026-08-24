@@ -230,11 +230,9 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
-	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)
-
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -299,6 +297,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var output strings.Builder
 		finalStatus := "completed"
 		var finalError string
+		var lastTurnError string
 		usage := make(map[string]TokenUsage)
 
 		// Pi message_update events can be large (they embed the full message
@@ -323,6 +322,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "turn_start":
 				output.Reset()
 				textBuffer.Reset()
+				lastTurnError = ""
 
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
@@ -360,7 +360,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				})
 
 			case "turn_end":
-				if msg := decodePiMessage(evt.Message); msg != nil && msg.Usage != nil {
+				msg := decodePiMessage(evt.Message)
+				if msg == nil {
+					continue
+				}
+				if msg.Usage != nil {
 					model := msg.Model
 					if model == "" {
 						model = opts.Model
@@ -374,6 +378,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheReadTokens += msg.Usage.CacheRead
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
+				}
+				// A turn Pi ends on an error is only terminal when nothing
+				// follows it. Pi emits the same stopReason before an automatic
+				// retry, and turn_start clears this, so a later successful turn
+				// leaves nothing behind.
+				if msg.StopReason == "error" {
+					lastTurnError = msg.ErrorMessage
+					if lastTurnError == "" {
+						lastTurnError = label + " ended the turn with an error"
+					}
 				}
 
 			case "error":
@@ -415,10 +429,29 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			// Prefer the turn's provider message over the process exit code.
+			// Pi (and pi-print-clean-exit) exits 1 after stopReason=error, so
+			// Wait() wins this branch and used to drop lastTurnError. The
+			// classifier then saw only "exit status 1" and filed the run as
+			// non-retryable process_failure — even when the turn was a
+			// transient LiteLLM/OpenAI "Connection error." / "Request timed
+			// out." Keep the exit status as a suffix so a genuine crash is
+			// still visible (same shape as the OpenCode empty-step+exit
+			// composite).
+			if lastTurnError != "" {
+				finalError = fmt.Sprintf("%s; %s exited with error: %v", lastTurnError, label, waitErr)
+			} else {
+				finalError = fmt.Sprintf("%s exited with error: %v", label, waitErr)
+			}
 		} else if writeErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
+		} else if lastTurnError != "" && finalStatus == "completed" {
+			// Pi exits 0 after a turn it could not complete and did not retry,
+			// and emits neither an `error` event nor `auto_retry_end`. Without
+			// this the run reports success with no output.
+			finalStatus = "failed"
+			finalError = lastTurnError
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -472,6 +505,12 @@ type piMessage struct {
 	Role  string   `json:"role,omitempty"`
 	Model string   `json:"model,omitempty"`
 	Usage *piUsage `json:"usage,omitempty"`
+
+	// turn_end carries the terminal state of the turn. Pi sets StopReason to
+	// "error" for a provider call it could not complete, whether or not it
+	// goes on to retry, and puts the provider's message in ErrorMessage.
+	StopReason   string `json:"stopReason,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type piUsage struct {
@@ -593,8 +632,7 @@ var piCustomArgModes = map[string]blockedArgMode{
 //	-p                          non-interactive mode (prompt arrives on stdin)
 //	--mode json                 emit one JSON event per line on stdout
 //	--session <path>            session log file (created upfront, reused on resume)
-//	--provider <name>           provider, when Model is "provider/id"
-//	--model <id>                model identifier
+//	--model <selector>          model selector, passed through verbatim
 //	--thinking <level>          per-agent reasoning level override
 //
 // The prompt is deliberately absent from argv. Pi reads a non-TTY stdin in
@@ -608,14 +646,18 @@ func buildPiArgs(sessionPath string, opts ExecOptions, logger *slog.Logger) []st
 	if sessionPath != "" {
 		args = append(args, "--session", sessionPath)
 	}
-	if opts.Model != "" {
-		provider, model := splitPiModel(opts.Model)
-		if provider != "" {
-			args = append(args, "--provider", provider)
-		}
-		if model != "" {
-			args = append(args, "--model", model)
-		}
+	// The selector goes to --model whole, and --provider is never synthesized.
+	// Pi's own resolver already accepts every shape we hold: a canonical
+	// `provider/id`, a bare id, and — crucially — an id that itself contains a
+	// slash, which is the normal case for gateway-style providers whose model
+	// ids look like `claude/claude-opus-5`. Splitting on the first slash to
+	// fill --provider turns that id into a provider name Pi has never heard of,
+	// and an unknown --provider is a hard error ("Unknown provider ...") rather
+	// than something Pi can recover from — whereas --model alone falls back to
+	// matching the full string as a raw model id. Passing less is strictly more
+	// capable here (GH #7300).
+	if model := strings.TrimSpace(opts.Model); model != "" {
+		args = append(args, "--model", model)
 	}
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--thinking", opts.ThinkingLevel)
@@ -690,16 +732,6 @@ func filterPiCustomArgs(args []string, logger *slog.Logger) []string {
 		}
 	}
 	return filtered
-}
-
-// splitPiModel parses a "provider/model" string into its parts. Plain
-// "model" strings pass through as (provider="", model="model").
-func splitPiModel(s string) (provider, model string) {
-	s = strings.TrimSpace(s)
-	if i := strings.Index(s, "/"); i >= 0 {
-		return strings.TrimSpace(s[:i]), strings.TrimSpace(s[i+1:])
-	}
-	return "", s
 }
 
 // ── Session path ──

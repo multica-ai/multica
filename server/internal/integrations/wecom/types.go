@@ -17,24 +17,31 @@
 // active connection per installation across processes) already holds without
 // wecom-specific code.
 //
-// Maintenance: this package is COMMUNITY-MAINTAINED. @leroy-chen contributed it
-// and co-owns it with @seacen — they are the first stop for WeCom-specific bugs
-// and behavior questions, on a best-effort volunteer basis. The Multica team
-// keeps this package compiling and its tests green through shared-layer
-// refactors, but does not use WeCom and cannot verify behavior against the real
-// platform; that part depends on the code owners. If the integration breaks in a
-// way that cannot be fixed without real WeCom access and no fix lands for a few
-// releases, it may be deprecated rather than left quietly broken. Changing the
-// shared channel engine? Keep this adapter building — and loop in the code
-// owners for anything that changes WeCom-visible behavior.
+// Maintenance: this package is COMMUNITY-MAINTAINED. Its maintainers, the
+// support boundary and the retirement rule are published at
+// https://multica.ai/docs/community-maintained
+// (apps/docs/content/docs/community-maintained.mdx, four locales). That page
+// is the single source of truth — record ownership changes there, not here.
+// Changing the shared channel engine? Keep this adapter building, and loop in
+// its maintainers for anything that changes WeCom-visible behavior.
 //
-// Known limits of the first version, both deliberate: inbound handling takes
-// only what arrives as words — typed text, and the transcript WeCom returns
-// for a voice note — while the kinds carrying a downloadable payload get a
-// short "text only" receipt; and outbound
-// delivery requires a SINGLE backend replica, because the only send path is the
-// in-process WebSocket in sendersRegistry while EventChatDone dispatches on the
-// in-process events.Bus. See SELF_HOSTING.md.
+// Inbound handles text, the transcript WeCom returns for a voice note,
+// photos, files, videos and 图文混排 (media_ingest.go downloads and decrypts
+// what a callback points at); a kind it cannot read still gets a short
+// receipt.
+//
+// Outbound file delivery cannot report back to the agent that produced the
+// file. `multica attachment upload` returns once the object is in storage and
+// bound to the reply, while the send into the room runs on EventChatDone —
+// after the run has ended. A delivery that is shed, refused by WeCom, or lost
+// with the socket is therefore told to the person in the chat
+// (outbound_media.go) and never to the agent, which has already exited.
+// Routing that outcome back into a later turn is its own piece of work.
+//
+// Known limit, deliberate: outbound delivery requires a SINGLE backend
+// replica, because the only send path is the in-process WebSocket in
+// sendersRegistry while EventChatDone dispatches on the in-process
+// events.Bus. See SELF_HOSTING.md.
 package wecom
 
 import (

@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -232,6 +233,37 @@ func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
 	plain := buildQuickCreatePrompt(Task{QuickCreatePrompt: "fix the login button color"})
 	if strings.Contains(plain, "--parent") {
 		t.Errorf("buildQuickCreatePrompt without parent must NOT mention --parent, got:\n%s", plain)
+	}
+}
+
+// TestBuildPromptSquadLeaderNoActionFailureFallback locks the escape hatch added
+// in MUL-6622 / GH #7487. The comment prohibition is conditional on the
+// `squad activity` call succeeding — the server only rejects a leader comment
+// once the no_action activity exists — so a failed call must not end the turn in
+// silence. The fallback is capped at ONE comment so it cannot collide with the
+// one-comment-per-turn rule.
+func TestBuildPromptSquadLeaderNoActionFailureFallback(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
+		Agent: &AgentData{
+			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"conditional on that call SUCCEEDING",
+		"post exactly ONE short comment",
+		"does not license a second one",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad leader no_action rule must contain %q, got:\n%s", want, out)
+		}
 	}
 }
 
@@ -502,11 +534,40 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			t.Fatalf("web-only chat prompt should not mention channel history, got:\n%s", out)
 		}
 	})
+
+	// A transcript surface must not be told its history is "NOT in Multica" and
+	// then handed a Multica command to read that history. The claim used to be
+	// unconditional, so every Feishu/WeCom/DingTalk prompt carried both halves;
+	// an agent that believes the first one has no reason to run the second.
+	for _, channelType := range []string{
+		execenv.ChannelTypeFeishu,
+		execenv.ChannelTypeWecom,
+		execenv.ChannelTypeDingtalk,
+	} {
+		t.Run(channelType+" transcript prompt does not contradict itself", func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: channelType,
+				ChatMessage:     "刚刚聊到哪了",
+			})
+			if !strings.Contains(out, "multica chat history") {
+				t.Fatalf("transcript surface lost its read-back command\n--- output ---\n%s", out)
+			}
+			if strings.Contains(out, "NOT in Multica") {
+				t.Errorf("transcript surface told its history is NOT in Multica, then told to read it from Multica\n--- output ---\n%s", out)
+			}
+			// The useful half of the original sentence must survive: the agent
+			// still must not go hunting through issues and comments.
+			if !strings.Contains(out, "Never look in Multica issues or comments") {
+				t.Errorf("lost the issues/comments prohibition\n--- output ---\n%s", out)
+			}
+		})
+	}
 }
 
 // TestBuildChatPromptNoNarrationOnEveryChannel pins the THIRD axis of the chat
 // channel policy: the no-narration delivery rule keys off "is there a channel at
-// all", like the upload axis and unlike the Slack-only history axis.
+// all", like the upload axis and unlike the Slack/Feishu history axis.
 //
 // Regression guard for GH #6006. #4776 introduced the rule for every channel;
 // the MUL-4899 split moved it into the Slack branch along with the read commands
@@ -561,36 +622,58 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 // chat channel policy (MUL-4899). Collapsing them into one condition is exactly
 // the bug this matrix exists to catch:
 //
-//   - delivery: `attachment upload` guidance is injected iff there is NO channel.
-//     Any IM reply leaves Multica, where the upload has nothing to bind to.
-//   - history: the `chat history` / `chat thread` commands are injected iff the
-//     channel is Slack. Those endpoints are hardwired to h.SlackHistory
-//     (handler/chat_history.go) — on Feishu they answer "no channel
-//     integration", so teaching them there sends the agent down a dead path.
+//   - delivery: `attachment upload` guidance is injected iff something actually
+//     carries the file the last hop. That is a per-DEPLOYMENT answer the server
+//     sends on the claim, not "is there a channel" and not a property of the
+//     channel type: web/mobile renders a card, and a channel gets the upload
+//     guidance only where the adapter goes back for the bound attachment AND
+//     that deployment has the object storage to go back to
+//     (integrations/wecom/outbound_media.go, cmd/server/router.go).
+//   - history: `multica chat history` is injected for Slack (live channel) and
+//     for every surface that persists a transcript (Feishu, WeCom, DingTalk);
+//     `multica chat thread` is Slack-only. handler/chat_history.go reads the
+//     live channel for Slack and falls back to the stored chat_message
+//     transcript for every other session.
 //
-// Feishu is the case that proves the axes are separate: no upload AND no
-// history. A single `ChatChannelType != ""` gate cannot express it.
+// Three cases prove the axes are separate. Feishu has no upload AND has
+// transcript history, so a single gate cannot express it. WeCom on a deployment
+// that can deliver is the mirror image — upload AND transcript history — which
+// is why the delivery axis cannot be `ChatChannelType != ""`. And the same WeCom
+// chat on a deployment that cannot deliver flips back to text-only, which is
+// why it cannot be the channel type either.
 func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	// Match the IMPERATIVE, not the bare command name. An IM prompt names
 	// `multica attachment upload` on purpose — to state that it does not apply
-	// here. That negation is the useful copy (the agent knows the command exists
-	// from the brief's Available Commands; silence would leave it guessing), so
-	// asserting on the bare name would forbid the very sentence we want.
+	// here. That negation is the useful copy (an agent carries the command over
+	// from every other surface, and the brief no longer names it for a
+	// channel-backed chat, so silence would leave it guessing), so asserting on
+	// the bare name would forbid the very sentence we want.
 	const uploadGuidance = "run `multica attachment upload <local-path>`"
 	const historyGuidance = "multica chat history"
 
 	cases := []struct {
-		name        string
-		channelType string
-		wantUpload  bool
-		wantHistory bool
-		wantPhrases []string
+		name          string
+		channelType   string
+		deliversFiles bool
+		wantUpload    bool
+		wantHistory   bool
+		wantPhrases   []string
 	}{
 		{
 			name:        "direct chat: upload, no history",
 			channelType: "",
 			wantUpload:  true,
 			wantHistory: false,
+		},
+		{
+			// A web chat is not made file-less by a stray capability flag, and
+			// not made file-carrying by one either — it has its own branch.
+			name:          "direct chat ignores the channel capability",
+			channelType:   "",
+			deliversFiles: true,
+			wantUpload:    true,
+			wantHistory:   false,
+			wantPhrases:   []string{"appears as an attachment card below it"},
 		},
 		{
 			name:        "slack: no upload, has history",
@@ -600,14 +683,70 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 			wantPhrases: []string{"Slack", "delivered to Slack as text", "You cannot attach a file to it"},
 		},
 		{
-			name:        "feishu: no upload, no history",
+			name:        "feishu: no upload, has transcript history",
 			channelType: execenv.ChannelTypeFeishu,
 			wantUpload:  false,
-			wantHistory: false,
+			wantHistory: true,
 			wantPhrases: []string{
 				"Feishu/Lark",
-				"no history reader for Feishu/Lark",
+				"read it back with `multica chat history`",
 				"delivered to Feishu/Lark as text",
+				"You cannot attach a file to it",
+			},
+		},
+		{
+			// The mirror of Feishu, and the row that makes the delivery axis
+			// impossible to express as "is there a channel". The adapter goes
+			// back for the bound file and this deployment has the storage, so
+			// the upload guidance applies — with the caveat that the file lands
+			// as its own message, since an agent told only "files work here"
+			// writes "see the chart below" and nothing appears below. WeCom
+			// also persists a transcript, so the history copy is present
+			// alongside the delivery copy.
+			name:          "wecom on a deployment that delivers: upload, has history",
+			channelType:   execenv.ChannelTypeWecom,
+			deliversFiles: true,
+			wantUpload:    true,
+			wantHistory:   true,
+			wantPhrases: []string{
+				"WeCom",
+				"sends it into the WeCom conversation as a separate message",
+				"there is no way to place it inline",
+				"read it back with `multica chat history`",
+			},
+		},
+		{
+			// Same channel, same adapter, deployment with no object storage —
+			// or a server too old to answer, which arrives here identically
+			// because an absent field decodes as false. Either way there is no
+			// last hop, so the agent is told to describe the file in words.
+			// This row is what fails if the capability is ever inferred from
+			// the channel type again. History is unaffected by the delivery
+			// axis: WeCom still reads its stored transcript back.
+			name:          "wecom on a deployment that cannot deliver: no upload, has history",
+			channelType:   execenv.ChannelTypeWecom,
+			deliversFiles: false,
+			wantUpload:    false,
+			wantHistory:   true,
+			wantPhrases: []string{
+				"WeCom",
+				"delivered to WeCom as text",
+				"You cannot attach a file to it",
+				"read it back with `multica chat history`",
+			},
+		},
+		{
+			// DingTalk persists to chat_message through the same AppendUserMessage
+			// path, so it gets the transcript reader copy too, not the
+			// "no history reader for dingtalk" else-branch.
+			name:        "dingtalk: no upload, has transcript history",
+			channelType: execenv.ChannelTypeDingtalk,
+			wantUpload:  false,
+			wantHistory: true,
+			wantPhrases: []string{
+				"DingTalk",
+				"read it back with `multica chat history`",
+				"delivered to DingTalk as text",
 				"You cannot attach a file to it",
 			},
 		},
@@ -616,9 +755,10 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out := buildChatPrompt(Task{
-				ChatSessionID:   "sess-1",
-				ChatChannelType: tc.channelType,
-				ChatMessage:     "hi",
+				ChatSessionID:            "sess-1",
+				ChatChannelType:          tc.channelType,
+				ChatChannelDeliversFiles: tc.deliversFiles,
+				ChatMessage:              "hi",
 			})
 			if got := strings.Contains(out, uploadGuidance); got != tc.wantUpload {
 				t.Errorf("upload guidance present=%v, want %v\n--- output ---\n%s", got, tc.wantUpload, out)
@@ -635,9 +775,9 @@ func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
 	}
 }
 
-// ChatInThread only ever selects between `chat history` and `chat thread`. With
-// no Feishu history reader there is nothing to select between, so the flag must
-// not leak either command into a Feishu prompt even if the server sets it.
+// ChatInThread only ever selects between `chat history` and `chat thread`. Feishu
+// has a transcript reader (`chat history`) but no thread expansion, so the flag
+// must not leak `chat thread` into a Feishu prompt even if the server sets it.
 func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
 	out := buildChatPrompt(Task{
 		ChatSessionID:   "sess-1",
@@ -645,10 +785,8 @@ func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
 		ChatInThread:    true,
 		ChatMessage:     "hi",
 	})
-	for _, unwanted := range []string{"multica chat thread", "multica chat history"} {
-		if strings.Contains(out, unwanted) {
-			t.Errorf("feishu prompt must not teach %q (no Feishu history reader exists)\n--- output ---\n%s", unwanted, out)
-		}
+	if strings.Contains(out, "multica chat thread") {
+		t.Errorf("feishu prompt must not teach `multica chat thread` (no thread reader)\n--- output ---\n%s", out)
 	}
 }
 
@@ -885,6 +1023,55 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	}
 }
 
+func TestBuildPromptWarnsAboutActiveSiblingRuns(t *testing.T) {
+	task := Task{
+		IssueID: "issue-target",
+		ActiveSiblingRuns: []ActiveSiblingRunData{{
+			TaskID:          "task-existing",
+			IssueID:         "issue-source",
+			IssueIdentifier: "MUL-6000",
+			IssueTitle:      "Existing work",
+			Status:          "running",
+			StartedAt:       "2026-08-14T03:00:00Z",
+		}},
+	}
+	out := BuildPrompt(task, "claude")
+	for _, want := range []string{
+		"Active sibling runs",
+		"MUL-6000",
+		"task-existing",
+		"multica issue comment list issue-target --roots-only --summary --compact --output json",
+		"multica issue run-messages task-existing",
+		"--no-start",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "multica issue runs") {
+		t.Errorf("prompt must not direct overlap checks to the target issue's run list\n--- output ---\n%s", out)
+	}
+	if strings.Contains(out, "run-messages task-existing --issue") {
+		t.Errorf("prompt must not resolve the issue when the task id is already complete\n--- output ---\n%s", out)
+	}
+}
+
+func TestBuildPromptOmitsActiveSiblingRunsForChatTask(t *testing.T) {
+	task := Task{
+		ChatSessionID: "chat-1",
+		ActiveSiblingRuns: []ActiveSiblingRunData{{
+			TaskID:          "task-existing",
+			IssueID:         "issue-source",
+			IssueIdentifier: "MUL-6000",
+			Status:          "running",
+		}},
+	}
+	out := BuildPrompt(task, "claude")
+	if strings.Contains(out, "Active sibling runs") || strings.Contains(out, "task-existing") {
+		t.Errorf("chat prompt must not include issue sibling guidance\n--- output ---\n%s", out)
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {
@@ -1083,6 +1270,22 @@ func TestBuildCommentPromptCoalescedCrossThread(t *testing.T) {
 		if !strings.Contains(out, id) {
 			t.Errorf("prompt must reference coalesced comment id %s, got:\n%s", id, out)
 		}
+	}
+}
+
+func TestBuildCommentPromptLabelsDelegatedFailureSignalAsPlatform(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-recovery-1",
+		TriggerCommentID:      "recovery-comment-1",
+		TriggerCommentContent: "Delegated task failed; resume coordination.",
+		TriggerAuthorType:     "system",
+	}
+	out := BuildPrompt(task, "codex")
+	if !strings.Contains(out, "[NEW COMMENT] The platform just left a new comment") {
+		t.Fatalf("system recovery comment was mislabeled in prompt:\n%s", out)
+	}
+	if strings.Contains(out, "[NEW COMMENT] A user just left a new comment") {
+		t.Fatalf("system recovery comment must not be labeled as a user:\n%s", out)
 	}
 }
 
@@ -1448,74 +1651,23 @@ func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
 	}
 }
 
-// TestTurnModeMarkerAlwaysPresent is the regression guard for the review
-// finding on #6021: the brief's mode router keys off an explicit marker in the
-// per-turn prompt, so that marker must be emitted unconditionally from the same
-// branch that selects the code path.
-//
-// The dangerous case is a comment-triggered run whose comment body is empty (or
-// an older server that doesn't send one). Before this guard the prompt emitted
-// no `[NEW COMMENT]` block at all, the brief fell through to Ownership mode,
-// and the agent would change the issue status on a turn that must not.
-func TestTurnModeMarkerAlwaysPresent(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		task Task
-		want string
-		deny string
-	}{
-		{
-			name: "comment-triggered with content",
-			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"},
-			want: "**Turn mode: Reply.**",
-			deny: "**Turn mode: Ownership.**",
-		},
-		{
-			name: "comment-triggered with EMPTY content",
-			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1"},
-			want: "**Turn mode: Reply.**",
-			deny: "**Turn mode: Ownership.**",
-		},
-		{
-			name: "assignment-triggered",
-			task: Task{IssueID: "issue-1"},
-			want: "**Turn mode: Ownership.**",
-			deny: "**Turn mode: Reply.**",
-		},
-		{
-			name: "assignment-triggered with handoff note",
-			task: Task{IssueID: "issue-1", HandoffNote: "start with the API"},
-			want: "**Turn mode: Ownership.**",
-			deny: "**Turn mode: Reply.**",
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			prompt := BuildPrompt(tc.task, "claude")
-			if !strings.Contains(prompt, tc.want) {
-				t.Errorf("prompt missing turn-mode marker %q\n---\n%s", tc.want, prompt)
-			}
-			if strings.Contains(prompt, tc.deny) {
-				t.Errorf("prompt carries the wrong turn-mode marker %q\n---\n%s", tc.deny, prompt)
-			}
-		})
-	}
-}
-
-// The mode marker only makes sense for the two issue paths — the issue-less
-// kinds have no Reply/Ownership distinction and no issue status to protect.
-func TestTurnModeMarkerAbsentOnIssuelessKinds(t *testing.T) {
+// TestTurnModeMarkersRetired pins MUL-6417: the Reply/Ownership turn-mode
+// split is gone, so no task kind may emit a `Turn mode:` marker. The brief no
+// longer carries a router to consume one, and a stray marker would read as an
+// instruction the brief never defines. The empty-content comment case is kept
+// from the old router guard: it exercised the branch that historically
+// misrouted, and it must stay marker-free like every other path.
+func TestTurnModeMarkersRetired(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name string
 		task Task
 	}{
+		{"comment-triggered with content", Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"}},
+		{"comment-triggered with EMPTY content", Task{IssueID: "issue-1", TriggerCommentID: "c-1"}},
+		{"assignment-triggered", Task{IssueID: "issue-1"}},
+		{"assignment-triggered with handoff note", Task{IssueID: "issue-1", HandoffNote: "start with the API"}},
 		{"chat", Task{ChatSessionID: "chat-1"}},
 		{"quick-create", Task{QuickCreatePrompt: "make an issue"}},
 		{"autopilot", Task{AutopilotRunID: "run-1"}},
@@ -1524,33 +1676,130 @@ func TestTurnModeMarkerAbsentOnIssuelessKinds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			prompt := BuildPrompt(tc.task, "claude")
-			for _, banned := range []string{"**Turn mode: Reply.**", "**Turn mode: Ownership.**"} {
-				if strings.Contains(prompt, banned) {
-					t.Errorf("%s prompt must not carry %q\n---\n%s", tc.name, banned, prompt)
-				}
+			if strings.Contains(prompt, "Turn mode") {
+				t.Errorf("%s prompt must not carry a turn-mode marker (MUL-6417)\n---\n%s", tc.name, prompt)
 			}
 		})
 	}
 }
 
-// The brief's router must describe the markers the prompt actually emits.
-// A drift here is exactly the bug this pair of changes fixes, and it is
-// invisible at runtime until an agent silently picks the wrong mode.
-func TestBriefModeRouterMatchesPromptMarkers(t *testing.T) {
+// The brief must not carry the retired mode router either — end-to-end through
+// InjectRuntimeConfig, so a reintroduction anywhere in the assembled brief
+// fails here even if the workflow section itself stays clean.
+func TestBriefCarriesNoModeRouter(t *testing.T) {
 	t.Parallel()
 
 	brief, err := execenv.InjectRuntimeConfig(t.TempDir(), "claude", execenv.TaskContextForEnv{IssueID: "issue-1"})
 	if err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
-	for _, want := range []string{"`Turn mode: Reply.`", "`Turn mode: Ownership.`"} {
-		if !strings.Contains(brief, want) {
-			t.Errorf("brief mode router does not name %s\n---\n%s", want, brief)
+	for _, banned := range []string{"Turn mode", "Ownership mode", "Reply mode", "mode block"} {
+		if strings.Contains(brief, banned) {
+			t.Errorf("brief still references the retired turn-mode split via %q (MUL-6417)\n---\n%s", banned, brief)
 		}
 	}
-	// The retired wording keyed off the prompt's first line, which was never
-	// actually the [NEW COMMENT] block.
-	if strings.Contains(brief, "It opens with a `[NEW COMMENT]` block") {
-		t.Error("brief still routes on the prompt's opening line; it must route on the explicit marker")
+	if !strings.Contains(brief, "**Issue status — write the state the issue is in, whenever it changes**") {
+		t.Errorf("brief lost the unified status rule\n---\n%s", brief)
 	}
+}
+
+// TestChatChannelDeliversFilesDefaultsOffAcrossVersions pins the mixed-version
+// half of the delivery capability at the wire, where it is actually decided.
+//
+// A daemon can be newer than the server it talks to — that pairing is normal,
+// not exotic, since the daemon runs on the user's machine and updates on its
+// own schedule. A server that predates this field simply does not send it, and
+// the whole compatibility story rests on what a new daemon then believes. It
+// must believe the file cannot be delivered: the old server has no code to
+// perform the hop, so a run told otherwise writes "the file is attached" into a
+// room where nothing ever arrives.
+//
+// Decoded from JSON rather than constructed as a struct, because the struct
+// literal cannot express "the server did not send this" and that is the entire
+// case under test.
+func TestChatChannelDeliversFilesDefaultsOffAcrossVersions(t *testing.T) {
+	t.Parallel()
+
+	// Exactly what an older server puts on the wire for a WeCom chat: the
+	// channel type, and no word about delivery.
+	const oldServerClaim = `{
+		"id": "task-1",
+		"chat_session_id": "sess-1",
+		"chat_channel_type": "wecom",
+		"chat_message": "make me a chart"
+	}`
+
+	var task Task
+	if err := json.Unmarshal([]byte(oldServerClaim), &task); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if task.ChatChannelType != execenv.ChannelTypeWecom {
+		t.Fatalf("chat_channel_type = %q, want wecom — the fixture is wrong", task.ChatChannelType)
+	}
+	if task.ChatChannelDeliversFiles {
+		t.Error("a claim with no chat_channel_delivers_files decoded as true; an old server would be taken to perform a hop it has no code for")
+	}
+
+	out := buildChatPrompt(task)
+	if strings.Contains(out, "run `multica attachment upload <local-path>`") {
+		t.Errorf("an old server's WeCom claim was told to upload files\n--- output ---\n%s", out)
+	}
+	if !strings.Contains(out, "You cannot attach a file to it") {
+		t.Errorf("an old server's WeCom claim was not told the conversation is text-only\n--- output ---\n%s", out)
+	}
+
+	// And the same claim from a current server that CAN deliver flips it,
+	// which is what proves the assertion above is reading the field rather
+	// than the channel type.
+	var delivering Task
+	if err := json.Unmarshal([]byte(`{"chat_session_id":"sess-1","chat_channel_type":"wecom","chat_channel_delivers_files":true}`), &delivering); err != nil {
+		t.Fatalf("decode claim: %v", err)
+	}
+	if !strings.Contains(buildChatPrompt(delivering), "run `multica attachment upload <local-path>`") {
+		t.Error("a server that reported file delivery did not produce the upload guidance")
+	}
+}
+
+// TestSharedLocalDirectoryBlock covers the notice a lock-exempt turn gets. It
+// is opt-in per run rather than derived from the Task, because whether the
+// directory is shared depends on the daemon's own resolution of the resource —
+// something the claimed Task does not carry.
+func TestSharedLocalDirectoryBlock(t *testing.T) {
+	t.Parallel()
+
+	chat := Task{ChatSessionID: "sess-1", ChatMessage: "how does the parser work?"}
+
+	t.Run("absent by default", func(t *testing.T) {
+		out := BuildPrompt(chat, "claude")
+		if strings.Contains(out, "Shared working directory") {
+			t.Fatalf("notice leaked into a run with no local_directory:\n%s", out)
+		}
+	})
+
+	t.Run("present when the turn runs unlocked in a shared directory", func(t *testing.T) {
+		out := BuildPrompt(chat, "claude", WithSharedLocalDirectory())
+		if !strings.Contains(out, "Shared working directory") {
+			t.Fatalf("notice missing:\n%s", out)
+		}
+		// The non-inferable fact is the concurrent writer. Without it the block
+		// is just style advice.
+		if !strings.Contains(out, "another task on this machine may be editing it") {
+			t.Fatalf("notice does not state that a sibling task may be writing:\n%s", out)
+		}
+		// It must stay guidance: turning it into a prohibition would promise an
+		// isolation the daemon does not enforce for the user's own editor either.
+		if strings.Contains(out, "Do NOT write") || strings.Contains(out, "must not write") {
+			t.Fatalf("notice hardened into a prohibition the system does not enforce:\n%s", out)
+		}
+	})
+
+	t.Run("appended after the cacheable prefix", func(t *testing.T) {
+		// Run-scoped blocks go at the end so a resumed session's cached prefix
+		// is unchanged by them (MUL-5377).
+		out := BuildPrompt(chat, "claude", WithSharedLocalDirectory())
+		body := buildChatPrompt(chat)
+		if !strings.HasPrefix(out, body) {
+			t.Fatalf("notice was not appended after the chat body:\n%s", out)
+		}
+	})
 }

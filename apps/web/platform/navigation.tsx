@@ -58,6 +58,7 @@ function NavigationProviderInner({
     push: router.push,
     replace: router.replace,
     back: router.back,
+    forward: router.forward,
     canGoBack: canGoBackInApp,
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),

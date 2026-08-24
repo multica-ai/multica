@@ -14,6 +14,11 @@ import (
 
 const maxLegacyMigrationPrefix = 148
 
+// legacyDuplicateMigrationStems lists prefixes that were already duplicated
+// before this lint existed. It is a frozen historical record, not an escape
+// hatch: a new collision must be renumbered instead of added here. Prefix 362
+// was briefly listed and is deliberately absent again — the later of the two
+// migrations was renumbered to 376, which its idempotent DDL made safe.
 var legacyDuplicateMigrationStems = map[string][]string{
 	"020": {"020_issue_number", "020_task_session"},
 	"026": {"026_comment_reactions", "026_task_messages"},

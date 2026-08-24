@@ -28,6 +28,11 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  RowActionsMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
@@ -58,11 +63,12 @@ function toPreview(content: string): string {
 }
 
 /**
- * IM-style conversation list: each row is agent avatar + name + last-message
- * preview + time, with a red unread *count* badge. An in-flight agent shows a
- * "typing…" indicator; a failed last reply shows a destructive hint. Rows are
- * rendered in the server's order (most-recent activity first). Renaming lives
- * in the conversation header's ⋯ menu, not here.
+ * IM-style conversation list: each row is agent avatar + session title + agent
+ * name + last-message preview + time, with a red unread *count* badge. An
+ * in-flight agent shows a "typing…" indicator; a failed last reply shows a
+ * destructive hint. Rows are rendered in the server's order (most-recent
+ * activity first). Renaming lives in the conversation header's ⋯ menu, not
+ * here.
  *
  * Two views, toggled locally: the default "history" view lists active chats and
  * hovering a row reveals pin + archive (or stop, while running) — archiving is
@@ -199,6 +205,7 @@ export function ChatThreadList({
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
+    const agentName = agent?.name.trim() || null;
     const pendingTask = pendingTaskBySessionId.get(session.id);
     const isRunning = !!pendingTask;
     // Only "offline" (definitively long-offline) downgrades typing → waiting.
@@ -255,6 +262,58 @@ export function ChatThreadList({
       previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
 
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift. The archived view
+    // is the only place hard-delete lives; the history view offers the
+    // reversible archive instead.
+    const rowActions: RowActionItem[] =
+      view === "archived"
+        ? [
+            {
+              key: "unarchive",
+              icon: <ArchiveRestore className="size-3.5" />,
+              label: t(($) => $.list.unarchive),
+              onSelect: () =>
+                setArchived.mutate({ sessionId: session.id, archived: false }),
+            },
+            {
+              key: "delete",
+              icon: <Trash2 className="size-3.5" />,
+              label: t(($) => $.session_history.row_delete_aria),
+              danger: true,
+              onSelect: () => setConfirmingDeleteId(session.id),
+            },
+          ]
+        : [
+            {
+              key: "pin",
+              icon: session.pinned ? (
+                <PinOff className="size-3.5" />
+              ) : (
+                <Pin className="size-3.5 -rotate-45" />
+              ),
+              label: session.pinned
+                ? t(($) => $.list.unpin)
+                : t(($) => $.list.pin),
+              onSelect: () =>
+                setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
+            },
+            isRunning
+              ? {
+                  key: "stop",
+                  icon: <Square className="size-3 fill-current" />,
+                  label: t(($) => $.session_history.row_stop_aria),
+                  danger: true,
+                  onSelect: () => setConfirmingStopId(session.id),
+                }
+              : {
+                  key: "archive",
+                  icon: <Archive className="size-3.5" />,
+                  label: t(($) => $.list.archive),
+                  onSelect: () => onArchive(session),
+                },
+          ];
+
     return (
       <div
         key={session.id}
@@ -293,9 +352,7 @@ export function ChatThreadList({
         }}
         onKeyDown={(e) => {
           if (isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
-          e.preventDefault();
-          onSelectSession(session);
+          handleRowActivationKey(e, () => onSelectSession(session));
         }}
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
@@ -358,7 +415,19 @@ export function ChatThreadList({
                 />
               ) : (
                 <>
-                  <div className="min-w-0 flex-1 overflow-hidden text-caption">{previewNode}</div>
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-caption">
+                    {agentName && (
+                      <>
+                        <span className="max-w-[40%] shrink-0 truncate font-medium text-muted-foreground">
+                          {agentName}
+                        </span>
+                        <span aria-hidden="true" className="shrink-0 text-faint-foreground">
+                          ·
+                        </span>
+                      </>
+                    )}
+                    <div className="min-w-0 flex-1 overflow-hidden">{previewNode}</div>
+                  </div>
                   {unread > 0 && (
                     <span
                       aria-label={t(($) => $.session_history.row_subtitle.new_reply)}
@@ -374,49 +443,31 @@ export function ChatThreadList({
             </div>
         </div>
 
-        {/* Hover actions — absolutely positioned so showing/hiding them never
-            changes the row height (which was making the list jump). The archived
-            view is the only place hard-delete lives; the history view offers the
-            reversible archive instead. */}
+        {/* Compact action menu — the touch equivalent of the hover strip
+            below, which a pointer without hover can never reach. It takes real
+            layout space (rather than overlaying the preview) and gives way to
+            the hover strip on a hover-capable pointer. */}
         {!isConfirmingAction && (
-          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 group-hover/row:flex">
-            {view === "archived" ? (
-              <>
-                <RowAction
-                  icon={<ArchiveRestore className="size-3.5" />}
-                  label={t(($) => $.list.unarchive)}
-                  onClick={() => setArchived.mutate({ sessionId: session.id, archived: false })}
-                />
-                <RowAction
-                  icon={<Trash2 className="size-3.5" />}
-                  label={t(($) => $.session_history.row_delete_aria)}
-                  danger
-                  onClick={() => setConfirmingDeleteId(session.id)}
-                />
-              </>
-            ) : (
-              <>
-                <RowAction
-                  icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
-                  label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
-                  onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
-                />
-                {isRunning ? (
-                  <RowAction
-                    icon={<Square className="size-3 fill-current" />}
-                    label={t(($) => $.session_history.row_stop_aria)}
-                    danger
-                    onClick={() => setConfirmingStopId(session.id)}
-                  />
-                ) : (
-                  <RowAction
-                    icon={<Archive className="size-3.5" />}
-                    label={t(($) => $.list.archive)}
-                    onClick={() => onArchive(session)}
-                  />
-                )}
-              </>
-            )}
+          <RowActionsMenu
+            label={t(($) => $.list.row_actions_aria)}
+            groups={[rowActions]}
+          />
+        )}
+
+        {/* Hover actions — absolutely positioned so showing/hiding them never
+            changes the row height (which was making the list jump). Keyboard
+            focus reveals them too, so they are reachable without a mouse. */}
+        {!isConfirmingAction && (
+          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
+            {rowActions.map((action) => (
+              <RowAction
+                key={action.key}
+                icon={action.icon}
+                label={action.label}
+                danger={action.danger}
+                onClick={action.onSelect}
+              />
+            ))}
           </div>
         )}
       </div>

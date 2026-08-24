@@ -29,7 +29,7 @@ After you pick an agent or squad in the comment editor, a trigger preview appear
 
 Unticking an agent skips this one trigger only — you don't need to delete its name from the comment, and the agent's Access is not changed.
 
-![Trigger preview before sending: lists the agents that will start working once the comment is sent](/images/docs/mention-trigger-preview.png)
+![Trigger preview before sending: lists the agents that will start working once the comment is sent](/images/docs/mention-trigger-preview.webp)
 
 Once the comment is posted, an online runtime usually claims the task right away; if the runtime is offline, the task waits in the queue.
 
@@ -39,7 +39,7 @@ A plain comment (containing no @ at all) is routed by discussion context:
 
 1. Replying to an agent's comment hands it to that agent.
 2. Replying inside a discussion an agent already participates in keeps that discussion's agent.
-3. Otherwise it goes to the issue's agent assignee; when the assignee is a squad, the leader handles it.
+3. A top-level comment that matches neither case goes to the issue's agent assignee; when the assignee is a squad, the leader handles it. A plain reply directly to a member does not fall back to the assignee; @-mention an agent or squad explicitly when you want one to join.
 
 When a comment explicitly @-mentions other targets (including members), the assignee fallback no longer applies.
 

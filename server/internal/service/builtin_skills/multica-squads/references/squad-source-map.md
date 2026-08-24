@@ -122,6 +122,47 @@ Contracts:
   members carry no skills segment (squad_briefing.go renderMemberRow);
 - no traced behavior injects `instructions` into every squad member.
 
+## Leader Evaluation Recording
+
+Source:
+
+```text
+server/internal/handler/squad.go                  # RecordSquadLeaderEvaluation ~949
+server/cmd/multica/cmd_squad.go                   # runSquadActivity ~459
+server/internal/service/squad_no_action.go        # HasSquadLeaderNoActionEvaluationForTask
+server/internal/handler/comment.go                # no_action comment rejection ~1851
+```
+
+Contracts:
+
+- authority is the TASK row from `X-Task-ID`, not the issue's assignee:
+  `task.issue_id == issue.id`, `task.is_leader_task`, `task.squad_id` valid.
+  The squad is loaded from `task.squad_id`; the target issue may be assigned to
+  anyone (MUL-6622 / GH #7487). The pre-fix `issue.assignee_type == "squad"`
+  gate diverged from the claim-side `is_leader_task` gate and made the call
+  unsatisfiable on `@squad`-on-agent-issue and leader-task-on-child paths;
+- the task is loaded with `GetAgentTaskInWorkspace`, not `GetAgentTask`: the
+  latter is a global lookup by id, and the rejection path quotes the task's
+  issue id. Check order is load-bearing — tenant scope, then "caller owns this
+  task", and only then any message naming a task-derived id;
+- two authorization gates: `task.agent_id == caller`, then
+  `squad.leader_id == caller`. The second is required because
+  `is_leader_task` on the row is enqueue-time INTENT: when the leader was
+  swapped before the claim, `handler/daemon.go` clears `resp.IsLeaderTask` and
+  runs the task as an ordinary agent turn while the row keeps
+  `is_leader_task = true`. Without the live check, such a downgraded run could
+  write a leader verdict and suppress its own comment. Removing this gate
+  requires persisting the role the claim actually delivered;
+- `activity_log.actor_id` is `task.agent_id`, not `squad.leader_id`: the
+  `no_action` comment suppression lookup matches on `task.agent_id`, so the
+  live leader id there would silently break suppression;
+- a leader agent running a NON-leader task is rejected — it is not running as
+  the leader, and the runtime only mandates the call for `is_leader_task`;
+- the `no_action` comment prohibition is conditional on this write succeeding
+  (comment.go:1851 checks the activity exists), so the injected instructions
+  tell leaders to fall back to a comment when the call errors — capped at one
+  comment, and only when the turn has not already commented.
+
 ## Issue Assignment
 
 Source:
@@ -142,15 +183,21 @@ Contracts:
   enqueue-time via `canEnqueueSquadLeader` (squad.go:1037);
 - archived squad / archived leader rejected at assign-time (issue.go:2622-2627);
 - pending task dedup is applied (squad.go:1042-1048);
-- parent status is agent-managed: assignment brief (`writeWorkflowAssignment` with
-  `IsSquadLeader`) requires `in_progress` on the first turn and forbids
-  unconditional `in_review` on that dispatch turn; Squad Operating Protocol
-  (`squad_briefing.go`) owns the ongoing `in_progress` → later `in_review`
-  contract. `StartTask` / `CompleteTask` do not write issue status. On
-  comment-triggered leader turns `writeWorkflowComment` names that protocol
-  responsibility as the one exception to "do not change status unless the
-  comment asks" — without it the @mention-dispatch shape (no child issues, so
-  no child-done ask) would strand the parent in `in_progress`.
+- parent status is agent-managed: since MUL-6417 the brief's status rule is a
+  fact judgment written when the work changes it (`writeWorkflowIssue`), and the
+  leader variant adds one bullet — dispatching members is not delivery, so a dispatch
+  turn leaves the parent `in_progress` and `in_review` waits for the re-trigger
+  that confirms the overall goal is met. Squad Operating Protocol
+  (`squad_briefing.go`) still states the ongoing `in_progress` → later
+  `in_review` responsibility for owning leaders. `StartTask` / `CompleteTask`
+  do not write issue status. There is no assignee gate anymore: a guest leader
+  writes nothing not because it lacks a grant but because a turn that did not
+  move the issue's state has nothing to record.
+- status names are category rules: custom statuses inherit their category's
+  behavior in full (MUL-6243, `server/internal/issuestatus/issuestatus.go`
+  `Effective`/`Resolve`); the brief lists the workspace catalog when any custom
+  statuses exist (MUL-6460, `writeIssueStatusCommand` in
+  `server/internal/daemon/execenv/runtime_config_sections.go`).
 
 ## Comment / Mention
 
@@ -231,9 +278,12 @@ Contracts:
   ungated path; any future invocation gate must be added to BOTH together.
 - parent status is not auto-advanced by the barrier: the system comment asks the
   leader to continue or — when the overall goal is met — run
-  `multica issue status <parent-id> in_review`. That explicit ask is what lets a
-  comment-triggered leader turn change status (the comment workflow otherwise
-  forbids status flips unless asked). `done` remains human / integration owned.
+  `multica issue status <parent-id> in_review`. The Squad Operating Protocol's
+  standing "Own the parent issue status" responsibility (present exactly when
+  the issue is assigned to this squad) states the same expectation; the system
+  comment marks the wrap-up moment. Since MUL-6417 the write itself needs no
+  grant — the brief's fact judgment covers it — but `done` remains
+  human / integration owned.
 
 ## Private Leader Access
 

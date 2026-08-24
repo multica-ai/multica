@@ -45,7 +45,7 @@ A task typically moves through these states:
 | `failed` | The run errored or was interrupted |
 | `cancelled` | The run was stopped manually |
 
-When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. A task left unclaimed for more than 2 hours ends as failed.
+When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. A task left unclaimed for more than 2 hours by default ends as failed; the limit is adjustable via `MULTICA_TASK_QUEUED_TTL` ([Environment variables](/environment-variables)).
 
 <Callout type="info">
 If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a task nothing can claim.
@@ -55,15 +55,21 @@ A runtime with a healthy heartbeat can execute long tasks; the server never forc
 
 ## Viewing run history
 
-Open an issue and go to the **Execution log** to see every task it has produced. Each row shows the trigger source, the executing agent, the state, and timing.
+Every task an issue produces is listed in the **Execution log** section of the issue's right sidebar — not on a separate page or tab. The section is expanded by default: active runs stay pinned at the top, and finished ones sit behind **Show past runs (N)**. Each row shows the trigger source, the executing agent, the state, and timing. If you don't see the section, open the sidebar with the panel button in the issue header; on narrow screens it starts collapsed.
+
+The log updates over the realtime connection while the page stays open — new runs, status changes, and the agent's comments appear without a manual reload.
+
+While an agent is working, the issue header also carries a live chip such as "Engineer is working". Hovering it shows the same active runs, so you can check progress without leaving the page.
 
 From here you can:
 
-- Open a run record to see the agent's messages, tool calls, and error output.
+- Click **View transcript** on a row to see the agent's messages, tool calls, and error output. For a run still in progress the transcript keeps streaming while the dialog stays open, and a **Newest first** toggle flips the event order.
 - Stop tasks that are deferred, queued, starting, waiting for a local directory, or running.
 - Retry a failed or cancelled task.
 
-![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.png)
+![Execution log in the issue sidebar: active runs above past runs](/images/docs/quickstart-run-result.webp)
+
+![Run record: status timeline, agent summary, and individual tool calls](/images/docs/task-transcript.webp)
 
 <Callout type="warning">
 Changing an issue's assignee or status does not stop a run that has already started. To interrupt one, stop the corresponding task in the execution log. Active tasks are cancelled along with an issue only when the issue is deleted.
@@ -88,7 +94,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
-| `queued_expired` | Queued for over 2 hours with no runtime claiming it | Confirm the runtime is online, then retry |
+| `queued_expired` | Queued past the unclaimed limit (2 hours by default, adjustable via `MULTICA_TASK_QUEUED_TTL`) with no runtime claiming it | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
@@ -143,7 +149,7 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | State | Meaning | Timeout and consequence |
 | --- | --- | --- |
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
-| `queued` | Waiting for a runtime to claim it | Fails after **2 hours** unclaimed; not retried automatically |
+| `queued` | Waiting for a runtime to claim it | Fails after **2 hours by default** unclaimed (limit settable via `MULTICA_TASK_QUEUED_TTL`); not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |
