@@ -50,11 +50,38 @@ Rules learned so far:
 
 ## Current patch series (my-fixes)
 
-1. `a6c9ef8` fix(execenv): atomic metadata writes + gc-meta write retry
-2. `193724e` feat(daemon): durable terminal-report outbox (+ tests)
-3. `2b41ead` feat(service): auto-retry webhook-triggered autopilot runs
-4. `7f0f85e` feat: jitter retry schedules against thundering herd
-5. `2c5aa8a` perf(db): bound claim-candidate scan with LIMIT
+Rebased onto upstream main 2026-08-24 (includes their runtime_offline
+health-gated retry + hasRunnableSuccessor slot guard).
 
-Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`.
-Server-side pieces require self-hosting (`docker-compose.selfhost.yml`).
+1. `a6c9ef8`→ fix(execenv): atomic metadata writes + gc-meta write retry
+2. `193724e`→ feat(daemon): durable terminal-report outbox (+ tests)
+3. `2b41ead`→ feat(service): auto-retry webhook-triggered autopilot runs
+4. `7f0f85e`→ feat: jitter retry schedules against thundering herd
+5. `2c5aa8a`→ perf(db): bound claim-candidate scan with LIMIT
+6. `4b165ae` feat(retry): prior-attempt failure digest into retry children (GAP-23)
+7. `fc8f4e3` feat(verify): opt-in verifier agent runs after branch delivery (GAP-24, migration 403)
+
+Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
+AND the desktop-bundled binary (see below). Server-side pieces require
+redeploying the self-host server from this branch.
+
+### Desktop app binary swap
+
+Desktop spawns `<Multica.app>/Contents/Resources/app.asar.unpacked/resources/bin/multica`
+— NOT ~/.local/bin. After each Multica app update:
+
+```bash
+cp ~/.local/bin/multica /Applications/Multica.app/Contents/Resources/app.asar.unpacked/resources/bin/multica
+codesign --force --sign - /Applications/Multica.app/Contents/Resources/app.asar.unpacked/resources/bin/multica
+# then quit + reopen the app; rollback backup: ~/multica.bak-desktop-0.4.32
+```
+
+Requires App Management (or Full Disk Access) permission for your terminal.
+
+### Verifier agents (GAP-24)
+
+Set via API: `PATCH /api/agents/{id}` with `"verify_agent_id": "<uuid>"`
+(null clears). The named agent then runs a fresh-session task on the same
+issue whenever this agent completes work that produced a branch; its handoff
+note names the branch to check out and asks for a PASS/FAIL verdict comment.
+Verifier failures are non-retryable by taxonomy.
