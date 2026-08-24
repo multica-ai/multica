@@ -4026,8 +4026,9 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}()
 
 	// Root context: handleHeartbeatActions hands this ctx to the actual work
-	// (model discovery shells out to a CLI for up to ~15s), so it must outlive
-	// this function. Only the heartbeat request itself is time-bounded.
+	// (model discovery shells out to a CLI, for up to ~40s on the slowest
+	// provider — see agent.hermesDiscoveryTimeout), so it must outlive this
+	// function. Only the heartbeat request itself is time-bounded.
 	ctx := d.recoveryContext()
 	if ctx.Err() != nil {
 		return
@@ -4056,9 +4057,14 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 
 // handleModelList resolves the provider's supported models (via static
 // catalog or by shelling out to the agent CLI) and reports the result
-// back to the server. Model discovery failures are reported as empty
-// lists rather than errors so the UI can still render a creatable
-// dropdown.
+// back to the server.
+//
+// How a discovery failure is reported is the provider's decision, not this
+// function's. Providers with a safe static catalog swallow the error and return
+// the stand-in (marked Fallback); providers without one — hermes — return the
+// error, and it is forwarded as status=failed so the picker can show the reason
+// and keep manual entry (MUL-6606). Both outcomes leave the creatable dropdown
+// usable; only the second one tells the user why it is empty.
 func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
@@ -4232,9 +4238,9 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // runtimeReportBackoffs defines the retry schedule for delivering any
 // daemon→server async result (model list, local-skill list, local-skill
 // import). First attempt runs immediately, then we back off. The sum
-// (≈6.5s) stays well under the server-side running timeout (60s) so a
-// report that eventually lands still updates the request instead of
-// racing a timeout transition.
+// (≈6.5s) leaves most of the server-side running timeout (60s) available for
+// discovery and report attempts. Each HTTP attempt has its own client timeout,
+// so this schedule alone is not an end-to-end delivery deadline.
 //
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}

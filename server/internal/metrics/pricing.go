@@ -68,6 +68,7 @@ var modelPrices = map[string]ModelPrice{
 	// packages/views/runtimes/utils.ts; keep the two tables in sync.
 	// `grok-composer-*` ships in the Grok Build catalog but is absent from the
 	// price sheet, so it stays unmapped rather than inheriting a guessed rate.
+	"xai:grok-4.6":                     {Provider: "xai", Model: "grok-4.6", InputPerM: 2.00, CacheReadPerM: 0.50, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.5":                     {Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.3":                     {Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-build-0.1":               {Provider: "xai", Model: "grok-build-0.1", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 2.00},
@@ -117,6 +118,7 @@ var modelAliasRules = []struct {
 	// rows above. The frontend resolver does not dash-normalize non-Anthropic
 	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
 	// rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)grok-4\.6$`), "xai:grok-4.6"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.5$`), "xai:grok-4.5"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.3$`), "xai:grok-4.3"},
 	{regexp.MustCompile(`(^|/|:)grok-build-0\.1$`), "xai:grok-build-0.1"},

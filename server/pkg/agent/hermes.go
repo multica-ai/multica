@@ -925,6 +925,17 @@ type hermesClient struct {
 
 	usageMu sync.Mutex
 	usage   acpUsageAccumulator
+
+	// terminalEnabled is only set for ACP runtimes whose client-side terminal
+	// calls are implemented below. Keeping it opt-in avoids advertising a
+	// capability to Hermes-family runtimes that do not need it.
+	terminalEnabled bool
+	terminalCtx     context.Context
+	terminalCwd     string
+	terminalEnv     []string
+	terminalMu      sync.Mutex
+	terminals       map[string]*acpTerminal
+	nextTerminalID  int
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -1031,11 +1042,11 @@ func (c *hermesClient) handleLine(line string) {
 }
 
 // handleAgentRequest replies to JSON-RPC requests the agent sends
-// us (agent → client direction). The only one we care about today is
-// `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we answer it ourselves — granting when a
-// safe option is offered, otherwise declining just this action or
-// failing closed (see below).
+// us (agent → client direction). Kimi's ACP terminal capability is
+// implemented here alongside the permission request handling: the daemon is
+// headless and cannot actually prompt a user, so we answer permission requests
+// ourselves — granting when a safe option is offered, otherwise declining
+// just this action or failing closed (see below).
 //
 // The reply MUST select one of the optionIds the agent actually
 // offered — the ACP permission contract is "pick from these options",
@@ -1057,9 +1068,86 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	if !ok {
 		return
 	}
+	if method == "terminal/wait_for_exit" && c.terminalEnabled {
+		// wait_for_exit is intentionally long-lived. The ACP reader must remain
+		// available for the output polling and terminal/kill requests Kimi sends
+		// while this request is pending.
+		id := append(json.RawMessage(nil), rawID...)
+		params := append(json.RawMessage(nil), raw["params"]...)
+		go func() {
+			result, err := c.acpTerminalResponse(method, params)
+			if err != nil {
+				c.writeAgentRequestResponse(method, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error": map[string]any{
+						"code":    -32602,
+						"message": err.Error(),
+					},
+				})
+				return
+			}
+			c.writeAgentRequestResponse(method, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  result,
+			})
+		}()
+		return
+	}
 
 	var resp map[string]any
 	switch method {
+	case "terminal/create":
+		if !c.terminalEnabled {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "terminal capability is not enabled",
+				},
+			}
+			break
+		}
+		result, err := c.acpTerminalCreate(raw["params"])
+		if err != nil {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32602,
+					"message": err.Error(),
+				},
+			}
+			break
+		}
+		resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(rawID), "result": result}
+	case "terminal/output", "terminal/wait_for_exit", "terminal/kill", "terminal/release":
+		if !c.terminalEnabled {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "terminal capability is not enabled",
+				},
+			}
+			break
+		}
+		result, err := c.acpTerminalResponse(method, raw["params"])
+		if err != nil {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32602,
+					"message": err.Error(),
+				},
+			}
+			break
+		}
+		resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(rawID), "result": result}
 	case "session/request_permission":
 		selector := c.selectPermission
 		if selector == nil {
@@ -1118,14 +1206,26 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 		c.cfg.Logger.Debug("unhandled agent→client request", "method", method)
 	}
 
+	c.writeAgentRequestResponse(method, resp)
+}
+
+func (c *hermesClient) writeAgentRequestResponse(method string, resp map[string]any) {
 	data, err := json.Marshal(resp)
 	if err != nil {
-		c.cfg.Logger.Warn("marshal agent-request response", "method", method, "error", err)
+		logger := c.cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("marshal agent-request response", "method", method, "error", err)
 		return
 	}
 	data = append(data, '\n')
 	if err := c.writeLine(data); err != nil {
-		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
+		logger := c.cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("write agent-request response", "method", method, "error", err)
 	}
 }
 
@@ -1869,11 +1969,9 @@ func acpRawText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-// Terminal blocks ({type:"terminal", terminalId}) reference a remote
-// terminal the client would normally subscribe to via terminal/output;
-// we don't advertise terminal capability so we never receive those in
-// practice, but if one slips through we skip it (nothing useful to
-// surface from a bare ID).
+// Terminal blocks ({type:"terminal", terminalId}) reference a terminal whose
+// output is served through terminal/output. The textual extractor has no
+// payload to duplicate here; the ACP transport retains the terminal output.
 func extractACPToolCallText(blocks []json.RawMessage) string {
 	var b strings.Builder
 	appendPiece := func(piece string) {

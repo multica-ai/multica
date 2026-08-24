@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // Model describes a single LLM model exposed by an agent provider.
@@ -1363,15 +1365,26 @@ func parseOmpModels(data []byte) ([]Model, error) {
 // `_build_model_state` so whatever ~/.hermes/config.yaml resolves
 // to at runtime is exactly what the UI shows.
 //
-// Failure modes (hermes missing, no credentials, config resolution
-// error) all return an empty list so the UI falls back to the
-// creatable manual-entry input instead of blocking the form.
+// Failures propagate. Hermes has no static catalog to degrade to, so the
+// empty-list behaviour the other legacy providers keep would report a
+// successful discovery that found nothing — and the picker renders that as an
+// authoritative empty dropdown with no error and no hint, which is the one
+// outcome packages/core/runtimes/models.ts explicitly refuses to produce
+// (MUL-6606). An error instead puts the picker in its discovery-failed state,
+// which still offers the creatable manual-entry input, and carries the reason
+// Hermes gave for why it found nothing.
+//
+// Contrast grok (strictErrors with a static fallback) and codebuddy: those
+// substitute a baked-in list and only slog.Debug the reason, because a
+// stand-in catalog is better than nothing there. Here there is no stand-in.
 func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
-	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
 		defaultBin:   "hermes",
 		clientName:   "multica-model-discovery",
 		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
 		tmpdirPrefix: "multica-hermes-discovery-",
+		strictErrors: true,
+		timeout:      hermesDiscoveryTimeout,
 		// The same handshake carries an effort selector on jcode and carries
 		// none on Hermes Agent, so annotate is what tells the two apart —
 		// Hermes Agent models come back with a nil Thinking and show no
@@ -1379,6 +1392,53 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 		// annotateACPThinkingForSessionModel.
 		annotate: annotateACPThinkingForSessionModel,
 	})
+	if err != nil {
+		return nil, annotateHermesDiscoveryUnconfigured(err)
+	}
+	return models, nil
+}
+
+// hermesDiscoveryUnconfiguredHint explains a "no LLM provider configured"
+// failure raised by MODEL DISCOVERY, which is a different story from the same
+// message raised by a task.
+//
+// Hermes' own remedy ("run `hermes model`") assumes the shell the user is
+// standing in. Discovery does not run there: it is a `hermes acp` child of the
+// daemon, and the daemon is frequently GUI-launched, in which case its
+// environment never saw the user's shell rc. agents_probe.go's login-shell
+// fallback does not close that gap — it resolves the binary's PATH and nothing
+// else — so a provider whose credentials live in an exported variable or in
+// gcloud/ADC state (GH: Vertex AI) resolves for the user and not for the
+// daemon.
+//
+// Deliberately NOT the task path's hint (annotateHermesProviderUnconfigured in
+// the daemon): that one is about a per-task HERMES_HOME overlay, and discovery
+// builds no overlay. Sending someone to set HERMES_HOME in an agent's
+// custom_env would be actively wrong here — discovery is per-runtime and never
+// reads any agent's custom_env, so that edit cannot put a single model in this
+// picker.
+//
+// Fixed prose, no interpolation, for the same reason the task hint is: this
+// text is error copy, and nothing user-controlled belongs in a string other
+// code may match on.
+const hermesDiscoveryUnconfiguredHint = " [multica] this is what hermes reported to the daemon, " +
+	"which runs `hermes acp` with its OWN environment — not your login shell. " +
+	"Credentials exported only from a shell rc file are invisible to it. " +
+	"Reproduce with `env -i HOME=\"$HOME\" PATH=\"$PATH\" hermes model`: if that fails while a plain " +
+	"`hermes model` succeeds, restart the daemon from a shell that already has those variables. " +
+	"Setting HERMES_HOME or custom_env on an agent will not populate this picker — " +
+	"model discovery is per-runtime and reads neither."
+
+// annotateHermesDiscoveryUnconfigured appends the hint above when, and only
+// when, the discovery failure is Hermes resolving no provider at all. Every
+// other failure (binary missing, handshake timeout, a rejected credential)
+// passes through untouched — the environment story would misdirect there, and
+// a rejected credential in particular means the config WAS found.
+func annotateHermesDiscoveryUnconfigured(err error) error {
+	if err == nil || !taskfailure.ProviderUnconfigured(err.Error()) {
+		return err
+	}
+	return fmt.Errorf("%w%s", err, hermesDiscoveryUnconfiguredHint)
 }
 
 // discoverKimiModels combines Kimi's ACP model catalog with the structured
@@ -1721,6 +1781,23 @@ func discoverQoderModels(ctx context.Context, runtimeCmd Command, defaultBin str
 	})
 }
 
+// acpDiscoveryDefaultTimeout bounds an ACP discovery handshake unless the
+// provider overrides it. Discovery is a foreground UI request, so the ceiling
+// is what a user will wait for a picker to populate, not what a CLI might
+// eventually manage.
+const acpDiscoveryDefaultTimeout = 15 * time.Second
+
+// hermesDiscoveryTimeout is sized to hermes' failure path, not its success
+// path. See acpDiscoveryProvider.timeout: a configured hermes returns its
+// catalog in ~2s, but one that cannot resolve its provider — the case that
+// actually needs to be reported — spends ~25s getting there. At the default 15s
+// the user would be told "context deadline exceeded" instead of the exact
+// command hermes wants them to run.
+//
+// Kept well below the server's 60s modelListRunningTimeout so discovery leaves
+// time for report delivery and retry backoffs before the request closes.
+const hermesDiscoveryTimeout = 40 * time.Second
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → optional authenticate → session/new → parse
@@ -1752,6 +1829,17 @@ type acpDiscoveryProvider struct {
 	// ignores. CodeBuddy uses it to read its effort catalog out of the same
 	// handshake, which is why it needs no separate discovery call at all.
 	annotate func([]Model, json.RawMessage)
+	// timeout bounds the whole handshake — spawn, initialize, session/new.
+	// Zero means acpDiscoveryDefaultTimeout.
+	//
+	// It is per-provider because a CLI's UNHAPPY path is what has to fit, and
+	// that is the path with no shared shape: hermes answers a healthy
+	// session/new in ~2s but takes ~25s to conclude it cannot resolve a
+	// provider, because it re-probes before giving up (measured against hermes
+	// 0.20.0 — MUL-6606). A budget sized for the happy path turns every such
+	// diagnosis into "context deadline exceeded", which is the one failure text
+	// that tells the user nothing.
+	timeout time.Duration
 	// inspectInit receives the raw initialize result before any session is
 	// created. It is for reading capability facts the handshake already
 	// carries — Kimi reads `agentInfo.version` to gate a feature on the CLI
@@ -1780,7 +1868,11 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
 		return fail("executable lookup", err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	timeout := p.timeout
+	if timeout <= 0 {
+		timeout = acpDiscoveryDefaultTimeout
+	}
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var isolatedStateDir string
 	if p.isolatedStateEnv != "" {
@@ -2257,9 +2349,11 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
 // IDs match a typical signed-in `session/new` / `grok models` listing.
+// Grok 4.6 is the current Grok Build default (xAI, 2026-08-12).
 func grokStaticModels() []Model {
 	models := []Model{
-		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+		{ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true},
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai"},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
 	annotateGrokThinking(models)
@@ -2267,20 +2361,35 @@ func grokStaticModels() []Model {
 }
 
 // annotateGrokThinking attaches only capabilities confirmed by xAI's
-// per-model reasoning documentation. session/new does not advertise effort
-// catalogs, so unknown and composer models deliberately keep Thinking nil
-// instead of exposing values that may fail at runtime.
+// per-model reasoning documentation and Grok Build's `--effort` flag.
+// session/new does not advertise effort catalogs on the versions this
+// table covers, so unknown and composer models deliberately keep Thinking
+// nil instead of exposing values that may fail at runtime.
+//
+// grok-4.6 documents and accepts `xhigh` (docs.x.ai/developers/grok-4-6,
+// grok 1.0.5 `--effort`). grok-4.5 does not; the server enum lets the
+// token through and ValidateThinkingLevel still fails it closed for 4.5.
 func annotateGrokThinking(models []Model) {
 	for i := range models {
-		if models[i].ID != "grok-4.5" {
-			continue
+		switch models[i].ID {
+		case "grok-4.6":
+			models[i].Thinking = grokThinkingCatalog(true)
+		case "grok-4.5":
+			models[i].Thinking = grokThinkingCatalog(false)
 		}
-		models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
-			{Value: "low", Label: "Low"},
-			{Value: "medium", Label: "Medium"},
-			{Value: "high", Label: "High"},
-		}}
 	}
+}
+
+func grokThinkingCatalog(includeXHigh bool) *ModelThinking {
+	levels := []ThinkingLevel{
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+	}
+	if includeXHigh {
+		levels = append(levels, ThinkingLevel{Value: "xhigh", Label: "Extra high"})
+	}
+	return &ModelThinking{SupportedLevels: levels}
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses

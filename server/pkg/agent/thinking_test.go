@@ -523,9 +523,9 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"grok", "low", true},
 		{"grok", "medium", true},
 		{"grok", "high", true},
+		{"grok", "xhigh", true},
 		{"grok", "none", false},
 		{"grok", "minimal", false},
-		{"grok", "xhigh", false},
 		{"grok", "max", false},
 		{"grok", "bogus", false},
 	}

@@ -135,10 +135,15 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// Reuse the hermesClient ACP transport — Kimi speaks the same protocol.
 	c := &hermesClient{
-		cfg:          b.cfg,
-		stdin:        stdin,
-		pending:      make(map[int]*pendingRPC),
-		pendingTools: make(map[string]*pendingToolCall),
+		cfg:             b.cfg,
+		stdin:           stdin,
+		pending:         make(map[int]*pendingRPC),
+		pendingTools:    make(map[string]*pendingToolCall),
+		terminalEnabled: true,
+		terminalCtx:     runCtx,
+		terminalCwd:     opts.Cwd,
+		terminalEnv:     buildEnv(b.cfg.Env),
+		terminals:       make(map[string]*acpTerminal),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
 		},
@@ -218,7 +223,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				"name":    "multica-agent-sdk",
 				"version": "0.2.0",
 			},
-			"clientCapabilities": map[string]any{},
+			"clientCapabilities": map[string]any{
+				"terminal": true,
+			},
 		})
 		if err != nil {
 			finalStatus = "failed"

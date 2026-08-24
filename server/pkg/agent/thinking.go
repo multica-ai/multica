@@ -773,12 +773,15 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
-	// does not accept none, minimal, or xhigh.
+	// Grok CLI --effort vocabulary (grok 1.0.5: low, medium, high, xhigh).
+	// Grok cannot disable reasoning and does not accept none, minimal, or
+	// max. xhigh is grok-4.6-only; the daemon's per-model catalog rejects
+	// it for grok-4.5 after this server-side literal gate.
 	"grok": {
 		"low":    true,
 		"medium": true,
 		"high":   true,
+		"xhigh":  true,
 	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
