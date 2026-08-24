@@ -3754,8 +3754,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
 		for _, rid := range runtimeIDs {
-			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
-				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
+			// ponytail: 3x retry with backoff; persistent queue if still failing
+			var rerr error
+			for attempt := 0; attempt < 3; attempt++ {
+				if rerr = d.client.RecoverOrphans(ctx, rid); rerr == nil {
+					break
+				}
+				time.Sleep(500 * time.Millisecond << attempt)
+			}
+			if rerr != nil {
+				d.logger.Warn("recover-orphans failed after retries", "runtime_id", rid, "error", rerr)
 			}
 		}
 
