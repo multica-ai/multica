@@ -178,6 +178,68 @@ func TestResolveTextFlag(t *testing.T) {
 		}
 	})
 
+	t.Run("file body warns on likely GBK mojibake", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		body := "璇风‘璁や腑鏂囧唴瀹逛繚鎸� UTF-8 涓嶈�佽��鎶ユ�ｅ父鏂囨湰"
+		if err := os.WriteFile("desc.md", []byte(body), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		stderr := captureStderr(t)
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		got, ok, err := resolveTextFlag(c, "description")
+		errOut := stderr.read()
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != body {
+			t.Fatalf("file body should still pass through unchanged, got %q", got)
+		}
+		for _, want := range []string{"GBK/cp936", "Get-Content -Raw -Encoding UTF8", "请确认"} {
+			if !strings.Contains(errOut, want) {
+				t.Errorf("warning missing %q\n---\n%s", want, errOut)
+			}
+		}
+	})
+
+	t.Run("file body does not warn on normal Chinese UTF-8", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		body := "## 又发现一处\n\n请确认中文内容保持 UTF-8，不要误报正常文本。"
+		if err := os.WriteFile("desc.md", []byte(body), 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		stderr := captureStderr(t)
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		got, ok, err := resolveTextFlag(c, "description")
+		errOut := stderr.read()
+		if err != nil || !ok {
+			t.Fatalf("unexpected: ok=%v err=%v", ok, err)
+		}
+		if got != body {
+			t.Fatalf("got %q, want %q", got, body)
+		}
+		if errOut != "" {
+			t.Fatalf("stderr = %q, want no mojibake warning", errOut)
+		}
+	})
+
+	t.Run("file body rejects invalid UTF-8 bytes", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		if err := os.WriteFile("desc.md", []byte{0xff, 0xfe, 0xfd}, 0o644); err != nil {
+			t.Fatalf("write tempfile: %v", err)
+		}
+		c := newFlagTestCmd("description")
+		_ = c.Flags().Set("description-file", "desc.md")
+		_, _, err := resolveTextFlag(c, "description")
+		if err == nil {
+			t.Fatalf("expected invalid UTF-8 file to be rejected")
+		}
+		if !strings.Contains(err.Error(), "valid UTF-8") {
+			t.Fatalf("error = %v, want UTF-8 guidance", err)
+		}
+	})
+
 	t.Run("file path that doesn't exist surfaces a useful error", func(t *testing.T) {
 		// A missing file inside the workdir clears the containment check and
 		// fails at the read, not at the guardrail.

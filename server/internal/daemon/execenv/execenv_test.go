@@ -2170,6 +2170,9 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 		"$OutputEncoding",
 		"--content-file",
 		"may replace non-ASCII characters with `?`",
+		"Get-Content -Raw -Encoding UTF8",
+		"Set-Content -Encoding UTF8",
+		"cp936/GBK",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing Codex/Windows file-first guidance %q\n---\n%s", want, s)
