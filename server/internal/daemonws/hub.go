@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,6 +18,9 @@ const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
+
+	// ponytail: soft-drop N msgs before evict; tune threshold when drop metrics appear
+	softDropLimit = 5
 )
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
@@ -110,6 +114,9 @@ type client struct {
 
 	// rpcSem bounds concurrent RPC handlers for this connection.
 	rpcSem chan struct{}
+
+	// consecutive soft-drops since last successful send; reset on delivery.
+	drops atomic.Int64
 }
 
 // trySend delivers frame to the write pump without blocking and without ever
@@ -465,9 +472,16 @@ func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delive
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -493,9 +507,16 @@ func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID stri
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -521,9 +542,16 @@ func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (deliv
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()

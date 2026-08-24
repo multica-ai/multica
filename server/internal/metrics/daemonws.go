@@ -13,6 +13,7 @@ type DaemonWSCollector struct {
 	disconnectsTotal     *prometheus.Desc
 	activeConnections    *prometheus.Desc
 	slowEvictionsTotal   *prometheus.Desc
+	softDropsTotal       *prometheus.Desc
 	wakeupPublishedTotal *prometheus.Desc
 	wakeupPublishErrors  *prometheus.Desc
 	wakeupReceivedTotal  *prometheus.Desc
@@ -27,6 +28,7 @@ func NewDaemonWSCollector(m *daemonws.Metrics) *DaemonWSCollector {
 		disconnectsTotal:     newDaemonWSDesc("disconnects_total", "Total daemon WebSocket connections closed."),
 		activeConnections:    newDaemonWSDesc("active_connections", "Current daemon WebSocket connections."),
 		slowEvictionsTotal:   newDaemonWSDesc("slow_evictions_total", "Total daemon WebSocket clients evicted for slow consumption."),
+		softDropsTotal:       newDaemonWSDesc("soft_drops_total", "Total daemon WebSocket frames soft-dropped for slow clients before eviction."),
 		wakeupPublishedTotal: newDaemonWSDesc("wakeup_published_total", "Total daemon wakeups published to the Redis relay."),
 		wakeupPublishErrors:  newDaemonWSDesc("wakeup_publish_errors_total", "Total daemon wakeup Redis publish errors."),
 		wakeupReceivedTotal:  newDaemonWSDesc("wakeup_received_total", "Total daemon wakeups received from the Redis relay."),
@@ -44,6 +46,7 @@ func (c *DaemonWSCollector) Describe(ch chan<- *prometheus.Desc) {
 		c.disconnectsTotal,
 		c.activeConnections,
 		c.slowEvictionsTotal,
+		c.softDropsTotal,
 		c.wakeupPublishedTotal,
 		c.wakeupPublishErrors,
 		c.wakeupReceivedTotal,
@@ -62,6 +65,7 @@ func (c *DaemonWSCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.disconnectsTotal, prometheus.CounterValue, float64(m.DisconnectsTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.activeConnections, prometheus.GaugeValue, float64(m.ActiveConnections.Load()))
 	ch <- prometheus.MustNewConstMetric(c.slowEvictionsTotal, prometheus.CounterValue, float64(m.SlowEvictionsTotal.Load()))
+	ch <- prometheus.MustNewConstMetric(c.softDropsTotal, prometheus.CounterValue, float64(m.SoftDropsTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.wakeupPublishedTotal, prometheus.CounterValue, float64(m.WakeupPublishedTotal.Load()))
 	ch <- prometheus.MustNewConstMetric(c.wakeupPublishErrors, prometheus.CounterValue, float64(m.WakeupPublishErrors.Load()))
 	ch <- prometheus.MustNewConstMetric(c.wakeupReceivedTotal, prometheus.CounterValue, float64(m.WakeupReceivedTotal.Load()))
