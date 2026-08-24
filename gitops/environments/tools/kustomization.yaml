@@ -37,7 +37,7 @@ patches:
       name: agentfarm-redis
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
-    newTag: "bea168a2"
+    newTag: "02c9a0f0"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "bea168a2"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
