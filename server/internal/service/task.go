@@ -4171,6 +4171,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				"error", err,
 			)
 		}
+		// GAP-29: hollow completion flag. A completed issue task with no branch
+		// produced nothing reviewable; leave a visible marker for human review.
+		// ponytail: hollow = no branch; zero-commits check needs daemon commit count — add BranchCommitCount when false positives appear
+		if !suppressNoActionComment && task.Status == "completed" && !task.BranchName.Valid {
+			s.createAgentComment(ctx, task.IssueID, task.AgentID,
+				"⚠️ Hollow completion: this task was marked completed but produced no branch. Flagged for human review.",
+				"system", pgtype.UUID{}, task.ID)
+		}
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
 			AuthorID: task.AgentID,

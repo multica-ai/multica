@@ -60,6 +60,7 @@ health-gated retry + hasRunnableSuccessor slot guard).
 5. `2c5aa8a`→ perf(db): bound claim-candidate scan with LIMIT
 6. `4b165ae` feat(retry): prior-attempt failure digest into retry children (GAP-23)
 7. `fc8f4e3` feat(verify): opt-in verifier agent runs after branch delivery (GAP-24, migration 403)
+8. feat(service): hollow-completion flag — agent comment when an issue task completes with no branch (GAP-29, issue #24)
 
 Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
 AND the desktop-bundled binary (see below). Server-side pieces require
