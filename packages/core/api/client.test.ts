@@ -773,6 +773,60 @@ describe("ApiClient notification preferences", () => {
   });
 });
 
+describe("ApiClient Inbox response schemas", () => {
+  const legacyRow = {
+    id: "inbox-1",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "member-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-1",
+    title: "Legacy Inbox row",
+    body: null,
+    read: false,
+    archived: false,
+    created_at: "2026-08-24T00:00:00Z",
+  };
+
+  it("schema-parses the main Inbox and preserves omitted legacy projections", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([legacyRow]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").listInbox();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty("issue_status");
+    expect(result[0]).not.toHaveProperty("issue_priority");
+  });
+
+  it("falls back safely when the main Inbox projection is wrong-typed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([{ ...legacyRow, issue_priority: 3 }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listInbox(),
+    ).resolves.toEqual([]);
+  });
+});
+
 describe("ApiClient", () => {
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(

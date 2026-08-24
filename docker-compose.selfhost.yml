@@ -141,6 +141,10 @@ services:
       MULTICA_PLUGIN_SURFACE_ORIGIN: ${MULTICA_PLUGIN_SURFACE_ORIGIN:-}
       MULTICA_PLUGIN_API_URL: ${MULTICA_PLUGIN_API_URL:-}
       MULTICA_PLUGIN_DIR: ${MULTICA_PLUGIN_DIR:-}
+      # Optional API URL shown in self-host daemon setup commands. Set this
+      # when the daemon reaches the API through a different URL than the one
+      # used for public webhook URLs; otherwise MULTICA_PUBLIC_URL is used.
+      MULTICA_DAEMON_SERVER_URL: ${MULTICA_DAEMON_SERVER_URL:-}
       # Comma-separated CIDRs whose source IP is allowed to set
       # X-Forwarded-For / X-Real-IP for the webhook per-IP rate limiter.
       # Empty default = headers ignored, RemoteAddr used. Set e.g.

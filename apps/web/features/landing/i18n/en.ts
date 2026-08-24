@@ -294,6 +294,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.33",
+        date: "2026-08-24",
+        title: "Inbox filters, the ZeroClaw runtime, and localized failure messages",
+        changes: [],
+        features: [
+          "Filter Inbox notifications by Issue status and priority.",
+          "Use ZeroClaw as a native agent runtime.",
+          "Self-hosted teams can send daemon traffic to a separate server.",
+          "Self-hosted teams can set how long queued tasks remain available.",
+        ],
+        improvements: [
+          "Task failure messages now appear in your chosen language.",
+          "Grok shows each model's supported reasoning levels.",
+          "Skill download failures now show how much data arrived.",
+          "Use a keyboard shortcut to show or hide the right sidebar.",
+          "The iOS app now has a cleaner flat icon.",
+          "Self-hosting guides now state the right PostgreSQL requirements.",
+        ],
+        fixes: [
+          "Windows Qwen and Pi runs now preserve complete prompts.",
+          "Antigravity responses keep their original line breaks.",
+          "Lark post mentions reach the intended people.",
+          "Agent and Issue activity stays correctly authorized and ordered.",
+          "New chats and project work stay in the right workspace context.",
+          "Self-hosted health checks and concurrent local work stay reliable.",
+          "Hermes, Kimi, and Pi now handle runtime failures more reliably.",
+          "Purchase quotes and archived Inbox counts now recover correctly.",
+        ],
+      },
+      {
         version: "0.4.32",
         date: "2026-08-21",
         title: "DingTalk groups, Project views, and smoother teamwork",

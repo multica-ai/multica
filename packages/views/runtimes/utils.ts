@@ -302,6 +302,7 @@ const MODEL_PRICING: Record<
   //    `grok-composer-*` ships in the Grok Build catalog
   //    (server/pkg/agent/models.go) but is absent from the price sheet; it
   //    deliberately stays unmapped rather than inheriting a guessed rate. --
+  "grok-4.6":                     { input: 2,    output: 6,    cacheRead: 0.50, cacheWrite: 2 },
   "grok-4.5":                     { input: 2,    output: 6,    cacheRead: 0.30, cacheWrite: 2 },
   "grok-4.3":                     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-build-0.1":               { input: 1,    output: 2,    cacheRead: 0.20, cacheWrite: 1 },

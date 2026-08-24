@@ -785,10 +785,17 @@ func TestCopilotStaticModelsExposesFullCatalog(t *testing.T) {
 }
 
 func TestListModelsHermesWithoutBinary(t *testing.T) {
-	// With no `hermes` binary on PATH the discovery fast-paths to
-	// an empty list (the UI then falls back to creatable manual
-	// entry). This test only verifies the fast-path; an actual
-	// ACP session is exercised in integration.
+	// Hermes reports discovery failures instead of swallowing them into an
+	// empty list, unlike the kiro / qoder cases below (MUL-6606). Those two
+	// have a caller that substitutes something; hermes has no static catalog,
+	// so an empty list here would be indistinguishable from "this runtime
+	// genuinely has no models" and the picker would render it as an
+	// authoritative empty dropdown. The error keeps the picker in its
+	// discovery-failed state, which still offers manual entry — the same
+	// fallback, minus the false confidence.
+	//
+	// This test only verifies the executable-lookup fast path; an actual ACP
+	// session is exercised in hermes_model_discovery_test.go.
 	ctx := context.Background()
 	// Prime the cache miss so we hit the live discovery function.
 	modelCacheMu.Lock()
@@ -796,11 +803,16 @@ func TestListModelsHermesWithoutBinary(t *testing.T) {
 	modelCacheMu.Unlock()
 
 	got, err := ListModels(ctx, "hermes", Command{Path: missingAgentExecutable(t, "hermes")})
-	if err != nil {
-		t.Fatalf("ListModels(hermes) error: %v", err)
+	if err == nil {
+		t.Fatalf("expected a missing binary to be reported, got catalog %+v", got.Models)
 	}
-	if got.Models == nil {
-		t.Error("expected non-nil slice even when binary is missing")
+	if len(got.Models) != 0 {
+		t.Errorf("a failed discovery must carry no models, got %+v", got.Models)
+	}
+	// The reason has to name what actually went wrong: this text is what the
+	// daemon forwards as the request's error and what the picker displays.
+	if !strings.Contains(err.Error(), "executable lookup") {
+		t.Errorf("error should name the failing stage, got: %v", err)
 	}
 }
 

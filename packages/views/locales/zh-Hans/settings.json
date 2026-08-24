@@ -7,7 +7,6 @@
     "show_archived": "显示已归档（{{count}}）",
     "archived_badge": "已归档",
     "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
-    "flag_off": "当前部署尚未开启自定义状态，下面的内置状态照常使用。",
     "reorder_failed": "排序保存失败。",
     "actions": {
       "open": "{{name}} 的操作",

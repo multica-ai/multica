@@ -2306,7 +2306,10 @@ export class ApiClient {
 
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+    const raw = await this.fetch<unknown>("/api/inbox");
+    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
+      endpoint: "GET /api/inbox",
+    });
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {

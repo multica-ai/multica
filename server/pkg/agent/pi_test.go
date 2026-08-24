@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 	"runtime"
@@ -229,6 +230,13 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 // piEventStreamScript builds a sh script that prints each JSON event on
 // its own stdout line. Fixtures must not contain single quotes.
 func piEventStreamScript(events []string) string {
+	return piEventStreamScriptWithExit(events, 0)
+}
+
+// piEventStreamScriptWithExit is piEventStreamScript plus an explicit
+// process exit code. Real Pi (and pi-print-clean-exit) exits 1 after a
+// turn whose last assistant stopReason is "error".
+func piEventStreamScriptWithExit(events []string, exitCode int) string {
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	// Real Pi reads the piped prompt to EOF before emitting events, so the fake
@@ -241,6 +249,9 @@ func piEventStreamScript(events []string) string {
 		b.WriteString("printf '%s\\n' '")
 		b.WriteString(e)
 		b.WriteString("'\n")
+	}
+	if exitCode != 0 {
+		b.WriteString(fmt.Sprintf("exit %d\n", exitCode))
 	}
 	return b.String()
 }
@@ -390,6 +401,59 @@ func TestPiExecuteSucceedsWhenRetryFollowsTurnError(t *testing.T) {
 		}
 		if result.Output != "recovered" {
 			t.Fatalf("Output: got %q, want %q", result.Output, "recovered")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestPiExecuteKeepsTurnErrorWhenProcessExitsNonZero(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// Real Pi (and pi-print-clean-exit) exits 1 after stopReason=error.
+	// Wait() used to win the completed-branch and drop lastTurnError, so
+	// the classifier only saw "exit status 1" (non-retryable
+	// process_failure). The provider message must survive so
+	// "Connection error." / "Request timed out." classify as
+	// provider_network.
+	events := []string{
+		`{"type":"agent_start"}`,
+		`{"type":"turn_start"}`,
+		`{"type":"turn_end","message":{"role":"assistant","content":[],"model":"test","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"Connection error."}}`,
+		`{"type":"agent_end","messages":[],"willRetry":false}`,
+	}
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(piEventStreamScriptWithExit(events, 1)))
+
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result := <-session.Result:
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "Connection error.") {
+			t.Fatalf("Error: got %q, want it to carry the provider message", result.Error)
+		}
+		if !strings.Contains(result.Error, "exited with error") {
+			t.Fatalf("Error: got %q, want the process exit still visible as a suffix", result.Error)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")

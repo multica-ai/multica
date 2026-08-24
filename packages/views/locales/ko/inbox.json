@@ -9,6 +9,15 @@
     "archive_all_read": "읽은 항목 모두 보관",
     "archive_completed": "완료된 항목 보관"
   },
+  "filters": {
+    "tooltip": "인박스 필터",
+    "active_count_other": "필터 {{count}}개 적용됨",
+    "status": "상태",
+    "priority": "우선순위",
+    "notification_count_other": "알림 {{count}}개",
+    "clear": "필터 지우기",
+    "empty": "필터와 일치하는 알림이 없습니다"
+  },
   "context_menu": {
     "mark_read": "읽음으로 표시",
     "mark_unread": "읽지 않음으로 표시",

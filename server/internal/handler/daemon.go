@@ -3044,12 +3044,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	// Workspace status catalog (MUL-6460): active CUSTOM statuses only, so the
-	// daemon can render them into the brief's status-command line. Not gated on
-	// the custom_issue_statuses flag — the flag only guards creation, and a
-	// catalog written before a flag flip must stay visible to agents as long as
-	// issues can sit on it. Read on every claim, like the agent row, so an
-	// admin's edit lands on the next task. Failure degrades to the built-in-only
-	// brief rather than failing the claim.
+	// daemon can render them into the brief's status-command line. Read on every
+	// claim, like the agent row, so an admin's edit lands on the next task.
+	// Failure degrades to the built-in-only brief rather than failing the claim.
 	if entries, err := h.Queries.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
 		WorkspaceID:     parseUUID(resp.WorkspaceID),
 		IncludeArchived: false,
