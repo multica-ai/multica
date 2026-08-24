@@ -34,6 +34,7 @@
     "queued": "대기 중",
     "idle": "유휴"
   },
+  "presence_status_aria": "상태: {{status}}",
   "archived": {
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
@@ -733,6 +734,7 @@
     "usage_chip_title": "이 실행의 토큰 및 예상 비용",
     "details_branch": "브랜치",
     "details_reason": "사유",
+    "details_diagnostics": "기술 세부 정보",
     "copy_branch": "브랜치 이름 복사",
     "lane_model": "모델",
     "lane_tool": "도구",

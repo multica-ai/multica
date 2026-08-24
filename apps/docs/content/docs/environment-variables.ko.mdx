@@ -53,9 +53,14 @@ Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`�
 | `FRONTEND_ORIGIN` | 비어 있음 | 사용자가 접근하는 프런트엔드 origin. CORS, cookie, 초대 링크에 사용 |
 | `MULTICA_APP_URL` | `FRONTEND_ORIGIN`으로 fallback | 사용자가 접근할 수 있는 Web 주소. CLI 로그인과 계정 연결 링크에 사용 |
 | `MULTICA_PUBLIC_URL` | 비어 있음 | 공개 API 주소. webhook URL과 런타임 연결 안내에 사용 |
+| `MULTICA_DAEMON_SERVER_URL` | `MULTICA_PUBLIC_URL`, 그다음 `MULTICA_APP_URL` / `FRONTEND_ORIGIN`으로 fallback | API 프로세스가 `multica setup self-host` 명령에 넣는 서버 URL. 데몬이 접근하는 API URL이 공개 webhook URL과 다를 때 설정 |
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 HTTP origin, 쉼표로 구분 |
 | `ALLOWED_ORIGINS` | CORS 또는 프런트엔드 주소로 fallback | WebSocket origin allowlist, 쉼표로 구분 |
 | `COOKIE_DOMAIN` | 비어 있음 | 프런트엔드와 backend의 host가 다르고 브라우저가 API 도메인에 직접 접근할 때 필수. 단일 도메인 배포에서는 비워 둠 |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL`은 인증이 필요 없는 `/api/config` 엔드포인트에서 반환되며 클라이언트가 읽을 수 있습니다. 공개 설정으로 취급하고 자격 증명, 토큰 또는 기타 비밀을 절대 포함하지 마세요.
+</Callout>
 
 프런트엔드와 API가 서로 다른 host를 사용하고 브라우저가 API 도메인에 직접 접근한다면 `COOKIE_DOMAIN`을 설정해야 합니다. 설정하지 않으면 브라우저가 CSRF cookie를 읽지 못해 모든 쓰기 요청이 `403 CSRF validation failed`를 반환하고 읽기 요청만 정상 작동합니다. 두 host를 모두 포함하는 가장 좁은 상위 도메인을 사용하세요(`.example.com`보다 `.agent.example.com`이 더 적합). 이 설정은 로그인 세션 cookie를 해당 도메인의 모든 host로 확장하므로 모든 host를 같은 신뢰 주체가 운영할 때만 사용할 수 있습니다. 수정 후 두 host에서 이전 cookie를 삭제하고 다시 로그인해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 same-origin 구성을 사용해 브라우저가 app 도메인에만 접근한다면 비워 두세요. IP 주소는 입력하지 마세요. 브라우저가 IP Domain이 포함된 cookie를 무시합니다.
 

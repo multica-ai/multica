@@ -53,9 +53,14 @@ When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must
 | `FRONTEND_ORIGIN` | empty | Frontend origin users visit; used for CORS, cookies, and invitation links |
 | `MULTICA_APP_URL` | falls back to `FRONTEND_ORIGIN` | User-reachable web URL; CLI sign-in and account-link URLs use it |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL; used for webhook URLs and runtime connection instructions |
+| `MULTICA_DAEMON_SERVER_URL` | falls back to `MULTICA_PUBLIC_URL`, then `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | Server URL the API process inserts into `multica setup self-host`; set it when daemons reach the API at a different URL than the public webhook URL |
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
 | `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
 | `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` is returned by the unauthenticated `/api/config` endpoint and is visible to clients. Treat it as public configuration; never put credentials, tokens, or other secrets in it.
+</Callout>
 
 When the frontend and API run on different hosts and the browser talks to the API domain directly, you must set `COOKIE_DOMAIN` — otherwise the browser cannot read the CSRF cookie: every write request returns `403 CSRF validation failed` while reads work fine. Use the narrowest parent domain that covers both hosts (`.agent.example.com` over `.example.com`). It spreads the sign-in session cookie to every host under that domain, which is only acceptable when all of those hosts are operated by the same trusted party. After changing it, clear the old cookies on both hosts and sign in again. If you follow the same-origin recipe in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) (the browser only visits the app domain), keep it empty. Do not use an IP address — browsers ignore cookies whose Domain is an IP.
 

@@ -9,6 +9,15 @@
     "archive_all_read": "归档全部已读",
     "archive_completed": "归档已完成"
   },
+  "filters": {
+    "tooltip": "筛选收件箱",
+    "active_count_other": "{{count}} 个筛选条件",
+    "status": "状态",
+    "priority": "优先级",
+    "notification_count_other": "{{count}} 条通知",
+    "clear": "清除筛选",
+    "empty": "没有符合筛选条件的通知"
+  },
   "context_menu": {
     "mark_read": "标为已读",
     "mark_unread": "标为未读",

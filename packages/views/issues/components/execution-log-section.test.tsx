@@ -228,7 +228,7 @@ describe("TaskCommentCoverage", () => {
 });
 
 describe("execution log failure reasons", () => {
-  it("renders a failed run's reason in the active locale", () => {
+  function failedLogClient() {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -240,9 +240,12 @@ describe("execution log failure reasons", () => {
         failure_reason: "agent_error.provider_quota_limit",
       }),
     ]);
+    return queryClient;
+  }
 
+  it("renders a failed run's reason in the active locale", () => {
     renderWithI18n(
-      <QueryClientProvider client={queryClient}>
+      <QueryClientProvider client={failedLogClient()}>
         <ExecutionLogSection issueId="issue-1" />
       </QueryClientProvider>,
       { locale: "zh-Hans" },
@@ -253,6 +256,24 @@ describe("execution log failure reasons", () => {
     expect(
       screen.queryByText(/Provider quota exhausted/),
     ).not.toBeInTheDocument();
+  });
+
+  // #7411: the raw `task.error` is English prose the server writes for logs
+  // and classification. It used to be concatenated into the status tooltip,
+  // which put untranslated text — and absolute worktree paths — in front of
+  // every non-English workspace. The localized reason is the whole hover text
+  // now; the raw diagnostic lives in the transcript's Run details.
+  it("keeps the raw server error out of the status tooltip", () => {
+    renderWithI18n(
+      <QueryClientProvider client={failedLogClient()}>
+        <ExecutionLogSection issueId="issue-1" />
+      </QueryClientProvider>,
+      { locale: "zh-Hans" },
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示历史运行（1）" }));
+    expect(screen.queryByTitle(/provider returned 402/)).not.toBeInTheDocument();
+    expect(screen.getByTitle("提供商配额已用尽")).toBeInTheDocument();
   });
 });
 

@@ -1066,13 +1066,23 @@ describe("InboxItemListSchema", () => {
 
   it("parses a well-formed archived list and tolerates extra fields", () => {
     const parsed = parseWithFallback(
-      [row({ issue_status: "in_progress", details: { comment_id: "c-1" }, future_field: 1 })],
+      [row({
+        issue_status: "in_progress",
+        issue_priority: "high",
+        details: { comment_id: "c-1" },
+        future_field: 1,
+      })],
       InboxItemListSchema,
       EMPTY_INBOX_ITEMS,
       ENDPOINT,
     );
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ id: "inbox-1", archived: true });
+    expect(parsed[0]).toMatchObject({
+      id: "inbox-1",
+      archived: true,
+      issue_status: "in_progress",
+      issue_priority: "high",
+    });
   });
 
   it("keeps a notification type this client doesn't know yet", () => {
@@ -1094,6 +1104,17 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("returns the empty fallback when an issue projection is wrong-typed", () => {
+    expect(
+      parseWithFallback(
+        [row({ issue_priority: 3 })],
+        InboxItemListSchema,
+        EMPTY_INBOX_ITEMS,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_ITEMS);
   });
 
   it("returns the empty fallback for a non-array body", () => {

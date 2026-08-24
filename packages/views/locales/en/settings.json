@@ -7,7 +7,6 @@
     "show_archived": "Show archived ({{count}})",
     "archived_badge": "Archived",
     "archived_hint": "Retired from new assignments. Issues already on it keep it.",
-    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
     "reorder_failed": "Could not save the new order.",
     "actions": {
       "open": "Actions for {{name}}",

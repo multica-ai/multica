@@ -773,16 +773,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok CLI --effort vocabulary (grok 1.0.5: low, medium, high, xhigh).
-	// Grok cannot disable reasoning and does not accept none, minimal, or
-	// max. xhigh is grok-4.6-only; the daemon's per-model catalog rejects
-	// it for grok-4.5 after this server-side literal gate.
-	"grok": {
-		"low":    true,
-		"medium": true,
-		"high":   true,
-		"xhigh":  true,
-	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
@@ -801,8 +791,12 @@ var providerThinkingEnums = map[string]map[string]bool{
 // server accepts any well-formed token for them and lets the daemon's
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
-	"codex":    true,
-	"dsh":      true,
+	"codex": true,
+	"dsh":   true,
+	// Grok advertises each model's effort catalog through session/new, so the
+	// server does not maintain a provider-wide fixed enum. The daemon applies
+	// the selected effort with `--effort`, not session/set_config_option.
+	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
 }

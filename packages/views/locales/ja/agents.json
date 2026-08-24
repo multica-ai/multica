@@ -34,6 +34,7 @@
     "queued": "待機中",
     "idle": "アイドル"
   },
+  "presence_status_aria": "ステータス: {{status}}",
   "archived": {
     "active_link": "アクティブなエージェント",
     "title": "アーカイブ済みエージェント"
@@ -725,6 +726,7 @@
     "usage_chip_title": "この実行のトークンと推定費用",
     "details_branch": "ブランチ",
     "details_reason": "理由",
+    "details_diagnostics": "技術的な詳細",
     "copy_branch": "ブランチ名をコピー",
     "lane_model": "モデル",
     "lane_tool": "ツール",

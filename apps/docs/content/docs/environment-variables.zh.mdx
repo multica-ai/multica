@@ -53,9 +53,14 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `FRONTEND_ORIGIN` | 空 | 用户访问的前端 origin；用于 CORS、cookie 和邀请链接 |
 | `MULTICA_APP_URL` | 回退到 `FRONTEND_ORIGIN` | 用户可访问的 Web 地址；CLI 登录和账号绑定链接使用它 |
 | `MULTICA_PUBLIC_URL` | 空 | 公网 API 地址；用于 webhook URL 和运行时连接说明 |
+| `MULTICA_DAEMON_SERVER_URL` | 回退到 `MULTICA_PUBLIC_URL`，再回退到 `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | API 进程写入 `multica setup self-host` 命令的服务端地址；守护进程访问 API 的地址与公网 webhook 地址不同时设置 |
 | `CORS_ALLOWED_ORIGINS` | 空 | 额外允许的 HTTP origin，逗号分隔 |
 | `ALLOWED_ORIGINS` | 回退到 CORS / 前端地址 | WebSocket origin 白名单，逗号分隔 |
 | `COOKIE_DOMAIN` | 空 | 前后端不同 host 且浏览器直接访问 API 域时必须设置；单域部署保持为空 |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` 会由无需认证的 `/api/config` 接口返回，客户端可以读取。请将它视为公开配置，切勿填入凭据、令牌或其他密钥。
+</Callout>
 
 前端和 API 使用不同 host、且浏览器直接访问 API 域时，必须设置 `COOKIE_DOMAIN`，否则浏览器读不到 CSRF cookie——所有写请求返回 `403 CSRF validation failed`，而读请求一切正常。取值用能同时覆盖两个 host 的最窄父域（`.agent.example.com` 优于 `.example.com`）。它会把登录会话 cookie 扩散到该域下的所有 host，只有这些 host 都由同一可信主体运维时才可用。修改后需要在两个 host 上清除旧 cookie 并重新登录。若采用[自托管快速上手](/self-host-quickstart#3-选择访问方式)的同源配方（浏览器只访问 app 域），保持为空即可。不要填写 IP 地址，浏览器会忽略带 IP Domain 的 cookie。
 

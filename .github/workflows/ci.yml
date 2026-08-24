@@ -616,7 +616,7 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
-        # official cursor-agent.ps1 and pi.ps1 launch native children with
+        # official cursor-agent.ps1, pi.ps1, and qwen.ps1 launch native children with
         # `$args`, and PowerShell re-serialises them onto the child command
         # line. Under
         # Legacy native argument passing (powershell.exe 5.1, pwsh <= 7.2) a
@@ -627,7 +627,7 @@ jobs:
         # the backend job still runs the full package on Linux.
         # -v so a silent skip (no PowerShell host resolved, or a -run pattern
         # that stops matching) is visible in the log instead of passing as "ok".
-        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestQwenExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation|TestPlatformQwenInvocation)' -count=1 -timeout=5m
 
       - name: Test Windows OpenCode oversized prompt reaches stdin
         if: ${{ needs.changes.outputs.backend == 'true' }}

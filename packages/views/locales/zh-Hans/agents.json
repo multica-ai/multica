@@ -34,6 +34,7 @@
     "queued": "排队中",
     "idle": "空闲"
   },
+  "presence_status_aria": "状态：{{status}}",
   "archived": {
     "active_link": "活跃智能体",
     "title": "已归档智能体"
@@ -832,6 +833,7 @@
     "usage_chip_title": "这次运行消耗的 token 与估算费用",
     "details_branch": "分支",
     "details_reason": "原因",
+    "details_diagnostics": "原始诊断",
     "copy_branch": "复制分支名",
     "lane_model": "模型",
     "lane_tool": "工具",

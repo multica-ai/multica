@@ -698,10 +698,19 @@ RETURNING *;
 -- =====================
 
 -- name: ListAutopilotSubscribers :many
+-- Only current workspace members are effective subscribers. The membership
+-- join makes legacy rows left behind by older member-removal code inert on
+-- both the detail response and the dispatch path, so clients never round-trip
+-- a hidden departed member into an otherwise valid update.
 -- ORDER BY created_at keeps chip rendering stable across refreshes.
-SELECT * FROM autopilot_subscriber
-WHERE autopilot_id = $1
-ORDER BY created_at ASC, user_id ASC;
+SELECT s.* FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = $1
+  AND s.user_type = 'member'
+ORDER BY s.created_at ASC, s.user_id ASC;
 
 -- name: AddAutopilotSubscriber :exec
 INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
@@ -712,6 +721,17 @@ ON CONFLICT (autopilot_id, user_type, user_id) DO NOTHING;
 -- Paired with a re-insert loop to implement full-replace PATCH semantics.
 DELETE FROM autopilot_subscriber
 WHERE autopilot_id = $1;
+
+-- name: DeleteAutopilotSubscribersByMember :exec
+-- Autopilot subscribers carry no FK, so member removal must prune them in the
+-- same application transaction. Scope through the autopilot's workspace: the
+-- same user may remain subscribed to autopilots in another workspace.
+DELETE FROM autopilot_subscriber AS s
+USING autopilot AS a
+WHERE s.autopilot_id = a.id
+  AND a.workspace_id = sqlc.arg(workspace_id)
+  AND s.user_type = 'member'
+  AND s.user_id = sqlc.arg(user_id);
 
 -- =====================
 -- Autopilot Collaborators

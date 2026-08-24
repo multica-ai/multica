@@ -34,6 +34,7 @@
     "queued": "Queued",
     "idle": "Idle"
   },
+  "presence_status_aria": "Status: {{status}}",
   "archived": {
     "active_link": "Active agents",
     "title": "Archived agents"
@@ -846,6 +847,7 @@
     "usage_chip_title": "Tokens and estimated cost for this run",
     "details_branch": "Branch",
     "details_reason": "Reason",
+    "details_diagnostics": "Technical details",
     "copy_branch": "Copy branch name",
     "lane_model": "Model",
     "lane_tool": "Tools",

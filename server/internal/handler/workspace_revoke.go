@@ -14,8 +14,8 @@ import (
 // agent pinned to one of those runtimes is archived, every in-flight task on
 // those runtimes is cancelled (cancelled rather than failed so the daemon's
 // per-task status poller interrupts the running agent gracefully), the
-// daemon_token rows for those runtimes are deleted, and finally the member row
-// itself is removed.
+// member's durable subscriptions and daemon_token rows are deleted, and
+// finally the member row itself is removed.
 //
 // All DB writes run inside a single transaction so a partial revocation never
 // leaves the workspace half-converged — e.g. a member who is "gone" but whose
@@ -188,6 +188,18 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	// stops a departed member from accruing inbox rows, and stops a re-invite
 	// from silently restoring visibility of everything they used to watch.
 	if err := qtx.DeleteSubscriptionsByMember(ctx, db.DeleteSubscriptionsByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
+	// autopilot_subscriber is another FK-free subscription template. Leaving
+	// stale rows here made the detail API return a user the member picker could
+	// no longer render; the next full-replace PATCH then failed membership
+	// validation, blocking every edit to that autopilot. Prune only templates in
+	// this workspace so the same user's subscriptions elsewhere survive.
+	if err := qtx.DeleteAutopilotSubscribersByMember(ctx, db.DeleteAutopilotSubscribersByMemberParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
 	}); err != nil {

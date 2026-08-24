@@ -2197,14 +2197,15 @@ export const InboxUnreadSummarySchema = z.array(
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
 // ---------------------------------------------------------------------------
-// Archived inbox items (`/api/inbox/archived` GET).
+// Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still
 // parses and renders (the UI's type-label lookup already tolerates unknown
 // kinds). Nullable optional fields are declared optional as well, since older
 // rows can omit them entirely. On malformed JSON parseWithFallback returns the
-// empty list — the archived view then reads as empty rather than white-
-// screening the inbox.
+// empty list — the affected view then reads as empty rather than white-
+// screening the inbox. Both endpoints share this boundary because they return
+// the same row shape and both feed the status/priority filter UI.
 // ---------------------------------------------------------------------------
 
 export const InboxItemListSchema = z.array(
@@ -2219,6 +2220,8 @@ export const InboxItemListSchema = z.array(
       issue_id: z.string().nullish(),
       title: z.string(),
       body: z.string().nullish(),
+      issue_status: z.string().nullish(),
+      issue_priority: z.string().nullish(),
       read: z.boolean(),
       archived: z.boolean(),
       created_at: z.string(),
