@@ -1,0 +1,6 @@
+{
+  "ios": {
+    "NSPhotoLibraryUsageDescription": "Allow Multica to access your photos to attach images to issues and comments.",
+    "NSCameraUsageDescription": "Allow Multica to use your camera to take a profile photo."
+  }
+}

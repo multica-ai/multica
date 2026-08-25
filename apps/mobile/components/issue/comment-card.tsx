@@ -55,6 +55,7 @@ import { cn } from "@/lib/utils";
 import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { translate } from "@/i18n";
 
 interface Props {
   entry: TimelineEntry;
@@ -93,18 +94,14 @@ export function CommentCard({
   // CommentBody flips this via onPressChange so the outer bubble shell can
   // visually bind the sheet to the targeted entry.
   const [pressedEntryId, setPressedEntryId] = useState<string | null>(null);
-  const handlePressChange = useCallback(
-    (entryId: string, pressed: boolean) => {
-      setPressedEntryId((cur) => {
-        if (pressed) return entryId;
-        return cur === entryId ? null : cur;
-      });
-    },
-    [],
-  );
+  const handlePressChange = useCallback((entryId: string, pressed: boolean) => {
+    setPressedEntryId((cur) => {
+      if (pressed) return entryId;
+      return cur === entryId ? null : cur;
+    });
+  }, []);
   const isHighlighted =
-    pressedEntryId === entry.id ||
-    replies.some((r) => r.id === pressedEntryId);
+    pressedEntryId === entry.id || replies.some((r) => r.id === pressedEntryId);
   // Translucent primary-tinted background while ANY body inside this card
   // is in text-selection mode. Subtle visual cue that replaces the prior
   // Done pill — exit is via scroll / tab switch / selecting another body.
@@ -245,15 +242,31 @@ function ResolvedThreadBar({
         onPress={onExpand}
         className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
         accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
+        accessibilityLabel={
+          total === 1
+            ? translate(
+                "Resolved thread by {{authors}}, 1 message. Tap to expand.",
+                { authors: authorsLabel },
+              )
+            : translate(
+                "Resolved thread by {{authors}}, {{count}} messages. Tap to expand.",
+                { authors: authorsLabel, count: total },
+              )
+        }
       >
         <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
         <Text
           className="flex-1 text-sm text-muted-foreground"
           numberOfLines={1}
         >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
+          {total === 1
+            ? translate("Resolved · 1 message by {{authors}}", {
+                authors: authorsLabel,
+              })
+            : translate("Resolved · {{count}} messages by {{authors}}", {
+                authors: authorsLabel,
+                count: total,
+              })}
         </Text>
         <Ionicons name="chevron-down" size={14} color={mutedFg} />
       </Pressable>
@@ -291,17 +304,19 @@ function ResolvedIndicator({
       onPress={onCollapse}
       className="flex-row items-center gap-2 active:opacity-60"
       accessibilityRole="button"
-      accessibilityLabel="Collapse resolved thread"
+      accessibilityLabel={translate("Collapse resolved thread")}
     >
       <Ionicons name="checkmark-circle" size={14} color={mutedFg} />
       <Text className="text-xs text-muted-foreground flex-1" numberOfLines={1}>
-        Resolved by{" "}
+        {translate("Resolved by")}{" "}
         <Text className="text-xs text-foreground font-medium">
           {resolverName}
         </Text>
         {entry.resolved_at ? ` · ${timeAgo(entry.resolved_at)}` : ""}
       </Text>
-      <Text className="text-xs text-muted-foreground">Collapse</Text>
+      <Text className="text-xs text-muted-foreground">
+        {translate("Collapse")}
+      </Text>
     </Pressable>
   );
 }
@@ -387,9 +402,7 @@ function CommentBody({
   // routes to UIKit's native text-selection magnifier instead of our
   // gesture handler. Selection mode is exited via the Done pill, scrolling
   // the timeline, or unmounting the issue screen.
-  const isSelecting = useCommentSelectStore(
-    (s) => s.selectingId === entry.id,
-  );
+  const isSelecting = useCommentSelectStore((s) => s.selectingId === entry.id);
   const { getName } = useActorLookup();
   const userId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -489,7 +502,7 @@ function CommentBody({
         <Text className="text-sm font-medium text-foreground">{name}</Text>
         <Text className="text-xs text-muted-foreground">
           · {timeAgo(entry.created_at)}
-          {edited ? " · (edited)" : ""}
+          {edited ? translate(" · (edited)") : ""}
         </Text>
       </View>
       {entry.content ? (
@@ -549,28 +562,27 @@ function FailedActions({
   return (
     <View className="flex-row items-center gap-2 mt-0.5">
       <Ionicons name="alert-circle" size={14} color={destructive} />
-      <Text
-        className="flex-1 text-xs text-destructive"
-        numberOfLines={1}
-      >
-        {error || "Couldn't send"}
+      <Text className="flex-1 text-xs text-destructive" numberOfLines={1}>
+        {error || translate("Couldn't send")}
       </Text>
       <Pressable
         onPress={onRetry}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Retry sending comment"
+        accessibilityLabel={translate("Retry sending comment")}
       >
-        <Text className="text-xs text-primary font-medium">Retry</Text>
+        <Text className="text-xs text-primary font-medium">
+          {translate("Retry")}
+        </Text>
       </Pressable>
       <Pressable
         onPress={onDiscard}
         hitSlop={6}
         accessibilityRole="button"
-        accessibilityLabel="Discard failed comment"
+        accessibilityLabel={translate("Discard failed comment")}
       >
         <Text className="text-xs text-muted-foreground font-medium">
-          Discard
+          {translate("Discard")}
         </Text>
       </Pressable>
     </View>

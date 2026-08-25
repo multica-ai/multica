@@ -105,6 +105,7 @@ import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequenc
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { translate } from "@/i18n";
 
 interface Props {
   issue: Issue;
@@ -363,7 +364,7 @@ export function TimelineList({
       <IssueReactionRow issue={issue} />
       <View className="px-4 pt-4 pb-2 border-t border-border">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Activity
+          {translate("Activity")}
         </Text>
       </View>
       {timelineLoading && (!entries || entries.length === 0) ? (
@@ -384,14 +385,12 @@ export function TimelineList({
   // non-empty under a live highlight is the cheapest way to re-arm it.
   const hasData = dataWithDivider.length > 0;
   const flashListKey =
-    highlightCommentId && hasData
-      ? `hl-${highlightNonce ?? "0"}`
-      : "list";
+    highlightCommentId && hasData ? `hl-${highlightNonce ?? "0"}` : "list";
 
   return (
     <ImageSequenceProvider blocks={imageBlocks}>
-    <View className="flex-1">
-      {/* Outer Pressable owns the "tap anywhere outside the selected
+      <View className="flex-1">
+        {/* Outer Pressable owns the "tap anywhere outside the selected
           comment to exit text-selection mode" gesture. Disabled when
           no comment is selected → layout-only wrapper, every tap passes
           through to cells / chips / reactions. Active state captures any
@@ -400,84 +399,82 @@ export function TimelineList({
           `if (isSelecting) return body;`), so taps on the selected
           comment dismiss too, matching iOS Notes / iMessage. Scroll
           gestures are unaffected. */}
-      <Pressable
-        onPress={
-          selectingId
-            ? () => useCommentSelectStore.getState().clear()
-            : undefined
-        }
-        disabled={!selectingId}
-        style={{ flex: 1 }}
-      >
-      <FlashList
-        key={flashListKey}
-        ref={listRef}
-        data={dataWithDivider}
-        keyExtractor={(row) => row.entry.id}
-        ListHeaderComponent={ListHeader}
-        // Drag-to-dismiss keyboard — when the user scrolls the timeline
-        // while the composer keyboard is up, the keyboard slides down
-        // interactively (iMessage / WhatsApp / Slack idiom). Pairs with the
-        // composer's `onBlur` → auto-collapse to pill: scroll dismisses
-        // keyboard → TextInput blurs → composer collapses if empty.
-        keyboardDismissMode="on-drag"
-        // Tap-on-row inside the list (long-press a comment, tap a
-        // reaction) should still register even when the keyboard is up.
-        keyboardShouldPersistTaps="handled"
-        // FlashList v2 MVCP. `startRenderingFromBottom` only applies when a
-        // deep-link is active — a normal issue-open lands at the top so the
-        // user sees the header (title, description, status) first. After
-        // initial paint the (always-on) MVCP keeps visible content stable
-        // when upper rows resize via async markdown / WS events; we do NOT
-        // set `autoscrollToBottomThreshold` because timeline uses an
-        // explicit "↓ N new" chip instead of silently following appends.
-        maintainVisibleContentPosition={{
-          startRenderingFromBottom: !!highlightCommentId,
-        }}
-        // "Activity" is a section heading, not a sibling row — it should
-        // hug the first entry the way iOS Settings / Linear sections do.
-        // 4 px is just enough breathing room without making the heading
-        // float above the list. (12 px = row-to-row gap, wrong here.)
-        ListHeaderComponentStyle={{ marginBottom: 4 }}
-        ItemSeparatorComponent={RowSeparator}
-        renderItem={({ item }) => {
-          if (item.entry.id === DIVIDER_ID) {
-            return <UnreadDivider />;
+        <Pressable
+          onPress={
+            selectingId
+              ? () => useCommentSelectStore.getState().clear()
+              : undefined
           }
-          return item.entry.type === "comment" ? (
-            <CommentCard
-              entry={item.entry}
-              replies={item.replies}
-              issueId={issue.id}
-              issueIdentifier={issue.identifier}
-              highlightedCommentId={highlightedId}
-            />
-          ) : (
-            <ActivityRow entry={item.entry} />
-          );
-        }}
-        onScroll={handleScroll}
-        // Any user-initiated scroll exits comment text-selection mode —
-        // matches iMessage's behavior where scrolling implicitly commits /
-        // dismisses the selection caret. Hooks both drag-start and the
-        // momentum kick after a flick so a fast scroll can't escape.
-        onScrollBeginDrag={() =>
-          useCommentSelectStore.getState().clear()
-        }
-        onMomentumScrollBegin={() =>
-          useCommentSelectStore.getState().clear()
-        }
-        viewabilityConfigCallbackPairs={viewabilityCallbackPairs.current}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        contentContainerStyle={{ paddingBottom: 16 }}
-      />
-      </Pressable>
-      {newCount > 0 ? (
-        <NewCommentChip count={newCount} onPress={onJumpToNew} />
-      ) : null}
-    </View>
+          disabled={!selectingId}
+          style={{ flex: 1 }}
+        >
+          <FlashList
+            key={flashListKey}
+            ref={listRef}
+            data={dataWithDivider}
+            keyExtractor={(row) => row.entry.id}
+            ListHeaderComponent={ListHeader}
+            // Drag-to-dismiss keyboard — when the user scrolls the timeline
+            // while the composer keyboard is up, the keyboard slides down
+            // interactively (iMessage / WhatsApp / Slack idiom). Pairs with the
+            // composer's `onBlur` → auto-collapse to pill: scroll dismisses
+            // keyboard → TextInput blurs → composer collapses if empty.
+            keyboardDismissMode="on-drag"
+            // Tap-on-row inside the list (long-press a comment, tap a
+            // reaction) should still register even when the keyboard is up.
+            keyboardShouldPersistTaps="handled"
+            // FlashList v2 MVCP. `startRenderingFromBottom` only applies when a
+            // deep-link is active — a normal issue-open lands at the top so the
+            // user sees the header (title, description, status) first. After
+            // initial paint the (always-on) MVCP keeps visible content stable
+            // when upper rows resize via async markdown / WS events; we do NOT
+            // set `autoscrollToBottomThreshold` because timeline uses an
+            // explicit "↓ N new" chip instead of silently following appends.
+            maintainVisibleContentPosition={{
+              startRenderingFromBottom: !!highlightCommentId,
+            }}
+            // "Activity" is a section heading, not a sibling row — it should
+            // hug the first entry the way iOS Settings / Linear sections do.
+            // 4 px is just enough breathing room without making the heading
+            // float above the list. (12 px = row-to-row gap, wrong here.)
+            ListHeaderComponentStyle={{ marginBottom: 4 }}
+            ItemSeparatorComponent={RowSeparator}
+            renderItem={({ item }) => {
+              if (item.entry.id === DIVIDER_ID) {
+                return <UnreadDivider />;
+              }
+              return item.entry.type === "comment" ? (
+                <CommentCard
+                  entry={item.entry}
+                  replies={item.replies}
+                  issueId={issue.id}
+                  issueIdentifier={issue.identifier}
+                  highlightedCommentId={highlightedId}
+                />
+              ) : (
+                <ActivityRow entry={item.entry} />
+              );
+            }}
+            onScroll={handleScroll}
+            // Any user-initiated scroll exits comment text-selection mode —
+            // matches iMessage's behavior where scrolling implicitly commits /
+            // dismisses the selection caret. Hooks both drag-start and the
+            // momentum kick after a flick so a fast scroll can't escape.
+            onScrollBeginDrag={() => useCommentSelectStore.getState().clear()}
+            onMomentumScrollBegin={() =>
+              useCommentSelectStore.getState().clear()
+            }
+            viewabilityConfigCallbackPairs={viewabilityCallbackPairs.current}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+            }
+            contentContainerStyle={{ paddingBottom: 16 }}
+          />
+        </Pressable>
+        {newCount > 0 ? (
+          <NewCommentChip count={newCount} onPress={onJumpToNew} />
+        ) : null}
+      </View>
     </ImageSequenceProvider>
   );
 }
@@ -503,7 +500,7 @@ function UnreadDivider() {
     <View className="flex-row items-center gap-2 px-4">
       <View className="flex-1 h-px bg-destructive/40" />
       <Text className="text-[10px] uppercase tracking-wider font-medium text-destructive">
-        New
+        {translate("New")}
       </Text>
       <View className="flex-1 h-px bg-destructive/40" />
     </View>
@@ -535,7 +532,11 @@ function NewCommentChip({
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={`Jump to ${count} new ${count === 1 ? "message" : "messages"}`}
+      accessibilityLabel={
+        count === 1
+          ? translate("Jump to 1 new message")
+          : translate("Jump to {{count}} new messages", { count })
+      }
       style={{
         // shadow comes from system, not Tailwind — keeps the chip readable
         // against either light or dark timeline content beneath.

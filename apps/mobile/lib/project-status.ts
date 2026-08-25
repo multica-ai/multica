@@ -14,6 +14,7 @@
  *     mobile picks an i18n lib (web uses i18next).
  */
 import type { ProjectPriority, ProjectStatus } from "@multica/core/types";
+import { translate } from "@/i18n";
 
 export const PROJECT_STATUSES: ProjectStatus[] = [
   "planned",
@@ -32,19 +33,19 @@ export const PROJECT_PRIORITIES: ProjectPriority[] = [
 ];
 
 export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
-  planned: "Planned",
-  in_progress: "In Progress",
-  paused: "Paused",
-  completed: "Completed",
-  cancelled: "Cancelled",
+  planned: translate("Planned"),
+  in_progress: translate("In Progress"),
+  paused: translate("Paused"),
+  completed: translate("Completed"),
+  cancelled: translate("Cancelled"),
 };
 
 export const PROJECT_PRIORITY_LABEL: Record<ProjectPriority, string> = {
-  urgent: "Urgent",
-  high: "High",
-  medium: "Medium",
-  low: "Low",
-  none: "No priority",
+  urgent: translate("Urgent"),
+  high: translate("High"),
+  medium: translate("Medium"),
+  low: translate("Low"),
+  none: translate("No priority"),
 };
 
 // Single hex per status, used by the SVG status icon (NativeWind classes

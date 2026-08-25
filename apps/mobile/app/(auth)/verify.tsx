@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
 import { mapAuthError } from "@/lib/auth-error";
+import { translate } from "@/i18n";
 
 const CODE_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -43,7 +44,9 @@ export default function Verify() {
       router.replace("/");
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(mapAuthError(err, "Couldn't verify the code. Try again."));
+      setError(
+        mapAuthError(err, translate("Couldn't verify the code. Try again.")),
+      );
       setSubmitting(false);
       otpRef.current?.clear();
       setCode("");
@@ -62,7 +65,9 @@ export default function Verify() {
       setCode("");
     } catch (err) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      setError(mapAuthError(err, "Couldn't resend the code. Try again."));
+      setError(
+        mapAuthError(err, translate("Couldn't resend the code. Try again.")),
+      );
     } finally {
       setResending(false);
     }
@@ -79,10 +84,11 @@ export default function Verify() {
             <MulticaLogo size={32} />
             <View className="gap-1 items-center">
               <Text className="text-2xl font-semibold text-foreground">
-                Enter verification code
+                {translate("Enter verification code")}
               </Text>
               <Text className="text-sm text-muted-foreground text-center">
-                We sent a 6-digit code to {email}
+                {translate("We sent a 6-digit code to")}
+                {email}
               </Text>
             </View>
           </View>
@@ -108,7 +114,9 @@ export default function Verify() {
               disabled={submitting || code.length < CODE_LENGTH}
               onPress={() => submit(code)}
             >
-              <Text>{submitting ? "Verifying..." : "Verify"}</Text>
+              <Text>
+                {submitting ? translate("Verifying...") : translate("Verify")}
+              </Text>
             </Button>
 
             <Pressable
@@ -124,10 +132,12 @@ export default function Verify() {
                 }
               >
                 {resending
-                  ? "Sending..."
+                  ? translate("Sending...")
                   : cooldown > 0
-                    ? `Resend code in ${cooldown}s`
-                    : "Resend code"}
+                    ? translate("Resend code in {{count}}s", {
+                        count: cooldown,
+                      })
+                    : translate("Resend code")}
               </Text>
             </Pressable>
 
@@ -136,7 +146,7 @@ export default function Verify() {
               disabled={submitting}
               onPress={() => router.back()}
             >
-              <Text>Use a different email</Text>
+              <Text>{translate("Use a different email")}</Text>
             </Button>
           </View>
         </View>

@@ -26,6 +26,7 @@ import {
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   issueId: string;
@@ -91,7 +92,9 @@ function ActiveContent({ actors }: { actors: StackActor[] }) {
     <View className="flex-1 flex-row items-center gap-2">
       <AvatarStack actors={actors} max={3} size={24} />
       <PulseDot />
-      <Text className="text-sm font-medium text-foreground">Working</Text>
+      <Text className="text-sm font-medium text-foreground">
+        {translate("Working")}
+      </Text>
     </View>
   );
 }
@@ -100,7 +103,10 @@ function IdleContent({ count, mutedFg }: { count: number; mutedFg: string }) {
   return (
     <View className="flex-1 flex-row items-center gap-2">
       <Ionicons name="time-outline" size={16} color={mutedFg} />
-      <Text className="text-sm text-foreground">Runs · {count}</Text>
+      <Text className="text-sm text-foreground">
+        {translate("Runs ·")}
+        {count}
+      </Text>
     </View>
   );
 }

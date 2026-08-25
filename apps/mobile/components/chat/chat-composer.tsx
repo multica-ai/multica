@@ -35,6 +35,7 @@ import { MessageComposer } from "@/components/composer/message-composer";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   /** Current draft text (controlled). Empty string = no draft. */
@@ -104,19 +105,23 @@ export function ChatComposer({
         pathname: "/[workspace]/mention-picker",
         params: { workspace: wsSlug ?? "", mode: "chat" },
       }}
-      placeholder={sending ? "Agent is working…" : "Message…"}
+      placeholder={
+        sending ? translate("Agent is working…") : translate("Message…")
+      }
       pillLabel={
         sending
-          ? "Agent is working…"
+          ? translate("Agent is working…")
           : disabled
-            ? (disabledReason ?? "Chat unavailable")
-            : "Message…"
+            ? (disabledReason ?? translate("Chat unavailable"))
+            : translate("Message…")
       }
       pillIcon="chatbubble-ellipses-outline"
       disabled={disabled}
       disabledReason={disabledReason}
       isSending={sending}
-      renderStop={allowStop ? () => <StopButton onPress={handleStop} /> : undefined}
+      renderStop={
+        allowStop ? () => <StopButton onPress={handleStop} /> : undefined
+      }
       manageKeyboard={false}
     />
   );
@@ -136,7 +141,7 @@ function StopButton({ onPress }: { onPress: () => void }) {
         className="h-8 w-8 items-center justify-center rounded-full bg-foreground active:opacity-80"
         hitSlop={12}
         accessibilityRole="button"
-        accessibilityLabel="Stop agent"
+        accessibilityLabel={translate("Stop agent")}
       >
         <View
           style={{

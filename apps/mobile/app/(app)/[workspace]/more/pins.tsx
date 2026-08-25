@@ -47,6 +47,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 export default function PinsPage() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
@@ -76,11 +77,11 @@ export default function PinsPage() {
     return (
       <View className="flex-1 bg-background px-4 gap-3 pt-4">
         <Text className="text-sm text-destructive">
-          Failed to load pins:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
+          {translate("Failed to load pins:")}{" "}
+          {error instanceof Error ? error.message : translate("unknown error")}
         </Text>
         <Button variant="outline" onPress={() => refetch()}>
-          <Text>Retry</Text>
+          <Text>{translate("Retry")}</Text>
         </Button>
       </View>
     );
@@ -90,8 +91,9 @@ export default function PinsPage() {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-sm text-muted-foreground text-center">
-          No pins yet. Pin an issue or project from its actions menu to
-          surface it here.
+          {translate(
+            "No pins yet. Pin an issue or project from its actions menu to surface it here.",
+          )}
         </Text>
       </View>
     );
@@ -102,10 +104,7 @@ export default function PinsPage() {
       className="flex-1 bg-background"
       contentContainerClassName="pb-6"
       refreshControl={
-        <RefreshControl
-          refreshing={isRefetching}
-          onRefresh={() => refetch()}
-        />
+        <RefreshControl refreshing={isRefetching} onRefresh={() => refetch()} />
       }
       showsVerticalScrollIndicator={false}
     >
@@ -129,9 +128,7 @@ function PinRow({
   wsSlug: string | null;
 }) {
   if (pin.item_type === "issue") {
-    return (
-      <IssuePinRow pin={pin} wsId={wsId} wsSlug={wsSlug} />
-    );
+    return <IssuePinRow pin={pin} wsId={wsId} wsSlug={wsSlug} />;
   }
   return <ProjectPinRow pin={pin} wsId={wsId} wsSlug={wsSlug} />;
 }
@@ -150,8 +147,7 @@ function IssuePinRow({
   const issue = data && data.id ? (data as Issue) : null;
 
   if (isLoading) return <SkeletonRow />;
-  if (!issue)
-    return <MissingPinRow itemType="issue" itemId={pin.item_id} />;
+  if (!issue) return <MissingPinRow itemType="issue" itemId={pin.item_id} />;
 
   return (
     <IssueRow
@@ -173,9 +169,7 @@ function ProjectPinRow({
   wsId: string | null;
   wsSlug: string | null;
 }) {
-  const { data, isLoading } = useQuery(
-    projectDetailOptions(wsId, pin.item_id),
-  );
+  const { data, isLoading } = useQuery(projectDetailOptions(wsId, pin.item_id));
   const project = data && data.id ? (data as Project) : null;
 
   if (isLoading) return <SkeletonRow />;
@@ -220,7 +214,10 @@ function MissingPinRow({
     <Pressable
       onPress={() => deletePin.mutate({ itemType, itemId })}
       className="px-4 py-3 flex-row items-center gap-3 active:bg-secondary opacity-60"
-      accessibilityLabel={`Unavailable ${itemType}, tap to unpin`}
+      accessibilityLabel={translate("Unavailable {{itemType}}, tap to unpin", {
+        itemType:
+          itemType === "issue" ? translate("Issue") : translate("Project"),
+      })}
     >
       <Ionicons
         name="alert-circle-outline"
@@ -228,7 +225,8 @@ function MissingPinRow({
         color={THEME[colorScheme].mutedForeground}
       />
       <Text className="flex-1 text-sm text-muted-foreground" numberOfLines={1}>
-        Unavailable {itemType} — tap to unpin
+        {translate("Unavailable")}
+        {itemType} {translate("— tap to unpin")}
       </Text>
     </Pressable>
   );

@@ -23,6 +23,7 @@ import type {
   IssueStatusCategory,
   IssueStatusEntry,
 } from "@multica/core/types";
+import { translate } from "@/i18n";
 
 /**
  * The 7 categories in canonical display order. Mirrors `ALL_STATUSES` in
@@ -59,26 +60,28 @@ export const BOARD_CATEGORIES: IssueStatusCategory[] = STATUS_CATEGORIES.filter(
  * statuses through the catalog (`useStatusLabel`).
  */
 export const STATUS_LABEL: Record<IssueStatusCategory, string> = {
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  done: "Done",
-  blocked: "Blocked",
-  cancelled: "Cancelled",
+  backlog: translate("Backlog"),
+  todo: translate("Todo"),
+  in_progress: translate("In Progress"),
+  in_review: translate("In Review"),
+  done: translate("Done"),
+  blocked: translate("Blocked"),
+  cancelled: translate("Cancelled"),
 };
 
 export const PRIORITY_LABEL: Record<IssuePriority, string> = {
-  none: "No priority",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  urgent: "Urgent",
+  none: translate("No priority"),
+  low: translate("Low"),
+  medium: translate("Medium"),
+  high: translate("High"),
+  urgent: translate("Urgent"),
 };
 
 const CATEGORY_SET = new Set<string>(STATUS_CATEGORIES);
 
-export function isIssueStatusCategory(value: string): value is IssueStatusCategory {
+export function isIssueStatusCategory(
+  value: string,
+): value is IssueStatusCategory {
   return CATEGORY_SET.has(value);
 }
 
@@ -155,7 +158,10 @@ export function issueBehavesAsAny(
 }
 
 /** The categories that mean "this issue is closed" — done or cancelled. */
-export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["done", "cancelled"];
+export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = [
+  "done",
+  "cancelled",
+];
 
 /**
  * The `#rrggbb` a surface must paint one catalog entry with, or null when it
@@ -167,7 +173,9 @@ export const CLOSED_CATEGORIES: readonly IssueStatusCategory[] = ["done", "cance
  * same status in two different greens depending on which control you look at
  * (MUL-6440).
  */
-export function issueStatusColor(entry: IssueStatusEntry | undefined): string | null {
+export function issueStatusColor(
+  entry: IssueStatusEntry | undefined,
+): string | null {
   if (!entry || entry.is_system === true) return null;
   return entry.color || null;
 }
@@ -250,7 +258,9 @@ export function isCustomStatus(
   // `is_system` is the authority. The key comparison is the backstop for a
   // server that does not send it — the schema defaults it to false, and a
   // built-in must stay silent either way.
-  return entry.is_system !== true && statusKey !== catalog.categoryOf(statusKey);
+  return (
+    entry.is_system !== true && statusKey !== catalog.categoryOf(statusKey)
+  );
 }
 
 /** One row in the status picker / status filter. */
@@ -281,7 +291,9 @@ export function statusOptions(catalog: IssueStatusCatalog): StatusOption[] {
   return STATUS_CATEGORIES.flatMap<StatusOption>((category) => {
     const entries = catalog.inCategory(category);
     if (entries.length === 0) {
-      return [{ key: category, category, label: STATUS_LABEL[category], color: null }];
+      return [
+        { key: category, category, label: STATUS_LABEL[category], color: null },
+      ];
     }
     return entries.map((entry) => ({
       key: entry.key,

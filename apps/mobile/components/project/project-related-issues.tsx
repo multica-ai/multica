@@ -39,6 +39,7 @@ import {
   STATUS_LABEL,
   issueColumnCategory,
 } from "@/lib/issue-status";
+import { translate } from "@/i18n";
 
 interface Props {
   projectId: string;
@@ -71,11 +72,11 @@ export function ProjectRelatedIssues({ projectId }: Props) {
     return (
       <View className="px-4 py-6 gap-3">
         <Text className="text-sm text-destructive">
-          Failed to load issues:{" "}
-          {error instanceof Error ? error.message : "unknown error"}
+          {translate("Failed to load issues:")}{" "}
+          {error instanceof Error ? error.message : translate("unknown error")}
         </Text>
         <Button variant="outline" onPress={() => refetch()}>
-          <Text>Retry</Text>
+          <Text>{translate("Retry")}</Text>
         </Button>
       </View>
     );
@@ -84,7 +85,9 @@ export function ProjectRelatedIssues({ projectId }: Props) {
   if ((data?.length ?? 0) === 0) {
     return (
       <View className="px-4 py-6">
-        <Text className="text-sm text-muted-foreground">No issues yet.</Text>
+        <Text className="text-sm text-muted-foreground">
+          {translate("No issues yet.")}
+        </Text>
       </View>
     );
   }

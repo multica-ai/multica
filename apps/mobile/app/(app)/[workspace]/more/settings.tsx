@@ -12,7 +12,13 @@
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
-import { Alert, ActivityIndicator, Pressable, ScrollView, View } from "react-native";
+import {
+  Alert,
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
@@ -25,17 +31,15 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
-import {
-  useColorScheme,
-  type ThemePreference,
-} from "@/lib/use-color-scheme";
+import { useColorScheme, type ThemePreference } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { translate } from "@/i18n";
 
-const THEME_OPTIONS: Array<{ value: ThemePreference; label: string }> = [
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-  { value: "system", label: "System" },
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: "light", label: translate("Light") },
+  { value: "dark", label: translate("Dark") },
+  { value: "system", label: translate("System") },
 ];
 
 function initialsOf(name: string | undefined): string {
@@ -67,12 +71,12 @@ export default function SettingsPage() {
 
   const onSignOut = () => {
     Alert.alert(
-      "Sign out",
-      "You'll need to sign in again to use Multica on this device.",
+      translate("Sign out"),
+      translate("You'll need to sign in again to use Multica on this device."),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: translate("Cancel"), style: "cancel" },
         {
-          text: "Sign out",
+          text: translate("Sign out"),
           style: "destructive",
           onPress: async () => {
             await clearWorkspace();
@@ -92,12 +96,15 @@ export default function SettingsPage() {
       className="flex-1 bg-background"
       contentContainerClassName="px-4 py-4 gap-6"
     >
-      <SectionGroup title="Account">
+      <SectionGroup title={translate("Account")}>
         <NavRow
           onPress={goProfile}
           chevronColor={mutedFg}
           leading={
-            <Avatar alt={user?.name ?? "User avatar"} className="size-10">
+            <Avatar
+              alt={user?.name ?? translate("User avatar")}
+              className="size-10"
+            >
               {user?.avatar_url ? (
                 <AvatarImage source={{ uri: user.avatar_url }} />
               ) : null}
@@ -115,12 +122,12 @@ export default function SettingsPage() {
         <NavRow
           onPress={goNotifications}
           chevronColor={mutedFg}
-          title="Notifications"
-          subtitle="Inbox and system alerts"
+          title={translate("Notifications")}
+          subtitle={translate("Inbox and system alerts")}
         />
       </SectionGroup>
 
-      <SectionGroup title="Workspaces">
+      <SectionGroup title={translate("Workspaces")}>
         {isLoading ? (
           <View className="py-4 items-center">
             <ActivityIndicator />
@@ -128,7 +135,7 @@ export default function SettingsPage() {
         ) : error ? (
           <View className="p-4">
             <Text className="text-sm text-destructive">
-              Failed to load workspaces
+              {translate("Failed to load workspaces")}
             </Text>
           </View>
         ) : (
@@ -151,7 +158,7 @@ export default function SettingsPage() {
         )}
       </SectionGroup>
 
-      <SectionGroup title="Appearance">
+      <SectionGroup title={translate("Appearance")}>
         {/* Two converging entry points by design, NOT a double-fire:
               - Tap on small radio circle  → RadioGroupItem (Pressable, inner) consumes → onValueChange fires
               - Tap on text / row padding  → outer Pressable.onPress fires
@@ -186,7 +193,7 @@ export default function SettingsPage() {
 
       <View className="pt-2">
         <Button variant="destructive" onPress={onSignOut}>
-          <Text>Sign out</Text>
+          <Text>{translate("Sign out")}</Text>
         </Button>
       </View>
     </ScrollView>

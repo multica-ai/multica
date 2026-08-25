@@ -26,13 +26,20 @@
  * vertical footprint minimal.
  */
 import { useMemo } from "react";
-import { ActivityIndicator, Linking, Pressable, ScrollView, View } from "react-native";
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  ScrollView,
+  View,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { resolveAttachmentUrl } from "@/lib/attachment-url";
 import { useLightbox } from "@/lib/markdown/lightbox-provider";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { Text } from "@/components/ui/text";
+import { translate } from "@/i18n";
 
 /** Mention chip data — composer-local state. No store, no cross-route
  *  sharing. The composer owns the array and passes it in. */
@@ -98,7 +105,11 @@ export function ComposerAttachmentRow({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      contentContainerStyle={{ gap: 6, paddingHorizontal: 2, paddingVertical: 2 }}
+      contentContainerStyle={{
+        gap: 6,
+        paddingHorizontal: 2,
+        paddingVertical: 2,
+      }}
       keyboardShouldPersistTaps="handled"
     >
       {mentions.map((m) => (
@@ -155,7 +166,9 @@ function MentionChipView({
         onPress={() => onRemove(mention.type, mention.id)}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={`Remove mention ${mention.name}`}
+        accessibilityLabel={translate("Remove mention {{name}}", {
+          name: mention.name,
+        })}
         className="h-4 w-4 items-center justify-center"
       >
         <Ionicons name="close" size={12} color={theme.mutedForeground} />
@@ -208,11 +221,12 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
     }
   };
 
-  const iconName = item.status === "failed"
-    ? "refresh"
-    : isImage
-      ? "image-outline"
-      : "document-outline";
+  const iconName =
+    item.status === "failed"
+      ? "refresh"
+      : isImage
+        ? "image-outline"
+        : "document-outline";
 
   return (
     <Pressable
@@ -220,8 +234,10 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
       accessibilityRole={item.status === "failed" ? "button" : "image"}
       accessibilityLabel={
         item.status === "failed"
-          ? `Retry upload of ${item.filename}`
-          : `Open ${item.filename}`
+          ? translate("Retry upload of {{filename}}", {
+              filename: item.filename,
+            })
+          : translate("Open {{filename}}", { filename: item.filename })
       }
       className="flex-row items-center gap-1 h-7 px-2 rounded-full bg-secondary active:opacity-80"
     >
@@ -232,23 +248,20 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
           name={iconName}
           size={12}
           color={
-            item.status === "failed"
-              ? theme.destructive
-              : theme.mutedForeground
+            item.status === "failed" ? theme.destructive : theme.mutedForeground
           }
         />
       )}
-      <Text
-        className="text-xs text-foreground max-w-[120px]"
-        numberOfLines={1}
-      >
+      <Text className="text-xs text-foreground max-w-[120px]" numberOfLines={1}>
         {item.filename}
       </Text>
       <Pressable
         onPress={() => onRemove(item.localId)}
         hitSlop={8}
         accessibilityRole="button"
-        accessibilityLabel={`Remove ${item.filename}`}
+        accessibilityLabel={translate("Remove {{filename}}", {
+          filename: item.filename,
+        })}
         className="h-4 w-4 items-center justify-center"
       >
         <Ionicons name="close" size={12} color={theme.mutedForeground} />

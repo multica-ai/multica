@@ -29,6 +29,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { translate } from "@/i18n";
 
 interface Props {
   items: TaskMessagePayload[];
@@ -46,15 +47,19 @@ export function ChatTimeline({ items, isStreaming = false }: Props) {
       <CollapsibleTrigger asChild>
         <View
           accessibilityRole="button"
-          accessibilityLabel={`${processSteps.length} step${processSteps.length === 1 ? "" : "s"}`}
+          accessibilityLabel={
+            processSteps.length === 1
+              ? translate("1 step")
+              : translate("{{count}} steps", { count: processSteps.length })
+          }
           className="flex-row items-center gap-1 active:opacity-70"
         >
           <Ionicons name="chevron-forward" size={12} color="#71717a" />
           {isStreaming ? <StreamingDot /> : null}
           <Text className="text-xs text-muted-foreground">
             {processSteps.length === 1
-              ? "1 step"
-              : `${processSteps.length} steps`}
+              ? translate("1 step")
+              : translate("{{count}} steps", { count: processSteps.length })}
           </Text>
         </View>
       </CollapsibleTrigger>
@@ -202,7 +207,7 @@ function ToolResultRow({ item }: { item: TaskMessagePayload }) {
         <View className="ml-4 mt-1 rounded bg-muted/40 px-2 py-1.5">
           <Text className="text-xs text-muted-foreground">
             {output.length > 4000
-              ? `${output.slice(0, 4000)}\n…(truncated)`
+              ? output.slice(0, 4000) + "\n" + translate("…(truncated)")
               : output}
           </Text>
         </View>

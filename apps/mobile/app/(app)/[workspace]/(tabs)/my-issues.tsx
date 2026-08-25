@@ -51,6 +51,7 @@ import { groupIssuesByCategory } from "@/lib/group-issues-by-category";
 import { filterIssues } from "@/lib/filter-issues";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 // Mobile pill row has tight width on SE3 (375pt). Three pills + Filter icon
 // must fit in 343pt usable space, so the agents scope renders "Agents" — the
@@ -59,9 +60,9 @@ import { THEME } from "@/lib/theme";
 // (`involves_user_id`, MUL-2397) covers owned agents + related squads; the
 // empty state copy still says "agents or squads".
 const SCOPES: { value: MyIssuesScope; label: string }[] = [
-  { value: "assigned", label: "Assigned" },
-  { value: "created", label: "Created" },
-  { value: "agents", label: "Agents" },
+  { value: "assigned", label: translate("Assigned") },
+  { value: "created", label: translate("Created") },
+  { value: "agents", label: translate("Agents") },
 ];
 
 export default function MyIssues() {
@@ -115,12 +116,11 @@ export default function MyIssues() {
   const hasActiveFilters =
     statusFilters.length > 0 || priorityFilters.length > 0;
 
-  const showEmptyState =
-    !isLoading && !error && filtered.length === 0;
+  const showEmptyState = !isLoading && !error && filtered.length === 0;
 
   return (
     <View className="flex-1 bg-background">
-      <Header title="My Issues" right={<HeaderActions />} />
+      <Header title={translate("My Issues")} right={<HeaderActions />} />
       <ScopeToolbar
         scopes={SCOPES}
         scope={scope}
@@ -146,18 +146,20 @@ export default function MyIssues() {
       ) : error ? (
         <View className="px-4 gap-3 pt-4">
           <Text className="text-sm text-destructive">
-            Failed to load issues:{" "}
-            {error instanceof Error ? error.message : "unknown error"}
+            {translate("Failed to load issues:")}{" "}
+            {error instanceof Error
+              ? error.message
+              : translate("unknown error")}
           </Text>
           <Button variant="outline" onPress={() => refetch()}>
-            <Text>Retry</Text>
+            <Text>{translate("Retry")}</Text>
           </Button>
         </View>
       ) : showEmptyState ? (
         <EmptyState
           message={
             hasActiveFilters
-              ? "No issues match the current filters."
+              ? translate("No issues match the current filters.")
               : emptyMessageForScope(scope)
           }
         />
@@ -188,7 +190,6 @@ export default function MyIssues() {
           onRefresh={refetch}
         />
       )}
-
     </View>
   );
 }
@@ -215,7 +216,7 @@ function FilterButton({
         variant="outline"
         size="sm"
         onPress={onPress}
-        accessibilityLabel="Filter"
+        accessibilityLabel={translate("Filter")}
         className="w-9 px-0"
       >
         <Ionicons
@@ -271,7 +272,9 @@ function ScopeToolbar<S extends string>({
             >
               <Text
                 numberOfLines={1}
-                className={active ? "text-accent-foreground" : "text-muted-foreground"}
+                className={
+                  active ? "text-accent-foreground" : "text-muted-foreground"
+                }
               >
                 {s.label}
               </Text>
@@ -304,10 +307,18 @@ function ActiveFilterChips({
   return (
     <View className="flex-row flex-wrap gap-1.5 px-4 pb-2">
       {statusFilters.map((s) => (
-        <Chip key={`s-${s}`} label={statusLabelOf(s)} onClear={() => onClearStatus(s)} />
+        <Chip
+          key={`s-${s}`}
+          label={statusLabelOf(s)}
+          onClear={() => onClearStatus(s)}
+        />
       ))}
       {priorityFilters.map((p) => (
-        <Chip key={`p-${p}`} label={PRIORITY_LABEL[p]} onClear={() => onClearPriority(p)} />
+        <Chip
+          key={`p-${p}`}
+          label={PRIORITY_LABEL[p]}
+          onClear={() => onClearPriority(p)}
+        />
       ))}
     </View>
   );
@@ -365,10 +376,10 @@ function EmptyState({ message }: { message: string }) {
 function emptyMessageForScope(scope: MyIssuesScope): string {
   switch (scope) {
     case "assigned":
-      return "No issues assigned to you.";
+      return translate("No issues assigned to you.");
     case "created":
-      return "You haven't created any issues.";
+      return translate("You haven't created any issues.");
     case "agents":
-      return "No issues assigned to your agents or squads yet.";
+      return translate("No issues assigned to your agents or squads yet.");
   }
 }

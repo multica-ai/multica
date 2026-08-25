@@ -17,6 +17,7 @@ import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
+import { translate } from "@/i18n";
 
 /**
  * Shared Stack.Screen options for every iOS formSheet-presented sheet route.
@@ -135,21 +136,21 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]"
           options={{
-            title: "Issue",
-            headerBackTitle: "Back",
+            title: translate("Issue"),
+            headerBackTitle: translate("Back"),
           }}
         />
         <Stack.Screen
           name="project/[id]"
           options={{
-            title: "Project",
-            headerBackTitle: "Back",
+            title: translate("Project"),
+            headerBackTitle: translate("Back"),
           }}
         />
         <Stack.Screen
           name="project/[id]/edit"
           options={{
-            title: "Edit Project",
+            title: translate("Edit Project"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -157,7 +158,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="issue/[id]/edit"
           options={{
-            title: "Edit Issue",
+            title: translate("Edit Issue"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -165,7 +166,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="project/new"
           options={{
-            title: "New Project",
+            title: translate("New Project"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -175,10 +176,7 @@ export default function WorkspaceLayout() {
             `fitToContents` zero-size / padding bugs on iOS 26 + Expo 55),
             iOS native grabber, and contentStyle.height=100% as a safety
             net against the same zero-size class of bugs. */}
-        <Stack.Screen
-          name="issue/[id]/picker/status"
-          options={SHEET_OPTIONS}
-        />
+        <Stack.Screen name="issue/[id]/picker/status" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="issue/[id]/picker/priority"
           options={SHEET_OPTIONS}
@@ -195,19 +193,16 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: translate("Assignee"),
           }}
         />
-        <Stack.Screen
-          name="issue/[id]/picker/label"
-          options={SHEET_OPTIONS}
-        />
+        <Stack.Screen name="issue/[id]/picker/label" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="mention-picker"
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Mention",
+            title: translate("Mention"),
           }}
         />
         <Stack.Screen
@@ -235,10 +230,7 @@ export default function WorkspaceLayout() {
           name="project/[id]/picker/priority"
           options={SHEET_OPTIONS}
         />
-        <Stack.Screen
-          name="project/[id]/picker/lead"
-          options={SHEET_OPTIONS}
-        />
+        <Stack.Screen name="project/[id]/picker/lead" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="project/[id]/add-resource"
           options={SHEET_OPTIONS}
@@ -247,10 +239,7 @@ export default function WorkspaceLayout() {
             new-issue.tsx Stack.Screen (which is itself a `modal`).
             Expo Router 55 / RN Screens 4 support a formSheet pushed on top
             of a modal in the same Stack. */}
-        <Stack.Screen
-          name="new-issue-picker/status"
-          options={SHEET_OPTIONS}
-        />
+        <Stack.Screen name="new-issue-picker/status" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="new-issue-picker/priority"
           options={SHEET_OPTIONS}
@@ -260,13 +249,10 @@ export default function WorkspaceLayout() {
           options={{
             ...SHEET_OPTIONS,
             headerShown: true,
-            title: "Assignee",
+            title: translate("Assignee"),
           }}
         />
-        <Stack.Screen
-          name="new-issue-picker/project"
-          options={SHEET_OPTIONS}
-        />
+        <Stack.Screen name="new-issue-picker/project" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="new-issue-picker/due-date"
           options={SHEET_OPTIONS}
@@ -291,36 +277,57 @@ export default function WorkspaceLayout() {
         <Stack.Screen name="switch-workspace" options={SHEET_OPTIONS} />
         <Stack.Screen
           name="more/issues"
-          options={{ title: "Issues", headerBackTitle: "Back" }}
+          options={{
+            title: translate("Issues"),
+            headerBackTitle: translate("Back"),
+          }}
         />
         <Stack.Screen
           name="more/projects"
-          options={{ title: "Projects", headerBackTitle: "Back" }}
+          options={{
+            title: translate("Projects"),
+            headerBackTitle: translate("Back"),
+          }}
         />
         <Stack.Screen
           name="more/agents"
-          options={{ title: "Agents", headerBackTitle: "Back" }}
+          options={{
+            title: translate("Agents"),
+            headerBackTitle: translate("Back"),
+          }}
         />
         <Stack.Screen
           name="more/pins"
-          options={{ title: "Pinned", headerBackTitle: "Back" }}
+          options={{
+            title: translate("Pinned"),
+            headerBackTitle: translate("Back"),
+          }}
         />
         <Stack.Screen
           name="more/settings"
-          options={{ title: "Settings", headerBackTitle: "Back" }}
+          options={{
+            title: translate("Settings"),
+            headerBackTitle: translate("Back"),
+          }}
         />
         <Stack.Screen
           name="more/settings/profile"
-          options={{ title: "Profile", headerBackTitle: "Settings" }}
+          options={{
+            title: translate("Profile"),
+            headerBackTitle: translate("Settings"),
+          }}
         />
         <Stack.Screen
           name="more/settings/notifications"
-          options={{ title: "Notifications", headerBackTitle: "Settings" }}
+          options={{
+            title: translate("Notifications"),
+            headerBackTitle: translate("Settings"),
+          }}
         />
         <Stack.Screen
           name="new-issue"
           options={{
-            title: "New Issue",
+            title: translate("New Issue"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}
@@ -328,7 +335,7 @@ export default function WorkspaceLayout() {
         <Stack.Screen
           name="search"
           options={{
-            title: "Search",
+            title: translate("Search"),
             presentation: "modal",
             headerLeft: () => <ModalCloseButton />,
           }}

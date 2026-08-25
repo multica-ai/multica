@@ -14,6 +14,7 @@
  */
 import { router } from "expo-router";
 import { IconButton } from "@/components/ui/icon-button";
+import { translate } from "@/i18n";
 
 export function ModalCloseButton() {
   return (
@@ -23,7 +24,7 @@ export function ModalCloseButton() {
       variant="secondary"
       className="size-7 rounded-full"
       onPress={() => router.back()}
-      accessibilityLabel="Close"
+      accessibilityLabel={translate("Close")}
     />
   );
 }

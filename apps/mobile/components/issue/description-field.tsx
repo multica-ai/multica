@@ -16,11 +16,12 @@ import { AutosizeTextArea } from "@/components/ui/autosize-textarea";
 import { MIN_BODY_INPUT_HEIGHT_PX } from "@/components/ui/input-tokens";
 import { cn } from "@/lib/utils";
 import type { UseMentionInputReturn } from "@/lib/use-mention-input";
+import { translate } from "@/i18n";
 
 export function DescriptionField({
   description,
   disabled,
-  placeholder = "Description… (type @ to mention)",
+  placeholder = translate("Description… (type @ to mention)"),
 }: {
   description: UseMentionInputReturn;
   disabled: boolean;

@@ -25,10 +25,9 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { pickInlineColor } from "@/lib/inline-color";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
-type Row =
-  | { kind: "create"; name: string }
-  | { kind: "label"; label: Label };
+type Row = { kind: "create"; name: string } | { kind: "label"; label: Label };
 
 interface Props {
   attached: Label[];
@@ -62,15 +61,11 @@ export function LabelPickerBody({
     const q = query.trim();
     const qLower = q.toLowerCase();
 
-    const sorted = [...labels].sort((a, b) =>
-      a.name.localeCompare(b.name),
-    );
+    const sorted = [...labels].sort((a, b) => a.name.localeCompare(b.name));
     const filtered = qLower
       ? sorted.filter((l) => l.name.toLowerCase().includes(qLower))
       : sorted;
-    const exactMatch = sorted.some(
-      (l) => l.name.toLowerCase() === qLower,
-    );
+    const exactMatch = sorted.some((l) => l.name.toLowerCase() === qLower);
 
     // No query → pin attached labels at top, others below.
     if (!q) {
@@ -118,7 +113,7 @@ export function LabelPickerBody({
               style={{ backgroundColor: pickInlineColor(item.name) }}
             />
             <Text className="flex-1 text-base text-foreground">
-              Create &ldquo;{item.name}&rdquo;
+              {translate('Create "{{name}}"', { name: item.name })}
             </Text>
             <Ionicons name="add" size={20} color={checkColor} />
           </Pressable>
@@ -147,8 +142,8 @@ export function LabelPickerBody({
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No labels in this workspace yet."}
+              ? translate("No matches.")
+              : translate("No labels in this workspace yet.")}
           </Text>
         </View>
       }

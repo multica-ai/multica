@@ -33,6 +33,7 @@ import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { translate } from "@/i18n";
 
 const AVATAR_SIZE = 36;
 
@@ -157,62 +158,68 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
             !runnableAgentIds.has(item.squad.leader_id));
         return (
           <Pressable
-          disabled={needsRuntime}
-          onPress={() => select(item)}
-          className={cn(
-            "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
-            needsRuntime && "opacity-50",
-          )}
-        >
-          {item.kind === "unassigned" ? (
-            <View
-              className="rounded-full border border-dashed border-muted-foreground/40 items-center justify-center"
-              style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
-            >
-              <Text className="text-sm text-muted-foreground">∅</Text>
-            </View>
-          ) : item.kind === "member" ? (
-            <ActorAvatar
-              type="member"
-              id={item.member.user_id}
-              size={AVATAR_SIZE}
-            />
-          ) : item.kind === "agent" ? (
-            <ActorAvatar type="agent" id={item.agent.id} size={AVATAR_SIZE} />
-          ) : (
-            <ActorAvatar type="squad" id={item.squad.id} size={AVATAR_SIZE} />
-          )}
-          <Text className="flex-1 text-base text-foreground">
-            {item.kind === "unassigned"
-              ? "Unassigned"
-              : item.kind === "member"
-                ? item.member.name
-                : item.kind === "agent"
-                  ? item.agent.name
-                  : item.squad.name}
-          </Text>
-          {/* Right-aligned secondary label. Mirrors Apple's
+            disabled={needsRuntime}
+            onPress={() => select(item)}
+            className={cn(
+              "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
+              needsRuntime && "opacity-50",
+            )}
+          >
+            {item.kind === "unassigned" ? (
+              <View
+                className="rounded-full border border-dashed border-muted-foreground/40 items-center justify-center"
+                style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
+              >
+                <Text className="text-sm text-muted-foreground">∅</Text>
+              </View>
+            ) : item.kind === "member" ? (
+              <ActorAvatar
+                type="member"
+                id={item.member.user_id}
+                size={AVATAR_SIZE}
+              />
+            ) : item.kind === "agent" ? (
+              <ActorAvatar type="agent" id={item.agent.id} size={AVATAR_SIZE} />
+            ) : (
+              <ActorAvatar type="squad" id={item.squad.id} size={AVATAR_SIZE} />
+            )}
+            <Text className="flex-1 text-base text-foreground">
+              {item.kind === "unassigned"
+                ? translate("Unassigned")
+                : item.kind === "member"
+                  ? item.member.name
+                  : item.kind === "agent"
+                    ? item.agent.name
+                    : item.squad.name}
+            </Text>
+            {/* Right-aligned secondary label. Mirrors Apple's
               UITableViewCellStyleValue1 / UIListContentConfiguration.valueCell
               pattern used throughout iOS Settings — type tag in lighter font on
               the same row. Members carry no tag (they're the default actor). */}
-          {item.kind === "agent" ? (
-            <Text className="text-sm text-muted-foreground">
-              {isAgentRuntimeBound(item.agent) ? "Agent" : "Needs runtime"}
-            </Text>
-          ) : item.kind === "squad" ? (
-            <Text className="text-sm text-muted-foreground">
-              {needsRuntime ? "Leader needs runtime" : "Squad"}
-            </Text>
-          ) : null}
-          {isSelected(item) ? (
-            <Ionicons name="checkmark" size={20} color={checkColor} />
-          ) : null}
+            {item.kind === "agent" ? (
+              <Text className="text-sm text-muted-foreground">
+                {isAgentRuntimeBound(item.agent)
+                  ? translate("Agent")
+                  : translate("Needs runtime")}
+              </Text>
+            ) : item.kind === "squad" ? (
+              <Text className="text-sm text-muted-foreground">
+                {needsRuntime
+                  ? translate("Leader needs runtime")
+                  : translate("Squad")}
+              </Text>
+            ) : null}
+            {isSelected(item) ? (
+              <Ionicons name="checkmark" size={20} color={checkColor} />
+            ) : null}
           </Pressable>
         );
       }}
       ListEmptyComponent={
         <View className="px-3 py-8 items-center">
-          <Text className="text-sm text-muted-foreground">No matches.</Text>
+          <Text className="text-sm text-muted-foreground">
+            {translate("No matches.")}
+          </Text>
         </View>
       }
     />

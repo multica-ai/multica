@@ -49,6 +49,7 @@ import { issueColumnCategory } from "@/lib/issue-status";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { projectStatusLabel } from "@/lib/project-status";
 import { buildSearchRows, type RowItem } from "@/lib/search-rows";
+import { translate } from "@/i18n";
 
 const DEBOUNCE_MS = 300;
 const ISSUE_LIMIT = 20;
@@ -85,7 +86,8 @@ function HighlightText({
     let last = 0;
     let m: RegExpExecArray | null;
     while ((m = regex.exec(text)) !== null) {
-      if (m.index > last) out.push({ text: text.slice(last, m.index), hit: false });
+      if (m.index > last)
+        out.push({ text: text.slice(last, m.index), hit: false });
       out.push({ text: m[0], hit: true });
       last = regex.lastIndex;
     }
@@ -161,8 +163,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
   // (packages/views/search/search-command.tsx:632) and the backend only
   // populates `matched_snippet` for comment matches anyway
   // (server/internal/handler/issue.go:592). Keep mobile strictly aligned.
-  const showSnippet =
-    item.match_source === "comment" && !!item.matched_snippet;
+  const showSnippet = item.match_source === "comment" && !!item.matched_snippet;
   const { colorOf, labelOf } = useIssueStatuses();
   const category = issueColumnCategory(item);
   const statusLabel = labelOf(item.status);
@@ -330,10 +331,7 @@ export default function SearchModal() {
     queries: recentIds.map((id) => issueDetailOptions(wsId, id)),
   });
   const recentIssues = useMemo<Issue[]>(
-    () =>
-      recentQueries
-        .map((q) => q.data)
-        .filter((i): i is Issue => !!i),
+    () => recentQueries.map((q) => q.data).filter((i): i is Issue => !!i),
     [recentQueries],
   );
 
@@ -378,7 +376,10 @@ export default function SearchModal() {
           ),
         ]);
         if (!controller.signal.aborted) {
-          setResults({ issues: issueRes.issues, projects: projectRes.projects });
+          setResults({
+            issues: issueRes.issues,
+            projects: projectRes.projects,
+          });
           setIsLoading(false);
         }
       } catch {
@@ -399,8 +400,7 @@ export default function SearchModal() {
   );
 
   const trimmedQuery = query.trim();
-  const hasResults =
-    results.issues.length > 0 || results.projects.length > 0;
+  const hasResults = results.issues.length > 0 || results.projects.length > 0;
 
   // Build the FlatList data. One flat array of discriminated rows means a
   // single virtualised list covers Recent (empty-state) and the search results
@@ -427,9 +427,17 @@ export default function SearchModal() {
             </Text>
           );
         case "issue":
-          return <SearchIssueRow item={item.issue} query={item.query} slug={slug} />;
+          return (
+            <SearchIssueRow item={item.issue} query={item.query} slug={slug} />
+          );
         case "project":
-          return <SearchProjectRow item={item.project} query={item.query} slug={slug} />;
+          return (
+            <SearchProjectRow
+              item={item.project}
+              query={item.query}
+              slug={slug}
+            />
+          );
         case "recent":
           return <RecentRow item={item.issue} slug={slug} />;
       }
@@ -449,7 +457,7 @@ export default function SearchModal() {
           <TextInput
             value={query}
             onChangeText={handleChange}
-            placeholder="Search issues and projects"
+            placeholder={translate("Search issues and projects")}
             placeholderTextColor="#a1a1aa"
             autoFocus
             autoCorrect={false}
@@ -475,13 +483,15 @@ export default function SearchModal() {
             ) : trimmedQuery && !hasResults ? (
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
-                  No results for &ldquo;{trimmedQuery}&rdquo;
+                  {translate('No results for "{{query}}"', {
+                    query: trimmedQuery,
+                  })}
                 </Text>
               </View>
             ) : !trimmedQuery && recentIssues.length === 0 ? (
               <View className="items-center justify-center py-12 px-6">
                 <Text className="text-sm text-muted-foreground text-center">
-                  Type to search issues and projects.
+                  {translate("Type to search issues and projects.")}
                 </Text>
               </View>
             ) : null

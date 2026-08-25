@@ -40,6 +40,7 @@ import { useUpdateIssue } from "@/data/mutations/issues";
 import { buildIssueTextUpdate } from "@/data/issue-edit";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMentionInput } from "@/lib/use-mention-input";
+import { translate } from "@/i18n";
 
 export default function EditIssue() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -78,7 +79,14 @@ export default function EditIssue() {
       currentDescription.trim() !==
         stripChannelMediaMarkers(initialDescription).trim()
     );
-  }, [detail.data, seeded, title, initialTitle, currentDescription, initialDescription]);
+  }, [
+    detail.data,
+    seeded,
+    title,
+    initialTitle,
+    currentDescription,
+    initialDescription,
+  ]);
 
   const canSave =
     seeded && title.trim().length > 0 && dirty && !update.isPending;
@@ -89,12 +97,12 @@ export default function EditIssue() {
       return;
     }
     Alert.alert(
-      "Discard changes?",
-      "Your edits to this issue will be lost.",
+      translate("Discard changes?"),
+      translate("Your edits to this issue will be lost."),
       [
-        { text: "Keep editing", style: "cancel" },
+        { text: translate("Keep editing"), style: "cancel" },
         {
-          text: "Discard",
+          text: translate("Discard"),
           style: "destructive",
           onPress: () => router.back(),
         },
@@ -115,8 +123,8 @@ export default function EditIssue() {
       onSuccess: () => router.back(),
       onError: (err) => {
         Alert.alert(
-          "Failed to save",
-          err instanceof Error ? err.message : "Unknown error",
+          translate("Failed to save"),
+          err instanceof Error ? err.message : translate("Unknown error"),
         );
       },
     });
@@ -125,7 +133,7 @@ export default function EditIssue() {
   const headerLeft = useCallback(
     () => (
       <Pressable onPress={onCancel} className="px-1 py-1">
-        <Text className="text-base text-brand">Cancel</Text>
+        <Text className="text-base text-brand">{translate("Cancel")}</Text>
       </Pressable>
     ),
     [onCancel],
@@ -139,7 +147,7 @@ export default function EditIssue() {
         className={canSave ? "px-1 py-1" : "px-1 py-1 opacity-40"}
       >
         <Text className="text-base text-brand font-semibold">
-          {update.isPending ? "Saving…" : "Save"}
+          {update.isPending ? translate("Saving…") : translate("Save")}
         </Text>
       </Pressable>
     ),
@@ -159,14 +167,16 @@ export default function EditIssue() {
           keyboardShouldPersistTaps="handled"
         >
           {!detail.data ? (
-            <Text className="text-sm text-muted-foreground">Loading…</Text>
+            <Text className="text-sm text-muted-foreground">
+              {translate("Loading…")}
+            </Text>
           ) : (
             <>
-              <Field label="Title">
+              <Field label={translate("Title")}>
                 <TextInput
                   value={title}
                   onChangeText={setTitle}
-                  placeholder="Issue title"
+                  placeholder={translate("Issue title")}
                   placeholderTextColor={MOBILE_PLACEHOLDER_COLOR}
                   className="text-base text-foreground bg-secondary/50 rounded-md px-3 py-2"
                   returnKeyType="next"
@@ -174,7 +184,7 @@ export default function EditIssue() {
                 />
               </Field>
 
-              <Field label="Description">
+              <Field label={translate("Description")}>
                 <DescriptionField
                   description={description}
                   disabled={update.isPending}

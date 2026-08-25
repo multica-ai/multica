@@ -19,41 +19,50 @@ import { Separator } from "@/components/ui/separator";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceOptions } from "@/data/queries/notification-preferences";
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
+import { translate } from "@/i18n";
 
-const INBOX_GROUPS: Array<{
+const INBOX_GROUPS: {
   key: Exclude<NotificationGroupKey, "system_notifications">;
   label: string;
   description: string;
-}> = [
+}[] = [
   {
     key: "assignments",
-    label: "Assignments",
-    description: "When you're assigned an issue or removed as assignee.",
+    label: translate("Assignments"),
+    description: translate(
+      "When you're assigned an issue or removed as assignee.",
+    ),
   },
   {
     key: "status_changes",
-    label: "Status changes",
-    description: "When an issue's status changes.",
+    label: translate("Status changes"),
+    description: translate("When an issue's status changes."),
   },
   {
     key: "comments",
-    label: "Comments",
-    description: "New comments on issues you're subscribed to.",
+    label: translate("Comments"),
+    description: translate("New comments on issues you're subscribed to."),
   },
   {
     key: "mentions",
-    label: "Mentions",
-    description: "When someone @mentions you, including @all and @squad.",
+    label: translate("Mentions"),
+    description: translate(
+      "When someone @mentions you, including @all and @squad.",
+    ),
   },
   {
     key: "updates",
-    label: "Issue updates",
-    description: "Edits to title, description, labels, priority, or due date.",
+    label: translate("Issue updates"),
+    description: translate(
+      "Edits to title, description, labels, priority, or due date.",
+    ),
   },
   {
     key: "agent_activity",
-    label: "Agent activity",
-    description: "When an agent picks up, runs, or completes a task.",
+    label: translate("Agent activity"),
+    description: translate(
+      "When an agent picks up, runs, or completes a task.",
+    ),
   },
 ];
 
@@ -91,7 +100,7 @@ export default function NotificationsSettingsScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-background px-6">
         <Text className="text-sm text-destructive text-center">
-          Failed to load notification preferences.
+          {translate("Failed to load notification preferences.")}
         </Text>
       </View>
     );
@@ -103,8 +112,8 @@ export default function NotificationsSettingsScreen() {
       contentContainerClassName="px-4 py-4 gap-6"
     >
       <Section
-        title="Inbox notifications"
-        description="Which events show up in your inbox."
+        title={translate("Inbox notifications")}
+        description={translate("Which events show up in your inbox.")}
       >
         {INBOX_GROUPS.map((group, idx) => {
           const enabled = preferences[group.key] !== "muted";
@@ -132,16 +141,18 @@ export default function NotificationsSettingsScreen() {
       </Section>
 
       <Section
-        title="System"
-        description="Multica-wide announcements and important account events."
+        title={translate("System")}
+        description={translate(
+          "Multica-wide announcements and important account events.",
+        )}
       >
         <View className="flex-row items-center px-4 py-3 gap-3">
           <View className="flex-1">
             <Text className="text-base font-medium text-foreground">
-              System notifications
+              {translate("System notifications")}
             </Text>
             <Text className="text-xs text-muted-foreground mt-0.5">
-              Account changes, security alerts, product updates.
+              {translate("Account changes, security alerts, product updates.")}
             </Text>
           </View>
           <Switch

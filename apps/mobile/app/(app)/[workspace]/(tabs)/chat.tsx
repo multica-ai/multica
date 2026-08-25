@@ -31,20 +31,11 @@
  *   patch pendingTask with server task_id + created_at.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  View,
-} from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, View } from "react-native";
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  Agent,
-  ChatMessage,
-  ChatPendingTask,
-} from "@multica/core/types";
+import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import {
   enqueuePendingChatTask,
   hideQueuedChatMessages,
@@ -92,6 +83,7 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { translate } from "@/i18n";
 
 export default function ChatTab() {
   const qc = useQueryClient();
@@ -287,15 +279,19 @@ export default function ChatTab() {
       // this state; this is the belt-and-braces guard.
       if (accessRevoked) {
         Alert.alert(
-          "No permission to run this agent",
-          "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+          translate("No permission to run this agent"),
+          translate(
+            "You no longer have permission to run this agent, so the message was not sent. Ask its owner for access.",
+          ),
         );
         return;
       }
       if (!runtimeBound) {
         Alert.alert(
-          "Runtime required",
-          "Bind a runtime to this agent on web or desktop before sending a message.",
+          translate("Runtime required"),
+          translate(
+            "Bind a runtime to this agent on web or desktop before sending a message.",
+          ),
         );
         return;
       }
@@ -308,7 +304,7 @@ export default function ChatTab() {
         // Session create runs the same invoke gate as a send, so a permission
         // change refuses here too — and this is the only layer that sees the
         // reason code (MUL-6380).
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(translate("Message not sent"), sendFailureMessage(err));
         throw err;
       }
       if (!sessionId) return;
@@ -326,20 +322,18 @@ export default function ChatTab() {
       qc.setQueryData<ChatMessage[]>(chatKeys.messages(sessionId), (old) =>
         old ? [...old, optimistic] : [optimistic],
       );
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(sessionId),
-        (old) =>
-          enqueuePendingChatTask(
-            old,
-            {
-              task_id: optimisticTaskId,
-              status: "queued",
-              created_at: sentAt,
-              message_id: optimistic.id,
-              content,
-            },
-            Boolean(old?.task_id),
-          ),
+      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
+        enqueuePendingChatTask(
+          old,
+          {
+            task_id: optimisticTaskId,
+            status: "queued",
+            created_at: sentAt,
+            message_id: optimistic.id,
+            content,
+          },
+          Boolean(old?.task_id),
+        ),
       );
       if (isNewSession) {
         promoteNewDraft(sessionId);
@@ -390,7 +384,7 @@ export default function ChatTab() {
         // The composer restores the draft on a thrown rejection but says nothing
         // about it, so a revoked-permission 403 used to read as a silent no-op
         // (MUL-6380). Name the cause here: only this layer sees the error body.
-        Alert.alert("Message not sent", sendFailureMessage(err));
+        Alert.alert(translate("Message not sent"), sendFailureMessage(err));
         throw err;
       }
     },
@@ -415,7 +409,8 @@ export default function ChatTab() {
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
       removePendingChatTask(old, taskId),
     );
-    void api.cancelTaskById(taskId)
+    void api
+      .cancelTaskById(taskId)
       .catch(() => {
         // Silent — task may have already terminated server-side.
       })
@@ -449,12 +444,12 @@ export default function ChatTab() {
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;
     Alert.alert(
-      "Delete this chat?",
-      activeSession.title || "Untitled chat",
+      translate("Delete this chat?"),
+      activeSession.title || translate("Untitled chat"),
       [
-        { text: "Cancel", style: "cancel" },
+        { text: translate("Cancel"), style: "cancel" },
         {
-          text: "Delete",
+          text: translate("Delete"),
           style: "destructive",
           onPress: () => {
             const id = activeSession.id;
@@ -484,7 +479,7 @@ export default function ChatTab() {
           ? "This chat is archived"
           : !runtimeBound
             ? "Agent needs a runtime"
-          : undefined;
+            : undefined;
 
   return (
     <View className="flex-1 bg-background">

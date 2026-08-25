@@ -8,7 +8,13 @@
  * via `getRepoUrl()` only when the dispatch knows the type, so a future
  * resource_type renders as a generic row with the label instead of crashing.
  */
-import { ActivityIndicator, Alert, Linking, Pressable, View } from "react-native";
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Pressable,
+  View,
+} from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import { Ionicons } from "@expo/vector-icons";
 import type {
@@ -21,6 +27,7 @@ import { useDeleteProjectResource } from "@/data/mutations/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 interface Props {
   projectId: string;
@@ -44,28 +51,27 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
   };
 
   const onLongPress = (resource: ProjectResource) => {
-    Alert.alert(
-      "Detach resource?",
-      describeResource(resource),
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Detach",
-          style: "destructive",
-          onPress: () => remove.mutate(resource.id),
-        },
-      ],
-    );
+    Alert.alert(translate("Detach resource?"), describeResource(resource), [
+      { text: translate("Cancel"), style: "cancel" },
+      {
+        text: translate("Detach"),
+        style: "destructive",
+        onPress: () => remove.mutate(resource.id),
+      },
+    ]);
   };
 
   return (
     <View>
       <View className="flex-row items-center justify-between px-4 py-2 bg-background">
         <Text className="text-xs uppercase tracking-wider text-muted-foreground font-medium">
-          Resources
+          {translate("Resources")}
         </Text>
-        <Pressable onPress={onAdd} className="px-2 py-1 active:bg-secondary rounded">
-          <Text className="text-xs text-brand">Add</Text>
+        <Pressable
+          onPress={onAdd}
+          className="px-2 py-1 active:bg-secondary rounded"
+        >
+          <Text className="text-xs text-brand">{translate("Add")}</Text>
         </Pressable>
       </View>
       {isLoading ? (
@@ -75,7 +81,7 @@ export function ProjectResourcesSection({ projectId, onAdd }: Props) {
       ) : !resources || resources.length === 0 ? (
         <View className="px-4 py-3">
           <Text className="text-sm text-muted-foreground/70">
-            No resources attached.
+            {translate("No resources attached.")}
           </Text>
         </View>
       ) : (

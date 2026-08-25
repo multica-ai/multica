@@ -19,6 +19,7 @@ import { projectListOptions } from "@/data/queries/projects";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
+import { translate } from "@/i18n";
 
 type Row = { kind: "none" } | { kind: "project"; project: Project };
 
@@ -92,11 +93,10 @@ export function ProjectPickerBody({ value, query, onChange }: Props) {
           ) : (
             <ProjectIcon icon={item.project.icon} size="md" />
           )}
-          <Text
-            className="flex-1 text-base text-foreground"
-            numberOfLines={1}
-          >
-            {item.kind === "none" ? "No project" : item.project.title}
+          <Text className="flex-1 text-base text-foreground" numberOfLines={1}>
+            {item.kind === "none"
+              ? translate("No project")
+              : item.project.title}
           </Text>
           {isSelected(item) ? (
             <Ionicons name="checkmark" size={20} color={checkColor} />
@@ -107,8 +107,10 @@ export function ProjectPickerBody({ value, query, onChange }: Props) {
         <View className="px-3 py-8 items-center">
           <Text className="text-sm text-muted-foreground text-center">
             {query
-              ? "No matches."
-              : "No projects in this workspace yet.\nCreate them on web."}
+              ? translate("No matches.")
+              : translate(
+                  "No projects in this workspace yet.\nCreate them on web.",
+                )}
           </Text>
         </View>
       }
