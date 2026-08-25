@@ -132,3 +132,23 @@ Set via API: `PATCH /api/agents/{id}` with `"verify_agent_id": "<uuid>"`
 issue whenever this agent completes work that produced a branch; its handoff
 note names the branch to check out and asks for a PASS/FAIL verdict comment.
 Verifier failures are non-retryable by taxonomy.
+
+### Autonomous development setup (multica-dev workspace) — 2026-08-25
+
+Dogfooding: run Multica on itself for `my-fixes` development.
+
+1. `multica workspace create --name multica-dev --slug multica-dev` → clones `scotthawes/multica` `my-fixes` as workspace repo, `WorkspacesRoot` `~/multica_workspaces_multica-dev`.
+2. Agents per role: `Builder` (`muse-spark` fixer), `Reviewer` (`minimax-m3` oracle), `QA` (`deepseek` tester), `Docs` (`qwen` librarian) — chain `verify_agent_id` `Builder→QA→Reviewer`.
+3. `multica autopilot create --kind event --event-filters '[{"event":"task.completed"}]'` → `GAP-31` `maybeEnqueueEventTriggers` handles `task.completed → next agent`, no schedule poll; keep `schedule` nightly for retention sweeps only (`GAP-9`).
+4. `multica autopilot create --kind schedule --cron "0 2 * * *"` for `budget`/`disk` sweeps already `GAP-8/9`.
+5. Enable `MULTICA_AGENT_WRAPPER` sandbox + `custom_env` encryption `GAP-10` when secrets move.
+6. Wire `.env` `MULTICA_BUDGET_MAX_*` `5/500k/60m` + `PROVIDER_CEILING/FAILOVER` already `42249` live — reuse for `multica-dev` tasks.
+
+### Missing AI tools (next gaps)
+
+- **Reviewer verifier**: exists `GAP-24` but not wired to all delivery agents → wire `Reviewer 2` as verifier for delivery agents + `Test Harness` `go test` gate.
+- **Cost observability**: `GAP-4` `usageByModel` + `GAP-28` caps logged but no dashboard → add `GAP-6` `MULTICA_NOTIFY_SINKS` webhook to `PostHog`/`Grafana` for `token/cost` per model.
+- **Semantic search**: no vector index for codebase → add `repoCache` + `pgvector` `issue`/`code` embeddings for `PriorRunDigest` relevance.
+- **Prompt optimizer**: no `prompt-optimizer` skill linked → add `foundry prompt-optimizer` for `handoffNote`/`issue_context` templates.
+- **External dispatch**: no `MCP` tools for `gh`, `docker`, `cloudflared` → add `mcp: github-gh`, `docker-mcp` to `agent` `Workflow` for autonomous PR/migration.
+- **Blocked deps API**: `issue_dependency` `blocked_by` edges have no API — insert via SQL until handler lands.
