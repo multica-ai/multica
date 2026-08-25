@@ -120,13 +120,14 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
   const canReadRuntime =
     runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
+  const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
   // loading, or discovery failed) and must not trigger any clearing.
   const modelsQuery = useQuery(
-    runtimeModelsOptions(isOnline && canReadRuntime ? agent.runtime_id : null),
+    runtimeModelsOptions(canDiscoverRuntimeModels ? agent.runtime_id : null),
   );
   const modelCatalog = useMemo<ModelCatalog>(
     () =>
@@ -274,7 +275,7 @@ export function AgentDetailInspector({
               variant="field"
               showLabel={false}
               runtimeId={agent.runtime_id}
-              runtimeOnline={!!isOnline}
+              runtimeOnline={canDiscoverRuntimeModels}
               value={agent.model ?? ""}
               canEdit={canEdit}
               onChange={handleModelChange}
@@ -283,7 +284,7 @@ export function AgentDetailInspector({
           <ThinkingSettingField
             label={t(($) => $.inspector.prop_thinking)}
             runtimeId={agent.runtime_id}
-            runtimeOnline={!!isOnline}
+            runtimeOnline={canDiscoverRuntimeModels}
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.thinking_level ?? ""}
@@ -295,7 +296,7 @@ export function AgentDetailInspector({
           <ServiceTierSettingField
             label={t(($) => $.inspector.prop_speed)}
             runtimeId={agent.runtime_id}
-            runtimeOnline={!!isOnline}
+            runtimeOnline={canDiscoverRuntimeModels}
             provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
