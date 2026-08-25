@@ -12,7 +12,10 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "@multica/core/agents";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
+import {
+  isRuntimeUsableForUser,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -115,13 +118,15 @@ export function AgentDetailInspector({
   });
 
   const isOnline = runtime?.status === "online";
+  const canReadRuntime =
+    runtime != null && isRuntimeUsableForUser(runtime, currentUserId);
   const nameInvalid = name.trim().length === 0;
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
   // loading, or discovery failed) and must not trigger any clearing.
   const modelsQuery = useQuery(
-    runtimeModelsOptions(isOnline ? agent.runtime_id : null),
+    runtimeModelsOptions(isOnline && canReadRuntime ? agent.runtime_id : null),
   );
   const modelCatalog = useMemo<ModelCatalog>(
     () =>

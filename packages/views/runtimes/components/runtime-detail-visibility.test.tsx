@@ -122,7 +122,9 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 // Stubbing ProviderLogo / UsageSection avoids dragging in chart libs and
 // additional query keys we don't care about here.
 vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("./usage-section", () => ({ UsageSection: () => null }));
+vi.mock("./usage-section", () => ({
+  UsageSection: () => <div data-testid="usage-section" />,
+}));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
 vi.mock("../../agents/presence", () => ({
   availabilityConfig: { offline: { dotClass: "", textClass: "" } },
@@ -280,6 +282,35 @@ describe("RuntimeDetail visibility section", () => {
     );
     expect(screen.getByText("Private")).toBeInTheDocument();
     expect(screen.queryByText("Public")).not.toBeInTheDocument();
+  });
+
+  it("hides usage from a workspace admin viewing another member's private runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Delete runtime/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows usage to a workspace admin viewing another member's public runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "public" }),
+    );
+
+    expect(screen.getByTestId("usage-section")).toBeInTheDocument();
   });
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime

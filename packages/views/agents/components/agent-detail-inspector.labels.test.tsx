@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 
+const mockUseQuery = vi.hoisted(() => vi.fn());
+
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: undefined, isSuccess: false }),
+  useQuery: (options: unknown) => {
+    mockUseQuery(options);
+    return { data: undefined, isSuccess: false };
+  },
 }));
 
 // The picker is the only way agent labels ever reached the agent settings
@@ -45,7 +50,10 @@ const agent = {
 } as Agent;
 
 describe("AgentDetailInspector labels", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    mockUseQuery.mockClear();
+  });
 
   // Agent labels were removed from the product (MUL-5600). Label Settings no
   // longer manages an agent catalog, so an attach-only picker here would be a
@@ -68,5 +76,41 @@ describe("AgentDetailInspector labels", () => {
 
     expect(screen.queryByTestId("resource-label-picker")).toBeNull();
     expect(screen.queryByText("Labels")).toBeNull();
+  });
+
+  it("does not discover models for another member's private runtime", () => {
+    const privateRuntime = {
+      id: "runtime-1",
+      workspace_id: "workspace-1",
+      daemon_id: "daemon-1",
+      name: "Private runtime",
+      runtime_mode: "local",
+      provider: "codex",
+      launch_header: "",
+      status: "online",
+      device_info: "Mac",
+      metadata: {},
+      owner_id: "user-2",
+      visibility: "private",
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    } satisfies AgentRuntime;
+
+    renderWithI18n(
+      <AgentDetailInspector
+        agent={agent}
+        runtime={privateRuntime}
+        runtimes={[privateRuntime]}
+        members={[]}
+        currentUserId="admin-1"
+        canEdit
+        onUpdate={vi.fn(async () => {})}
+      />,
+    );
+
+    expect(mockUseQuery).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false }),
+    );
   });
 });

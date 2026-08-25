@@ -119,6 +119,7 @@ export function RuntimeDetail({
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;
+  const canReadRuntime = isRuntimeOwner || runtime.visibility === "public";
   const runtimeProfile: RuntimeProfile | null = runtime.profile_id
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
     : null;
@@ -193,7 +194,7 @@ export function RuntimeDetail({
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
-            <UsageSection runtime={runtime} />
+            {canReadRuntime && <UsageSection runtime={runtime} />}
           </div>
 
           {/* Right rail: serving agents + diagnostics */}
