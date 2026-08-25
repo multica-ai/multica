@@ -151,7 +151,14 @@ if [ "${FORK_POINT}" = "${UPSTREAM_HEAD}" ]; then
 fi
 
 BRANCH="upstream-sync/${FROM_LABEL}-to-${TARGET_TAG}"
-git checkout -b "${BRANCH}" "${FORK_REMOTE}/${FORK_BRANCH}"
+# -B, not -b: a prior attempt at this exact hop may have created this branch
+# locally and then died before pushing it (crash, killed tick, ANK-117's
+# "branch already exists" block). stage_syncing() in sync-tick.sh already
+# refuses to get here if a PUSHED branch for this hop has no open PR
+# (stale_sync_branch), so any local branch of this name left to find here is
+# guaranteed unpushed and safe to rebuild from scratch — which is exactly what
+# every other step below already does from fetched refs.
+git checkout -B "${BRANCH}" "${FORK_REMOTE}/${FORK_BRANCH}"
 
 # 6b. Restore upstream ancestry so the merge base is the release we last synced.
 #
