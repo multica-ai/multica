@@ -229,7 +229,11 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 	if !ok {
 		return
 	}
-	user, err := h.Queries.GetUser(r.Context(), parseUUID(userID))
+	payerUserID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	user, err := h.Queries.GetUser(r.Context(), payerUserID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve checkout payer")
 		return

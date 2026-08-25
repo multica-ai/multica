@@ -441,6 +441,52 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutFailsWhenPayerCannotBeResolved(
 	}
 }
 
+func TestCreateCloudWorkspaceSubscriptionCheckoutRejectsInvalidPayerID(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"interval":        "month",
+		"idempotency_key": "checkout-request-invalid-payer",
+	})
+	req.Header.Set("X-User-ID", "not-a-uuid")
+	req = withCloudSubscriptionWorkspace(req, "owner")
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid user id") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if proxy.called {
+		t.Fatal("upstream must not be called with an invalid payer id")
+	}
+}
+
+func TestCreateCloudWorkspaceSubscriptionCheckoutRejectsEmptyPayerEmail(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true}
+	useCloudRuntimeProxy(t, proxy)
+	emptyEmailUserID := dbfx.User(t, "Empty Checkout Email", "   ")
+	dbfx.Member(t, testWorkspaceID, emptyEmailUserID, "owner")
+
+	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"interval":        "month",
+		"idempotency_key": "checkout-request-empty-email",
+	})
+	req.Header.Set("X-User-ID", emptyEmailUserID)
+	req = withCloudSubscriptionWorkspace(req, "owner")
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "checkout payer email is unavailable") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if proxy.called {
+		t.Fatal("upstream must not be called without a payer email")
+	}
+}
+
 func TestCreateCloudWorkspaceSubscriptionCheckoutAcceptsHeaderIdempotencyKey(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	proxy := &fakeCloudRuntimeProxy{
