@@ -401,15 +401,34 @@ LIMIT $2 OFFSET $3;
 
 -- name: GetAutopilotRunInFlight :one
 -- Mutex gate for the scheduler: returns the most recent run that has not yet
--- reached a terminal state. The status list mirrors the partial index
--- idx_autopilot_run_status (migration 042), which is also the authoritative
--- definition of "in flight". Returns no rows when the autopilot is free to
--- dispatch a new run.
+-- reached a terminal state. "In flight" is defined as
+-- status IN ('issue_created', 'running'), strictly aligned with the CHECK
+-- constraint autopilot_run_status_check and the partial indexes
+-- idx_autopilot_run_status / uq_autopilot_run_inflight. 'pending' is NOT a
+-- legal status (the CHECK constraint forbids it; the column default is a
+-- historical leftover), so it must not appear here — a predicate wider than
+-- the partial index would make the planner fall back off the index. Returns
+-- no rows when the autopilot is free to dispatch a new run.
 SELECT * FROM autopilot_run
 WHERE autopilot_id = $1
-  AND status IN ('pending', 'issue_created', 'running')
+  AND status IN ('issue_created', 'running')
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: TerminalizeStaleAutopilotRun :one
+-- Lease-gate reclaim (ALL-211 BLOCKING 1): marks an in-flight run as failed
+-- with a lease-expired reason, then returns the updated row. The idempotent
+-- WHERE clause (status still in-flight) makes concurrent reclaim safe: a
+-- racing sweeper or another replica's dispatch gate affects at most one
+-- UPDATE and the loser simply sees zero rows.
+UPDATE autopilot_run
+SET status = 'failed',
+    failure_reason = $1,
+    reason_code = $2,
+    completed_at = $3
+WHERE id = $4
+  AND status IN ('issue_created', 'running')
+RETURNING *;
 
 -- name: UpdateAutopilotRunIssueCreated :one
 UPDATE autopilot_run

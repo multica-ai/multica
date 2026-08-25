@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/autopilot"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -40,6 +41,15 @@ type AutopilotService struct {
 	TaskSvc      *TaskService
 	Entitlements entitlement.Provider
 	QuotaMetrics AutopilotQuotaMetrics
+
+	// LeaseTimeout is the bounded in-flight lease applied by the dispatch
+	// mutual-exclusion gate (ALL-211 BLOCKING 1). A run still in
+	// issue_created/running past this age is treated as stale: the gate
+	// terminalizes it (failed + reason_code=lease_expired) and admits the
+	// new slot, so a run that never reaches a terminal state can no longer
+	// wedge the autopilot forever. Wired from AUTOPILOT_RUN_LEASE_TIMEOUT in
+	// cmd/server/main.go; defaults to autopilot.DefaultLeaseTimeout.
+	LeaseTimeout time.Duration
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -51,7 +61,27 @@ const DefaultAutopilotTriggerTimezone = "UTC"
 const autopilotRecentDuplicateWindow = 60 * time.Second
 
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
-	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
+	return &AutopilotService{
+		Queries:      q,
+		TxStarter:    tx,
+		Bus:          bus,
+		TaskSvc:      taskSvc,
+		LeaseTimeout: autopilot.DefaultLeaseTimeout,
+	}
+}
+
+// SetLeaseTimeout overrides the dispatch mutual-exclusion lease. Used by
+// cmd/server/main.go to wire AUTOPILOT_RUN_LEASE_TIMEOUT and by tests to
+// shrink the window without waiting out the default.
+func (s *AutopilotService) SetLeaseTimeout(d time.Duration) {
+	s.LeaseTimeout = d
+}
+
+// leaseTimeout returns the effective in-flight lease, floored at
+// autopilot.MinLeaseDuration via LeaseConfig so a misconfigured value can
+// never cause over-aggressive stale-run cleanup.
+func (s *AutopilotService) leaseTimeout() time.Duration {
+	return (&autopilot.LeaseConfig{BaseTimeout: s.LeaseTimeout}).CalculateLeaseDuration()
 }
 
 // autopilotRuleConfigSummary captures the substantive (accountability-bearing)
@@ -190,8 +220,9 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 	}
 
 	// Webhook admission has no member actor → automation principal (rule_owner);
-	// the per-run reason code is not surfaced to a human here, so it is dropped.
-	if reason, _, skip := s.shouldSkipDispatch(ctx, autopilot, pgtype.UUID{}); skip {
+	// the per-run reason code is still persisted on the skipped row so the
+	// failure monitor can group webhook skips by cause.
+	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, pgtype.UUID{}); skip {
 		run, err := s.recordSkippedRun(
 			ctx,
 			autopilot,
@@ -201,6 +232,7 @@ func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
 			pgtype.Timestamptz{},
 			deliveryID,
 			reason,
+			code,
 		)
 		if err != nil {
 			return s.recoverConcurrentWebhookAdmission(
@@ -523,7 +555,10 @@ func (s *AutopilotService) dispatchAutopilot(
 	idempotencyKey string,
 ) (*db.AutopilotRun, dispatch.ReasonCode, error) {
 	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID); skip {
-		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason)
+		// Persist the typed admission code on the skipped run so the failure
+		// monitor and the run history can group skips by reason (e.g. all
+		// already_active rows from the mutual-exclusion gate).
+		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason, code)
 		return run, code, err
 	}
 
@@ -549,6 +584,20 @@ func (s *AutopilotService) dispatchAutopilot(
 		if errors.As(err, &quotaErr) && source == "schedule" {
 			skipped, skipErr := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, quotaErr.Error(), dispatch.ReasonQuotaExceeded)
 			return skipped, dispatch.ReasonQuotaExceeded, skipErr
+		}
+		// ALL-211 BLOCKING 3: another replica (or a racing manual trigger +
+		// scheduler tick) inserted its run between the in-flight check above
+		// and this INSERT. The partial unique index uq_autopilot_run_inflight
+		// is the authoritative gate — the loser records a skipped run with
+		// already_active instead of failing, exactly like the existing
+		// recoverConcurrentWebhookAdmission pattern.
+		if isPgUniqueViolation(err, "uq_autopilot_run_inflight") {
+			slog.Info("autopilot dispatch: concurrent in-flight run detected via unique constraint",
+				"autopilot_id", util.UUIDToString(autopilot.ID),
+				"source", source,
+			)
+			skipped, skipErr := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, "concurrent dispatch detected via unique constraint", dispatch.ReasonAlreadyActive)
+			return skipped, dispatch.ReasonAlreadyActive, skipErr
 		}
 		return nil, dispatch.ReasonInternalError, fmt.Errorf("create run: %w", err)
 	}
@@ -1252,6 +1301,41 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}
 }
 
+// terminalizeStaleRun marks an in-flight autopilot run as failed because it
+// outlived the dispatch lease (ALL-211 BLOCKING 1). The UPDATE is guarded by
+// `status IN ('issue_created','running')` so it is idempotent under
+// concurrency: a racing sweeper or another replica's lease gate reclaims the
+// same row at most once; everyone else affects zero rows and moves on.
+func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, runID pgtype.UUID, leaseTimeout time.Duration) error {
+	failureReason := fmt.Sprintf(
+		"Run exceeded lease timeout (%s) and was terminated by stale run cleanup",
+		leaseTimeout,
+	)
+	_, err := s.Queries.TerminalizeStaleAutopilotRun(ctx, db.TerminalizeStaleAutopilotRunParams{
+		ID:            runID,
+		FailureReason: pgtype.Text{String: failureReason, Valid: true},
+		ReasonCode:    pgtype.Text{String: "lease_expired", Valid: true},
+		CompletedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
+	return err
+}
+
+// isPgUniqueViolation reports whether err is (or wraps) a PostgreSQL unique
+// violation (SQLSTATE 23505) on the named constraint/index. Wrapped errors
+// are unwrapped via errors.As, so callers may pass fmt.Errorf-wrapped query
+// errors. Used to map the partial-unique-index race on
+// uq_autopilot_run_inflight (ALL-211 BLOCKING 3) to a skipped/already_active
+// outcome instead of a failed run.
+func isPgUniqueViolation(err error, constraintName string) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505" &&
+			pgErr.ConstraintName != "" &&
+			strings.Contains(pgErr.ConstraintName, constraintName)
+	}
+	return false
+}
+
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.
 // Returns (reason, true) when dispatching now would only enqueue a doomed
 // task — i.e. the assignee (or, for squad autopilots, the squad leader) is
@@ -1268,19 +1352,47 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
 func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, dispatch.ReasonCode, bool) {
-	// Mutex / lease gate (ALL-206): never dispatch a new slot while the
-	// autopilot still has an in-flight run. The in-flight statuses
-	// (pending / issue_created / running) mirror the partial index
-	// idx_autopilot_run_status from migration 042 — a scheduled run that
-	// outlives its slot interval used to let the next slot start a second
-	// concurrent run for the same autopilot. When one is in flight the new
-	// slot is recorded as skipped (with a clear failure_reason) instead of
-	// creating a concurrent run.
+	// Mutual-exclusion gate (ALL-206 + ALL-211 BLOCKING 1 & 3): never start
+	// a second concurrent run for an autopilot while it still has an in-flight
+	// run. "In flight" is exactly status IN ('issue_created', 'running') — the
+	// state set aligned with autopilot_run_status_check and the partial unique
+	// index uq_autopilot_run_inflight (migration 433).
+	//
+	// The gate is BOUNDED: an in-flight run whose lease has not expired blocks
+	// the slot (skipped + already_active); a run whose lease HAS expired is
+	// stale and is terminalized as failed (reason_code=lease_expired) right
+	// here, then the slot is admitted. This is what eliminates the permanent
+	// stuck path — previously a run in issue_created whose issue never reached
+	// a terminal state blocked every later slot forever, with no escape hatch.
+	// The terminalize UPDATE is idempotent (WHERE status still in-flight) and
+	// the INSERT that follows is protected by the unique index, so concurrent
+	// replicas cannot double-admit.
 	prior, err := s.Queries.GetAutopilotRunInFlight(ctx, ap.ID)
-	if err == nil {
-		return "previous run still in flight (" + util.UUIDToString(prior.ID) + ")", dispatch.ReasonAlreadyActive, true
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
+	switch {
+	case err == nil:
+		leaseTimeout := s.leaseTimeout()
+		if time.Now().Before(prior.CreatedAt.Time.Add(leaseTimeout)) {
+			return "previous run still in flight (" + util.UUIDToString(prior.ID) + ")", dispatch.ReasonAlreadyActive, true
+		}
+		// Lease expired: reclaim the stale run, then fall through to admit.
+		if err := s.terminalizeStaleRun(ctx, prior.ID, leaseTimeout); err != nil {
+			// Fail-open: the unique index still protects mutual exclusion, so
+			// the worst case is a 23505 on the INSERT below, which is mapped to
+			// a skipped/already_active run — never a duplicate dispatch.
+			slog.Warn("autopilot admission: failed to terminalize stale run; admitting slot (unique index still enforces mutual exclusion)",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"run_id", util.UUIDToString(prior.ID),
+				"lease_timeout", leaseTimeout.String(),
+				"error", err,
+			)
+		} else {
+			slog.Info("autopilot admission: lease expired, terminalized stale run",
+				"autopilot_id", util.UUIDToString(ap.ID),
+				"run_id", util.UUIDToString(prior.ID),
+				"lease_timeout", leaseTimeout.String(),
+			)
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
 		// Transient DB error — fail-open so the next scheduler tick gets a
 		// chance to succeed, consistent with the rest of the admission gate.
 		slog.Warn("autopilot admission: failed to check for in-flight run",

@@ -927,16 +927,20 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 const getAutopilotRunInFlight = `-- name: GetAutopilotRunInFlight :one
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code FROM autopilot_run
 WHERE autopilot_id = $1
-  AND status IN ('pending', 'issue_created', 'running')
+  AND status IN ('issue_created', 'running')
 ORDER BY created_at DESC
 LIMIT 1
 `
 
 // Mutex gate for the scheduler: returns the most recent run that has not yet
-// reached a terminal state. The status list mirrors the partial index
-// idx_autopilot_run_status (migration 042), which is also the authoritative
-// definition of "in flight". Returns no rows when the autopilot is free to
-// dispatch a new run.
+// reached a terminal state. "In flight" is defined as
+// status IN ('issue_created', 'running'), strictly aligned with the CHECK
+// constraint autopilot_run_status_check and the partial indexes
+// idx_autopilot_run_status / uq_autopilot_run_inflight. 'pending' is NOT a
+// legal status (the CHECK constraint forbids it; the column default is a
+// historical leftover), so it must not appear here — a predicate wider than
+// the partial index would make the planner fall back off the index. Returns
+// no rows when the autopilot is free to dispatch a new run.
 func (q *Queries) GetAutopilotRunInFlight(ctx context.Context, autopilotID pgtype.UUID) (AutopilotRun, error) {
 	row := q.db.QueryRow(ctx, getAutopilotRunInFlight, autopilotID)
 	var i AutopilotRun
@@ -2059,6 +2063,60 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.AssigneeType,
 		&i.ProjectID,
 		&i.PauseReason,
+	)
+	return i, err
+}
+
+const terminalizeStaleAutopilotRun = `-- name: TerminalizeStaleAutopilotRun :one
+UPDATE autopilot_run
+SET status = 'failed',
+    failure_reason = $1,
+    reason_code = $2,
+    completed_at = $3
+WHERE id = $4
+  AND status IN ('issue_created', 'running')
+RETURNING id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id, quota_reservation_id, reason_code
+`
+
+type TerminalizeStaleAutopilotRunParams struct {
+	FailureReason pgtype.Text        `json:"failure_reason"`
+	ReasonCode    pgtype.Text        `json:"reason_code"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+	ID            pgtype.UUID        `json:"id"`
+}
+
+// Lease-gate reclaim (ALL-211 BLOCKING 1): marks an in-flight run as failed
+// with a lease-expired reason, then returns the updated row. The idempotent
+// WHERE clause (status still in-flight) makes concurrent reclaim safe: a
+// racing sweeper or another replica's dispatch gate affects at most one
+// UPDATE and the loser simply sees zero rows.
+func (q *Queries) TerminalizeStaleAutopilotRun(ctx context.Context, arg TerminalizeStaleAutopilotRunParams) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, terminalizeStaleAutopilotRun,
+		arg.FailureReason,
+		arg.ReasonCode,
+		arg.CompletedAt,
+		arg.ID,
+	)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+		&i.WebhookDeliveryID,
+		&i.QuotaReservationID,
+		&i.ReasonCode,
 	)
 	return i, err
 }

@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	sweeperpkg "github.com/multica-ai/multica/server/internal/autopilot"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
@@ -25,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/pkg/autopilot"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
@@ -612,6 +614,21 @@ func main() {
 	go runSourceContextSweeper(sweepCtx, taskSvc)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+
+	// ALL-211 P0: wire the dispatch lease (AUTOPILOT_RUN_LEASE_TIMEOUT) into
+	// the admission gate, then register the stale-run sweeper — the
+	// defensive second layer that terminalizes in-flight runs beyond a hard
+	// age even when no new slot ever arrives, so the failure monitor can see
+	// and auto-pause a permanently-stuck autopilot.
+	autopilotSvc.SetLeaseTimeout(envDuration("AUTOPILOT_RUN_LEASE_TIMEOUT", autopilot.DefaultLeaseTimeout))
+	sweeper := sweeperpkg.NewStaleRunSweeper(pool, &sweeperpkg.SweeperConfig{
+		Interval:    envDurationPositive("AUTOPILOT_SWEEPER_INTERVAL", 5*time.Minute),
+		HardTimeout: envDurationPositive("AUTOPILOT_SWEEPER_HARD_TIMEOUT", 2*time.Hour),
+		Enabled:     envBool("AUTOPILOT_SWEEPER_ENABLED", true),
+		Logger:      slog.With("component", "autopilot-sweeper"),
+	})
+	go sweeper.Start(autopilotCtx)
+
 	if autopilotSvc.QuotaEnabled() {
 		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
 	}
@@ -718,6 +735,7 @@ func main() {
 
 	slog.Info("shutting down server")
 	autopilotCancel()
+	sweeper.Stop()
 
 	// Order matters: drain in-flight HTTP first so any heartbeat handlers
 	// finish calling Schedule() before we stop the scheduler. Otherwise a

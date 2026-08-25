@@ -21,6 +21,7 @@ import (
 )
 
 type autopilotQuotaFixture struct {
+	t             *testing.T
 	pool          *pgxpool.Pool
 	queries       *db.Queries
 	service       *AutopilotService
@@ -70,7 +71,7 @@ func newAutopilotQuotaFixture(t *testing.T, action entitlement.Action, limit int
 	periodEnd := periodStart.Add(37 * time.Hour)
 	stub := entitlementtest.New()
 	fixture := &autopilotQuotaFixture{
-		pool: pool, queries: q, stub: stub, workspace: workspace,
+		t: t, pool: pool, queries: q, stub: stub, workspace: workspace,
 		workspaceID: workspaceID, autopilotID: util.MustParseUUID(autopilotIDString),
 		agentID: util.MustParseUUID(agentID), publisherID: util.MustParseUUID(publisherID),
 		issueID:     util.MustParseUUID(issueIDString),
@@ -99,6 +100,30 @@ func (f *autopilotQuotaFixture) setPolicy(action entitlement.Action, start, end 
 		},
 		PolicyRevision: 7, SubscriptionVersion: 11,
 	})
+}
+
+// closeSeededRun terminalizes the in-flight run that seedRunOnlyAutopilot
+// leaves on the fixture's primary autopilot, freeing the per-autopilot
+// in-flight slot (uq_autopilot_run_inflight) for the admission under test.
+func (f *autopilotQuotaFixture) closeSeededRun() {
+	if _, err := f.pool.Exec(context.Background(),
+		`UPDATE autopilot_run SET status = 'completed', completed_at = now() WHERE autopilot_id = $1`,
+		f.autopilotID); err != nil {
+		f.t.Fatalf("close seeded in-flight run: %v", err)
+	}
+}
+
+// newRunArgs returns CreateAutopilotRunParams targeting a FRESH autopilot
+// (no seeded run). Quota is per-workspace, so one autopilot per in-flight
+// admission is exactly how production quota usage manifests — and it keeps
+// consecutive admissions from colliding on the per-autopilot in-flight
+// unique index uq_autopilot_run_inflight (migration 433).
+func (f *autopilotQuotaFixture) newRunArgs(source string) db.CreateAutopilotRunParams {
+	autopilotID := seedRunOnlyAutopilotNoRun(f.t, f.pool,
+		util.UUIDToString(f.workspaceID), util.UUIDToString(f.agentID), util.UUIDToString(f.publisherID))
+	return db.CreateAutopilotRunParams{
+		AutopilotID: util.MustParseUUID(autopilotID), Source: source, Status: "running",
+	}
 }
 
 func TestAutopilotQuotaDisabledDoesNotReadQuotaTables(t *testing.T) {
@@ -154,6 +179,13 @@ func TestAutopilotQuotaEnforcesBoundaryAndFinalizesIdempotently(t *testing.T) {
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_reservation WHERE workspace_id = $1`, workspaceID)
 		pool.Exec(context.Background(), `DELETE FROM autopilot_quota_period WHERE workspace_id = $1`, workspaceID)
 	})
+	// The fixture autopilot carries a seeded 'running' run; close it so the
+	// per-autopilot in-flight slot is free for the admissions below.
+	if _, err := pool.Exec(ctx,
+		`UPDATE autopilot_run SET status = 'completed', completed_at = now() WHERE autopilot_id = $1`,
+		autopilotID); err != nil {
+		t.Fatalf("close seeded in-flight run: %v", err)
+	}
 
 	periodStart := time.Now().UTC().Truncate(time.Second)
 	periodEnd := periodStart.Add(37 * time.Hour) // opaque Cloud interval, deliberately not a calendar month
@@ -168,23 +200,34 @@ func TestAutopilotQuotaEnforcesBoundaryAndFinalizesIdempotently(t *testing.T) {
 		PolicyRevision: 7, SubscriptionVersion: 11,
 	})
 	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), Entitlements: stub}
-	params := db.CreateAutopilotRunParams{
-		AutopilotID: autopilotID, Source: "api", Status: "running",
-	}
 
 	runs := make([]db.AutopilotRun, 0, limit)
 	for i, key := range []string{"boundary-1", "boundary-2"} {
+		// Quota is per-workspace: each in-flight admission targets its own
+		// autopilot so the per-autopilot in-flight unique index
+		// uq_autopilot_run_inflight does not reject the second admission.
+		params := db.CreateAutopilotRunParams{
+			AutopilotID: util.MustParseUUID(seedRunOnlyAutopilotNoRun(t, pool, workspaceIDString, agentID, publisherID)),
+			Source:      "api", Status: "running",
+		}
 		run, _, err := svc.createAutopilotRunWithQuota(ctx, workspaceID, "api", key, params)
 		if err != nil {
 			t.Fatalf("admission %d: %v", i+1, err)
 		}
 		runs = append(runs, run)
 	}
-	reused, wasReused, err := svc.createAutopilotRunWithQuota(ctx, workspaceID, "api", "boundary-1", params)
+	reused, wasReused, err := svc.createAutopilotRunWithQuota(ctx, workspaceID, "api", "boundary-1", db.CreateAutopilotRunParams{
+		AutopilotID: runs[0].AutopilotID, Source: "api", Status: "running",
+	})
 	if err != nil || !wasReused || reused.ID.Bytes != runs[0].ID.Bytes {
 		t.Fatalf("idempotent reuse = %s, %v; want %s", util.UUIDToString(reused.ID), err, util.UUIDToString(runs[0].ID))
 	}
-	_, _, err = svc.createAutopilotRunWithQuota(ctx, workspaceID, "api", "boundary-3", params)
+	// boundary-3 is quota-blocked before any INSERT, so the target autopilot
+	// is irrelevant; reuse a fresh one for clarity.
+	_, _, err = svc.createAutopilotRunWithQuota(ctx, workspaceID, "api", "boundary-3", db.CreateAutopilotRunParams{
+		AutopilotID: util.MustParseUUID(seedRunOnlyAutopilotNoRun(t, pool, workspaceIDString, agentID, publisherID)),
+		Source:      "api", Status: "running",
+	})
 	var quotaErr *AutopilotQuotaExceededError
 	if !errors.As(err, &quotaErr) {
 		t.Fatalf("N+1 admission error = %v, want quota exceeded", err)
@@ -222,6 +265,16 @@ func TestAutopilotQuotaConcurrentAdmissionNeverExceedsLimit(t *testing.T) {
 	const limit = 5
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, limit)
 	ctx := context.Background()
+
+	// Quota is per-workspace; give every concurrent admission its own
+	// autopilot so the per-autopilot in-flight unique index
+	// uq_autopilot_run_inflight does not race with the quota gate. Built
+	// up-front (sequential) so t.Cleanup registration stays single-threaded.
+	argsList := make([]db.CreateAutopilotRunParams, attempts)
+	for i := range argsList {
+		argsList[i] = fixture.newRunArgs("api")
+	}
+
 	start := make(chan struct{})
 	unexpected := make(chan error, attempts)
 	var admitted atomic.Int64
@@ -234,7 +287,7 @@ func TestAutopilotQuotaConcurrentAdmissionNeverExceedsLimit(t *testing.T) {
 			defer wg.Done()
 			<-start
 			_, _, err := fixture.service.createAutopilotRunWithQuota(
-				ctx, fixture.workspaceID, "api", fmt.Sprintf("concurrent-%d", i), fixture.createRunArgs,
+				ctx, fixture.workspaceID, "api", fmt.Sprintf("concurrent-%d", i), argsList[i],
 			)
 			if err == nil {
 				admitted.Add(1)
@@ -274,7 +327,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 	runs := make([]db.AutopilotRun, 0, 2)
 	for i := 0; i < 2; i++ {
 		run, _, err := fixture.service.createAutopilotRunWithQuota(
-			ctx, fixture.workspaceID, "api", fmt.Sprintf("observe-%d", i), fixture.createRunArgs,
+			ctx, fixture.workspaceID, "api", fmt.Sprintf("observe-%d", i), fixture.newRunArgs("api"),
 		)
 		if err != nil {
 			t.Fatalf("observe admission %d: %v", i, err)
@@ -291,7 +344,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 
 	fixture.setPolicy(entitlement.ActionEnforce, fixture.periodStart, fixture.periodEnd, 1)
 	_, _, err = fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "enforce-after-observe", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "enforce-after-observe", fixture.newRunArgs("api"),
 	)
 	var quotaErr *AutopilotQuotaExceededError
 	if !errors.As(err, &quotaErr) {
@@ -314,7 +367,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 		t.Fatalf("usage after off finalization = %+v, %v; want zero", usage, err)
 	}
 	if _, _, err := fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "reopened-after-off", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "reopened-after-off", fixture.newRunArgs("api"),
 	); err != nil {
 		t.Fatalf("admission after reopening policy: %v", err)
 	}
@@ -325,7 +378,7 @@ func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 	ctx := context.Background()
 
 	cancelled, _, err := fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "consumed-then-cancelled", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "consumed-then-cancelled", fixture.newRunArgs("api"),
 	)
 	if err != nil {
 		t.Fatalf("admit cancelled run: %v", err)
@@ -340,7 +393,7 @@ func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 	}
 
 	deleted, _, err := fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "consumed-then-deleted", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "consumed-then-deleted", fixture.newRunArgs("api"),
 	)
 	if err != nil {
 		t.Fatalf("admit deleted run: %v", err)
@@ -367,6 +420,8 @@ func TestAutopilotQuotaConsumedCreateIssueCannotBeRefunded(t *testing.T) {
 func TestAutopilotQuotaTerminalUpdateNeedsNoTransactionStarter(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionOff, 1)
 	ctx := context.Background()
+	// Free the per-autopilot in-flight slot before the direct insert below.
+	fixture.closeSeededRun()
 	run, err := fixture.queries.CreateAutopilotRun(ctx, fixture.createRunArgs)
 	if err != nil {
 		t.Fatalf("create off-path run: %v", err)
@@ -384,6 +439,8 @@ func TestAutopilotQuotaTerminalUpdateNeedsNoTransactionStarter(t *testing.T) {
 func TestAutopilotQuotaSettlementStaysInOriginalPeriod(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	ctx := context.Background()
+	// Free the per-autopilot in-flight slot before the admission below.
+	fixture.closeSeededRun()
 	run, _, err := fixture.service.createAutopilotRunWithQuota(
 		ctx, fixture.workspaceID, "api", "cross-period", fixture.createRunArgs,
 	)
@@ -420,11 +477,15 @@ func TestAutopilotQuotaWorkspaceIsolation(t *testing.T) {
 	first := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	second := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	ctx := context.Background()
+	first.closeSeededRun()
+	second.closeSeededRun()
 	if _, _, err := first.service.createAutopilotRunWithQuota(
 		ctx, first.workspaceID, "api", "isolated", first.createRunArgs,
 	); err != nil {
 		t.Fatalf("first workspace admission: %v", err)
 	}
+	// The over-limit admission is quota-blocked before any INSERT, so it
+	// does not collide with the in-flight run created above.
 	_, _, err := first.service.createAutopilotRunWithQuota(
 		ctx, first.workspaceID, "api", "isolated-over-limit", first.createRunArgs,
 	)
@@ -443,13 +504,13 @@ func TestAutopilotQuotaReconcilerSettlesTerminalOnlyOnce(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 2)
 	ctx := context.Background()
 	terminal, _, err := fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "reconcile-terminal", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "reconcile-terminal", fixture.newRunArgs("api"),
 	)
 	if err != nil {
 		t.Fatalf("admit terminal run: %v", err)
 	}
 	active, _, err := fixture.service.createAutopilotRunWithQuota(
-		ctx, fixture.workspaceID, "api", "reconcile-active", fixture.createRunArgs,
+		ctx, fixture.workspaceID, "api", "reconcile-active", fixture.newRunArgs("api"),
 	)
 	if err != nil {
 		t.Fatalf("admit active run: %v", err)
@@ -499,8 +560,10 @@ func TestAutopilotQuotaReconcilerReleasesOnlyAbandonedManualOrAPIRuns(t *testing
 	ctx := context.Background()
 	create := func(source, key string) db.AutopilotRun {
 		t.Helper()
-		params := fixture.createRunArgs
-		params.Source = source
+		// Each in-flight admission targets its own autopilot so the
+		// per-autopilot in-flight unique index does not reject concurrent
+		// partial runs — quota usage is per-workspace, not per-autopilot.
+		params := fixture.newRunArgs(source)
 		run, _, err := fixture.service.createAutopilotRunWithQuota(
 			ctx, fixture.workspaceID, source, key, params,
 		)
@@ -572,6 +635,8 @@ func TestAutopilotQuotaReconcilerReleasesOnlyAbandonedManualOrAPIRuns(t *testing
 func TestAutopilotQuotaIdempotencyRecoversOrphanedReservation(t *testing.T) {
 	fixture := newAutopilotQuotaFixture(t, entitlement.ActionEnforce, 1)
 	ctx := context.Background()
+	// Free the per-autopilot in-flight slot before the admission below.
+	fixture.closeSeededRun()
 	first, _, err := fixture.service.createAutopilotRunWithQuota(
 		ctx, fixture.workspaceID, "api", "orphaned-key", fixture.createRunArgs,
 	)

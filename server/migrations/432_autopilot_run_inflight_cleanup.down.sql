@@ -1,0 +1,6 @@
+-- Migration 432 is a one-way data cleanup: it terminalizes duplicate
+-- in-flight autopilot_run rows so migration 433's partial unique index can
+-- be created. The terminalized rows cannot be restored (their status change
+-- is destructive), so this down migration is a documented no-op. Rolling
+-- back is achieved by dropping the index (migration 433 down) — the cleanup
+-- itself is safe to have applied.

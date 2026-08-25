@@ -767,6 +767,24 @@ func seedRunOnlyAutopilot(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID
 	return autopilotID, runID
 }
 
+// seedRunOnlyAutopilotNoRun is seedRunOnlyAutopilot without the seeded
+// in-flight run. Needed by quota tests that admit their own runs: the
+// per-autopilot in-flight unique index uq_autopilot_run_inflight (migration
+// 433) allows at most one issue_created/running run per autopilot, so a
+// seeded 'running' run would collide with the admission under test.
+func seedRunOnlyAutopilotNoRun(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID, creatorID string) (autopilotID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'run-only ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, creatorID).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+	return autopilotID
+}
+
 // TestDispatchRunOnlyScheduleStampsRuleOwnerRow is the run_only row assertion Elon
 // asked for: the direct CreateAutopilotTask path (no member actor → schedule-like)
 // must persist rule_owner on the queue row — originator NULL, accountable = the
