@@ -493,6 +493,7 @@
     },
     "task_tokens": {
       "description": "Choose which internal systems this agent may act on. Tokens are signed per run for the person who triggered it, and are never stored.",
+      "docs_link": "Integration guide",
       "unconfigured": "This deployment has no identity tokens configured.",
       "injected_as": "Injected as {{env}}",
       "saved": "Identity tokens updated",

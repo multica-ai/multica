@@ -15,6 +15,9 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
 }));
 
+const mockOpenExternal = vi.hoisted(() => vi.fn());
+vi.mock("../../../platform", () => ({ openExternal: mockOpenExternal }));
+
 import { TaskTokensTab } from "./task-tokens-tab";
 
 const AGENT = { id: "a-1", name: "Test Agent" } as never;
@@ -88,6 +91,20 @@ describe("TaskTokensTab", () => {
     await waitFor(() => {
       expect(updateAgentTaskTokens).toHaveBeenCalledWith("a-1", ["erp", "app"]);
     });
+  });
+
+  it("links to the integration guide on the docs site", async () => {
+    installApi();
+    renderTab();
+
+    const link = await screen.findByTestId("task-tokens-docs-link");
+    await userEvent.click(link);
+
+    // Resolved against the current origin (relative to the deployment), not a
+    // hardcoded product domain.
+    expect(mockOpenExternal).toHaveBeenCalledWith(
+      `${window.location.origin}/docs/task-identity-tokens`,
+    );
   });
 
   it("shows the unconfigured notice when the catalog is empty", async () => {

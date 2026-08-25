@@ -5,8 +5,31 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { BookOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import { openExternal } from "../../../platform";
+
+// taskTokenDocsUrl builds the integration-guide link — the page a receiving
+// system's developer follows to verify these tokens — as a path relative to
+// the current deployment, then resolves it against origin so desktop's
+// shell.openExternal (which needs an absolute URL) works too. This feature is
+// self-hosted, so the docs live wherever this instance serves them rather than
+// at a hardcoded product domain. The docs site uses /<lang>/ path prefixes
+// (English has none), matching the convention used by other doc links.
+export function taskTokenDocsUrl(
+  lang: string | undefined,
+  origin: string,
+): string {
+  const prefix = lang?.startsWith("zh")
+    ? "/zh"
+    : lang?.startsWith("ja")
+      ? "/ja"
+      : lang?.startsWith("ko")
+        ? "/ko"
+        : "";
+  return new URL(`/docs${prefix}/task-identity-tokens`, origin).href;
+}
 
 // Query key is agent-scoped: the catalog is deployment-wide but the enabled
 // set is per agent, and they arrive in one response.
@@ -15,7 +38,7 @@ export function agentTaskTokensKey(agentId: string) {
 }
 
 export function TaskTokensTab({ agent }: { agent: Agent }) {
-  const { t } = useT("agents");
+  const { t, i18n } = useT("agents");
   const qc = useQueryClient();
   const [pendingId, setPendingId] = useState<string | null>(null);
 
@@ -66,9 +89,25 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-body text-muted-foreground">
-        {t(($) => $.tab_body.task_tokens.description)}
-      </p>
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-body text-muted-foreground">
+          {t(($) => $.tab_body.task_tokens.description)}
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            openExternal(
+              taskTokenDocsUrl(i18n.language, window.location.origin),
+            )
+          }
+          className="inline-flex shrink-0 items-center gap-1.5 text-caption font-medium text-primary underline-offset-2 hover:underline"
+          title={t(($) => $.tab_body.task_tokens.docs_link)}
+          data-testid="task-tokens-docs-link"
+        >
+          <BookOpen className="h-4 w-4" />
+          {t(($) => $.tab_body.task_tokens.docs_link)}
+        </button>
+      </div>
       <div className="space-y-3">
         {available.map((tpl) => (
           <label
