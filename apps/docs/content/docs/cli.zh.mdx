@@ -126,8 +126,11 @@ multica agent update <agent-id> --help
 multica skill list
 multica skill get <skill-id>
 multica skill import --url <skill-url>
+multica skill export <skill-id> [--output <path>]
 multica agent skills add <agent-id> --skill-ids <skill-id>
 ```
+
+`multica skill export` 会保存一个可移植的 `.tar.gz` 压缩包。不指定 `--output` 时使用服务端返回的文件名；之后可以通过 `multica skill import --file <path>` 重新导入。
 
 导入时遇到同名 skill，默认会停止且不修改现有内容。按意图选择：
 

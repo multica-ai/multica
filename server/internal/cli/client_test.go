@@ -296,6 +296,66 @@ func TestContentDispositionFilenameUsesSafeBasename(t *testing.T) {
 	}
 }
 
+func TestDownloadSkillArchive(t *testing.T) {
+	t.Run("returns bytes and safe server filename", func(t *testing.T) {
+		var gotPath, gotAuth, gotWorkspace string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotPath = r.URL.Path
+			gotAuth = r.Header.Get("Authorization")
+			gotWorkspace = r.Header.Get("X-Workspace-ID")
+			w.Header().Set("Content-Disposition", `attachment; filename="review-helper.tar.gz"`)
+			_, _ = io.WriteString(w, "archive")
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "workspace-123", "test-token")
+		data, filename, err := client.DownloadSkillArchive(context.Background(), "skill-123")
+		if err != nil {
+			t.Fatalf("DownloadSkillArchive: %v", err)
+		}
+		if string(data) != "archive" || filename != "review-helper.tar.gz" {
+			t.Fatalf("data = %q, filename = %q", data, filename)
+		}
+		if gotPath != "/api/skills/skill-123/export" || gotAuth != "Bearer test-token" || gotWorkspace != "workspace-123" {
+			t.Fatalf("path = %q, auth = %q, workspace = %q", gotPath, gotAuth, gotWorkspace)
+		}
+	})
+
+	t.Run("returns HTTP error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = io.WriteString(w, `{"error":"skill exceeds portable export limits"}`)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "workspace-123", "test-token")
+		_, _, err := client.DownloadSkillArchive(context.Background(), "skill-123")
+		if err == nil || !strings.Contains(err.Error(), "422") {
+			t.Fatalf("expected 422 error, got %v", err)
+		}
+	})
+
+	t.Run("rejects oversized response", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.CopyN(w, zeroReader{}, maxSkillExportDownloadSize+1)
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "workspace-123", "test-token")
+		_, _, err := client.DownloadSkillArchive(context.Background(), "skill-123")
+		if err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("expected size-limit error, got %v", err)
+		}
+	})
+}
+
+type zeroReader struct{}
+
+func (zeroReader) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
+}
+
 func TestUploadFileWithURL(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

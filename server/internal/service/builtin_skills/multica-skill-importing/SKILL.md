@@ -23,7 +23,7 @@ Every claim below is traced to source in
 A skill is installed for Multica only when it exists in the current workspace's
 skill database. The single supported path that puts it there is the workspace
 import endpoint. It accepts either a hosted URL or an uploaded local archive
-(`.skill` / `.zip`), driven by this CLI:
+(`.skill` / `.zip` / `.tar` / `.tar.gz`), driven by this CLI:
 
 ```bash
 multica skill import --url <url> --output json              # hosted source
@@ -39,7 +39,7 @@ body: { "url": "<url>", "on_conflict": "fail" }
 ```
 
 A `--file` import hits the same route as `multipart/form-data` with a `file`
-part (the `.skill` / `.zip` bytes) and an `on_conflict` field. `--url` and
+part (the archive bytes) and an `on_conflict` field. `--url` and
 `--file` are mutually exclusive; exactly one is required.
 
 Do not finish with `npx skills add`. That installs into an external/local skill
@@ -64,12 +64,12 @@ multica skill import --url github.com/owner/repo/blob/main/path/to/SKILL.md --ou
 - A bare ClawHub slug (no host) is accepted and routed to ClawHub.
 - Any other host is rejected with a 400 naming the supported sources.
 
-## Local archive import (`.skill` / `.zip`)
+## Local archive import (`.skill` / `.zip` / `.tar` / `.tar.gz`)
 
 `multica skill import --file <path> --output json` imports a skill from a local
 archive instead of a hosted URL. A `.skill` file is a standard zip — the format
-Anthropic's skill-creator `package_skill` produces — and a plain `.zip` of a
-skill folder works too. The server:
+Anthropic's skill-creator `package_skill` produces — and plain `.zip`, `.tar`,
+or `.tar.gz` archives of a skill folder work too. The server:
 
 - accepts the upload as `multipart/form-data` (a `file` part plus an optional
   `on_conflict` field) on the same `POST /api/skills/import` route;
@@ -80,7 +80,8 @@ skill folder works too. The server:
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
   license files, and binary assets — under the same per-file (1 MiB),
   per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
-  traversal (zip-slip);
+  traversal (zip-slip / tar-slip); tar imports additionally reject special
+  entries and enforce expanded-byte and archive-entry limits;
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.
 

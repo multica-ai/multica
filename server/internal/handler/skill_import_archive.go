@@ -34,7 +34,7 @@ func isMultipartForm(r *http.Request) bool {
 }
 
 // importSkillFromArchive handles POST /api/skills/import when the body is an
-// uploaded skill archive (.skill / .zip). It reads the file plus the optional
+// uploaded skill archive (.skill / .zip / .tar / .tar.gz). It reads the file plus the optional
 // on_conflict form field, decompresses the archive into an importedSkill, and
 // hands off to the shared finishSkillImport tail. The archive path always
 // produces structured (status / skill / existing_skill) results — there is no
@@ -105,7 +105,8 @@ func (h *Handler) importSkillFromArchive(w http.ResponseWriter, r *http.Request,
 // (zip-slip / tar-slip), the reserved SKILL.md supporting path is dropped,
 // per-file size is bounded while reading (so a lying archive header can't blow
 // up memory), and the shared addFile enforces the per-bundle byte and
-// file-count caps.
+// file-count caps. Tar streams additionally reject non-regular entries and
+// enforce expanded-byte and archive-entry limits before buffering can grow.
 func parseSkillArchive(data []byte, filename string) (*importedSkill, error) {
 	entries, err := readSkillArchiveEntries(data)
 	if err != nil {

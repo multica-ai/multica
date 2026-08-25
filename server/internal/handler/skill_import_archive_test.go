@@ -477,6 +477,46 @@ func TestReadTarArchiveEntriesRejectsExpandedBundle(t *testing.T) {
 	}
 }
 
+func TestReadTarArchiveEntriesRejectsSpecialEntries(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "review-helper/link",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../outside",
+		Mode:     0o777,
+	}); err != nil {
+		t.Fatalf("write symlink header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "unsupported archive entry") {
+		t.Fatalf("expected unsupported-entry error, got %v", err)
+	}
+}
+
+func TestReadTarArchiveEntriesRejectsTooManyEntries(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i <= maxImportArchiveEntryCount; i++ {
+		name := fmt.Sprintf("files/%04d.txt", i)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644}); err != nil {
+			t.Fatalf("write header %q: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "entry limit") {
+		t.Fatalf("expected entry-limit error, got %v", err)
+	}
+}
+
 func TestParseSkillArchive_InvalidGzipRejected(t *testing.T) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)

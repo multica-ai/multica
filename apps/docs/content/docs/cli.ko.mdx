@@ -126,8 +126,11 @@ multica agent update <agent-id> --help
 multica skill list
 multica skill get <skill-id>
 multica skill import --url <skill-url>
+multica skill export <skill-id> [--output <path>]
 multica agent skills add <agent-id> --skill-ids <skill-id>
 ```
+
+`multica skill export`는 이동 가능한 `.tar.gz` 압축 파일을 저장합니다. `--output`을 생략하면 서버가 반환한 파일 이름을 사용하며, `multica skill import --file <path>`로 다시 가져올 수 있습니다.
 
 가져올 때 같은 이름의 스킬이 있으면 기본적으로 중지하고 기존 내용을 수정하지 않습니다. 의도에 맞는 방식을 선택하세요.
 

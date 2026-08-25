@@ -33,7 +33,7 @@ archive path (below); a JSON body keeps the URL flow. Both converge on the share
 `finishSkillImport` tail. Line numbers in this table predate that split — re-grep
 `func (h *Handler) ImportSkill` / `finishSkillImport` to re-derive.
 
-## Local archive import (`.skill` / `.zip`)
+## Local archive import (`.skill` / `.zip` / `.tar` / `.tar.gz`)
 
 | Behavior | File:line |
 |---|---|
@@ -42,7 +42,8 @@ archive path (below); a JSON body keeps the URL flow. Both converge on the share
 | `isMultipartForm` content-type check | `server/internal/handler/skill_import_archive.go:26` |
 | `importSkillFromArchive` (multipart parse + `MaxBytesReader` + `on_conflict` + `file`) | `server/internal/handler/skill_import_archive.go:36` |
 | Upload cap `maxImportArchiveUploadSize` (16 MiB compressed) | `server/internal/handler/skill_import_archive.go:22` |
-| `parseSkillArchive` (zip decode, shallowest-`SKILL.md` root, frontmatter name, zip-slip + reserved + ignore filters) | `server/internal/handler/skill_import_archive.go:95` |
+| `parseSkillArchive` (zip/tar dispatch, shallowest-`SKILL.md` root, frontmatter name, traversal + reserved + ignore filters) | `server/internal/handler/skill_import_archive.go` |
+| Tar safety caps (expanded bytes, archive entries, regular files only) | `readTarArchiveEntries` in `server/internal/handler/skill_import_archive.go` |
 | Reuses per-file / per-bundle / count caps via `importedSkill.addFile` | `server/internal/handler/skill.go:618` (`maxImportFileSize`/`maxImportTotalSize`/`maxImportFileCount` at `:579-583`) |
 | Name fallback (wrapper dir, then filename) | `server/internal/handler/skill_import_archive.go:201` |
 | Ignore filter (dotfiles, `__MACOSX`, license) | `server/internal/handler/skill_import_archive.go:218` |
@@ -55,7 +56,7 @@ archive path (below); a JSON body keeps the URL flow. Both converge on the share
 |---|---|
 | `skill import` command def | `server/cmd/multica/cmd_skill.go:59-63` |
 | `--url` flag | `server/cmd/multica/cmd_skill.go:143` |
-| `--file` flag (local `.skill` / `.zip`; mutually exclusive with `--url`) | `server/cmd/multica/cmd_skill.go:144` |
+| `--file` flag (local `.skill` / `.zip` / `.tar` / `.tar.gz`; mutually exclusive with `--url`) | `server/cmd/multica/cmd_skill.go:144` |
 | `--on-conflict` flag (default `fail`) | `server/cmd/multica/cmd_skill.go:145` |
 | `--output` flag (default `json`) | `server/cmd/multica/cmd_skill.go:146` |
 | `runSkillImport` | `server/cmd/multica/cmd_skill.go:412` |

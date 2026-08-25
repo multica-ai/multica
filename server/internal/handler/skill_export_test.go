@@ -170,6 +170,36 @@ func TestExportSkill_FilenameSanitizesUnsafeName(t *testing.T) {
 	}
 }
 
+func TestExportSkill_RejectsSkillOutsidePortableLimits(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test DB not configured")
+	}
+
+	name := "oversized-export-" + t.Name()
+	var skillID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
+		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
+		RETURNING id
+	`, testWorkspaceID, name, "fixture", strings.Repeat("x", maxImportFileSize+1), testUserID).Scan(&skillID); err != nil {
+		t.Fatalf("insert skill: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodGet, "/api/skills/"+skillID+"/export", nil), "id", skillID)
+	testHandler.ExportSkill(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "portable export limits") {
+		t.Errorf("body = %q, want portable export limit error", w.Body.String())
+	}
+}
+
 func keys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

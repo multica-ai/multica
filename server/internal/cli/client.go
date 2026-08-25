@@ -702,6 +702,8 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+const maxSkillExportDownloadSize = 16 << 20
+
 // DownloadSkillArchive downloads a skill's portable .tar.gz export
 // (GET /api/skills/{id}/export) and returns the raw bytes plus the
 // server-provided attachment filename (sanitized skill name + ".tar.gz"). The
@@ -726,13 +728,12 @@ func (c *APIClient) DownloadSkillArchive(ctx context.Context, id string) ([]byte
 
 	// Exports mirror the import bundle cap (maxImportTotalSize + SKILL.md), so
 	// 16 MiB is a generous ceiling that still stops an unbounded read.
-	const maxExportSize = 16 << 20
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxExportSize+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSkillExportDownloadSize+1))
 	if err != nil {
 		return nil, "", err
 	}
-	if len(data) > maxExportSize {
-		return nil, "", fmt.Errorf("skill export exceeds %d bytes", maxExportSize)
+	if len(data) > maxSkillExportDownloadSize {
+		return nil, "", fmt.Errorf("skill export exceeds %d bytes", maxSkillExportDownloadSize)
 	}
 
 	filename := contentDispositionFilename(resp.Header.Get("Content-Disposition"))
