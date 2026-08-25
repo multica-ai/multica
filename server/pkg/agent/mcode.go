@@ -404,9 +404,10 @@ func mcodeSessionStartupExited(operation string, err error) bool {
 	if operation != "session/new" {
 		return false
 	}
-	if errors.Is(err, errMcodeProcessExited) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, syscall.EPIPE) {
-		return true
-	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "process exited") || strings.Contains(text, "broken pipe")
+	// Only trust transport-level signals. A still-running MCode reports
+	// session/new failures as a JSON-RPC error, and session/new is where
+	// mcpServers are launched, so text matching on "process exited" or
+	// "broken pipe" would rewrite a caller's real MCP startup error into
+	// an MCode-exited message and drop its root cause.
+	return errors.Is(err, errMcodeProcessExited) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, syscall.EPIPE)
 }

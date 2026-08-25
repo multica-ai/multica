@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -304,5 +306,88 @@ func TestMcodeBlockedArgsKeepACPTransportStable(t *testing.T) {
 		if _, ok := mcodeBlockedArgs[arg]; !ok {
 			t.Errorf("mcodeBlockedArgs missing %q", arg)
 		}
+	}
+}
+
+// A still-running MCode reports session/new failures as a JSON-RPC error, and
+// session/new is the call that launches mcpServers. Only transport-level exit
+// signals may be reported as "MiniMax Code ACP exited" — anything else must
+// reach the member with its root cause intact.
+func TestMcodeSessionStartupExitedOnlyTrustsTransportSignals(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		operation string
+		err       error
+		want      bool
+	}{
+		{
+			name:      "reader saw the process exit",
+			operation: "session/new",
+			err:       errMcodeProcessExited,
+			want:      true,
+		},
+		{
+			name:      "stdin write raced the exit",
+			operation: "session/new",
+			err:       fmt.Errorf("write session/new: %w", syscall.EPIPE),
+			want:      true,
+		},
+		{
+			name:      "closed pipe",
+			operation: "session/new",
+			err:       fmt.Errorf("write session/new: %w", io.ErrClosedPipe),
+			want:      true,
+		},
+		{
+			name:      "live mcode reporting a failed MCP server is not an mcode exit",
+			operation: "session/new",
+			err:       &acpRPCError{Method: "session/new", Code: -32603, Message: "Internal error", Data: `failed to start MCP server "filesystem": process exited with code 1`},
+			want:      false,
+		},
+		{
+			name:      "live mcode reporting a broken pipe to an MCP child is not an mcode exit",
+			operation: "session/new",
+			err:       &acpRPCError{Method: "session/new", Code: -32603, Message: "Internal error", Data: "write to mcp stdio: broken pipe"},
+			want:      false,
+		},
+		{
+			name:      "unrelated live error",
+			operation: "session/new",
+			err:       &acpRPCError{Method: "session/new", Code: -32602, Message: "Invalid params", Data: "cwd must be absolute"},
+			want:      false,
+		},
+		{
+			name:      "wrong operation does not match",
+			operation: "session/load",
+			err:       errMcodeProcessExited,
+			want:      false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := mcodeSessionStartupExited(tt.operation, tt.err); got != tt.want {
+				t.Fatalf("mcodeSessionStartupExited(%q, %v) = %v, want %v", tt.operation, tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// The rewritten startup message carries no %v, so a false positive would not
+// just mislabel the failure — it would drop the original error entirely.
+func TestMcodeRequestFailureKeepsLiveSessionErrorRootCause(t *testing.T) {
+	t.Parallel()
+
+	err := &acpRPCError{Method: "session/new", Code: -32603, Message: "Internal error", Data: `failed to start MCP server "filesystem": process exited with code 1`}
+	status, msg := mcodeRequestFailure(context.Background(), 0, "session/new", err)
+	if status != "failed" {
+		t.Fatalf("status = %q, want failed", status)
+	}
+	if !strings.Contains(msg, "failed to start MCP server") {
+		t.Fatalf("error = %q, want the original MCP failure preserved", msg)
+	}
+	if strings.Contains(msg, "MiniMax Code ACP exited") {
+		t.Fatalf("error = %q, must not blame an mcode exit while mcode is still running", msg)
 	}
 }
