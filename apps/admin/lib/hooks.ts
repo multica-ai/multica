@@ -1,8 +1,17 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AnalyticsParams, AnalyticsResult, ListWorkspacesParams, ListWorkspacesResult, WorkspaceDetail } from "./types";
+import type {
+  AnalyticsParams,
+  AnalyticsResult,
+  AnalyticsWorkspaceBreakdownParams,
+  AnalyticsWorkspaceBreakdownResult,
+  ListWorkspacesParams,
+  ListWorkspacesResult,
+  WorkspaceDetail,
+} from "./types";
 import type { Invitation } from "./agentfarm-schema";
+import { parseAnalyticsWorkspaceBreakdown } from "./analytics-schema";
 
 // Client-side data hooks. These hit this app's own Route Handlers (never
 // Postgres/LiteLLM directly, never the Go API) — see app/api/workspaces/*.
@@ -60,6 +69,22 @@ export function useAnalytics(params: AnalyticsParams) {
     queryKey: ["analytics", params],
     queryFn: () => fetchJson(`/api/analytics?${qs.toString()}`),
     placeholderData: (prev) => prev,
+  });
+}
+
+export function useAnalyticsWorkspaceBreakdown(params: AnalyticsWorkspaceBreakdownParams | null) {
+  const qs = params
+    ? new URLSearchParams({
+        from: params.from,
+        to: params.to,
+        kind: params.kind,
+        segment: params.segment,
+      })
+    : null;
+  return useQuery<AnalyticsWorkspaceBreakdownResult>({
+    queryKey: ["analytics-workspace-breakdown", params],
+    queryFn: async () => parseAnalyticsWorkspaceBreakdown(await fetchJson(`/api/analytics/workspaces?${qs?.toString()}`)),
+    enabled: params !== null,
   });
 }
 
