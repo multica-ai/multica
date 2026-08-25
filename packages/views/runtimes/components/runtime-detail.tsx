@@ -22,6 +22,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
+  isRuntimeUsableForUser,
   runtimeDisplayName,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
@@ -119,7 +120,7 @@ export function RuntimeDetail({
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;
-  const canReadRuntime = isRuntimeOwner || runtime.visibility === "public";
+  const canReadRuntime = isRuntimeUsableForUser(runtime, user?.id ?? null);
   const runtimeProfile: RuntimeProfile | null = runtime.profile_id
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
     : null;

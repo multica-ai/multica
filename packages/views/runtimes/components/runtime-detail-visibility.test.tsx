@@ -74,7 +74,15 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-me" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+// isRuntimeUsableForUser is the shared owner/public rule the component reads
+// runtime access from, so the real implementation is kept rather than stubbed —
+// a stub here would just re-derive the rule this test is meant to pin down.
+vi.mock("@multica/core/runtimes", async () => ({
+  isRuntimeUsableForUser: (
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    )
+  ).isRuntimeUsableForUser,
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
@@ -311,6 +319,17 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     expect(screen.getByTestId("usage-section")).toBeInTheDocument();
+  });
+
+  // An ownerless runtime is unreadable server-side (the read gate reuses
+  // canUseRuntimeForAgent, which is fail-closed without an owner), so the
+  // page must not render a Usage section that can only 404.
+  it("hides usage for an ownerless runtime even when it is public", () => {
+    mockQueryData.members = [{ user_id: "user-me", role: "admin" }];
+
+    renderDetail(makeRuntime({ owner_id: null, visibility: "public" }));
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
   });
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime
