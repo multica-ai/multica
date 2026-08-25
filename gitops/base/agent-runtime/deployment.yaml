@@ -57,10 +57,14 @@ spec:
       # -o agent -g agent` in the Dockerfile only ever chowned the image's
       # ephemeral layer — the PVC needs the same fix applied at pod start.
       # Mirrors devenv's fix-efs-permissions init container (configuration
-      # repo): top-level dirs only, never recurse. `home` holds real git
-      # checkouts under multica_workspaces (like devenv's own `workspaces`
-      # dir), so a recursive chown here would scale with repo size and
-      # meaningfully slow every pod start.
+      # repo). `multica_workspaces` holds real git checkouts (like devenv's
+      # own `workspaces` dir), so it only ever gets a top-level chown — a
+      # recursive one would scale with repo size and meaningfully slow every
+      # pod start. The rest are tool caches/config that nest arbitrarily deep
+      # on their own (bazel under .cache, npm under .npm-global, etc.) but
+      # stay small, so they're chowned recursively: a top-level-only fix
+      # would leave any subtree a tool once created while running as root
+      # permanently stuck root-owned, since the PVC persists across restarts.
       initContainers:
         - name: fix-efs-permissions
           image: busybox:1.36
@@ -70,9 +74,10 @@ spec:
             - |
               echo "Fixing volume permissions for uid 1000..."
               chown 1000:1000 /home-efs 2>/dev/null || true
-              for d in .npm-global .local .cache .hermes .git-ai .multica .agents multica_workspaces; do
-                [ -e "/home-efs/$d" ] && chown 1000:1000 "/home-efs/$d" 2>/dev/null || true
+              for d in .npm-global .local .cache .hermes .git-ai .multica .agents; do
+                [ -e "/home-efs/$d" ] && chown -R 1000:1000 "/home-efs/$d" 2>/dev/null || true
               done
+              [ -e "/home-efs/multica_workspaces" ] && chown 1000:1000 "/home-efs/multica_workspaces" 2>/dev/null || true
               echo "Permissions fixed."
           volumeMounts:
             - name: home
