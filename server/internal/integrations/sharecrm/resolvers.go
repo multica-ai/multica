@@ -166,6 +166,7 @@ func (r *deduper) Release(ctx context.Context, installationID pgtype.UUID, messa
 
 type chatSession interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	StartSession(ctx context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error)
 	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
@@ -184,6 +185,26 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 		BindingConfig:  config,
 		ChatType:       p.Message.Source.ChatType,
 	})
+}
+
+func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	bindingKey, config := sharecrmSessionRouting(p.Message)
+	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
+		EnsureSessionInput: engine.EnsureSessionInput{
+			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
+			InstallationID: p.Installation.ID, Sender: p.Creator,
+			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
+		},
+		Initiator: p.Sender,
+		Body:      p.Message.Text, MessageID: p.Message.MessageID, ThreadID: p.Message.Source.ThreadID,
+		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
+		BeforeCommit: p.BeforeCommit,
+	})
+	return engine.StartSessionResult{
+		SessionID: result.SessionID, BindingID: result.BindingID,
+		RouteRevision: result.RouteRevision, Append: result.Append,
+	}, err
 }
 
 func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
@@ -209,15 +230,21 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 	})
 }
 
-func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
-	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) (engine.BindMediaResult, error) {
+	in := engine.BindMediaInput{
 		MessageID:   p.MessageID,
 		SessionID:   p.SessionID,
 		WorkspaceID: p.WorkspaceID,
 		Sender:      p.Sender,
 		IssueID:     p.IssueID,
 		MediaRefs:   p.MediaRefs,
-	})
+	}
+	if richer, ok := r.session.(interface {
+		BindMediaRefsWithResult(context.Context, engine.BindMediaInput) (engine.BindMediaResult, error)
+	}); ok {
+		return richer.BindMediaRefsWithResult(ctx, in)
+	}
+	return engine.BindMediaResult{}, r.session.BindMediaRefs(ctx, in)
 }
 
 type auditor struct{ q *db.Queries }
