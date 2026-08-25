@@ -445,10 +445,16 @@ export function MembersTab() {
             capacity
               ? {
                   description: billingT(
-                    ($) => $.workspace.seats.members_over_capacity_description,
+                    ($) => $.workspace.seats.occupancy_over_capacity_description,
                     {
-                      actual: summary.humanMembers,
+                      // Cloud refuses on used + reserved, so pending
+                      // invitations have to appear here: the most common
+                      // trigger is a first ledger snapshot whose member count
+                      // alone still fits inside the purchased seats.
+                      occupied: capacity.used + capacity.reserved,
                       purchased: capacity.purchased,
+                      members: capacity.used,
+                      reserved: capacity.reserved,
                     },
                   ),
                 }

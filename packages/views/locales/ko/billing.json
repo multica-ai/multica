@@ -220,6 +220,7 @@
       "summary_unavailable_description": "현재 요금제는 계속 표시되지만 구매한 좌석과 예정 좌석 수를 불러오지 못했습니다.",
       "members_over_capacity_title": "멤버 수가 구매한 좌석 수를 초과합니다",
       "members_over_capacity_description": "이 워크스페이스에는 멤버가 {{actual}}명이지만 구매한 좌석은 {{purchased}}개입니다. 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하세요.",
+      "occupancy_over_capacity_description": "이 워크스페이스는 구매한 좌석 {{purchased}}개에 대해 {{occupied}}개를 점유하고 있습니다(멤버 {{members}}명, 대기 중인 초대 {{reserved}}건). 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하거나 대기 중인 초대를 취소하세요.",
       "updated": "좌석 구매를 제출했습니다"
     },
     "seat_purchase": {

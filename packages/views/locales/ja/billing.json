@@ -220,6 +220,7 @@
       "summary_unavailable_description": "現在のプランは表示できますが、購入済みの席数と変更予定の席数を読み込めませんでした。",
       "members_over_capacity_title": "メンバー数が購入済みの席数を超えています",
       "members_over_capacity_description": "このワークスペースには {{actual}} 人のメンバーがいますが、購入済みの席は {{purchased}} 席です。さらに招待する前に席を追加するか、メンバーを削除してください。",
+      "occupancy_over_capacity_description": "このワークスペースは購入済み {{purchased}} 席に対して {{occupied}} 席を占有しています（メンバー {{members}} 人、保留中の招待 {{reserved}} 件）。さらに招待する前に席を追加する、メンバーを削除する、または保留中の招待を取り消してください。",
       "updated": "席数の購入を送信しました"
     },
     "seat_purchase": {

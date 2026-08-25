@@ -224,6 +224,7 @@
       "summary_unavailable_description": "The current plan is still shown, but purchased and scheduled seat quantities could not be loaded.",
       "members_over_capacity_title": "Members exceed purchased seats",
       "members_over_capacity_description": "This workspace has {{actual}} members but only {{purchased}} purchased seats. Add enough seats or remove members before sending more invitations.",
+      "occupancy_over_capacity_description": "This workspace occupies {{occupied}} of {{purchased}} purchased seats ({{members}} members and {{reserved}} pending invitations). Add seats, remove a member, or revoke a pending invitation before inviting someone else.",
       "updated": "Seat purchase submitted"
     },
     "seat_purchase": {
