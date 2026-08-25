@@ -80,6 +80,15 @@ func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	if firstModel != "builder-model-a" {
 		t.Fatalf("first builder model was mutated: got %q", firstModel)
 	}
+	var explicitlyCreated bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT explicitly_created_at IS NOT NULL FROM chat_session WHERE id = $1
+	`, first.SessionID).Scan(&explicitlyCreated); err != nil {
+		t.Fatalf("load builder session origin: %v", err)
+	}
+	if !explicitlyCreated {
+		t.Fatal("builder session must be marked as an explicit first-party Chat")
+	}
 
 	w := httptest.NewRecorder()
 	testHandler.ListAgents(w, newRequest(http.MethodGet, "/api/agents", nil))

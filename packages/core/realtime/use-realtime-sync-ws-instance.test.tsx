@@ -275,6 +275,33 @@ describe("useRealtimeSync — ws instance change", () => {
 
     expect(invalidateSpy).not.toHaveBeenCalled();
   });
+
+  it("invalidates the current workspace chat list when a channel creates a session", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const sessionCreated = vi
+      .mocked(ws.on)
+      .mock.calls.find(([event]) => event === "chat:session_created")?.[1];
+    expect(sessionCreated).toBeDefined();
+
+    (sessionCreated as (payload: unknown) => void)({
+      workspace_id: "ws-1",
+      chat_session_id: "channel-session-1",
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: chatKeys.sessions("ws-1"),
+    });
+
+		invalidateSpy.mockClear();
+		(sessionCreated as (payload: unknown) => void)({
+			workspace_id: "ws-2",
+			chat_session_id: "other-workspace-session",
+		});
+		expect(invalidateSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("useRealtimeSync — queued chat promotion", () => {

@@ -306,6 +306,10 @@ func (h *Handler) getOrCreateMikaSession(ctx context.Context, agent db.Agent, wo
 	if err != nil {
 		return db.ChatSession{}, err
 	}
+	created, err = qtx.MarkChatSessionExplicitlyCreated(ctx, created.ID)
+	if err != nil {
+		return db.ChatSession{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.ChatSession{}, err
 	}
