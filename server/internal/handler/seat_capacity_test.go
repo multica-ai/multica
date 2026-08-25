@@ -261,10 +261,10 @@ func TestCapacityConsumeFailsClosedWhenCloudIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestAcceptInvitationRejectsDeniedCapacity(t *testing.T) {
+func TestAcceptInvitationRejectsUnavailableReservedCapacity(t *testing.T) {
 	ctx := context.Background()
-	email := "paused-capacity-invite-" + uuid.NewString() + "@multica.ai"
-	userID := dbfx.User(t, "Paused Capacity Invitee", email)
+	email := "strict-capacity-invite-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Strict Capacity Invitee", email)
 	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
 		"workspace_id":    testWorkspaceID,
 		"inviter_id":      testUserID,
@@ -277,8 +277,8 @@ func TestAcceptInvitationRejectsDeniedCapacity(t *testing.T) {
 	dbfx.Cleanup(t, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID))
 	dbfx.Cleanup(t, `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, parseUUID(invitationID))
 
-	denied := seatcapacity.Decision{Managed: true, Allowed: false, Reason: "capacity_full"}
-	executor := &stubSeatCapacity{consumeDecision: &denied}
+	rejected := seatcapacity.Decision{Managed: true, Allowed: false, Reason: "capacity_full"}
+	executor := &stubSeatCapacity{consumeDecision: &rejected}
 	useSeatCapacity(t, executor)
 
 	req := newRequest("POST", "/api/invitations/"+invitationID+"/accept", nil)

@@ -6,6 +6,7 @@ import type {
 import {
   isSingleSeatInvitePreview,
   purchasedSeatIsReadyForInvitation,
+  seatPurchaseCanRetryWithSameQuote,
   seatPurchaseMatchesPreview,
 } from "./seat-invite-purchase";
 
@@ -76,6 +77,21 @@ describe("invite seat purchase validation", () => {
     expect(
       seatPurchaseMatchesPreview({ ...response, resultingSeats: 6 }, preview),
     ).toBe(false);
+  });
+
+  it("reuses the idempotent quote only for retry-safe failures", () => {
+    expect(seatPurchaseCanRetryWithSameQuote(undefined)).toBe(true);
+    expect(seatPurchaseCanRetryWithSameQuote("seat_purchase_rate_limited")).toBe(
+      true,
+    );
+    expect(seatPurchaseCanRetryWithSameQuote("seat_purchase_payment_failed")).toBe(
+      false,
+    );
+    expect(seatPurchaseCanRetryWithSameQuote("seat_quote_changed")).toBe(false);
+    expect(seatPurchaseCanRetryWithSameQuote("seat_capacity_changed")).toBe(false);
+    expect(seatPurchaseCanRetryWithSameQuote("seat_purchase_in_progress")).toBe(
+      false,
+    );
   });
 
   it("retries the invitation only from a fresh summary with free capacity", () => {

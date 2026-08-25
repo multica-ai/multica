@@ -31,6 +31,17 @@ export function seatPurchaseMatchesPreview(
   );
 }
 
+export function seatPurchaseCanRetryWithSameQuote(
+  errorCode: string | undefined,
+): boolean {
+  return ![
+    "seat_purchase_payment_failed",
+    "seat_purchase_in_progress",
+    "seat_quote_changed",
+    "seat_capacity_changed",
+  ].includes(errorCode ?? "");
+}
+
 export function purchasedSeatIsReadyForInvitation(
   summary: WorkspaceSubscriptionSummary | null | undefined,
   preview: WorkspaceSeatPurchasePreview,

@@ -195,7 +195,7 @@ func (w *Worker) settle(ctx context.Context, intent db.SeatCapacityOutbox) error
 		if err != nil && !IsNotFound(err) {
 			return err
 		}
-		if err == nil && decision.Managed && !decision.Allowed && decision.Reason != "released" && decision.Reason != "denied" {
+		if err == nil && decision.Managed && !decision.Allowed && decision.Reason != "released" {
 			return errors.New("capacity release rejected in state " + decision.Reason)
 		}
 		return w.deleteCurrent(ctx, intent)
@@ -225,7 +225,7 @@ func (w *Worker) recoverReserve(ctx context.Context, intent db.SeatCapacityOutbo
 		return errors.New("managed capacity operation response omitted operation")
 	}
 	switch decision.Operation.State {
-	case "denied", "released":
+	case "released":
 		return w.deleteCurrent(ctx, intent)
 	case "reserved":
 		invitationID := intent.InvitationID
@@ -266,9 +266,11 @@ func (w *Worker) recoverConsuming(ctx context.Context, intent db.SeatCapacityOut
 		// A concurrent request already committed and confirmed the member. A
 		// stale consuming worker must not try to release that used seat.
 		return w.deleteCurrent(ctx, intent)
-	case "denied", "released":
+	case "released":
 		if intent.Action == ActionConsumeInvitation && intent.InvitationID.Valid {
-			_ = w.queries.ExpireInvitationForCapacityRecovery(ctx, intent.InvitationID)
+			if err := w.queries.ExpireInvitationForCapacityRecovery(ctx, intent.InvitationID); err != nil {
+				return err
+			}
 		}
 		return w.deleteCurrent(ctx, intent)
 	case "consuming":

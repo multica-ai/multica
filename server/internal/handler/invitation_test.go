@@ -247,6 +247,38 @@ func TestCreateInvitation_BlocksWhenPurchasedCapacityIsFull(t *testing.T) {
 	}
 }
 
+func TestCreateInvitation_BlocksOvercommittedCapacityWithoutOfferingSingleSeatSemantics(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	capacity := &stubSeatCapacity{reserveErr: &seatcapacity.HTTPError{
+		StatusCode: http.StatusConflict,
+		Code:       "capacity_overcommitted",
+	}}
+	useSeatCapacity(t, capacity)
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
+		Email: "capacity-overcommitted-invite@multica.ai", Role: "member",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateInvitation(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "seat_capacity_overcommitted" {
+		t.Fatalf("code = %q, want seat_capacity_overcommitted", body.Code)
+	}
+	if capacity.reserveCalls != 1 {
+		t.Fatalf("reserve calls = %d, want 1", capacity.reserveCalls)
+	}
+}
+
 func TestCreateInvitation_CompensatesCapacityWhenCommitRollsBack(t *testing.T) {
 	clearInvitationsForTestWorkspace(t)
 	ctx := context.Background()
@@ -347,8 +379,13 @@ func TestCreateInvitation_AllowsAfterExpiry(t *testing.T) {
 	}
 }
 
-func TestCreateInvitation_RateLimitChecksEveryGateBeforeWrite(t *testing.T) {
+func TestCreateInvitation_RateLimitChecksEveryGateAfterCapacityReservation(t *testing.T) {
 	clearInvitationsForTestWorkspace(t)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("clear capacity outbox: %v", err)
+	}
+	capacity := &stubSeatCapacity{reserveDecision: seatcapacity.Decision{Managed: true, Allowed: true}}
+	useSeatCapacity(t, capacity)
 	actor := &stubInvitationRateLimiter{allowed: false, retryAfter: 10 * time.Minute}
 	workspace := &stubInvitationRateLimiter{allowed: true}
 	recipient := &stubInvitationRateLimiter{allowed: false, retryAfter: 24 * time.Hour}
@@ -422,6 +459,12 @@ func TestCreateInvitation_RateLimitChecksEveryGateBeforeWrite(t *testing.T) {
 	}
 	if pendingCount != 0 {
 		t.Fatalf("pending invitation count = %d, want 0 after rate limit rejection", pendingCount)
+	}
+	if capacity.reserveCalls != 1 || capacity.releaseCalls != 1 {
+		t.Fatalf("capacity calls reserve=%d release=%d, want 1/1", capacity.reserveCalls, capacity.releaseCalls)
+	}
+	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); intents != 0 {
+		t.Fatalf("capacity intents = %d, want 0 after compensated rate-limit rejection", intents)
 	}
 }
 

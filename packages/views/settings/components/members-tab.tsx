@@ -80,6 +80,7 @@ import { formatStripeMinorAmount } from "./billing-format";
 import {
   isSingleSeatInvitePreview,
   purchasedSeatIsReadyForInvitation,
+  seatPurchaseCanRetryWithSameQuote,
   seatPurchaseMatchesPreview,
 } from "./seat-invite-purchase";
 
@@ -94,6 +95,7 @@ type InviteSeatPurchase = {
   phase: "review" | "purchasing" | "waiting" | "inviting" | "error";
   submittedAt?: number;
   error?: string;
+  retryable?: boolean;
 };
 
 function createSeatPurchaseKey(workspaceId: string): string {
@@ -431,6 +433,34 @@ export function MembersTab() {
       await sendInvitation(email, role);
     } catch (e) {
       const code = errorCode(e);
+      if (code === "seat_capacity_overcommitted") {
+        try {
+          const summary = await qc.fetchQuery({
+            ...workspaceSubscriptionSummaryOptions(wsId),
+            staleTime: 0,
+          });
+          const capacity = summary?.seatCapacity;
+          toast.error(
+            billingT(($) => $.workspace.seats.members_over_capacity_title),
+            capacity
+              ? {
+                  description: billingT(
+                    ($) => $.workspace.seats.members_over_capacity_description,
+                    {
+                      actual: summary.humanMembers,
+                      purchased: capacity.purchased,
+                    },
+                  ),
+                }
+              : undefined,
+          );
+        } catch {
+          toast.error(
+            billingT(($) => $.workspace.seats.members_over_capacity_title),
+          );
+        }
+        return;
+      }
       if (code === "seat_capacity_full") {
         try {
           const preview = await previewSeatPurchase.mutateAsync({
@@ -471,13 +501,24 @@ export function MembersTab() {
   };
 
   const handlePurchaseSeatAndInvite = async () => {
-    if (!inviteSeatPurchase || inviteSeatPurchase.phase !== "review") return;
+    if (
+      !inviteSeatPurchase ||
+      (inviteSeatPurchase.phase !== "review" &&
+        !(inviteSeatPurchase.phase === "error" && inviteSeatPurchase.retryable))
+    ) {
+      return;
+    }
     const current = inviteSeatPurchase;
     if (!workspace || current.workspaceId !== workspace.id) {
       setInviteSeatPurchase(null);
       return;
     }
-    setInviteSeatPurchase({ ...current, phase: "purchasing" });
+    setInviteSeatPurchase({
+      ...current,
+      phase: "purchasing",
+      error: undefined,
+      retryable: false,
+    });
     const request: PurchaseWorkspaceSeatsRequest = {
       additionalSeats: current.preview.additionalSeats,
       expectedCurrentSeats: current.preview.currentSeats,
@@ -495,6 +536,7 @@ export function MembersTab() {
           error: billingT(
             ($) => $.workspace.seat_purchase.purchase_unreadable,
           ),
+          retryable: true,
         });
         return;
       }
@@ -503,6 +545,8 @@ export function MembersTab() {
         ...current,
         phase: "waiting",
         submittedAt,
+        error: undefined,
+        retryable: false,
       });
       await qc.invalidateQueries({
         queryKey: workspaceSubscriptionSummaryOptions(wsId).queryKey,
@@ -517,7 +561,12 @@ export function MembersTab() {
             : code === "seat_quote_changed" || code === "seat_capacity_changed"
               ? billingT(($) => $.workspace.seat_purchase.quote_changed)
               : billingT(($) => $.workspace.seat_purchase.purchase_failed);
-      setInviteSeatPurchase({ ...current, phase: "error", error: message });
+      setInviteSeatPurchase({
+        ...current,
+        phase: "error",
+        error: message,
+        retryable: seatPurchaseCanRetryWithSameQuote(code),
+      });
     }
   };
 
@@ -553,6 +602,7 @@ export function MembersTab() {
         setInviteSeatPurchase({
           ...purchase,
           phase: "error",
+          retryable: false,
           error:
             code === "seat_capacity_full"
               ? t(($) => $.members.seat_purchase_capacity_taken)
@@ -587,6 +637,7 @@ export function MembersTab() {
               ...current,
               phase: "error",
               error: t(($) => $.members.seat_purchase_timeout),
+              retryable: false,
             }
           : current,
       );
@@ -975,6 +1026,17 @@ export function MembersTab() {
                 {t(($) => $.members.purchase_seat_and_invite)}
               </AlertDialogAction>
             )}
+            {inviteSeatPurchase?.phase === "error" &&
+              inviteSeatPurchase.retryable && (
+                <AlertDialogAction
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handlePurchaseSeatAndInvite();
+                  }}
+                >
+                  {t(($) => $.members.retry_seat_purchase)}
+                </AlertDialogAction>
+              )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

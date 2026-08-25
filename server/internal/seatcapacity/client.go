@@ -259,7 +259,7 @@ func IsNotFound(err error) bool {
 	return errors.As(err, &remote) && remote.StatusCode == http.StatusNotFound
 }
 
-func IsCapacityFull(err error) bool {
+func IsCapacityOvercommitted(err error) bool {
 	var remote *HTTPError
-	return errors.As(err, &remote) && remote.StatusCode == http.StatusConflict && remote.Code == "capacity_full"
+	return errors.As(err, &remote) && remote.StatusCode == http.StatusConflict && remote.Code == "capacity_overcommitted"
 }
