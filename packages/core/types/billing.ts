@@ -267,7 +267,6 @@ export interface WorkspaceSubscriptionPrices {
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
   interval: WorkspaceSubscriptionInterval;
   idempotencyKey: string;
-  customerEmail?: string;
 }
 
 export interface CreateWorkspaceSubscriptionCheckoutResponse {

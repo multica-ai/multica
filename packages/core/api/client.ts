@@ -1810,9 +1810,6 @@ export class ApiClient {
         body: JSON.stringify({
           interval: data.interval,
           idempotency_key: data.idempotencyKey,
-          ...(data.customerEmail
-            ? { customer_email: data.customerEmail }
-            : {}),
         }),
         extraHeaders: {
           "Content-Type": "application/json",

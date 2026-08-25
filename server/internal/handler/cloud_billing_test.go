@@ -376,7 +376,7 @@ func TestCloudWorkspaceSubscriptionReadAndWritesUseScopedPaths(t *testing.T) {
 	}
 }
 
-func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspace(t *testing.T) {
+func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspaceAndEmail(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	proxy := &fakeCloudRuntimeProxy{
 		enabled: true,
@@ -391,7 +391,7 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspace(t
 		"workspace_id":    "00000000-0000-0000-0000-000000000001",
 		"interval":        "year",
 		"idempotency_key": "checkout-request-1",
-		"customer_email":  "payer@example.com",
+		"customer_email":  "attacker@example.com",
 	})
 	req.Header.Set(idempotencyKeyHeader, "checkout-header-1")
 	req = withCloudSubscriptionWorkspace(req, "owner")
@@ -411,11 +411,33 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspace(t
 	if body.WorkspaceID != testWorkspaceID {
 		t.Fatalf("upstream workspace_id = %q, want middleware workspace %q", body.WorkspaceID, testWorkspaceID)
 	}
-	if body.Interval != "year" || body.IdempotencyKey != "checkout-request-1" || body.CustomerEmail != "payer@example.com" {
+	if body.Interval != "year" || body.IdempotencyKey != "checkout-request-1" || body.CustomerEmail != handlerTestEmail {
 		t.Fatalf("upstream body = %+v", body)
 	}
 	if got := proxy.req.Headers.Get(idempotencyKeyHeader); got != "checkout-header-1" {
 		t.Fatalf("upstream idempotency key = %q", got)
+	}
+}
+
+func TestCreateCloudWorkspaceSubscriptionCheckoutFailsWhenPayerCannotBeResolved(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"interval":        "month",
+		"idempotency_key": "checkout-request-missing-payer",
+	})
+	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000099")
+	req = withCloudSubscriptionWorkspace(req, "owner")
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "failed to resolve checkout payer") {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if proxy.called {
+		t.Fatal("upstream must not be called without an authoritative payer email")
 	}
 }
 
