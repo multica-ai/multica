@@ -5209,6 +5209,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	// GAP-28 (issue #23): opt-in wall-clock cap. Wrapping the cancel context
+	// keeps the server-side cancellation watcher live underneath it; on
+	// deadline the run unwinds like any cancelled run and the sentinel below
+	// relabels it agent_error.budget_exceeded instead of a provider/network
+	// misclassification. 0 = off (default).
+	budget := budgetForTask(&task)
+	if budget.wallClock > 0 {
+		var clockCancel context.CancelFunc
+		runCtx, clockCancel = context.WithTimeout(runCtx, budget.wallClock)
+		defer clockCancel()
+	}
+
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
 	// doesn't panic time.NewTicker.
@@ -5237,6 +5249,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	for i, tryProvider := range chain {
 		result, err = d.runner.run(runCtx, task, tryProvider, slot, taskLog)
 		usage = append(usage, result.Usage...)
+		// GAP-28: cost/token caps checked on every attempt boundary (usage
+		// accumulates across the chain); the wall-clock cap bounds burn inside
+		// one attempt. Overrun stops the chain immediately — a failover would
+		// only spend more against an exhausted budget.
+		if over := overBudget(budget, usage); over != "" {
+			err = fmt.Errorf("%w: %s", errBudgetExceeded, over)
+			break
+		}
+		if budget.wallClock > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: wall clock %s elapsed", errBudgetExceeded, budget.wallClock)
+			break
+		}
 		if err == nil || !isProviderNetworkError(err) || i == len(chain)-1 || runCtx.Err() != nil {
 			break
 		}
@@ -5382,6 +5406,12 @@ func (e *worktreePreservedError) Unwrap() error { return e.err }
 func taskRunFailureReason(err error) string {
 	if errors.Is(err, errInvalidTaskIdentity) {
 		return taskfailure.ReasonInvalidTaskIdentity.String()
+	}
+	// GAP-28: a MULTICA_BUDGET_* cap stop must not fall through to Classify,
+	// which reads "context deadline exceeded" as provider_network and would
+	// both mislabel the failure and invite a pointless auto-retry.
+	if errors.Is(err, errBudgetExceeded) {
+		return taskfailure.ReasonAgentBudgetExceeded.String()
 	}
 	if errors.Is(err, errTaskPrepareTimeout) {
 		return taskfailure.ReasonTimeout.String()
