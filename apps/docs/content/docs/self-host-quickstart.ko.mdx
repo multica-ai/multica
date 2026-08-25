@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다: `MULTICA_PUBLIC_URL`이 설정되어 있으면 그 값을, 아니면 앱 URL(`MULTICA_APP_URL`, 미설정이면 `FRONTEND_ORIGIN`으로 폴백)을 사용합니다. `MULTICA_APP_URL`과 `FRONTEND_ORIGIN` 둘 다 설정되어 있지 않으면 `MULTICA_PUBLIC_URL`이 설정되어 있어도 이 필드는 응답에서 통째로 생략됩니다(위의 grep은 아무것도 출력하지 않음). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: `.env.example`에서 복사한 `${FRONTEND_PORT}` 참조에 의존하지 말고 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`을 공개 URL로 명시적으로 설정한 뒤 컨테이너를 다시 만드세요.
+마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다: `MULTICA_DAEMON_SERVER_URL`이 설정되어 있으면 그 값을, 그다음 `MULTICA_PUBLIC_URL`, 둘 다 미설정이면 앱 URL(`MULTICA_APP_URL`, 미설정이면 `FRONTEND_ORIGIN`으로 폴백)을 사용합니다. `MULTICA_APP_URL`과 `FRONTEND_ORIGIN` 둘 다 설정되어 있지 않으면 `MULTICA_DAEMON_SERVER_URL`이나 `MULTICA_PUBLIC_URL`이 설정되어 있어도 이 필드는 응답에서 통째로 생략됩니다(위의 grep은 아무것도 출력하지 않음). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: `.env.example`에서 복사한 `${FRONTEND_PORT}` 참조에 의존하지 말고 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`을 공개 URL로 명시적으로 설정한 뒤 컨테이너를 다시 만드세요.
 
 <Callout type="warning">
 `docker compose restart`는 기존 컨테이너만 다시 시작하며 `.env`를 다시 읽지 않습니다. 설정을 수정한 뒤 `.env`를 다시 읽게 하려면 `docker compose -f docker-compose.selfhost.yml up -d`를 실행하세요.

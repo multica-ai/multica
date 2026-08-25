@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します: `MULTICA_PUBLIC_URL` が設定されていればそれを、なければアプリ URL（`MULTICA_APP_URL`、未設定なら `FRONTEND_ORIGIN` にフォールバック）を使います。`MULTICA_APP_URL` と `FRONTEND_ORIGIN` のどちらも未設定の場合、`MULTICA_PUBLIC_URL` が設定されていてもこのフィールドはレスポンスから丸ごと省略されます（上の grep は何も出力しません）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: `.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
+最後のコマンドは `daemon_server_url`（デーモンが API に接続するための URL）を出力します: `MULTICA_DAEMON_SERVER_URL` が設定されていればそれを、次に `MULTICA_PUBLIC_URL`、どちらも未設定ならアプリ URL（`MULTICA_APP_URL`、未設定なら `FRONTEND_ORIGIN` にフォールバック）を使います。`MULTICA_APP_URL` と `FRONTEND_ORIGIN` のどちらも未設定の場合、`MULTICA_DAEMON_SERVER_URL` や `MULTICA_PUBLIC_URL` が設定されていてもこのフィールドはレスポンスから丸ごと省略されます（上の grep は何も出力しません）。`localhost` と出力される場合は `.env` がまだローカルのデフォルトのままです: `.env.example` からコピーした `${FRONTEND_PORT}` 参照に頼らず、`FRONTEND_ORIGIN` と `MULTICA_APP_URL` を公開 URL として明示的に設定し、コンテナを作り直してください。
 
 <Callout type="warning">
 `docker compose restart` は既存のコンテナを再起動するだけで、`.env` を読み直しません。設定を変更した後に `.env` を読み直すには、`docker compose -f docker-compose.selfhost.yml up -d` を実行してください。

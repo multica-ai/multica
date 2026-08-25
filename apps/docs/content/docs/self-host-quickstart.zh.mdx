@@ -180,7 +180,7 @@ curl -fsS https://api.example.com/readyz
 curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
 
-最后一条命令输出 `daemon_server_url`——daemon 连接 API 用的地址：设了 `MULTICA_PUBLIC_URL` 时用它，否则用 app URL（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）。当 `MULTICA_APP_URL` 和 `FRONTEND_ORIGIN` 都没设时，这个字段会整个从响应里省略（上面的 grep 无输出）——即使设了 `MULTICA_PUBLIC_URL` 也是如此。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：不要依赖从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用，把 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 显式设置为公网地址，然后重建容器。
+最后一条命令输出 `daemon_server_url`——daemon 连接 API 用的地址：设了 `MULTICA_DAEMON_SERVER_URL` 时用它，其次是 `MULTICA_PUBLIC_URL`，否则用 app URL（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）。当 `MULTICA_APP_URL` 和 `FRONTEND_ORIGIN` 都没设时，这个字段会整个从响应里省略（上面的 grep 无输出）——即使设了 `MULTICA_DAEMON_SERVER_URL` 或 `MULTICA_PUBLIC_URL` 也是如此。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：不要依赖从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用，把 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 显式设置为公网地址，然后重建容器。
 
 <Callout type="warning">
 `docker compose restart` 只重启现有容器，不会重新读取 `.env`。修改配置后，重新读取 `.env` 需要运行 `docker compose -f docker-compose.selfhost.yml up -d`。
