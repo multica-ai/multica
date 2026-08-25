@@ -44,6 +44,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	"github.com/multica-ai/multica/server/pkg/projectauth"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -65,9 +66,12 @@ type dbExecutor interface {
 }
 
 type Config struct {
-	AllowSignup         bool
-	AllowedEmails       []string
-	AllowedEmailDomains []string
+	// ProjectPermissionEnabled enables the additive projectauth overlay. Keep
+	// false during rollout so upstream-compatible workspace behavior is retained.
+	ProjectPermissionEnabled bool
+	AllowSignup              bool
+	AllowedEmails            []string
+	AllowedEmailDomains      []string
 	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
 	// 403 for every caller. There is no role/owner exception because the repo
 	// has no platform-admin concept; operators bootstrap the workspace with
@@ -173,9 +177,10 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
-	Queries   *db.Queries
-	DB        dbExecutor
-	TxStarter txStarter
+	Queries     *db.Queries
+	DB          dbExecutor
+	TxStarter   txStarter
+	ProjectAuth *projectauth.Service
 	// issueTableWindowCache is initialized only on the request-local Handler
 	// copy used by a repeatable-read table request. It lets facets reuse one
 	// visible-id snapshot without adding mutable state to the shared Handler.
@@ -449,6 +454,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Queries:                      queries,
 		DB:                           executor,
 		TxStarter:                    txStarter,
+		ProjectAuth:                  projectauth.New(newProjectAuthRepository(executor), cfg.ProjectPermissionEnabled),
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
@@ -986,6 +992,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.requireIssueProjectPermission(w, r, issue, projectauth.View) {
+			return db.Issue{}, false
+		}
 		if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
 			return db.Issue{}, false
 		}
@@ -1013,6 +1022,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		return db.Issue{}, false
 	}
 	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
+		return db.Issue{}, false
+	}
+	if !h.requireIssueProjectPermission(w, r, issue, projectauth.View) {
 		return db.Issue{}, false
 	}
 	return issue, true

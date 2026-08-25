@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/projectauth"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -600,7 +601,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, creationWindowLimit *int64) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, creationWindowLimit *int64, projectPermissionUserID string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -626,6 +627,10 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	phraseStartsWithParam := nextArg(escapedPhrase + "%")
 
 	wsParam := nextArg(nil) // $4 — workspace_id, will be filled by caller position
+	projectUserParam := ""
+	if projectPermissionUserID != "" {
+		projectUserParam = nextArg(projectPermissionUserID)
+	}
 
 	// Build per-term LIKE conditions only for multi-word search.
 	var termContainsParams []string
@@ -687,6 +692,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	if creationWindowLimit != nil {
 		limitRef := nextArg(*creationWindowLimit)
 		whereClause = issueWindowPredicate("i", wsParam, limitRef) + " AND " + whereClause
+	}
+	if projectUserParam != "" {
+		whereClause = issueProjectVisibilityPredicate("i", wsParam, projectUserParam) + " AND " + whereClause
 	}
 
 	// --- ORDER BY clause ---
@@ -903,7 +911,15 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	if windowEnabled && policy.action == entitlement.ActionEnforce {
 		creationWindowLimit = &policy.limit
 	}
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, creationWindowLimit)
+	projectPermissionUserID := ""
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		projectPermissionUserID = requestUserID(r)
+		if projectPermissionUserID == "" {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+	}
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, creationWindowLimit, projectPermissionUserID)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -1144,6 +1160,35 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		for i, issue := range issues {
 			openIDs[i] = issue.ID
 		}
+		if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+			userID := requestUserID(r)
+			if userID == "" {
+				writeError(w, http.StatusUnauthorized, "user not authenticated")
+				return
+			}
+			visibleProjects, scopeErr := h.ProjectAuth.Scope(ctx, projectauth.Subject{UserID: userID, WorkspaceID: workspaceID})
+			if scopeErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list issues")
+				return
+			}
+			visible := make(map[string]struct{}, len(visibleProjects))
+			for _, id := range visibleProjects {
+				visible[id] = struct{}{}
+			}
+			filtered := issues[:0]
+			for _, issue := range issues {
+				if issue.ProjectID.Valid {
+					if _, ok := visible[uuidToString(issue.ProjectID)]; ok {
+						filtered = append(filtered, issue)
+					}
+				}
+			}
+			issues = filtered
+			openIDs = openIDs[:0]
+			for _, issue := range issues {
+				openIDs = append(openIDs, issue.ID)
+			}
+		}
 		if windowEnabled && windowPolicy.action == entitlement.ActionEnforce {
 			visible, visibleErr := h.visibleIssueIDSet(ctx, wsUUID, windowPolicy, openIDs)
 			if visibleErr != nil {
@@ -1307,6 +1352,14 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		userID := requestUserID(r)
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+		where = append(where, issueProjectVisibilityPredicate("i", "$1", addArg(userID)))
 	}
 
 	if len(statusCategoriesFilter) > 0 {
@@ -1791,6 +1844,14 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	addArg := func(v any) string {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
+	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		userID := requestUserID(r)
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+		where = append(where, issueProjectVisibilityPredicate("i", "$1", addArg(userID)))
 	}
 
 	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
@@ -2282,6 +2343,15 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		visible := children[:0]
+		for _, child := range children {
+			if allowed, _ := h.issueProjectAllowed(r, child, projectauth.View); allowed {
+				visible = append(visible, child)
+			}
+		}
+		children = visible
+	}
 	windowPolicy, windowEnabled := h.issueWindowPolicy(r.Context(), issue.WorkspaceID)
 	childIDs := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2389,6 +2459,15 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		visible := children[:0]
+		for _, child := range children {
+			if allowed, _ := h.issueProjectAllowed(r, child, projectauth.View); allowed {
+				visible = append(visible, child)
+			}
+		}
+		children = visible
+	}
 	windowPolicy, windowEnabled := h.issueWindowPolicy(r.Context(), wsUUID)
 	childIDs := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2454,7 +2533,45 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	policy, windowEnabled := h.issueWindowPolicy(r.Context(), wsUUID)
 	resp := []progressEntry{}
-	if windowEnabled && policy.action == entitlement.ActionEnforce {
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		userID := requestUserID(r)
+		if userID == "" {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+		userRef := "$2"
+		query := fmt.Sprintf(`SELECT i.parent_issue_id,
+			COUNT(*)::bigint AS total,
+			COUNT(*) FILTER (WHERE issue_effective_status(i.workspace_id, i.status) IN ('done', 'cancelled'))::bigint AS done
+		FROM issue i
+		JOIN issue p ON p.id = i.parent_issue_id AND p.workspace_id = i.workspace_id
+		WHERE i.workspace_id = $1
+		  AND %s
+		  AND %s
+		GROUP BY i.parent_issue_id`, issueProjectVisibilityPredicate("i", "$1", userRef), issueProjectVisibilityPredicate("p", "$1", userRef))
+		rows, err := h.DB.Query(r.Context(), query, wsUUID, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var parentID pgtype.UUID
+			var entry progressEntry
+			if err := rows.Scan(&parentID, &entry.Total, &entry.Done); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+				return
+			}
+			entry.ParentIssueID = uuidToString(parentID)
+			entry.VisibleTotal = entry.Total
+			entry.VisibleDone = entry.Done
+			resp = append(resp, entry)
+		}
+		if err := rows.Err(); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+			return
+		}
+	} else if windowEnabled && policy.action == entitlement.ActionEnforce {
 		query := fmt.Sprintf(`WITH visible_issue_ids AS MATERIALIZED (
 			%s
 		)
@@ -2719,6 +2836,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectUUID = pid
 	}
+	if !h.requireNewIssueProjectPermission(w, r, workspaceID, projectUUID, projectauth.IssueCreate) {
+		return
+	}
 
 	// Optional parent_issue_id — validate same-workspace membership just like
 	// the regular CreateIssue path. Frontend seeds this from the "Add sub
@@ -2736,6 +2856,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil || !parent.ID.Valid {
 			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+			return
+		}
+		if !h.requireParentIssueProjectPermission(w, r, parent, projectUUID) {
 			return
 		}
 		parentIssueUUID = pid
@@ -2957,6 +3080,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		parentIssueID = id
+	}
+	if !h.requireNewIssueProjectPermission(w, r, workspaceID, projectID, projectauth.IssueCreate) {
+		return
+	}
+	if parentIssueID.Valid && h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          parentIssueID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+			return
+		}
+		if !h.requireParentIssueProjectPermission(w, r, parent, projectID) {
+			return
+		}
 	}
 	// Cross-workspace parent / project existence is enforced inside
 	// IssueService.Create (atomically with the create), so every entry
@@ -3392,6 +3531,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !h.requireIssueProjectPermission(w, r, prevIssue, projectauth.IssueManage) {
+		return
+	}
 	userID := requestUserID(r)
 	workspaceID := uuidToString(prevIssue.WorkspaceID)
 
@@ -3520,10 +3662,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// Validate parent exists in the same workspace.
-			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			_, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			})
+			if err != nil {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 				return
 			}
@@ -3567,6 +3710,22 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.ProjectID = projectUUID
 		} else {
 			params.ProjectID = pgtype.UUID{Valid: false}
+		}
+		if !h.requireNewIssueProjectPermission(w, r, workspaceID, params.ProjectID, projectauth.IssueCreate) {
+			return
+		}
+	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() && params.ParentIssueID.Valid && (rawFields["parent_issue_id"] != nil || rawFields["project_id"] != nil) {
+		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+			ID:          params.ParentIssueID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+			return
+		}
+		if !h.requireParentIssueProjectPermission(w, r, parent, params.ProjectID) {
+			return
 		}
 	}
 	if _, ok := rawFields["stage"]; ok {
@@ -3717,7 +3876,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			StatusChanged:   statusChanged,
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-	); ok && !req.SuppressRun {
+	); ok && !req.SuppressRun && h.issueAgentAllowed(r, issue) {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
@@ -3935,6 +4094,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
+		return
+	}
+	if !h.requireIssueProjectPermission(w, r, issue, projectauth.IssueManage) {
 		return
 	}
 
@@ -4171,6 +4333,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		batchProjectID = projectUUID
 	}
+	if _, ok := rawUpdates["project_id"]; ok {
+		if !h.requireNewIssueProjectPermission(w, r, workspaceID, batchProjectID, projectauth.IssueCreate) {
+			return
+		}
+	}
 
 	updated := 0
 	// One Resolver for the whole batch — a per-issue filler would query the
@@ -4191,6 +4358,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			continue
+		}
+		if !h.requireIssueProjectPermission(w, r, prevIssue, projectauth.IssueManage) {
+			return
 		}
 
 		params := db.UpdateIssueParams{
@@ -4271,10 +4441,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				// Validate parent exists in the same workspace.
-				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				_, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
-				}); err != nil {
+				})
+				if err != nil {
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -4302,6 +4473,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, ok := rawUpdates["project_id"]; ok {
 			// Resolved before the loop; an explicit null stays invalid and clears.
 			params.ProjectID = batchProjectID
+		}
+		if h.ProjectAuth != nil && h.ProjectAuth.Enabled() && params.ParentIssueID.Valid && (rawUpdates["parent_issue_id"] != nil || rawUpdates["project_id"] != nil) {
+			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          params.ParentIssueID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			})
+			if err != nil || !parent.ProjectID.Valid || !params.ProjectID.Valid || parent.ProjectID != params.ProjectID {
+				continue
+			}
+			allowed, _ := h.issueProjectAllowed(r, parent, projectauth.View)
+			if !allowed {
+				continue
+			}
 		}
 		if _, ok := rawUpdates["stage"]; ok {
 			if req.Updates.Stage != nil {
@@ -4387,7 +4571,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				StatusChanged:   statusChanged,
 			},
 			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-		); ok && !req.Updates.SuppressRun {
+		); ok && !req.Updates.SuppressRun && h.issueAgentAllowed(r, issue) {
 			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
 		}
 
@@ -4473,6 +4657,9 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			continue
+		}
+		if !h.requireIssueProjectPermission(w, r, issue, projectauth.IssueManage) {
+			return
 		}
 
 		seenIssueIDs[issueUUID] = struct{}{}
