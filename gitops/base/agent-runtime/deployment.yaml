@@ -58,13 +58,21 @@ spec:
       # ephemeral layer — the PVC needs the same fix applied at pod start.
       # Mirrors devenv's fix-efs-permissions init container (configuration
       # repo). `multica_workspaces` holds real git checkouts (like devenv's
-      # own `workspaces` dir), so it only ever gets a top-level chown — a
-      # recursive one would scale with repo size and meaningfully slow every
-      # pod start. The rest are tool caches/config that nest arbitrarily deep
-      # on their own (bazel under .cache, npm under .npm-global, etc.) but
-      # stay small, so they're chowned recursively: a top-level-only fix
-      # would leave any subtree a tool once created while running as root
-      # permanently stuck root-owned, since the PVC persists across restarts.
+      # own `workspaces` dir), so it only ever gets a top-level chown.
+      #
+      # The rest are tool caches/config that nest arbitrarily deep on their
+      # own (bazel under .cache, npm under .npm-global, etc.), so a
+      # top-level-only fix leaves any subtree a tool once created while
+      # running as root permanently stuck, since the PVC persists across
+      # restarts. But a plain `chown -R` over EFS is one NFS round-trip per
+      # file, and months of accumulated cache can mean hundreds of thousands
+      # of files — a first pass across long-lived workspaces wedged pods in
+      # Init for 25+ minutes with no end in sight. mkdir only ever fails on
+      # *directory* ownership, so this fixes directories only (a far smaller
+      # set than every cached file), skips ones already correct so repeat
+      # runs are cheap, fans out 16-way to hide NFS latency, and is
+      # time-boxed per dir so a pathological case degrades to "still
+      # partially root-owned" rather than "pod never starts."
       initContainers:
         - name: fix-efs-permissions
           image: busybox:1.36
@@ -75,7 +83,9 @@ spec:
               echo "Fixing volume permissions for uid 1000..."
               chown 1000:1000 /home-efs 2>/dev/null || true
               for d in .npm-global .local .cache .hermes .git-ai .multica .agents; do
-                [ -e "/home-efs/$d" ] && chown -R 1000:1000 "/home-efs/$d" 2>/dev/null || true
+                [ -e "/home-efs/$d" ] || continue
+                timeout 120 sh -c "find '/home-efs/$d' -type d '!' -user 1000 -print0 | xargs -0 -r -P 16 -n 200 chown 1000:1000" \
+                  || echo "permission fix for $d timed out or failed, continuing"
               done
               [ -e "/home-efs/multica_workspaces" ] && chown 1000:1000 "/home-efs/multica_workspaces" 2>/dev/null || true
               echo "Permissions fixed."
