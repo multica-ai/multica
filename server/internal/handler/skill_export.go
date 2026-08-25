@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,8 @@ import (
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+var errSkillExportNotPortable = errors.New("skill exceeds portable archive limits")
 
 // ExportSkill serves a single workspace skill as a portable .tar.gz archive so
 // it can be shared with someone outside the workspace and re-imported through
@@ -42,6 +45,10 @@ func (h *Handler) ExportSkill(w http.ResponseWriter, r *http.Request) {
 
 	data, err := buildSkillTarGz(skill.Name, skill.Content, files)
 	if err != nil {
+		if errors.Is(err, errSkillExportNotPortable) {
+			writeError(w, http.StatusUnprocessableEntity, "skill exceeds portable export limits")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to build skill archive")
 		return
 	}
@@ -66,6 +73,9 @@ func (h *Handler) ExportSkill(w http.ResponseWriter, r *http.Request) {
 // paths are re-validated (zip-slip guard) so a path that somehow landed in the
 // DB outside the normal write path cannot escape the archive root.
 func buildSkillTarGz(name, content string, files []db.SkillFile) ([]byte, error) {
+	if err := validateSkillExportSize(content, files); err != nil {
+		return nil, err
+	}
 	root := skillArchiveDirName(name)
 
 	var buf bytes.Buffer
@@ -104,6 +114,31 @@ func buildSkillTarGz(name, content string, files []db.SkillFile) ([]byte, error)
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// validateSkillExportSize keeps the exporter within the archive importer's
+// content contract. Skills written through the regular API predate those
+// limits, so exporting an oversized record without this check would create a
+// download that cannot be imported again.
+func validateSkillExportSize(content string, files []db.SkillFile) error {
+	if len(content) > maxImportFileSize {
+		return fmt.Errorf("%w: SKILL.md exceeds %d bytes", errSkillExportNotPortable, maxImportFileSize)
+	}
+	if len(files) > maxImportFileCount {
+		return fmt.Errorf("%w: skill has more than %d supporting files", errSkillExportNotPortable, maxImportFileCount)
+	}
+
+	totalSize := 0
+	for _, file := range files {
+		if len(file.Content) > maxImportFileSize {
+			return fmt.Errorf("%w: supporting file %q exceeds %d bytes", errSkillExportNotPortable, file.Path, maxImportFileSize)
+		}
+		totalSize += len(file.Content)
+		if totalSize > maxImportTotalSize {
+			return fmt.Errorf("%w: supporting files exceed %d bytes", errSkillExportNotPortable, maxImportTotalSize)
+		}
+	}
+	return nil
 }
 
 // skillArchiveDirName renders a skill name as a safe single path segment for

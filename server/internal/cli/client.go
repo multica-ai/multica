@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -743,8 +744,10 @@ func (c *APIClient) DownloadSkillArchive(ctx context.Context, id string) ([]byte
 
 // contentDispositionFilename extracts the filename from an RFC 6266
 // `Content-Disposition: attachment; filename="..."` header. Returns "" when
-// the header is absent, carries no filename, or contains CR/LF (header
-// injection).
+// the header is absent, carries no filename, or contains unsafe characters.
+// It always returns a basename: although this server sanitizes its header,
+// the response remains an untrusted boundary for a CLI that writes the result
+// to disk by default.
 func contentDispositionFilename(disposition string) string {
 	if disposition == "" {
 		return ""
@@ -762,7 +765,11 @@ func contentDispositionFilename(disposition string) string {
 	if rest == "" || strings.ContainsAny(rest, "\r\n") {
 		return ""
 	}
-	return rest
+	filename := path.Base(strings.ReplaceAll(rest, "\\", "/"))
+	if filename == "." || filename == ".." || filename == "/" || strings.ContainsAny(filename, "\r\n\x00:") {
+		return ""
+	}
+	return filename
 }
 
 // UploadPrivatePlugin installs workspace-private Plugin archive bytes. The

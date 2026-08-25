@@ -281,6 +281,21 @@ func TestDownloadFile(t *testing.T) {
 	})
 }
 
+func TestContentDispositionFilenameUsesSafeBasename(t *testing.T) {
+	tests := map[string]string{
+		`attachment; filename="review-helper.tar.gz"`:    "review-helper.tar.gz",
+		`attachment; filename="../../escape.tar.gz"`:     "escape.tar.gz",
+		`attachment; filename="C:\\temp\\escape.tar.gz"`: "escape.tar.gz",
+		`attachment; filename="bad:name.tar.gz"`:         "",
+		`attachment; filename="../"`:                     "",
+	}
+	for header, want := range tests {
+		if got := contentDispositionFilename(header); got != want {
+			t.Errorf("contentDispositionFilename(%q) = %q, want %q", header, got, want)
+		}
+	}
+}
+
 func TestUploadFileWithURL(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

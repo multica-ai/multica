@@ -21,7 +21,11 @@ import (
 // per-file / total / file-count caps (maxImportFileSize, maxImportTotalSize,
 // maxImportFileCount); this outer cap just stops a client from streaming an
 // unbounded compressed body before those decompression limits can apply.
-const maxImportArchiveUploadSize = 16 << 20 // 16 MiB
+const (
+	maxImportArchiveUploadSize   = 16 << 20 // 16 MiB compressed upload
+	maxImportArchiveExpandedSize = maxImportFileSize + maxImportTotalSize
+	maxImportArchiveEntryCount   = 1024
+)
 
 // isMultipartForm reports whether the request carries a multipart/form-data
 // body (an uploaded skill archive) rather than the JSON URL-import body.
@@ -150,9 +154,11 @@ func readZipArchiveEntries(data []byte) ([]skillArchiveEntry, error) {
 }
 
 // readTarArchiveEntries walks a .tar or .tar.gz archive into normalized
-// entries. tar is a sequential stream, so each entry's content is read eagerly
-// (bounded by maxImportFileSize+1) while the reader is positioned at it; the
-// entry's read closure then returns what was already consumed.
+// entries. tar is a sequential stream, so each regular entry's content is read
+// eagerly while the reader is positioned at it. The expanded-byte and entry
+// caps are enforced here, before buffered content can grow past the import
+// contract. In particular, returning as soon as a file exceeds its cap avoids
+// tar.Reader.Next draining the rest of an attacker-controlled giant entry.
 func readTarArchiveEntries(data []byte) ([]skillArchiveEntry, error) {
 	var src io.Reader = bytes.NewReader(data)
 	if isGzipArchive(data) {
@@ -166,6 +172,8 @@ func readTarArchiveEntries(data []byte) ([]skillArchiveEntry, error) {
 
 	tr := tar.NewReader(src)
 	var entries []skillArchiveEntry
+	var expandedSize int64
+	entryCount := 0
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
@@ -175,27 +183,40 @@ func readTarArchiveEntries(data []byte) ([]skillArchiveEntry, error) {
 			return nil, fmt.Errorf("uploaded file is not a valid .skill/.zip/.tar archive")
 		}
 
-		entry := skillArchiveEntry{
+		if hdr.Typeflag == tar.TypeDir {
+			continue
+		}
+		// A skill archive contains regular files only. Symlinks, devices, and
+		// other special tar entries cannot be represented in skill_file and must
+		// not become empty supporting files on import. Reject rather than skip so
+		// a later Next call never drains an attacker-controlled special entry.
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+			return nil, fmt.Errorf("unsupported archive entry %q", hdr.Name)
+		}
+		entryCount++
+		if entryCount > maxImportArchiveEntryCount {
+			return nil, fmt.Errorf("archive exceeds %d entry limit", maxImportArchiveEntryCount)
+		}
+
+		// Bound the read now, while the stream is positioned at this entry, so a
+		// header that under-reports its size cannot force an unbounded allocation.
+		buf, err := io.ReadAll(io.LimitReader(tr, maxImportFileSize+1))
+		if err != nil {
+			return nil, fmt.Errorf("read archive entry %q: %w", hdr.Name, err)
+		}
+		if int64(len(buf)) > maxImportFileSize {
+			return nil, fmt.Errorf("file %q exceeds %d bytes", hdr.Name, maxImportFileSize)
+		}
+		expandedSize += int64(len(buf))
+		if expandedSize > maxImportArchiveExpandedSize {
+			return nil, fmt.Errorf("archive exceeds %d byte expanded size limit", maxImportArchiveExpandedSize)
+		}
+
+		content := string(buf)
+		entries = append(entries, skillArchiveEntry{
 			name: path.Clean(hdr.Name),
-			dir:  hdr.FileInfo().IsDir(),
-		}
-		if !entry.dir {
-			// Bound the read now, while the stream is positioned at this
-			// entry, so a header that under-reports its size cannot force an
-			// unbounded allocation. Mirrors readZipFile's cap.
-			buf, rerr := io.ReadAll(io.LimitReader(tr, maxImportFileSize+1))
-			if rerr != nil {
-				entry.read = func(int64) (string, error) { return "", rerr }
-			} else if int64(len(buf)) > maxImportFileSize {
-				entry.read = func(int64) (string, error) {
-					return "", fmt.Errorf("file %q exceeds %d bytes", hdr.Name, maxImportFileSize)
-				}
-			} else {
-				content := string(buf)
-				entry.read = func(int64) (string, error) { return content, nil }
-			}
-		}
-		entries = append(entries, entry)
+			read: func(int64) (string, error) { return content, nil },
+		})
 	}
 	if len(entries) == 0 {
 		return nil, fmt.Errorf("uploaded file is not a valid .skill/.zip/.tar archive")

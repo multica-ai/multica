@@ -7,6 +7,8 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -435,6 +437,46 @@ func TestParseSkillArchive_TarSlipRejected(t *testing.T) {
 	}
 }
 
+func TestParseSkillArchive_TarGzRejectsOversizedEntryBeforeDraining(t *testing.T) {
+	data := buildTestTarGz(t, map[string]string{
+		"SKILL.md":           testSkillMd,
+		"references/huge.md": strings.Repeat("x", maxImportFileSize+1),
+	})
+
+	_, err := parseSkillArchive(data, "oversized.tar.gz")
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversize archive error, got %v", err)
+	}
+}
+
+func TestReadTarArchiveEntriesRejectsExpandedBundle(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	writeTestTarEntries(t, tw, map[string]string{"SKILL.md": testSkillMd})
+	for i := 0; i < 9; i++ {
+		name := fmt.Sprintf("references/%d.md", i)
+		body := strings.Repeat("x", maxImportFileSize)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatalf("write header %q: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatalf("write body %q: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "expanded size limit") {
+		t.Fatalf("expected expanded-size error, got %v", err)
+	}
+}
+
 func TestParseSkillArchive_InvalidGzipRejected(t *testing.T) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
@@ -485,6 +527,18 @@ func TestBuildSkillTarGz_RoundTrip(t *testing.T) {
 	}
 	if c, ok := fileContent(imported, "references/g.md"); !ok || c != "guide" {
 		t.Errorf("references/g.md content = %q, ok=%v", c, ok)
+	}
+}
+
+func TestBuildSkillTarGzRejectsContentOutsideImportLimits(t *testing.T) {
+	_, err := buildSkillTarGz("too-large", strings.Repeat("a", maxImportFileSize+1), nil)
+	if !errors.Is(err, errSkillExportNotPortable) {
+		t.Fatalf("buildSkillTarGz error = %v, want portable-limit error", err)
+	}
+
+	_, err = buildSkillTarGz("too-many-files", "# Skill", make([]db.SkillFile, maxImportFileCount+1))
+	if !errors.Is(err, errSkillExportNotPortable) {
+		t.Fatalf("buildSkillTarGz error = %v, want portable-limit error", err)
 	}
 }
 
