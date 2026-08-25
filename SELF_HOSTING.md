@@ -88,6 +88,20 @@ Once ready:
 
 Open http://localhost:3000 in your browser. The Docker self-host stack defaults to `APP_ENV=production` (set in `docker-compose.selfhost.yml`), and there is no fixed verification code by default. Pick one of the following to log in:
 
+## Upgrade policy for private deployments
+
+Self-hosting means the organization owns the compatible release set: backend,
+web, PostgreSQL migrations, CLI/daemon, and any desktop or mobile builds that
+connect to the private server. The public desktop updater and `multica update`
+are disabled when the configured API URL is not `api.multica.ai`; users should
+upgrade from the organization's private build or release channel. This avoids
+silently replacing a private build with an official release that does not
+contain the same server changes or permission features.
+
+If a private desktop build is distributed, bundle the matching CLI with it (or
+install that CLI on the host). The desktop app will not download a public CLI as
+a fallback for a private API URL.
+
 - **Recommended (production):** configure `RESEND_API_KEY` in `.env`, then restart the backend. Real verification codes will be sent to the email address you enter. See [Advanced Configuration → Email](SELF_HOSTING_ADVANCED.md#email-required-for-authentication).
 - **Without email configured:** the verification code is generated server-side and printed to the backend container logs (look for `[DEV] Verification code for ...:`). Useful for one-off testing on a single machine.
 - **Deterministic local/private testing:** set `APP_ENV=development` and `MULTICA_DEV_VERIFICATION_CODE=888888` in `.env`, then restart the backend. This fixed code is ignored when `APP_ENV=production`.

@@ -154,6 +154,29 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestIsOfficialCloudServerURL(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"canonical cloud", "https://api.multica.ai", true},
+		{"canonical cloud with path", "https://api.multica.ai/api", true},
+		{"case insensitive hostname", "https://API.MULTICA.AI", true},
+		{"private hostname", "https://multica.example.internal", false},
+		{"lookalike hostname", "https://api.multica.ai.evil.example", false},
+		{"localhost", "http://localhost:8080", false},
+		{"empty", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsOfficialCloudServerURL(tt.url); got != tt.want {
+				t.Fatalf("IsOfficialCloudServerURL(%q) = %v, want %v", tt.url, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFindChecksumManifestAsset(t *testing.T) {
 	t.Run("finds checksums.txt among assets", func(t *testing.T) {
 		assets := []GitHubReleaseAsset{

@@ -33,6 +33,13 @@ multica update
 
 `multica update` auto-detects your installation method and upgrades accordingly.
 
+For a self-hosted deployment, the CLI deliberately does **not** use the public
+Multica GitHub/Homebrew release channel. Once `server_url` points to a private
+server, `multica update` stops with an operator-facing message; upgrade the
+CLI, backend, web image, and database migrations from the versions published by
+your organization instead. This prevents a public CLI from becoming
+incompatible with private API contracts or permission extensions.
+
 ## Quick Start
 
 ```bash

@@ -176,10 +176,11 @@ describe("setupAutoUpdater", () => {
   });
 
   it("enables automatic background updates by default", async () => {
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => null, { serverUrl: "https://api.multica.ai" });
 
     await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
       automaticUpdates: true,
+      updatesAvailable: true,
     });
 
     await vi.advanceTimersByTimeAsync(5_000);
@@ -191,7 +192,7 @@ describe("setupAutoUpdater", () => {
       updaterPreferencesPath(ctx.userDataPath),
       JSON.stringify({ automaticUpdates: false }),
     );
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => null, { serverUrl: "https://api.multica.ai" });
 
     // Let the async preference load settle before advancing timers; otherwise
     // the in-flight readFile can resolve after afterEach() removes the temp
@@ -205,11 +206,11 @@ describe("setupAutoUpdater", () => {
   });
 
   it("persists the automatic update preference and stops future background checks", async () => {
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => null, { serverUrl: "https://api.multica.ai" });
 
     await expect(
       invokeIpc("updater:set-automatic-updates", false),
-    ).resolves.toEqual({ automaticUpdates: false });
+    ).resolves.toEqual({ automaticUpdates: false, updatesAvailable: true });
     expect(
       JSON.parse(
         readFileSync(updaterPreferencesPath(ctx.userDataPath), "utf-8"),
@@ -225,7 +226,7 @@ describe("setupAutoUpdater", () => {
       updaterPreferencesPath(ctx.userDataPath),
       JSON.stringify({ automaticUpdates: false }),
     );
-    setupAutoUpdater(() => null);
+    setupAutoUpdater(() => null, { serverUrl: "https://api.multica.ai" });
 
     await expect(invokeIpc("updater:check")).resolves.toMatchObject({
       ok: true,
@@ -234,9 +235,26 @@ describe("setupAutoUpdater", () => {
     expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
+  it("does not access the public updater for a private deployment", async () => {
+    setupAutoUpdater(() => null, {
+      serverUrl: "https://multica.example.internal",
+    });
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: false,
+      updatesAvailable: false,
+    });
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+    await expect(invokeIpc("updater:check")).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("private Multica deployment"),
+    });
+  });
+
   it("forwards update progress to a live renderer", () => {
     const { win, send } = makeWindow();
-    setupAutoUpdater(() => win);
+    setupAutoUpdater(() => win, { serverUrl: "https://api.multica.ai" });
 
     emitUpdater("download-progress", { percent: 42 });
 
@@ -246,14 +264,16 @@ describe("setupAutoUpdater", () => {
   });
 
   it("skips update progress when the BrowserWindow has already been destroyed", () => {
-    setupAutoUpdater(() => makeDestroyedWindow());
+    setupAutoUpdater(() => makeDestroyedWindow(), {
+      serverUrl: "https://api.multica.ai",
+    });
 
     expect(() => emitUpdater("download-progress", { percent: 42 })).not.toThrow();
   });
 
   it("skips update progress when the BrowserWindow webContents has already been destroyed", () => {
     const { win, send } = makeWindowWithDestroyedWebContents();
-    setupAutoUpdater(() => win);
+    setupAutoUpdater(() => win, { serverUrl: "https://api.multica.ai" });
 
     expect(() => emitUpdater("download-progress", { percent: 42 })).not.toThrow();
     expect(send).not.toHaveBeenCalled();
@@ -263,7 +283,7 @@ describe("setupAutoUpdater", () => {
     const { win, send } = makeWindowWithThrowingSend(
       new TypeError("Object has been destroyed"),
     );
-    setupAutoUpdater(() => win);
+    setupAutoUpdater(() => win, { serverUrl: "https://api.multica.ai" });
 
     expect(() => emitUpdater("download-progress", { percent: 42 })).not.toThrow();
     expect(send).toHaveBeenCalledWith("updater:download-progress", {
@@ -273,7 +293,7 @@ describe("setupAutoUpdater", () => {
 
   it("rethrows non-destroy errors from webContents.send", () => {
     const { win } = makeWindowWithThrowingSend(new Error("boom"));
-    setupAutoUpdater(() => win);
+    setupAutoUpdater(() => win, { serverUrl: "https://api.multica.ai" });
 
     expect(() => emitUpdater("download-progress", { percent: 42 })).toThrow(
       "boom",

@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/projectauth"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -137,6 +138,28 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
 		return
 	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		visible, err := h.ProjectAuth.Scope(r.Context(), projectauth.Subject{UserID: userID, WorkspaceID: workspaceID})
+		if err != nil {
+			writeProjectAuthError(w, err)
+			return
+		}
+		allowed := make(map[string]struct{}, len(visible))
+		for _, id := range visible {
+			allowed[id] = struct{}{}
+		}
+		filtered := projects[:0]
+		for _, project := range projects {
+			if _, ok := allowed[uuidToString(project.ID)]; ok {
+				filtered = append(filtered, project)
+			}
+		}
+		projects = filtered
+	}
 
 	// Batch-fetch issue stats and resource counts for all projects
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
@@ -188,6 +211,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireProjectPermission(w, r, id, workspaceID, projectauth.View) {
 		return
 	}
 	resp := projectToResponse(project)
@@ -363,6 +389,13 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			h.writeProjectWriteError(w, r, err, "create")
 			return
 		}
+		if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+			if err := h.ProjectAuth.EnsureOwner(r.Context(), uuidToString(project.ID), userID); err != nil {
+				slog.Error("seed project owner failed", append(logger.RequestAttrs(r), "project_id", uuidToString(project.ID), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to initialize project permissions")
+				return
+			}
+		}
 		resp := projectToResponse(project)
 		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 		writeJSON(w, http.StatusCreated, resp)
@@ -418,6 +451,13 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project create")
 		return
 	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		if err := h.ProjectAuth.EnsureOwner(r.Context(), uuidToString(project.ID), userID); err != nil {
+			slog.Error("seed project owner failed", append(logger.RequestAttrs(r), "project_id", uuidToString(project.ID), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to initialize project permissions")
+			return
+		}
+	}
 
 	resourceResp := make([]ProjectResourceResponse, len(resourceRows))
 	for i, row := range resourceRows {
@@ -460,6 +500,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireProjectPermission(w, r, id, workspaceID, projectauth.Edit) {
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -591,11 +634,22 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
-	if !ok {
-		return
+	var userID string
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		if !h.requireProjectPermission(w, r, id, workspaceID, projectauth.SettingsManage) {
+			return
+		}
+		userID, ok = requireUserID(w, r)
+		if !ok {
+			return
+		}
+	} else {
+		requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
+		if !ok {
+			return
+		}
+		userID = uuidToString(requester.UserID)
 	}
-	userID := uuidToString(requester.UserID)
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -881,6 +935,32 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("search projects failed", "error", err, "workspace_id", workspaceID, "query", q)
 		writeError(w, http.StatusInternalServerError, "failed to search projects")
 		return
+	}
+	if h.ProjectAuth != nil && h.ProjectAuth.Enabled() {
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		visible, err := h.ProjectAuth.Scope(ctx, projectauth.Subject{UserID: userID, WorkspaceID: workspaceID})
+		if err != nil {
+			writeProjectAuthError(w, err)
+			return
+		}
+		allowed := make(map[string]struct{}, len(visible))
+		for _, id := range visible {
+			allowed[id] = struct{}{}
+		}
+		filtered := results[:0]
+		for _, row := range results {
+			if _, ok := allowed[uuidToString(row.project.ID)]; ok {
+				filtered = append(filtered, row)
+			}
+		}
+		results = filtered
+		totalVisible := int64(len(results))
+		for i := range results {
+			results[i].totalCount = totalVisible
+		}
 	}
 
 	var total int64

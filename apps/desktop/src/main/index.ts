@@ -829,7 +829,11 @@ if (!gotTheLock) {
     desktopInitialized = true;
     createWindow();
 
-    setupAutoUpdater(() => mainWindow);
+    setupAutoUpdater(() => mainWindow, {
+      serverUrl: runtimeConfigResult.ok
+        ? runtimeConfigResult.config.apiUrl
+        : "",
+    });
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
 

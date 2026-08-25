@@ -51,6 +51,27 @@ func TestTryAutoUpdate_SkipsWhenUpdating(t *testing.T) {
 	}
 }
 
+func TestTryAutoUpdate_SkipsPrivateDeploymentEvenWhenEnabled(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
+	d.cfg.ServerBaseURL = "http://multica.example.internal"
+	var fetchCalls atomic.Int32
+	prev := fetchLatestRelease
+	fetchLatestRelease = func() (*cli.GitHubRelease, error) {
+		fetchCalls.Add(1)
+		return &cli.GitHubRelease{TagName: "v0.1.14"}, nil
+	}
+	t.Cleanup(func() { fetchLatestRelease = prev })
+
+	d.tryAutoUpdate(context.Background())
+
+	if fetchCalls.Load() != 0 {
+		t.Fatalf("private deployment queried the public release channel %d time(s)", fetchCalls.Load())
+	}
+	if restartCalls.Load() != 0 {
+		t.Fatalf("private deployment triggered a public-binary restart")
+	}
+}
+
 func TestTryAutoUpdate_SkipsWhenTasksRunning(t *testing.T) {
 	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
 	d.activeTasks.Store(1)

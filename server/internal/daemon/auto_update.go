@@ -198,6 +198,15 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
+	// 2026-08-25 coder(lq): The public updater is hard-coded to GitHub. Keep
+	// self-hosted daemons fail-closed even when MULTICA_DAEMON_AUTO_UPDATE=true;
+	// that switch must never turn a private deployment into an upstream binary.
+	// Empty ServerBaseURL is retained for focused unit tests that construct a
+	// partial Daemon directly; production configs always normalize this value.
+	if d.cfg.ServerBaseURL != "" && !isOfficialCloudServer(d.cfg.ServerBaseURL) {
+		d.logger.Info("auto-update: skipped (private deployment)", "server", d.cfg.ServerBaseURL)
+		return
+	}
 	// Don't race the server-triggered update path. If a manual update from
 	// the Runtimes page is already in flight, let it finish and re-check next
 	// tick (by which time we'll either be on the new binary or it failed and

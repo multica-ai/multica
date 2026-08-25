@@ -9,6 +9,7 @@ import { tmpdir } from "os";
 import { Readable } from "stream";
 
 import { selectPlatformReleaseAssetName } from "./cli-release-asset";
+import { isOfficialCloudServerUrl } from "../shared/runtime-config";
 
 // Desktop prefers the bundled `multica` CLI shipped inside the app for
 // same-repo builds, but it can also repair or bootstrap a managed copy in
@@ -90,7 +91,12 @@ async function extractArchive(archive: string, dest: string): Promise<void> {
   await run("tar", ["-xf", archive, "-C", dest]);
 }
 
-async function installFresh(): Promise<string> {
+async function installFresh(serverUrl?: string): Promise<string> {
+  if (!isOfficialCloudServerUrl(serverUrl ?? "")) {
+    throw new Error(
+      "CLI auto-install is disabled for private Multica deployments; install a CLI built for this server or bundle it with the desktop app",
+    );
+  }
   const target = managedCliPath();
   const checksums = await fetchChecksums();
   const assetName = selectPlatformReleaseAssetName(checksums.keys());
@@ -149,9 +155,9 @@ async function installFresh(): Promise<string> {
  * the latest release asset for the current platform and installs it.
  */
 export async function ensureManagedCli(
-  options: { forceInstall?: boolean } = {},
+  options: { forceInstall?: boolean; serverUrl?: string } = {},
 ): Promise<string> {
   const target = managedCliPath();
   if (existsSync(target) && !options.forceInstall) return target;
-  return installFresh();
+  return installFresh(options.serverUrl);
 }

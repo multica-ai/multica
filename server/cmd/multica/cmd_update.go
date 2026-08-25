@@ -23,9 +23,20 @@ func init() {
 	updateCmd.Flags().DurationVar(&updateDownloadTimeout, "download-timeout", cli.DefaultUpdateDownloadTimeout, "Maximum time to wait for the release archive download")
 }
 
-func runUpdate(_ *cobra.Command, _ []string) error {
+func runUpdate(cmd *cobra.Command, _ []string) error {
 	if updateDownloadTimeout <= 0 {
 		return fmt.Errorf("download timeout must be greater than zero")
+	}
+
+	serverURL := ""
+	if cmd != nil {
+		serverURL = tryResolveHumanServerURL(cmd)
+	}
+	if !cli.IsOfficialCloudServerURL(serverURL) {
+		if serverURL == "" {
+			return fmt.Errorf("official updates are disabled because no Multica server is configured; for a private deployment, upgrade the CLI from your organization's build or release channel")
+		}
+		return fmt.Errorf("official updates are disabled for private Multica server %q; upgrade the CLI from your organization's build or release channel", serverURL)
 	}
 
 	fmt.Fprintf(os.Stderr, "Current version: %s (commit: %s, built: %s)\n", version, commit, date)

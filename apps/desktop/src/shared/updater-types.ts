@@ -1,5 +1,7 @@
 export interface UpdaterPreferences {
   automaticUpdates: boolean;
+  /** Optional for compatibility with older renderer/main-process bundles. */
+  updatesAvailable?: boolean;
 }
 
 export type ManualUpdateCheckResult =

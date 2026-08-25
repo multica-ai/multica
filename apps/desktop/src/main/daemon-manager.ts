@@ -480,6 +480,7 @@ async function resolveCliBinary(): Promise<string | null> {
     try {
       const installed = await ensureManagedCli({
         forceInstall: existsSync(managed),
+        serverUrl: targetApiBaseUrl ?? "",
       });
       const version = await probeCliBinary(installed, "managed");
       if (version) {

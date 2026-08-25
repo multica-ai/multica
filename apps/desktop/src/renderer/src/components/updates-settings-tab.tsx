@@ -17,6 +17,7 @@ export function UpdatesSettingsTab() {
   const { t } = useT("settings");
   const [state, setState] = useState<CheckState>({ status: "idle" });
   const [automaticUpdates, setAutomaticUpdates] = useState(true);
+  const [updatesAvailable, setUpdatesAvailable] = useState(true);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingPreference, setSavingPreference] = useState(false);
   const currentVersion = window.desktopAPI.appInfo.version;
@@ -26,7 +27,18 @@ export function UpdatesSettingsTab() {
     void window.updater
       .getPreferences()
       .then((preferences) => {
-        if (mounted) setAutomaticUpdates(preferences.automaticUpdates);
+        if (mounted) {
+          setAutomaticUpdates(preferences.automaticUpdates);
+          const available = preferences.updatesAvailable !== false;
+          setUpdatesAvailable(available);
+          if (!available) {
+            setState({
+              status: "error",
+              message:
+                "Updates are managed by your private Multica deployment administrator.",
+            });
+          }
+        }
       })
       .catch(() => {
         // The main process falls back to enabled when preferences cannot be
@@ -92,7 +104,7 @@ export function UpdatesSettingsTab() {
           <Switch
             checked={automaticUpdates}
             onCheckedChange={handleAutomaticUpdatesChange}
-            disabled={!preferencesReady || savingPreference}
+            disabled={!updatesAvailable || !preferencesReady || savingPreference}
             aria-label={t(($) => $.desktop.updates.automatic_updates_title)}
           />
         </SettingsRow>
@@ -130,7 +142,7 @@ export function UpdatesSettingsTab() {
             variant="outline"
             size="sm"
             onClick={handleCheck}
-            disabled={state.status === "checking"}
+            disabled={!updatesAvailable || state.status === "checking"}
           >
             {state.status === "checking" ? (
               <>

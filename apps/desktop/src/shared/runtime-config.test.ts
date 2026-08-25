@@ -3,11 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_RUNTIME_CONFIG,
   deriveWsUrl,
+  isOfficialCloudServerUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
 } from "./runtime-config";
 
 describe("runtime config", () => {
+  it("recognizes only the official cloud API as a public update source", () => {
+    expect(isOfficialCloudServerUrl("https://api.multica.ai")).toBe(true);
+    expect(isOfficialCloudServerUrl("https://api.multica.ai.evil.example")).toBe(
+      false,
+    );
+    expect(isOfficialCloudServerUrl("https://multica.example.internal")).toBe(
+      false,
+    );
+  });
+
   it("uses cloud defaults without a desktop.json file", () => {
     expect(DEFAULT_RUNTIME_CONFIG).toEqual({
       schemaVersion: 1,

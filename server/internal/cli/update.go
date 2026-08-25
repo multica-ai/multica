@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,17 @@ import (
 const ChecksumManifestName = "checksums.txt"
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
+
+// 2026-08-25 coder(lq): Keep public release updates scoped to Multica Cloud;
+// self-hosted installations must use an operator-managed release channel.
+func IsOfficialCloudServerURL(serverURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(serverURL))
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "api.multica.ai") &&
+		(u.Scheme == "http" || u.Scheme == "https")
+}
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {

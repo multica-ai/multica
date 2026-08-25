@@ -20,6 +20,19 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   appUrl: "https://multica.ai",
 });
 
+/** 2026-08-25 coder(lq): Public releases only update Multica Cloud installs. */
+export function isOfficialCloudServerUrl(apiUrl: string): boolean {
+  try {
+    const url = new URL(apiUrl);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname.toLowerCase() === "api.multica.ai"
+    );
+  } catch {
+    return false;
+  }
+}
+
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
   apiUrl: "http://localhost:8080",

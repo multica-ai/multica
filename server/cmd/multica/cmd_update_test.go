@@ -17,6 +17,19 @@ func TestRunUpdateRejectsNonPositiveDownloadTimeout(t *testing.T) {
 	}
 }
 
+func TestRunUpdateRejectsPrivateDeployment(t *testing.T) {
+	orig := updateDownloadTimeout
+	updateDownloadTimeout = time.Second
+	t.Cleanup(func() { updateDownloadTimeout = orig })
+
+	t.Setenv("MULTICA_SERVER_URL", "https://multica.example.internal")
+	cmd := updateCmd
+	err := runUpdate(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "official updates are disabled") {
+		t.Fatalf("runUpdate error = %v, want private deployment protection", err)
+	}
+}
+
 func TestUpdateCommandRegistersDownloadTimeoutFlag(t *testing.T) {
 	flag := updateCmd.Flags().Lookup("download-timeout")
 	if flag == nil {

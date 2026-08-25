@@ -10,6 +10,7 @@ import {
   saveUpdaterPreferences,
   updaterPreferencesPath,
 } from "./updater-preferences";
+import { isOfficialCloudServerUrl } from "../shared/runtime-config";
 
 // Silent background updates: electron-updater downloads on its own as soon
 // as `update-available` fires; we only surface UI when the package is fully
@@ -109,16 +110,26 @@ function checkForUpdatesOnce(): Promise<unknown> {
   return p;
 }
 
-export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): void {
+const PRIVATE_DEPLOYMENT_UPDATE_MESSAGE =
+  "Updates are managed by your private Multica deployment administrator.";
+
+export function setupAutoUpdater(
+  getMainWindow: () => BrowserWindow | null,
+  options: { serverUrl?: string } = {},
+): void {
+  // 2026-08-25 coder(lq): Fail closed when no runtime server is available, so
+  // private builds never fall back to the public GitHub release channel.
+  const updatesAvailable = isOfficialCloudServerUrl(options.serverUrl ?? "");
   const preferencesFilePath = updaterPreferencesPath(app.getPath("userData"));
   let automaticUpdatesEnabled =
-    DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
+    updatesAvailable && DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
   let startupCheckElapsed = false;
   let startupTimer: ReturnType<typeof setTimeout> | null = null;
   let periodicTimer: ReturnType<typeof setInterval> | null = null;
   const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
     (preferences) => {
-      automaticUpdatesEnabled = preferences.automaticUpdates;
+      automaticUpdatesEnabled =
+        updatesAvailable && preferences.automaticUpdates;
       return preferences;
     },
   );
@@ -126,7 +137,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   const runAutomaticCheck = (errorMessage: string): void => {
     void preferencesReady
       .then(() => {
-        if (!automaticUpdatesEnabled) return;
+        if (!updatesAvailable || !automaticUpdatesEnabled) return;
         return checkForUpdatesOnce();
       })
       .catch((err) => {
@@ -209,7 +220,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     "updater:get-preferences",
     async (): Promise<UpdaterPreferences> => {
       await preferencesReady;
-      return { automaticUpdates: automaticUpdatesEnabled };
+      return { automaticUpdates: automaticUpdatesEnabled, updatesAvailable };
     },
   );
 
@@ -221,6 +232,9 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
       }
 
       await preferencesReady;
+      if (!updatesAvailable && enabled) {
+        throw new Error(PRIVATE_DEPLOYMENT_UPDATE_MESSAGE);
+      }
       const wasEnabled = automaticUpdatesEnabled;
       const preferences = { automaticUpdates: enabled };
       await saveUpdaterPreferences(preferencesFilePath, preferences);
@@ -237,11 +251,14 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
         scheduleBackgroundChecks();
       }
 
-      return preferences;
+      return { ...preferences, updatesAvailable };
     },
   );
 
   ipcMain.handle("updater:check", async (): Promise<ManualUpdateCheckResult> => {
+    if (!updatesAvailable) {
+      return { ok: false, error: PRIVATE_DEPLOYMENT_UPDATE_MESSAGE };
+    }
     try {
       const result = (await checkForUpdatesOnce()) as
         | { updateInfo: { version: string }; isUpdateAvailable?: boolean }
@@ -270,5 +287,5 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   // Initial check shortly after startup so we don't block boot, plus a
   // background poll for long-running sessions. Both are torn down when the
   // user disables automatic updates and re-armed when they turn them back on.
-  scheduleBackgroundChecks();
+  if (updatesAvailable) scheduleBackgroundChecks();
 }
