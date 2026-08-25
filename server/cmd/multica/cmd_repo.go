@@ -57,6 +57,20 @@ var repoCheckoutCmd = &cobra.Command{
 
 var repoCheckoutRef string
 
+// TEMPORARY INTERNAL FIX (AIPLAT-200, AIPLAT-201): filed upstream as
+// multica-ai/multica#6879, fix proposed as multica-ai/multica#6887. Remove
+// this block (and the corresponding repoCacheGitTimeout in cache.go) once
+// the upstream fix — or an equivalent — lands and is pulled in via an
+// upstream-sync PR; do not let both versions coexist.
+
+// repoCheckoutTimeout bounds how long the CLI waits for the daemon's
+// /repo/checkout to finish. It must stay comfortably above the daemon's own
+// internal git timeout (repoCacheGitTimeout, 20m) so a legitimately slow
+// checkout of a large repo is bounded by the daemon's timeout, not cut off
+// early by this one with a confusing "context deadline exceeded"
+// (multica-ai/multica#6879).
+const repoCheckoutTimeout = 30 * time.Minute
+
 func init() {
 	repoListCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -374,7 +388,7 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	if parentCtx == nil {
 		parentCtx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(parentCtx, repoCheckoutTimeout)
 	defer cancel()
 	client := &http.Client{}
 	checkoutURL := fmt.Sprintf("http://127.0.0.1:%s/repo/checkout", daemonPort)

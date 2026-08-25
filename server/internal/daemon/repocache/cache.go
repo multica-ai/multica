@@ -66,7 +66,19 @@ var agentGitExcludePatterns = []string{
 	".codebuddy",
 }
 
-const repoCacheGitTimeout = 10 * time.Minute
+// TEMPORARY INTERNAL FIX (AIPLAT-200, AIPLAT-201): filed upstream as
+// multica-ai/multica#6879, fix proposed as multica-ai/multica#6887. Remove
+// this block (and the corresponding changes in cmd_repo.go and
+// gitWorktreeAdminIntact/CreateWorktreeContext below) once the upstream fix —
+// or an equivalent — lands and is pulled in via an upstream-sync PR; do not
+// let both versions coexist.
+
+// repoCacheGitTimeout bounds a single git subprocess run through the repo
+// cache's default (non-explicit-timeout) wrappers (fetch, worktree add,
+// reset, etc.). Doubled from 10m: on a large repo this canceled a
+// legitimately still-running checkout with an opaque "context deadline
+// exceeded" (multica-ai/multica#6879).
+const repoCacheGitTimeout = 20 * time.Minute
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
@@ -292,7 +304,6 @@ func (l *repoLock) cancelMaintenanceAndWait() {
 	l.mu.Unlock()
 }
 
-// New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
 	return &Cache{root: root, logger: logger}
 }
@@ -881,44 +892,84 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
-		if err != nil {
-			return nil, fmt.Errorf("update existing worktree: %w", err)
+		adminIntact := gitWorktreeAdminIntact(worktreePath)
+		var reuseErr error
+		var actualBranch string
+		if adminIntact {
+			actualBranch, reuseErr = updateExistingWorktreeContext(ctx, worktreePath, branchName, baseRef)
 		}
 
-		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGitContext(ctx, worktreePath, pattern)
-		}
-
-		// Install or remove the Co-authored-by hook based on the workspace
-		// setting. The hook lives in the bare repo's shared hooks dir, so we
-		// must actively remove it when disabled — otherwise a previously
-		// installed hook keeps appending the trailer to every commit even
-		// after the user toggles the setting off.
-		if params.CoAuthoredByEnabled {
-			if err := installCoAuthoredByHookContext(ctx, worktreePath); err != nil {
-				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+		if adminIntact && reuseErr == nil {
+			for _, pattern := range agentGitExcludePatterns {
+				_ = excludeFromGitContext(ctx, worktreePath, pattern)
 			}
+
+			// Install or remove the Co-authored-by hook based on the workspace
+			// setting. The hook lives in the bare repo's shared hooks dir, so we
+			// must actively remove it when disabled — otherwise a previously
+			// installed hook keeps appending the trailer to every commit even
+			// after the user toggles the setting off.
+			if params.CoAuthoredByEnabled {
+				if err := installCoAuthoredByHookContext(ctx, worktreePath); err != nil {
+					c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
+				}
+			} else {
+				if err := removeCoAuthoredByHookContext(ctx, worktreePath); err != nil {
+					c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
+				}
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, context.Cause(ctx)
+			}
+
+			c.logger.Info("repo checkout: existing worktree updated",
+				"url", params.RepoURL,
+				"path", worktreePath,
+				"branch", actualBranch,
+				"base", baseRef,
+			)
+
+			return &WorktreeResult{
+				Path:       worktreePath,
+				BranchName: actualBranch,
+			}, nil
+		}
+
+		if reuseErr != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, context.Cause(ctx)
+			}
+			// A checkout killed mid `git reset`/`git checkout` can leave stale
+			// git state behind (e.g. an index.lock) even though the admin
+			// metadata itself is structurally intact — see the discussion on
+			// multica-ai/multica#6879. Every later retry would otherwise hit
+			// the same opaque git error, so recover the same way as corrupted
+			// admin metadata below instead of failing forever.
+			c.logger.Warn("repo checkout: existing worktree failed to update cleanly, recreating",
+				"url", params.RepoURL,
+				"path", worktreePath,
+				"error", reuseErr,
+			)
 		} else {
-			if err := removeCoAuthoredByHookContext(ctx, worktreePath); err != nil {
-				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
-			}
-		}
-		if err := ctx.Err(); err != nil {
-			return nil, context.Cause(ctx)
+			// Corrupted admin metadata from a canceled checkout (see
+			// multica-ai/multica#6879) — recover instead of failing every retry
+			// with an opaque git error.
+			c.logger.Warn("repo checkout: existing worktree has corrupted admin metadata, recreating",
+				"url", params.RepoURL,
+				"path", worktreePath,
+			)
 		}
 
-		c.logger.Info("repo checkout: existing worktree updated",
-			"url", params.RepoURL,
-			"path", worktreePath,
-			"branch", actualBranch,
-			"base", baseRef,
-		)
-
-		return &WorktreeResult{
-			Path:       worktreePath,
-			BranchName: actualBranch,
-		}, nil
+		// Remove the broken checkout and the bare repo's dangling worktree
+		// registration, then fall through to the normal fresh-create path
+		// below.
+		if err := os.RemoveAll(worktreePath); err != nil {
+			return nil, fmt.Errorf("remove corrupted worktree: %w", err)
+		}
+		if out, err := runGitCombinedOutputContext(ctx, "-C", barePath, "worktree", "prune"); err != nil {
+			c.logger.Warn("repo checkout: prune stale worktree registration failed (non-fatal)",
+				"path", worktreePath, "error", err, "output", strings.TrimSpace(string(out)))
+		}
 	}
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
@@ -1001,16 +1052,32 @@ func (c *Cache) createOrUpdateIsolatedCheckoutContext(ctx context.Context, bareP
 			return "", err
 		}
 		actualBranch, err := updateExistingWorktreeContext(ctx, checkoutPath, branchName, baseCommit)
-		if err != nil {
-			return "", err
+		if err == nil {
+			// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
+			// new local branch on every checkout. Non-fatal: leftover branches are
+			// harmless clutter and must never fail the checkout.
+			if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, actualBranch); err != nil {
+				c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
+			}
+			return actualBranch, nil
 		}
-		// Drop earlier tasks' agent/* heads so a reused workdir doesn't grow a
-		// new local branch on every checkout. Non-fatal: leftover branches are
-		// harmless clutter and must never fail the checkout.
-		if err := deleteStaleAgentBranchesContext(ctx, checkoutPath, actualBranch); err != nil {
-			c.logger.Warn("repo checkout: prune stale branches failed (non-fatal)", "error", err)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", context.Cause(ctx)
 		}
-		return actualBranch, nil
+		// A checkout killed mid `git reset`/`git checkout` can leave stale git
+		// state behind (e.g. an index.lock) even though the isolated checkout
+		// itself is structurally intact — see the discussion on
+		// multica-ai/multica#6879. Every later retry would otherwise hit the
+		// same opaque git error, so recover by recreating instead of failing
+		// forever.
+		c.logger.Warn("repo checkout: existing isolated checkout failed to update cleanly, recreating",
+			"url", repoURL,
+			"path", checkoutPath,
+			"error", err,
+		)
+		if err := os.RemoveAll(checkoutPath); err != nil {
+			return "", fmt.Errorf("remove corrupted isolated checkout: %w", err)
+		}
 	}
 	// A daemon upgrade can resume a pre-fix Codex workdir that still has a
 	// linked worktree. Remove it through Git (so the shared admin record is
@@ -1409,6 +1476,36 @@ func isBranchCollisionError(err error) bool {
 func isGitWorktree(path string) bool {
 	info, err := os.Stat(filepath.Join(path, ".git"))
 	return err == nil && !info.IsDir()
+}
+
+// gitWorktreeAdminIntact reports whether an existing linked worktree's admin
+// directory (referenced by its .git file) is structurally complete. A
+// checkout canceled mid `git worktree add` / `git reset --hard` (e.g. by the
+// CLI's own request timeout racing the daemon's internal git timeout — see
+// multica-ai/multica#6879) can leave the .git file present but the admin
+// directory missing required bookkeeping files, in which case every later
+// git command routed through this worktree fails immediately with an opaque
+// "fatal: not a git repository" instead of something recoverable.
+func gitWorktreeAdminIntact(path string) bool {
+	data, err := os.ReadFile(filepath.Join(path, ".git"))
+	if err != nil {
+		return false
+	}
+	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, prefix) {
+		return false
+	}
+	adminDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if !filepath.IsAbs(adminDir) {
+		adminDir = filepath.Join(path, adminDir)
+	}
+	for _, required := range []string{"HEAD", "commondir", "gitdir"} {
+		if _, err := os.Stat(filepath.Join(adminDir, required)); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // updateExistingWorktree resets the worktree to a clean state and checks out a
