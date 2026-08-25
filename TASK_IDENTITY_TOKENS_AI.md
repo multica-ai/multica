@@ -33,7 +33,7 @@ guess.
    are not configured on that server, and you cannot proceed.
 2. **The `sub` claim's meaning** — what identifier the deployment templated into
    `sub`, and which column in *this* system it corresponds to. The recommended
-   default is the full corporate email (`alice@corp.com`); some deployments use
+   default is the full corporate email (`alice@domain.com`); some deployments use
    the local part (`alice`) against a username column, which is safe only when
    the issuing side restricts signing to the corporate domain. Confirm it; an
    incorrect mapping is a silent privilege error, not a crash.
@@ -166,7 +166,7 @@ This is the whole of it:
 import time, requests
 from jose import jwt  # any mainstream JWT library works
 
-JWKS_URL = "https://multica.example.com/.well-known/jwks.json"
+JWKS_URL = "https://multica.domain.com/.well-known/jwks.json"
 ALLOWED_ALGS = ["ES256"]          # pin to what your deployment signs with
 EXPECTED_ISS = "multica"
 EXPECTED_SCOPE = "erp"

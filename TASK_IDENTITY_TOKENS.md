@@ -74,7 +74,7 @@ instead of a shared bot.
  │ Agent process                                                     │
  │                                                                   │
  │  4. curl -H "Authorization: Bearer $BOT_TOKEN_ERP" \              │
- │          https://erp.internal/api/orders                          │
+ │          https://erp.domain.com/api/orders                          │
  └───────────────────────────────┬───────────────────────────────────┘
                                  ▼
  ┌───────────────────────────────────────────────────────────────────┐
@@ -86,7 +86,7 @@ instead of a shared bot.
  │  6. Verify the signature using the key whose "kid"     │          │
  │     matches the token header; check exp, then iss      │          │
  │                                                        │          │
- │  7. sub = "alice@corp.com" → look up YOUR OWN user     │          │
+ │  7. sub = "alice@domain.com" → look up YOUR OWN user     │          │
  │                                                        │          │
  │  8. Apply the permissions Alice already has            │          │
  │                                                        │          │
@@ -139,15 +139,15 @@ openssl ecparam -genkey -name prime256v1 -noout \
   {
     "id": "erp",
     "label": "ERP",
-    "description": "erp.internal — orders, inventory",
+    "description": "erp.domain.com — orders, inventory",
     "env": "BOT_TOKEN_ERP",
     "algorithm": "ES256",
     "key_id": "erp-2026",
     "ttl": "8h",
-    "allowed_domains": ["corp.com"],
+    "allowed_domains": ["domain.com"],
     "claims": {
       "iss": "multica",
-      "aud": "erp.internal",
+      "aud": "erp.domain.com",
       "scope": "erp",
       "sub": "{{identity.email}}",
       "name": "{{identity.name}}",
@@ -156,7 +156,7 @@ openssl ecparam -genkey -name prime256v1 -noout \
       "act_name": "{{agent.name}}",
       "task_id": "{{task.id}}"
     },
-    "manifest": { "base_url": "https://erp.internal", "name": "ERP" }
+    "manifest": { "base_url": "https://erp.domain.com", "name": "ERP" }
   }
 ]
 ```
@@ -182,7 +182,7 @@ rather than run on half a configuration and emit an empty claim at 3am.
 
 | Variable | Value |
 | --- | --- |
-| `{{identity.email}}` | `alice@example.com` |
+| `{{identity.email}}` | `alice@domain.com` |
 | `{{identity.email_local}}` | `alice` — local part, lowercased, `+tag` stripped |
 | `{{identity.name}}` | `Alice Chen` |
 | `{{identity.id}}` | Multica user UUID |
@@ -199,8 +199,8 @@ these agents is a hard prerequisite — if workspace emails are self-asserted or
 external, the identity this feature attests is only as trustworthy as they are.
 
 Default `sub` to `{{identity.email}}`. The full address is unambiguous;
-`{{identity.email_local}}` drops the domain, so `alice@corp.com` and
-`alice@contractor.io` both sign as `alice` — in a workspace with guests or
+`{{identity.email_local}}` drops the domain, so `alice@domain.com` and
+`alice@external.com` both sign as `alice` — in a workspace with guests or
 external collaborators that is a privilege-escalation path, not a convenience.
 Use `email_local` only when the receiving system genuinely keys on the local
 part, and then **always pair it with `allowed_domains`** so only your own
@@ -219,7 +219,7 @@ to fix.
 of the `manifest` blocks of the templates **actually issued** for this run:
 
 ```json
-[{ "base_url": "https://erp.internal", "name": "ERP" }]
+[{ "base_url": "https://erp.domain.com", "name": "ERP" }]
 ```
 
 A tool's view of "which systems can I reach" is then derived from the
@@ -271,7 +271,7 @@ credential minted in someone's name is never invisible to them.
 The public keys are served, unauthenticated, at:
 
 ```
-GET https://multica.example.com/.well-known/jwks.json
+GET https://multica.domain.com/.well-known/jwks.json
 ```
 
 ```json
