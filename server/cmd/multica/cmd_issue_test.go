@@ -3507,6 +3507,37 @@ func TestRunIssueReorderRejectsCrossColumnTarget(t *testing.T) {
 	}
 }
 
+func TestReorderTargetNotInColumnErrorUsesFetchedIssueKey(t *testing.T) {
+	otherID := "33333333-3333-3333-3333-333333333333"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/issues/"+otherID {
+			http.NotFound(w, r)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         otherID,
+			"identifier": "MUL-3",
+			"status":     "in_progress",
+		})
+	}))
+	defer srv.Close()
+
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+	err := reorderTargetNotInColumnError(
+		context.Background(),
+		client,
+		resolvedID{ID: otherID, Display: otherID},
+		"MUL-9",
+		"todo",
+	)
+	if msg := err.Error(); !strings.Contains(msg, "issue MUL-3") || !strings.Contains(msg, "MUL-9") {
+		t.Fatalf("error = %q, want fetched issue keys for both issues", msg)
+	}
+	if strings.Contains(err.Error(), otherID) {
+		t.Fatalf("error = %q, should not expose the UUID after fetching the issue key", err)
+	}
+}
+
 func mkIssue(id, key, status string, pos float64) map[string]any {
 	return map[string]any{"id": id, "identifier": key, "status": status, "position": pos}
 }
