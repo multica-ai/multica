@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -243,4 +244,70 @@ func TestListAutopilots_SubscribersMatchDetail(t *testing.T) {
 	} else if entries, _ := empty.([]any); len(entries) != 0 {
 		t.Errorf("expected empty subscribers for %s, got %v", withoutSubs, empty)
 	}
+}
+
+// hideAutopilotSubscriberTable makes reads of autopilot_subscriber fail for the
+// duration of one test, so the subscriber query's error branch can be exercised
+// while the autopilot query itself still succeeds. A rename isolates the
+// failure to exactly that one query; t.Cleanup restores it. Safe to run
+// alongside the rest of the suite because non-parallel tests in a package run
+// sequentially, and no parallel test in this package touches this table.
+func hideAutopilotSubscriberTable(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `ALTER TABLE autopilot_subscriber RENAME TO autopilot_subscriber_hidden`); err != nil {
+		t.Fatalf("hide autopilot_subscriber: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx, `ALTER TABLE autopilot_subscriber_hidden RENAME TO autopilot_subscriber`); err != nil {
+			t.Fatalf("restore autopilot_subscriber: %v", err)
+		}
+	})
+}
+
+// TestAutopilotSubscriberReadFailureFailsClosed guards the error path of the
+// MUL-6680 fix. "subscribers" has no omitempty and is documented as
+// authoritative, so degrading a failed read to an empty array would recreate
+// the very defect this change removes: the caller cannot tell "none
+// configured" from "read failed", and a client that round-trips the response
+// into a full-replace PATCH would silently wipe a real subscriber list. Both
+// projections must surface the error instead.
+func TestAutopilotSubscriberReadFailureFailsClosed(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "autopilot-subs-failclosed-agent", []byte(`[]`))
+	apID := insertListTestAutopilot(t, agentID, "list-subs-fail-closed")
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+		VALUES ($1, 'member', $2)
+	`, apID, testUserID); err != nil {
+		t.Fatalf("insert subscriber fixture: %v", err)
+	}
+
+	hideAutopilotSubscriberTable(t)
+
+	t.Run("list", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.ListAutopilots(w, newRequest("GET", "/api/autopilots", nil))
+		if w.Code != 500 {
+			t.Fatalf("expected 500 when the subscriber read fails, got %d: %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), `"subscribers":[]`) {
+			t.Errorf("response must not carry an authoritative empty subscriber list: %s", w.Body.String())
+		}
+	})
+
+	t.Run("detail", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		testHandler.GetAutopilot(w, withURLParam(
+			newRequest("GET", "/api/autopilots/"+apID+"?workspace_id="+testWorkspaceID, nil), "id", apID))
+		if w.Code != 500 {
+			t.Fatalf("expected 500 when the subscriber read fails, got %d: %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), `"subscribers":[]`) {
+			t.Errorf("response must not carry an authoritative empty subscriber list: %s", w.Body.String())
+		}
+	})
 }

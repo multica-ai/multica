@@ -447,9 +447,15 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 	if len(autopilotIDs) > 0 {
 		subs, err := h.Queries.ListAutopilotSubscribersForAutopilots(r.Context(), autopilotIDs)
 		if err != nil {
-			// Don't 500 the whole list over template metadata; the detail
-			// endpoint still reports the truth.
-			subs = nil
+			// Fail closed. Degrading to an empty set here would reintroduce
+			// exactly the bug this endpoint was fixed for: subscribers is a
+			// non-omitempty field documented as authoritative, so an empty
+			// value on a failed read is indistinguishable from "none
+			// configured" — and a caller acting on it can overwrite a real
+			// subscriber list. An error the caller can see and retry is the
+			// only honest answer.
+			writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+			return
 		}
 		for _, s := range subs {
 			id := uuidToString(s.AutopilotID)
@@ -489,8 +495,11 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
 	if err != nil {
-		// Don't 500 the detail fetch over template metadata.
-		subs = nil
+		// Fail closed for the same reason the list endpoint does: an empty
+		// subscribers array is a claim, not an absence, and this response is
+		// what clients round-trip back into a full-replace PATCH.
+		writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+		return
 	}
 	resp := autopilotToResponse(autopilot, subs)
 
