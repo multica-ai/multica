@@ -133,16 +133,15 @@ issue whenever this agent completes work that produced a branch; its handoff
 note names the branch to check out and asks for a PASS/FAIL verdict comment.
 Verifier failures are non-retryable by taxonomy.
 
-### Autonomous development setup (multica-dev workspace) — 2026-08-25
+### Autonomous development setup (multica-dev workspace) — 2026-08-25 (live)
 
 Dogfooding: run Multica on itself for `my-fixes` development.
 
-1. `multica workspace create --name multica-dev --slug multica-dev` → clones `scotthawes/multica` `my-fixes` as workspace repo, `WorkspacesRoot` `~/multica_workspaces_multica-dev`.
-2. Agents per role: `Builder` (`muse-spark` fixer), `Reviewer` (`minimax-m3` oracle), `QA` (`deepseek` tester), `Docs` (`qwen` librarian) — chain `verify_agent_id` `Builder→QA→Reviewer`.
-3. `multica autopilot create --kind event --event-filters '[{"event":"task.completed"}]'` → `GAP-31` `maybeEnqueueEventTriggers` handles `task.completed → next agent`, no schedule poll; keep `schedule` nightly for retention sweeps only (`GAP-9`).
-4. `multica autopilot create --kind schedule --cron "0 2 * * *"` for `budget`/`disk` sweeps already `GAP-8/9`.
-5. Enable `MULTICA_AGENT_WRAPPER` sandbox + `custom_env` encryption `GAP-10` when secrets move.
-6. Wire `.env` `MULTICA_BUDGET_MAX_*` `5/500k/60m` + `PROVIDER_CEILING/FAILOVER` already `42249` live — reuse for `multica-dev` tasks.
+1. `multica workspace create --name multica-dev --slug multica-dev --issue-prefix MDEV` → workspace `dc85f04e-b671-457f-808f-b9a666ac6063`, runtime `ffb65ef2-346f-4e46-a588-eba82ba712b1` (Opencode MacBook-Air-2.local), `WorkspacesRoot` `~/multica_workspaces_multica-dev`.
+2. Agents per role (same runtime): `Builder` `bb15ecfd-2b44-444e-9e59-e36cf115e230` (`muse-spark` fixer) → `QA` `5dd45ae7-d0c1-4a9a-9f49-8b55b871fb27` (`deepseek` tester) → `Reviewer` `c9601323-8f1b-4691-b157-c48f830b38b9` (`minimax` oracle) `verify_agent_id` chain; `Docs` `6209fd9f-27dd-4477-be54-92cf297aef9d` (`qwen` librarian).
+3. Autopilots: `Handoff` `48cd5804-b8b3-4d1e-bc38-ef738bb6f0fb` (`event` trigger `a21c48ec-88f3-4e7c-953a-05b303c08bea` `[{"event":"task.completed"}]`) → `GAP-31` `maybeEnqueueEventTriggers`; `Retention Sweep` `ce954b98-d0d0-4642-bce6-46f4f5dd95bf` (`schedule` `658c3771-595f-4fbf-959d-7d2f2040099a` `0 2 * * *` nightly, `GAP-9`).
+4. Enable `MULTICA_AGENT_WRAPPER` sandbox + `custom_env` encryption `GAP-10` when secrets move.
+5. Wire `.env` `MULTICA_BUDGET_MAX_*` `5/500k/60m` + `PROVIDER_CEILING/FAILOVER` already `42249` live — reuse for `multica-dev` tasks.
 
 ### Missing AI tools (next gaps)
 
