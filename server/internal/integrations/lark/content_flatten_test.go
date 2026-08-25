@@ -1,6 +1,9 @@
 package lark
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestFlattenPostContent_IssueExample pins the exact rich-text `post`
 // example from MUL-2951: a title line, a prose paragraph, and a
@@ -51,12 +54,38 @@ func TestFlattenPostContent_MediaAndMentionSpans(t *testing.T) {
 	}
 }
 
-func TestFlattenPostContent_AtPrefersResolvedName(t *testing.T) {
+func TestFlattenPostContent_AtPrefersPlaceholderWhenBothPresent(t *testing.T) {
 	t.Parallel()
-	raw := `{"content":[[{"tag":"at","user_id":"@_user_1","user_name":"Tom"},{"tag":"text","text":"hi"}]]}`
-	want := "@Tom hi"
+	raw := `{"content":[[{"tag":"at","user_id":"@_user_1","user_name":"ReviewBot"}]]}`
+	want := "@_user_1"
 	if got := flattenPostContent(raw); got != want {
 		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestFlattenPostContent_AtFallsBackToUserNameWhenNoPlaceholder(t *testing.T) {
+	t.Parallel()
+	raw := `{"content":[[{"tag":"at","user_id":"","user_name":"ReviewBot"}]]}`
+	want := "@ReviewBot"
+	if got := flattenPostContent(raw); got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+}
+
+func TestFlattenPostContent_TopicGroupMentionSlashCommand(t *testing.T) {
+	t.Parallel()
+	raw := `{"content":[[{"tag":"at","user_id":"@_user_1","user_name":"ReviewBot"},{"tag":"text","text":" /issue review this"}]]}`
+	flat := flattenPostContent(raw)
+	m := larkMention{Key: "@_user_1", Name: "ReviewBot"}
+	m.ID.OpenID = "ou_bot"
+	mentions := []larkMention{m}
+	got := resolveMentions(flat, mentions, "ou_bot", "")
+	got = strings.TrimSpace(got)
+	if want := "/issue review this"; got != want {
+		t.Errorf("after resolveMentions got %q want %q (flat was %q)", got, want, flat)
+	}
+	if len(got) == 0 || got[0] != '/' {
+		t.Errorf("first line should start with '/', got %q", got)
 	}
 }
 

@@ -345,6 +345,28 @@ function DimLogo({ className }: { className: string }) {
   return <img src={staticAssetSrc(dimLogo)} alt="" aria-hidden className={className} />;
 }
 
+// ZeroClaw — no official brand asset has been sourced for this runtime yet
+// (multica-ai/multica#1543), so this is a deliberately simple placeholder
+// mark (three claw-scratch strokes) rather than a claimed "official" logo.
+// currentColor keeps it legible in both themes; swap for a real asset once
+// ZeroClaw ships one, following the DimLogo <img> pattern.
+function ZeroClawLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <path d="M5 5l4 14" />
+      <path d="M12 5l2 14" />
+      <path d="M19 5l-4 14" />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -400,6 +422,8 @@ export function ProviderLogo({
       return <DshLogo className={className} />;
     case "dim":
       return <DimLogo className={className} />;
+    case "zeroclaw":
+      return <ZeroClawLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

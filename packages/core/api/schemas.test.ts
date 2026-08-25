@@ -1066,13 +1066,23 @@ describe("InboxItemListSchema", () => {
 
   it("parses a well-formed archived list and tolerates extra fields", () => {
     const parsed = parseWithFallback(
-      [row({ issue_status: "in_progress", details: { comment_id: "c-1" }, future_field: 1 })],
+      [row({
+        issue_status: "in_progress",
+        issue_priority: "high",
+        details: { comment_id: "c-1" },
+        future_field: 1,
+      })],
       InboxItemListSchema,
       EMPTY_INBOX_ITEMS,
       ENDPOINT,
     );
     expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ id: "inbox-1", archived: true });
+    expect(parsed[0]).toMatchObject({
+      id: "inbox-1",
+      archived: true,
+      issue_status: "in_progress",
+      issue_priority: "high",
+    });
   });
 
   it("keeps a notification type this client doesn't know yet", () => {
@@ -1094,6 +1104,17 @@ describe("InboxItemListSchema", () => {
     expect(
       parseWithFallback([withoutOptionals], InboxItemListSchema, EMPTY_INBOX_ITEMS, ENDPOINT),
     ).toHaveLength(1);
+  });
+
+  it("returns the empty fallback when an issue projection is wrong-typed", () => {
+    expect(
+      parseWithFallback(
+        [row({ issue_priority: 3 })],
+        InboxItemListSchema,
+        EMPTY_INBOX_ITEMS,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_INBOX_ITEMS);
   });
 
   it("returns the empty fallback for a non-array body", () => {
@@ -1669,6 +1690,33 @@ describe("Plugin schemas", () => {
     expect(parsed.installed).toBe(true);
     expect(parsed.installed_version).toBe("1.0.0");
     expect(parsed.added_scopes).toEqual(["comments:write"]);
+  });
+
+  it("preserves automatic schedules on both consent and installed Plugin payloads", () => {
+    const schedule = { cron: "*/5 * * * *", timezone: "Asia/Shanghai" };
+    const preview = PluginPreviewSchema.parse({
+      manifest: {
+        key: "com.example.digest",
+        name: "Digest",
+        version: "1.0.0",
+        author: { name: "example" },
+        contributes: {
+          hooks: [{ key: "digest", name: "Digest", triggers: ["schedule"], schedule }],
+        },
+      },
+    });
+    expect(preview.manifest.contributes?.hooks?.[0]?.schedule).toEqual(schedule);
+
+    const installation = PluginInstallationSchema.parse({
+      id: "installation-1",
+      hooks: [{
+        key: "digest",
+        name: "Digest",
+        triggers: ["schedule"],
+        schedule: { ...schedule, next_run_at: "2026-08-23T10:15:00Z" },
+      }],
+    });
+    expect(installation.hooks[0]?.schedule?.next_run_at).toBe("2026-08-23T10:15:00Z");
   });
 });
 

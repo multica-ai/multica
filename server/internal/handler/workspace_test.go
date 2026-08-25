@@ -941,6 +941,102 @@ VALUES ($1, $2, $3, 'feishu', $4)
 	}
 }
 
+// TestDeleteMember_PrunesAutopilotSubscribers verifies the application-layer
+// cleanup for the FK-free autopilot_subscriber table. DeleteMember and
+// LeaveWorkspace both use revokeAndRemoveMember, so this pins their shared
+// transaction while also proving the delete is scoped to the departed user.
+func TestDeleteMember_PrunesAutopilotSubscribers(t *testing.T) {
+	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-subscriber", "daemon-revoke-autopilot-subscriber")
+
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    fx.WorkspaceID,
+		"title":           "Revocation autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     fx.AgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2), ($1, 'member', $3)
+`, autopilotID, fx.TargetUserID, testUserID)
+
+	// The same person belongs to another workspace and subscribes there too.
+	// Removing them from fx.WorkspaceID must not cross this tenant boundary.
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Revocation subscriber other workspace",
+		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-subscriber-other-%d", time.Now().UnixNano()),
+		"description":  "tenant-scope regression fixture",
+		"issue_prefix": "RAO",
+	})
+	dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"user_id":      fx.TargetUserID,
+		"role":         "owner",
+	})
+	otherRuntimeID := dbfx.Runtime(t, "Other workspace runtime", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"daemon_id":    "daemon-revoke-autopilot-subscriber-other",
+		"runtime_mode": "local",
+		"provider":     "multica_daemon",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAgentID := dbfx.Agent(t, "Other workspace agent", otherRuntimeID, testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"runtime_mode": "local",
+		"visibility":   "workspace",
+		"owner_id":     fx.TargetUserID,
+	})
+	otherAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    otherWorkspaceID,
+		"title":           "Other workspace autopilot subscriber",
+		"assignee_type":   "agent",
+		"assignee_id":     otherAgentID,
+		"status":          "active",
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   fx.TargetUserID,
+	})
+	dbfx.Exec(t, `
+INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
+VALUES ($1, 'member', $2)
+`, otherAutopilotID, fx.TargetUserID)
+
+	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
+	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
+	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
+
+	var removedCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, fx.TargetUserID).Scan(&removedCount)
+	if removedCount != 0 {
+		t.Fatalf("departed member autopilot subscribers = %d, want 0", removedCount)
+	}
+
+	var remainingCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, autopilotID, testUserID).Scan(&remainingCount)
+	if remainingCount != 1 {
+		t.Fatalf("remaining member autopilot subscribers = %d, want 1", remainingCount)
+	}
+
+	var otherWorkspaceCount int
+	dbfx.QueryRow(t, `
+SELECT count(*) FROM autopilot_subscriber
+WHERE autopilot_id = $1 AND user_id = $2
+`, otherAutopilotID, fx.TargetUserID).Scan(&otherWorkspaceCount)
+	if otherWorkspaceCount != 1 {
+		t.Fatalf("other workspace autopilot subscribers = %d, want 1", otherWorkspaceCount)
+	}
+}
+
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when
 // a member leaves a workspace voluntarily, their own runtimes are revoked
 // with the same atomic write set as DeleteMember.

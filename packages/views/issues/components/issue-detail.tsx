@@ -143,6 +143,7 @@ import {
   getAnimatedRightSidebarInitialOpen,
   rightSidebarPanelMotionProps,
   useAnimatedRightSidebarState,
+  useRightSidebarShortcut,
 } from "../../layout/animated-right-sidebar";
 
 /**
@@ -1241,8 +1242,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const consumedHighlightRef = useRef(consumedHighlightId);
   consumedHighlightRef.current = consumedHighlightId;
   const writeViewState = useViewStateWriter();
+  const rightSidebarShortcutTargetRef = useRef<HTMLDivElement | null>(null);
   const attachScrollContainer = useCallback(
     (el: HTMLDivElement | null) => {
+      rightSidebarShortcutTargetRef.current = el;
       setScrollContainerEl(el);
       restoreScrollRef(el);
     },
@@ -2193,6 +2196,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       else panel.collapse();
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
+
+  useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
   useIssueDetailScrollRestore({
     restoreKey: `${wsId}:${id}`,

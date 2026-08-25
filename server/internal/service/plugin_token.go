@@ -59,6 +59,34 @@ func (s *PluginService) IssueInstallToken(ctx context.Context, installationID pg
 	return token, nil
 }
 
+// InstallCredentials is returned exactly once when an admin rotates a Plugin's
+// standing credential. SigningSecret is empty when hook signing is disabled;
+// the install token remains usable for the Public API in that deployment.
+type InstallCredentials struct {
+	Token         string
+	SigningSecret string
+}
+
+// RotateInstallCredentials prepares every response value before replacing the
+// stored token hash. This keeps an optional hook-signing configuration failure
+// from invalidating the previous token after the response has already become
+// impossible to complete.
+func (s *PluginService) RotateInstallCredentials(ctx context.Context, installationID pgtype.UUID) (InstallCredentials, error) {
+	var signingSecret string
+	if len(s.DeploymentKey) > 0 {
+		secret, err := s.HookSigningSecret(installationID)
+		if err != nil {
+			return InstallCredentials{}, err
+		}
+		signingSecret = secret
+	}
+	token, err := s.IssueInstallToken(ctx, installationID)
+	if err != nil {
+		return InstallCredentials{}, err
+	}
+	return InstallCredentials{Token: token, SigningSecret: signingSecret}, nil
+}
+
 // RevokeInstallToken drops the stored hash, so nothing presented afterwards
 // matches. Rotation is IssueInstallToken, which overwrites in place.
 func (s *PluginService) RevokeInstallToken(ctx context.Context, installationID pgtype.UUID) error {

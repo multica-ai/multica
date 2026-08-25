@@ -9,6 +9,15 @@
     "archive_all_read": "既読の項目をすべてアーカイブ",
     "archive_completed": "完了した項目をアーカイブ"
   },
+  "filters": {
+    "tooltip": "インボックスを絞り込む",
+    "active_count_other": "{{count}} 件のフィルター",
+    "status": "ステータス",
+    "priority": "優先度",
+    "notification_count_other": "{{count}} 件の通知",
+    "clear": "フィルターをクリア",
+    "empty": "フィルターに一致する通知はありません"
+  },
   "context_menu": {
     "mark_read": "既読にする",
     "mark_unread": "未読にする",

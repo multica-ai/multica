@@ -506,6 +506,28 @@ func (q *Queries) DeleteAutopilotCollaboratorsForAutopilot(ctx context.Context, 
 	return err
 }
 
+const deleteAutopilotSubscribersByMember = `-- name: DeleteAutopilotSubscribersByMember :exec
+DELETE FROM autopilot_subscriber AS s
+USING autopilot AS a
+WHERE s.autopilot_id = a.id
+  AND a.workspace_id = $1
+  AND s.user_type = 'member'
+  AND s.user_id = $2
+`
+
+type DeleteAutopilotSubscribersByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Autopilot subscribers carry no FK, so member removal must prune them in the
+// same application transaction. Scope through the autopilot's workspace: the
+// same user may remain subscribed to autopilots in another workspace.
+func (q *Queries) DeleteAutopilotSubscribersByMember(ctx context.Context, arg DeleteAutopilotSubscribersByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotSubscribersByMember, arg.WorkspaceID, arg.UserID)
+	return err
+}
+
 const deleteAutopilotSubscribersForAutopilot = `-- name: DeleteAutopilotSubscribersForAutopilot :exec
 DELETE FROM autopilot_subscriber
 WHERE autopilot_id = $1
@@ -1199,14 +1221,23 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 
 const listAutopilotSubscribers = `-- name: ListAutopilotSubscribers :many
 
-SELECT autopilot_id, user_type, user_id, created_at FROM autopilot_subscriber
-WHERE autopilot_id = $1
-ORDER BY created_at ASC, user_id ASC
+SELECT s.autopilot_id, s.user_type, s.user_id, s.created_at FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = $1
+  AND s.user_type = 'member'
+ORDER BY s.created_at ASC, s.user_id ASC
 `
 
 // =====================
 // Autopilot Subscribers
 // =====================
+// Only current workspace members are effective subscribers. The membership
+// join makes legacy rows left behind by older member-removal code inert on
+// both the detail response and the dispatch path, so clients never round-trip
+// a hidden departed member into an otherwise valid update.
 // ORDER BY created_at keeps chip rendering stable across refreshes.
 func (q *Queries) ListAutopilotSubscribers(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotSubscriber, error) {
 	rows, err := q.db.Query(ctx, listAutopilotSubscribers, autopilotID)

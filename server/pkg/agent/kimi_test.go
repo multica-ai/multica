@@ -673,6 +673,13 @@ func TestKimiFreshSessionIncludesMcpServers(t *testing.T) {
 		t.Fatal("timeout waiting for result")
 	}
 
+	initFrame := findRecordedFrame(t, recordPath, "initialize")
+	initParams := initFrame["params"].(map[string]any)
+	capabilities := initParams["clientCapabilities"].(map[string]any)
+	if capabilities["terminal"] != true {
+		t.Fatalf("initialize.clientCapabilities.terminal = %#v, want true", capabilities["terminal"])
+	}
+
 	frame := findRecordedFrame(t, recordPath, "session/new")
 	params := frame["params"].(map[string]any)
 	servers, ok := params["mcpServers"].([]any)

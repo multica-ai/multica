@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
-
+	"strconv"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	publicapiv1 "github.com/multica-ai/multica/server/pkg/publicapi/v1"
 )
 
 // The Action API is what a plugin surface reaches through the host bridge.
@@ -62,17 +65,52 @@ type pluginActor struct {
 func (a pluginActor) isMember() bool { return a.Type == "member" }
 
 // requireMember refuses an endpoint that has no meaning without a person.
-func (a pluginActor) requireMember(w http.ResponseWriter) bool {
+func (a pluginActor) requireMember(w http.ResponseWriter, r *http.Request) bool {
 	if a.isMember() {
 		return true
 	}
-	writeError(w, http.StatusForbidden, "this endpoint requires a user; the presented token acts as the Plugin itself")
+	publicapiv1.WriteProblem(w, r, http.StatusForbidden, "member_required", "this endpoint requires a user; the presented token acts as the Plugin itself")
 	return false
+}
+
+func (h *Handler) requirePluginActionV1(w http.ResponseWriter, r *http.Request) bool {
+	if h.pluginsV1Enabled(r.Context()) {
+		return true
+	}
+	publicapiv1.WriteProblem(w, r, http.StatusServiceUnavailable, "plugin_api_disabled", "Plugin management is not enabled")
+	return false
+}
+
+// writePluginActionError maps service-layer failures into the one stable
+// Public API problem contract. Management endpoints intentionally keep their
+// existing App API errors; only the versioned Action/bridge surface uses this.
+func writePluginActionError(w http.ResponseWriter, r *http.Request, err error, fallback string) {
+	var pluginErr *service.PluginError
+	if !errors.As(err, &pluginErr) {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", fallback)
+		return
+	}
+	switch pluginErr.Kind {
+	case service.PluginErrorInvalid:
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", pluginErr.Message)
+	case service.PluginErrorNotFound:
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", pluginErr.Message)
+	case service.PluginErrorConflict:
+		publicapiv1.WriteProblem(w, r, http.StatusConflict, "conflict", pluginErr.Message)
+	case service.PluginErrorForbidden:
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "forbidden", pluginErr.Message)
+	case service.PluginErrorIncompatible:
+		publicapiv1.WriteProblem(w, r, http.StatusUnprocessableEntity, "incompatible", pluginErr.Message)
+	case service.PluginErrorQuota:
+		publicapiv1.WriteProblem(w, r, http.StatusInsufficientStorage, "quota_exceeded", pluginErr.Message)
+	default:
+		publicapiv1.WriteProblem(w, r, http.StatusBadGateway, "upstream_unavailable", pluginErr.Message)
+	}
 }
 
 // pluginCaller runs checks 1 and 2 and returns the authorized caller.
 func (h *Handler) pluginCaller(w http.ResponseWriter, r *http.Request, scope string) (service.PluginActionCaller, pluginActor, bool) {
-	if !h.requirePluginsV1(w, r) {
+	if !h.requirePluginActionV1(w, r) {
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
 	if token := middleware.BearerToken(r); middleware.IsPluginBearerToken(token) {
@@ -84,26 +122,29 @@ func (h *Handler) pluginCaller(w http.ResponseWriter, r *http.Request, scope str
 // pluginSessionCaller is the surface path, unchanged: a real signed-in user
 // whose own permissions bound everything the plugin can reach.
 func (h *Handler) pluginSessionCaller(w http.ResponseWriter, r *http.Request, scope string) (service.PluginActionCaller, pluginActor, bool) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
+	userID := strings.TrimSpace(r.Header.Get("X-User-ID"))
+	if userID == "" {
+		publicapiv1.WriteProblem(w, r, http.StatusUnauthorized, "unauthorized", "missing authenticated user")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
-	parsedUserID, ok := parseUUIDOrBadRequest(w, userID, "user_id")
-	if !ok {
+	parsedUserID, err := util.ParseUUID(userID)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "user_id must be a valid UUID")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
 
 	caller, err := h.PluginService.AuthorizePluginAction(r.Context(), r.Header.Get(pluginInstallationHeader), parsedUserID, scope)
 	if err != nil {
-		writePluginError(w, err, "failed to authorize the Plugin call")
+		writePluginActionError(w, r, err, "failed to authorize the Plugin call")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
 
 	// The workspace comes from the installation, never from a client header:
 	// otherwise a caller could aim an installation at a workspace it was never
 	// installed in. Membership is then checked against that workspace.
-	member, ok := h.requireWorkspaceMember(w, r, uuidToString(caller.WorkspaceID), "workspace not found")
-	if !ok {
+	member, err := h.getWorkspaceMember(r.Context(), userID, uuidToString(caller.WorkspaceID))
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "workspace not found")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
 	return caller, pluginActor{Type: "member", Member: member}, true
@@ -124,12 +165,12 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 	switch {
 	case strings.HasPrefix(token, "mpc_"):
 		if h.PluginService.Callbacks == nil {
-			writeError(w, http.StatusForbidden, "callback tokens are not enabled")
+			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "callback_tokens_disabled", "callback tokens are not enabled")
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
 		grant, err := h.PluginService.Callbacks.Resolve(token)
 		if err != nil {
-			writePluginError(w, err, "failed to authorize the Plugin call")
+			writePluginActionError(w, r, err, "failed to authorize the Plugin call")
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
 		installationID = grant.InstallationID
@@ -140,7 +181,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 	default:
 		installation, err := h.PluginService.AuthenticateInstallToken(r.Context(), token)
 		if err != nil {
-			writePluginError(w, err, "failed to authorize the Plugin call")
+			writePluginActionError(w, r, err, "failed to authorize the Plugin call")
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
 		installationID = installation.ID
@@ -148,7 +189,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 
 	caller, err := h.PluginService.AuthorizePluginAction(r.Context(), uuidToString(installationID), memberUserID, scope)
 	if err != nil {
-		writePluginError(w, err, "failed to authorize the Plugin call")
+		writePluginActionError(w, r, err, "failed to authorize the Plugin call")
 		return service.PluginActionCaller{}, pluginActor{}, false
 	}
 
@@ -162,7 +203,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 	if memberUserID.Valid {
 		member, err := h.getWorkspaceMember(r.Context(), uuidToString(memberUserID), uuidToString(caller.WorkspaceID))
 		if err != nil {
-			writeError(w, http.StatusForbidden, "the user this callback acts for is no longer a member")
+			publicapiv1.WriteProblem(w, r, http.StatusForbidden, "actor_membership_revoked", "the user this callback acts for is no longer a member")
 			return service.PluginActionCaller{}, pluginActor{}, false
 		}
 		actor = pluginActor{Type: "member", Member: member}
@@ -178,7 +219,7 @@ func (h *Handler) pluginTokenCaller(w http.ResponseWriter, r *http.Request, toke
 // not be able to confirm that an id it cannot read exists.
 func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, caller service.PluginActionCaller, issueID string) (db.Issue, bool) {
 	if issueID == "" {
-		writeError(w, http.StatusNotFound, "issue not found")
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
 		return db.Issue{}, false
 	}
 	// Resolve first, then compare ids: a caller may name an issue by identifier
@@ -186,7 +227,7 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 	// pass under one spelling and fail under the other.
 	issue, ok := h.resolvePluginIssue(r, caller, issueID)
 	if !ok {
-		writeError(w, http.StatusNotFound, "issue not found")
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
 		return db.Issue{}, false
 	}
 	// A callback grant issued about one issue reaches only that issue. Without
@@ -196,7 +237,7 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 	// 404 rather than 403: the caller may well be able to see this issue by
 	// other means, and "you are scoped elsewhere" would confirm the id exists.
 	if caller.IssueScope.Valid && uuidToString(issue.ID) != uuidToString(caller.IssueScope) {
-		writeError(w, http.StatusNotFound, "issue not found")
+		publicapiv1.WriteProblem(w, r, http.StatusNotFound, "not_found", "issue not found")
 		return db.Issue{}, false
 	}
 	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "plugin") {
@@ -227,7 +268,7 @@ func (h *Handler) resolvePluginIssue(r *http.Request, caller service.PluginActio
 	return issue, true
 }
 
-// GetPluginContext — GET /api/v1/plugin/context
+// GetPluginContext — GET /v1/context
 func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 	// No scope: this is the page the user is already looking at.
 	caller, actor, ok := h.pluginCaller(w, r, "")
@@ -236,7 +277,7 @@ func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 	}
 	workspace, err := h.Queries.GetWorkspace(r.Context(), caller.WorkspaceID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load the workspace")
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to load the workspace")
 		return
 	}
 	// A plugin-actor call has no user to describe, and the payload says so
@@ -245,7 +286,7 @@ func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 	if actor.isMember() {
 		loaded, err := h.Queries.GetUser(r.Context(), actor.Member.UserID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to load the user")
+			publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to load the user")
 			return
 		}
 		user = &loaded
@@ -260,28 +301,48 @@ func (h *Handler) GetPluginContext(w http.ResponseWriter, r *http.Request) {
 		issue = &loaded
 	}
 
-	writeJSON(w, http.StatusOK, h.PluginService.BuildPluginContext(caller, workspace, user, issue))
+	writeJSON(w, http.StatusOK, publicPluginContext(h.PluginService.BuildPluginContext(caller, workspace, user, issue)))
 }
 
-// GetPluginIssue — GET /api/v1/plugin/issues/{id}
+func publicPluginContext(context service.PluginContext) publicapiv1.Context {
+	payload := publicapiv1.Context{
+		Workspace: publicapiv1.ContextWorkspace{
+			ID:   context.Workspace.ID,
+			Name: context.Workspace.Name,
+			Slug: context.Workspace.Slug,
+		},
+		Config:            context.Config,
+		GrantedNetDomains: context.GrantedURLs,
+		Actor:             context.Actor,
+	}
+	if context.User != nil {
+		payload.User = &publicapiv1.ContextUser{ID: context.User.ID, Name: context.User.Name}
+	}
+	if context.Issue != nil {
+		payload.Issue = &publicapiv1.ContextIssue{
+			ID:         context.Issue.ID,
+			Identifier: context.Issue.Identifier,
+			Title:      context.Issue.Title,
+		}
+	}
+	return payload
+}
+
+// GetPluginIssue — GET /v1/issues/{issue_ref}
 func (h *Handler) GetPluginIssue(w http.ResponseWriter, r *http.Request) {
 	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeIssuesRead)
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "id"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
+	setPublicIssueETag(w, issue.Revision)
 	writeJSON(w, http.StatusOK, h.pluginIssuePayload(r, caller, issue))
 }
 
-type patchPluginIssueRequest struct {
-	Title       *string `json:"title,omitempty"`
-	Description *string `json:"description,omitempty"`
-}
-
-// PatchPluginIssue — PATCH /api/v1/plugin/issues/{id}
+// PatchPluginIssue — PATCH /v1/issues/{issue_ref}
 //
 // Title and description only. Status, priority, assignee, parent, project and
 // stage each carry dispatch, catalog or hierarchy semantics — a status change
@@ -294,71 +355,140 @@ func (h *Handler) PatchPluginIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "id"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
 
-	var req patchPluginIssueRequest
+	var req publicapiv1.PatchIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 	if req.Title == nil && req.Description == nil {
-		writeError(w, http.StatusBadRequest, "title or description is required")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "title or description is required")
 		return
 	}
-
-	// Every other field is passed back unchanged: UpdateIssue treats a null
-	// nargs as "clear", so omitting them here would silently unassign the issue
-	// or detach it from its parent.
-	params := db.UpdateIssueParams{
-		ID:            issue.ID,
-		AssigneeType:  issue.AssigneeType,
-		AssigneeID:    issue.AssigneeID,
-		StartDate:     issue.StartDate,
-		DueDate:       issue.DueDate,
-		ParentIssueID: issue.ParentIssueID,
-		ProjectID:     issue.ProjectID,
-		Stage:         issue.Stage,
+	expectedRevision, ok := publicIssueExpectedRevision(w, r, req.ExpectedRevision)
+	if !ok {
+		return
 	}
-	if req.Title != nil {
-		title := sanitizeNullBytes(*req.Title)
-		if title == "" {
-			writeError(w, http.StatusBadRequest, "title must not be empty")
+	if expectedRevision != nil {
+		if issue.Revision != *expectedRevision {
+			writePublicIssueRevisionConflict(w, r)
 			return
 		}
-		params.Title = pgtype.Text{String: title, Valid: true}
-	}
-	if req.Description != nil {
-		params.Description = pgtype.Text{String: sanitizeNullBytes(*req.Description), Valid: true}
 	}
 
-	updated, err := h.Queries.UpdateIssue(r.Context(), params)
+	var title *string
+	if req.Title != nil {
+		value := sanitizeNullBytes(*req.Title)
+		if value == "" {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "title must not be empty")
+			return
+		}
+		title = &value
+	}
+	var description *string
+	if req.Description != nil {
+		value := sanitizeNullBytes(*req.Description)
+		description = &value
+	}
+
+	updated, err := h.IssueService.UpdateContent(r.Context(), issue, service.IssueContentPatch{
+		Title:            title,
+		Description:      description,
+		ExpectedRevision: expectedRevision,
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update the issue")
+		if errors.Is(err, service.ErrIssueRevisionConflict) {
+			writePublicIssueRevisionConflict(w, r)
+			return
+		}
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to update the issue")
 		return
 	}
+	setPublicIssueETag(w, updated.Revision)
 	writeJSON(w, http.StatusOK, h.pluginIssuePayload(r, caller, updated))
 }
 
-// pluginIssuePayload reuses the ordinary issue response so a surface sees the
-// same shape the rest of the product does.
-func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActionCaller, issue db.Issue) IssueResponse {
+func setPublicIssueETag(w http.ResponseWriter, revision int64) {
+	w.Header().Set("ETag", fmt.Sprintf(`W/"%d"`, revision))
+}
+
+func publicIssueExpectedRevision(w http.ResponseWriter, r *http.Request, bodyRevision *int64) (*int64, bool) {
+	header := strings.TrimSpace(r.Header.Get("If-Match"))
+	if header == "" {
+		if bodyRevision != nil && *bodyRevision < 1 {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "expected_revision must be a positive integer")
+			return nil, false
+		}
+		return bodyRevision, true
+	}
+	if strings.HasPrefix(header, "W/") {
+		header = strings.TrimSpace(strings.TrimPrefix(header, "W/"))
+	}
+	header = strings.Trim(header, `"`)
+	parsed, err := strconv.ParseInt(header, 10, 64)
+	if err != nil || parsed < 1 {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_if_match", "If-Match must contain a positive issue revision")
+		return nil, false
+	}
+	if bodyRevision != nil && *bodyRevision != parsed {
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "revision_mismatch", "If-Match and expected_revision must identify the same revision")
+		return nil, false
+	}
+	return &parsed, true
+}
+
+func writePublicIssueRevisionConflict(w http.ResponseWriter, r *http.Request) {
+	publicapiv1.WriteProblem(w, r, http.StatusConflict, "revision_conflict", "resource changed since it was loaded")
+}
+
+// pluginIssuePayload explicitly maps the App response into the stable Public
+// DTO. New App-only fields cannot leak into the public contract by accident.
+func (h *Handler) pluginIssuePayload(r *http.Request, caller service.PluginActionCaller, issue db.Issue) publicapiv1.Issue {
 	prefix := ""
 	if workspace, err := h.Queries.GetWorkspace(r.Context(), caller.WorkspaceID); err == nil {
 		prefix = workspace.IssuePrefix
 	}
-	return issueToResponse(issue, prefix)
+	app := issueToResponse(issue, prefix)
+	return publicapiv1.Issue{
+		ID:             app.ID,
+		WorkspaceID:    app.WorkspaceID,
+		Number:         app.Number,
+		Identifier:     app.Identifier,
+		Title:          app.Title,
+		Description:    app.Description,
+		Status:         app.Status,
+		StatusCategory: app.StatusCategory,
+		Priority:       app.Priority,
+		AssigneeType:   app.AssigneeType,
+		AssigneeID:     app.AssigneeID,
+		CreatorType:    app.CreatorType,
+		CreatorID:      app.CreatorID,
+		ParentIssueID:  app.ParentIssueID,
+		ProjectID:      app.ProjectID,
+		Position:       app.Position,
+		Stage:          app.Stage,
+		StartDate:      app.StartDate,
+		DueDate:        app.DueDate,
+		CreatedAt:      app.CreatedAt,
+		UpdatedAt:      app.UpdatedAt,
+		Revision:       app.Revision,
+		LastActivityAt: app.LastActivityAt,
+		Metadata:       app.Metadata,
+		Properties:     app.Properties,
+	}
 }
 
-// ListPluginComments — GET /api/v1/plugin/issues/{id}/comments
+// ListPluginComments — GET /v1/issues/{issue_ref}/comments
 func (h *Handler) ListPluginComments(w http.ResponseWriter, r *http.Request) {
 	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeCommentsRead)
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "id"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
@@ -368,40 +498,29 @@ func (h *Handler) ListPluginComments(w http.ResponseWriter, r *http.Request) {
 		Limit:       maxPluginCommentsPerRead,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list comments")
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list comments")
 		return
 	}
-	payload := make([]pluginCommentResponse, 0, len(comments))
+	payload := make([]publicapiv1.Comment, 0, len(comments))
 	for _, comment := range comments {
-		payload = append(payload, pluginCommentResponse{
-			ID:         uuidToString(comment.ID),
-			AuthorType: comment.AuthorType,
-			AuthorID:   uuidToString(comment.AuthorID),
-			Content:    comment.Content,
-			Type:       comment.Type,
-			ParentID:   uuidToString(comment.ParentID),
-			CreatedAt:  comment.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
-		})
+		payload = append(payload, publicPluginComment(comment))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"comments": payload})
+	writeJSON(w, http.StatusOK, publicapiv1.CommentListResponse{Comments: payload})
 }
 
-type pluginCommentResponse struct {
-	ID         string `json:"id"`
-	AuthorType string `json:"author_type"`
-	AuthorID   string `json:"author_id"`
-	Content    string `json:"content"`
-	Type       string `json:"type"`
-	ParentID   string `json:"parent_id,omitempty"`
-	CreatedAt  string `json:"created_at"`
+func publicPluginComment(comment db.Comment) publicapiv1.Comment {
+	return publicapiv1.Comment{
+		ID:         uuidToString(comment.ID),
+		AuthorType: comment.AuthorType,
+		AuthorID:   uuidToString(comment.AuthorID),
+		Content:    comment.Content,
+		Type:       comment.Type,
+		ParentID:   uuidToString(comment.ParentID),
+		CreatedAt:  comment.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
+	}
 }
 
-type createPluginCommentRequest struct {
-	Content  string  `json:"content"`
-	ParentID *string `json:"parent_id,omitempty"`
-}
-
-// CreatePluginComment — POST /api/v1/plugin/issues/{id}/comments
+// CreatePluginComment — POST /v1/issues/{issue_ref}/comments
 //
 // The comment is authored BY THE USER and marked with the plugin that produced
 // it, so the timeline can render "Jiayuan (via Hello Panel)".
@@ -416,36 +535,37 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "id"))
+	issue, ok := h.pluginIssueForUser(w, r, caller, chi.URLParam(r, "issue_ref"))
 	if !ok {
 		return
 	}
 
-	var req createPluginCommentRequest
+	var req publicapiv1.CreateCommentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 	content := sanitizeNullBytes(req.Content)
 	if content == "" {
-		writeError(w, http.StatusBadRequest, "content is required")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "content is required")
 		return
 	}
 	if len(content) > maxPluginCommentBytes {
-		writeError(w, http.StatusBadRequest, "content is too long")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "content is too long")
 		return
 	}
 
 	var parentID pgtype.UUID
 	var rootComment *db.Comment
 	if req.ParentID != nil && *req.ParentID != "" {
-		parsed, ok := parseUUIDOrBadRequest(w, *req.ParentID, "parent_id")
-		if !ok {
+		parsed, err := util.ParseUUID(*req.ParentID)
+		if err != nil {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "parent_id must be a valid UUID")
 			return
 		}
 		parent, err := h.Queries.GetComment(r.Context(), parsed)
 		if err != nil || uuidToString(parent.IssueID) != uuidToString(issue.ID) {
-			writeError(w, http.StatusBadRequest, "invalid parent comment")
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_parent_comment", "invalid parent comment")
 			return
 		}
 		parentID = parsed
@@ -476,7 +596,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		ViaPluginID: caller.Installation.ID,
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create the comment")
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to create the comment")
 		return
 	}
 	comment := createdComment.Comment()
@@ -497,15 +617,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(caller.WorkspaceID), authorType, uuidToString(authorID))
 	}
 
-	writeJSON(w, http.StatusCreated, pluginCommentResponse{
-		ID:         uuidToString(comment.ID),
-		AuthorType: comment.AuthorType,
-		AuthorID:   uuidToString(comment.AuthorID),
-		Content:    comment.Content,
-		Type:       comment.Type,
-		ParentID:   uuidToString(comment.ParentID),
-		CreatedAt:  comment.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
-	})
+	writeJSON(w, http.StatusCreated, publicPluginComment(comment))
 }
 
 // maxPluginCommentBytes keeps a surface from using comments as bulk storage.
@@ -525,18 +637,18 @@ func (h *Handler) pluginStorageScope(w http.ResponseWriter, r *http.Request, cal
 		required = plugincontract.ScopeStorageUser
 	}
 	if !hasGrantedScope(caller.Scopes, required) {
-		writeError(w, http.StatusForbidden, "this Plugin was not granted the "+required+" scope")
+		publicapiv1.WriteProblem(w, r, http.StatusForbidden, "missing_scope", "this Plugin was not granted the "+required+" scope")
 		return "", pgtype.UUID{}, false
 	}
 	// storage:user is per-member state, so a caller with no member has no such
 	// scope to resolve. Falling through would key every plugin-actor write to
 	// the zero UUID — one shared bucket masquerading as somebody's private one.
-	if scopeType == service.PluginStorageUser && !actor.requireMember(w) {
+	if scopeType == service.PluginStorageUser && !actor.requireMember(w, r) {
 		return "", pgtype.UUID{}, false
 	}
 	scopeID, err := service.ResolveStorageScope(scopeType, caller.WorkspaceID, actor.Member.UserID)
 	if err != nil {
-		writePluginError(w, err, "invalid storage scope")
+		writePluginActionError(w, r, err, "invalid storage scope")
 		return "", pgtype.UUID{}, false
 	}
 	return scopeType, scopeID, true
@@ -551,7 +663,7 @@ func hasGrantedScope(scopes []string, want string) bool {
 	return false
 }
 
-// ListPluginStorage — GET /api/v1/plugin/storage/{scope}
+// ListPluginStorage — GET /v1/storage/{scope}
 func (h *Handler) ListPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -563,13 +675,19 @@ func (h *Handler) ListPluginStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	keys, err := h.PluginService.ListStorageKeys(r.Context(), caller.Installation.ID, scopeType, scopeID)
 	if err != nil {
-		writePluginError(w, err, "failed to list storage")
+		writePluginActionError(w, r, err, "failed to list storage")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"keys": keys})
+	payload := make([]publicapiv1.StorageKey, 0, len(keys))
+	for _, key := range keys {
+		payload = append(payload, publicapiv1.StorageKey{
+			Key: key.Key, SizeBytes: key.SizeBytes, UpdatedAt: key.UpdatedAt,
+		})
+	}
+	writeJSON(w, http.StatusOK, publicapiv1.StorageKeyListResponse{Keys: payload})
 }
 
-// GetPluginStorage — GET /api/v1/plugin/storage/{scope}/{key}
+// GetPluginStorage — GET /v1/storage/{scope}/{key}
 func (h *Handler) GetPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -581,17 +699,13 @@ func (h *Handler) GetPluginStorage(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.PluginService.GetStorageValue(r.Context(), caller.Installation.ID, scopeType, scopeID, chi.URLParam(r, "key"))
 	if err != nil {
-		writePluginError(w, err, "failed to read storage")
+		writePluginActionError(w, r, err, "failed to read storage")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"value": value})
+	writeJSON(w, http.StatusOK, publicapiv1.StorageValueResponse{Value: value})
 }
 
-type putPluginStorageRequest struct {
-	Value string `json:"value"`
-}
-
-// PutPluginStorage — PUT /api/v1/plugin/storage/{scope}/{key}
+// PutPluginStorage — PUT /v1/storage/{scope}/{key}
 func (h *Handler) PutPluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -601,19 +715,19 @@ func (h *Handler) PutPluginStorage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var req putPluginStorageRequest
+	var req publicapiv1.PutStorageValueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 	if err := h.PluginService.SetStorageValue(r.Context(), caller.Installation.ID, scopeType, scopeID, chi.URLParam(r, "key"), req.Value); err != nil {
-		writePluginError(w, err, "failed to write storage")
+		writePluginActionError(w, r, err, "failed to write storage")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeletePluginStorage — DELETE /api/v1/plugin/storage/{scope}/{key}
+// DeletePluginStorage — DELETE /v1/storage/{scope}/{key}
 func (h *Handler) DeletePluginStorage(w http.ResponseWriter, r *http.Request) {
 	caller, actor, ok := h.pluginCaller(w, r, "")
 	if !ok {
@@ -624,7 +738,7 @@ func (h *Handler) DeletePluginStorage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.PluginService.DeleteStorageValue(r.Context(), caller.Installation.ID, scopeType, scopeID, chi.URLParam(r, "key")); err != nil {
-		writePluginError(w, err, "failed to delete storage")
+		writePluginActionError(w, r, err, "failed to delete storage")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

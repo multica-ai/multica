@@ -17,8 +17,9 @@ multica.ui.resize(320);
 **One** script in a sandboxed iframe.
 
 Bundle this SDK and everything else your surface needs into a single file. There
-is no module graph: you publish an artifact, Multica stores it and inlines your
-entry into the document it generates, so there is no origin for a top-level
+is no module graph: you publish an artifact, Multica stores it and serves your
+entry inside a generated document on its dedicated plugin-content origin. There
+is no path back to the author's server and no top-level module graph for a bare
 `import` to resolve against. Publishing refuses an entry that has one rather
 than letting it fail later in a reader's browser.
 
@@ -31,7 +32,7 @@ before you write one:
   or per member, and survives the frame.
 - **`Origin: null` on your own requests.** If your surface calls your backend
   directly, that backend must accept a null origin in CORS.
-- **A CSP you did not write.** The host generates the document and derives
+- **A CSP you did not write.** Multica generates the response and derives
   `connect-src` from the `net:` scopes in your manifest. Declare every host you
   intend to reach; with no `net:` scope your surface cannot issue a network
   request at all, including back to your own origin, which is no longer in the
@@ -66,7 +67,7 @@ cannot start agent runs as a side effect of posting text.
 
 ## Theme
 
-The host pushes design tokens in at init and again on every theme switch, and
+The host pushes design tokens over the private port and again on every theme switch, and
 the SDK writes them as custom properties on `:root`. Use `var(--foreground)`,
 `var(--background)`, `var(--border)`, `var(--radius)` and friends and your
 surface will look native without shipping a stylesheet.

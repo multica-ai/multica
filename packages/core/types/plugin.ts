@@ -29,7 +29,14 @@ export interface PluginSurface {
   platforms?: string[];
 }
 
-export type PluginHookTrigger = "ui" | "manual" | "agent" | "event";
+export type PluginHookTrigger = "ui" | "manual" | "agent" | "event" | "schedule";
+
+export interface PluginHookSchedule {
+  cron: string;
+  timezone: string;
+  /** Display-only projection. Runtime correctness never depends on this value. */
+  next_run_at?: string;
+}
 
 export interface PluginHook {
   key: string;
@@ -37,6 +44,7 @@ export interface PluginHook {
   description: string;
   triggers: (PluginHookTrigger | string)[];
   events?: string[];
+  schedule?: PluginHookSchedule;
   transport: string;
 }
 
@@ -82,6 +90,14 @@ export interface PluginManifestSummary {
   description?: string;
   version: string;
   author: { name: string; url?: string };
+  contributes?: {
+    hooks?: Array<{
+      key: string;
+      name: string;
+      triggers: (PluginHookTrigger | string)[];
+      schedule?: PluginHookSchedule;
+    }>;
+  };
 }
 
 /**
@@ -142,15 +158,12 @@ export interface PluginPackageListResponse {
   packages: PluginPackage[];
 }
 
-/**
- * The code one surface runs, read from the version the workspace installed.
- *
- * The host inlines it into the sandboxed document it generates, so the surface
- * loads nothing over the network and its CSP names no third-party script origin
- * at all.
- */
-export interface PluginSurfaceScript {
-  code: string;
+/** One short-lived, installation-bound launch of a hosted surface. */
+export interface PluginSurfaceLaunch {
+  /** Multica's cookie-free content URL, never the plugin author's server. */
+  url: string;
+  /** Single-use proof the generated document must present to this frame. */
+  bridge_token: string;
   version: string;
   digest: string;
 }
@@ -189,6 +202,8 @@ export interface PluginInvocation {
   attempt: number;
   latency_ms: number;
   error?: string;
+  delivery_id?: string;
+  planned_at?: string;
   created_at: string;
 }
 

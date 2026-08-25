@@ -75,13 +75,13 @@ function verifySignature(rawBody, signature, timestamp) {
 // The callback token is scoped to THIS invocation and is revoked the moment the
 // hook returns, so anything the handler wants to write has to be written before
 // it replies. That constraint is the reason this is awaited, not fired off.
-async function commentOnIssue(callback, issueId, body) {
-  if (!callback?.token || !callback?.base_url || !issueId) return;
+async function commentOnIssue(callbackUrl, callbackToken, issueId, content) {
+  if (!callbackToken || !callbackUrl || !issueId) return;
   try {
-    const response = await fetch(`${callback.base_url}/api/v1/plugin/issues/${issueId}/comments`, {
+    const response = await fetch(`${callbackUrl}/issues/${encodeURIComponent(issueId)}/comments`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${callback.token}` },
-      body: JSON.stringify({ body }),
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${callbackToken}` },
+      body: JSON.stringify({ content }),
     });
     if (!response.ok) {
       console.warn(`callback comment failed: ${response.status} ${await response.text()}`);
@@ -178,7 +178,15 @@ const server = createServer(tlsOptions(), async (req, res) => {
     return reply(400, { error: "body is not valid JSON" });
   }
 
-  const { hook_key: hookKey, trigger, input = {}, config = {}, callback, issue_id: issueId } = payload;
+  const {
+    hook_key: hookKey,
+    trigger,
+    input = {},
+    config = {},
+    callback_url: callbackUrl,
+    callback_token: callbackToken,
+    issue_id: issueId,
+  } = payload;
   console.log(`${hookKey} via ${trigger}`);
 
   switch (hookKey) {
@@ -188,7 +196,7 @@ const server = createServer(tlsOptions(), async (req, res) => {
       // their colleagues will see it. An agent call already returns to the
       // agent, which will write its own account of what it found.
       if (trigger === "ui" || trigger === "manual") {
-        await commentOnIssue(callback, issueId, `**Deploy Sentinel** — ${result.summary}`);
+        await commentOnIssue(callbackUrl, callbackToken, issueId, `**Deploy Sentinel** — ${result.summary}`);
       }
       return reply(200, result);
     }
@@ -197,7 +205,8 @@ const server = createServer(tlsOptions(), async (req, res) => {
       const result = requestRollback(input, config);
       if (result.status === "filed") {
         await commentOnIssue(
-          callback,
+          callbackUrl,
+          callbackToken,
           issueId,
           `**Deploy Sentinel** filed rollback ${result.change_id} for deploy ${result.deploy_id}.\n\n> ${input.reason}\n\nAwaiting human approval — nothing has been rolled back.`,
         );

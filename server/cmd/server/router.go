@@ -45,6 +45,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	publicapiv1 "github.com/multica-ai/multica/server/pkg/publicapi/v1"
 )
 
 var defaultOrigins = []string{
@@ -52,6 +53,8 @@ var defaultOrigins = []string{
 	"http://localhost:5173", // electron-vite dev
 	"http://localhost:5174", // electron-vite dev (fallback port)
 }
+
+const pluginBridgePrefix = "/api/plugin-bridge/v1"
 
 // corsAllowedHeaders must list every header the browser clients send. A header
 // missing here fails the preflight, so the request never reaches the handler at
@@ -64,6 +67,7 @@ var corsAllowedHeaders = []string{
 	"Authorization",
 	"Content-Type",
 	"Idempotency-Key",
+	"If-Match",
 	"X-Workspace-ID",
 	"X-Workspace-Slug",
 	"X-Request-ID",
@@ -87,8 +91,22 @@ var corsAllowedHeaders = []string{
 // Referencing the handler constant rather than re-typing the string keeps a
 // rename from quietly switching the signal off (MUL-5492).
 var corsExposedHeaders = []string{
+	"ETag",
+	"X-Request-ID",
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
+}
+
+func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {
+	r.Get(publicapiv1.PathContext, h.GetPluginContext)
+	r.Get(publicapiv1.PathIssue, h.GetPluginIssue)
+	r.Patch(publicapiv1.PathIssue, h.PatchPluginIssue)
+	r.Get(publicapiv1.PathIssueComments, h.ListPluginComments)
+	r.Post(publicapiv1.PathIssueComments, h.CreatePluginComment)
+	r.Get(publicapiv1.PathStorageScope, h.ListPluginStorage)
+	r.Get(publicapiv1.PathStorageValue, h.GetPluginStorage)
+	r.Put(publicapiv1.PathStorageValue, h.PutPluginStorage)
+	r.Delete(publicapiv1.PathStorageValue, h.DeletePluginStorage)
 }
 
 func allowedOrigins() []string {
@@ -123,6 +141,21 @@ func appURLFromEnv() string {
 		return v
 	}
 	return strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")), "/")
+}
+
+// pluginActionBaseURL resolves the versioned public base a hook handler calls
+// back into. Managed deployments give the Plugin API its own hostname through
+// MULTICA_PLUGIN_API_URL; self-hosted and local deployments can leave it empty
+// and serve the same /v1 contract on MULTICA_PUBLIC_URL.
+func pluginActionBaseURL(publicURL string) string {
+	if value := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_API_URL")), "/"); value != "" {
+		return value
+	}
+	publicURL = strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	if publicURL == "" {
+		return ""
+	}
+	return publicURL + publicapiv1.BasePath
 }
 
 // parseTrustedProxies parses a comma-separated list of CIDR prefixes from the
@@ -344,12 +377,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		VCSIntegrationEnabled:    os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
+		AppURL:                   appURLFromEnv(),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudRuntimeFleetURL:     cloudRuntimeFleetURLFromEnv(),
 		CloudRuntimeFleetTimeout: envDuration("MULTICA_CLOUD_FLEET_TIMEOUT", 35*time.Second),
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
+		PluginSurfaceOrigin:      strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_SURFACE_ORIGIN")), "/"),
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
@@ -1083,6 +1118,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// is derived from this rather than stored, so no row holds a usable
 			// one.
 			h.PluginService.DeploymentKey = pluginKey
+			h.PluginSurfaceTokens, err = handler.NewPluginSurfaceTokenBox(pluginKey)
+			if err != nil {
+				slog.Error("plugins: surface token key derivation failed; surfaces disabled", "error", err)
+			}
 			slog.Info("Plugin secret encryption enabled")
 		}
 	} else {
@@ -1095,13 +1134,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// put an outside server on the critical path of creating an issue.
 	if h.PluginService != nil {
 		h.PluginService.Callbacks = service.NewCallbackTokens()
-		// Omitted rather than sent relative: a handler receiving
-		// "/api/v1/plugin" cannot call anything with it, and a broken absolute
-		// URL is harder to diagnose than an absent one.
-		if publicURL := strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")); publicURL != "" {
-			h.PluginService.CallbackBaseURL = strings.TrimSuffix(publicURL, "/") + "/api/v1/plugin"
+		// Omitted rather than sent relative: a third-party hook server cannot
+		// call a path-only URL, and a broken absolute URL is harder to diagnose
+		// than an absent one.
+		if baseURL := pluginActionBaseURL(signupConfig.PublicURL); baseURL != "" {
+			h.PluginService.CallbackBaseURL = baseURL
 		} else {
-			slog.Warn("plugins: MULTICA_PUBLIC_URL is not set; hook callbacks will carry no callback_url")
+			slog.Warn("plugins: MULTICA_PLUGIN_API_URL and MULTICA_PUBLIC_URL are not set; hook callbacks will carry no callback_url")
 		}
 		// The flag reaches the event path only through the service: a worker has
 		// no request to read it from.
@@ -1163,6 +1202,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Use(opts.HTTPMetrics.Middleware)
 	}
 	r.Use(chimw.Recoverer)
+	r.Use(h.PluginSurfaceHostBoundary)
 	r.Use(middleware.ContentSecurityPolicy)
 
 	// Share allowed origins with WebSocket origin checker.
@@ -1241,6 +1281,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// be avatar-class — see server/internal/handler/avatar.go (MUL-5393 /
 	// #6024).
 	r.Get("/api/avatars/{sig}/*", h.ServeAvatar)
+
+	// Hosted plugin documents are capability-authenticated and intentionally
+	// outside the session middleware: the configured content origin must stay
+	// cookie-free. The encrypted path token binds the installation, immutable
+	// version, surface and one bridge challenge.
+	r.Get("/plugin-surfaces/{token}", h.ServePluginSurface)
 
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
@@ -1352,35 +1398,30 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/session", h.PinTaskSession)
 	})
 
-	// Protected API routes
-	// Plugin Action API. Two kinds of caller reach these, and the difference is
-	// only in WHO the call acts as.
-	//
-	// A SURFACE has no credential: the iframe asks the host page over the
-	// postMessage bridge, and the host re-issues the call on the signed-in
-	// user's own session, naming the installation in a header the iframe cannot
-	// set for itself. That path goes through the ordinary Auth chain.
-	//
-	// A HOOK HANDLER — the plugin author's own server — has no session and
-	// never will, so it presents a plugin bearer token instead. PluginAuth
-	// routes that request past the session chain to the handler, which resolves
-	// the token itself; a request with neither credential is refused there.
-	//
-	// The workspace always comes from the installation, never from the client.
+	// Public Plugin Action API. This is the stable, globally versioned contract
+	// exposed on the Plugin API origin. It accepts only mpi_/mpc_ bearer tokens;
+	// browser sessions use the bridge group below and cannot cross this trust
+	// boundary even when both hostnames route to the same Go service.
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.PluginAuth(middleware.Auth(queries, patCache, cloudPATVerifier)))
-		r.Route("/api/v1/plugin", func(r chi.Router) {
-			r.Get("/context", h.GetPluginContext)
-			r.Get("/issues/{id}", h.GetPluginIssue)
-			r.Patch("/issues/{id}", h.PatchPluginIssue)
-			r.Get("/issues/{id}/comments", h.ListPluginComments)
-			r.Post("/issues/{id}/comments", h.CreatePluginComment)
-			r.Get("/storage/{scope}", h.ListPluginStorage)
-			r.Get("/storage/{scope}/{key}", h.GetPluginStorage)
-			r.Put("/storage/{scope}/{key}", h.PutPluginStorage)
-			r.Delete("/storage/{scope}/{key}", h.DeletePluginStorage)
+		r.Use(middleware.PluginBearerOnly)
+		r.Use(middleware.PluginRateLimit(rdb, envPositiveInt("RATE_LIMIT_PLUGIN_API", 120), time.Minute))
+		r.Route(publicapiv1.BasePath, func(r chi.Router) {
+			registerPluginActionRoutes(r, h)
+			r.NotFound(publicapiv1.NotFound)
+			r.MethodNotAllowed(publicapiv1.MethodNotAllowed)
+		})
+	})
+
+	// Browser-session relay for sandboxed plugin surfaces. The iframe talks to
+	// the host over MessagePort; the host calls this internal route with the
+	// signed-in user's session and the installation header. Keeping it outside
+	// /v1 prevents the Public API from accepting session cookies.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Route(pluginBridgePrefix, func(r chi.Router) {
+			registerPluginActionRoutes(r, h)
 			// ui / manual only. `event` is dispatched by the host off the event
-			// bus and never requested; `agent` arrives over MCP in PR 4.
+			// bus; `agent` arrives over MCP rather than this HTTP endpoint.
 			r.Post("/hooks/{key}", h.InvokePluginHook)
 		})
 	})
@@ -1470,10 +1511,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// see what is mounted in their workspace and which scopes
 					// it holds; install / configure / remove stay admin-only.
 					r.Get("/plugins", h.ListPlugins)
-					// A surface's code, read from the version the workspace
-					// installed. Member-visible because opening an issue is
-					// what asks for it.
-					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/script", h.GetPluginSurfaceScript)
+					// One short-lived hosted surface launch. Member-visible
+					// because opening an issue is what asks for it; executable
+					// bytes stay off the authenticated app/API origin.
+					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

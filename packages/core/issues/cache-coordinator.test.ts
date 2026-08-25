@@ -437,6 +437,65 @@ describe("applyIssueChange", () => {
     expect(staleHashes).not.toContain(hashKey(wsKey));
   });
 
+  it("priority change patches and rolls back both Inbox projections", () => {
+    const active = {
+      id: "inbox-active",
+      workspace_id: WS_ID,
+      recipient_type: "member" as const,
+      recipient_id: "me",
+      actor_type: "member" as const,
+      actor_id: "bob",
+      type: "priority_changed" as const,
+      severity: "info" as const,
+      issue_id: "issue-1",
+      title: "Inbox",
+      body: null,
+      issue_status: "todo" as const,
+      issue_priority: "low" as const,
+      read: false,
+      archived: false,
+      created_at: "2025-01-01T00:00:00Z",
+      details: null,
+    } satisfies InboxItem;
+    const archived = {
+      ...active,
+      id: "inbox-archived",
+      archived: true,
+    } satisfies InboxItem;
+    qc.setQueryData<InboxItem[]>(inboxKeys.list(WS_ID), [active]);
+    qc.setQueryData<InboxItem[]>(inboxKeys.archived(WS_ID), [archived]);
+
+    const result = applyIssueChange(
+      qc,
+      WS_ID,
+      "issue-1",
+      { priority: "urgent" },
+      {
+        changed: issueChangedDims({ priority: "urgent" }, issue()),
+        baseIssue: issue(),
+      },
+    );
+
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.[0]
+        ?.issue_priority,
+    ).toBe("urgent");
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.[0]
+        ?.issue_priority,
+    ).toBe("urgent");
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.list(WS_ID))?.[0]
+        ?.issue_priority,
+    ).toBe("low");
+    expect(
+      qc.getQueryData<InboxItem[]>(inboxKeys.archived(WS_ID))?.[0]
+        ?.issue_priority,
+    ).toBe("low");
+  });
+
   it("off-window leave: decrements the old status bucket total without a refetch", () => {
     // The card is beyond My-Assigned's loaded window; reassigning it to bob
     // means the list's todo total counted it and must lose one.
