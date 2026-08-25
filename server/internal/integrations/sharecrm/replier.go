@@ -16,12 +16,14 @@ import (
 )
 
 const (
-	agentOfflineText  = "⚠️ The agent is offline, so this message won't be processed automatically."
-	agentArchivedText = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
+	agentOfflineText   = "⚠️ The agent is offline, so this message won't be processed automatically."
+	agentArchivedText  = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
 	issueNotMemberText = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
 	issueDisabledText  = "This ShareCRM bot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
-	// bare /new confirmation (MUL-5873 / engine OutcomeFreshPending).
+	// bare /clear confirmation (MUL-6661 / engine OutcomeFreshPending).
 	freshPendingText = "✅ Fresh start ready. Your next chat message will run without previous context."
+	// bare /new confirmation (MUL-6661 / engine OutcomeChatStarted).
+	chatStartedText = "✅ Started a new Multica chat. Your next message will enter it."
 	// bare /issue usage (MUL-5873 / engine OutcomeIssueUsage). ShareCRM is
 	// text-first so there is no media-with-title variant.
 	issueUsageText = "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"
@@ -102,6 +104,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	case engine.OutcomeFreshPending:
 		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
 			r.logger.WarnContext(ctx, "sharecrm replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeChatStarted:
+		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
+			r.logger.WarnContext(ctx, "sharecrm replier: new-chat confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIssueUsage:

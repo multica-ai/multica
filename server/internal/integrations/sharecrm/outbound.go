@@ -11,15 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type outboundQueries interface {
-	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
-	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
@@ -56,35 +53,27 @@ func (o *Outbound) handleEvent(e events.Event) {
 }
 
 func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
-	taskID, sessionID, ok := taskAndSessionFromEvent(e)
-	if !ok || !sessionID.Valid {
+	taskID, _, ok := taskAndSessionFromEvent(e)
+	if !ok {
 		return nil
 	}
 	content := eventContent(e)
 	if content == "" {
 		return nil
 	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   string(TypeShareCRM),
-	})
+	// A missing snapshot means the task came from Web/Desktop/Mobile and
+	// must not reach ShareCRM, even if its Chat once had a ShareCRM route.
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
-		return fmt.Errorf("lookup sharecrm chat binding: %w", err)
+		return fmt.Errorf("lookup sharecrm task delivery: %w", err)
 	}
-	task, err := o.q.GetAgentTask(ctx, taskID)
-	if err != nil {
-		return fmt.Errorf("load agent task: %w", err)
-	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
-	if err != nil {
-		return fmt.Errorf("classify task input origin: %w", err)
-	}
-	if !deliver {
+	if delivery.ChannelType != string(TypeShareCRM) {
 		return nil
 	}
+	binding := sharecrmBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeShareCRM),
@@ -104,6 +93,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("post sharecrm reply: %w", err)
 	}
 	return nil
+}
+
+func sharecrmBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType: delivery.ChatType, LastMessageID: delivery.ChannelMessageID,
+		LastThreadID: delivery.ChannelThreadID, RouteRevision: delivery.RouteRevision,
+		Config: delivery.Config,
+	}
 }
 
 // eventContent extracts the deliverable text from an EventChatDone payload
