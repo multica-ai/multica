@@ -7566,6 +7566,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
 			profileFixedArgs, rawCustomArgs, d.logger)
 	}
+	// GAP-3 (fork issue #2): official agent-wrapper hook. When
+	// MULTICA_AGENT_WRAPPER is set and non-empty, every agent launch runs
+	// `<wrapper...> <agent-binary> <agent args...>` instead of the bare
+	// agent. Wrapper string is whitespace-split (strings.Fields). Unset =
+	// byte-identical direct spawn.
+	if ws := strings.Fields(os.Getenv("MULTICA_AGENT_WRAPPER")); len(ws) > 0 {
+		bin := entry.Path
+		entry.Path = ws[0]
+		profileFixedArgs = append(append(append([]string{}, ws[1:]...), bin), profileFixedArgs...)
+	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
 	// families go through New. This is the single production boundary — the
