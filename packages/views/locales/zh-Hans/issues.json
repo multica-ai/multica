@@ -451,6 +451,7 @@
     "due_date_removed": "移除了截止日期",
     "title_renamed": "把这个任务从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
+    "task_no_response_other": "本次 task 已结束，没有返回文字回复（{{count}} 次）",
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_other": "task 失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",
