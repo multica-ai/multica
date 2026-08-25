@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -25,11 +26,12 @@ type ErrorKind int
 
 const (
 	// Network / transport layer (errors returned by http.Client.Do).
-	KindNetworkTimeout ErrorKind = iota // context deadline exceeded / i/o timeout
-	KindNetworkDNS                      // no such host
-	KindNetworkRefused                  // connection refused
-	KindNetworkTLS                      // x509 / tls handshake failures
-	KindNetworkOffline                  // catch-all: host unreachable, reset, etc.
+	KindNetworkTimeout     ErrorKind = iota // context deadline exceeded / i/o timeout
+	KindNetworkDNS                          // no such host
+	KindNetworkRefused                      // connection refused
+	KindNetworkTLS                          // x509 / tls handshake failures
+	KindNetworkInterrupted                  // connection established, then broke: reset, EOF, GOAWAY
+	KindNetworkOffline                      // catch-all: host/network unreachable
 
 	// HTTP status layer.
 	KindAuthRequired // 401
@@ -56,7 +58,8 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS,
+		KindNetworkInterrupted, KindNetworkOffline:
 		return true
 	default:
 		return false
@@ -76,6 +79,8 @@ func (k ErrorKind) String() string {
 		return "network_refused"
 	case KindNetworkTLS:
 		return "network_tls"
+	case KindNetworkInterrupted:
+		return "network_interrupted"
 	case KindNetworkOffline:
 		return "network_offline"
 	case KindAuthRequired:
@@ -221,6 +226,22 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindNetworkRefused
 	}
 
+	// The connection was established and then broke mid-flight. These are the
+	// errors a lossy link produces once TCP is already up, and they are the
+	// ones a retry actually fixes — keeping them out of the "offline"
+	// catch-all is what stops the CLI telling users to check a network that
+	// is, in fact, working (FLU-65).
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return KindNetworkInterrupted
+	}
+
+	// Genuinely unreachable: the packet had nowhere to go.
+	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) ||
+		errors.Is(err, syscall.ENETDOWN) {
+		return KindNetworkOffline
+	}
+
 	// String fallbacks for anything not surfaced as a typed error.
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -232,6 +253,18 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindNetworkRefused
 	case strings.Contains(msg, "x509"), strings.Contains(msg, "certificate"), strings.Contains(msg, "tls"):
 		return KindNetworkTLS
+	case strings.Contains(msg, "network is unreachable"), strings.Contains(msg, "no route to host"),
+		strings.Contains(msg, "network is down"):
+		return KindNetworkOffline
+	// HTTP/2 and connection-reuse failures never surface as a typed syscall
+	// error, so they have to be matched on text. "malformed http status code"
+	// is the desync we actually observed on this deployment when a reused
+	// keep-alive connection was torn down between the request and its reply.
+	case strings.Contains(msg, "connection reset by peer"), strings.Contains(msg, "broken pipe"),
+		strings.Contains(msg, "unexpected eof"), strings.Contains(msg, "eof"),
+		strings.Contains(msg, "goaway"), strings.Contains(msg, "malformed http"),
+		strings.Contains(msg, "client connection lost"), strings.Contains(msg, "connection was forcibly closed"):
+		return KindNetworkInterrupted
 	}
 	return KindNetworkOffline
 }
@@ -298,6 +331,14 @@ var kindMessages = map[ErrorKind][2]string{
 	KindNetworkTLS: {
 		"Could not establish a secure connection to the Multica server (TLS/certificate error). Check your system clock and CA certificates.",
 		"无法与 Multica 服务器建立安全连接（TLS/证书错误）。请检查系统时间和 CA 证书。",
+	},
+	// Deliberately does not claim the CLI already retried: a non-idempotent
+	// request that reached the wire is never replayed (see retry.go), so that
+	// promise would be false exactly when it matters most — and it is also
+	// why the message warns about checking before re-running a write.
+	KindNetworkInterrupted: {
+		"The connection to the Multica server was interrupted before the response arrived — usually a transient network drop. Run the command again; if it creates or changes something, check first whether it already took effect. Re-run with --debug for the underlying transport error.",
+		"与 Multica 服务器的连接在收到响应前被中断——通常是网络瞬时抖动。请重新运行该命令；若该命令会创建或修改数据，请先确认上一次是否已经生效。可加 --debug 查看底层传输错误。",
 	},
 	KindNetworkOffline: {
 		"Could not reach the Multica server. Check your network connection.",
