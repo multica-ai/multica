@@ -879,7 +879,7 @@ func (s *TaskService) maybeEnqueueVerifier(ctx context.Context, completed db.Age
 }
 
 // maybeEnqueueEventTriggers fires GAP-31 event triggers on task completion.
-// ponytail: list triggers where event_filters @> task.completed, log count, enqueue stub — full dispatch when scheduler job lands.
+// ponytail: list triggers where event_filters @> task.completed, enqueue via CreateAutopilotRun→CreateAutopilotTask→UpdateRun→NotifyTaskEnqueued; minimal, no quota, squad leader fallback.
 func (s *TaskService) maybeEnqueueEventTriggers(ctx context.Context, completed db.AgentTaskQueue) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -895,8 +895,45 @@ func (s *TaskService) maybeEnqueueEventTriggers(ctx context.Context, completed d
 	if len(triggers) == 0 {
 		return
 	}
-	slog.Info("event triggers matched (dispatch stub)", "task_id", util.UUIDToString(completed.ID), "matched", len(triggers))
-	// ponytail: full enqueue via autopilot dispatch when event job lands — log-only for now, prevents silent drop
+	slog.Info("event triggers matched", "task_id", util.UUIDToString(completed.ID), "matched", len(triggers))
+	for _, tr := range triggers {
+		ap, err := s.Queries.GetAutopilot(ctx, tr.AutopilotID)
+		if err != nil {
+			slog.Warn("event trigger: get autopilot failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		var agent db.Agent
+		if ap.AssigneeType == "squad" {
+			sq, err := s.Queries.GetSquad(ctx, ap.AssigneeID)
+			if err != nil {
+				slog.Warn("event trigger: get squad failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+				continue
+			}
+			agent, err = s.Queries.GetAgent(ctx, sq.LeaderID)
+		} else {
+			agent, err = s.Queries.GetAgent(ctx, ap.AssigneeID)
+		}
+		if err != nil {
+			slog.Warn("event trigger: resolve agent failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		payload, _ := json.Marshal(map[string]string{"event": "task.completed", "task_id": util.UUIDToString(completed.ID)})
+		run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{ID: dbid.NewV7(), AutopilotID: ap.ID, Source: "event", Status: "running", TriggerID: tr.ID, TriggerPayload: payload})
+		if err != nil {
+			slog.Warn("event trigger: create run failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, AutopilotRunID: run.ID})
+		if err != nil {
+			slog.Warn("event trigger: create task failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		if u, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{ID: run.ID, TaskID: task.ID}); err == nil {
+			_ = u
+		}
+		s.NotifyTaskEnqueued(ctx, task)
+		slog.Info("event trigger dispatched", "trigger_id", util.UUIDToString(tr.ID), "run_id", util.UUIDToString(run.ID), "task_id", util.UUIDToString(task.ID))
+	}
 }
 
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
