@@ -58,6 +58,9 @@ var knownVariables = map[string]struct{}{
 	"identity.source":      {},
 	"workspace.id":         {},
 	"workspace.slug":       {},
+	"agent.id":             {},
+	"agent.name":           {},
+	"task.id":              {},
 }
 
 // variablePattern matches "{{ name }}" with optional inner whitespace.
@@ -73,6 +76,12 @@ type Template struct {
 	KeyID       string
 	TTL         time.Duration
 	Claims      map[string]string
+	// AllowedDomains, when non-empty, restricts issuing to identities whose
+	// email domain is in the list (compared case-insensitively). The identity's
+	// email is the root of the whole trust chain, so a template for a sensitive
+	// system can refuse to speak for guests and external collaborators whose
+	// addresses live outside the corporate domain.
+	AllowedDomains []string
 	// Manifest is opaque descriptive metadata about the system this token
 	// opens — a base URL, a display name, whatever the consuming tool needs to
 	// know to actually use it. The issuer collects the manifests of the
@@ -93,15 +102,16 @@ type Catalog struct {
 
 // templateJSON mirrors the wire form; TTL arrives as a Go duration string.
 type templateJSON struct {
-	ID          string            `json:"id"`
-	Label       string            `json:"label"`
-	Description string            `json:"description"`
-	Env         string            `json:"env"`
-	Algorithm   string            `json:"algorithm"`
-	KeyID       string            `json:"key_id"`
-	TTL         string            `json:"ttl"`
-	Claims      map[string]string `json:"claims"`
-	Manifest    json.RawMessage   `json:"manifest"`
+	ID             string            `json:"id"`
+	Label          string            `json:"label"`
+	Description    string            `json:"description"`
+	Env            string            `json:"env"`
+	Algorithm      string            `json:"algorithm"`
+	KeyID          string            `json:"key_id"`
+	TTL            string            `json:"ttl"`
+	Claims         map[string]string `json:"claims"`
+	AllowedDomains []string          `json:"allowed_domains"`
+	Manifest       json.RawMessage   `json:"manifest"`
 }
 
 // ParseCatalog parses and validates the catalog JSON. Blank input returns
@@ -199,6 +209,14 @@ func validateEntry(e templateJSON) (Template, error) {
 				return Template{}, fmt.Errorf("unknown variable %q in claim %q", m[1], name)
 			}
 		}
+	}
+
+	for _, raw := range e.AllowedDomains {
+		domain := strings.ToLower(strings.TrimSpace(raw))
+		if domain == "" || strings.ContainsAny(domain, "@ \t") {
+			return Template{}, fmt.Errorf("allowed_domains entry %q is not a domain", raw)
+		}
+		tpl.AllowedDomains = append(tpl.AllowedDomains, domain)
 	}
 
 	if len(tpl.Manifest) > 0 && !json.Valid(tpl.Manifest) {

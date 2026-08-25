@@ -52,6 +52,32 @@ func TestParseCatalogValid(t *testing.T) {
 	}
 }
 
+func TestParseCatalogAgentAndTaskVariables(t *testing.T) {
+	raw := `[{"id":"a","label":"A","env":"TOKEN_A","claims":{
+		"sub":"{{identity.email}}",
+		"act_sub":"{{agent.id}}",
+		"act_name":"{{agent.name}}",
+		"task_id":"{{task.id}}"
+	}}]`
+	if _, err := ParseCatalog(raw); err != nil {
+		t.Fatalf("ParseCatalog() error = %v, want agent.*/task.* accepted", err)
+	}
+}
+
+func TestParseCatalogAllowedDomains(t *testing.T) {
+	raw := `[{"id":"a","label":"A","env":"TOKEN_A",
+		"allowed_domains":[" Corp.COM ","other.example"],
+		"claims":{"sub":"{{identity.email}}"}}]`
+	c, err := ParseCatalog(raw)
+	if err != nil {
+		t.Fatalf("ParseCatalog() error = %v", err)
+	}
+	tpl, _ := c.Get("a")
+	if len(tpl.AllowedDomains) != 2 || tpl.AllowedDomains[0] != "corp.com" || tpl.AllowedDomains[1] != "other.example" {
+		t.Errorf("AllowedDomains = %v, want normalized [corp.com other.example]", tpl.AllowedDomains)
+	}
+}
+
 func TestParseCatalogDefaults(t *testing.T) {
 	raw := `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"{{identity.id}}"}}]`
 	c, err := ParseCatalog(raw)
@@ -89,6 +115,9 @@ func TestParseCatalogRejects(t *testing.T) {
 		{"ttl non-positive", `[{"id":"a","label":"A","env":"TOKEN_A","ttl":"0s","claims":{"sub":"x"}}]`, "must be positive"},
 		{"unknown variable", `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"{{identity.salary}}"}}]`, "unknown variable"},
 		{"reserved claim", `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"x","exp":"1"}}]`, "reserved claim"},
+		{"empty allowed domain", `[{"id":"a","label":"A","env":"TOKEN_A","allowed_domains":[""],"claims":{"sub":"x"}}]`, "allowed_domains"},
+		{"allowed domain with @", `[{"id":"a","label":"A","env":"TOKEN_A","allowed_domains":["a@b.c"],"claims":{"sub":"x"}}]`, "allowed_domains"},
+		{"allowed domain with space", `[{"id":"a","label":"A","env":"TOKEN_A","allowed_domains":["corp .com"],"claims":{"sub":"x"}}]`, "allowed_domains"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

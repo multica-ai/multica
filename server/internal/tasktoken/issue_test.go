@@ -78,7 +78,7 @@ func TestIssueSignsVerifiableToken(t *testing.T) {
 	}
 
 	now := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
-	out := iss.Issue([]string{"erp"}, Context{
+	out, receipts := iss.Issue([]string{"erp"}, Context{
 		Identity:    Identity{Email: "Alice@Example.com", Name: "Alice", UserID: "u-1", Source: "direct_human"},
 		WorkspaceID: "ws-1", WorkspaceSlug: "erp",
 	}, now)
@@ -119,6 +119,101 @@ func TestIssueSignsVerifiableToken(t *testing.T) {
 	if claims["jti"] == "" || claims["jti"] == nil {
 		t.Error("jti is empty, want a unique id")
 	}
+	if len(receipts) != 1 {
+		t.Fatalf("receipts = %v, want exactly one", receipts)
+	}
+	rc := receipts[0]
+	if rc.TemplateID != "erp" || rc.Env != "BOT_TOKEN_ERP" {
+		t.Errorf("receipt = %+v, want template erp / env BOT_TOKEN_ERP", rc)
+	}
+	if rc.JTI != claims["jti"] {
+		t.Errorf("receipt jti = %q, want the signed token's jti %v", rc.JTI, claims["jti"])
+	}
+	if !rc.ExpiresAt.Equal(now.Add(2 * time.Hour)) {
+		t.Errorf("receipt ExpiresAt = %v, want %v", rc.ExpiresAt, now.Add(2*time.Hour))
+	}
+}
+
+func TestIssueInterpolatesAgentAndTaskVariables(t *testing.T) {
+	keyPEM, pub := testKeyPEM(t)
+	catalog := `[{"id":"erp","label":"ERP","env":"BOT_TOKEN_ERP","claims":{
+		"sub":"{{identity.email}}",
+		"act_sub":"{{agent.id}}",
+		"act_name":"{{agent.name}}",
+		"task_id":"{{task.id}}"
+	}}]`
+	iss, err := NewIssuer(catalog, keyPEM, "")
+	if err != nil {
+		t.Fatalf("NewIssuer() error = %v", err)
+	}
+
+	now := time.Now()
+	out, _ := iss.Issue([]string{"erp"}, Context{
+		Identity:  Identity{Email: "alice@corp.com"},
+		AgentID:   "agent-uuid-1",
+		AgentName: "deploy-bot",
+		TaskID:    "task-uuid-9",
+	}, now)
+
+	parsed, err := jwt.Parse(out["BOT_TOKEN_ERP"],
+		func(*jwt.Token) (any, error) { return pub, nil },
+		jwt.WithTimeFunc(func() time.Time { return now }))
+	if err != nil {
+		t.Fatalf("token failed verification: %v", err)
+	}
+	claims := parsed.Claims.(jwt.MapClaims)
+	if claims["sub"] != "alice@corp.com" {
+		t.Errorf("sub = %v, want alice@corp.com", claims["sub"])
+	}
+	if claims["act_sub"] != "agent-uuid-1" {
+		t.Errorf("act_sub = %v, want agent-uuid-1", claims["act_sub"])
+	}
+	if claims["act_name"] != "deploy-bot" {
+		t.Errorf("act_name = %v, want deploy-bot", claims["act_name"])
+	}
+	if claims["task_id"] != "task-uuid-9" {
+		t.Errorf("task_id = %v, want task-uuid-9", claims["task_id"])
+	}
+}
+
+func TestIssueRefusesEmailOutsideAllowedDomains(t *testing.T) {
+	keyPEM, _ := testKeyPEM(t)
+	catalog := `[
+	  {"id":"erp","label":"ERP","env":"BOT_TOKEN_ERP","allowed_domains":["corp.com"],
+	   "claims":{"sub":"{{identity.email}}"}},
+	  {"id":"wiki","label":"Wiki","env":"BOT_TOKEN_WIKI","claims":{"sub":"{{identity.email}}"}}
+	]`
+	iss, err := NewIssuer(catalog, keyPEM, "")
+	if err != nil {
+		t.Fatalf("NewIssuer() error = %v", err)
+	}
+	now := time.Now()
+
+	// A contractor outside the allowlist: the restricted template is refused,
+	// the unrestricted one still issues.
+	out, receipts := iss.Issue([]string{"erp", "wiki"},
+		Context{Identity: Identity{Email: "alice@contractor.io"}}, now)
+	if _, present := out["BOT_TOKEN_ERP"]; present {
+		t.Error("Issue() signed BOT_TOKEN_ERP for a domain outside allowed_domains")
+	}
+	if _, present := out["BOT_TOKEN_WIKI"]; !present {
+		t.Errorf("Issue() = %v, want the unrestricted template to still issue", keysOf(out))
+	}
+	if len(receipts) != 1 || receipts[0].TemplateID != "wiki" {
+		t.Errorf("receipts = %v, want only wiki", receipts)
+	}
+
+	// Domain match is case-insensitive.
+	out, _ = iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "Alice@CORP.com"}}, now)
+	if _, present := out["BOT_TOKEN_ERP"]; !present {
+		t.Errorf("Issue() = %v, want case-insensitive domain match", keysOf(out))
+	}
+
+	// An address with no domain cannot satisfy an allowlist.
+	out, _ = iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "alice"}}, now)
+	if len(out) != 0 {
+		t.Errorf("Issue() = %v, want none for an address without a domain", keysOf(out))
+	}
 }
 
 func TestIssueSkipsUnknownAndDisabledTemplates(t *testing.T) {
@@ -133,7 +228,7 @@ func TestIssueSkipsUnknownAndDisabledTemplates(t *testing.T) {
 	tctx := Context{Identity: Identity{UserID: "u-1", Email: "a@b.c"}}
 
 	// An id no longer in the catalog must not fail the whole batch.
-	out := iss.Issue([]string{"a", "gone"}, tctx, now)
+	out, _ := iss.Issue([]string{"a", "gone"}, tctx, now)
 	if len(out) != 1 {
 		t.Fatalf("Issue() = %v, want only TOKEN_A", out)
 	}
@@ -141,7 +236,7 @@ func TestIssueSkipsUnknownAndDisabledTemplates(t *testing.T) {
 		t.Errorf("Issue() = %v, want key TOKEN_A", out)
 	}
 
-	if got := iss.Issue(nil, tctx, now); len(got) != 0 {
+	if got, _ := iss.Issue(nil, tctx, now); len(got) != 0 {
 		t.Errorf("Issue(nil) = %v, want empty", got)
 	}
 }
@@ -156,8 +251,9 @@ func TestIssueUniqueJTI(t *testing.T) {
 	now := time.Now()
 	tctx := Context{Identity: Identity{UserID: "u-1"}}
 
-	first := iss.Issue([]string{"a"}, tctx, now)["TOKEN_A"]
-	second := iss.Issue([]string{"a"}, tctx, now)["TOKEN_A"]
+	firstOut, _ := iss.Issue([]string{"a"}, tctx, now)
+	secondOut, _ := iss.Issue([]string{"a"}, tctx, now)
+	first, second := firstOut["TOKEN_A"], secondOut["TOKEN_A"]
 	if first == second {
 		t.Error("two issues at the same instant produced identical tokens, want unique jti")
 	}
@@ -165,7 +261,7 @@ func TestIssueUniqueJTI(t *testing.T) {
 
 func TestNilIssuerIsSafe(t *testing.T) {
 	var iss *Issuer
-	if got := iss.Issue([]string{"a"}, Context{}, time.Now()); len(got) != 0 {
+	if got, _ := iss.Issue([]string{"a"}, Context{}, time.Now()); len(got) != 0 {
 		t.Errorf("nil issuer Issue() = %v, want empty", got)
 	}
 	if iss.Catalog() != nil {
@@ -186,7 +282,7 @@ func TestIssueEmitsManifestForEnabledTemplates(t *testing.T) {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}
 
-	out := iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "a@b.c"}}, time.Now())
+	out, _ := iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "a@b.c"}}, time.Now())
 
 	raw, ok := out["BOT_SYSTEMS_CONFIG"]
 	if !ok {
@@ -214,7 +310,7 @@ func TestIssueOmitsManifestWhenUnconfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}
-	out := iss.Issue([]string{"a"}, Context{}, time.Now())
+	out, _ := iss.Issue([]string{"a"}, Context{}, time.Now())
 	if len(out) != 1 {
 		t.Errorf("Issue() = %v, want only the token", keysOf(out))
 	}
@@ -227,7 +323,7 @@ func TestIssueSkipsManifestEntryForTemplateWithoutOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}
-	out := iss.Issue([]string{"a"}, Context{}, time.Now())
+	out, _ := iss.Issue([]string{"a"}, Context{}, time.Now())
 	if _, present := out["BOT_SYSTEMS_CONFIG"]; present {
 		t.Errorf("Issue() = %v, want no manifest when no template declares one", keysOf(out))
 	}

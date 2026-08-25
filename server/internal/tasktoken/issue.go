@@ -33,6 +33,22 @@ type Context struct {
 	Identity      Identity
 	WorkspaceID   string
 	WorkspaceSlug string
+	// AgentID and AgentName identify the agent actually executing the run, so
+	// a template can put an RFC 8693-style actor claim next to the accountable
+	// human's sub. Without it a receiving system's audit row cannot tell an
+	// agent-performed action from the person doing it themselves.
+	AgentID   string
+	AgentName string
+	TaskID    string
+}
+
+// Receipt records one token that was actually signed. The caller uses it to
+// put issuance on the product's audit surface; the receipt carries no secret.
+type Receipt struct {
+	TemplateID string
+	Env        string
+	JTI        string
+	ExpiresAt  time.Time
 }
 
 // EmailLocal returns the local part of an address, lowercased, with any "+tag"
@@ -137,23 +153,31 @@ func (i *Issuer) Catalog() *Catalog {
 	return i.catalog
 }
 
-// Issue signs every enabled template it can and returns env name -> token.
+// Issue signs every enabled template it can and returns env name -> token,
+// plus a receipt per signed token for the caller's audit trail.
 //
 // Issuing is best-effort by design: a template that has been removed from the
-// catalog, or one that fails to sign, is skipped with a log line while the
-// rest still reach the agent. Failing to obtain a token is an "unauthorized"
-// condition for the skill that wanted it, never a task failure.
-func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[string]string {
+// catalog, one that fails to sign, or one whose domain allowlist excludes this
+// identity, is skipped with a log line while the rest still reach the agent.
+// Failing to obtain a token is an "unauthorized" condition for the skill that
+// wanted it, never a task failure.
+func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) (map[string]string, []Receipt) {
 	if i == nil || i.catalog == nil || len(enabledIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	out := make(map[string]string, len(enabledIDs)+1)
+	receipts := make([]Receipt, 0, len(enabledIDs))
 	manifests := make([]json.RawMessage, 0, len(enabledIDs))
 	for _, id := range enabledIDs {
 		tpl, ok := i.catalog.Get(id)
 		if !ok {
 			slog.Warn("task token: enabled template is not in the catalog", "template_id", id)
+			continue
+		}
+		if !domainAllowed(tpl.AllowedDomains, tctx.Identity.Email) {
+			slog.Warn("task token: identity email domain is outside the template's allowed_domains; refusing",
+				"template_id", tpl.ID, "user_id", tctx.Identity.UserID)
 			continue
 		}
 		token, jti, err := i.sign(tpl, tctx, now)
@@ -165,6 +189,9 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[str
 			"template_id", tpl.ID, "env", tpl.Env, "jti", jti,
 			"identity_source", tctx.Identity.Source, "user_id", tctx.Identity.UserID)
 		out[tpl.Env] = token
+		receipts = append(receipts, Receipt{
+			TemplateID: tpl.ID, Env: tpl.Env, JTI: jti, ExpiresAt: now.Add(tpl.TTL),
+		})
 		// Collected only for templates that actually produced a token, so the
 		// manifest can never advertise a system whose token is missing.
 		if len(tpl.Manifest) > 0 {
@@ -172,7 +199,7 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[str
 		}
 	}
 	if len(out) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	if i.manifestEnv != "" && len(manifests) > 0 {
@@ -181,11 +208,32 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) map[str
 			// The tokens themselves are still good; ship them without the
 			// manifest rather than failing the whole set.
 			slog.Error("task token: encoding manifest failed", "error", err)
-			return out
+			return out, receipts
 		}
 		out[i.manifestEnv] = string(encoded)
 	}
-	return out
+	return out, receipts
+}
+
+// domainAllowed reports whether an identity email may be signed under a
+// template's domain allowlist. An empty allowlist allows everything; a
+// non-empty one requires the part after the last "@" to match one entry,
+// case-insensitively. An address without a domain can never match.
+func domainAllowed(allowed []string, email string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at < 0 || at == len(email)-1 {
+		return false
+	}
+	domain := strings.ToLower(email[at+1:])
+	for _, d := range allowed {
+		if domain == d {
+			return true
+		}
+	}
+	return false
 }
 
 func (i *Issuer) sign(tpl Template, tctx Context, now time.Time) (token string, jti string, err error) {
@@ -238,6 +286,12 @@ func interpolate(value string, tctx Context) string {
 			return tctx.WorkspaceID
 		case "workspace.slug":
 			return tctx.WorkspaceSlug
+		case "agent.id":
+			return tctx.AgentID
+		case "agent.name":
+			return tctx.AgentName
+		case "task.id":
+			return tctx.TaskID
 		default:
 			return ""
 		}

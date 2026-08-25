@@ -243,7 +243,7 @@ func TestTokenSignedByIssuerVerifiesAgainstPublishedJWKS(t *testing.T) {
 		t.Fatalf("NewIssuer() error = %v", err)
 	}
 
-	env := iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "alice@example.com"}}, time.Now())
+	env, _ := iss.Issue([]string{"erp"}, Context{Identity: Identity{Email: "alice@example.com"}}, time.Now())
 	raw := env["TOKEN_ERP"]
 	if raw == "" {
 		t.Fatal("Issue() produced no token for TOKEN_ERP")

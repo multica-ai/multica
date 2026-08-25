@@ -21,6 +21,12 @@ import (
 // a token or any key material, so reading it discloses nothing secret.
 const agentTaskTokensActivityUpdated = "agent_task_tokens_updated"
 
+// agentTaskTokensActivityIssued records that identity tokens were actually
+// minted for a run. One row per issuance batch, tied to the run's issue, so
+// both the accountable human and a workspace admin can see, in-product, that
+// a credential was signed in that person's name — and for which systems.
+const agentTaskTokensActivityIssued = "agent_task_tokens_issued"
+
 // TaskTokenTemplateSummary is the UI-facing description of one catalog entry.
 // It deliberately omits claims: the UI picks from the catalog, it does not get
 // to see or influence what will be signed.
@@ -239,6 +245,9 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 			Source: string(src),
 		},
 		WorkspaceID: workspaceID,
+		AgentID:     uuidToString(agent.ID),
+		AgentName:   agent.Name,
+		TaskID:      uuidToString(task.ID),
 	}
 	// Slug is best-effort: a template that does not reference it must not pay
 	// for a failed lookup, and one that does gets an empty string rather than
@@ -250,5 +259,44 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 			"workspace_id", workspaceID, "error", wsErr)
 	}
 
-	return h.TaskTokenIssuer.Issue(enabled, tctx, time.Now())
+	tokens, receipts := h.TaskTokenIssuer.Issue(enabled, tctx, time.Now())
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	// Fail-closed on audit: a credential minted in a person's name must be
+	// visible in the product's activity log, not only in server logs. If the
+	// audit row cannot be written, the tokens are withheld — the run degrades
+	// to "no token", the same non-fatal condition as every other refusal here.
+	issued := make([]map[string]string, 0, len(receipts))
+	for _, rc := range receipts {
+		issued = append(issued, map[string]string{
+			"template_id": rc.TemplateID,
+			"env":         rc.Env,
+			"jti":         rc.JTI,
+			"expires_at":  rc.ExpiresAt.UTC().Format(time.RFC3339),
+		})
+	}
+	details, _ := json.Marshal(map[string]any{
+		"agent_id":        uuidToString(agent.ID),
+		"agent_name":      agent.Name,
+		"task_id":         uuidToString(task.ID),
+		"user_id":         uuidToString(user.ID),
+		"identity_source": string(src),
+		"issued":          issued,
+	})
+	if _, err := h.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		ID:          dbid.NewV7(),
+		WorkspaceID: agent.WorkspaceID,
+		IssueID:     task.IssueID,
+		ActorType:   pgtype.Text{String: "agent", Valid: true},
+		ActorID:     agent.ID,
+		Action:      agentTaskTokensActivityIssued,
+		Details:     details,
+	}); err != nil {
+		slog.Error("task token: issuance audit write failed; withholding tokens",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+		return nil
+	}
+	return tokens
 }
