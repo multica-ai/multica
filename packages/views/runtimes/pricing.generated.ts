@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-22
+// Snapshot: 2026-08-25
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -94,7 +94,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "glm-5-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
-  "glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5v-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "google/gemini-flash-latest": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "google/gemini-flash-lite-latest": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
@@ -154,6 +154,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "kimi-k2.7-code": { input: 0.95, output: 4, cacheRead: 0.19, cacheWrite: 0.95 },
   "kimi-k2.7-code-highspeed": { input: 1.9, output: 8, cacheRead: 0.38, cacheWrite: 1.9 },
   "kimi-k3": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3 },
+  "longcat-2.0": { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0.3 },
   "mai-code-1-flash-picker": { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0.75 },
   "mai-code-1.1-flash": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
   "mimo-v2-omni": { input: 0.4, output: 2, cacheRead: 0.08, cacheWrite: 0.4 },
@@ -181,6 +182,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "opencode-go/glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "opencode-go/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode-go/minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },

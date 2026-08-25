@@ -102,11 +102,22 @@ async function loadModelsDev() {
     // otherwise win resolution over this bare override, so pin them too.
     { key: "gpt-5.6-luna",          input: 1,    output: 6,    cache_read: 0.1,   cache_write: 1.25 },
     { key: "gpt-5.6-terra",         input: 2.5,  output: 15,   cache_read: 0.25,  cache_write: 3.125 },
+    { key: "gpt-5.6",               input: 5,    output: 30,   cache_read: 0.5,   cache_write: 6.25 },
+    { key: "gpt-5.6-sol",           input: 5,    output: 30,   cache_read: 0.5,   cache_write: 6.25 },
     { key: "openai/gpt-5.6-luna",   input: 1,    output: 6,    cache_read: 0.1,   cache_write: 1.25 },
     { key: "openai/gpt-5.6-terra",  input: 2.5,  output: 15,   cache_read: 0.25,  cache_write: 3.125 },
+    { key: "openai/gpt-5.6",        input: 5,    output: 30,   cache_read: 0.5,   cache_write: 6.25 },
+    { key: "openai/gpt-5.6-sol",    input: 5,    output: 30,   cache_read: 0.5,   cache_write: 6.25 },
     // z.ai ships *-flash family members at $0; models.dev omits these entries.
     { key: "glm-4.5-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },
     { key: "glm-4.7-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },
+    // DeepSeek's docs route the legacy deepseek-chat / deepseek-reasoner
+    // aliases to the current deepseek-v4-flash tier; models.dev no longer
+    // lists either alias at all, so seed them here at the same rate.
+    { key: "deepseek-chat",         input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+    { key: "deepseek-reasoner",     input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+    { key: "deepseek/deepseek-chat",     input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
+    { key: "deepseek/deepseek-reasoner", input: 0.14, output: 0.28, cache_read: 0.0028, cache_write: 0.14 },
   ];
   for (const e of extraEntries) {
     if (!rows.has(e.key)) {
