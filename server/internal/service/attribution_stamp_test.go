@@ -1232,6 +1232,7 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 		t.Fatalf("seed chat session: %v", err)
 	}
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	seedChannelTaskBinding(t, pool, chatSessionID)
 
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
@@ -1282,6 +1283,7 @@ func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
 	})
+	seedChannelTaskBinding(t, pool, chatSessionID)
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO chat_message (chat_session_id, role, content)
 		VALUES ($1, 'user', 'first') RETURNING id`, chatSessionID).Scan(&priorMessageID); err != nil {

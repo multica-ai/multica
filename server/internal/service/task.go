@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -1774,47 +1775,167 @@ var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 // a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
 
-// EnqueueChatTask creates a task-owned input batch for a chat session. Channel
-// media makes the task deferred until binding completes or its durable fallback
-// deadline expires; other chat tasks are queued immediately. Unlike issue
-// tasks, chat tasks have no issue_id.
-//
-// Errors split into two layers:
-//
-//   - Productizable rejections (agent archived, no runtime, session
-//     archived) return the sentinel errors above. Callers (e.g. the Lark
-//     dispatcher) can errors.Is them to decide a user-visible outcome.
-//
-//   - Infrastructure failures (DB load / insert errors) are wrapped
-//     as ordinary errors. The caller should treat them as retryable
-//     or page-worthy, NOT as user-facing state.
-//
-// initiatorUserID is the user who actually sent the triggering message — the
-// real requester behind this run. Callers pass it explicitly because
-// chat_session.creator_id is not a reliable source: Lark group sessions set the
-// creator to the installer, not the sender (see the lark dispatcher). Web chat
-// passes the request user; the lark dispatcher passes the inbound sender of the
-// latest message in the silence window. Stored on the task so the daemon brief
-// can attribute the run to the right person. See MUL-2645.
-//
-// forceFreshSession applies only to the task created by this call. Channel
-// callers additionally use EnqueueChannelChatTask to snapshot the durable
-// context revision; its batch seal and history reads cannot cross that boundary.
-// The daemon skips prior provider-session resume for a fresh dispatch without
-// clearing the Chat's stored resume pointer for later generations.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
-	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, 0)
+// PreparedChatTaskEnqueue is an opaque, side-effect-free input snapshot built
+// before a caller opens a task-enqueue transaction.
+type PreparedChatTaskEnqueue struct {
+	accountableUser  pgtype.UUID
+	attrSource       pgtype.Text
+	attrEvidenceKind pgtype.Text
+	runtimeOverlay   runtimeMCPOverlayData
 }
 
-func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error) {
-	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, contextRevision)
-}
-
-func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error) {
-	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
+// PrepareChatTaskEnqueue performs reads and optional external integration work
+// before the caller opens a transaction. BuildTaskOverlay may perform network
+// I/O and must never run while /new holds route-rotation locks.
+func (s *TaskService) PrepareChatTaskEnqueue(
+	ctx context.Context,
+	agentID, initiatorUserID pgtype.UUID,
+) (PreparedChatTaskEnqueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
-		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+		slog.Error("chat task preparation failed", "agent_id", util.UUIDToString(agentID), "error", err)
+		return PreparedChatTaskEnqueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentArchived
+	}
+	if !agent.RuntimeID.Valid {
+		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentNoRuntime
+	}
+
+	attr := attribution.DirectHumanRun(
+		initiatorUserID, attribution.EvidenceChat, pgtype.UUID{},
+	)
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		slog.Warn("chat task enqueue refused: attribution fail-closed",
+			"agent_id", util.UUIDToString(agentID))
+		return PreparedChatTaskEnqueue{}, err
+	}
+	attrSource, _, attrEvidenceKind, _ := attributionCreateParams(attr)
+	return PreparedChatTaskEnqueue{
+		accountableUser: attr.AccountableUserID,
+		attrSource:      attrSource, attrEvidenceKind: attrEvidenceKind,
+		runtimeOverlay: s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent),
+	}, nil
+}
+
+// EnqueueChatTask creates a Direct Chat task. If the Chat also has a channel
+// binding, its context generation is still snapshotted, but no external delivery
+// snapshot is created: first-party sends reply only to first-party clients.
+func (s *TaskService) EnqueueChatTask(
+	ctx context.Context,
+	chatSession db.ChatSession,
+	initiatorUserID pgtype.UUID,
+	forceFreshSession bool,
+) (db.AgentTaskQueue, error) {
+	return s.enqueueChatTask(
+		ctx, chatSession, initiatorUserID, forceFreshSession, 0, false,
+		pgtype.UUID{}, 0,
+	)
+}
+
+// EnqueueChannelChatTask creates a channel-owned task for one durable context
+// generation and freezes its external delivery route in the same transaction.
+func (s *TaskService) EnqueueChannelChatTask(
+	ctx context.Context,
+	chatSession db.ChatSession,
+	initiatorUserID pgtype.UUID,
+	forceFreshSession bool,
+	contextRevision int64,
+	bindingID pgtype.UUID,
+	routeRevision int64,
+) (db.AgentTaskQueue, error) {
+	if contextRevision <= 0 {
+		return db.AgentTaskQueue{}, errors.New("channel chat task requires a context revision")
+	}
+	return s.enqueueChatTask(
+		ctx, chatSession, initiatorUserID, forceFreshSession,
+		contextRevision, true, bindingID, routeRevision,
+	)
+}
+
+func (s *TaskService) enqueueChatTask(
+	ctx context.Context,
+	chatSession db.ChatSession,
+	initiatorUserID pgtype.UUID,
+	forceFreshSession bool,
+	contextRevision int64,
+	requireDelivery bool,
+	expectedBindingID pgtype.UUID,
+	expectedRouteRevision int64,
+) (db.AgentTaskQueue, error) {
+	prepared, err := s.PrepareChatTaskEnqueue(ctx, chatSession.AgentID, initiatorUserID)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if s.TxStarter == nil {
+		return db.AgentTaskQueue{}, errors.New("chat task enqueue: transaction starter is required")
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("begin chat task enqueue: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	task, err := s.enqueueChatTaskTx(
+		ctx, s.Queries.WithTx(tx), chatSession, initiatorUserID,
+		forceFreshSession, contextRevision, requireDelivery,
+		expectedBindingID, expectedRouteRevision, prepared,
+	)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("commit chat task enqueue: %w", err)
+	}
+	s.FinalizeChatTaskEnqueue(ctx, task)
+	return task, nil
+}
+
+// EnqueuePreparedChannelChatTaskInTx adds the first /new turn to a caller-owned
+// route-rotation transaction. Preparation must happen before that transaction;
+// post-commit effects belong to FinalizeChatTaskEnqueue.
+func (s *TaskService) EnqueuePreparedChannelChatTaskInTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	chatSession db.ChatSession,
+	initiatorUserID pgtype.UUID,
+	forceFreshSession bool,
+	contextRevision int64,
+	prepared PreparedChatTaskEnqueue,
+) (db.AgentTaskQueue, error) {
+	if contextRevision <= 0 {
+		return db.AgentTaskQueue{}, errors.New("prepared channel chat task requires a context revision")
+	}
+	return s.enqueueChatTaskTx(
+		ctx, s.Queries.WithTx(tx), chatSession, initiatorUserID,
+		forceFreshSession, contextRevision, true, pgtype.UUID{}, 0, prepared,
+	)
+}
+
+func (s *TaskService) enqueueChatTaskTx(
+	ctx context.Context,
+	qtx *db.Queries,
+	chatSession db.ChatSession,
+	initiatorUserID pgtype.UUID,
+	forceFreshSession bool,
+	contextRevision int64,
+	requireDelivery bool,
+	expectedBindingID pgtype.UUID,
+	expectedRouteRevision int64,
+	prepared PreparedChatTaskEnqueue,
+) (db.AgentTaskQueue, error) {
+	currentSession, err := qtx.LockChatSessionForEnqueue(ctx, chatSession.ID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
+	}
+	if currentSession.Status != "active" {
+		return db.AgentTaskQueue{}, ErrChatSessionArchived
+	}
+
+	agent, err := qtx.GetAgentForClaimUpdate(ctx, chatSession.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("reload chat agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
@@ -1823,137 +1944,103 @@ func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
 
-	// The chat sender (initiator) is the direct_human originator and accountable.
-	// Evidence uses the uniform pair (kind=chat, ref=chat_session_id) so the
-	// attribution UI links to the conversation the same way it does for
-	// autopilot_run / issue_assignment — the dedicated chat_session_id column still
-	// exists for its own consumers. An unresolved sender (some Lark group messages)
-	// degrades to unattributed rather than a NULL-source bypass (MUL-4302 §2).
-	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, chatSession.ID)
-	// An unresolved sender degrades to owner_fallback (accountable = agent owner),
-	// or is refused if the workspace is fail-closed (MUL-4302 §3.5).
-	attr, err = s.applyAttributionFallback(ctx, attr, agent)
-	if err != nil {
-		slog.Warn("chat task enqueue refused: attribution fail-closed", "chat_session_id", util.UUIDToString(chatSession.ID))
-		return db.AgentTaskQueue{}, err
+	binding, bindingErr := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
+	if bindingErr != nil && !errors.Is(bindingErr, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", bindingErr)
 	}
-	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
-
-	tx, err := s.TxStarter.Begin(ctx)
-	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("begin chat task enqueue: %w", err)
-	}
-	defer tx.Rollback(ctx)
-	qtx := s.Queries.WithTx(tx)
-	// Refuse to enqueue onto a session that has been archived, the same guard
-	// the direct-send path takes. This is the one enqueue path with a delay in
-	// front of it: the channel run trigger is debounced by
-	// DefaultChatRunBatchWindow, so the message is persisted immediately and
-	// the task row is only created here, up to a window later. An archive
-	// committing inside that window cancels the tasks it can see — there are
-	// none yet — and drops the channel binding, and without this check the
-	// flush then inserts a fresh task on a conversation the user closed.
-	// ClaimAgentTask does not read chat_session.status either, so the daemon
-	// would run it: quota and runtime spent on a closed conversation, new
-	// assistant turns written into an archived chat, the agent flipped back to
-	// 'working', and the brief describing the run as a private web chat
-	// because the binding is already gone.
-	//
-	// The lock is what makes the check hold — the caller's copy of the session
-	// was loaded before the transaction opened and can already be stale, the
-	// same reason the send path re-reads the agent under its lock. It is
-	// deliberately FOR NO KEY UPDATE rather than the send path's FOR UPDATE;
-	// see LockChatSessionForEnqueue for why the channel path cannot afford to
-	// block the inbound appends FOR UPDATE would. Taken as the transaction's
-	// first statement, so the chat_session -> agent_task_queue order is
-	// unchanged and no new deadlock edge appears.
-	currentSession, err := qtx.LockChatSessionForEnqueue(ctx, chatSession.ID)
-	if err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
-	}
-	if currentSession.Status != "active" {
-		return db.AgentTaskQueue{}, ErrChatSessionArchived
-	}
-	// Lock the channel binding only after the chat_session lock above. The
-	// append path touches chat_session before binding as well, so this order
-	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
-	binding, err := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", err)
-	}
-	if errors.Is(err, pgx.ErrNoRows) && contextRevision > 0 {
-		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", err)
-	}
-	pendingFresh := false
-	if err == nil {
-		if err := qtx.EnsureChannelChatContextGeneration(ctx, chatSession.ID); err != nil {
-			return db.AgentTaskQueue{}, fmt.Errorf("ensure channel context generation: %w", err)
+	if requireDelivery {
+		if errors.Is(bindingErr, pgx.ErrNoRows) {
+			return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", pgx.ErrNoRows)
 		}
+		routeMatches := expectedBindingID.Valid &&
+			binding.ID == expectedBindingID &&
+			binding.RouteRevision == expectedRouteRevision
+		if binding.RetiredAt.Valid && !routeMatches {
+			return db.AgentTaskQueue{}, fmt.Errorf("lock retired channel chat binding: %w", pgx.ErrNoRows)
+		}
+		if expectedBindingID.Valid && !routeMatches {
+			return db.AgentTaskQueue{}, fmt.Errorf("lock expected channel chat route: %w", pgx.ErrNoRows)
+		}
+	}
+
+	pendingFresh := false
+	if bindingErr == nil {
 		if contextRevision <= 0 {
 			contextRevision = binding.ContextRevision
 		}
-		generation, err := qtx.LockChannelChatContextGenerationByRevision(ctx, db.LockChannelChatContextGenerationByRevisionParams{
-			ChatSessionID: chatSession.ID, Revision: contextRevision,
-		})
+		generation, err := qtx.LockChannelChatContextGenerationByRevision(
+			ctx, db.LockChannelChatContextGenerationByRevisionParams{
+				ChatSessionID: chatSession.ID, Revision: contextRevision,
+			},
+		)
 		if err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("lock channel context generation: %w", err)
 		}
-		pendingFresh = generation.PendingFresh || (contextRevision == binding.ContextRevision && binding.PendingFresh)
+		pendingFresh = generation.PendingFresh
 	}
 	if pendingFresh {
 		forceFreshSession = true
 	}
-	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, db.GetChannelMediaPendingUntilParams{
-		ChatSessionID:          chatSession.ID,
-		ChannelContextRevision: pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
-	})
+
+	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(
+		ctx, db.GetChannelMediaPendingUntilParams{
+			ChatSessionID: chatSession.ID,
+			ChannelContextRevision: pgtype.Int8{
+				Int64: contextRevision, Valid: contextRevision > 0,
+			},
+		},
+	)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("load channel media pending deadline: %w", err)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		mediaPendingUntil = pgtype.Timestamptz{}
 	}
+
 	task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-		ID:                dbid.NewV7(),
-		AgentID:           chatSession.AgentID,
-		RuntimeID:         agent.RuntimeID,
-		Priority:          2, // medium priority for chat
-		ChatSessionID:     chatSession.ID,
-		InitiatorUserID:   initiatorUserID,
-		FireAt:            mediaPendingUntil,
-		OriginatorUserID:  initiatorUserID,
-		AccountableUserID: attr.AccountableUserID,
-		ForceFreshSession: pgtype.Bool{
-			Bool:  forceFreshSession,
-			Valid: true,
+		ID:                   dbid.NewV7(),
+		AgentID:              chatSession.AgentID,
+		RuntimeID:            agent.RuntimeID,
+		Priority:             2,
+		ChatSessionID:        chatSession.ID,
+		InitiatorUserID:      initiatorUserID,
+		FireAt:               mediaPendingUntil,
+		OriginatorUserID:     initiatorUserID,
+		AccountableUserID:    prepared.accountableUser,
+		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: true},
+		RuntimeMcpOverlay:    prepared.runtimeOverlay.Overlay,
+		RuntimeConnectedApps: prepared.runtimeOverlay.ConnectedApps,
+		OriginatorSource:     prepared.attrSource,
+		TriggerEvidenceKind:  prepared.attrEvidenceKind,
+		TriggerEvidenceRefID: chatSession.ID,
+		ChannelContextRevision: pgtype.Int8{
+			Int64: contextRevision, Valid: contextRevision > 0,
 		},
-		RuntimeMcpOverlay:      runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps:   runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:       attrSource,
-		TriggerEvidenceKind:    attrEvidenceKind,
-		TriggerEvidenceRefID:   attrEvidenceRef,
-		ChannelContextRevision: pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
 	})
 	if err != nil {
-		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create chat task: %w", err)
 	}
+	if requireDelivery {
+		if _, err := qtx.CreateChannelTaskDeliveryFromSession(
+			ctx, db.CreateChannelTaskDeliveryFromSessionParams{
+				TaskID: task.ID, ChatSessionID: chatSession.ID,
+			},
+		); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("snapshot channel task delivery: %w", err)
+		}
+	}
+
 	task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("set channel chat task input owner: %w", err)
 	}
-	if err := qtx.LinkUnownedChannelChatMessagesToTask(ctx, db.LinkUnownedChannelChatMessagesToTaskParams{
-		TaskID:        task.ID,
-		ChatSessionID: chatSession.ID,
-	}); err != nil {
+	if err := qtx.LinkUnownedChannelChatMessagesToTask(
+		ctx, db.LinkUnownedChannelChatMessagesToTaskParams{
+			TaskID: task.ID, ChatSessionID: chatSession.ID,
+		},
+	); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("seal channel chat task input: %w", err)
 	}
-	// The deadline read above ran before the seal; under READ COMMITTED a media
-	// message committed between the two statements is sealed into this task
-	// without deferring it, and the daemon could claim it before its media
-	// binds. Re-derive the deferral from the sealed batch itself.
 	switch corrected, err := qtx.DeferChatTaskForSealedPendingMedia(ctx, task.ID); {
 	case err == nil:
 		task = corrected
@@ -1961,49 +2048,50 @@ func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, fmt.Errorf("defer chat task for sealed pending media: %w", err)
 	}
 	if pendingFresh {
-		if err := qtx.ClearChannelChatContextPendingFresh(ctx, db.ClearChannelChatContextPendingFreshParams{
-			ChatSessionID: chatSession.ID, Revision: contextRevision,
-		}); err != nil {
+		if err := qtx.ClearChannelChatContextPendingFresh(
+			ctx, db.ClearChannelChatContextPendingFreshParams{
+				ChatSessionID: chatSession.ID, Revision: contextRevision,
+			},
+		); err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("clear channel context pending fresh: %w", err)
 		}
-		if err := qtx.ClearChannelChatSessionPendingFreshForRevision(ctx, db.ClearChannelChatSessionPendingFreshForRevisionParams{
-			ChatSessionID: chatSession.ID, Revision: contextRevision,
-		}); err != nil {
+		if err := qtx.ClearChannelChatSessionPendingFreshForRevision(
+			ctx, db.ClearChannelChatSessionPendingFreshForRevisionParams{
+				ChatSessionID: chatSession.ID, Revision: contextRevision,
+			},
+		); err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("clear channel pending fresh: %w", err)
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("commit chat task enqueue: %w", err)
-	}
+	return task, nil
+}
 
+// FinalizeChatTaskEnqueue performs only post-commit effects.
+func (s *TaskService) FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue) {
 	if task.Status == "deferred" {
 		slog.Info("chat task deferred for channel media",
 			"task_id", util.UUIDToString(task.ID),
-			"chat_session_id", util.UUIDToString(chatSession.ID),
-			"agent_id", util.UUIDToString(chatSession.AgentID),
+			"chat_session_id", util.UUIDToString(task.ChatSessionID),
+			"agent_id", util.UUIDToString(task.AgentID),
 			"fire_at", task.FireAt.Time,
 		)
-		// Fence the clear-vs-create race: media completion may have found no
-		// committed task after our deadline read. Re-check after commit so the
-		// task is promoted immediately when the marker has already cleared.
-		// The task is already durably committed, so a fence failure must not
-		// surface as an enqueue failure — the router would treat it as "no
-		// task" and clear the typing indicator while the run still happens.
-		// The claim-path deferred promoter re-queues it at fire_at regardless.
-		if err := s.PromoteChannelChatTasksIfMediaReady(ctx, chatSession.ID); err != nil {
+		if err := s.PromoteChannelChatTasksIfMediaReady(ctx, task.ChatSessionID); err != nil {
 			slog.Warn("chat task media-ready fence failed; deferred task falls back to its deadline",
 				"task_id", util.UUIDToString(task.ID),
-				"chat_session_id", util.UUIDToString(chatSession.ID),
-				"error", err)
+				"chat_session_id", util.UUIDToString(task.ChatSessionID),
+				"error", err,
+			)
 		}
-		return task, nil
+		return
 	}
 
-	slog.Info("chat task enqueued", "task_id", util.UUIDToString(task.ID), "chat_session_id", util.UUIDToString(chatSession.ID), "agent_id", util.UUIDToString(chatSession.AgentID))
-	// See EnqueueTaskForIssue for ordering rationale.
+	slog.Info("chat task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"chat_session_id", util.UUIDToString(task.ChatSessionID),
+		"agent_id", util.UUIDToString(task.AgentID),
+	)
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
-	return task, nil
 }
 
 // RegenerateChatQuickActions runs a fresh suggestion pass for the session's
@@ -2129,6 +2217,7 @@ type DirectChatSendResult struct {
 	Message            db.ChatMessage
 	BoundAttachmentIDs []pgtype.UUID
 	Queued             bool
+	InitialTitle       string
 }
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
@@ -2255,6 +2344,17 @@ func (s *TaskService) SendDirectChatMessage(
 			return fmt.Errorf("adopt onboarding kickoff: %w", err)
 		}
 
+		// Initialize an explicitly empty Chat before inserting its first public
+		// user message. The CAS query also protects a manual rename and competing
+		// first send; keeping it in this transaction prevents a title-only commit.
+		if title := chattitle.Derive(content); title != "" {
+			if _, err := qtx.InitializeChatSessionTitle(ctx, db.InitializeChatSessionTitleParams{ID: session.ID, Title: title}); err == nil {
+				out.InitialTitle = title
+			} else if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("initialize direct chat title: %w", err)
+			}
+		}
+
 		// Create the user message already owned by this task (task_id = task.id),
 		// so it belongs to this immutable input batch the instant it exists.
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
@@ -2283,6 +2383,33 @@ func (s *TaskService) SendDirectChatMessage(
 				return fmt.Errorf("link chat attachments: %w", err)
 			}
 			out.BoundAttachmentIDs = bound
+
+			// An explicitly empty /new Chat can receive its first turn from a
+			// first-party client. For an attachment-only turn, initialize the
+			// title from the first attachment that was actually bound. The media
+			// title CAS runs after the message insert by design and still refuses
+			// to overwrite a manual rename or a competing first message.
+			if out.InitialTitle == "" && strings.TrimSpace(content) == "" && len(bound) > 0 {
+				attachments, err := qtx.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
+					ChatMessageID: msg.ID,
+					WorkspaceID:   session.WorkspaceID,
+				})
+				if err != nil {
+					return fmt.Errorf("list bound chat attachments for title: %w", err)
+				}
+				if len(attachments) > 0 {
+					title := chattitle.Derive(attachments[0].Filename)
+					if title != "" {
+						if _, err := qtx.InitializeChatSessionMediaTitle(ctx, db.InitializeChatSessionMediaTitleParams{
+							ID: session.ID, MessageID: msg.ID, Title: title,
+						}); err == nil {
+							out.InitialTitle = title
+						} else if !errors.Is(err, pgx.ErrNoRows) {
+							return fmt.Errorf("initialize direct attachment chat title: %w", err)
+						}
+					}
+				}
+			}
 		}
 
 		if err := qtx.TouchChatSession(ctx, session.ID); err != nil {
@@ -4652,6 +4779,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				} else if transferErr != nil {
 					return fmt.Errorf("transfer pending source context to retry: %w", transferErr)
 				} else {
+					if err := qtx.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
+						ChildTaskID: child.ID, ParentTaskID: taskID,
+					}); err != nil {
+						return fmt.Errorf("copy retry channel delivery: %w", err)
+					}
 					retried = &child
 				}
 			case errors.Is(cerr, pgx.ErrNoRows):
@@ -5087,9 +5219,12 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, nil
 	}
-	tx, beginErr := s.TxStarter.Begin(ctx)
-	if beginErr != nil {
-		return nil, beginErr
+	if s.TxStarter == nil {
+		return nil, errors.New("task auto-retry: transaction starter is required")
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("task auto-retry: begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
@@ -5129,8 +5264,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		}
 		return nil, err
 	}
+	if err := qtx.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
+		ChildTaskID: child.ID, ParentTaskID: parent.ID,
+	}); err != nil {
+		return nil, fmt.Errorf("copy auto-retry channel delivery: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("task auto-retry: commit: %w", err)
 	}
 	slog.Info("task auto-retry enqueued",
 		"parent_task_id", util.UUIDToString(parent.ID),

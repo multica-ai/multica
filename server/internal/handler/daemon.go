@@ -2595,52 +2595,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.ChatIntro = !hasUser
 			}
 		}
-		// Flag a channel-backed session so the daemon makes the agent aware it
-		// is operating inside an IM conversation and not the Multica web app
-		// (MUL-3871). Empty for a web-only chat session.
-		//
-		// The binding is read WITHOUT naming a channel. Every channel writes
-		// the same channel_chat_session_binding row and differs only in
-		// channel_type, and UNIQUE (chat_session_id) allows at most one, so
-		// the row itself is the answer. Enumerating candidate channels here
-		// was the bug twice over: the Slack-only lookup reported a Feishu
-		// chat as web-backed (MUL-4899), and the {slack, feishu} list that
-		// replaced it did the same to WeCom. Downstream that mis-flag makes
-		// the brief inject `multica attachment upload` guidance into a
-		// conversation that cannot carry attachments at all.
-		//
-		// ChatInThread stays Slack-only on purpose. It selects between
-		// `multica chat history` and `multica chat thread`, and those two
-		// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
-		// is no history reader on any other channel, so the flag has nothing
-		// to select between there and must not imply one exists.
-		//
-		// chat_type rides along on the same row. It is what lets the
-		// per-turn prompt tell the agent whether this chat_session is a room
-		// shared by many people or a 1:1 with the bot; the prompt used to
-		// describe every chat run as a private 1:1 whatever the room. The
-		// shared session service writes the column for every channel
-		// (channel/engine/session.go), so no channel needs naming here
-		// either.
-		if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
-			resp.ChatChannelType = binding.ChannelType
-			resp.ChatType = binding.ChatType
-			// Whether a file the agent produces reaches this
-			// conversation is the server's question, not the daemon's.
-			// It takes an adapter that goes back for the bound
-			// attachment AND storage for it to go back to, and only
-			// this process knows both. Answered here so the daemon
-			// never has to infer it from the channel type — an
-			// inference that promises delivery on any deployment
-			// running WeCom without object storage.
-			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
-			if binding.ChannelType == string(slack.TypeSlack) {
-				// The latest trigger was a thread reply iff its reply-target
-				// thread (last_thread_id) differs from its own message id (a
-				// top-level @mention records its own ts as both).
-				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-					binding.LastThreadID.String != binding.LastMessageID.String
+		// A task-level delivery snapshot, not the Chat's historical binding,
+		// decides whether this run is operating for an external audience.
+		// Web/Desktop/Mobile turns in an old channel-originated Chat have no
+		// snapshot and remain private to Multica after /new rotates the route.
+		delivery, deliveryErr := h.Queries.GetChannelTaskDelivery(r.Context(), task.ID)
+		if deliveryErr == nil {
+			resp.ChatChannelType = delivery.ChannelType
+			resp.ChatType = delivery.ChatType
+			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
+			if delivery.ChannelType == string(slack.TypeSlack) {
+				resp.ChatInThread = delivery.ChannelThreadID.Valid &&
+					delivery.ChannelThreadID.String != "" &&
+					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String
 			}
+		} else if !errors.Is(deliveryErr, pgx.ErrNoRows) {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.

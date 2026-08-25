@@ -32,7 +32,37 @@ func seedChannelCommandSession(t *testing.T, pool *pgxpool.Pool, workspaceID, ag
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(cleanupCtx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
 	})
+	seedChannelTaskBinding(t, pool, chatSessionID)
 	return chatSessionID
+}
+
+// seedChannelTaskBinding gives EnqueueChatTask the same current route every
+// production caller has. The enqueue path now snapshots that route as a hard
+// delivery invariant, so a channel-ingested fixture without a binding is not a
+// valid channel task fixture.
+func seedChannelTaskBinding(t *testing.T, pool *pgxpool.Pool, chatSessionID string) {
+	t.Helper()
+	ctx := context.Background()
+	var bindingID string
+	if err := pool.QueryRow(ctx, `
+		WITH binding AS (
+			INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type
+			) VALUES ($1, gen_random_uuid(), 'dingtalk', $2, 'p2p')
+			RETURNING id, chat_session_id, context_revision
+		), generation AS (
+			INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+			SELECT chat_session_id, context_revision FROM binding
+		)
+		SELECT id FROM binding`, chatSessionID, chatSessionID).Scan(&bindingID); err != nil {
+		t.Fatalf("seed channel task binding: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx := context.Background()
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_task_delivery WHERE binding_id = $1`, bindingID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_chat_session_binding WHERE id = $1`, bindingID)
+	})
 }
 
 func TestEnqueueChatTaskConsumesPendingFreshOnlyOnSuccess(t *testing.T) {
@@ -47,10 +77,14 @@ func TestEnqueueChatTaskConsumesPendingFreshOnlyOnSuccess(t *testing.T) {
 	}
 
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO channel_chat_session_binding (
-			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, pending_fresh
-		) VALUES ($1, gen_random_uuid(), 'dingtalk', 'chat-fresh', 'p2p', TRUE)`, chatSessionID); err != nil {
-		t.Fatalf("seed channel binding: %v", err)
+		WITH binding AS (
+			UPDATE channel_chat_session_binding SET pending_fresh = TRUE
+			WHERE chat_session_id = $1
+			RETURNING chat_session_id
+		)
+		UPDATE channel_chat_context_generation SET pending_fresh = TRUE
+		WHERE chat_session_id = $1`, chatSessionID); err != nil {
+		t.Fatalf("seed pending fresh: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_message (chat_session_id, role, content)

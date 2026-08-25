@@ -56,6 +56,8 @@ func TestRegisterBYO_DifferentAppKey_IsolatesIdentityStateDB(t *testing.T) {
 		multicaUserID  = "d1470000-0000-4000-8000-000000000004"
 		oldInstallID   = "d1470000-0000-4000-8000-000000000010"
 		chatSessionID  = "d1470000-0000-4000-8000-000000000020"
+		bindingID      = "d1470000-0000-4000-8000-000000000021"
+		taskID         = "d1470000-0000-4000-8000-000000000022"
 		mediaMessageID = "d1470000-0000-4000-8000-000000000030"
 		oldAppKey      = "dingtalk_identity_old_app"
 		newAppKey      = "dingtalk_identity_new_app"
@@ -68,6 +70,8 @@ func TestRegisterBYO_DifferentAppKey_IsolatesIdentityStateDB(t *testing.T) {
 
 	clean := func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_card_message WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_message WHERE installation_id = $1`, oldInstallID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_task_delivery WHERE installation_id = $1`, oldInstallID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
@@ -95,9 +99,9 @@ INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id
 VALUES ($1, $2, $3, 'dingtalk', $4)
 `, workspaceID, multicaUserID, oldInstallID, staffID)
 	exec(`
-INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
-VALUES ($1, $2, 'dingtalk', $3, 'p2p')
-`, chatSessionID, oldInstallID, chatID)
+INSERT INTO channel_chat_session_binding (id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, $3, 'dingtalk', $4, 'p2p')
+`, bindingID, chatSessionID, oldInstallID, chatID)
 	exec(`
 INSERT INTO channel_chat_context_generation (chat_session_id, revision)
 VALUES ($1, 1)
@@ -110,6 +114,18 @@ VALUES ($1, $2, $3, 'dingtalk', $4, now() + interval '10 minutes')
 INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id)
 VALUES ($1, 'dingtalk', $2, 'old-outbound-message')
 `, chatSessionID, chatID)
+	exec(`
+INSERT INTO channel_task_delivery (
+    task_id, binding_id, installation_id, channel_type, channel_chat_id,
+    chat_type, route_revision
+) VALUES ($1, $2, $3, 'dingtalk', $4, 'p2p', 1)
+`, taskID, bindingID, oldInstallID, chatID)
+	exec(`
+INSERT INTO channel_outbound_message (
+    installation_id, channel_type, channel_message_id, binding_id,
+    route_revision, task_id, outbound_kind
+) VALUES ($1, 'dingtalk', 'old-route-reply', $2, 1, $3, 'task_reply')
+`, oldInstallID, bindingID, taskID)
 	exec(`
 INSERT INTO channel_inbound_message_dedup (installation_id, message_id)
 VALUES ($1, 'dingtalk-identity-old-message')
@@ -171,6 +187,8 @@ VALUES ($1, $2, $3, 'https://storage.example.test/old-image', $4)
 	assertCount("old installation", `SELECT count(*) FROM channel_installation WHERE id = $1`, 0, oldInstallID)
 	assertCount("old user binding", `SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, 0, oldInstallID)
 	assertCount("old chat binding", `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, 0, oldInstallID)
+	assertCount("old task delivery", `SELECT count(*) FROM channel_task_delivery WHERE installation_id = $1`, 0, oldInstallID)
+	assertCount("old route ledger", `SELECT count(*) FROM channel_outbound_message WHERE installation_id = $1`, 0, oldInstallID)
 	assertCount("old chat context", `SELECT count(*) FROM channel_chat_context_generation WHERE chat_session_id = $1`, 1, chatSessionID)
 	assertCount("old binding token", `SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, 0, oldInstallID)
 	assertCount("old outbound state", `SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, 0, chatSessionID)
