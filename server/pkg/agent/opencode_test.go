@@ -1056,8 +1056,8 @@ func TestOpencodeProcessEventsEmptyFinalStepFails(t *testing.T) {
 	if result.output != "All context gathered. Let me set up and begin." {
 		t.Errorf("output: got %q, want the text emitted before the empty step", result.output)
 	}
-	if result.usage.InputTokens != 14585 || result.usage.OutputTokens != 89 {
-		t.Errorf("usage: got %+v, want the first step's tokens preserved", result.usage)
+	if u := result.usageByModel[""]; u.InputTokens != 14585 || u.OutputTokens != 89 {
+		t.Errorf("usage: got %+v, want the first step's tokens preserved under the unnamed-model key", u)
 	}
 
 	close(ch)
@@ -1845,6 +1845,35 @@ func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
 	}
 	if !strings.Contains(result.Error, "exit status 1") {
 		t.Errorf("result error = %q, want it to include the process exit status", result.Error)
+	}
+}
+
+// GAP-4: a step whose stream events name a model is attributed to that model;
+// steps without one stay under the unnamed key (resolved to the configured
+// model by Execute). The run stream does not emit model fields today — this
+// pins the parse so a version that starts carrying them lands correctly.
+func TestOpencodeProcessEventsPerStepModelAttribution(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_gap4","part":{"type":"step-start","providerID":"acme","modelID":"fast-1"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_gap4","part":{"type":"text","text":"hi"}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_gap4","part":{"type":"step-finish","reason":"stop","tokens":{"input":10,"output":5}}}`,
+		`{"type":"step_start","timestamp":1003,"sessionID":"ses_gap4","part":{"type":"step-start"}}`,
+		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_gap4","part":{"type":"step-finish","reason":"stop","tokens":{"input":7,"output":3}}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+	if result.status != "completed" {
+		t.Fatalf("status: got %q, want %q", result.status, "completed")
+	}
+	if u := result.usageByModel["acme/fast-1"]; u.InputTokens != 10 || u.OutputTokens != 5 {
+		t.Errorf("named step usage: got %+v, want {10 5} under acme/fast-1", u)
+	}
+	if u := result.usageByModel[""]; u.InputTokens != 7 || u.OutputTokens != 3 {
+		t.Errorf("unnamed step usage: got %+v, want {7 3} under \"\"", u)
 	}
 }
 
