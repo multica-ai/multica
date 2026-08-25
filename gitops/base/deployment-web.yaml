@@ -35,6 +35,18 @@ spec:
       nodeSelector:
         karpenter.sh/nodepool: shared
         kubernetes.io/arch: arm64
+      # Force replicas onto distinct nodes so a single node's conntrack table
+      # can't be exhausted by the whole fleet at once — observed 2026-08-25:
+      # all 8 replicas landing on one shared-pool node saturated
+      # nf_conntrack_max within 1-2 minutes of every reschedule.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: agentfarm
+              component: web
       securityContext:
         runAsNonRoot: true
         runAsUser: 1001
