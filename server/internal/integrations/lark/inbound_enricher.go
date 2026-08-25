@@ -152,13 +152,22 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	if freshSource == "" {
 		freshSource = msg.Body
 	}
-	if body, ok := engine.ParseFreshSessionCommand(freshSource); ok {
-		msg.ForceFreshSession = true
-		msg.Body = body
+	startChat := false
+	if control, ok := engine.ParseControlCommand(freshSource); ok {
+		msg.Body = control.Body
+		switch control.Kind {
+		case engine.ControlCommandFreshSession:
+			msg.ForceFreshSession = true
+		case engine.ControlCommandNewChat:
+			// A new Chat must not inherit adapter-generated recent context from
+			// the route's previous Chat. Explicit quote/forward context is still
+			// expanded below because the user attached it to this command.
+			startChat = true
+		}
 	}
 
 	isForward := msg.MessageType == larkMsgTypeMergeForward
-	wantRecent := e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
+	wantRecent := !startChat && e.recentContextSize > 0 && msg.ChatType == ChatTypeGroup && msg.AddressedToBot
 	if msg.ParentID == "" && !isForward && !wantRecent {
 		// Nothing to expand and no group prefetch wanted — no network call.
 		return msg

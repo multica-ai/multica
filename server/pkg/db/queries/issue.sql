@@ -129,6 +129,18 @@ SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;
 
+-- name: DetachDirectChildIssues :many
+UPDATE issue
+SET parent_issue_id = NULL,
+    stage = NULL,
+    revision = revision + 1,
+    updated_at = now(),
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND parent_issue_id = sqlc.arg(parent_issue_id)
+  AND NOT COALESCE(id = ANY(sqlc.arg(excluded_issue_ids)::uuid[]), false)
+RETURNING *;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
@@ -232,6 +244,11 @@ UPDATE issue AS i SET
     updated_at = CASE WHEN changed.did_change THEN now() ELSE i.updated_at END
 FROM changed
 WHERE i.id = changed.id
+  -- Re-check the precondition on the row version that UPDATE actually locks.
+  -- Under READ COMMITTED, concurrent statements may both populate candidate
+  -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
+  -- after waiting for the first writer, leaving the stale writer with 0 rows.
+  AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
 RETURNING i.*;
 
 -- name: UpdateIssueStatus :one

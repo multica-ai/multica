@@ -29,7 +29,14 @@ export interface PluginSurface {
   platforms?: string[];
 }
 
-export type PluginHookTrigger = "ui" | "manual" | "agent" | "event";
+export type PluginHookTrigger = "ui" | "manual" | "agent" | "event" | "schedule";
+
+export interface PluginHookSchedule {
+  cron: string;
+  timezone: string;
+  /** Display-only projection. Runtime correctness never depends on this value. */
+  next_run_at?: string;
+}
 
 export interface PluginHook {
   key: string;
@@ -37,6 +44,7 @@ export interface PluginHook {
   description: string;
   triggers: (PluginHookTrigger | string)[];
   events?: string[];
+  schedule?: PluginHookSchedule;
   transport: string;
 }
 
@@ -82,6 +90,14 @@ export interface PluginManifestSummary {
   description?: string;
   version: string;
   author: { name: string; url?: string };
+  contributes?: {
+    hooks?: Array<{
+      key: string;
+      name: string;
+      triggers: (PluginHookTrigger | string)[];
+      schedule?: PluginHookSchedule;
+    }>;
+  };
 }
 
 /**
@@ -186,6 +202,8 @@ export interface PluginInvocation {
   attempt: number;
   latency_ms: number;
   error?: string;
+  delivery_id?: string;
+  planned_at?: string;
   created_at: string;
 }
 

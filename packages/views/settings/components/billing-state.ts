@@ -75,37 +75,22 @@ export function resolveAutopilotUsage(
   return { kind: "unavailable" };
 }
 
-const MANAGED_SUBSCRIPTION_STATUSES = new Set([
-  "active",
-  "trialing",
-  "past_due",
-  "canceled",
-  "incomplete",
-  "incomplete_expired",
-  "paused",
-  "unpaid",
-]);
-
 const PURCHASABLE_SUBSCRIPTION_STATUSES = new Set([
   "inactive",
   "canceled",
   "incomplete_expired",
 ]);
 
-/**
- * Summary facts are primary. Plan and status are compatibility fallbacks so
- * an older or temporarily unavailable summary does not hide the recovery UI.
- */
-export function hasManagedWorkspaceSubscription(
-  entitlements: WorkspaceSubscriptionEntitlements,
+export function hasActiveWorkspaceSeatCapacity(
   summary: WorkspaceSubscriptionSummary | null | undefined,
 ): boolean {
-  return (
-    summary?.hasStripeCustomer === true ||
-    summary?.billedSeats !== null && summary?.billedSeats !== undefined ||
-    entitlements.plan === "pro" ||
-    MANAGED_SUBSCRIPTION_STATUSES.has(entitlements.status)
-  );
+  return summary?.seatCapacity != null;
+}
+
+export function hasWorkspaceBillingRelationship(
+  summary: WorkspaceSubscriptionSummary | null | undefined,
+): boolean {
+  return summary?.hasStripeCustomer === true;
 }
 
 /**

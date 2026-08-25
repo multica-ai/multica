@@ -125,6 +125,10 @@ func TestChannelContextLockOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load chat session: %v", err)
 	}
+	binding, err := queries.GetChannelChatSessionBindingBySessionAny(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("load channel route: %v", err)
+	}
 
 	generationLocked := make(chan struct{})
 	releaseEnqueue := make(chan struct{})
@@ -141,14 +145,14 @@ func TestChannelContextLockOrder(t *testing.T) {
 	}
 	enqueueResult := make(chan error, 1)
 	go func() {
-		_, err := enqueueService.EnqueueChannelChatTask(ctx, chatSession, initiator, true, 2)
+		_, err := enqueueService.EnqueueChannelChatTask(ctx, chatSession, initiator, true, 2, binding.ID, binding.RouteRevision)
 		enqueueResult <- err
 	}()
 	waitContextLockSignal(t, generationLocked, "enqueue did not lock generation")
 
 	bindingAttempted := make(chan struct{})
 	appendSession := engine.NewChatSession(queries, &contextLockTestStarter{
-		pool: testPool, observeBefore: "LockChannelChatSessionBindingForContext", observed: bindingAttempted,
+		pool: testPool, observeBefore: "LockCurrentChannelChatSessionBindingBySession", observed: bindingAttempted,
 	}, channel.Type("slack"), engine.SessionTitles{Direct: "Lock order test"})
 	appendResult := make(chan error, 1)
 	go func() {

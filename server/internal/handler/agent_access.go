@@ -224,6 +224,18 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 	return ""
 }
 
+// effectiveInvocationAuthorityFromRequest returns the human principal used by
+// canInvokeAgent without changing attribution. A real top-of-chain originator
+// always wins. Only an unattributed agent request may fall back to the creator
+// of a lineage-verified autopilot issue supplied by the caller.
+func (h *Handler) effectiveInvocationAuthorityFromRequest(r *http.Request, delegationIssue *db.Issue, actorType, actorID string) string {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originatorUserID != "" || delegationIssue == nil {
+		return originatorUserID
+	}
+	return h.autopilotDelegationAuthorityFromRequest(r, *delegationIssue, actorType, actorID)
+}
+
 // autopilotDelegationAuthority resolves the effective invoking human for the A2A
 // invoke gate (canInvokeAgent) when a trigger comment is authored by an
 // UNATTRIBUTED autopilot dispatch delegating mid-chain on the very issue that

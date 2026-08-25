@@ -65,7 +65,7 @@ func hookTestService(t *testing.T, harness *hookTestServer) *PluginService {
 	service.DevOrigins = []string{harness.server.URL}
 	service.HookClient = harness.server.Client()
 	service.Callbacks = NewCallbackTokens()
-	service.CallbackBaseURL = "https://multica.test/api/v1/plugin"
+	service.CallbackBaseURL = "https://plugin-api.multica.test/v1"
 	return service
 }
 
@@ -244,7 +244,7 @@ func TestHookCarriesAnInvocationScopedCallbackToken(t *testing.T) {
 	if body.CallbackToken == "" {
 		t.Fatal("the handler needs a callback token to answer with")
 	}
-	if body.CallbackURL != "https://multica.test/api/v1/plugin" {
+	if body.CallbackURL != "https://plugin-api.multica.test/v1" {
 		t.Fatalf("unexpected callback url %q", body.CallbackURL)
 	}
 	if body.Actor.Type != "member" {

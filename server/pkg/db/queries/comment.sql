@@ -675,3 +675,87 @@ UPDATE comment SET
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
 RETURNING *;
+-- name: ListCommentAncestorPath :many
+WITH RECURSIVE ancestor_path AS (
+  SELECT c.*, ARRAY[c.id]::uuid[] AS visited_ids, 1::integer AS depth, false AS cycle
+  FROM comment c
+  WHERE c.id = sqlc.arg(comment_id)
+    AND c.workspace_id = sqlc.arg(workspace_id)
+    AND c.issue_id = sqlc.arg(issue_id)
+
+  UNION ALL
+
+  SELECT parent.*,
+         path.visited_ids || parent.id,
+         path.depth + 1,
+         parent.id = ANY(path.visited_ids)
+  FROM ancestor_path path
+  JOIN comment parent ON parent.id = path.parent_id
+  WHERE parent.workspace_id = sqlc.arg(workspace_id)
+    AND parent.issue_id = sqlc.arg(issue_id)
+    AND path.depth <= 256
+    AND NOT path.cycle
+)
+SELECT id, issue_id, author_type, author_id, content, type, created_at,
+       updated_at, workspace_id, parent_id, resolved_at, resolved_by_type,
+       resolved_by_id, source_task_id, revision, quick_action_id, via_plugin_id,
+       depth, cycle
+FROM ancestor_path
+ORDER BY depth DESC;
+
+-- name: ListCommentThreadHistory :many
+-- Capture the anchor comment's complete chronological thread through that
+-- comment. Later replies are outside the immutable context boundary.
+-- UUID is the stable tiebreaker used by the issue timeline when timestamps tie.
+WITH RECURSIVE thread_history AS (
+  SELECT root.*
+  FROM comment root
+  WHERE root.id = sqlc.arg(root_id)
+    AND root.workspace_id = sqlc.arg(workspace_id)
+    AND root.issue_id = sqlc.arg(issue_id)
+    AND root.parent_id IS NULL
+    AND (root.created_at, root.id) <= (
+      sqlc.arg(anchor_created_at)::timestamptz,
+      sqlc.arg(anchor_id)::uuid
+    )
+
+  UNION ALL
+
+  SELECT child.*
+  FROM comment child
+  JOIN thread_history parent ON child.parent_id = parent.id
+  WHERE child.workspace_id = sqlc.arg(workspace_id)
+    AND child.issue_id = sqlc.arg(issue_id)
+    AND (child.created_at, child.id) <= (
+      sqlc.arg(anchor_created_at)::timestamptz,
+      sqlc.arg(anchor_id)::uuid
+    )
+)
+SELECT *
+FROM thread_history
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit);
+
+-- name: LockCommentAncestorPath :many
+WITH RECURSIVE ancestor_ids AS (
+  SELECT c.id, c.parent_id, 1::integer AS depth, ARRAY[c.id]::uuid[] AS visited_ids
+  FROM comment c
+  WHERE c.id = sqlc.arg(comment_id)
+    AND c.workspace_id = sqlc.arg(workspace_id)
+    AND c.issue_id = sqlc.arg(issue_id)
+
+  UNION ALL
+
+  SELECT parent.id, parent.parent_id, path.depth + 1, path.visited_ids || parent.id
+  FROM ancestor_ids path
+  JOIN comment parent ON parent.id = path.parent_id
+  WHERE parent.workspace_id = sqlc.arg(workspace_id)
+    AND parent.issue_id = sqlc.arg(issue_id)
+    AND path.depth <= 256
+    AND NOT parent.id = ANY(path.visited_ids)
+)
+SELECT c.id
+FROM comment c
+JOIN ancestor_ids path ON path.id = c.id
+ORDER BY c.id
+FOR UPDATE OF c;

@@ -177,7 +177,7 @@ func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*Mod
 func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
 	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
 	}
@@ -358,7 +358,7 @@ var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
 	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
-	return cmd.Output()
+	return outputOwned(cmd, runtimeCmd.logger)
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
@@ -773,13 +773,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
-	// does not accept none, minimal, or xhigh.
-	"grok": {
-		"low":    true,
-		"medium": true,
-		"high":   true,
-	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
@@ -798,8 +791,12 @@ var providerThinkingEnums = map[string]map[string]bool{
 // server accepts any well-formed token for them and lets the daemon's
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
-	"codex":    true,
-	"dsh":      true,
+	"codex": true,
+	"dsh":   true,
+	// Grok advertises each model's effort catalog through session/new, so the
+	// server does not maintain a provider-wide fixed enum. The daemon applies
+	// the selected effort with `--effort`, not session/set_config_option.
+	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
 }

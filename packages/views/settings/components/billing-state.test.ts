@@ -8,7 +8,8 @@ import type {
 } from "@multica/core/types";
 import {
   canPurchaseWorkspaceSubscription,
-  hasManagedWorkspaceSubscription,
+  hasActiveWorkspaceSeatCapacity,
+  hasWorkspaceBillingRelationship,
   resolveAutopilotUsage,
 } from "./billing-state";
 
@@ -116,34 +117,34 @@ describe("resolveAutopilotUsage", () => {
 });
 
 describe("billing subscription state", () => {
-  it("prefers subscription facts and keeps safe compatibility fallbacks", () => {
-    const summary = {
+  it("keeps billing history separate from current seat capacity", () => {
+    const canceledSummary = {
       entitlement: freeEntitlements,
       billingInterval: null,
-      actualSeats: 3,
-      billedSeats: null,
-      pendingSeatQuantity: null,
-      usedSeats: 3,
-      reservedSeats: 0,
-      purchaseVersion: null,
-      activeSeatPurchase: null,
+      humanMembers: 3,
+      seatCapacity: null,
       cancelAtPeriodEnd: false,
       graceUntil: null,
       hasStripeCustomer: true,
     } satisfies WorkspaceSubscriptionSummary;
 
-    expect(hasManagedWorkspaceSubscription(freeEntitlements, summary)).toBe(
-      true,
-    );
-    expect(
-      hasManagedWorkspaceSubscription(
-        { ...freeEntitlements, status: "incomplete_expired" },
-        undefined,
-      ),
-    ).toBe(true);
-    expect(hasManagedWorkspaceSubscription(freeEntitlements, undefined)).toBe(
-      false,
-    );
+    expect(hasActiveWorkspaceSeatCapacity(canceledSummary)).toBe(false);
+    expect(hasWorkspaceBillingRelationship(canceledSummary)).toBe(true);
+
+    const activeSummary = {
+      ...canceledSummary,
+      seatCapacity: {
+        purchased: 5,
+        used: 3,
+        reserved: 1,
+        available: 1,
+        version: 2,
+        pendingQuantity: null,
+        activePurchase: null,
+      },
+    } satisfies WorkspaceSubscriptionSummary;
+    expect(hasActiveWorkspaceSeatCapacity(activeSummary)).toBe(true);
+    expect(hasWorkspaceBillingRelationship(undefined)).toBe(false);
   });
 
   it.each([

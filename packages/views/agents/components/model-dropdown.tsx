@@ -19,9 +19,15 @@ import { useT } from "../../i18n";
 // daemon enumerates models on demand via heartbeat piggyback. Providers
 // whose runtime ignores per-agent model selection return supported=false,
 // and the dropdown renders disabled with an explanation instead of silently
-// accepting a value the backend would ignore. No built-in provider does so
-// today — Antigravity gained `--model` in agy 1.0.6 — but the path stays for
-// any future model-less runtime.
+// accepting a value the backend would ignore. Today that is qwenpaw and mcode
+// (agent.ModelSelectionSupported is the single source of truth for the set);
+// Antigravity left it when agy 1.0.6 added `--model`.
+//
+// supported=false is a different state from discovery failing, and the two must
+// not be conflated. A failed discovery throws out of resolveRuntimeModels, so
+// modelsQuery.isError renders the discovery-failed notice and keeps the
+// creatable manual-entry input below — which is exactly the fallback a user
+// needs when their runtime could not enumerate anything (MUL-6606).
 export function ModelDropdown({
   runtimeId,
   runtimeOnline,
@@ -51,6 +57,13 @@ export function ModelDropdown({
     [modelsQuery.data],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
+  // resolveRuntimeModels throws the daemon's reported error text, so this is
+  // the runtime's own message (plus any hint the daemon appended). It is only
+  // ever read while isError is true.
+  const discoveryError =
+    modelsQuery.error instanceof Error
+      ? modelsQuery.error.message.trim() || null
+      : null;
 
   // When the selected runtime reports it doesn't support per-agent
   // model selection, clear any previously-saved value so we don't
@@ -120,7 +133,12 @@ export function ModelDropdown({
       <div className="flex h-6 items-center justify-between">
         <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
-          <span className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
+          <span
+            className="text-caption text-muted-foreground"
+            title={discoveryError ?? undefined}
+          >
+            {t(($) => $.model_dropdown.discovery_failed)}
+          </span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
@@ -200,7 +218,35 @@ export function ModelDropdown({
                 </div>
               ))}
 
+            {/* A failed discovery reports WHY here rather than in the label
+                row's caption, which has no room for a sentence. The runtime's
+                own words are the actionable part — hermes, for one, names the
+                exact command to run — so they are rendered verbatim and left
+                selectable. Paired with the manual-entry prompt, because a
+                reason with no way forward is just a nicer dead end. */}
+            {!modelsQuery.isLoading && modelsQuery.isError && (
+              <div className="px-3 py-4 text-body text-muted-foreground">
+                <div className="flex items-start gap-2">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="font-medium text-foreground">
+                      {t(($) => $.pickers.model_discovery_failed_title)}
+                    </div>
+                    {discoveryError && (
+                      <div className="mt-1 whitespace-pre-wrap break-words text-caption select-text">
+                        {discoveryError}
+                      </div>
+                    )}
+                    <div className="mt-1.5 text-caption">
+                      {t(($) => $.pickers.model_discovery_failed_hint)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {!modelsQuery.isLoading &&
+              !modelsQuery.isError &&
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-body text-muted-foreground">

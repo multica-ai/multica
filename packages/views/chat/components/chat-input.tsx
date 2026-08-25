@@ -73,6 +73,15 @@ interface ChatInputProps {
      */
     sessionId?: string;
   } | null;
+  /** Explicit replacement requested by a starter-prompt button. Unlike a
+   * synchronized draft write, this may intentionally replace dirty editor
+   * content, so ChatInput adopts it after cancelling any pending debounce. */
+  starterPromptRequest?: {
+    id: number;
+    content: string;
+  } | null;
+  /** Fired after the request has replaced both the stored and live draft. */
+  onStarterPromptApplied?: () => void;
   /**
    * Fired when — and only when — the restore's content/attachments were written
    * into the draft. A restore the composer cannot apply yet (the user has work
@@ -140,6 +149,8 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   restoreDraftRequest,
+  starterPromptRequest,
+  onStarterPromptApplied,
   onRestoreDraftApplied,
   uploadEnabled: uploadAllowed,
   onStop,
@@ -217,6 +228,7 @@ export function ChatInput({
   // reads the live editor and bails when it is empty.
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
+  const appliedStarterPromptIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
   // The draft whose document the editor instance is currently HOLDING.
@@ -364,6 +376,32 @@ export function ChatInput({
     if (!focusRequest) return;
     editorRef.current?.focus();
   }, [focusRequest]);
+
+  // A starter-prompt click is an explicit replacement, not an ordinary
+  // external store sync. ContentEditor deliberately rejects external values
+  // while it has dirty local text, so adopting here prevents the old text's
+  // pending debounce from winning the race and overwriting the chosen prompt.
+  // Wait out active uploads: adopting content while an upload node is present
+  // would strand its completion callback.
+  useLayoutEffect(() => {
+    if (!starterPromptRequest) return;
+    if (appliedStarterPromptIdRef.current === starterPromptRequest.id) return;
+    if (editorDraftKeyRef.current !== draftKey) return;
+    if (editorRef.current?.hasActiveUploads() === true) return;
+
+    editorRef.current?.flushPendingUpdate();
+    appliedStarterPromptIdRef.current = starterPromptRequest.id;
+    commitDraft(draftKey, starterPromptRequest.content);
+    editorRef.current?.adoptContent(starterPromptRequest.content);
+    setIsEmpty(!starterPromptRequest.content.trim());
+    onStarterPromptApplied?.();
+  }, [
+    commitDraft,
+    draftKey,
+    onStarterPromptApplied,
+    starterPromptRequest,
+    uploadGate.uploading,
+  ]);
 
   useEffect(() => {
     if (!restoreDraftRequest) {

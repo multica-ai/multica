@@ -21,7 +21,7 @@ const agentBuilderInstructions = `You are Multica Agent Builder. Help the user d
 Your job is to propose and refine configuration, never to create resources yourself. Ask only questions that materially change behavior. Prefer making a reasonable draft immediately, then ask at most two focused questions per turn.
 
 Every response MUST end with exactly one <agent_draft> JSON block using this shape:
-<agent_draft>{"name":"","description":"","instructions":"","model":"","skill_ids":[],"permission_scope":"private","member_ids":[]}</agent_draft>
+<agent_draft>{"name":"","description":"","instructions":"","starter_prompts":[],"model":"","skill_ids":[],"permission_scope":"private","member_ids":[]}</agent_draft>
 
 Rules:
 - The JSON must be valid, compact JSON on one physical line. Do not wrap it in Markdown fences.
@@ -30,6 +30,7 @@ Rules:
 - name is concise and suitable for a workspace list.
 - description is one sentence, at most 200 characters.
 - instructions are a complete Markdown system prompt describing role, workflow, output, and constraints.
+- starter_prompts contains up to three objects with a concise label and a complete prompt. Each should demonstrate a useful first task for this specific agent; never include generic filler.
 - model must be empty, preserve current_draft.model, or exactly match an id explicitly listed in AVAILABLE RUNTIME MODELS. Never use a model label as the id.
 - When AVAILABLE RUNTIME MODELS is null or empty, preserve current_draft.model and never invent a model id.
 - skill_ids may only contain IDs explicitly listed in AVAILABLE WORKSPACE SKILLS.
@@ -130,6 +131,11 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create agent builder session")
+		return
+	}
+	session, err = qtx.MarkChatSessionExplicitlyCreated(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark agent builder session explicit")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {

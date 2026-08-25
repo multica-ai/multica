@@ -25,15 +25,16 @@ import (
 type outboundQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	SetChatMessageChannelOutboundProvenanceByTask(ctx context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error)
+	RecordChannelOutboundMessage(ctx context.Context, arg db.RecordChannelOutboundMessageParams) error
 }
 
 // replySender posts one reply. Satisfied by *slackSender, so the outbound path
 // reuses Send's Markdown->mrkdwn conversion, chunking, and threading.
 type replySender interface {
-	Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error)
+	SendWithMetadata(ctx context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error)
 }
 
 // Outbound delivers an agent's chat reply back to Slack — the outbound half of
@@ -86,16 +87,6 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks carry no chat_session.
 		return nil
 	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   string(TypeSlack),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // not a Slack session (Feishu / web-only)
-		}
-		return fmt.Errorf("lookup slack chat binding: %w", err)
-	}
 	content := chatDoneContent(e.Payload)
 	if content == "" {
 		return nil // nothing to say (empty completion)
@@ -112,6 +103,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if !ok {
 		return nil
 	}
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil // direct Chat or another channel
+		}
+		return fmt.Errorf("lookup slack task delivery: %w", err)
+	}
+	if delivery.ChannelType != string(TypeSlack) {
+		return nil
+	}
+	binding := slackBindingFromTaskDelivery(delivery)
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load agent task: %w", err)
@@ -138,11 +140,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("decode slack credentials: %w", err)
 	}
 	channelID, threadTS := outboundTarget(binding)
-	result, err := o.newSender(creds).Send(ctx, channel.OutboundMessage{
+	result, err := o.newSender(creds).SendWithMetadata(ctx, channel.OutboundMessage{
 		ChatID:   channelID,
 		Text:     content,
 		ThreadID: threadTS,
-	})
+	}, outboundMetadata(delivery.BindingID, delivery.RouteRevision, "task_reply"))
 	if err != nil {
 		return fmt.Errorf("post slack reply: %w", err)
 	}
@@ -166,7 +168,30 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if rows != 1 {
 		return fmt.Errorf("record slack reply provenance: updated %d assistant rows, want 1", rows)
 	}
+	for _, messageID := range messageIDs {
+		if err := o.q.RecordChannelOutboundMessage(ctx, db.RecordChannelOutboundMessageParams{
+			OutboundInstallationID: delivery.InstallationID,
+			OutboundChannelType:    delivery.ChannelType,
+			OutboundMessageID:      messageID,
+			OutboundBindingID:      delivery.BindingID,
+			OutboundRouteRevision:  delivery.RouteRevision,
+			OutboundTaskID:         taskID,
+			OutboundKind:           "task_reply",
+		}); err != nil {
+			return fmt.Errorf("record slack outbound message: %w", err)
+		}
+	}
 	return nil
+}
+
+func slackBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType:      delivery.ChatType,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		RouteRevision: delivery.RouteRevision, Config: delivery.Config,
+	}
 }
 
 // chatDoneTaskID extracts the task id from the event envelope or the typed/map

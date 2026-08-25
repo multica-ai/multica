@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -33,6 +34,8 @@ type fakeOutboundQueries struct {
 	provenanceRows      int64
 	provenanceErr       error
 	gotProvenance       db.SetChatMessageChannelOutboundProvenanceByTaskParams
+	recordedOutbound    []db.RecordChannelOutboundMessageParams
+	recordOutboundErr   error
 }
 
 func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -43,12 +46,24 @@ func (f *fakeOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pg
 	return f.taskChannelIngested, nil
 }
 
-func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
-	return f.binding, f.bindingErr
+func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	if f.bindingErr != nil {
+		return db.ChannelTaskDelivery{}, f.bindingErr
+	}
+	return db.ChannelTaskDelivery{
+		BindingID: f.binding.ID, InstallationID: f.binding.InstallationID,
+		ChannelType: string(TypeSlack), ChannelChatID: f.binding.ChannelChatID,
+		ChannelMessageID: f.binding.LastMessageID, ChannelThreadID: f.binding.LastThreadID,
+		RouteRevision: f.binding.RouteRevision, Config: f.binding.Config,
+	}, nil
 }
 
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.inst, f.instErr
+}
+func (f *fakeOutboundQueries) RecordChannelOutboundMessage(_ context.Context, arg db.RecordChannelOutboundMessageParams) error {
+	f.recordedOutbound = append(f.recordedOutbound, arg)
+	return f.recordOutboundErr
 }
 
 func (f *fakeOutboundQueries) SetChatMessageChannelOutboundProvenanceByTask(_ context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error) {
@@ -60,14 +75,16 @@ func (f *fakeOutboundQueries) SetChatMessageChannelOutboundProvenanceByTask(_ co
 }
 
 type fakeSender struct {
-	called int
-	got    channel.OutboundMessage
-	result channel.SendResult
+	called      int
+	got         channel.OutboundMessage
+	gotMetadata slack.SlackMetadata
+	result      channel.SendResult
 }
 
-func (f *fakeSender) Send(_ context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
+func (f *fakeSender) SendWithMetadata(_ context.Context, out channel.OutboundMessage, metadata slack.SlackMetadata) (channel.SendResult, error) {
 	f.called++
 	f.got = out
+	f.gotMetadata = metadata
 	if len(f.result.MessageIDs) > 0 || f.result.MessageID != "" {
 		return f.result, nil
 	}

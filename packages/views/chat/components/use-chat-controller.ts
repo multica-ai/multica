@@ -277,6 +277,25 @@ export function useChatController(opts?: { isActive?: boolean }) {
     () => setFocusInputRequest((n) => n + 1),
     [],
   );
+  const [starterPromptRequest, setStarterPromptRequest] = useState<{
+    id: number;
+    content: string;
+  } | null>(null);
+  const nextStarterPromptRequestIdRef = useRef(0);
+  const prefillStarterPrompt = useCallback(
+    (prompt: string) => {
+      setStarterPromptRequest({
+        id: ++nextStarterPromptRequestIdRef.current,
+        content: prompt,
+      });
+      requestInputFocus();
+    },
+    [requestInputFocus],
+  );
+  const handleStarterPromptApplied = useCallback(
+    () => setStarterPromptRequest(null),
+    [],
+  );
 
   const currentSession = activeSessionId
     ? sessions.find((s) => s.id === activeSessionId)
@@ -832,6 +851,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleRestoreDraftApplied,
     // compose-box focus nonce (bumped on new chat)
     focusInputRequest,
+    starterPromptRequest,
+    handleStarterPromptApplied,
+    prefillStarterPrompt,
     // actions
     handleSend,
     handleStop,

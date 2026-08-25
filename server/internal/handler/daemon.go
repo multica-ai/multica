@@ -2598,52 +2598,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.ChatIntro = !hasUser
 			}
 		}
-		// Flag a channel-backed session so the daemon makes the agent aware it
-		// is operating inside an IM conversation and not the Multica web app
-		// (MUL-3871). Empty for a web-only chat session.
-		//
-		// The binding is read WITHOUT naming a channel. Every channel writes
-		// the same channel_chat_session_binding row and differs only in
-		// channel_type, and UNIQUE (chat_session_id) allows at most one, so
-		// the row itself is the answer. Enumerating candidate channels here
-		// was the bug twice over: the Slack-only lookup reported a Feishu
-		// chat as web-backed (MUL-4899), and the {slack, feishu} list that
-		// replaced it did the same to WeCom. Downstream that mis-flag makes
-		// the brief inject `multica attachment upload` guidance into a
-		// conversation that cannot carry attachments at all.
-		//
-		// ChatInThread stays Slack-only on purpose. It selects between
-		// `multica chat history` and `multica chat thread`, and those two
-		// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
-		// is no history reader on any other channel, so the flag has nothing
-		// to select between there and must not imply one exists.
-		//
-		// chat_type rides along on the same row. It is what lets the
-		// per-turn prompt tell the agent whether this chat_session is a room
-		// shared by many people or a 1:1 with the bot; the prompt used to
-		// describe every chat run as a private 1:1 whatever the room. The
-		// shared session service writes the column for every channel
-		// (channel/engine/session.go), so no channel needs naming here
-		// either.
-		if binding, berr := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), cs.ID); berr == nil {
-			resp.ChatChannelType = binding.ChannelType
-			resp.ChatType = binding.ChatType
-			// Whether a file the agent produces reaches this
-			// conversation is the server's question, not the daemon's.
-			// It takes an adapter that goes back for the bound
-			// attachment AND storage for it to go back to, and only
-			// this process knows both. Answered here so the daemon
-			// never has to infer it from the channel type — an
-			// inference that promises delivery on any deployment
-			// running WeCom without object storage.
-			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(binding.ChannelType)
-			if binding.ChannelType == string(slack.TypeSlack) {
-				// The latest trigger was a thread reply iff its reply-target
-				// thread (last_thread_id) differs from its own message id (a
-				// top-level @mention records its own ts as both).
-				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-					binding.LastThreadID.String != binding.LastMessageID.String
+		// A task-level delivery snapshot, not the Chat's historical binding,
+		// decides whether this run is operating for an external audience.
+		// Web/Desktop/Mobile turns in an old channel-originated Chat have no
+		// snapshot and remain private to Multica after /new rotates the route.
+		delivery, deliveryErr := h.Queries.GetChannelTaskDelivery(r.Context(), task.ID)
+		if deliveryErr == nil {
+			resp.ChatChannelType = delivery.ChannelType
+			resp.ChatType = delivery.ChatType
+			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
+			if delivery.ChannelType == string(slack.TypeSlack) {
+				resp.ChatInThread = delivery.ChannelThreadID.Valid &&
+					delivery.ChannelThreadID.String != "" &&
+					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String
 			}
+		} else if !errors.Is(deliveryErr, pgx.ErrNoRows) {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
 		}
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
@@ -2897,7 +2868,36 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, true); failure != nil {
 				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 			}
-
+			if qc.SourceContextID != "" {
+				workspaceID, workspaceErr := util.ParseUUID(qc.WorkspaceID)
+				contextID, contextIDErr := util.ParseUUID(qc.SourceContextID)
+				if workspaceErr != nil || contextIDErr != nil {
+					return resp, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
+						r.Context(), task,
+						"Captured source context is invalid. Start again from the branch point.",
+						taskfailure.ReasonAgentUnknown,
+						"error_source_context_invalid", http.StatusConflict, "captured source context is invalid",
+					)
+				}
+				captured, contextErr := h.Queries.GetIssueSourceContextByID(r.Context(), db.GetIssueSourceContextByIDParams{WorkspaceID: workspaceID, ID: contextID})
+				if contextErr != nil && !errors.Is(contextErr, pgx.ErrNoRows) {
+					if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); requeueErr != nil {
+						slog.Error("quick-create claim: requeue after source context lookup failed", "task_id", uuidToString(task.ID), "error", requeueErr)
+					}
+					return resp, nil, 0, 0, &claimBuildFailure{
+						outcome: "error_source_context_load", status: http.StatusInternalServerError, message: "failed to load captured source context",
+					}
+				}
+				if contextErr != nil || captured.State != "pending" || captured.OriginTaskID != task.ID {
+					return resp, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
+						r.Context(), task,
+						"Captured source context is no longer available. Start again from the branch point.",
+						taskfailure.ReasonAgentUnknown,
+						"error_source_context_unavailable", http.StatusConflict, "captured source context is unavailable",
+					)
+				}
+				resp.QuickCreateSourceContext = append(json.RawMessage(nil), captured.Snapshot...)
+			}
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task. A prompt-supplied project id
@@ -2932,7 +2932,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// will fail loud, which is a better outcome than silently
 			// dropping the sub-issue intent.
 			if qc.ParentIssueID != "" {
-				resp.ParentIssueID = qc.ParentIssueID
+				parentExists := true
 				if parentUUID, err := util.ParseUUID(qc.ParentIssueID); err == nil {
 					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
 						parent, perr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -2943,8 +2943,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
 								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
 							}
+						} else if qc.SourceContextID != "" && errors.Is(perr, pgx.ErrNoRows) {
+							// A contextual quick-create already owns an immutable
+							// snapshot. If its source was deleted before this first
+							// issue exists, create the eventual target as top-level —
+							// the same state application-layer detach would have
+							// produced had deletion happened just after creation.
+							// Ordinary Add sub-issue keeps its historical fail-loud
+							// behavior when its parent disappears.
+							parentExists = false
 						}
 					}
+				}
+				if parentExists {
+					resp.ParentIssueID = qc.ParentIssueID
 				}
 			}
 
@@ -3047,12 +3059,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	// Workspace status catalog (MUL-6460): active CUSTOM statuses only, so the
-	// daemon can render them into the brief's status-command line. Not gated on
-	// the custom_issue_statuses flag — the flag only guards creation, and a
-	// catalog written before a flag flip must stay visible to agents as long as
-	// issues can sit on it. Read on every claim, like the agent row, so an
-	// admin's edit lands on the next task. Failure degrades to the built-in-only
-	// brief rather than failing the claim.
+	// daemon can render them into the brief's status-command line. Read on every
+	// claim, like the agent row, so an admin's edit lands on the next task.
+	// Failure degrades to the built-in-only brief rather than failing the claim.
 	if entries, err := h.Queries.ListIssueStatusEntries(r.Context(), db.ListIssueStatusEntriesParams{
 		WorkspaceID:     parseUUID(resp.WorkspaceID),
 		IncludeArchived: false,

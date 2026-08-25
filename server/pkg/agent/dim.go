@@ -193,11 +193,10 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, dimArgs...)
 	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
-	// Take over context cancellation: the default would SIGKILL only the
-	// leader the instant runCtx is done, orphaning descendants. We instead
-	// drive a group-wide SIGKILL from the deferred cleanup below. Returning
-	// nil keeps os/exec from racing us with its own kill.
+	// Take over context cancellation: the default kills the group the instant
+	// runCtx is done, leaving no chance to shut the ACP session down first. We
+	// instead drive a group-wide SIGKILL from the deferred cleanup below.
+	// Returning nil keeps os/exec from racing us with its own kill.
 	cmd.Cancel = func() error { return nil }
 	cmd.WaitDelay = 10 * time.Second
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(dimArgs, trustAgentCommandPositional(0, "acp")))

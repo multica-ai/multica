@@ -147,9 +147,19 @@
     "chat_with_named": "与 {{name}} 对话"
   },
   "starter_prompts": {
-    "list_open": "按优先级列出我未完成的任务",
-    "summarize_today": "总结一下我今天做了什么",
-    "plan_next": "规划接下来该做什么"
+    "aria_label": "推荐的初始操作",
+    "capabilities": {
+      "label": "你能帮我做什么？",
+      "prompt": "你最擅长帮我做什么？请简要介绍。"
+    },
+    "first_task": {
+      "label": "建议第一个任务",
+      "prompt": "建议三个适合交给你的实用任务。"
+    },
+    "recommend": {
+      "label": "推荐一个操作",
+      "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
+    }
   },
   "onboarding_cards": {
     "aria_label": "开始方式",

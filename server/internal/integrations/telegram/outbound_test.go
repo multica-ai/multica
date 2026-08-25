@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -24,28 +25,31 @@ import (
 )
 
 type fakeTelegramOutboundQueries struct {
-	task          db.AgentTaskQueue
-	taskErr       error
+	deliveryErr   error
 	channelOrigin bool
-	originErr     error
 	binding       db.ChannelChatSessionBinding
 	bindings      map[[16]byte]db.ChannelChatSessionBinding
 	installation  db.ChannelInstallation
 }
 
-func (f *fakeTelegramOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
-	return f.task, f.taskErr
-}
-
-func (f *fakeTelegramOutboundQueries) TaskHasChannelIngestedMessages(context.Context, pgtype.UUID) (bool, error) {
-	return f.channelOrigin, f.originErr
-}
-
-func (f *fakeTelegramOutboundQueries) GetChannelChatSessionBindingBySession(_ context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
-	if binding, ok := f.bindings[arg.ChatSessionID.Bytes]; ok {
-		return binding, nil
+func (f *fakeTelegramOutboundQueries) GetChannelTaskDelivery(_ context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	if f.deliveryErr != nil {
+		return db.ChannelTaskDelivery{}, f.deliveryErr
 	}
-	return f.binding, nil
+	if !f.channelOrigin {
+		return db.ChannelTaskDelivery{}, pgx.ErrNoRows
+	}
+	binding := f.binding
+	if mapped, ok := f.bindings[taskID.Bytes]; ok {
+		binding = mapped
+	}
+	return db.ChannelTaskDelivery{
+		TaskID: taskID, BindingID: binding.ID, InstallationID: binding.InstallationID,
+		ChannelType: string(TypeTelegram), ChannelChatID: binding.ChannelChatID,
+		ChatType: binding.ChatType, ChannelMessageID: binding.LastMessageID,
+		ChannelThreadID: binding.LastThreadID, RouteRevision: binding.RouteRevision,
+		Config: binding.Config,
+	}, nil
 }
 
 func (f *fakeTelegramOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
@@ -57,13 +61,6 @@ func telegramTestUUID(b byte) pgtype.UUID {
 	id.Bytes[0] = b
 	id.Valid = true
 	return id
-}
-
-func telegramTestTask() db.AgentTaskQueue {
-	return db.AgentTaskQueue{
-		ChatSessionID:   telegramTestUUID(3),
-		ChatInputTaskID: telegramTestUUID(4),
-	}
 }
 
 func telegramTestEvent() events.Event {
@@ -116,7 +113,6 @@ func telegramTestBinding(chatID int64) db.ChannelChatSessionBinding {
 
 func newTelegramOutboundQueries() *fakeTelegramOutboundQueries {
 	return &fakeTelegramOutboundQueries{
-		task: telegramTestTask(),
 		binding: db.ChannelChatSessionBinding{
 			InstallationID: telegramTestUUID(1),
 			ChannelChatID:  "42",
@@ -131,9 +127,9 @@ func newTelegramOutboundQueries() *fakeTelegramOutboundQueries {
 	}
 }
 
-func TestResolveTargetFailsClosedWhenTaskLookupFails(t *testing.T) {
+func TestResolveTargetFailsClosedWhenDeliveryLookupFails(t *testing.T) {
 	q := newTelegramOutboundQueries()
-	q.taskErr = errors.New("database unavailable")
+	q.deliveryErr = errors.New("database unavailable")
 	o := NewOutbound(q, nil, "", nil, nil)
 
 	if _, err := o.resolveTarget(context.Background(), telegramTestEvent(), false); err == nil {
@@ -864,8 +860,8 @@ func TestOutboundLegacyLaneCollisionDoesNotBlockAnotherSession(t *testing.T) {
 	q := newTelegramOutboundQueries()
 	q.channelOrigin = true
 	q.bindings = map[[16]byte]db.ChannelChatSessionBinding{
-		{15: 3}: telegramTestBinding(42),
-		{15: 7}: telegramTestBinding(43),
+		{15: 2}: telegramTestBinding(42),
+		{15: 5}: telegramTestBinding(43),
 	}
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -971,9 +967,9 @@ func TestOutboundBackoffSessionsDoNotExhaustWorkers(t *testing.T) {
 	q.channelOrigin = true
 	q.bindings = make(map[[16]byte]db.ChannelChatSessionBinding)
 	for i := byte(1); i <= terminalWorkerCount+2; i++ {
-		q.bindings[[16]byte{15: i}] = telegramTestBinding(100 + int64(i))
+		q.bindings[[16]byte{15: i + 30}] = telegramTestBinding(100 + int64(i))
 	}
-	q.bindings[[16]byte{15: 20}] = telegramTestBinding(200)
+	q.bindings[[16]byte{15: 60}] = telegramTestBinding(200)
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	o.Start(ctx)
@@ -1029,8 +1025,9 @@ func TestOutboundShutdownAbandonsQueuedRetryWaitingAndInflightJobs(t *testing.T)
 	q := newTelegramOutboundQueries()
 	q.channelOrigin = true
 	q.bindings = map[[16]byte]db.ChannelChatSessionBinding{
-		{15: 3}: telegramTestBinding(42),
-		{15: 7}: telegramTestBinding(43),
+		{15: 2}: telegramTestBinding(42),
+		{15: 5}: telegramTestBinding(43),
+		{15: 6}: telegramTestBinding(43),
 	}
 	o := NewOutbound(q, nil, api.URL, api.Client(), nil)
 	ctx, cancel := context.WithCancel(context.Background())

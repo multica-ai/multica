@@ -294,11 +294,19 @@ func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, c
 	return chatSessionBindingFromRow(row), nil
 }
 
+func (s *ChannelStore) GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	return s.Queries.GetChannelTaskDelivery(ctx, taskID)
+}
+
+func (s *ChannelStore) GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
+	return s.Queries.GetChannelChatSessionBindingBySession(ctx, arg)
+}
+
 func (s *ChannelStore) UpdateLarkChatSessionBindingReplyTarget(ctx context.Context, arg UpdateChatSessionBindingReplyTargetParams) error {
 	return s.Queries.UpdateChannelChatSessionBindingReplyTarget(ctx, db.UpdateChannelChatSessionBindingReplyTargetParams{
-		ChatSessionID: arg.ChatSessionID,
-		LastMessageID: arg.LastMessageID,
-		LastThreadID:  arg.LastThreadID,
+		ReplyChatSessionID: arg.ChatSessionID,
+		LastMessageID:      arg.LastMessageID,
+		LastThreadID:       arg.LastThreadID,
 	})
 }
 

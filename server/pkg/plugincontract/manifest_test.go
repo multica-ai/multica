@@ -77,6 +77,61 @@ func TestParseManifestAcceptsReferenceDocument(t *testing.T) {
 	}
 }
 
+func TestParseManifestAcceptsScheduledHook(t *testing.T) {
+	raw := mutate(t, func(doc map[string]any) {
+		contributes := doc["contributes"].(map[string]any)
+		hook := contributes["hooks"].([]any)[0].(map[string]any)
+		hook["triggers"] = []any{"schedule", "manual"}
+		hook["schedule"] = map[string]any{"cron": "*/5 * * * *", "timezone": "Asia/Shanghai"}
+	})
+	manifest, _, err := ParseManifest(raw)
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	hook := manifest.Contributes.Hooks[0]
+	if hook.Schedule == nil || hook.Schedule.Cron != "*/5 * * * *" || hook.Schedule.Timezone != "Asia/Shanghai" {
+		t.Fatalf("schedule = %+v", hook.Schedule)
+	}
+}
+
+func TestParseManifestValidatesScheduledHookContract(t *testing.T) {
+	tests := []struct {
+		name      string
+		triggers  []any
+		schedule  any
+		transport any
+		want      string
+	}{
+		{name: "missing schedule", triggers: []any{"schedule"}, want: "schedule is required"},
+		{name: "schedule without trigger", triggers: []any{"manual"}, schedule: map[string]any{"cron": "*/5 * * * *", "timezone": "UTC"}, want: "requires the schedule trigger"},
+		{name: "seconds field", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "0 */5 * * * *", "timezone": "UTC"}, want: "five-field"},
+		{name: "inline timezone", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "CRON_TZ=UTC */5 * * * *", "timezone": "UTC"}, want: "inline timezone"},
+		{name: "missing timezone", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "*/5 * * * *", "timezone": ""}, want: "timezone must not be empty"},
+		{name: "invalid timezone", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "*/5 * * * *", "timezone": "Mars/Olympus"}, want: "timezone is invalid"},
+		{name: "too frequent", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "*/4 * * * *", "timezone": "UTC"}, want: "every five minutes"},
+		{name: "mcp transport", triggers: []any{"schedule"}, schedule: map[string]any{"cron": "*/5 * * * *", "timezone": "UTC"}, transport: map[string]any{"type": "mcp", "url": "https://example.com/mcp"}, want: "only supports the http transport"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hook := contributes["hooks"].([]any)[0].(map[string]any)
+				hook["triggers"] = tc.triggers
+				if tc.schedule != nil {
+					hook["schedule"] = tc.schedule
+				}
+				if tc.transport != nil {
+					hook["transport"] = tc.transport
+				}
+			})
+			_, _, err := ParseManifest(raw)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
 func TestConfigSchemaPreservesDeclarationOrder(t *testing.T) {
 	manifest, canonical, err := ParseManifest([]byte(validManifest))
 	if err != nil {
@@ -440,7 +495,7 @@ func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
 
 	full := Capabilities{
 		SurfaceTypes:  map[string]bool{SurfaceIssuePanel: true, SurfaceSidebarPanel: true, SurfaceModal: true},
-		HookTriggers:  map[string]bool{TriggerUI: true, TriggerManual: true, TriggerAgent: true, TriggerEvent: true},
+		HookTriggers:  map[string]bool{TriggerUI: true, TriggerManual: true, TriggerAgent: true, TriggerEvent: true, TriggerSchedule: true},
 		HookTransport: map[string]bool{TransportHTTP: true, TransportMCP: true},
 		ResourceTypes: map[string]bool{ResourceSkill: true},
 	}
