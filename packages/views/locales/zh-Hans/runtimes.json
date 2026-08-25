@@ -289,6 +289,7 @@
     "col_owner": "所有者",
     "col_agents": "智能体",
     "col_cost": "费用 · 7 天",
+    "col_plan_limits": "套餐额度",
     "col_cli": "CLI",
     "cost_delta_flat": "持平",
     "cli_managed_badge": "桌面端",
@@ -307,6 +308,20 @@
     "pending_health_error": "注册错误",
     "pending_health_disabled": "已禁用",
     "pending_cli_unknown": "等待中"
+  },
+  "plan_limits": {
+    "title": "套餐额度",
+    "observed": "更新于 {{when}}",
+    "unavailable": "暂无额度数据",
+    "unavailable_hint": "尚未上报额度快照。Codex 会在运行一次 CLI 会话后上报；旧版守护进程和不支持的 CLI 会保持此状态。",
+    "unavailable_hint_claude": "Claude Code 目前只有在会话额度用尽后才会报告套餐额度。",
+    "limit_reached": "额度已用尽",
+    "used": "已使用 {{percent}}%",
+    "resets": "{{when}}重置",
+    "window_5h": "5 小时窗口",
+    "window_7d": "7 天窗口",
+    "window_primary": "当前窗口",
+    "window_secondary": "次级窗口"
   },
   "profiles": {
     "cta": "添加运行时",

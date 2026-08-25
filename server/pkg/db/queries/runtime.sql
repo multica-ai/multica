@@ -169,6 +169,15 @@ UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online';
 
+-- name: UpdateAgentRuntimePlanLimits :execrows
+-- Stores only the normalized, credential-free provider snapshot accepted by
+-- the heartbeat handler. IS DISTINCT FROM avoids rewriting the row on every
+-- 15-second heartbeat when the observed snapshot has not changed.
+UPDATE agent_runtime
+SET plan_limits = @plan_limits
+WHERE id = @id
+  AND plan_limits IS DISTINCT FROM @plan_limits;
+
 -- name: TouchAgentRuntimesLastSeenBatch :execrows
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
 -- coalesces N per-runtime "bump last_seen_at" requests into a single UPDATE so a

@@ -42,10 +42,11 @@ type AgentRuntimeResponse struct {
 	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID  *string `json:"profile_id"`
-	LastSeenAt *string `json:"last_seen_at"`
-	CreatedAt  string  `json:"created_at"`
-	UpdatedAt  string  `json:"updated_at"`
+	ProfileID  *string                      `json:"profile_id"`
+	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+	LastSeenAt *string                      `json:"last_seen_at"`
+	CreatedAt  string                       `json:"created_at"`
+	UpdatedAt  string                       `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -55,6 +56,13 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	}
 	if metadata == nil {
 		metadata = map[string]any{}
+	}
+	var planLimits *protocol.PlanLimitsSnapshot
+	if len(rt.PlanLimits) > 0 {
+		var snapshot protocol.PlanLimitsSnapshot
+		if json.Unmarshal(rt.PlanLimits, &snapshot) == nil {
+			planLimits = &snapshot
+		}
 	}
 
 	return AgentRuntimeResponse{
@@ -72,6 +80,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		ProfileID:    uuidToPtr(rt.ProfileID),
+		PlanLimits:   planLimits,
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),

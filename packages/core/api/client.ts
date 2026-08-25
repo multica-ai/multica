@@ -254,6 +254,7 @@ import {
   IssueTriggerPreviewSchema,
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
+  AgentRuntimeListSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
   AgentBuilderSessionListSchema,
@@ -1579,8 +1580,11 @@ export class ApiClient {
     // workspace_id alone is not enough: the server resolves the workspace from
     // the slug header first, so a caller listing another workspace's runtimes
     // must override the header too.
-    return this.fetch(`/api/runtimes?${search}`, {
+    const raw = await this.fetch<unknown>(`/api/runtimes?${search}`, {
       headers: workspaceHeader(workspaceSlug),
+    });
+    return parseWithFallback<AgentRuntime[]>(raw, AgentRuntimeListSchema, [], {
+      endpoint: "GET /api/runtimes",
     });
   }
 

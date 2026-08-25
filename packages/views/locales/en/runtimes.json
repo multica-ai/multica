@@ -302,6 +302,7 @@
     "col_owner": "Owner",
     "col_agents": "Agents",
     "col_cost": "Cost · 7d",
+    "col_plan_limits": "Plan limits",
     "col_cli": "CLI",
     "cost_delta_flat": "flat",
     "cli_managed_badge": "Desktop",
@@ -320,6 +321,20 @@
     "pending_health_error": "Registration error",
     "pending_health_disabled": "Disabled",
     "pending_cli_unknown": "waiting"
+  },
+  "plan_limits": {
+    "title": "Plan limits",
+    "observed": "Updated {{when}}",
+    "unavailable": "Plan limits unavailable",
+    "unavailable_hint": "No quota snapshot has been reported. Codex reports one after a CLI session; older daemons and unsupported CLIs remain unavailable.",
+    "unavailable_hint_claude": "Claude Code currently reports plan limits only after it reaches a session limit.",
+    "limit_reached": "Limit reached",
+    "used": "{{percent}}% used",
+    "resets": "Resets {{when}}",
+    "window_5h": "5-hour window",
+    "window_7d": "7-day window",
+    "window_primary": "Current window",
+    "window_secondary": "Secondary window"
   },
   "profiles": {
     "cta": "Add runtime",

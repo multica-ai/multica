@@ -902,6 +902,64 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	w = testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 }
 
+func TestDaemonHeartbeat_StoresCredentialFreePlanLimits(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	daemonID := "plan-limits-daemon-" + uuid.New().String()
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, $2, 'Plan Limits Runtime', 'local', 'codex', 'online',
+			'Plan limits test', '{}'::jsonb, $3, now())
+		RETURNING id
+	`, testWorkspaceID, daemonID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
+		"runtime_id": runtimeID,
+		"plan_limits": map[string]any{
+			"provider":     "codex",
+			"status":       protocol.PlanLimitsStatusAvailable,
+			"observed_at":  int64(1_800_000_000),
+			"access_token": "must-not-be-stored",
+			"windows": []map[string]any{{
+				"name":           "primary",
+				"used_percent":   42.0,
+				"window_minutes": 300,
+				"resets_at":      int64(1_800_003_600),
+			}},
+		},
+	}, testWorkspaceID, daemonID)
+	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
+
+	var stored []byte
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT plan_limits FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&stored); err != nil {
+		t.Fatalf("read stored plan limits: %v", err)
+	}
+	if bytes.Contains(stored, []byte("must-not-be-stored")) || bytes.Contains(stored, []byte("access_token")) {
+		t.Fatalf("stored plan limits contain an unapproved field: %s", stored)
+	}
+
+	var snapshot protocol.PlanLimitsSnapshot
+	if err := json.Unmarshal(stored, &snapshot); err != nil {
+		t.Fatalf("decode stored plan limits: %v", err)
+	}
+	if snapshot.Provider != "codex" || len(snapshot.Windows) != 1 || snapshot.Windows[0].UsedPercent == nil || *snapshot.Windows[0].UsedPercent != 42 {
+		t.Fatalf("stored plan limits = %+v", snapshot)
+	}
+}
+
 // TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the fix for
 // issue #2391: when GetAgentRuntime returns pgx.ErrNoRows (runtime row was
 // deleted server-side), the WS handler must return a successful ack with
@@ -917,7 +975,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	missingRuntime := uuid.New().String()
 	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
 		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
-		missingRuntime, false)
+		missingRuntime, false, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -956,7 +1014,7 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 
 	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
 		daemonws.ClientIdentity{WorkspaceIDs: []string{testWorkspaceID, workspaceID}},
-		runtimeID, false)
+		runtimeID, false, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}

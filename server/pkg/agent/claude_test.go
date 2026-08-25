@@ -12,7 +12,43 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+func TestClaudePlanLimitsFromSessionLimitEvent(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.August, 21, 16, 0, 0, 0, time.UTC)
+	line := `{"type":"assistant","error":"rate_limit","apiErrorStatus":429,"message":{"content":[{"type":"text","text":"You've hit your session limit · resets 1:50am (Asia/Shanghai)"}]}}`
+	snapshot := claudePlanLimitsFromLine(line, observedAt)
+	if snapshot == nil {
+		t.Fatal("expected exhausted plan limit snapshot")
+	}
+	if snapshot.Provider != "claude" || snapshot.Status != protocol.PlanLimitsStatusExhausted || snapshot.ObservedAt != observedAt.Unix() {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if len(snapshot.Windows) != 1 || snapshot.Windows[0].ResetsAt == nil {
+		t.Fatalf("windows = %+v", snapshot.Windows)
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("load timezone: %v", err)
+	}
+	wantReset := time.Date(2026, time.August, 22, 1, 50, 0, 0, location).Unix()
+	if got := *snapshot.Windows[0].ResetsAt; got != wantReset {
+		t.Fatalf("resets_at = %d, want %d", got, wantReset)
+	}
+}
+
+func TestClaudePlanLimitsIgnoresGenericRateLimit(t *testing.T) {
+	t.Parallel()
+
+	line := `{"type":"result","is_error":true,"result":"API Error: 429 rate_limit_error: per-minute rate limit exceeded"}`
+	if got := claudePlanLimitsFromLine(line, time.Now()); got != nil {
+		t.Fatalf("generic API rate limit produced plan snapshot: %+v", got)
+	}
+}
 
 func TestClaudeHandleAssistantText(t *testing.T) {
 	t.Parallel()

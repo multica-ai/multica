@@ -289,6 +289,7 @@
     "col_owner": "소유자",
     "col_agents": "에이전트",
     "col_cost": "비용 · 7일",
+    "col_plan_limits": "플랜 한도",
     "col_cli": "CLI",
     "cost_delta_flat": "변화 없음",
     "cli_managed_badge": "데스크톱",
@@ -307,6 +308,20 @@
     "pending_health_error": "등록 오류",
     "pending_health_disabled": "비활성화됨",
     "pending_cli_unknown": "대기 중"
+  },
+  "plan_limits": {
+    "title": "플랜 한도",
+    "observed": "{{when}} 업데이트",
+    "unavailable": "한도 데이터 없음",
+    "unavailable_hint": "한도 스냅샷이 아직 보고되지 않았습니다. Codex는 CLI 세션 후 보고하며, 이전 데몬과 지원되지 않는 CLI에서는 사용할 수 없습니다.",
+    "unavailable_hint_claude": "Claude Code는 현재 세션 한도에 도달한 경우에만 플랜 한도를 보고합니다.",
+    "limit_reached": "한도 도달",
+    "used": "{{percent}}% 사용",
+    "resets": "{{when}} 재설정",
+    "window_5h": "5시간 창",
+    "window_7d": "7일 창",
+    "window_primary": "현재 창",
+    "window_secondary": "보조 창"
   },
   "profiles": {
     "cta": "런타임 추가",

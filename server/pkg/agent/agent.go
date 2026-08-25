@@ -12,6 +12,8 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
@@ -199,6 +201,10 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// PlanLimits is the latest credential-free subscription-window snapshot
+	// observed while this run was active. Most providers leave it nil because
+	// their CLI does not expose plan headroom to non-interactive callers.
+	PlanLimits *protocol.PlanLimitsSnapshot
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was itself refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history

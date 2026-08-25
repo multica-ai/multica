@@ -1499,6 +1499,49 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
 };
 
 // ---------------------------------------------------------------------------
+// Runtime schemas. `plan_limits` is a progressive daemon capability: malformed
+// optional quota data is discarded without hiding an otherwise usable runtime
+// row, while the established runtime identity fields remain validated.
+// ---------------------------------------------------------------------------
+
+export const PlanLimitWindowSchema = z.object({
+  name: z.string(),
+  used_percent: z.number().min(0).max(100).optional(),
+  window_minutes: z.number().positive().optional(),
+  resets_at: z.number().positive().optional(),
+}).loose();
+
+export const PlanLimitsSnapshotSchema = z.object({
+  provider: z.string(),
+  status: z.enum(["available", "exhausted"]),
+  windows: z.array(PlanLimitWindowSchema).optional(),
+  observed_at: z.number().positive(),
+}).loose();
+
+export const AgentRuntimeSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  daemon_id: z.string().nullable(),
+  name: z.string(),
+  custom_name: z.string().nullable().optional(),
+  runtime_mode: z.enum(["local", "cloud"]),
+  provider: z.string(),
+  launch_header: z.string(),
+  status: z.enum(["online", "offline"]),
+  device_info: z.string(),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  owner_id: z.string().nullable(),
+  visibility: z.enum(["private", "public"]).default("private"),
+  profile_id: z.string().nullable().optional(),
+  plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
+  last_seen_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
+
+// ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //
 // The dashboard hits three independent rollup endpoints. Each returns a flat

@@ -56,6 +56,27 @@ export interface AgentInvocationTargetInput {
 // the fallback.
 export type RuntimeVisibility = "private" | "public";
 
+export type PlanLimitsStatus = "available" | "exhausted";
+
+export interface PlanLimitWindow {
+  name: string;
+  used_percent?: number;
+  window_minutes?: number;
+  resets_at?: number;
+}
+
+/**
+ * Credential-free provider subscription usage observed by the daemon. Older
+ * daemons omit the field, and some providers can report only an exhausted
+ * state plus reset time rather than a live percentage.
+ */
+export interface PlanLimitsSnapshot {
+  provider: string;
+  status: PlanLimitsStatus;
+  windows?: PlanLimitWindow[];
+  observed_at: number;
+}
+
 export interface RuntimeDevice {
   id: string;
   workspace_id: string;
@@ -85,6 +106,7 @@ export interface RuntimeDevice {
    * a missing value as `null` (built-in).
    */
   profile_id?: string | null;
+  plan_limits?: PlanLimitsSnapshot | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
