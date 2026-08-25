@@ -5225,7 +5225,24 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	// GAP-5 (issue #4): opt-in provider failover. Primary first, then any
+	// MULTICA_PROVIDER_FAILOVER fallbacks, walking the chain only when the
+	// attempt died on a transient transport error (provider_network / 429).
+	// Unset chain = single run, identical to pre-failover behavior. Usage from
+	// every attempt accumulates so billing stays complete across failovers.
+	var result TaskResult
+	var err error
+	var usage []TaskUsageEntry
+	chain := append([]string{provider}, d.cfg.ProviderFailover[provider]...)
+	for i, tryProvider := range chain {
+		result, err = d.runner.run(runCtx, task, tryProvider, slot, taskLog)
+		usage = append(usage, result.Usage...)
+		if err == nil || !isProviderNetworkError(err) || i == len(chain)-1 || runCtx.Err() != nil {
+			break
+		}
+		taskLog.Warn("provider failover", "from", tryProvider, "to", chain[i+1], "error", err)
+	}
+	result.Usage = usage
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
@@ -5387,6 +5404,24 @@ func taskRunFailureReason(err error) string {
 		return taskfailure.ReasonRuntimeCLITimeout.String()
 	}
 	return taskfailure.Classify(err.Error()).String()
+}
+
+// isProviderNetworkError reports whether err is a transient transport-layer
+// provider failure — the only class worth walking the GAP-5 failover chain
+// for. Provider network cuts and 429 capacity errors qualify; auth, quota,
+// context overflow, timeouts with their own terminal status etc. fail fast on
+// the current provider.
+func isProviderNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch taskfailure.Classify(err.Error()) {
+	case taskfailure.ReasonAgentProviderNetwork,
+		taskfailure.ReasonAgentProviderCapacityOrRateLimit: // 429/529
+		return true
+	default:
+		return false
+	}
 }
 
 // acquireLocalDirectoryLockIfNeeded inspects the task's project resources for

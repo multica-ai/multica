@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -116,6 +117,13 @@ type Config struct {
 	// parsed from MULTICA_PROVIDER_CEILING="codex:2,claude:3". Providers not
 	// listed fall back to MaxConcurrentTasks. nil = no per-provider limits.
 	ProviderCeilings map[string]int
+	// ProviderFailover maps a primary provider to its ordered fallbacks
+	// (GAP-5, issue #4), parsed from
+	// MULTICA_PROVIDER_FAILOVER="codex:claude,kimi-k2.6;claude:qwen3.7-plus".
+	// When a task fails on the primary with a transient transport error
+	// (provider_network / 429) the daemon retries in-process on the next
+	// fallback. In-memory only; nil = no failover (pre-GAP-5 behavior).
+	ProviderFailover map[string][]string
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -394,6 +402,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
 	providerCeilings := parseProviderCeilings(os.Getenv("MULTICA_PROVIDER_CEILING"))
+	providerFailover := parseProviderFailover(os.Getenv("MULTICA_PROVIDER_FAILOVER"))
 
 	// Profile
 	profile := overrides.Profile
@@ -567,6 +576,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		HealthPort:                      healthPort,
 		MaxConcurrentTasks:              maxConcurrentTasks,
 		ProviderCeilings:                providerCeilings,
+		ProviderFailover:                providerFailover,
 		PollInterval:                    pollInterval,
 		HeartbeatInterval:               heartbeatInterval,
 		AgentTimeout:                    agentTimeout,
@@ -602,6 +612,44 @@ func parseProviderCeilings(raw string) map[string]int {
 			continue
 		}
 		m[k] = n
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
+}
+
+// parseProviderFailover parses MULTICA_PROVIDER_FAILOVER="codex:claude,kimi-k2.6;
+// claude:qwen3.7-plus" (GAP-5, issue #4). Semicolon splits primary:fallback
+// entries, comma splits the fallback list. Malformed entries and fallbacks that
+// are empty, equal to their primary, or duplicated within a chain are skipped
+// with a warning; an unset or fully-empty value returns nil (no failover).
+func parseProviderFailover(raw string) map[string][]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	m := make(map[string][]string)
+	for _, entry := range strings.Split(raw, ";") {
+		k, v, ok := strings.Cut(strings.TrimSpace(entry), ":")
+		if !ok || k == "" {
+			slog.Warn("ignoring bad MULTICA_PROVIDER_FAILOVER entry", "entry", entry)
+			continue
+		}
+		var chain []string
+		for _, fb := range strings.Split(v, ",") {
+			fb = strings.TrimSpace(fb)
+			if fb == "" || fb == k || slices.Contains(chain, fb) {
+				slog.Warn("ignoring bad MULTICA_PROVIDER_FAILOVER fallback", "primary", k, "fallback", fb)
+				continue
+			}
+			chain = append(chain, fb)
+		}
+		if len(chain) == 0 {
+			slog.Warn("ignoring MULTICA_PROVIDER_FAILOVER entry with no usable fallbacks", "primary", k)
+			continue
+		}
+		m[k] = chain
 	}
 	if len(m) == 0 {
 		return nil
