@@ -202,7 +202,14 @@ type TaskContextForEnv struct {
 	// PriorAttempt is the failure digest of the attempt this retry follows
 	// (GAP-23). Rendered as "## Prior Attempt" in issue_context.md. Nil on
 	// fresh tasks.
-	PriorAttempt  *PriorAttemptData
+	PriorAttempt *PriorAttemptData
+	// PriorRunDigest is the GAP-2 handoff summary of the reused workdir's git
+	// state (current branch, commits ahead of the default branch, last three
+	// commit subjects), collected by writeContextFiles when
+	// PriorSessionResumed is set. Rendered ONLY into issue_context.md (a
+	// per-run sidecar rewritten every task); it must never reach the runtime
+	// brief, which stays byte-identical across runs (MUL-5377).
+	PriorRunDigest string
 	IsSquadLeader bool // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
