@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { InboxItem } from "@multica/core/types";
+import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("sonner", () => ({
@@ -133,10 +134,14 @@ vi.mock("./inbox-list", () => ({
     items,
     view,
     onSelect,
+    emptyLabel,
+    emptyAction,
   }: {
     items: InboxItem[];
     view: string;
     onSelect: (item: InboxItem) => void;
+    emptyLabel?: string;
+    emptyAction?: React.ReactNode;
   }) => (
     <div data-testid="list" data-view={view}>
       {items.map((i) => (
@@ -144,8 +149,13 @@ vi.mock("./inbox-list", () => ({
           {i.id}
         </button>
       ))}
+      {items.length === 0 && emptyLabel && <p>{emptyLabel}</p>}
+      {items.length === 0 && emptyAction}
     </div>
   ),
+}));
+vi.mock("./inbox-filter-menu", () => ({
+  InboxFilterMenu: () => <button type="button">Filter inbox</button>,
 }));
 vi.mock("./inbox-list-item", () => ({ useTimeAgo: () => vi.fn() }));
 
@@ -185,6 +195,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
     title: "Issue title",
     body: null,
     issue_status: null,
+    issue_priority: null,
     read: true,
     archived: false,
     created_at: "2026-06-15T08:00:00Z",
@@ -208,6 +219,7 @@ function reset() {
   rowActions = null;
   issueDetailProps.length = 0;
   layout.width = PHONE;
+  useInboxFilterStore.setState({ filtersByWorkspace: {} });
 }
 
 describe("InboxPage", () => {
@@ -231,6 +243,70 @@ describe("InboxPage", () => {
 
     expect(screen.getByTestId("list").dataset.view).toBe("inbox");
     expect(screen.getByTestId("row").textContent).toBe("active-1");
+  });
+
+  it("filters the list by status and priority together", () => {
+    reset();
+    listData.active = [
+      item({
+        id: "todo-high",
+        issue_id: "issue-1",
+        issue_status: "todo",
+        issue_priority: "high",
+      }),
+      item({
+        id: "done-low",
+        issue_id: "issue-2",
+        issue_status: "done",
+        issue_priority: "low",
+      }),
+      item({ id: "system", issue_id: null }),
+    ];
+    const filters = useInboxFilterStore.getState();
+    filters.toggleStatusFilter("workspace-1", "done");
+    filters.togglePriorityFilter("workspace-1", "low");
+
+    render(<InboxPage />);
+
+    expect(screen.getAllByTestId("row")).toHaveLength(1);
+    expect(screen.getByTestId("row")).toHaveTextContent("done-low");
+  });
+
+  it("offers to clear filters when they hide every notification", () => {
+    reset();
+    listData.active = [
+      item({
+        id: "todo-high",
+        issue_status: "todo",
+        issue_priority: "high",
+      }),
+    ];
+    useInboxFilterStore
+      .getState()
+      .togglePriorityFilter("workspace-1", "urgent");
+
+    render(<InboxPage />);
+
+    expect(screen.queryByTestId("row")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Inbox" }));
+    expect(screen.getByTestId("row")).toHaveTextContent("todo-high");
+  });
+
+  it("ignores a priority filter when a legacy response omits the projection", () => {
+    reset();
+    const legacyItem = item({
+      id: "legacy-todo",
+      issue_status: "todo",
+    });
+    delete legacyItem.issue_priority;
+    listData.active = [legacyItem];
+    useInboxFilterStore
+      .getState()
+      .togglePriorityFilter("workspace-1", "urgent");
+
+    render(<InboxPage />);
+
+    expect(screen.getByTestId("row")).toHaveTextContent("legacy-todo");
   });
 
   it("renders the archived list when the URL asks for it", () => {

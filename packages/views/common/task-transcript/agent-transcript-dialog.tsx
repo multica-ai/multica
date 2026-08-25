@@ -42,7 +42,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { cancelReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
@@ -788,10 +788,23 @@ export function AgentTranscriptDialog({
   // this figure, same as on the other usage surfaces.
   useCustomPricingStore((s) => s.pricings);
   const usage = summarizeTaskUsage(task.usage);
+  // Two separate things, deliberately not one string (#7411):
+  //   • `reasonLabel` — the localized reason, derived from the stable
+  //     `failure_reason` enum. This is the user-facing explanation.
+  //   • `task.error` — the raw diagnostic the server/daemon persisted, in
+  //     English, for classification and logs. Kept readable (it is how you
+  //     find "which worktree holds my preserved work" and "which machine
+  //     needs upgrading") but labelled as a technical detail rather than
+  //     presented as the reason, and never merged into the localized text.
+  const reasonLabel =
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
   const hasRunDetails =
     !!runtimeInfo ||
     !!workdirCopyTarget?.relativePath ||
     !!task.branch_name ||
+    !!reasonLabel ||
     !!task.error ||
     !!createdLabel ||
     !!startedLabel ||
@@ -939,14 +952,13 @@ export function AgentTranscriptDialog({
                           copyTitle={t(($) => $.transcript.copy_branch)}
                         />
                       )}
-                      {/* The full persisted error, for failed AND
-                          server-cancelled runs — this is where "which
-                          worktree holds my preserved work" and "which
-                          machine needs upgrading" are actually readable. */}
-                      {task.error && (
+                      {/* The localized reason, from the stable
+                          `failure_reason` enum — this is the explanation, and
+                          it reads in the user's language. */}
+                      {reasonLabel && (
                         <RunDetailRow
                           label={t(($) => $.transcript.details_reason)}
-                          value={task.error}
+                          value={reasonLabel}
                         />
                       )}
                       {createdLabel && (
@@ -957,6 +969,23 @@ export function AgentTranscriptDialog({
                       )}
                       {completedLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                      {/* The raw persisted diagnostic, last and behind its own
+                          divider. It is English prose written by the server
+                          and daemon for logs and classification, so it is
+                          labelled "Technical details" — a translated heading
+                          over untranslated content — rather than shown as the
+                          run's reason (#7411). Still the place where "which
+                          worktree holds my preserved work" is readable. */}
+                      {task.error && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_diagnostics)}
+                            value={task.error}
+                            mono
+                          />
+                        </>
                       )}
                       {usage && (
                         <>

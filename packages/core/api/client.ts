@@ -153,7 +153,7 @@ import type {
   PluginInstallationListResponse,
   PluginPackage,
   PluginPackageListResponse,
-  PluginSurfaceScript,
+  PluginSurfaceLaunch,
   PluginInvocation,
   PluginMCPTool,
   PluginPreview,
@@ -412,12 +412,12 @@ import {
   EMPTY_PLUGIN_PREVIEW,
   EMPTY_PLUGIN_PACKAGE,
   EMPTY_PLUGIN_PACKAGE_LIST,
-  EMPTY_PLUGIN_SURFACE_SCRIPT,
+  EMPTY_PLUGIN_SURFACE_LAUNCH,
   PluginHookResultSchema,
   PluginInstallationListResponseSchema,
   PluginPackageListResponseSchema,
   PluginPackageSchema,
-  PluginSurfaceScriptSchema,
+  PluginSurfaceLaunchSchema,
   PluginInvocationListSchema,
   PluginMCPToolListSchema,
   PluginTokenIssueSchema,
@@ -2306,7 +2306,10 @@ export class ApiClient {
 
   // Inbox
   async listInbox(): Promise<InboxItem[]> {
-    return this.fetch("/api/inbox");
+    const raw = await this.fetch<unknown>("/api/inbox");
+    return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
+      endpoint: "GET /api/inbox",
+    });
   }
 
   async markInboxRead(id: string): Promise<InboxItem> {
@@ -2603,17 +2606,13 @@ export class ApiClient {
     await this.fetch<void>(`/api/workspaces/${workspaceId}/plugins/packages/${packageId}`, { method: "DELETE" });
   }
 
-  /**
-   * The code one surface runs, read from the version the workspace installed.
-   * The host inlines it into the sandboxed document, so nothing is fetched from
-   * the plugin author's infrastructure to render a panel.
-   */
-  async getPluginSurfaceScript(workspaceId: string, installationId: string, surfaceKey: string): Promise<PluginSurfaceScript> {
+  /** Mint one hosted document URL and its single-use bridge proof. */
+  async getPluginSurfaceLaunch(workspaceId: string, installationId: string, surfaceKey: string): Promise<PluginSurfaceLaunch> {
     const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/plugins/${installationId}/surfaces/${encodeURIComponent(surfaceKey)}/script`,
+      `/api/workspaces/${workspaceId}/plugins/${installationId}/surfaces/${encodeURIComponent(surfaceKey)}/launch`,
     );
-    return parseWithFallback(raw, PluginSurfaceScriptSchema, EMPTY_PLUGIN_SURFACE_SCRIPT, {
-      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/surfaces/{surfaceKey}/script",
+    return parseWithFallback(raw, PluginSurfaceLaunchSchema, EMPTY_PLUGIN_SURFACE_LAUNCH, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/surfaces/{surfaceKey}/launch",
     });
   }
 
@@ -2676,7 +2675,7 @@ export class ApiClient {
     const query = request.path === "/context" && request.issueId
       ? `?issue_id=${encodeURIComponent(request.issueId)}`
       : "";
-    return this.fetch<unknown>(`/api/v1/plugin${request.path}${query}`, {
+    return this.fetch<unknown>(`/api/plugin-bridge/v1${request.path}${query}`, {
       method: request.method,
       headers: { "X-Multica-Plugin-Installation": installationId },
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
@@ -2697,7 +2696,7 @@ export class ApiClient {
     hookKey: string,
     request: { trigger: "ui" | "manual"; issueId?: string; input?: unknown },
   ): Promise<PluginHookResult> {
-    const raw = await this.fetch<unknown>(`/api/v1/plugin/hooks/${encodeURIComponent(hookKey)}`, {
+    const raw = await this.fetch<unknown>(`/api/plugin-bridge/v1/hooks/${encodeURIComponent(hookKey)}`, {
       method: "POST",
       headers: { "X-Multica-Plugin-Installation": installationId },
       body: JSON.stringify({ trigger: request.trigger, issue_id: request.issueId, input: request.input }),
@@ -2708,7 +2707,7 @@ export class ApiClient {
       trigger: request.trigger,
       latency_ms: 0,
       attempts: 1,
-    }, { endpoint: "POST /api/v1/plugin/hooks/{key}" });
+    }, { endpoint: "POST /api/plugin-bridge/v1/hooks/{key}" });
   }
 
   async listPluginInvocations(workspaceId: string, installationId: string): Promise<PluginInvocation[]> {

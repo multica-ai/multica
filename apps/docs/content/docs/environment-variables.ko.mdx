@@ -42,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 작업을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | 태스크가 대기열에 점유되지 않고 머물 수 있는 최대 시간. 초과 시 `queued_expired`로 실패. 저 동시성 런타임이 긴 작업 뒤에 합리적으로 대기할 수 있으므로 이 경우 값을 키워야 함 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -52,9 +53,14 @@ Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`�
 | `FRONTEND_ORIGIN` | 비어 있음 | 사용자가 접근하는 프런트엔드 origin. CORS, cookie, 초대 링크에 사용 |
 | `MULTICA_APP_URL` | `FRONTEND_ORIGIN`으로 fallback | 사용자가 접근할 수 있는 Web 주소. CLI 로그인과 계정 연결 링크에 사용 |
 | `MULTICA_PUBLIC_URL` | 비어 있음 | 공개 API 주소. webhook URL과 런타임 연결 안내에 사용 |
+| `MULTICA_DAEMON_SERVER_URL` | `MULTICA_PUBLIC_URL`, 그다음 `MULTICA_APP_URL` / `FRONTEND_ORIGIN`으로 fallback | API 프로세스가 `multica setup self-host` 명령에 넣는 서버 URL. 데몬이 접근하는 API URL이 공개 webhook URL과 다를 때 설정 |
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 HTTP origin, 쉼표로 구분 |
 | `ALLOWED_ORIGINS` | CORS 또는 프런트엔드 주소로 fallback | WebSocket origin allowlist, 쉼표로 구분 |
 | `COOKIE_DOMAIN` | 비어 있음 | 프런트엔드와 backend의 host가 다르고 브라우저가 API 도메인에 직접 접근할 때 필수. 단일 도메인 배포에서는 비워 둠 |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL`은 인증이 필요 없는 `/api/config` 엔드포인트에서 반환되며 클라이언트가 읽을 수 있습니다. 공개 설정으로 취급하고 자격 증명, 토큰 또는 기타 비밀을 절대 포함하지 마세요.
+</Callout>
 
 프런트엔드와 API가 서로 다른 host를 사용하고 브라우저가 API 도메인에 직접 접근한다면 `COOKIE_DOMAIN`을 설정해야 합니다. 설정하지 않으면 브라우저가 CSRF cookie를 읽지 못해 모든 쓰기 요청이 `403 CSRF validation failed`를 반환하고 읽기 요청만 정상 작동합니다. 두 host를 모두 포함하는 가장 좁은 상위 도메인을 사용하세요(`.example.com`보다 `.agent.example.com`이 더 적합). 이 설정은 로그인 세션 cookie를 해당 도메인의 모든 host로 확장하므로 모든 host를 같은 신뢰 주체가 운영할 때만 사용할 수 있습니다. 수정 후 두 host에서 이전 cookie를 삭제하고 다시 로그인해야 합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 same-origin 구성을 사용해 브라우저가 app 도메인에만 접근한다면 비워 두세요. IP 주소는 입력하지 마세요. 브라우저가 IP Domain이 포함된 cookie를 무시합니다.
 
@@ -175,6 +181,10 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 저장된 secret과 surface 실행 URL을 암호화하는 base64 인코딩 32바이트 키 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 백엔드로 라우팅되는 쿠키 없는 전용 origin. app/API origin과 달라야 하며 `Host`를 보존해야 함 |
+| Plugins | `MULTICA_PLUGIN_API_URL` | 버전을 포함한 Plugin Public API의 전체 Base URL(예: `https://plugin-api.example.com/v1`). 설정하지 않으면 `MULTICA_PUBLIC_URL` + `/v1` 사용 |
+| Plugins | `MULTICA_PLUGIN_DIR` | 개발 중 로컬 plugin bundle을 게시하는 선택적 절대 디렉터리 |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
@@ -230,7 +240,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 작업별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 작업 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 실행 태스크 디렉터리 유지 |
 
-각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
+각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

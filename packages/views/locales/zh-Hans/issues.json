@@ -353,7 +353,7 @@
       "hint_jump": "跳转",
       "hint_close": "关闭"
     },
-    "sidebar_tooltip": "切换侧边栏",
+    "sidebar_tooltip": "切换右侧边栏",
     "find": {
       "placeholder": "在任务中查找...",
       "count": "{{current}}/{{total}}",

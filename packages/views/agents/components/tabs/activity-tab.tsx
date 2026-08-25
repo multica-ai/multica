@@ -682,11 +682,13 @@ function TaskRow({
           {failureLabel && (
             <>
               <Sep />
-              {/* Hover reveals the actionable text ("upgrade the daemon on
-                  that machine", "work preserved at …"), not just the bucket. */}
-              <span className="text-destructive" title={task.error ?? undefined}>
-                {failureLabel}
-              </span>
+              {/* The localized reason is the whole user-facing explanation
+                  here. The raw `task.error` used to ride along as this
+                  element's `title`, which put untranslated English (and
+                  absolute paths) in front of every non-English workspace
+                  (#7411); the full diagnostic lives in the transcript's Run
+                  details instead. */}
+              <span className="text-destructive">{failureLabel}</span>
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.

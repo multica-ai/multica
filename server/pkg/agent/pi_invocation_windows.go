@@ -9,27 +9,13 @@ import (
 	"strings"
 )
 
-// platformPiInvocation rewrites pi.cmd → PowerShell -File pi.ps1 on
-// Windows to avoid cmd.exe %* re-tokenisation (see #3306).
+// platformPiInvocation rewrites pi.cmd → PowerShell -Command pi.ps1 on
+// Windows. -Command with @args is the only route that preserves stdin bytes:
+// -File re-encodes stdin under the console ANSI codepage, destroying
+// non-ASCII input (#7355). It also avoids cmd.exe %* re-tokenisation (#3306).
 // powerShellLookup and rewriteCmdToPS1 are defined in cursor_invocation_windows.go.
 func platformPiInvocation(lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
-	if isPiRPCInvocation(args) {
-		return rewriteCmdToPS1Command("pi", lookedUp, args, logger)
-	}
-	return rewriteCmdToPS1("pi", lookedUp, args, logger)
-}
-
-func isPiRPCInvocation(args []string) bool {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--mode" && i+1 < len(args) && args[i+1] == "rpc" {
-			return true
-		}
-		if arg == "--mode=rpc" {
-			return true
-		}
-	}
-	return false
+	return rewriteCmdToPS1Command("pi", lookedUp, args, logger)
 }
 
 func rewriteCmdToPS1Command(toolName, lookedUp string, args []string, logger *slog.Logger) (string, []string, bool) {
@@ -47,13 +33,10 @@ func rewriteCmdToPS1Command(toolName, lookedUp string, args []string, logger *sl
 		return "", nil, false
 	}
 
-	quotedPS1 := strings.ReplaceAll(ps1, "'", "''")
-	full := make([]string, 0, 6+len(args))
-	full = append(full, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "& '"+quotedPS1+"' @args")
-	full = append(full, args...)
+	full := piPowerShellCommandArgs(ps1, args)
 
 	if logger != nil {
-		logger.Info(toolName+": routing RPC through powershell -Command to preserve stdin",
+		logger.Info(toolName+": routing through powershell -Command to preserve stdin",
 			"powershell", psExe,
 			"ps1", ps1,
 			"original", lookedUp,

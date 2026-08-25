@@ -119,6 +119,14 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 		want  ModelPrice
 	}{
 		{
+			model: "grok-4.6",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "xai:grok-4.6",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
 			model: "grok-4.5",
 			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.3, CacheWritePerM: 2, OutputPerM: 6},
 		},
@@ -170,6 +178,8 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 	for _, model := range []string{
 		"grok-composer-2.5-fast",
 		"grok-composer-2.5",
+		"grok-4.6-fast",
+		"grok-4-6",
 		"grok-4.5-fast",
 		"grok-4-5",
 		"grok-4.20-0309",

@@ -503,6 +503,21 @@ describe("estimateCost", () => {
     ).toBeCloseTo(8.3, 5);
   });
 
+  it("prices grok-4.6 at xAI's short-context $2.00 / $6.00 tier with $0.50 cached input", () => {
+    // grok-4.6 cached input is $0.50/1M, not grok-4.5's $0.30.
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.50.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.5, 5);
+  });
+
   it("prices the rest of the published Grok catalog", () => {
     // grok-4.3 and the 4.20 snapshots share one $1.25 / $2.50 tier;
     // grok-build-0.1 is its own $1.00 / $2.00 row.

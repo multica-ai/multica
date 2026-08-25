@@ -443,9 +443,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // Hovering the status mark reveals the localized reason, never the raw
   // `task.error`. That field is operator-facing English prose the daemon and
   // server write for classification and logs (#7411) — pasting it into a
-  // tooltip is exactly how internal implementation detail leaks into the UI.
-  const statusTitle =
-    failureLabel ?? label;
+  // tooltip made every non-English workspace read English at the exact moment
+  // something broke, and dragged absolute worktree paths and machine names
+  // into hover text and screenshots. The full diagnostic stays one click away
+  // in the transcript's Run details.
+  const statusTitle = failureLabel ?? label;
 
   // What this run cost, in the slot the relative timestamp used to hold.
   //

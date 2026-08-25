@@ -981,6 +981,21 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PluginHookSchedule struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	HookKey        string             `json:"hook_key"`
+	CronExpression string             `json:"cron_expression"`
+	Timezone       string             `json:"timezone"`
+	Generation     pgtype.UUID        `json:"generation"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	Enabled        bool               `json:"enabled"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PluginInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -1011,6 +1026,8 @@ type PluginInvocation struct {
 	LatencyMs      int32              `json:"latency_ms"`
 	Error          pgtype.Text        `json:"error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	DeliveryID     pgtype.Text        `json:"delivery_id"`
+	PlannedAt      pgtype.Timestamptz `json:"planned_at"`
 }
 
 type PluginPackage struct {

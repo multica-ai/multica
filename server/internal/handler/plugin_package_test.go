@@ -4,10 +4,12 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -121,19 +123,45 @@ func installPublishedVersion(t *testing.T, versionID string) string {
 
 func surfaceScript(t *testing.T, installationID, surfaceKey string) (*httptest.ResponseRecorder, service.PluginSurfaceScript) {
 	t.Helper()
+	previousOrigin := testHandler.cfg.PluginSurfaceOrigin
+	previousTokens := testHandler.PluginSurfaceTokens
+	testHandler.cfg.PluginSurfaceOrigin = "https://plugin-content.example.test"
+	testHandler.PluginSurfaceTokens, _ = NewPluginSurfaceTokenBox(bytes.Repeat([]byte{7}, 32))
+	t.Cleanup(func() {
+		testHandler.cfg.PluginSurfaceOrigin = previousOrigin
+		testHandler.PluginSurfaceTokens = previousTokens
+	})
+
 	recorder := httptest.NewRecorder()
-	testHandler.GetPluginSurfaceScript(recorder, pluginHandlerRequest(http.MethodGet, "/script", nil, map[string]string{
+	testHandler.GetPluginSurfaceLaunch(recorder, pluginHandlerRequest(http.MethodGet, "/launch", nil, map[string]string{
 		"id":             testWorkspaceID,
 		"installationId": installationID,
 		"surfaceKey":     surfaceKey,
 	}))
-	var script service.PluginSurfaceScript
-	if recorder.Code == http.StatusOK {
-		if err := json.Unmarshal(recorder.Body.Bytes(), &script); err != nil {
-			t.Fatalf("decode surface script: %v", err)
-		}
+	if recorder.Code != http.StatusOK {
+		return recorder, service.PluginSurfaceScript{}
 	}
-	return recorder, script
+	var launch pluginSurfaceLaunch
+	if err := json.Unmarshal(recorder.Body.Bytes(), &launch); err != nil {
+		t.Fatalf("decode surface launch: %v", err)
+	}
+	token := launch.URL[strings.LastIndex(launch.URL, "/")+1:]
+	documentRecorder := httptest.NewRecorder()
+	documentRequest := pluginHandlerRequest(http.MethodGet, "/plugin-surfaces/"+token, nil, map[string]string{"token": token})
+	documentRequest.Host = "plugin-content.example.test"
+	testHandler.ServePluginSurface(documentRecorder, documentRequest)
+	if documentRecorder.Code != http.StatusOK {
+		t.Fatalf("serve hosted surface: status=%d body=%s", documentRecorder.Code, documentRecorder.Body.String())
+	}
+	encoded := regexp.MustCompile(`id="multica-surface-code">([^<]+)</script>`).FindStringSubmatch(documentRecorder.Body.String())
+	if len(encoded) != 2 {
+		t.Fatal("hosted surface did not contain stored code")
+	}
+	code, err := base64.StdEncoding.DecodeString(encoded[1])
+	if err != nil {
+		t.Fatalf("decode hosted surface code: %v", err)
+	}
+	return recorder, service.PluginSurfaceScript{Code: string(code), Version: launch.Version, Digest: launch.Digest}
 }
 
 // An author with no server of their own publishes a panel plugin by upload, an

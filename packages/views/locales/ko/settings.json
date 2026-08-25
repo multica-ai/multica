@@ -7,7 +7,6 @@
     "show_archived": "보관됨 표시 ({{count}})",
     "archived_badge": "보관됨",
     "archived_hint": "새로 지정할 수 없습니다. 이미 이 상태인 태스크는 그대로 유지됩니다.",
-    "flag_off": "이 배포에서는 사용자 지정 상태가 아직 활성화되지 않았습니다. 아래 기본 상태는 평소대로 동작합니다.",
     "reorder_failed": "새 순서를 저장하지 못했습니다.",
     "actions": {
       "open": "{{name}} 작업",
@@ -168,8 +167,12 @@
         "description": "선호하는 태스크 만들기 흐름을 엽니다."
       },
       "toggleSidebar": {
-        "label": "사이드바 전환",
-        "description": "기본 사이드바를 표시하거나 숨깁니다."
+        "label": "왼쪽 사이드바 전환",
+        "description": "왼쪽 사이드바를 표시하거나 숨깁니다."
+      },
+      "toggleRightSidebar": {
+        "label": "오른쪽 사이드바 전환",
+        "description": "현재 페이지에 오른쪽 사이드바가 있으면 표시하거나 숨깁니다."
       },
       "toggleChat": {
         "label": "채팅 창 전환",
@@ -363,6 +366,19 @@
       "installed": "Plugin을 설치했습니다",
       "upgrade_from": " · v{{version}}에서 업그레이드",
       "new_scope": "신규"
+    },
+    "schedule": {
+      "title": "자동 스케줄",
+      "consent_title": "이 Plugin은 훅을 자동 실행합니다",
+      "consent_description": "설치하거나 업그레이드하면 다음 스케줄이 활성화됩니다. 여러 실행 시점을 놓친 경우 가장 최근 실행만 전달합니다.",
+      "next_run": "다음 실행: {{time}}",
+      "activity_title": "최근 전달",
+      "activity_last": "{{status}} · 예정 {{planned}} · 전송 {{actual}} · 시도 {{attempt}}",
+      "activity_empty": "아직 전달되지 않음",
+      "frequency_minutes_other": "{{count}}분마다",
+      "frequency_hourly": "매시 {{minute}}분",
+      "frequency_daily": "매일 {{hour}}:{{minute}}",
+      "frequency_custom": "사용자 지정 반복 스케줄"
     },
     "config": {
       "title": "설정",

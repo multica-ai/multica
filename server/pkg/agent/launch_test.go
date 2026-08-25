@@ -131,7 +131,7 @@ func TestNewFiltersLaunchPrefixOnce(t *testing.T) {
 func TestLaunchPrefixReachesACPFamilies(t *testing.T) {
 	t.Parallel()
 
-	for _, family := range []string{"kimi", "hermes", "kiro", "reasonix", "qwenpaw", "dim"} {
+	for _, family := range []string{"kimi", "hermes", "kiro", "reasonix", "qwenpaw", "dim", "zeroclaw"} {
 		t.Run(family, func(t *testing.T) {
 			t.Parallel()
 			cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
@@ -658,6 +658,30 @@ func TestDimLaunchPrefixFiltersBlockedFlags(t *testing.T) {
 	want := []string{"start", "q36"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("dim: blocked flags must be stripped, got %v, want %v", got, want)
+	}
+}
+
+// TestZeroclawLaunchPrefixFiltersBlockedFlags proves the ZeroClaw
+// launch-prefix safety policy: allowed positional tokens reach the command
+// ahead of the hardcoded `acp` subcommand, while protocol-breaking flags
+// (--help, -h, login, --login, --auth, acp) are stripped.
+func TestZeroclawLaunchPrefixFiltersBlockedFlags(t *testing.T) {
+	t.Parallel()
+
+	// Allowed positional prefix tokens survive and precede `acp`.
+	cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
+	argv := cfg.commandAt("wrapper").Argv("acp")
+	if idx := prefixIndex(argv, []string{"start", "q36", "acp"}); idx != 0 {
+		t.Fatalf("zeroclaw: allowed prefix must precede the acp subcommand, got %v", argv)
+	}
+
+	// Protocol-breaking flags are removed from the prefix.
+	got := filterLaunchPrefix(
+		[]string{"start", "--help", "--login", "--auth", "-h", "q36"},
+		"zeroclaw", slog.Default())
+	want := []string{"start", "q36"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("zeroclaw: blocked flags must be stripped, got %v, want %v", got, want)
 	}
 }
 

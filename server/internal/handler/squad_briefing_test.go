@@ -13,6 +13,31 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// TestSquadOperatingProtocolRecordsAgainstTheTurnsIssue locks the recording
+// contract the protocol teaches (MUL-6622 / GH #7487): record against the issue
+// this turn runs on — squad assignment of that issue is irrelevant — and, when
+// the call fails, leave a trace WITHOUT breaking one-comment-per-turn. The
+// conditional matters: on the `action` path a delegation comment already exists,
+// so an unconditional "post a comment on failure" would demand a second one.
+func TestSquadOperatingProtocolRecordsAgainstTheTurnsIssue(t *testing.T) {
+	for _, ownsStatus := range []bool{true, false} {
+		compact := strings.Join(strings.Fields(squadOperatingProtocolFor(ownsStatus)), " ")
+		for _, want := range []string{
+			"Record it against the issue THIS turn is running on",
+			"It does not need to be assigned to your squad",
+			"without breaking the one-comment-per-turn rule",
+			"ONLY if you have not already commented this turn",
+			"do not add a second one",
+			"never post a second comment just to report the error",
+		} {
+			if !strings.Contains(compact, want) {
+				t.Errorf("owns_status=%v: expected squad operating protocol to contain %q\n--- protocol ---\n%s",
+					ownsStatus, want, compact)
+			}
+		}
+	}
+}
+
 // TestSquadOperatingProtocolOwnsParentStatus locks the parent-issue status
 // contract: first dispatch moves todo→in_progress and stays there; only a
 // later confirmation of overall completion may advance to in_review; done is
