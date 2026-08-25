@@ -635,8 +635,11 @@ jobs:
         # grandchild dies with the tree that owns it, that an unowned process
         # still reports cleanup as unconfirmed, and that a descendant holding
         # inherited stdout neither keeps Result blocked nor survives cleanup.
+        # The DSH entry extends the same guarantee to the backend's own
+        # startup path: a runtime that spawns a detached descendant and dies
+        # before `ready` must take that descendant down with the owned tree.
         # -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestDshWindowsStartupFailureKillsProcessTree)$' -count=1 -timeout=5m
 
       - name: Test Windows OpenClaw npm shim interpreter resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}
