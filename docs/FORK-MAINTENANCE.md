@@ -95,6 +95,21 @@ Daemon-side pieces take effect when you rebuild + swap `~/.local/bin/multica`
 AND the desktop-bundled binary (see below). Server-side pieces require
 redeploying the self-host server from this branch.
 
+### Autonomy enablement (2026-08-25, workspace PSP-latro)
+
+Full-autonomy caps set for workspace `55e95948-ebca-4d05-97fe-913db33d969d`:
+budget $5 / 500k tokens / 60m wall clock, provider ceilings
+`opencode:2,deepseek-v4-flash:2`, failover
+`opencode:deepseek-v4-flash;deepseek-v4-flash:opencode`, notify sinks empty.
+Values live in `.env` + compose passthrough (`docker-compose.selfhost.yml`,
+pool tweak `pool_max_conns=8&pool_min_conns=2` preserved) and — because tasks
+for this workspace run under the **host** launchd daemon, not a container —
+in `~/Library/LaunchAgents/com.multica.daemon.plist`. Plist change applies on
+next daemon restart:
+`launchctl kickstart -k gui/$UID/com.multica.daemon` (do NOT run mid-task).
+Verifier chain set via direct SQL (no API token in `.env`): Gameplay
+Programmer → QA Tester → Reviewer 2 (`verify_agent_id`).
+
 ### Desktop app binary swap
 
 Desktop spawns `<Multica.app>/Contents/Resources/app.asar.unpacked/resources/bin/multica`
