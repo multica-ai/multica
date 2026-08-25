@@ -72,6 +72,12 @@ export function InstructionsTab({
   useEffect(() => {
     const previous = persistedRef.current;
     const switchingAgents = previous.agentId !== agent.id;
+
+    // The parent publishes these fields optimistically while a save is in
+    // flight. Neither that snapshot nor a later rollback is confirmed server
+    // state, so keep the submitted values available for retry on failure.
+    if (!switchingAgents && saving) return;
+
     const local = localRef.current;
     const wasLocallyDirty =
       local.instructions !== previous.instructions ||
@@ -91,7 +97,7 @@ export function InstructionsTab({
         JSON.parse(persistedStarterPromptsKey) as AgentStarterPrompt[],
       );
     }
-  }, [agent.id, agent.instructions, persistedStarterPromptsKey]);
+  }, [agent.id, agent.instructions, persistedStarterPromptsKey, saving]);
 
   // Report dirty state up so the parent can guard tab switches.
   useEffect(() => {

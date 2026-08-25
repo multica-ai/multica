@@ -100,6 +100,56 @@ describe("InstructionsTab persisted-state synchronization", () => {
     );
   });
 
+  it("preserves submitted prompt edits when an optimistic update rolls back", async () => {
+    let rejectSave!: (reason?: unknown) => void;
+    const onSave = vi.fn(
+      () =>
+        new Promise<void>((_, reject) => {
+          rejectSave = reject;
+        }),
+    );
+    const user = userEvent.setup();
+    const { rerender } = render(tab(baseAgent, onSave));
+    const label = screen.getByLabelText("Suggestion 1 label");
+    const prompt = screen.getByLabelText("Suggestion 1 prompt");
+    await user.clear(label);
+    await user.type(label, "Inspect the patch");
+    await user.clear(prompt);
+    await user.type(prompt, "Inspect the patch for correctness.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const optimisticPrompt = {
+      label: "Inspect the patch",
+      prompt: "Inspect the patch for correctness.",
+    };
+    rerender(
+      tab(
+        {
+          ...baseAgent,
+          starter_prompts: [optimisticPrompt],
+        },
+        onSave,
+      ),
+    );
+    rerender(
+      tab(
+        {
+          ...baseAgent,
+          starter_prompts: [{ ...persistedPrompt }],
+        },
+        onSave,
+      ),
+    );
+    await act(async () => rejectSave(new Error("Update failed")));
+
+    expect(screen.getByLabelText("Suggestion 1 label")).toHaveValue(
+      "Inspect the patch",
+    );
+    expect(screen.getByLabelText("Suggestion 1 prompt")).toHaveValue(
+      "Inspect the patch for correctness.",
+    );
+  });
+
   it("omits starter prompts from settings writes to an older backend", async () => {
     configStore.getState().setAgentStarterPromptsSupported(false);
     const onSave = vi.fn().mockResolvedValue(undefined);
