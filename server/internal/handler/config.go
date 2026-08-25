@@ -25,6 +25,9 @@ type AppConfig struct {
 	// toggle signup or wire Google OAuth.
 	AllowSignup    bool   `json:"allow_signup"`
 	GoogleClientID string `json:"google_client_id,omitempty"`
+	// DingTalkClientID gates the DingTalk OAuth button on the login page,
+	// same runtime-driven pattern as GoogleClientID.
+	DingTalkClientID string `json:"dingtalk_client_id,omitempty"`
 	// WorkspaceCreationDisabled mirrors the server-side
 	// DISABLE_WORKSPACE_CREATION env var so the UI can hide every
 	// "Create workspace" affordance on self-hosted instances. Omitted
@@ -94,6 +97,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		LocalWorktreeSupported:    true,
 		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
+		DingTalkClientID:          os.Getenv("DINGTALK_CLIENT_ID"),
 		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 	}
 	if h.Storage != nil {
