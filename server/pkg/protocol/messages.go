@@ -20,6 +20,10 @@ const (
 	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
 	// that implements the mode says so; one that does not, cannot.
 	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+	// DaemonCapabilitySourceContextQuickCreateV1 advertises support for the
+	// two-section quick-create prompt that keeps a new instruction separate
+	// from immutable historical source context.
+	DaemonCapabilitySourceContextQuickCreateV1 = "source_context_quick_create_v1"
 
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).

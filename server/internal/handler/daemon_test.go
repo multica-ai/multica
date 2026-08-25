@@ -2656,16 +2656,18 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 }
 
 type claimRuntimeGuardTask struct {
-	PriorSessionID                string   `json:"prior_session_id"`
-	PriorWorkDir                  string   `json:"prior_work_dir"`
-	PriorSessionResumeUnavailable bool     `json:"prior_session_resume_unavailable"`
-	ChatMessage                   string   `json:"chat_message"`
-	ThreadName                    string   `json:"thread_name"`
-	QuickCreateAttachmentIDs      []string `json:"quick_create_attachment_ids"`
-	QuickCreatePriority           string   `json:"quick_create_priority"`
-	QuickCreateDueDate            string   `json:"quick_create_due_date"`
-	ProjectID                     string   `json:"project_id"`
-	ProjectDescription            string   `json:"project_description"`
+	PriorSessionID                string          `json:"prior_session_id"`
+	PriorWorkDir                  string          `json:"prior_work_dir"`
+	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
+	ChatMessage                   string          `json:"chat_message"`
+	ThreadName                    string          `json:"thread_name"`
+	QuickCreateAttachmentIDs      []string        `json:"quick_create_attachment_ids"`
+	QuickCreatePriority           string          `json:"quick_create_priority"`
+	QuickCreateDueDate            string          `json:"quick_create_due_date"`
+	ProjectID                     string          `json:"project_id"`
+	ProjectDescription            string          `json:"project_description"`
+	ParentIssueID                 string          `json:"parent_issue_id"`
+	QuickCreateSourceContext      json.RawMessage `json:"quick_create_source_context"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
@@ -3407,6 +3409,91 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 	}
 	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
 		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
+	}
+}
+
+func TestClaimTask_SourceContextQuickCreateBecomesTopLevelWhenSourceWasDeleted(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	parentIssueID := dbfx.Issue(t, "deleted source for contextual quick-create")
+	contextID := uuid.NewString()
+	quickContext, err := json.Marshal(map[string]any{
+		"type":              "quick_create",
+		"prompt":            "create the surviving follow-up",
+		"requester_id":      testUserID,
+		"workspace_id":      testWorkspaceID,
+		"parent_issue_id":   parentIssueID,
+		"source_context_id": contextID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var taskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
+		VALUES ($1, $2, 'queued', 2, $3)
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&taskID)
+	dbfx.Exec(t, `
+		INSERT INTO issue_source_context (
+			id, workspace_id, origin_task_id, source_issue_id, anchor_comment_id,
+			captured_by_user_id, snapshot_version, snapshot, capture_digest, state
+		) VALUES ($1, $2, $3, $4, $5, $6, 1, '{}'::jsonb, 'digest', 'pending')
+	`, contextID, testWorkspaceID, taskID, parentIssueID, uuid.NewString(), testUserID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context WHERE id = $1`, contextID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	// Direct deletion isolates the claim-time race: the immutable pending
+	// context intentionally has no FK to the live source and must survive.
+	dbfx.Exec(t, `DELETE FROM issue WHERE id = $1`, parentIssueID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.ParentIssueID != "" {
+		t.Fatalf("source-context quick-create parent = %q after source deletion, want top-level", task.ParentIssueID)
+	}
+	if len(task.QuickCreateSourceContext) == 0 {
+		t.Fatal("source-context quick-create lost its immutable snapshot")
+	}
+}
+
+func TestClaimTask_SourceContextQuickCreateChecksWorkspaceBeforeSnapshot(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	quickContext, err := json.Marshal(map[string]any{
+		"type":              "quick_create",
+		"prompt":            "must not load foreign context",
+		"requester_id":      testUserID,
+		"workspace_id":      uuid.NewString(),
+		"source_context_id": "not-a-uuid",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"context":    quickContext,
+	})
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
+		testWorkspaceID, daemonID)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
+
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("foreign source-context quick-create status = %q, want cancelled before snapshot parsing", status)
 	}
 }
 

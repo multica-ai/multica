@@ -42,7 +42,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, invitationListOptions, shareLinkListOptions, workspaceKeys } from "@multica/core/workspace/queries";
-import { api } from "@multica/core/api";
+import { api, errorCode } from "@multica/core/api";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
@@ -348,6 +348,22 @@ export function MembersTab() {
       qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
       toast.success(t(($) => $.members.toast_invitation_sent));
     } catch (e) {
+      const code = errorCode(e);
+      if (code === "seat_capacity_full") {
+        toast.error(t(($) => $.members.toast_seat_capacity_full), {
+          action: navigation
+            ? {
+                label: t(($) => $.members.add_seats_action),
+                onClick: () => navigation.push(`/${workspace.slug}/settings?tab=billing`),
+              }
+            : undefined,
+        });
+        return;
+      }
+      if (code === "seat_capacity_unavailable") {
+        toast.error(t(($) => $.members.toast_seat_capacity_unavailable));
+        return;
+      }
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
     } finally {
       setInviteLoading(false);

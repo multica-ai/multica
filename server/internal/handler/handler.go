@@ -36,6 +36,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -144,8 +145,10 @@ type Config struct {
 	LLMMaxRetries *llm.RetryOverride
 	// CodexCapacityRetryCount is the deployment-wide number of additional
 	// immediate retries for Codex's exact selected-model capacity error. Zero
-	// disables only that dedicated policy. cmd/server clamps it to
-	// service.MaxCodexCapacityRetryCount before it reaches this struct.
+	// disables only that dedicated policy. cmd/server enforces
+	// service.MaxCodexCapacityRetryCount as a hard maximum, failing the boot on
+	// an out-of-range value rather than correcting it, so the value reaching
+	// this struct is already validated.
 	CodexCapacityRetryCount int32
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
@@ -195,13 +198,19 @@ type Handler struct {
 	AutopilotService       *service.AutopilotService
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves the self-hosted and pre-rollout behavior without extra reads.
-	Entitlements          entitlement.Provider
-	EmailService          *service.EmailService
-	UpdateStore           UpdateStore
-	ModelListStore        ModelListStore
-	LocalSkillListStore   LocalSkillListStore
-	LocalSkillImportStore LocalSkillImportStore
-	FeatureFlags          *featureflag.Service
+	Entitlements entitlement.Provider
+	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
+	// disabled preserves self-hosted behavior.
+	SeatCapacity                   seatcapacity.Executor
+	SeatCapacityEnforcementEnabled bool
+	SeatCapacityLocker             seatcapacity.WorkspaceLocker
+	SeatCapacityWorker             *seatcapacity.Worker
+	EmailService                   *service.EmailService
+	UpdateStore                    UpdateStore
+	ModelListStore                 ModelListStore
+	LocalSkillListStore            LocalSkillListStore
+	LocalSkillImportStore          LocalSkillImportStore
+	FeatureFlags                   *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that
@@ -439,6 +448,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.SourceContextStorage = store
 	taskSvc.CodexCapacityRetryCount = cfg.CodexCapacityRetryCount
 	// Chat follow-up suggestions run through the same internal LLM layer that
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets

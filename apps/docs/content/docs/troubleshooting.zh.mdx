@@ -108,6 +108,10 @@ multica issue runs <issue-id>
 - 反向代理是否转发 WebSocket 的 Upgrade 请求；
 - 浏览器登录是否已经过期。
 
+直接用 `curl` 访问 `/ws` 返回 HTTP 400 是正常现象：该端点要求带 workspace 相关的查询参数，裸握手在进入 WebSocket 升级之前就会被拒。所以 backend 日志里出现 400/401 记录，只能说明普通 HTTP 路由已经到达 backend——并不能证明代理保留了 WebSocket `Upgrade` 头。要验证真正的连接，请打开浏览器开发者工具的 Network → WS 面板（或用支持 WebSocket 的客户端），看是否出现 `101` 握手。
+
+自部署注意：daemon 的长连接拨的是 `/api/daemon/ws`（不是 `/ws`），同样要直通后端；握手失败时 daemon 会静默回退到轮询，backend 日志里该路径反复出现 `status=400` 即中招。
+
 容器只在创建时读取 `.env`，修改后需要重新创建：
 
 ```bash
@@ -115,6 +119,16 @@ docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 完整的反向代理示例见[自托管快速上手](/self-host-quickstart#3-选择访问方式)。
+
+## `multica setup` 报告服务器不可达
+
+CLI 的可达性探测会 GET `<server-url>/health` 并要求 200。backend 提供这个路径。新版 web 前端会把 `/health` 转发给 backend，旧版不会——把所有流量都转给旧版 frontend 的反向代理会返回 404，于是 CLI 误判服务不可用，而服务实际是健康的。
+
+在代理里把 `/health` 显式转给 backend（8080 端口），对所有版本都适用——[自托管快速上手](/self-host-quickstart#3-选择访问方式)里的两个 Caddy 示例都包含这条。确认方法：
+
+```bash
+curl -fsS <server-url>/health
+```
 
 ## 验证码与邀请邮件未送达
 

@@ -13,11 +13,67 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 )
 
 const invitationTestEmail = "invitation-test@multica.ai"
+
+type stubSeatCapacity struct {
+	reserveDecision seatcapacity.Decision
+	reserveErr      error
+	reserveCalls    int
+	releaseCalls    int
+	consumeCalls    int
+	consumeDecision *seatcapacity.Decision
+	consumeErr      error
+}
+
+func (s *stubSeatCapacity) Enabled() bool { return true }
+func (s *stubSeatCapacity) ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (seatcapacity.Decision, error) {
+	s.reserveCalls++
+	return s.reserveDecision, s.reserveErr
+}
+func (s *stubSeatCapacity) ClaimShareJoin(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *stubSeatCapacity) Consume(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	s.consumeCalls++
+	decision := seatcapacity.Decision{Managed: true, Allowed: true}
+	if s.consumeDecision != nil {
+		decision = *s.consumeDecision
+	}
+	return decision, s.consumeErr
+}
+func (s *stubSeatCapacity) Confirm(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *stubSeatCapacity) Release(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	s.releaseCalls++
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *stubSeatCapacity) ReleaseMember(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *stubSeatCapacity) GetOperation(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{}, nil
+}
+
+func useSeatCapacity(t *testing.T, executor seatcapacity.Executor) {
+	t.Helper()
+	previous := testHandler.SeatCapacity
+	previousEnforcement := testHandler.SeatCapacityEnforcementEnabled
+	testHandler.SeatCapacity = executor
+	testHandler.SeatCapacityEnforcementEnabled = true
+	t.Cleanup(func() {
+		testHandler.SeatCapacity = previous
+		testHandler.SeatCapacityEnforcementEnabled = previousEnforcement
+	})
+}
 
 func TestDefaultInvitationRateLimits(t *testing.T) {
 	limits := DefaultInvitationRateLimits()
@@ -90,6 +146,27 @@ func clearInvitationsForTestWorkspace(t *testing.T) {
 	})
 }
 
+type rollbackOnCommitTx struct {
+	pgx.Tx
+}
+
+func (tx rollbackOnCommitTx) Commit(ctx context.Context) error {
+	_ = tx.Tx.Rollback(ctx)
+	return errors.New("forced commit failure")
+}
+
+type rollbackOnCommitTxStarter struct {
+	pool *pgxpool.Pool
+}
+
+func (s rollbackOnCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return rollbackOnCommitTx{Tx: tx}, nil
+}
+
 // Sanity check: a fresh, live pending invitation must block re-invitation.
 func TestCreateInvitation_BlocksWhilePending(t *testing.T) {
 	clearInvitationsForTestWorkspace(t)
@@ -126,6 +203,91 @@ func TestCreateInvitation_BlocksWhilePending(t *testing.T) {
 		if calls != 1 {
 			t.Errorf("%s limiter calls = %d, want 1; a pending retry must not consume budget", name, calls)
 		}
+	}
+}
+
+func TestCreateInvitation_BlocksWhenPurchasedCapacityIsFull(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("clear capacity outbox: %v", err)
+	}
+	capacity := &stubSeatCapacity{reserveDecision: seatcapacity.Decision{
+		Managed: true, Allowed: false, Reason: "capacity_full",
+	}}
+	useSeatCapacity(t, capacity)
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
+		Email: "capacity-full-invite@multica.ai", Role: "member",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateInvitation(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "seat_capacity_full" {
+		t.Fatalf("code = %q, want seat_capacity_full", body.Code)
+	}
+	if capacity.reserveCalls != 1 {
+		t.Fatalf("reserve calls = %d, want 1", capacity.reserveCalls)
+	}
+	var invitationCount, outboxCount int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM workspace_invitation WHERE workspace_id = $1 AND invitee_email = $2`, parseUUID(testWorkspaceID), "capacity-full-invite@multica.ai").Scan(&invitationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if invitationCount != 0 || outboxCount != 0 {
+		t.Fatalf("persisted invitation=%d outbox=%d, want both zero", invitationCount, outboxCount)
+	}
+}
+
+func TestCreateInvitation_CompensatesCapacityWhenCommitRollsBack(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	ctx := context.Background()
+	workspaceID := parseUUID(testWorkspaceID)
+	if _, err := testPool.Exec(ctx, `DELETE FROM seat_capacity_outbox WHERE workspace_id = $1`, workspaceID); err != nil {
+		t.Fatalf("clear capacity outbox: %v", err)
+	}
+
+	capacity := &stubSeatCapacity{reserveDecision: seatcapacity.Decision{Managed: true, Allowed: true}}
+	useSeatCapacity(t, capacity)
+	previousTxStarter := testHandler.TxStarter
+	testHandler.TxStarter = rollbackOnCommitTxStarter{pool: testPool}
+	t.Cleanup(func() { testHandler.TxStarter = previousTxStarter })
+
+	const email = "capacity-commit-failure@multica.ai"
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
+		Email: email, Role: "member",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateInvitation(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	if capacity.reserveCalls != 1 || capacity.releaseCalls != 1 {
+		t.Fatalf("reserve calls = %d, release calls = %d; want one each", capacity.reserveCalls, capacity.releaseCalls)
+	}
+
+	var invitationCount, outboxCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM workspace_invitation WHERE workspace_id = $1 AND invitee_email = $2`, workspaceID, email).Scan(&invitationCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM seat_capacity_outbox WHERE workspace_id = $1`, workspaceID).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if invitationCount != 0 || outboxCount != 0 {
+		t.Fatalf("persisted invitation=%d outbox=%d, want both zero after compensation", invitationCount, outboxCount)
 	}
 }
 

@@ -44,6 +44,7 @@
     "select_prompt": "詳細を表示する通知を選択してください",
     "empty": "インボックスは空です",
     "original_input": "元の入力",
+    "retry_with_context": "コンテキストを保持して再試行",
     "edit_advanced": "詳細フォームで編集",
     "archive": "アーカイブ",
     "unarchive": "アーカイブ解除"
@@ -83,10 +84,13 @@
     "failed_with_detail": "失敗: {{detail}}"
   },
   "toasts": {
+    "source_context_retry_started": "元のコンテキストで再試行を開始しました",
     "archived": "通知をアーカイブしました",
     "unarchived": "通知を元に戻しました"
   },
   "errors": {
+    "source_context_retry_failed": "元のコンテキストで再試行できませんでした",
+    "source_context_retry_unavailable": "このコンテキストは再試行できません。分岐点からやり直してください。",
     "mark_read_failed": "既読にできませんでした",
     "mark_unread_failed": "未読にできませんでした",
     "archive_failed": "アーカイブできませんでした",

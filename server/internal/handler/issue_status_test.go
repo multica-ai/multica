@@ -329,7 +329,6 @@ func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 // TestCreateIssueStatusValidation covers the reserved-key and category rules.
 func TestCreateIssueStatusValidation(t *testing.T) {
 	seedTestCatalog(t)
-	withCustomIssueStatusesFlag(t, testHandler, true)
 
 	cases := []struct {
 		name string
@@ -354,27 +353,20 @@ func TestCreateIssueStatusValidation(t *testing.T) {
 	}
 }
 
-// TestCreateIssueStatusIsGatedOnRollout pins the rollout gate. Creating the
-// first custom status mints a value older pods cannot interpret, so it must be
-// impossible until the whole fleet is on this code. Reads stay open.
-func TestCreateIssueStatusIsGatedOnRollout(t *testing.T) {
+// TestCreateIssueStatusIsNotGatedOnRollout pins the removal of the rollout gate
+// (MUL-6643). Creation used to 403 unless a feature flag was flipped on, because
+// the first custom status minted a value older pods could not interpret. Every
+// pod resolves categories now, so an unset flag must not be able to take the
+// feature away again — creation answers to workspace role alone.
+func TestCreateIssueStatusIsNotGatedOnRollout(t *testing.T) {
 	seedTestCatalog(t)
-	withCustomIssueStatusesFlag(t, testHandler, false)
 
-	rec := httptest.NewRecorder()
-	testHandler.CreateIssueStatus(rec, newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-		"name": "Human Review", "category": "in_review", "color": "#123456",
-	}))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 while the rollout gate is closed, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// Reading the catalog is never gated — clients need it to render statuses.
-	listRec := httptest.NewRecorder()
-	testHandler.ListIssueStatuses(listRec, newRequest(http.MethodGet, "/api/issue-statuses", nil))
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("listing must stay open while the gate is closed, got %d: %s", listRec.Code, listRec.Body.String())
-	}
+	var created IssueStatusResponse
+	testutil.Call(t, testHandler.CreateIssueStatus,
+		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
+			"name": "Human Review", "category": issuestatus.InReview, "color": "#123456",
+		})).Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
 }
 
 // TestIssueWriteStoresCanonicalStatusKey guards the 500 found in review:
@@ -1246,7 +1238,6 @@ func TestBackgroundEventCarriesCustomStatusCategory(t *testing.T) {
 func TestCatalogWritesAnnounceThemselves(t *testing.T) {
 	ctx := context.Background()
 	seedTestCatalog(t)
-	withCustomIssueStatusesFlag(t, testHandler, true)
 
 	changes := make(chan events.Event, 8)
 	testHandler.Bus.Subscribe(protocol.EventIssueStatusChanged, func(e events.Event) {

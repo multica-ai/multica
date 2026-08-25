@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -664,8 +665,8 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate before insert so a bad payload doesn't half-create the row.
-	subscriberUUIDs, ok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+	// Parse before insert so a malformed payload doesn't open a transaction.
+	subscribers, ok := parseAutopilotSubscribers(w, req.Subscribers)
 	if !ok {
 		return
 	}
@@ -677,6 +678,15 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// This must be the first lock family in the transaction. Member revocation
+	// takes the same per-(workspace, user) locks before pruning templates and
+	// deleting member rows. Re-checking membership after those locks means
+	// either this save commits first and revocation prunes it, or revocation
+	// commits first and this save rejects the departed subscriber.
+	if !h.lockAndValidateAutopilotSubscribers(w, r, qtx, subscribers, wsUUID) {
+		return
+	}
 
 	// Keep save-time readiness validation in the same transaction as the
 	// insert. The assignment lock serializes this path with Runtime teardown,
@@ -711,11 +721,11 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	for _, uid := range subscriberUUIDs {
+	for _, subscriber := range subscribers {
 		if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 			AutopilotID: autopilot.ID,
 			UserType:    "member",
-			UserID:      uid,
+			UserID:      subscriber.UserID,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
 			return
@@ -742,19 +752,19 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// Writes an HTTP error and returns ok=false on the first invalid entry.
-// Returns (nil, true) when raw is empty — caller distinguishes "leave alone"
-// from "replace with empty" via the raw-fields map, not this return.
-func (h *Handler) validateAutopilotSubscribers(
-	w http.ResponseWriter,
-	r *http.Request,
-	raw []SubscriberInput,
-	workspaceID string,
-) ([]pgtype.UUID, bool) {
+type autopilotSubscriberCandidate struct {
+	UserID     pgtype.UUID
+	InputIndex int
+}
+
+// parseAutopilotSubscribers validates the wire shape without reading mutable
+// membership state. Membership is checked only after the write transaction
+// owns the same serialization locks as member revocation.
+func parseAutopilotSubscribers(w http.ResponseWriter, raw []SubscriberInput) ([]autopilotSubscriberCandidate, bool) {
 	if len(raw) == 0 {
 		return nil, true
 	}
-	out := make([]pgtype.UUID, 0, len(raw))
+	out := make([]autopilotSubscriberCandidate, 0, len(raw))
 	seen := make(map[string]bool, len(raw))
 	for i, entry := range raw {
 		if entry.UserType != "member" {
@@ -769,17 +779,57 @@ func (h *Handler) validateAutopilotSubscribers(
 		if !ok {
 			return nil, false
 		}
-		if seen[entry.UserID] {
+		canonicalID := uuidToString(uid)
+		if seen[canonicalID] {
 			continue
 		}
-		seen[entry.UserID] = true
-		if !h.isWorkspaceEntity(r.Context(), entry.UserType, entry.UserID, workspaceID) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("subscribers[%d] is not a member of this workspace", i))
-			return nil, false
-		}
-		out = append(out, uid)
+		seen[canonicalID] = true
+		out = append(out, autopilotSubscriberCandidate{UserID: uid, InputIndex: i})
 	}
 	return out, true
+}
+
+// lockAndValidateAutopilotSubscribers serializes subscriber-template writes
+// with member revocation. Locks and row checks both use canonical UUID order,
+// so two saves containing the same members in different request orders cannot
+// deadlock each other.
+func (h *Handler) lockAndValidateAutopilotSubscribers(
+	w http.ResponseWriter,
+	r *http.Request,
+	qtx *db.Queries,
+	subscribers []autopilotSubscriberCandidate,
+	workspaceID pgtype.UUID,
+) bool {
+	ordered := append([]autopilotSubscriberCandidate(nil), subscribers...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return uuidToString(ordered[i].UserID) < uuidToString(ordered[j].UserID)
+	})
+
+	for _, subscriber := range ordered {
+		if err := qtx.LockSubscriberWrites(r.Context(), db.LockSubscriberWritesParams{
+			WorkspaceID: workspaceID,
+			UserID:      subscriber.UserID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate autopilot subscribers")
+			return false
+		}
+	}
+	for _, subscriber := range ordered {
+		if _, err := qtx.LockActiveMember(r.Context(), db.LockActiveMemberParams{
+			UserID:      subscriber.UserID,
+			WorkspaceID: workspaceID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf(
+					"subscribers[%d] is not a member of this workspace", subscriber.InputIndex,
+				))
+				return false
+			}
+			writeError(w, http.StatusInternalServerError, "failed to validate autopilot subscribers")
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
@@ -890,19 +940,19 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Subscribers are validated up-front (before any write) so a bad payload
-	// doesn't leave the autopilot row updated but the template stale.
+	// Parse subscriber wire values up-front. Mutable membership is revalidated
+	// under the revocation serialization locks after the transaction starts.
 	var (
-		subscriberUUIDs    []pgtype.UUID
+		subscribers        []autopilotSubscriberCandidate
 		replaceSubscribers bool
 	)
 	if _, sent := rawFields["subscribers"]; sent {
 		replaceSubscribers = true
-		validated, vok := h.validateAutopilotSubscribers(w, r, req.Subscribers, workspaceID)
+		validated, vok := parseAutopilotSubscribers(w, req.Subscribers)
 		if !vok {
 			return
 		}
-		subscriberUUIDs = validated
+		subscribers = validated
 	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -912,6 +962,12 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Lock subscriber identities before assignment and autopilot rows. This is
+	// the same global order used by CreateAutopilot and member revocation.
+	if !h.lockAndValidateAutopilotSubscribers(w, r, qtx, subscribers, prev.WorkspaceID) {
+		return
+	}
 
 	// Retargeting must validate the polymorphic reference; resuming must also
 	// validate Runtime readiness. Keep both in this transaction so Runtime
@@ -986,11 +1042,11 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update subscribers")
 			return
 		}
-		for _, uid := range subscriberUUIDs {
+		for _, subscriber := range subscribers {
 			if err := qtx.AddAutopilotSubscriber(r.Context(), db.AddAutopilotSubscriberParams{
 				AutopilotID: autopilot.ID,
 				UserType:    "member",
-				UserID:      uid,
+				UserID:      subscriber.UserID,
 			}); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to add autopilot subscriber")
 				return

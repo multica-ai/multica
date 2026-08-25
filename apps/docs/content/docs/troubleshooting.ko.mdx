@@ -108,6 +108,10 @@ multica issue runs <issue-id>
 - reverse proxy가 WebSocket Upgrade 요청을 전달하는지
 - 브라우저 로그인이 만료되었는지
 
+`curl`로 `/ws`에 요청했을 때 HTTP 400이 반환되는 것은 정상입니다: 이 엔드포인트는 workspace 관련 쿼리 파라미터를 요구하며, 파라미터 없는 핸드셰이크는 WebSocket 업그레이드 전에 거부됩니다. 따라서 backend 로그에 400/401 기록이 있다는 것은 일반 HTTP 라우팅이 backend까지 도달했다는 것만 증명합니다 — 프록시가 WebSocket `Upgrade` 헤더를 보존하는지는 증명하지 않습니다. 실제 연결을 확인하려면 브라우저 DevTools → Network → WS 탭(또는 WebSocket 지원 클라이언트)에서 `101` 핸드셰이크가 성립했는지 보세요.
+
+자체 호스팅 참고: 데몬의 긴 연결은 `/api/daemon/ws`로 향합니다(`/ws`가 아님). 마찬가지로 backend로 직접 전달해야 하며, 핸드셰이크가 실패하면 데몬은 조용히 폴링으로 폴백합니다. backend 로그에서 이 경로에 `status=400`이 반복되면 그 증상입니다.
+
 컨테이너는 생성될 때만 `.env`를 읽으므로 수정 후 다시 생성해야 합니다.
 
 ```bash
@@ -115,6 +119,16 @@ docker compose -f docker-compose.selfhost.yml up -d
 ```
 
 전체 reverse proxy 예시는 [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)을 참고하세요.
+
+## `multica setup`이 서버에 도달할 수 없다고 보고함
+
+CLI 도달 확인은 `<server-url>/health`에 GET을 보내 200을 기대합니다. backend는 이 경로를 제공합니다. 최신 web 릴리스는 `/health`를 backend로 전달하지만 구버전은 그렇지 않아, 모든 트래픽을 구버전 frontend로 전달하는 reverse proxy에서는 404가 반환되고 CLI는 정상 동작 중인 서버를 도달 불가로 오판합니다.
+
+프록시에서 `/health`를 backend(포트 8080)로 명시적으로 전달하면 모든 릴리스에서 동작합니다. [자체 호스팅 빠른 시작](/self-host-quickstart#3-접근-방식-선택)의 두 Caddy 예시에 모두 포함되어 있습니다. 확인 방법:
+
+```bash
+curl -fsS <server-url>/health
+```
 
 ## 인증 코드 및 초대 이메일이 도착하지 않음
 

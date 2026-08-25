@@ -7,7 +7,6 @@
     "show_archived": "Show archived ({{count}})",
     "archived_badge": "Archived",
     "archived_hint": "Retired from new assignments. Issues already on it keep it.",
-    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
     "reorder_failed": "Could not save the new order.",
     "actions": {
       "open": "Actions for {{name}}",
@@ -1158,6 +1157,9 @@
     "inviting": "Inviting...",
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",
+    "toast_seat_capacity_full": "All purchased member seats are in use. Add a seat before inviting someone else.",
+    "toast_seat_capacity_unavailable": "Member capacity could not be verified. Please try again.",
+    "add_seats_action": "Add seats",
     "no_members": "No members found.",
     "pending_title": "Pending invitations ({{count}})",
     "pending_status": "Pending",

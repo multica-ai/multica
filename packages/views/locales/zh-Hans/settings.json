@@ -7,7 +7,6 @@
     "show_archived": "显示已归档（{{count}}）",
     "archived_badge": "已归档",
     "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
-    "flag_off": "当前部署尚未开启自定义状态，下面的内置状态照常使用。",
     "reorder_failed": "排序保存失败。",
     "actions": {
       "open": "{{name}} 的操作",
@@ -1155,6 +1154,9 @@
     "inviting": "邀请中...",
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",
+    "toast_seat_capacity_full": "已购买的成员席位已全部使用，请先增加席位再邀请新成员。",
+    "toast_seat_capacity_unavailable": "暂时无法核验成员席位，请稍后重试。",
+    "add_seats_action": "增加席位",
     "no_members": "未找到成员。",
     "pending_title": "待处理邀请（{{count}}）",
     "pending_status": "待处理",

@@ -53,6 +53,7 @@ import {
   SendChatMessageResponseSchema,
   SquadListSchema,
   SquadSchema,
+  SourceContextPreviewSchema,
   TimelineEntriesSchema,
   UserSchema,
   PluginInstallationSchema,
@@ -130,6 +131,79 @@ describe("ChildIssueProgressResponseSchema", () => {
 });
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("keeps the issue while independently dropping a malformed source context", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: { snapshot: "bad" } }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.source_context).toBeUndefined();
+  });
+  it("parses source-context change reasons without requiring them from older servers", () => {
+    const sourceContext = {
+      id: "context-1",
+      version: 1,
+      usage: "read_only_historical_background",
+      captured_at: "2026-08-21T12:00:00Z",
+      display_state: "changed",
+      source_issue_state: "changed",
+      comment_thread_state: "unchanged",
+      anchor_comment_state: "available",
+      can_open_current_source: true,
+      change_reasons: ["issue_description_attachments"],
+      change_details: {
+        changed_comment_ids: ["comment-1"],
+        added_comments: [{
+          id: "comment-2", parent_id: "comment-1", type: "comment", content: "new reply",
+          author: { type: "member", id: "user-2", name: "Bob" },
+          created_at: "later", updated_at: "later", revision: 1, attachments: [],
+        }],
+        removed_comment_ids: ["comment-3"],
+        description_attachment_changes: [{
+          kind: "removed", attachment_id: "attachment-1", filename: "old.txt",
+        }],
+      },
+      snapshot: {
+        source_issue: {
+          id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+          description: null, created_at: "now", updated_at: "now", revision: 1,
+          attachments: [],
+        },
+        comment_thread: [{
+          id: "comment-1", parent_id: null, type: "comment", content: "history",
+          author: { type: "member", id: "user-1", name: "Alice" },
+          created_at: "now", updated_at: "now", revision: 1, attachments: [],
+        }],
+        anchor_comment_id: "comment-1",
+      },
+    };
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: sourceContext }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.source_context?.change_reasons).toEqual(["issue_description_attachments"]);
+    expect(parsed.issues[0]?.source_context?.change_details).toEqual(sourceContext.change_details);
+
+    const { change_reasons: _reasonsOmitted, change_details: _detailsOmitted, ...legacyContext } = sourceContext;
+    const legacy = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, source_context: legacyContext }],
+      total: 1,
+    });
+    expect(legacy.issues[0]?.source_context?.change_reasons).toBeUndefined();
+    expect(legacy.issues[0]?.source_context?.change_details).toBeUndefined();
+
+    const malformed = ListIssuesResponseSchema.parse({
+      issues: [{
+        ...baseIssue,
+        source_context: {
+          ...sourceContext,
+          change_details: { ...sourceContext.change_details, added_comments: [{ id: 42 }] },
+        },
+      }],
+      total: 1,
+    });
+    expect(malformed.issues[0]?.source_context).toBeUndefined();
+  });
   it("accepts null activity during backfill and rejects malformed activity", () => {
     const parsed = ListIssuesResponseSchema.parse({
       issues: [{ ...baseIssue, last_activity_at: null }],
@@ -230,6 +304,50 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.properties).toEqual({ "def-2": "opt-a" });
+  });
+});
+
+describe("SourceContextPreviewSchema", () => {
+  it("parses a thread-history preview and rejects a missing token", () => {
+    const preview = {
+      source_issue: {
+        id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+        description: null, created_at: "now", updated_at: "now", revision: 1,
+        attachments: [],
+      },
+      comment_thread: [{
+        id: "comment-1", parent_id: null, type: "comment", content: "history",
+        author: { type: "member", id: "user-1", name: "Alice" },
+        created_at: "now", updated_at: "now", revision: 1, attachments: [],
+      }],
+      anchor_comment_id: "comment-1",
+      capture_token: "sha256:token",
+      limits: { comment_count: 1, text_bytes: 7, attachment_count: 0, attachment_bytes: 0 },
+    };
+    expect(SourceContextPreviewSchema.parse(preview).comment_thread).toHaveLength(1);
+    expect(() => SourceContextPreviewSchema.parse({ ...preview, capture_token: "" })).toThrow();
+  });
+
+  it("normalizes null attachment lists from early source-context servers", () => {
+    const preview = {
+      source_issue: {
+        id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
+        description: null, created_at: "now", updated_at: "now", revision: 1,
+        attachments: null,
+      },
+      comment_thread: [{
+        id: "comment-1", parent_id: null, type: "comment", content: "history",
+        author: { type: "member", id: "user-1", name: "Alice" },
+        created_at: "now", updated_at: "now", revision: 1, attachments: null,
+      }],
+      anchor_comment_id: "comment-1",
+      capture_token: "sha256:token",
+      limits: { comment_count: 1, text_bytes: 7, attachment_count: 0, attachment_bytes: 0 },
+    };
+
+    const parsed = SourceContextPreviewSchema.parse(preview);
+    expect(parsed.source_issue.attachments).toEqual([]);
+    expect(parsed.comment_thread[0]?.attachments).toEqual([]);
   });
 });
 

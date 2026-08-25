@@ -7,7 +7,6 @@
     "show_archived": "アーカイブ済みを表示（{{count}}）",
     "archived_badge": "アーカイブ済み",
     "archived_hint": "新規の割り当てには使えません。すでにこのステータスのタスクはそのままです。",
-    "flag_off": "このデプロイではカスタムステータスがまだ有効化されていません。下の組み込みステータスは通常どおり使えます。",
     "reorder_failed": "並び順を保存できませんでした。",
     "actions": {
       "open": "{{name}} の操作",
@@ -1155,6 +1154,9 @@
     "inviting": "招待中...",
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",
+    "toast_seat_capacity_full": "購入済みのメンバー席をすべて使用しています。新しいメンバーを招待する前に席を追加してください。",
+    "toast_seat_capacity_unavailable": "メンバー席を確認できませんでした。もう一度お試しください。",
+    "add_seats_action": "席を追加",
     "no_members": "メンバーが見つかりません。",
     "pending_title": "保留中の招待（{{count}}）",
     "pending_status": "保留中",

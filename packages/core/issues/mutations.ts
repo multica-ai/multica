@@ -29,6 +29,7 @@ import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
+  CreateCommentSubIssueManualRequest,
   CreateIssueRequest,
   ListIssuesCache,
   MoveIssueRequest,
@@ -75,11 +76,13 @@ export type UpdateIssueMutationInput = {
 // Issue CRUD
 // ---------------------------------------------------------------------------
 
-export function useCreateIssue() {
+function useIssueCreateMutation<TVariables>(
+  mutationFn: (variables: TVariables) => Promise<Issue>,
+) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: (data: CreateIssueRequest) => api.createIssue(data),
+    mutationFn,
     onSuccess: (newIssue) => {
       for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
         if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, newIssue));
@@ -103,6 +106,20 @@ export function useCreateIssue() {
       qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     },
   });
+}
+
+export function useCreateIssue() {
+  return useIssueCreateMutation((data: CreateIssueRequest) => api.createIssue(data));
+}
+
+export function useCreateCommentSubIssue() {
+  return useIssueCreateMutation(({
+    anchorCommentId,
+    data,
+  }: {
+    anchorCommentId: string;
+    data: CreateCommentSubIssueManualRequest;
+  }) => api.createCommentSubIssue(anchorCommentId, data));
 }
 
 export function useUpdateIssue() {
