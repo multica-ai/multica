@@ -624,8 +624,13 @@ func main() {
 	sweeper := sweeperpkg.NewStaleRunSweeper(pool, &sweeperpkg.SweeperConfig{
 		Interval:    envDurationPositive("AUTOPILOT_SWEEPER_INTERVAL", 5*time.Minute),
 		HardTimeout: envDurationPositive("AUTOPILOT_SWEEPER_HARD_TIMEOUT", 2*time.Hour),
-		Enabled:     envBool("AUTOPILOT_SWEEPER_ENABLED", true),
-		Logger:      slog.With("component", "autopilot-sweeper"),
+		// Same slot-interval source as the dispatch lease gate, so the
+		// sweeper's per-autopilot reclaim deadline is
+		// max(HardTimeout, SlotInterval) and it never preempts a run the
+		// gate would still consider live (ALL-235 BLOCKING 2, 方案 A).
+		SlotInterval: autopilotSvc.SlotIntervalForAutopilot,
+		Enabled:      envBool("AUTOPILOT_SWEEPER_ENABLED", true),
+		Logger:       slog.With("component", "autopilot-sweeper"),
 	})
 	go sweeper.Start(autopilotCtx)
 

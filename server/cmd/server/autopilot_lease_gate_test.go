@@ -417,6 +417,74 @@ func TestStaleRunSweeper_TerminalizesExpiredRuns(t *testing.T) {
 	}
 }
 
+// TestStaleRunSweeper_RespectsDailyScheduleSlotInterval is the ALL-235
+// BLOCKING 2 regression: a daily-schedule autopilot (SlotInterval=24h) has a
+// legitimate in-flight run with a linked agent task. The run is OLDER than
+// the sweeper's flat hard timeout (2h) but well WITHIN its 24h slot interval
+// — exactly the case where the dispatch lease gate would still consider it
+// live (lease = max(base 30m, 24h) = 24h). The sweeper must NOT reclaim it:
+// with the defect, the flat hard timeout terminalized the run (and, via the
+// buggy cancel path, its task) at 2h, contradicting the lease semantics. The
+// per-autopilot deadline max(HardTimeout, SlotInterval) keeps both alive.
+func TestStaleRunSweeper_RespectsDailyScheduleSlotInterval(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	const hardTimeout = 2 * time.Hour
+	agentID := loadFixtureAgentID(t, ctx)
+	ap := createLeaseGateAutopilot(t, ctx, queries, "ALL-235 sweeper daily", agentID, "run_only", "")
+	// Daily cadence: slot interval = 24h, far beyond the flat hard timeout.
+	trigger := createTriggerWithCron(t, ctx, queries, ap, "0 0 * * *")
+
+	// Start a legitimate run with a linked task, then backdate it past the
+	// hard timeout but well inside the slot interval.
+	plannedAt := time.Now().UTC().Truncate(time.Second).Add(-2 * time.Minute)
+	run, err := autopilotSvc.DispatchAutopilotForPlan(ctx, ap, trigger.ID, "schedule", nil, plannedAt)
+	if err != nil {
+		t.Fatalf("slot 1 dispatch: %v", err)
+	}
+	if run == nil || run.Status != "running" || !run.TaskID.Valid {
+		t.Fatalf("slot 1 run = %+v, want running with linked task", run)
+	}
+	backdateRunCreatedAt(t, ctx, run.ID, 3*time.Hour) // > 2h hard timeout, < 24h slot interval
+
+	sweeper := autopilot.NewStaleRunSweeper(testPool, &autopilot.SweeperConfig{
+		Interval:     5 * time.Minute,
+		HardTimeout:  hardTimeout,
+		SlotInterval: autopilotSvc.SlotIntervalForAutopilot,
+		Enabled:      true,
+		Logger:       testLogger(t),
+	})
+	sweeper.SweepOnce(ctx)
+
+	var status, reason string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status, COALESCE(reason_code, '') FROM autopilot_run WHERE id = $1`, run.ID,
+	).Scan(&status, &reason); err != nil {
+		t.Fatalf("read daily-schedule run after sweep: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("daily-schedule in-flight run = status %q (reason %q), want running; the sweeper must not reclaim a run within its 24h slot interval", status, reason)
+	}
+
+	// The linked task must also still be alive — the run was not treated as
+	// stale, so its work was not cancelled.
+	var taskStatus string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status FROM agent_task_queue WHERE id = $1`, run.TaskID,
+	).Scan(&taskStatus); err != nil {
+		t.Fatalf("read linked task after sweep: %v", err)
+	}
+	if taskStatus == "cancelled" || taskStatus == "failed" {
+		t.Fatalf("daily-schedule linked task = %q after sweep, want still active", taskStatus)
+	}
+
+	assertInFlightCount(t, ctx, ap.ID, 1)
+}
+
 // --- helpers ---------------------------------------------------------------
 
 // createLeaseGateAutopilot seeds an active autopilot for lease-gate tests.

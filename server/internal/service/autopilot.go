@@ -87,7 +87,7 @@ func (s *AutopilotService) SetLeaseTimeout(d time.Duration) {
 // legitimately fire.
 func (s *AutopilotService) leaseTimeout(ctx context.Context, ap db.Autopilot) time.Duration {
 	cfg := &autopilot.LeaseConfig{BaseTimeout: s.LeaseTimeout}
-	if interval, ok := s.slotInterval(ctx, ap); ok {
+	if interval, ok := s.slotInterval(ctx, ap.ID); ok {
 		cfg.SlotInterval = interval
 	}
 	return cfg.CalculateLeaseDuration()
@@ -98,11 +98,11 @@ func (s *AutopilotService) leaseTimeout(ctx context.Context, ap db.Autopilot) ti
 // parseable schedule (webhook/api/manual-only triggers) — the lease then
 // stays at the base timeout. The lease must cover the slowest trigger so a
 // run fired by any of them is never reclaimed early.
-func (s *AutopilotService) slotInterval(ctx context.Context, ap db.Autopilot) (time.Duration, bool) {
-	triggers, err := s.Queries.ListAutopilotTriggers(ctx, ap.ID)
+func (s *AutopilotService) slotInterval(ctx context.Context, autopilotID pgtype.UUID) (time.Duration, bool) {
+	triggers, err := s.Queries.ListAutopilotTriggers(ctx, autopilotID)
 	if err != nil {
 		slog.Warn("autopilot lease: failed to load triggers for slot interval",
-			"autopilot_id", util.UUIDToString(ap.ID),
+			"autopilot_id", util.UUIDToString(autopilotID),
 			"error", err,
 		)
 		return 0, false
@@ -129,6 +129,18 @@ func (s *AutopilotService) slotInterval(ctx context.Context, ap db.Autopilot) (t
 		}
 	}
 	return best, found
+}
+
+// SlotIntervalForAutopilot is the exported hook the stale-run sweeper uses to
+// keep its reclaim deadline in lockstep with the dispatch lease gate (ALL-235
+// BLOCKING 2, 方案 A): it returns the autopilot's slot interval (the longest
+// scheduling gap across its enabled schedule triggers) computed by the SAME
+// SlotIntervalFromCron source the gate's leaseTimeout() uses, so the two
+// layers can never disagree on how long a legitimate in-flight run may live.
+// (0, false) means the autopilot has no parseable schedule — the caller falls
+// back to its flat hard timeout.
+func (s *AutopilotService) SlotIntervalForAutopilot(ctx context.Context, autopilotID pgtype.UUID) (time.Duration, bool) {
+	return s.slotInterval(ctx, autopilotID)
 }
 
 // autopilotRuleConfigSummary captures the substantive (accountability-bearing)

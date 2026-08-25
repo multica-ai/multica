@@ -9,15 +9,19 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/dispatch"
 )
 
 // sweeperDB is the narrow contract the sweeper needs from a database handle:
-// a single-statement UPDATE. *pgxpool.Pool satisfies it; tests can substitute
-// any fake with the same shape.
+// a read of the in-flight run set plus a single-statement UPDATE.
+// *pgxpool.Pool satisfies it; tests can substitute any fake with the same
+// shape.
 type sweeperDB interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 }
 
@@ -32,6 +36,24 @@ type SweeperConfig struct {
 	// sweeper only reclaims runs the lease gate has already had plenty of
 	// chances to reclaim on its own.
 	HardTimeout time.Duration
+	// SlotInterval resolves an autopilot's scheduling cadence (the longest
+	// gap between two consecutive schedule occurrences) — the SAME source
+	// the dispatch lease gate uses via service.SlotIntervalFromCron. The
+	// sweeper's per-autopilot reclaim deadline becomes
+	// max(HardTimeout, SlotInterval), so a slow-cycle autopilot (e.g. daily)
+	// is never reclaimed before its next slot could fire. Wired from
+	// main.go to AutopilotService.SlotIntervalForAutopilot; nil keeps the
+	// flat HardTimeout behavior for autopilots whose schedule cannot be
+	// resolved (webhook/api/manual-only triggers).
+	//
+	// Choice rationale (ALL-235 BLOCKING 2, 方案 A over 方案 B): 方案 B would
+	// cap the lease at an explicit MaxLeaseDuration, which clamps the
+	// dispatch gate's lease for slow-cycle autopilots below their slot
+	// interval — re-introducing the very early-reclaim defect 1 fixed. 方案 A
+	// instead makes the sweeper per-autopilot aware with the SAME cron source
+	// as the gate, so the sweeper stays a pure backstop ("兜底而非抢跑") and
+	// the two layers can never disagree.
+	SlotInterval func(ctx context.Context, autopilotID pgtype.UUID) (time.Duration, bool)
 	// Enabled gates the whole worker. Useful on small self-hosted
 	// deployments that want the lease gate but not another goroutine.
 	Enabled bool
@@ -74,6 +96,7 @@ type StaleRunSweeper struct {
 	db           sweeperDB
 	interval     time.Duration
 	hardTimeout  time.Duration
+	slotInterval func(ctx context.Context, autopilotID pgtype.UUID) (time.Duration, bool)
 	enabled      bool
 	logger       *slog.Logger
 	shutdownChan chan struct{}
@@ -89,6 +112,7 @@ func NewStaleRunSweeper(db sweeperDB, config *SweeperConfig) *StaleRunSweeper {
 		db:           db,
 		interval:     config.Interval,
 		hardTimeout:  config.HardTimeout,
+		slotInterval: config.SlotInterval,
 		enabled:      config.Enabled,
 		logger:       logger,
 		shutdownChan: make(chan struct{}),
@@ -130,46 +154,132 @@ func (s *StaleRunSweeper) Start(ctx context.Context) {
 	}
 }
 
-// SweepOnce performs a single sweep: terminalize every in-flight run older
-// than the hard timeout as failed (reason_code=lease_expired). The linked
-// agent tasks are deliberately left to the runtime sweeper — see the
-// residual-risk note on StaleRunSweeper. The UPDATE is idempotent — the WHERE
-// clause only matches rows still in an in-flight status, so concurrent
-// sweepers (or a racing dispatch gate that already reclaimed the same row)
-// never double-terminalize. It is exported so tests and callers can drive a
-// sweep without the ticker loop.
+// SweepOnce performs a single sweep: terminalize every in-flight run past
+// its per-autopilot reclaim deadline as failed (reason_code=lease_expired).
+// The reclaim deadline is max(HardTimeout, SlotInterval) where SlotInterval
+// comes from the SAME cron source as the dispatch lease gate (ALL-235
+// BLOCKING 2, 方案 A), so the sweeper never preempts a run the gate would
+// still consider live: a daily-schedule autopilot's legitimate long-running
+// run (and its linked agent task, deliberately left to the runtime sweeper —
+// see the residual-risk note on StaleRunSweeper) survives a sweep.
+//
+// Each UPDATE is idempotent — the WHERE clause only matches rows still in an
+// in-flight status, so concurrent sweepers (or a racing dispatch gate that
+// already reclaimed the same row) never double-terminalize. It is exported
+// so tests and callers can drive a sweep without the ticker loop.
 func (s *StaleRunSweeper) SweepOnce(ctx context.Context) {
-	deadline := time.Now().Add(-s.hardTimeout)
-
-	result, err := s.db.Exec(ctx, `
-		UPDATE autopilot_run
-		SET status = 'failed',
-		    failure_reason = $1,
-		    reason_code = $3,
-		    completed_at = NOW()
+	// Load the in-flight run set with their autopilot so the deadline can be
+	// computed per autopilot. In-flight runs are rare (the partial unique
+	// index uq_autopilot_run_inflight admits at most one per autopilot), so
+	// the extra read is negligible next to the correctness it buys.
+	rows, err := s.db.Query(ctx, `
+		SELECT id, autopilot_id, created_at
+		FROM autopilot_run
 		WHERE status IN ('issue_created', 'running')
-		  AND created_at < $2
-	`,
-		fmt.Sprintf("Run exceeded hard timeout (%s) and was terminated by sweeper", s.hardTimeout),
-		deadline,
-		string(dispatch.ReasonLeaseExpired),
-	)
+	`)
 	if err != nil {
-		s.logger.Error("autopilot stale run sweeper: sweep failed",
-			"hard_timeout", s.hardTimeout.String(),
+		s.logger.Error("autopilot stale run sweeper: list in-flight runs failed",
+			"error", err,
+		)
+		return
+	}
+	defer rows.Close()
+
+	type inFlightRun struct {
+		id          pgtype.UUID
+		autopilotID pgtype.UUID
+		createdAt   time.Time
+	}
+	var runs []inFlightRun
+	for rows.Next() {
+		var r inFlightRun
+		if err := rows.Scan(&r.id, &r.autopilotID, &r.createdAt); err != nil {
+			s.logger.Error("autopilot stale run sweeper: scan in-flight run failed",
+				"error", err,
+			)
+			return
+		}
+		runs = append(runs, r)
+	}
+	if err := rows.Err(); err != nil {
+		s.logger.Error("autopilot stale run sweeper: iterate in-flight runs failed",
 			"error", err,
 		)
 		return
 	}
 
-	affected := result.RowsAffected()
-	if affected > 0 {
+	// Effective deadline per autopilot, computed once per sweep and cached so
+	// a slow-cycle autopilot with several runs pays the trigger lookup once.
+	type deadlineInfo struct {
+		deadline time.Time
+		timeout  time.Duration
+	}
+	deadlines := make(map[pgtype.UUID]deadlineInfo)
+	now := time.Now()
+	terminated := 0
+	for _, r := range runs {
+		info, ok := deadlines[r.autopilotID]
+		if !ok {
+			info.timeout = s.hardTimeout
+			if s.slotInterval != nil {
+				if interval, ok := s.slotInterval(ctx, r.autopilotID); ok && interval > info.timeout {
+					info.timeout = interval
+				}
+			}
+			info.deadline = now.Add(-info.timeout)
+			deadlines[r.autopilotID] = info
+		}
+		if !r.createdAt.Before(info.deadline) {
+			continue
+		}
+		affected, err := s.terminalize(ctx, r.id, info.timeout)
+		if err != nil {
+			s.logger.Error("autopilot stale run sweeper: terminalize run failed",
+				"run_id", utilUUID(r.id),
+				"error", err,
+			)
+			continue
+		}
+		terminated += affected
+	}
+
+	if terminated > 0 {
 		s.logger.Warn("autopilot stale run sweeper: terminated stale runs",
-			"count", affected,
-			"deadline", deadline.UTC().Format(time.RFC3339),
-			"hard_timeout", s.hardTimeout.String(),
+			"count", terminated,
 		)
 	}
+}
+
+// terminalize marks a single in-flight run as failed with
+// reason_code=lease_expired. The WHERE status IN (...) guard keeps the write
+// idempotent under concurrency. Returns the number of rows actually updated
+// (0 or 1).
+func (s *StaleRunSweeper) terminalize(ctx context.Context, runID pgtype.UUID, effectiveTimeout time.Duration) (int, error) {
+	result, err := s.db.Exec(ctx, `
+		UPDATE autopilot_run
+		SET status = 'failed',
+		    failure_reason = $1,
+		    reason_code = $2,
+		    completed_at = NOW()
+		WHERE id = $3
+		  AND status IN ('issue_created', 'running')
+	`,
+		fmt.Sprintf("Run exceeded effective stale-run deadline (%s) and was terminated by sweeper", effectiveTimeout),
+		string(dispatch.ReasonLeaseExpired),
+		runID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return int(result.RowsAffected()), nil
+}
+
+// utilUUID renders a pgtype.UUID for log output, tolerating the zero value.
+func utilUUID(u pgtype.UUID) string {
+	if !u.Valid {
+		return "<invalid>"
+	}
+	return u.String()
 }
 
 // Stop requests a graceful shutdown of the sweep loop. Idempotent.
