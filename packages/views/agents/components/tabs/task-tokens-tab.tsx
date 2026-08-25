@@ -10,17 +10,12 @@ import { toast } from "sonner";
 import { useT } from "../../../i18n";
 import { openExternal } from "../../../platform";
 
-// taskTokenDocsUrl builds the integration-guide link — the page a receiving
-// system's developer follows to verify these tokens — as a path relative to
-// the current deployment, then resolves it against origin so desktop's
-// shell.openExternal (which needs an absolute URL) works too. This feature is
-// self-hosted, so the docs live wherever this instance serves them rather than
-// at a hardcoded product domain. The docs site uses /<lang>/ path prefixes
-// (English has none), matching the convention used by other doc links.
-export function taskTokenDocsUrl(
-  lang: string | undefined,
-  origin: string,
-): string {
+// taskTokenDocsUrl points at the integration guide — the page a receiving
+// system's developer follows to verify these tokens — localized to the viewer's
+// language. The docs site is a separate app served at multica.ai/docs, not a
+// route on this deployment, so this is absolute like every other doc link in
+// the app. The site uses /<lang>/ path prefixes (English has none).
+export function taskTokenDocsUrl(lang: string | undefined): string {
   const prefix = lang?.startsWith("zh")
     ? "/zh"
     : lang?.startsWith("ja")
@@ -28,7 +23,7 @@ export function taskTokenDocsUrl(
       : lang?.startsWith("ko")
         ? "/ko"
         : "";
-  return new URL(`/docs${prefix}/task-identity-tokens`, origin).href;
+  return `https://multica.ai/docs${prefix}/task-identity-tokens`;
 }
 
 // Query key is agent-scoped: the catalog is deployment-wide but the enabled
@@ -95,11 +90,7 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
         </p>
         <button
           type="button"
-          onClick={() =>
-            openExternal(
-              taskTokenDocsUrl(i18n.language, window.location.origin),
-            )
-          }
+          onClick={() => openExternal(taskTokenDocsUrl(i18n.language))}
           className="inline-flex shrink-0 items-center gap-1.5 text-caption font-medium text-primary underline-offset-2 hover:underline"
           title={t(($) => $.tab_body.task_tokens.docs_link)}
           data-testid="task-tokens-docs-link"

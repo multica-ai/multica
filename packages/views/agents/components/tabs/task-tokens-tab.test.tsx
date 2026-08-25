@@ -100,10 +100,10 @@ describe("TaskTokensTab", () => {
     const link = await screen.findByTestId("task-tokens-docs-link");
     await userEvent.click(link);
 
-    // Resolved against the current origin (relative to the deployment), not a
-    // hardcoded product domain.
+    // The docs site is a separate app at multica.ai/docs, not a route on this
+    // deployment, so the link is absolute like every other doc link.
     expect(mockOpenExternal).toHaveBeenCalledWith(
-      `${window.location.origin}/docs/task-identity-tokens`,
+      "https://multica.ai/docs/task-identity-tokens",
     );
   });
 
