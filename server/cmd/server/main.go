@@ -12,14 +12,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	sweeperpkg "github.com/multica-ai/multica/server/internal/autopilot"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
-	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -628,13 +626,6 @@ func main() {
 		HardTimeout: envDurationPositive("AUTOPILOT_SWEEPER_HARD_TIMEOUT", 2*time.Hour),
 		Enabled:     envBool("AUTOPILOT_SWEEPER_ENABLED", true),
 		Logger:      slog.With("component", "autopilot-sweeper"),
-		// Cancel the agent task linked to every reclaimed run so a
-		// terminalized run never leaves its task executing while the next
-		// slot is admitted (ALL-234 defect 2).
-		CancelTask: func(ctx context.Context, taskID pgtype.UUID, reason string) error {
-			_, err := autopilotSvc.TaskSvc.CancelTaskWithReason(ctx, taskID, reason, string(dispatch.ReasonLeaseExpired))
-			return err
-		},
 	})
 	go sweeper.Start(autopilotCtx)
 

@@ -1187,6 +1187,25 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		return
 	}
 
+	// Terminal-state guard (ALL-211 BLOCKING 1 follow-up, ALL-234 defect 4):
+	// a run terminalized by the lease gate or the sweeper (failed +
+	// reason_code=lease_expired) may still have a SURVIVING task that ends
+	// later — terminalizeStaleRun deliberately does not cancel it (see its
+	// comment). Without this guard, that late task event would flow back
+	// through this function and rewrite the SAME row from failed back to
+	// completed, erasing the lease audit trail and making the failure
+	// monitor count a reclaimed run as a success. Once a run is terminal, no
+	// downstream task event may mutate it again.
+	if run.Status == "completed" || run.Status == "failed" || run.Status == "skipped" {
+		slog.Info("autopilot run already terminal; ignoring task sync event",
+			"run_id", util.UUIDToString(run.ID),
+			"run_status", run.Status,
+			"task_id", util.UUIDToString(task.ID),
+			"task_status", task.Status,
+		)
+		return
+	}
+
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
 		return
@@ -1348,43 +1367,50 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}
 }
 
-// terminalizeStaleRun reclaims an in-flight autopilot run that outlived the
-// dispatch lease (ALL-211 BLOCKING 1 / ALL-234 defect 2). The linked agent
-// task — autopilot_run.task_id, set for run_only mode — is cancelled FIRST
-// so a reclaimed run can never leave a still-executing task behind while the
-// slot it wedged gets admitted. Cancellation is idempotent (guarded by task
-// status), so a racing sweeper or another replica that already reclaimed the
-// same run cancels nothing twice.
-//
-// Ordering is deliberate: cancel-before-terminalize means a transient failure
-// of the run UPDATE leaves a cancelled task and an in-flight run (reclaimed
-// on the next tick), never the reverse — a failed run with a live task is the
-// exact duplicate-execution defect this closes. The task cancel is
-// best-effort: if it fails, the error is logged and the run is still
-// terminalized, because failing the whole dispatch would re-wedge the
-// autopilot. The run UPDATE itself is guarded by
-// `status IN ('issue_created','running')` so it is idempotent under
+// terminalizeStaleRun marks an in-flight autopilot run as failed because it
+// outlived the dispatch lease (ALL-211 BLOCKING 1). The run UPDATE is guarded
+// by `status IN ('issue_created','running')` so it is idempotent under
 // concurrency: a racing sweeper or another replica's lease gate reclaims the
 // same row at most once; everyone else affects zero rows and moves on.
+//
+// Residual risk — the linked agent task (autopilot_run.task_id, set for
+// run_only) is DELIBERATELY NOT cancelled here (ALL-234 defect 2, architecture
+// ruling 2026-08-25):
+//
+//   - Lease expiry is a coarse wall-clock bound on the RUN row, not evidence
+//     the TASK is dead — the task's authoritative liveness signal is the
+//     runtime heartbeat. Cancelling a task whose heartbeat is still fresh and
+//     that is genuinely making progress would kill legitimate long-running
+//     work; with the SlotInterval defect open the lease could expire early and
+//     make such mis-kills the norm rather than the edge case.
+//   - Task lifecycle is owned by the dedicated task reclaim layer
+//     (sweepStaleTasks -> FailStaleTasks in cmd/server/runtime_sweeper.go),
+//     which combines wall-clock age (dispatched 300s / running 9000s) with
+//     heartbeat freshness and is the correct place to judge a task dead.
+//     Cancelling from the dispatch admission gate would cross aggregate roots
+//     to mutate another slot's task on the scheduling hot path — the pattern
+//     MUL-4465 removed.
+//   - Residual window: between this run's terminalization and the task's
+//     natural terminalisation (or the runtime sweeper reclaiming it), the SAME
+//     autopilot can briefly have two executing bodies — the partial unique
+//     index uq_autopilot_run_inflight constrains run rows, not tasks. The
+//     terminal-state guard in SyncRunFromTask keeps a surviving task's late
+//     completion/failure event from overwriting this failed/lease_expired row.
+//   - Terminalizing the run releases its quota reservation immediately
+//     (settlement requires a terminal run) while the task may still consume
+//     real compute — an accepted deviation.
 func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, prior db.AutopilotRun, leaseTimeout time.Duration) error {
-	if prior.TaskID.Valid {
-		taskReason := fmt.Sprintf(
-			"Run exceeded lease timeout (%s) and was terminated by stale run cleanup; linked agent task cancelled",
-			leaseTimeout,
-		)
-		if _, err := s.TaskSvc.CancelTaskWithReason(ctx, prior.TaskID, taskReason, string(dispatch.ReasonLeaseExpired)); err != nil {
-			slog.Warn("autopilot stale run cleanup: failed to cancel linked agent task",
-				"run_id", util.UUIDToString(prior.ID),
-				"task_id", util.UUIDToString(prior.TaskID),
-				"lease_timeout", leaseTimeout.String(),
-				"error", err,
-			)
-		}
-	}
 	failureReason := fmt.Sprintf(
 		"Run exceeded lease timeout (%s) and was terminated by stale run cleanup",
 		leaseTimeout,
 	)
+	if prior.TaskID.Valid {
+		slog.Info("autopilot stale run cleanup: terminalizing run; linked agent task left to the runtime sweeper (task_id is the only locator for the surviving execution body)",
+			"run_id", util.UUIDToString(prior.ID),
+			"task_id", util.UUIDToString(prior.TaskID),
+			"lease_timeout", leaseTimeout.String(),
+		)
+	}
 	_, err := s.Queries.TerminalizeStaleAutopilotRun(ctx, db.TerminalizeStaleAutopilotRunParams{
 		ID:            prior.ID,
 		FailureReason: pgtype.Text{String: failureReason, Valid: true},
