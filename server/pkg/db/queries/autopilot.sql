@@ -548,6 +548,23 @@ WHERE t.kind = 'schedule'
   AND t.cron_expression <> ''
 ORDER BY t.id;
 
+-- name: ListEventAutopilotTriggersForTask :many
+-- GAP-31: event-kind triggers eligible to fire for a task completion in the
+-- completing agent's workspace. $1 is the completing task's agent id (resolves
+-- the workspace via scalar subquery — agent_task_queue has no workspace_id).
+-- $2 is a jsonb array like '[{"event":"task.completed"}]'; containment matches
+-- any trigger whose event_filters include that event regardless of declared
+-- actions (action narrowing is a webhook-ingress concept, not applied here).
+SELECT t.*, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'event'
+  AND t.enabled = TRUE
+  AND a.status = 'active'
+  AND a.workspace_id = (SELECT ag.workspace_id FROM agent ag WHERE ag.id = $1)
+  AND t.event_filters @> $2::jsonb
+ORDER BY t.id;
+
 -- =====================
 -- Task Queue (run_only mode)
 -- =====================

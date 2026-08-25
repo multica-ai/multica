@@ -1372,6 +1372,89 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 	return items, nil
 }
 
+const listEventAutopilotTriggersForTask = `-- name: ListEventAutopilotTriggersForTask :many
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'event'
+  AND t.enabled = TRUE
+  AND a.status = 'active'
+  AND a.workspace_id = (SELECT ag.workspace_id FROM agent ag WHERE ag.id = $1)
+  AND t.event_filters @> $2::jsonb
+ORDER BY t.id
+`
+
+type ListEventAutopilotTriggersForTaskParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Column2 []byte      `json:"column_2"`
+}
+
+type ListEventAutopilotTriggersForTaskRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
+	Kind                 string             `json:"kind"`
+	Enabled              bool               `json:"enabled"`
+	CronExpression       pgtype.Text        `json:"cron_expression"`
+	Timezone             pgtype.Text        `json:"timezone"`
+	NextRunAt            pgtype.Timestamptz `json:"next_run_at"`
+	WebhookToken         pgtype.Text        `json:"webhook_token"`
+	Label                pgtype.Text        `json:"label"`
+	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Provider             string             `json:"provider"`
+	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	EventFilters         []byte             `json:"event_filters"`
+	PublishedByType      pgtype.Text        `json:"published_by_type"`
+	PublishedByID        pgtype.UUID        `json:"published_by_id"`
+	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
+}
+
+// GAP-31: event-kind triggers eligible to fire for a task completion in the
+// completing agent's workspace. $1 is the completing task's agent id (resolves
+// the workspace via scalar subquery — agent_task_queue has no workspace_id).
+// $2 is a jsonb array like '[{"event":"task.completed"}]'; containment matches
+// any trigger whose event_filters include that event regardless of declared
+// actions (action narrowing is a webhook-ingress concept, not applied here).
+func (q *Queries) ListEventAutopilotTriggersForTask(ctx context.Context, arg ListEventAutopilotTriggersForTaskParams) ([]ListEventAutopilotTriggersForTaskRow, error) {
+	rows, err := q.db.Query(ctx, listEventAutopilotTriggersForTask, arg.ID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEventAutopilotTriggersForTaskRow{}
+	for rows.Next() {
+		var i ListEventAutopilotTriggersForTaskRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.Kind,
+			&i.Enabled,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.NextRunAt,
+			&i.WebhookToken,
+			&i.Label,
+			&i.LastFiredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Provider,
+			&i.SigningSecret,
+			&i.EventFilters,
+			&i.PublishedByType,
+			&i.PublishedByID,
+			&i.AutopilotWorkspaceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSchedulableAutopilotTriggers = `-- name: ListSchedulableAutopilotTriggers :many
 
 SELECT t.id, t.autopilot_id, t.cron_expression, t.timezone, t.created_at, t.last_fired_at

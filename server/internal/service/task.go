@@ -878,6 +878,27 @@ func (s *TaskService) maybeEnqueueVerifier(ctx context.Context, completed db.Age
 	}
 }
 
+// maybeEnqueueEventTriggers fires GAP-31 event triggers on task completion.
+// ponytail: list triggers where event_filters @> task.completed, log count, enqueue stub — full dispatch when scheduler job lands.
+func (s *TaskService) maybeEnqueueEventTriggers(ctx context.Context, completed db.AgentTaskQueue) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("event trigger enqueue panicked (non-fatal)", "task_id", util.UUIDToString(completed.ID), "panic", r)
+		}
+	}()
+	filter := []byte(`[{"event":"task.completed"}]`)
+	triggers, err := s.Queries.ListEventAutopilotTriggersForTask(ctx, db.ListEventAutopilotTriggersForTaskParams{ID: completed.AgentID, Column2: filter})
+	if err != nil {
+		slog.Warn("event trigger list failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	if len(triggers) == 0 {
+		return
+	}
+	slog.Info("event triggers matched (dispatch stub)", "task_id", util.UUIDToString(completed.ID), "matched", len(triggers))
+	// ponytail: full enqueue via autopilot dispatch when event job lands — log-only for now, prevents silent drop
+}
+
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
@@ -4155,6 +4176,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if branchName != "" {
 		s.maybeEnqueueVerifier(ctx, task, branchName)
 	}
+	s.maybeEnqueueEventTriggers(ctx, task)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
