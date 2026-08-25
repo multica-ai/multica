@@ -43,4 +43,4 @@ images:
     newTag: "4c2543c4"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "f0fc059a"
+    newTag: "4c2543c4"
