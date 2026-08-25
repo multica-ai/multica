@@ -15,9 +15,10 @@ import (
 )
 
 type workerTestExecutor struct {
-	decision Decision
-	err      error
-	confirms int
+	decision       Decision
+	err            error
+	confirms       int
+	releaseMembers int
 }
 
 type workerTestLocker struct {
@@ -48,6 +49,7 @@ func (e *workerTestExecutor) Release(context.Context, uuid.UUID, uuid.UUID) (Dec
 	return e.decision, e.err
 }
 func (e *workerTestExecutor) ReleaseMember(context.Context, uuid.UUID, uuid.UUID) (Decision, error) {
+	e.releaseMembers++
 	return e.decision, e.err
 }
 func (e *workerTestExecutor) GetOperation(context.Context, uuid.UUID, uuid.UUID) (Decision, error) {
@@ -68,6 +70,9 @@ type workerTestQueries struct {
 	expires     int
 	failures    int
 	deadLetters int
+	defers      int
+
+	pendingConfirm bool
 }
 
 func (q *workerTestQueries) ClaimNextDueSeatCapacityIntent(context.Context, pgtype.Timestamptz) (db.SeatCapacityOutbox, error) {
@@ -133,6 +138,25 @@ func (q *workerTestQueries) MarkClaimedSeatCapacityIntentFailed(_ context.Contex
 	return 1, nil
 }
 
+func (q *workerTestQueries) DeferClaimedSeatCapacityIntent(_ context.Context, arg db.DeferClaimedSeatCapacityIntentParams) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.intent.OperationToken != arg.OperationToken || q.intent.Action != arg.Action || q.intent.LeaseToken != arg.LeaseToken {
+		return 0, nil
+	}
+	q.defers++
+	q.intent.NextAttemptAt = arg.NextAttemptAt
+	q.intent.LastError = pgtype.Text{String: arg.LastError, Valid: true}
+	q.intent.LeaseToken = pgtype.UUID{}
+	return 1, nil
+}
+
+func (q *workerTestQueries) ExistsPendingSeatCapacityConfirmForMember(context.Context, db.ExistsPendingSeatCapacityConfirmForMemberParams) (bool, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.pendingConfirm, nil
+}
+
 func (q *workerTestQueries) SeatCapacityOutboxStats(context.Context) ([]db.SeatCapacityOutboxStatsRow, error) {
 	return q.stats, nil
 }
@@ -149,10 +173,10 @@ func (q *workerTestQueries) TransitionClaimedSeatCapacityIntent(_ context.Contex
 	return 1, nil
 }
 
-func (q *workerTestQueries) counts() (transitions, deletes, expires, failures, deadLetters int) {
+func (q *workerTestQueries) counts() (transitions, deletes, expires, failures, deadLetters, defers int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return q.transitions, q.deletes, q.expires, q.failures, q.deadLetters
+	return q.transitions, q.deletes, q.expires, q.failures, q.deadLetters, q.defers
 }
 
 func workerTestIntent(action string) db.SeatCapacityOutbox {
@@ -178,7 +202,7 @@ func TestRecoverConsumingTransitionsAbandonedOperationToRelease(t *testing.T) {
 	if err := worker.recoverConsuming(context.Background(), intent, uuidFromPG(intent.WorkspaceID), uuidFromPG(intent.OperationToken)); err != nil {
 		t.Fatal(err)
 	}
-	transitions, deletes, expires, _, _ := queries.counts()
+	transitions, deletes, expires, _, _, _ := queries.counts()
 	if transitions != 1 || deletes != 0 || expires != 1 {
 		t.Fatalf("transitions=%d deletes=%d expires=%d, want 1/0/1", transitions, deletes, expires)
 	}
@@ -195,7 +219,7 @@ func TestRecoverConsumingUsedDeletesWithoutReleasing(t *testing.T) {
 	if err := worker.recoverConsuming(context.Background(), intent, uuidFromPG(intent.WorkspaceID), uuidFromPG(intent.OperationToken)); err != nil {
 		t.Fatal(err)
 	}
-	transitions, deletes, expires, _, _ := queries.counts()
+	transitions, deletes, expires, _, _, _ := queries.counts()
 	if transitions != 0 || deletes != 1 || expires != 0 {
 		t.Fatalf("transitions=%d deletes=%d expires=%d, want 0/1/0", transitions, deletes, expires)
 	}
@@ -214,7 +238,7 @@ func TestRecoverReserveKeepsPendingInvitationReservation(t *testing.T) {
 	if err := worker.recoverReserve(context.Background(), intent, uuidFromPG(intent.WorkspaceID), uuidFromPG(intent.OperationToken)); err != nil {
 		t.Fatal(err)
 	}
-	transitions, deletes, expires, _, _ := queries.counts()
+	transitions, deletes, expires, _, _, _ := queries.counts()
 	if transitions != 0 || deletes != 1 || expires != 0 {
 		t.Fatalf("transitions=%d deletes=%d expires=%d, want 0/1/0", transitions, deletes, expires)
 	}
@@ -238,7 +262,7 @@ func TestRecoveryCleansUnknownOrUnmanagedOperations(t *testing.T) {
 			if err := worker.recoverConsuming(context.Background(), intent, uuidFromPG(intent.WorkspaceID), uuidFromPG(intent.OperationToken)); err != nil {
 				t.Fatal(err)
 			}
-			_, deletes, expires, _, _ := queries.counts()
+			_, deletes, expires, _, _, _ := queries.counts()
 			if deletes != 1 || expires != 0 {
 				t.Fatalf("deletes=%d expires=%d, want 1/0", deletes, expires)
 			}
@@ -270,7 +294,7 @@ func TestConcurrentRecoveryOnlyOneReplicaTransitionsIntent(t *testing.T) {
 		}
 	}
 
-	transitions, _, expires, _, _ := queries.counts()
+	transitions, _, expires, _, _, _ := queries.counts()
 	if transitions != 1 || expires != 1 {
 		t.Fatalf("transitions=%d expires=%d, want 1/1", transitions, expires)
 	}
@@ -287,7 +311,7 @@ func TestWorkerDeadLettersAfterMaximumAttempts(t *testing.T) {
 	if err := worker.ReconcileOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, failures, deadLetters := queries.counts()
+	_, _, _, failures, deadLetters, _ := queries.counts()
 	if failures != 0 || deadLetters != 1 {
 		t.Fatalf("failures=%d deadLetters=%d, want 0/1", failures, deadLetters)
 	}
@@ -305,6 +329,52 @@ func TestWorkerUsesWorkspaceSerializationBeforeCloudCall(t *testing.T) {
 	}
 	if locker.locks != 1 || locker.unlocks != 1 {
 		t.Fatalf("locks=%d unlocks=%d, want 1/1", locker.locks, locker.unlocks)
+	}
+}
+
+func TestWorkerDefersReleaseMemberBeforeCloudCallWhenConfirmPending(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	intent := workerTestIntent(ActionReleaseMember)
+	intent.MemberID = uuidToTestPG(uuid.New())
+	queries := &workerTestQueries{intent: intent, pendingConfirm: true}
+	executor := &workerTestExecutor{decision: Decision{Managed: true, Allowed: true}}
+	worker := newWorker(queries, executor, WorkerConfig{})
+	worker.now = func() time.Time { return now }
+
+	if err := worker.settle(context.Background(), intent); err != nil {
+		t.Fatal(err)
+	}
+	_, deletes, _, failures, deadLetters, defers := queries.counts()
+	if defers != 1 || deletes != 0 || failures != 0 || deadLetters != 0 {
+		t.Fatalf("defers=%d deletes=%d failures=%d deadLetters=%d, want 1/0/0/0", defers, deletes, failures, deadLetters)
+	}
+	if executor.releaseMembers != 0 {
+		t.Fatalf("ReleaseMember calls = %d, want 0", executor.releaseMembers)
+	}
+	if queries.intent.AttemptCount != intent.AttemptCount {
+		t.Fatalf("attempt_count = %d, want unchanged %d", queries.intent.AttemptCount, intent.AttemptCount)
+	}
+	if got := queries.intent.NextAttemptAt.Time.Sub(now); got != defaultReconcileInterval {
+		t.Fatalf("defer delay = %s, want %s", got, defaultReconcileInterval)
+	}
+}
+
+func TestWorkerReleaseMemberSettlesAfterConfirmDeadLetterEscape(t *testing.T) {
+	intent := workerTestIntent(ActionReleaseMember)
+	intent.MemberID = uuidToTestPG(uuid.New())
+	queries := &workerTestQueries{intent: intent, pendingConfirm: false}
+	executor := &workerTestExecutor{err: &HTTPError{StatusCode: http.StatusNotFound}}
+	worker := newWorker(queries, executor, WorkerConfig{})
+
+	if err := worker.settle(context.Background(), intent); err != nil {
+		t.Fatal(err)
+	}
+	_, deletes, _, failures, deadLetters, defers := queries.counts()
+	if deletes != 1 || defers != 0 || failures != 0 || deadLetters != 0 {
+		t.Fatalf("deletes=%d defers=%d failures=%d deadLetters=%d, want 1/0/0/0", deletes, defers, failures, deadLetters)
+	}
+	if executor.releaseMembers != 1 {
+		t.Fatalf("ReleaseMember calls = %d, want 1", executor.releaseMembers)
 	}
 }
 

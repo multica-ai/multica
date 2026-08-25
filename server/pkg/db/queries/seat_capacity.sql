@@ -105,6 +105,16 @@ WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: ExistsPendingSeatCapacityConfirmForMember :one
+SELECT EXISTS (
+    SELECT 1
+    FROM seat_capacity_outbox
+    WHERE workspace_id = sqlc.arg('workspace_id')
+      AND member_id = sqlc.arg('member_id')
+      AND action = 'confirm'
+      AND dead_lettered_at IS NULL
+);
+
 -- name: DeleteSeatCapacityConfirmIntentsForWorkspaceDeletion :exec
 -- Confirmed seats are released only through the member-scoped operation below.
 -- Never rewrite them to token release: Cloud may accept token release for a
@@ -215,6 +225,16 @@ SET attempt_count = attempt_count + 1,
     updated_at = now()
 WHERE operation_token = sqlc.arg('operation_token') AND action = sqlc.arg('action');
 
+-- name: DeferSeatCapacityIntentForAction :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left(sqlc.arg('last_error'), 1000),
+    next_attempt_at = sqlc.arg('next_attempt_at'),
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = sqlc.arg('operation_token')
+  AND action = sqlc.arg('action')
+  AND dead_lettered_at IS NULL;
+
 -- name: MarkClaimedSeatCapacityIntentDeadLettered :execrows
 UPDATE seat_capacity_outbox
 SET attempt_count = attempt_count + 1,
@@ -266,6 +286,17 @@ SET attempt_count = attempt_count + 1,
 WHERE operation_token = sqlc.arg('operation_token')
   AND action = sqlc.arg('action')
   AND lease_token = sqlc.arg('lease_token');
+
+-- name: DeferClaimedSeatCapacityIntent :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left(sqlc.arg('last_error'), 1000),
+    next_attempt_at = sqlc.arg('next_attempt_at'),
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = sqlc.arg('operation_token')
+  AND action = sqlc.arg('action')
+  AND lease_token = sqlc.arg('lease_token')
+  AND dead_lettered_at IS NULL;
 
 -- name: DeleteSeatCapacityIntentForAction :exec
 DELETE FROM seat_capacity_outbox

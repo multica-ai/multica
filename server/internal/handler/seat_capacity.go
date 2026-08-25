@@ -301,8 +301,16 @@ func (h *Handler) settleMemberCapacityRelease(ctx context.Context, workspaceID, 
 	if err != nil {
 		return
 	}
+	if deferred, nextAttemptAt, err := seatcapacity.DeferMemberReleaseIfPendingConfirm(
+		ctx, q, workspaceID, memberID, uuid.UUID(intent.OperationToken.Bytes), time.Now(),
+	); err != nil || deferred {
+		if deferred {
+			seatcapacity.LogMemberReleaseDeferred(ctx, slog.Default(), workspaceID, memberID, nextAttemptAt)
+		}
+		return
+	}
 	decision, releaseErr := h.SeatCapacity.ReleaseMember(ctx, workspaceID, memberID)
-	if (releaseErr == nil && (!decision.Managed || decision.Allowed || decision.Reason == "released")) || seatcapacity.IsNotFound(releaseErr) {
+	if seatcapacity.MemberReleaseSettleError(decision, releaseErr) == nil {
 		_ = deleteCapacityIntentForAction(ctx, q, uuid.UUID(intent.OperationToken.Bytes), seatcapacity.ActionReleaseMember)
 		return
 	}
