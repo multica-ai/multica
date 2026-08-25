@@ -88,6 +88,71 @@ expect_grep "upstream README is saved separately" 'git show "\$\{UPSTREAM_REF\}:
 expect_grep "any non-KEEP_OURS conflict still parks for a human" 'exit 2' "${SYNC}"
 expect_grep "a merge failure with no conflicts is still fatal" 'Merge failed for a non-conflict reason' "${SYNC}"
 
+# ── scripts/upstream-sync.sh — annotated tags are peeled to commits ─────────
+# `git rev-parse <ref>` on a ref pointing at an ANNOTATED tag object returns the
+# tag object's own SHA, not the commit it points at, unless peeled with
+# `^{commit}`. An unpeeled SHA written into the cursor's `sha=` line later fails
+# `git replace --graft`, which requires literal commit objects ("Not a valid
+# commit name"). This is the exact ANK-117 / AIPLAT-232 failure on the
+# v0.4.32 -> v0.4.33 hop. Both peel sites are plain script lines, not
+# functions, so — like normalize_jira_ref above — they are lifted out by
+# pattern match and eval'd for real, against a real annotated tag, rather than
+# reimplemented here.
+echo "==> upstream-sync.sh: annotated tag SHAs are peeled to commits"
+PEEL_SCRATCH="$(mktemp -d)"
+(
+  cd "${PEEL_SCRATCH}"
+  git init -q .
+  git config user.email test@example.com
+  git config user.name test
+  echo hello > file.txt
+  git add file.txt
+  git commit -q -m "initial commit"
+  git tag -a v9.9.9 -m "annotated release tag"
+) >/dev/null
+
+TAG_COMMIT="$(git -C "${PEEL_SCRATCH}" rev-parse v9.9.9^{commit})"
+TAG_OBJECT="$(git -C "${PEEL_SCRATCH}" rev-parse v9.9.9)"
+if [[ "$(git -C "${PEEL_SCRATCH}" cat-file -t "${TAG_OBJECT}")" == "tag" ]]; then
+  pass "fixture tag is a real annotated tag object (reproduces the bug)"
+else
+  fail "fixture tag is not annotated — test would not reproduce the bug"
+fi
+
+# Write-time peel: UPSTREAM_HEAD=$(git rev-parse "${UPSTREAM_REF}^{commit}")
+UPSTREAM_HEAD_LINE="$(grep -E '^UPSTREAM_HEAD=\$\(git rev-parse' "${SYNC}")"
+if [[ -z "${UPSTREAM_HEAD_LINE}" ]]; then
+  fail "could not find the UPSTREAM_HEAD assignment in ${SYNC}"
+else
+  WRITE_TIME_SHA="$(cd "${PEEL_SCRATCH}" && UPSTREAM_REF="refs/tags/v9.9.9" \
+    bash -c "${UPSTREAM_HEAD_LINE}"'; printf "%s" "${UPSTREAM_HEAD}"')"
+  WRITE_TIME_TYPE="$(git -C "${PEEL_SCRATCH}" cat-file -t "${WRITE_TIME_SHA}" 2>/dev/null || echo missing)"
+  expect_eq "write-time UPSTREAM_HEAD resolves to the tagged commit" \
+    "${TAG_COMMIT}" "${WRITE_TIME_SHA}"
+  expect_eq "write-time UPSTREAM_HEAD is a commit object (cursor sha= is safe to graft)" \
+    "commit" "${WRITE_TIME_TYPE}"
+fi
+
+# Cursor-read peel: the `if [ -f "${CURSOR_FILE}" ]; then ... fi` block that
+# reads FORK_POINT back out of an on-disk cursor. Simulates the already-
+# corrupted cursor left behind by a pre-fix run (sha= holding a bare tag
+# object), which is exactly the AIPLAT-232 v0.4.32 cursor state.
+FORK_POINT_BLOCK="$(sed -n '/^if \[ -f "\${CURSOR_FILE}" \]; then$/,/^fi$/p' "${SYNC}")"
+if [[ -z "${FORK_POINT_BLOCK}" ]]; then
+  fail "could not extract the cursor-read FORK_POINT block from ${SYNC}"
+else
+  CURSOR_SCRATCH_FILE="${PEEL_SCRATCH}/.upstream-sync-cursor"
+  printf 'tag=v9.9.9\nsha=%s\n' "${TAG_OBJECT}" > "${CURSOR_SCRATCH_FILE}"
+  CURSOR_READ_SHA="$(cd "${PEEL_SCRATCH}" && CURSOR_FILE="${CURSOR_SCRATCH_FILE}" \
+    bash -c "${FORK_POINT_BLOCK}"'; printf "%s" "${FORK_POINT}"')"
+  CURSOR_READ_TYPE="$(git -C "${PEEL_SCRATCH}" cat-file -t "${CURSOR_READ_SHA}" 2>/dev/null || echo missing)"
+  expect_eq "cursor-read FORK_POINT peels an already-corrupted tag-object sha" \
+    "${TAG_COMMIT}" "${CURSOR_READ_SHA}"
+  expect_eq "cursor-read FORK_POINT is a commit object (safe for git replace --graft)" \
+    "commit" "${CURSOR_READ_TYPE}"
+fi
+rm -rf "${PEEL_SCRATCH}"
+
 # ── scripts/sync-tick.sh — pure helpers ──────────────────────────────────────
 # Sourcing runs the file's top-level setup (repo root, scratch dir) but not
 # main(), and the dependency checks live in require_deps precisely so this works

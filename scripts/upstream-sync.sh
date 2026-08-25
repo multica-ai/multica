@@ -118,7 +118,7 @@ git fetch "${FORK_REMOTE}" "${FORK_BRANCH}"
 git fetch --no-tags "${UPSTREAM_REMOTE}" main
 git fetch --no-tags --force "${UPSTREAM_REMOTE}" "refs/tags/${TARGET_TAG}:${UPSTREAM_REF}"
 
-UPSTREAM_HEAD=$(git rev-parse "${UPSTREAM_REF}")
+UPSTREAM_HEAD=$(git rev-parse "${UPSTREAM_REF}^{commit}")
 UPSTREAM_SHORT=$(git rev-parse --short=7 "${UPSTREAM_HEAD}")
 
 # 5. Resolve fork-point. Prefer the explicit cursor (survives squash-merge);
@@ -129,6 +129,12 @@ FORK_POINT=""
 if [ -f "${CURSOR_FILE}" ]; then
   FROM_TAG=$(sed -n 's/^tag=//p' "${CURSOR_FILE}" | tr -d '[:space:]')
   FORK_POINT=$(sed -n 's/^sha=//p' "${CURSOR_FILE}" | tr -d '[:space:]')
+  # Defensive peel: a cursor written before this script peeled at write-time
+  # (see UPSTREAM_HEAD above) may still hold a bare tag-object SHA, which
+  # `git replace --graft` below rejects with "Not a valid commit name".
+  if [ -n "${FORK_POINT}" ]; then
+    FORK_POINT=$(git rev-parse "${FORK_POINT}^{commit}")
+  fi
 fi
 if [ -z "${FORK_POINT}" ]; then
   FORK_POINT=$(git merge-base "${FORK_REMOTE}/${FORK_BRANCH}" "${UPSTREAM_REF}")
