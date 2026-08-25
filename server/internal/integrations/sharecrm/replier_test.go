@@ -30,11 +30,15 @@ func TestIssueDuplicateText(t *testing.T) {
 }
 
 func TestCommandOutcomeCopy(t *testing.T) {
-	// Pins the user-visible bare-/new and bare-/issue strings that Reply posts
-	// for OutcomeFreshPending / OutcomeIssueUsage (MUL-5873). ShareCRM is
-	// text-first so there is no media usage variant.
+	// Pins the user-visible bare-/clear, bare-/new, and bare-/issue strings
+	// that Reply posts for OutcomeFreshPending / OutcomeChatStarted /
+	// OutcomeIssueUsage (MUL-6661). ShareCRM is text-first so there is no
+	// media usage variant.
 	if freshPendingText != "✅ Fresh start ready. Your next chat message will run without previous context." {
 		t.Fatalf("freshPendingText = %q", freshPendingText)
+	}
+	if chatStartedText != "✅ Started a new Multica chat. Your next message will enter it." {
+		t.Fatalf("chatStartedText = %q", chatStartedText)
 	}
 	if issueUsageText != "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)" {
 		t.Fatalf("issueUsageText = %q", issueUsageText)
