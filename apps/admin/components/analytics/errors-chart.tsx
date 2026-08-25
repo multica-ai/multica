@@ -13,16 +13,26 @@ import { activeFailureClasses, failureClassChartConfig, labelOf } from "./failur
  * per-workspace Usage → Errors tab uses (failureClassOf from
  * @multica/core/dashboard), just folded across every workspace.
  */
-export function ErrorsChart({ buckets }: { buckets: AnalyticsBucket[] }) {
+export function ErrorsChart({
+  buckets,
+  onSegmentClick,
+}: {
+  buckets: AnalyticsBucket[];
+  onSegmentClick?: (bucketStart: string, segment: string) => void;
+}) {
   const data = useMemo(
-    () => buckets.map((b) => ({ label: bucketLabel(b.bucketStart), ...b.errors })),
+    () => buckets.map((b) => ({ bucketStart: b.bucketStart, label: bucketLabel(b.bucketStart), ...b.errors })),
     [buckets],
   );
   const classes = activeFailureClasses(data);
   if (classes.length === 0) return <EmptyChartState message="No errors in this window." />;
 
   return (
-    <ChartContainer config={failureClassChartConfig} className="aspect-[3/1] w-full">
+    <ChartContainer
+      config={failureClassChartConfig}
+      className="aspect-[3/1] w-full"
+      aria-label="Errors chart. Click a bar segment to see its workspace breakdown."
+    >
       <BarChart data={data} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
         <CartesianGrid vertical={false} />
         <XAxis dataKey="label" tickLine={false} axisLine={false} tickMargin={8} interval="preserveStartEnd" />
@@ -31,6 +41,7 @@ export function ErrorsChart({ buckets }: { buckets: AnalyticsBucket[] }) {
           content={
             <ChartTooltipContent
               formatter={(value, name) => `${value} ${labelOf(failureClassChartConfig, name)}`}
+              footer="Click a segment for its workspace breakdown."
             />
           }
         />
@@ -41,6 +52,8 @@ export function ErrorsChart({ buckets }: { buckets: AnalyticsBucket[] }) {
             stackId="errors"
             fill={`var(--color-${c})`}
             radius={i === classes.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+            className="cursor-pointer"
+            onClick={(data) => data.payload?.bucketStart && onSegmentClick?.(data.payload.bucketStart, c)}
           />
         ))}
       </BarChart>

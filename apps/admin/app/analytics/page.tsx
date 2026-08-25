@@ -6,6 +6,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { KpiRow } from "@/components/analytics/kpi-row";
 import { ErrorsChart } from "@/components/analytics/errors-chart";
 import { AutopilotRunsChart } from "@/components/analytics/autopilot-runs-chart";
+import { WorkspaceBreakdownSheet } from "@/components/analytics/workspace-breakdown-sheet";
 import { CountsChart } from "@/components/analytics/counts-chart";
 import {
   WindowToolbar,
@@ -14,7 +15,7 @@ import {
   granularityOptionsFor,
   type WindowHours,
 } from "@/components/analytics/window-toolbar";
-import type { GranularityHours } from "@/lib/types";
+import type { AnalyticsWorkspaceBreakdownParams, GranularityHours } from "@/lib/types";
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -28,6 +29,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 export default function AnalyticsPage() {
   const [windowHours, setWindowHours] = useState<WindowHours>(DEFAULT_WINDOW_HOURS);
   const [granularityHours, setGranularityHours] = useState<GranularityHours>(DEFAULT_GRANULARITY_HOURS);
+  const [workspaceBreakdown, setWorkspaceBreakdown] = useState<AnalyticsWorkspaceBreakdownParams | null>(null);
 
   // Mirrors usage-section.tsx's handleDimChange: reset granularity to the
   // window's first valid option whenever it's no longer offered.
@@ -50,6 +52,14 @@ export default function AnalyticsPage() {
 
   const params = useMemo(() => ({ from, to, granularityHours }), [from, to, granularityHours]);
   const { data, isLoading, isError, refetch } = useAnalytics(params);
+
+  function openWorkspaceBreakdown(kind: AnalyticsWorkspaceBreakdownParams["kind"], segment: string, bucketStart: string) {
+    const bucketEnd = Math.min(
+      new Date(bucketStart).getTime() + granularityHours * 3_600_000,
+      new Date(to).getTime(),
+    );
+    setWorkspaceBreakdown({ kind, segment, from: bucketStart, to: new Date(bucketEnd).toISOString() });
+  }
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
@@ -83,11 +93,11 @@ export default function AnalyticsPage() {
           <KpiRow result={data} />
 
           <ChartCard title="Errors">
-            <ErrorsChart buckets={data.buckets} />
+            <ErrorsChart buckets={data.buckets} onSegmentClick={(bucketStart, segment) => openWorkspaceBreakdown("errors", segment, bucketStart)} />
           </ChartCard>
 
           <ChartCard title="Autopilot runs">
-            <AutopilotRunsChart buckets={data.buckets} />
+            <AutopilotRunsChart buckets={data.buckets} onSegmentClick={(bucketStart, segment) => openWorkspaceBreakdown("autopilotRuns", segment, bucketStart)} />
           </ChartCard>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -105,7 +115,8 @@ export default function AnalyticsPage() {
           </div>
         </div>
       ) : null}
+
+      <WorkspaceBreakdownSheet selection={workspaceBreakdown} onClose={() => setWorkspaceBreakdown(null)} />
     </main>
   );
 }
-

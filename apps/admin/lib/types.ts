@@ -233,3 +233,26 @@ export interface AnalyticsResult {
    */
   totalLiteLlmSpendUsd: number | null;
 }
+
+/** A clickable segment in one of the two drill-down analytics charts. */
+export type AnalyticsBreakdownKind = "errors" | "autopilotRuns";
+
+export interface AnalyticsWorkspaceBreakdownParams {
+  /** Exact start/end of the clicked chart bucket. */
+  from: string;
+  to: string;
+  kind: AnalyticsBreakdownKind;
+  /** An error class for `errors`, or a run outcome for `autopilotRuns`. */
+  segment: string;
+}
+
+/** One workspace's contribution to a selected analytics chart segment. */
+export interface AnalyticsWorkspaceBreakdownItem {
+  workspaceId: string;
+  workspaceName: string;
+  count: number;
+}
+
+export interface AnalyticsWorkspaceBreakdownResult {
+  items: AnalyticsWorkspaceBreakdownItem[];
+}

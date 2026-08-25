@@ -2,6 +2,7 @@ import "server-only";
 import { query } from "./db";
 import type {
   ActivityEvent,
+  AnalyticsBreakdownKind,
   AnalyticsParams,
   AutopilotRunCounts,
   IssueMetrics,
@@ -436,6 +437,64 @@ export interface AnalyticsRawBucket {
   issuesCreated: number;
   autopilotRuns: AutopilotRunCounts;
   errorsByReason: Record<string, number>;
+}
+
+/**
+ * Unfolded workspace rows for one selected analytics bucket. Error rows keep
+ * their raw reason here so the route can apply the shared failure taxonomy
+ * before selecting the requested segment.
+ */
+export interface AnalyticsWorkspaceBreakdownRawRow {
+  workspaceId: string;
+  workspaceName: string;
+  segment: string;
+  count: number;
+}
+
+export async function getAnalyticsWorkspaceBreakdown(
+  params: Pick<AnalyticsParams, "from" | "to"> & { kind: AnalyticsBreakdownKind },
+): Promise<AnalyticsWorkspaceBreakdownRawRow[]> {
+  const { from, to, kind } = params;
+
+  if (kind === "autopilotRuns") {
+    return query<{ workspace_id: string; workspace_name: string; status: string; n: string }>(
+      `
+      SELECT ap.workspace_id, w.name AS workspace_name, ar.status, count(*) AS n
+      FROM autopilot_run ar
+      JOIN autopilot ap ON ap.id = ar.autopilot_id
+      JOIN workspace w ON w.id = ap.workspace_id
+      WHERE ar.triggered_at >= $1::timestamptz AND ar.triggered_at < $2::timestamptz
+      GROUP BY 1, 2, 3
+      `,
+      [from, to],
+    ).then((rows) => rows.map((row) => ({
+      workspaceId: row.workspace_id,
+      workspaceName: row.workspace_name,
+      segment: row.status,
+      count: Number(row.n),
+    })));
+  }
+
+  return query<{ workspace_id: string; workspace_name: string; failure_reason: string; n: string }>(
+    `
+    SELECT a.workspace_id,
+           w.name AS workspace_name,
+           COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified') AS failure_reason,
+           count(*) AS n
+    FROM agent_task_queue atq
+    JOIN agent a ON a.id = atq.agent_id
+    JOIN workspace w ON w.id = a.workspace_id
+    WHERE atq.status = 'failed'
+      AND atq.completed_at >= $1::timestamptz AND atq.completed_at < $2::timestamptz
+    GROUP BY 1, 2, 3
+    `,
+    [from, to],
+  ).then((rows) => rows.map((row) => ({
+    workspaceId: row.workspace_id,
+    workspaceName: row.workspace_name,
+    segment: row.failure_reason,
+    count: Number(row.n),
+  })));
 }
 
 // Every bucketing expression below is anchored at `from` ($1) rather than a
