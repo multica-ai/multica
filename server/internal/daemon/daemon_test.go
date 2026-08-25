@@ -1687,6 +1687,14 @@ func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 	if err := os.WriteFile(present, []byte("{}"), 0o644); err != nil {
 		t.Fatalf("write rollout: %v", err)
 	}
+	archived := filepath.Join(codexHome, "archived_sessions",
+		"rollout-2026-07-13T00-00-00-archived-session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(archived), 0o755); err != nil {
+		t.Fatalf("mkdir archived sessions: %v", err)
+	}
+	if err := os.WriteFile(archived, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write archived rollout: %v", err)
+	}
 
 	tests := []struct {
 		name        string
@@ -1696,6 +1704,7 @@ func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 		wantSession string
 	}{
 		{name: "rollout present keeps resume", provider: "codex", sessionID: "present-session", codexHome: codexHome, wantSession: "present-session"},
+		{name: "archived rollout stays eligible for unarchive", provider: "codex", sessionID: "archived-session", codexHome: codexHome, wantSession: "archived-session"},
 		{name: "rollout absent drops resume", provider: "codex", sessionID: "gone-session", codexHome: codexHome, wantSession: ""},
 		{name: "non-codex provider is a no-op", provider: "claude", sessionID: "present-session", codexHome: codexHome, wantSession: "present-session"},
 		{name: "empty codex home is a no-op", provider: "codex", sessionID: "present-session", codexHome: "", wantSession: "present-session"},
@@ -4379,6 +4388,181 @@ func TestReportTaskResult_CancelledParentStillRunsPermanentFailureFallback(t *te
 	}
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fallback fail calls = %d, want 1", got)
+	}
+}
+
+func TestHandleTaskArchivesCodexOnlyAfterTerminalPersistence(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	tests := []struct {
+		name           string
+		result         TaskResult
+		runErr         error
+		archiveErr     error
+		statusResponse string
+		wantTerminal   string
+	}{
+		{
+			name:           "completion",
+			result:         TaskResult{Status: "completed"},
+			statusResponse: "running",
+			wantTerminal:   "complete",
+		},
+		{
+			name:           "archive failure does not overwrite completion",
+			result:         TaskResult{Status: "completed"},
+			archiveErr:     errors.New("archive unavailable"),
+			statusResponse: "running",
+			wantTerminal:   "complete",
+		},
+		{
+			name:           "failure result",
+			result:         TaskResult{Status: "blocked", Comment: "provider failed"},
+			statusResponse: "running",
+			wantTerminal:   "fail",
+		},
+		{
+			name:         "runner error",
+			result:       TaskResult{},
+			runErr:       errors.New("runner crashed"),
+			wantTerminal: "fail",
+		},
+		{
+			name:           "post-run cancellation",
+			result:         TaskResult{Status: "completed"},
+			statusResponse: "cancelled",
+			wantTerminal:   "cancel-ack",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var events []string
+			record := func(event string) {
+				mu.Lock()
+				events = append(events, event)
+				mu.Unlock()
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/status"):
+					status := tc.statusResponse
+					if status == "" {
+						status = "running"
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"status":%q}`, status)
+				case strings.HasSuffix(r.URL.Path, "/complete"):
+					record("complete")
+					w.WriteHeader(http.StatusOK)
+				case strings.HasSuffix(r.URL.Path, "/fail"):
+					record("fail")
+					w.WriteHeader(http.StatusOK)
+				case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+					record("cancel-ack")
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusOK)
+				}
+			}))
+			t.Cleanup(srv.Close)
+
+			result := tc.result
+			result.CodexArchiveThreadIDs = []string{"thr-task", "thr-task"}
+			result.CodexArchiveThread = func(_ context.Context, id string) error {
+				record("archive:" + id)
+				return tc.archiveErr
+			}
+			d := &Daemon{
+				client:             NewClient(srv.URL),
+				logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+				workspaces:         make(map[string]*workspaceState),
+				runtimeIndex:       map[string]Runtime{"rt-codex": {ID: "rt-codex", Provider: "codex"}},
+				cancelPollInterval: time.Hour,
+				activeStores:       make(map[string]int),
+				deletingStores:     make(map[string]bool),
+			}
+			d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
+			d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+				return result, tc.runErr
+			})
+			d.handleTask(context.Background(), Task{
+				ID:        "task-codex",
+				RuntimeID: "rt-codex",
+				IssueID:   "issue-codex",
+				AgentID:   "agent-codex",
+				Agent:     &AgentData{Name: "Codex"},
+			}, 0)
+
+			mu.Lock()
+			got := append([]string(nil), events...)
+			mu.Unlock()
+			want := []string{tc.wantTerminal, "archive:thr-task"}
+			if !slices.Equal(got, want) {
+				t.Fatalf("event order = %v, want terminal persistence before one deduplicated archive %v", got, want)
+			}
+		})
+	}
+}
+
+func TestHandleTaskDoesNotArchiveWhenTerminalPersistenceFails(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	var archives atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case strings.HasSuffix(r.URL.Path, "/fail"):
+			w.WriteHeader(http.StatusBadRequest)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-codex": {ID: "rt-codex", Provider: "codex"}},
+		cancelPollInterval: time.Hour,
+		activeStores:       make(map[string]int),
+		deletingStores:     make(map[string]bool),
+	}
+	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
+	d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		return TaskResult{
+			CodexArchiveThreadIDs: []string{"thr-no-persist"},
+			CodexArchiveThread: func(context.Context, string) error {
+				archives.Add(1)
+				return nil
+			},
+		}, errors.New("runner crashed")
+	})
+	d.handleTask(context.Background(), Task{
+		ID:        "task-codex-fail",
+		RuntimeID: "rt-codex",
+		IssueID:   "issue-codex-fail",
+		AgentID:   "agent-codex",
+		Agent:     &AgentData{Name: "Codex"},
+	}, 0)
+	if got := archives.Load(); got != 0 {
+		t.Fatalf("archive calls = %d, want 0 when /fail persistence was rejected", got)
+	}
+}
+
+func TestArchiveCodexTaskThreadsIgnoresNonCodexProvider(t *testing.T) {
+	var calls atomic.Int32
+	result := TaskResult{
+		CodexArchiveThreadIDs: []string{"thr-wrong-provider"},
+		CodexArchiveThread: func(context.Context, string) error {
+			calls.Add(1)
+			return nil
+		},
+	}
+	(&Daemon{}).archiveCodexTaskThreads(context.Background(), "claude", Task{}, result, slog.Default())
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("non-Codex archive calls = %d, want 0", got)
 	}
 }
 

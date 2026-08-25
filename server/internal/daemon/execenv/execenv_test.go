@@ -3042,8 +3042,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should contain task-local sessions, the model-cache config
-	// binding, and auto-generated config.toml.
+	// Directory should contain task-local active/archived sessions, the
+	// model-cache config binding, and auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -3055,6 +3055,9 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["sessions"] {
 		t.Error("expected sessions directory")
 	}
+	if !entryNames["archived_sessions"] {
+		t.Error("expected archived_sessions directory")
+	}
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
 	}
@@ -3065,7 +3068,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Error("expected models cache config binding")
 	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" && name != codexModelsCacheBindingFile {
+		if name != "sessions" && name != "archived_sessions" && name != "config.toml" && name != "plugins" && name != codexModelsCacheBindingFile {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}

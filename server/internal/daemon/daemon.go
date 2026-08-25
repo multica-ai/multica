@@ -384,6 +384,13 @@ type Daemon struct {
 	// went away is a few bytes, not a leak worth a lifecycle.
 	registerSerial sync.Map
 
+	// codexConversationSerial holds one mutex per stable Codex conversation.
+	// A terminal callback wakes successor tasks before the old daemon handler
+	// receives its HTTP response; holding this lock through post-persistence
+	// archive prevents that successor from unarchiving/resuming the same thread
+	// while its predecessor is still moving the rollout.
+	codexConversationSerial sync.Map
+
 	// agentsAvailable holds the current built-in agent CLI availability set —
 	// the same shape as cfg.Agents, which it supersedes as the read path.
 	//
@@ -5020,6 +5027,38 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 	provider := rt.Provider
 
+	if provider == "codex" {
+		conversation := execenv.TaskContextForEnv{
+			IssueID:       task.IssueID,
+			ChatSessionID: task.ChatSessionID,
+			AgentID:       task.AgentID,
+		}
+		lockKey := execenv.CodexSessionStorePath(d.cfg.Profile, conversation)
+		if lockKey == "" {
+			// Tasks without a stable issue/chat conversation cannot be resumed
+			// by another task, but retaining a task-local key keeps the locking
+			// rule total and avoids a global mutex.
+			lockKey = "task:" + task.ID
+		}
+		lockAny, _ := d.codexConversationSerial.LoadOrStore(lockKey, &sync.Mutex{})
+		conversationLock := lockAny.(*sync.Mutex)
+		conversationLock.Lock()
+		defer conversationLock.Unlock()
+
+		// Keep both halves of a local-directory conversation store out of the
+		// existing GC until archive/unarchive and their process cleanup finish.
+		for _, store := range []string{
+			execenv.CodexSessionStorePath(d.cfg.Profile, conversation),
+			execenv.CodexArchivedSessionStorePath(d.cfg.Profile, conversation),
+		} {
+			if store == "" {
+				continue
+			}
+			d.markActiveStore(store)
+			defer d.unmarkActiveStore(store)
+		}
+	}
+
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
 	agentName := "agent"
@@ -5142,6 +5181,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, ack); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		} else {
+			d.archiveCodexTaskThreads(ctx, provider, task, result, taskLog)
 		}
 		return
 	default:
@@ -5166,6 +5207,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			failureReason:  taskRunFailureReason(err),
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
+		} else {
+			d.archiveCodexTaskThreads(ctx, provider, task, result, taskLog)
 		}
 		return
 	}
@@ -5191,11 +5234,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// them.
 		if ackErr := d.client.AckTaskCancelled(ctx, task.ID, TaskCancelAck{BranchName: result.BranchName, DurableWorkDir: result.DurableWorkDir}); ackErr != nil {
 			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		} else {
+			d.archiveCodexTaskThreads(ctx, provider, task, result, taskLog)
 		}
 		return
 	}
 
-	d.reportTaskResult(ctx, task.ID, result, taskLog)
+	if d.reportTaskResult(ctx, task.ID, result, taskLog) {
+		d.archiveCodexTaskThreads(ctx, provider, task, result, taskLog)
+	}
 
 	// Write GC metadata after the task finishes so the periodic GC loop
 	// can look up the parent record (issue / chat session / autopilot run /
@@ -5473,7 +5520,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 // the agent may have built a real session before getting stuck, and we want
 // the next chat turn to resume there rather than start over and "forget"
 // the conversation.
-func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) {
+func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result TaskResult, taskLog *slog.Logger) bool {
 	switch result.Status {
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
@@ -5489,7 +5536,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			retiredSessionID:      result.RetiredSessionID,
 		})
 		if err == nil {
-			return
+			return true
 		}
 		// CompleteTask retries transient errors internally. A transient
 		// error reaching us here means the schedule was exhausted while
@@ -5504,7 +5551,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 		// left is a concrete failure.
 		if isTransientError(err) {
 			taskLog.Error("complete task failed after retries; leaving task in running rather than falling back to fail", "error", err)
-			return
+			return false
 		}
 		taskLog.Error("complete task rejected by server, falling back to fail", "error", err)
 		// MUL-2946: this fallback fires when a server-side complete
@@ -5532,7 +5579,9 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			retiredSessionID:      result.RetiredSessionID,
 		}); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
+			return false
 		}
+		return true
 	default:
 		failureReason := result.FailureReason
 		if failureReason == "" {
@@ -5570,7 +5619,51 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			retiredSessionID:      result.RetiredSessionID,
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
+			return false
 		}
+		return true
+	}
+	return false
+}
+
+const codexTaskArchiveTimeout = 20 * time.Second
+
+// archiveCodexTaskThreads is the sole post-persistence archive boundary. The
+// caller invokes it only after /complete, /fail or /cancel-ack returned
+// success. A transient or rejected terminal callback leaves the task running
+// and must leave its threads active for recovery.
+//
+// Archive is best-effort by contract: the server result is already durable, so
+// an RPC failure is structured operational evidence and never another task
+// status transition. One shared deadline bounds all retry-created roots and
+// their process cleanup below the daemon's task-drain window.
+func (d *Daemon) archiveCodexTaskThreads(parent context.Context, provider string, task Task, result TaskResult, taskLog *slog.Logger) {
+	if provider != "codex" || result.CodexArchiveThread == nil || len(result.CodexArchiveThreadIDs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), codexTaskArchiveTimeout)
+	defer cancel()
+	for _, threadID := range mergeCodexThreadIDs(result.CodexArchiveThreadIDs) {
+		started := time.Now()
+		if err := result.CodexArchiveThread(ctx, threadID); err != nil {
+			taskLog.Warn("codex task thread archive failed",
+				"task_id", task.ID,
+				"runtime_id", task.RuntimeID,
+				"thread_id", threadID,
+				"latency", time.Since(started).Round(time.Millisecond).String(),
+				"error", err,
+			)
+			if ctx.Err() != nil {
+				return
+			}
+			continue
+		}
+		taskLog.Info("codex task thread archived",
+			"task_id", task.ID,
+			"runtime_id", task.RuntimeID,
+			"thread_id", threadID,
+			"latency", time.Since(started).Round(time.Millisecond).String(),
+		)
 	}
 }
 
@@ -5884,11 +5977,19 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 	if provider != "codex" || task.PriorSessionID == "" || codexHome == "" {
 		return
 	}
-	if execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) {
+	if execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) ||
+		execenv.CodexArchivedRolloutPresent(codexHome, task.PriorSessionID) {
 		return
 	}
 	taskLog.Warn("dropping prior codex session: rollout not present in task CODEX_HOME; starting a fresh thread",
 		"session_id", task.PriorSessionID, "codex_home", codexHome)
+	markCodexResumeUnavailable(task, taskCtx)
+}
+
+func markCodexResumeUnavailable(task *Task, taskCtx *execenv.TaskContextForEnv) {
+	if task == nil || taskCtx == nil {
+		return
+	}
 	task.PriorSessionID = ""
 	taskCtx.PriorSessionResumed = false
 	// The user expected this run to continue the prior conversation; surface the
@@ -5936,6 +6037,25 @@ func codexSessionResumable(codexHome, sessionID string, wait time.Duration) bool
 		}
 		time.Sleep(codexRolloutPollInterval)
 	}
+}
+
+func mergeCodexThreadIDs(groups ...[]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, group := range groups {
+		for _, id := range group {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // waitCodexRolloutPresent blocks until sessionID's rollout appears in codexHome's
@@ -7584,6 +7704,63 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
+	// thread/archive makes the task disappear from Codex Desktop by moving its
+	// rollout to archived_sessions. Before a later Multica task resumes the
+	// persisted pointer, restore it through the official inverse RPC. The
+	// archived_sessions view is stable across local-directory task homes (see
+	// execenv.prepareCodexArchivedSessionsDir), so this preserves the existing
+	// cross-task continuity contract instead of turning archive into deletion.
+	//
+	// Keep the exact backend and ExecOptions for handleTask's post-persistence
+	// archive. ThreadIDs is sampled in the defer, after all internal and daemon
+	// fresh-session retries have finished, so intermediate roots are not leaked.
+	if lifecycle, ok := backend.(agent.CodexThreadLifecycle); ok {
+		var preUnarchived []string
+		if execOpts.ResumeSessionID != "" && execenv.CodexArchivedRolloutPresent(env.CodexHome, execOpts.ResumeSessionID) {
+			priorThreadID := execOpts.ResumeSessionID
+			unarchiveErr := lifecycle.UnarchiveThread(ctx, priorThreadID, execOpts)
+			active := execenv.CodexResumeRolloutPresent(env.CodexHome, priorThreadID)
+			if unarchiveErr == nil && active {
+				preUnarchived = append(preUnarchived, priorThreadID)
+				taskLog.Info("codex archived thread restored for resume", "thread_id", priorThreadID)
+			} else if active {
+				// An idempotent race (or an older runtime reporting an error after
+				// moving the rollout) is safe when the filesystem proves the thread
+				// is active. The conversation lock in handleTask prevents another
+				// local task from entering this window concurrently.
+				preUnarchived = append(preUnarchived, priorThreadID)
+				taskLog.Info("codex thread already active after unarchive response", "thread_id", priorThreadID)
+			} else {
+				taskLog.Warn("codex thread unarchive failed; starting a fresh thread",
+					"thread_id", priorThreadID, "error", unarchiveErr)
+				markCodexResumeUnavailable(&task, &taskCtx)
+				execOpts.ResumeSessionID = ""
+				execOpts.ResumeExpected = false
+				execOpts.ResumeContinuityNotice = ""
+				if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+					taskLog.Warn("execenv: re-inject runtime config after unarchive failure failed (non-fatal)", "error", briefErr)
+				} else {
+					runtimeBrief = freshBrief
+					if providerNeedsInlineSystemPrompt(provider) {
+						execOpts.SystemPrompt = runtimeBrief
+					}
+				}
+				prompt = BuildPrompt(task, provider, promptOptions...)
+			}
+		}
+		defer func() {
+			ids := mergeCodexThreadIDs(preUnarchived, lifecycle.ThreadIDs())
+			if len(ids) == 0 {
+				return
+			}
+			opts := execOpts
+			taskResult.CodexArchiveThreadIDs = ids
+			taskResult.CodexArchiveThread = func(archiveCtx context.Context, threadID string) error {
+				return lifecycle.ArchiveThread(archiveCtx, threadID, opts)
+			}
+		}()
+	}
+
 	// A quick-actions refresh task from a server that predates server-side
 	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
 	// it with, and it must NOT fall through to the ordinary chat path below:
@@ -8726,6 +8903,15 @@ func (d *Daemon) markActiveStore(store string) {
 	}
 	d.activeStoresMu.Lock()
 	defer d.activeStoresMu.Unlock()
+	if d.activeStores == nil {
+		d.activeStores = make(map[string]int)
+	}
+	if d.deletingStores == nil {
+		d.deletingStores = make(map[string]bool)
+	}
+	if d.activeStoresCond == nil {
+		d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
+	}
 	for d.deletingStores[store] {
 		d.activeStoresCond.Wait()
 	}

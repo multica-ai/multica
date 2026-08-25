@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -316,8 +317,14 @@ type TaskResult struct {
 	// abandoned as unresumable (GH #6066). Forwarded on every terminal path,
 	// including the completed one: a fresh-session retry that SUCCEEDS is
 	// precisely when the abandoned id would otherwise stay selectable.
-	RetiredSessionID string           `json:"-"`
-	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	RetiredSessionID string `json:"-"`
+	// CodexArchiveThread and CodexArchiveThreadIDs are producer-internal
+	// lifecycle metadata. The backend supplies exact task-owned thread IDs;
+	// handleTask invokes the callback only after the server accepted a terminal
+	// complete/fail/cancel persistence boundary. They never cross the task API.
+	CodexArchiveThread    func(context.Context, string) error `json:"-"`
+	CodexArchiveThreadIDs []string                            `json:"-"`
+	Usage                 []TaskUsageEntry                    `json:"usage,omitempty"` // per-model token usage
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

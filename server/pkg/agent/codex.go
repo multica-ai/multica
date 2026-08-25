@@ -258,6 +258,41 @@ func (o *codexFirstItemWaitObservation) snapshot() (time.Duration, string, codex
 // and communicating via JSON-RPC 2.0 over stdin/stdout.
 type codexBackend struct {
 	cfg Config
+
+	threadIDsMu sync.Mutex
+	threadIDs   []string
+}
+
+const maxCodexArchiveTargets = 8
+
+func (b *codexBackend) recordThreadID(threadID string) {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return
+	}
+	b.threadIDsMu.Lock()
+	defer b.threadIDsMu.Unlock()
+	for _, existing := range b.threadIDs {
+		if existing == threadID {
+			return
+		}
+	}
+	// A normal task can create at most four roots today (two internal Codex
+	// attempts across the daemon's one fresh-session retry). Keep a defensive
+	// cap so a custom protocol-compatible runtime cannot grow task memory or
+	// post-terminal work without bound.
+	if len(b.threadIDs) < maxCodexArchiveTargets {
+		b.threadIDs = append(b.threadIDs, threadID)
+	}
+}
+
+// ThreadIDs returns every thread this backend positively observed in a
+// successful thread/start or thread/resume response. It never guesses from a
+// prior session id or a state database row.
+func (b *codexBackend) ThreadIDs() []string {
+	b.threadIDsMu.Lock()
+	defer b.threadIDsMu.Unlock()
+	return append([]string(nil), b.threadIDs...)
 }
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -1440,6 +1475,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			return
 		}
 		c.threadID = threadID
+		b.recordThreadID(threadID)
 		if resumed {
 			b.cfg.Logger.Info("codex thread resumed", "thread_id", threadID)
 		} else {
@@ -2167,6 +2203,10 @@ type codexClient struct {
 	// suppressing an initialize retry after observed activity) without letting
 	// filtered history mutate current-turn output or lifecycle state.
 	onDiscardedNotification func(method string, params map[string]any)
+	// rejectServerRequests makes the one-shot archive/unarchive client
+	// read-only. The execution client intentionally auto-approves tools in
+	// daemon mode; a lifecycle process must never inherit that authority.
+	rejectServerRequests bool
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
@@ -2287,7 +2327,7 @@ func (e *codexHandshakeTimeoutError) Unwrap() error {
 
 func isCodexHandshakeRPC(method string) bool {
 	switch method {
-	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start", "thread/archive", "thread/unarchive":
 		return true
 	default:
 		return false
@@ -2555,6 +2595,10 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	if c.rejectServerRequests {
+		c.respondError(id, -32601, "server requests are disabled during codex thread lifecycle")
+		return
+	}
 
 	// Auto-approve all exec/patch requests in daemon mode
 	switch method {

@@ -3706,7 +3706,7 @@ func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
 		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-warm","turn":{"id":"turn-warm","status":"completed"}}}'`+"\n"+
 		`fi`+"\n")
 
-	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+	result, messages, backend := executeFakeCodexCollectingMessagesWithBackend(t, fakePath, Config{Logger: slog.Default()}, ExecOptions{
 		Timeout:                   20 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, 20*time.Second)
@@ -3726,6 +3726,9 @@ func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
 		if msg.SessionID == "thr-cold" {
 			t.Fatalf("discarded attempt leaked a session pin for thr-cold: %+v", msg)
 		}
+	}
+	if got, want := backend.(CodexThreadLifecycle).ThreadIDs(), []string{"thr-cold", "thr-warm"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("archive targets = %v, want every successful retry-created thread %v", got, want)
 	}
 }
 
@@ -3769,7 +3772,7 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh","status":"completed"}}}'`+"\n"+
 		`fi`+"\n")
 
-	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+	result, _, backend := executeFakeCodexCollectingMessagesWithBackend(t, fakePath, Config{Logger: slog.Default()}, ExecOptions{
 		ResumeSessionID: "thr-prior",
 		ResumeExpected:  true,
 		// Supplied by the daemon since MUL-5722: this package no longer holds
@@ -3785,6 +3788,9 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 	}
 	if result.SessionID != "thr-fresh" {
 		t.Fatalf("expected the retry to land on a fresh thread, got %q", result.SessionID)
+	}
+	if got, want := backend.(CodexThreadLifecycle).ThreadIDs(), []string{"thr-prior", "thr-fresh"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("resume archive targets = %v, want resumed and fresh retry roots %v", got, want)
 	}
 	dir := filepath.Dir(fakePath)
 	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
@@ -4025,6 +4031,12 @@ func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts Exec
 
 func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string, cfg Config, opts ExecOptions, budget time.Duration) (Result, []Message) {
 	t.Helper()
+	result, messages, _ := executeFakeCodexCollectingMessagesWithBackend(t, fakePath, cfg, opts, budget)
+	return result, messages
+}
+
+func executeFakeCodexCollectingMessagesWithBackend(t *testing.T, fakePath string, cfg Config, opts ExecOptions, budget time.Duration) (Result, []Message, Backend) {
+	t.Helper()
 	cfg.ExecutablePath = fakePath
 	backend, err := New("codex", cfg)
 	if err != nil {
@@ -4055,10 +4067,10 @@ func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string,
 		mu.Lock()
 		collected := append([]Message(nil), messages...)
 		mu.Unlock()
-		return result, collected
+		return result, collected, backend
 	case <-time.After(budget):
 		t.Fatal("timeout waiting for result")
-		return Result{}, nil
+		return Result{}, nil, backend
 	}
 }
 

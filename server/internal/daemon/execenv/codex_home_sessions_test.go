@@ -689,6 +689,54 @@ func TestPruneCodexSessionStores_RemovesEmptyAgentDir(t *testing.T) {
 	assertAbsent(t, filepath.Join(storeRoot, "agent-lonely"))
 }
 
+func TestPrepareCodexArchivedSessionsPersistsAcrossLocalTaskHomes(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	key := codexSessionStoreKey("", TaskContextForEnv{AgentID: "agent-1", IssueID: "issue-1"})
+	sessionID := "thr-archived-resume"
+
+	firstHome := filepath.Join(t.TempDir(), "codex-home-a")
+	if err := prepareCodexHomeWithOpts(firstHome, CodexHomeOptions{
+		GOOS:             "linux",
+		IsLocalDirectory: true,
+		SessionStoreKey:  key,
+	}, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := seedRolloutAt(t, filepath.Join(firstHome, "archived_sessions", "rollout-2026-08-25T00-00-00-"+sessionID+".jsonl"), 32)
+	if !CodexArchivedRolloutPresent(firstHome, sessionID) {
+		t.Fatal("first task home cannot see archived rollout")
+	}
+
+	secondHome := filepath.Join(t.TempDir(), "codex-home-b")
+	if err := prepareCodexHomeWithOpts(secondHome, CodexHomeOptions{
+		GOOS:             "linux",
+		IsLocalDirectory: true,
+		SessionStoreKey:  key,
+		ResumeSessionID:  sessionID,
+	}, testLogger()); err != nil {
+		t.Fatal(err)
+	}
+	if !CodexArchivedRolloutPresent(secondHome, sessionID) {
+		t.Fatal("archived rollout did not survive into the next local task home")
+	}
+	wantStore := codexArchivedSessionStoreDir(sharedHome, key)
+	gotTarget, err := filepath.EvalSymlinks(filepath.Join(secondHome, "archived_sessions"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTarget, err := filepath.EvalSymlinks(wantStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameCodexPath(gotTarget, wantTarget) {
+		t.Fatalf("archived_sessions target = %s, want %s", gotTarget, wantTarget)
+	}
+	if _, err := os.Stat(archivePath); err != nil {
+		t.Fatalf("archive written through first task link was lost: %v", err)
+	}
+}
+
 // chtimesTree sets the atime/mtime of every entry under root to ts.
 func chtimesTree(t *testing.T, root string, ts time.Time) {
 	t.Helper()

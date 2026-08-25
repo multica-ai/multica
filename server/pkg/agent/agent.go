@@ -22,6 +22,23 @@ type Backend interface {
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
+// CodexThreadLifecycle is implemented only by the Codex app-server backend.
+// It gives the daemon a provider-owned way to move a task thread out of the
+// active Desktop list after the task's terminal callback is durable, and to
+// restore an archived rollout before a later task resumes it.
+//
+// The daemon must use ThreadIDs rather than deriving archive targets from a
+// task's resume pointer: Codex may create more than one real thread across its
+// bounded startup/fresh-session retries, while Result.SessionID carries only
+// the final one. Lifecycle RPCs receive the same ExecOptions as Execute so the
+// one-shot app-server uses the exact runtime args and CODEX_HOME that own the
+// thread.
+type CodexThreadLifecycle interface {
+	ArchiveThread(ctx context.Context, threadID string, opts ExecOptions) error
+	UnarchiveThread(ctx context.Context, threadID string, opts ExecOptions) error
+	ThreadIDs() []string
+}
+
 // ExecOptions configures a single execution.
 type ExecOptions struct {
 	Cwd   string

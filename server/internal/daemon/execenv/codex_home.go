@@ -212,6 +212,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if err := prepareCodexSessionsDir(codexHome, sharedHome, opts, logger); err != nil {
 		logger.Warn("execenv: codex-home sessions dir prepare failed", "error", err)
 	}
+	// thread/archive moves a rollout out of sessions/ and into
+	// archived_sessions/. Local-directory tasks receive a fresh CODEX_HOME for
+	// every task ID, so point that directory at a stable per-conversation store
+	// as well; otherwise archiving would make the server-persisted session
+	// impossible to unarchive on the next task. Managed tasks reuse their env
+	// root and keep the directory local, matching prepareCodexSessionsDir.
+	if err := prepareCodexArchivedSessionsDir(codexHome, sharedHome, opts); err != nil {
+		logger.Warn("execenv: codex-home archived sessions dir prepare failed", "error", err)
+	}
 
 	// Symlink shared files (auth).
 	for _, name := range codexSymlinkedFiles {
@@ -359,6 +368,8 @@ var codexSessionStateGlobs = []string{
 // user's own thread list.
 const codexSessionStoreRoot = "multica-sessions"
 
+const codexArchivedStoreSuffix = "__archived"
+
 // codexSessionStoreDir returns the persistent, per-(agent, issue) Codex sessions
 // store for key, rooted on the shared Codex home's volume. It survives across
 // task IDs (unlike the task-scoped envRoot the GC reclaims) and holds only that
@@ -368,6 +379,19 @@ func codexSessionStoreDir(sharedHome, key string) string {
 		return ""
 	}
 	return filepath.Join(sharedHome, codexSessionStoreRoot, key)
+}
+
+// codexArchivedSessionStoreDir is the persistent archive half of a
+// per-conversation store. It deliberately lives under the existing
+// multica-sessions root with a reserved suffix: the existing session-store GC
+// then applies the same profile isolation, retention and reservation protocol
+// without introducing a second cleanup loop.
+func codexArchivedSessionStoreDir(sharedHome, key string) string {
+	store := codexSessionStoreDir(sharedHome, key)
+	if store == "" {
+		return ""
+	}
+	return store + codexArchivedStoreSuffix
 }
 
 // codexSessionStoreNamespace maps a daemon's profile to the directory segment
@@ -629,6 +653,33 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	return os.MkdirAll(dst, 0o755)
 }
 
+// prepareCodexArchivedSessionsDir preserves archive/resume continuity across
+// task IDs. Local-directory tasks cannot reuse their task CODEX_HOME, so their
+// archived_sessions directory is linked to the per-conversation archive store.
+// Managed tasks reuse the same env root and retain a local directory, avoiding
+// an unbounded cross-volume move when Codex archives a large rollout.
+func prepareCodexArchivedSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions) error {
+	dst := filepath.Join(codexHome, "archived_sessions")
+	if !opts.IsLocalDirectory || opts.SessionStoreKey == "" {
+		return os.MkdirAll(dst, 0o755)
+	}
+	// Do not destroy archives produced by the temporary pre-producer helper in
+	// an already-existing local directory. New task homes have no destination
+	// yet and take the stable link below; a non-empty legacy directory stays
+	// readable in place and can be recovered manually.
+	if fi, err := os.Lstat(dst); err == nil && fi.Mode()&os.ModeSymlink == 0 {
+		entries, readErr := os.ReadDir(dst)
+		if readErr != nil {
+			return readErr
+		}
+		if len(entries) > 0 {
+			return nil
+		}
+	}
+	storeDir := codexArchivedSessionStoreDir(sharedHome, opts.SessionStoreKey)
+	return ensureCodexSessionsLink(dst, storeDir)
+}
+
 // linkCodexSessionsToStore points codex-home/sessions (dst) at the per-issue
 // store (storeDir) via an idempotent directory link — a symlink on Unix, a
 // junction on Windows — both of which cross filesystem volumes without special
@@ -687,6 +738,16 @@ func CodexSessionStorePath(profile string, task TaskContextForEnv) string {
 		return ""
 	}
 	return codexSessionStoreDir(resolveSharedCodexHome(), key)
+}
+
+// CodexArchivedSessionStorePath returns the persistent archived-rollout store
+// for the same conversation key as CodexSessionStorePath.
+func CodexArchivedSessionStorePath(profile string, task TaskContextForEnv) string {
+	key := codexSessionStoreKey(profile, task)
+	if key == "" {
+		return ""
+	}
+	return codexArchivedSessionStoreDir(resolveSharedCodexHome(), key)
 }
 
 // sameCodexPath reports whether two filesystem paths refer to the same location,
@@ -784,6 +845,17 @@ func CodexResumeRolloutPresent(codexHome, sessionID string) bool {
 		return false
 	}
 	return len(findCodexRollouts(filepath.Join(codexHome, "sessions"), sessionID)) > 0
+}
+
+// CodexArchivedRolloutPresent reports whether thread/archive moved the target
+// rollout into this task's archived_sessions view. The daemon uses it to keep a
+// persisted resume pointer eligible long enough to call official
+// thread/unarchive before the next thread/resume.
+func CodexArchivedRolloutPresent(codexHome, sessionID string) bool {
+	if codexHome == "" || sessionID == "" {
+		return false
+	}
+	return len(findCodexRollouts(filepath.Join(codexHome, "archived_sessions"), sessionID)) > 0
 }
 
 // exposeResumeRollout links sessionID's rollout(s) out of the shared sessions
