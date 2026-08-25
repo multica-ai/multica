@@ -1,11 +1,11 @@
 ---
 title: Slack Bot
-description: Create a Slack Bot for an agent and use it in DMs, channels, and the /issue command.
+description: Create a Slack Bot for an agent and use it in DMs, channels, and the /issue, /new, and /clear commands.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica uses your own Slack app. Once connected, team members can DM the Bot, @-mention it in a channel, or use `/issue` to create issues.
+Multica uses your own Slack app. Once connected, team members can DM the Bot, @-mention it in a channel, use `/issue` to create issues, use `/new` to start a new Multica Chat, or use `/clear` to reset the current Chat's agent context.
 
 One Slack app maps to one Multica agent. To connect several agents, create a separate app for each.
 
@@ -35,6 +35,12 @@ features:
     - command: /issue
       description: Create a Multica issue
       usage_hint: "[description]"
+    - command: /new
+      description: Start a new Multica chat
+      usage_hint: "[message]"
+    - command: /clear
+      description: Clear the current Multica chat context
+      usage_hint: "[message]"
 oauth_config:
   scopes:
     bot:
@@ -63,7 +69,11 @@ settings:
   token_rotation_enabled: false
 ```
 
-Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, or `/issue` may stop working.
+Before creating, you can replace both occurrences of `Multica` with the agent's name. Do not remove scopes or events from the manifest, or DMs, channel mentions, replies, `/issue`, `/new`, or `/clear` may stop working.
+
+<Callout type="warning">
+Slack slash-command names are workspace-global. If another installed app already owns `/new` or `/clear`, Slack rejects the conflicting command when you create or update the app. Resolve the collision, or send the message form — `@Multica /new [message]` or `@Multica /clear [message]` — to bypass native slash-command interception.
+</Callout>
 
 <Callout type="warning">
 If this Slack app was installed before attachment support was available, add the `files:read` Bot scope and reinstall the app to the workspace. Slack does not apply newly added scopes to the existing Bot token until the app is reinstalled.
@@ -137,6 +147,20 @@ In a channel or DM, type:
 
 This command needs no @-mention. Multica hands the description to the agent behind the current Bot, which writes up the title and body and creates the issue. Slack first shows an acknowledgment visible only to you; when the issue is created, you get a notification in your Multica inbox.
 
+### Start a new Chat with `/new`
+
+In a DM with the Bot, `/new` immediately creates a new, visible empty Chat. `/new <message>` creates the Chat and uses the message as its first turn. A bare `/new` displays as **New chat** until the first effective user message arrives; the title then follows the existing first-message title behavior.
+
+The previous Chat remains available and writable in Multica on the web, desktop, and mobile. Only subsequent messages from this Slack conversation are routed to the new Chat.
+
+In a channel or thread, Slack's native slash-command payload does not identify the target thread. Send `@Multica /new [message]` in the target thread instead.
+
+### Clear the current Chat context with `/clear`
+
+In a DM with the Bot, `/clear` keeps the current Multica Chat and resets only the context visible to the agent. The complete Chat history remains stored and visible in Multica. `/clear <message>` uses the message as the first turn in the new context; a bare `/clear` applies the boundary to the next real message.
+
+In a channel or thread, send `@Multica /clear [message]` in the target thread so Multica can apply the boundary to the correct conversation.
+
 ## Manage connections
 
 Open **Settings → Integrations** to view all connected Slack Bots. Workspace owners and admins can disconnect them.
@@ -167,7 +191,7 @@ Account binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` w
 - **App can't be verified**: confirm the manifest includes `users:read`, then reinstall the app after updating permissions.
 - **No DM entry point**: confirm `app_home.messages_tab_enabled` is `true`.
 - **No reply in a channel**: confirm the Bot has been invited to the channel and the message @-mentions it.
-- **`/issue` doesn't exist**: confirm the manifest includes the slash command and the `commands` scope, then reinstall the app.
+- **`/issue`, `/new`, or `/clear` doesn't exist**: confirm the manifest includes all three slash commands and the `commands` scope, then reinstall the app. If Slack reports that `/new` or `/clear` is already taken, use the `@Multica` message form or resolve the workspace-level command collision first.
 - **Files don't reach the agent**: confirm the manifest includes `files:read` and that the app was reinstalled after the scope was added, and check the file is 20 MiB or smaller.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
 
