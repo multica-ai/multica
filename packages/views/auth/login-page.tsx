@@ -35,6 +35,13 @@ interface GoogleAuthConfig {
   state?: string;
 }
 
+interface DingTalkAuthConfig {
+  clientId: string;
+  redirectUri: string;
+  /** Opaque state passed through DingTalk OAuth round-trip. */
+  state?: string;
+}
+
 interface CliCallbackConfig {
   /** Validated localhost callback URL */
   url: string;
@@ -50,6 +57,8 @@ interface LoginPageProps {
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
   google?: GoogleAuthConfig;
+  /** DingTalk OAuth config. Omit to disable DingTalk login. */
+  dingtalk?: DingTalkAuthConfig;
   /** CLI callback config for authorizing CLI tools. */
   cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
@@ -101,6 +110,7 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
+  dingtalk,
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
@@ -284,6 +294,23 @@ export function LoginPage({
     });
     if (google.state) params.set("state", google.state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+  };
+
+  const handleDingTalkLogin = () => {
+    if (!dingtalk) return;
+    const params = new URLSearchParams({
+      client_id: dingtalk.clientId,
+      redirect_uri: dingtalk.redirectUri,
+      response_type: "code",
+      // DingTalk gates identity fields on the granted scope: unionId/corpId
+      // only come back when the auth request asks for "openid corpid".
+      scope: "openid corpid",
+      prompt: "consent",
+    });
+    if (dingtalk.state) params.set("state", dingtalk.state);
+    // URLSearchParams encodes spaces as "+"; DingTalk expects %20.
+    const qs = params.toString().replaceAll("+", "%20");
+    window.location.href = `https://login.dingtalk.com/oauth2/auth?${qs}`;
   };
 
   // -------------------------------------------------------------------------
@@ -477,6 +504,25 @@ export function LoginPage({
                 />
               </svg>
               {t(($) => $.signin.google)}
+            </Button>
+          )}
+          {dingtalk && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              size="lg"
+              onClick={handleDingTalkLogin}
+              disabled={loading}
+            >
+              <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" fill="none">
+                <rect x="1" y="4" width="22" height="16" rx="4" fill="#0089FF" />
+                <path
+                  d="M12.8 7.2l-4.4 5.2h2.9l-1.3 4.4 4.4-5.6h-2.9l1.3-4z"
+                  fill="#fff"
+                />
+              </svg>
+              {t(($) => $.signin.dingtalk)}
             </Button>
           )}
           {extra && <div className="w-full pt-1 text-center">{extra}</div>}
