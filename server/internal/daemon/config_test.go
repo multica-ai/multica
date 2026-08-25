@@ -433,11 +433,42 @@ func stageFakeAgent(t *testing.T) string {
 		t.Fatalf("write fake claude: %v", err)
 	}
 	t.Setenv("PATH", binDir)
+	// Keep missing providers from consulting the developer's login shell.
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "unsupported-shell"))
 	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
 	// Clear any inherited env-var override so the test sees the URL-based
 	// default, not whatever the developer happens to have exported.
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
 	return binDir
+}
+
+func TestStageFakeAgentIgnoresLoginShellAgents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+
+	kiro := filepath.Join(t.TempDir(), "kiro-cli")
+	if err := os.WriteFile(kiro, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake kiro: %v", err)
+	}
+	shell := filepath.Join(t.TempDir(), "sh")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf 'kiro-cli\\t"+kiro+"\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake shell: %v", err)
+	}
+	t.Setenv("SHELL", shell)
+	stageFakeAgent(t)
+	resetShellResolveCacheForTest(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if _, found := cfg.Agents["kiro"]; found {
+		t.Fatal("stageFakeAgent discovered a login-shell agent")
+	}
 }
 
 func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
@@ -1031,23 +1062,16 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
-	sh := "/bin/sh"
-	if _, err := os.Stat(sh); err != nil {
-		t.Skipf("no /bin/sh available: %v", err)
-	}
 
-	// rc backgrounds a sleeper that holds stdout for far longer than any
-	// reasonable WaitDelay. The resolver script never gets to print
-	// anything (we never even reach the for-loop because rc is still
-	// being sourced when the sleeper forks), but that's exactly the
-	// scenario we care about — we don't want to leak time-to-startup.
-	rc := filepath.Join(t.TempDir(), "sh.rc")
-	rcBody := "( sleep 60 ) &\n"
-	if err := os.WriteFile(rc, []byte(rcBody), 0o644); err != nil {
-		t.Fatalf("write rc: %v", err)
+	// Use a test-created supported shell so the fixture cannot source the
+	// developer's login files. It exits after starting a child that keeps
+	// stdout open, reproducing the pipe leak without consulting the host shell.
+	sh := filepath.Join(t.TempDir(), "sh")
+	shBody := "#!/bin/sh\n(sleep 60) &\nexit 0\n"
+	if err := os.WriteFile(sh, []byte(shBody), 0o755); err != nil {
+		t.Fatalf("write fake shell: %v", err)
 	}
 	t.Setenv("SHELL", sh)
-	t.Setenv("ENV", rc)
 
 	// Cap = context timeout + wait delay + generous slack for goroutine
 	// scheduling. A bug that disables WaitDelay would blow past 60s here.
@@ -1060,7 +1084,11 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 	}()
 	select {
 	case <-done:
-		if elapsed := time.Since(start); elapsed > cap {
+		elapsed := time.Since(start)
+		if elapsed < loginShellResolveWaitDelay {
+			t.Errorf("resolver took %v, expected the background child to hold stdout for at least %v", elapsed, loginShellResolveWaitDelay)
+		}
+		if elapsed > cap {
 			t.Errorf("resolver took %v, expected <= %v (WaitDelay leak?)", elapsed, cap)
 		}
 	case <-time.After(cap):
