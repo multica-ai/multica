@@ -135,6 +135,45 @@ func TestNextOccurrenceAfterUTCIgnoresWallClock(t *testing.T) {
 	}
 }
 
+// TestSlotIntervalFromCron locks in the ALL-234 defect 1 cadence: the
+// slot-interval helper must return the longest gap between consecutive
+// occurrences of the schedule, which is what extends the autopilot lease
+// beyond the base timeout for slow schedules.
+func TestSlotIntervalFromCron(t *testing.T) {
+	after := time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name   string
+		cron   string
+		tz     string
+		want   time.Duration
+		wantOK bool
+	}{
+		{name: "every five minutes", cron: "*/5 * * * *", tz: "UTC", want: 5 * time.Minute, wantOK: true},
+		{name: "every two hours", cron: "0 */2 * * *", tz: "UTC", want: 2 * time.Hour, wantOK: true},
+		{name: "daily", cron: "0 0 * * *", tz: "UTC", want: 24 * time.Hour, wantOK: true},
+		{name: "weekly on monday", cron: "0 12 * * MON", tz: "UTC", want: 7 * 24 * time.Hour, wantOK: true},
+		{name: "monthly first", cron: "0 0 1 * *", tz: "UTC", want: 31 * 24 * time.Hour, wantOK: true},
+		{name: "invalid cron", cron: "not a cron", tz: "UTC", want: 0, wantOK: false},
+		{name: "invalid timezone", cron: "0 * * * *", tz: "Mars/Olympus", want: 0, wantOK: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := SlotIntervalFromCron(tt.cron, tt.tz, after)
+			if ok != tt.wantOK {
+				t.Fatalf("SlotIntervalFromCron() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if !ok {
+				return
+			}
+			if got != tt.want {
+				t.Fatalf("SlotIntervalFromCron() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestNextOccurrenceAdvancesPastFiredSlot locks in the property the
 // scheduler's next_run_at write-back relies on (MUL-3749): once a
 // recurring trigger fires at a slot, the next computed occurrence is the

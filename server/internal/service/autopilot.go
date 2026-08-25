@@ -77,11 +77,58 @@ func (s *AutopilotService) SetLeaseTimeout(d time.Duration) {
 	s.LeaseTimeout = d
 }
 
-// leaseTimeout returns the effective in-flight lease, floored at
-// autopilot.MinLeaseDuration via LeaseConfig so a misconfigured value can
-// never cause over-aggressive stale-run cleanup.
-func (s *AutopilotService) leaseTimeout() time.Duration {
-	return (&autopilot.LeaseConfig{BaseTimeout: s.LeaseTimeout}).CalculateLeaseDuration()
+// leaseTimeout returns the effective in-flight lease for the autopilot's
+// dispatch mutual-exclusion gate: max(base timeout, the autopilot's slot
+// interval), floored at autopilot.MinLeaseDuration via LeaseConfig so a
+// misconfigured value can never cause over-aggressive stale-run cleanup.
+// The slot interval is the longest scheduling gap across the autopilot's
+// enabled schedule triggers (ALL-226; ALL-234 defect 1), so a slow-cycle
+// autopilot's in-flight run is never reclaimed before the next slot could
+// legitimately fire.
+func (s *AutopilotService) leaseTimeout(ctx context.Context, ap db.Autopilot) time.Duration {
+	cfg := &autopilot.LeaseConfig{BaseTimeout: s.LeaseTimeout}
+	if interval, ok := s.slotInterval(ctx, ap); ok {
+		cfg.SlotInterval = interval
+	}
+	return cfg.CalculateLeaseDuration()
+}
+
+// slotInterval returns the longest scheduling gap across the autopilot's
+// enabled schedule triggers, or (0, false) when the autopilot has no
+// parseable schedule (webhook/api/manual-only triggers) — the lease then
+// stays at the base timeout. The lease must cover the slowest trigger so a
+// run fired by any of them is never reclaimed early.
+func (s *AutopilotService) slotInterval(ctx context.Context, ap db.Autopilot) (time.Duration, bool) {
+	triggers, err := s.Queries.ListAutopilotTriggers(ctx, ap.ID)
+	if err != nil {
+		slog.Warn("autopilot lease: failed to load triggers for slot interval",
+			"autopilot_id", util.UUIDToString(ap.ID),
+			"error", err,
+		)
+		return 0, false
+	}
+	after := time.Now().UTC()
+	var best time.Duration
+	found := false
+	for _, tr := range triggers {
+		if tr.Kind != "schedule" || !tr.Enabled {
+			continue
+		}
+		cronExpr := strings.TrimSpace(tr.CronExpression.String)
+		if !tr.CronExpression.Valid || cronExpr == "" {
+			continue
+		}
+		timezone := strings.TrimSpace(tr.Timezone.String)
+		if timezone == "" {
+			timezone = DefaultAutopilotTriggerTimezone
+		}
+		interval, ok := SlotIntervalFromCron(cronExpr, timezone, after)
+		if ok && interval > best {
+			best = interval
+			found = true
+		}
+	}
+	return best, found
 }
 
 // autopilotRuleConfigSummary captures the substantive (accountability-bearing)
@@ -1301,18 +1348,45 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 	}
 }
 
-// terminalizeStaleRun marks an in-flight autopilot run as failed because it
-// outlived the dispatch lease (ALL-211 BLOCKING 1). The UPDATE is guarded by
+// terminalizeStaleRun reclaims an in-flight autopilot run that outlived the
+// dispatch lease (ALL-211 BLOCKING 1 / ALL-234 defect 2). The linked agent
+// task — autopilot_run.task_id, set for run_only mode — is cancelled FIRST
+// so a reclaimed run can never leave a still-executing task behind while the
+// slot it wedged gets admitted. Cancellation is idempotent (guarded by task
+// status), so a racing sweeper or another replica that already reclaimed the
+// same run cancels nothing twice.
+//
+// Ordering is deliberate: cancel-before-terminalize means a transient failure
+// of the run UPDATE leaves a cancelled task and an in-flight run (reclaimed
+// on the next tick), never the reverse — a failed run with a live task is the
+// exact duplicate-execution defect this closes. The task cancel is
+// best-effort: if it fails, the error is logged and the run is still
+// terminalized, because failing the whole dispatch would re-wedge the
+// autopilot. The run UPDATE itself is guarded by
 // `status IN ('issue_created','running')` so it is idempotent under
 // concurrency: a racing sweeper or another replica's lease gate reclaims the
 // same row at most once; everyone else affects zero rows and moves on.
-func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, runID pgtype.UUID, leaseTimeout time.Duration) error {
+func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, prior db.AutopilotRun, leaseTimeout time.Duration) error {
+	if prior.TaskID.Valid {
+		taskReason := fmt.Sprintf(
+			"Run exceeded lease timeout (%s) and was terminated by stale run cleanup; linked agent task cancelled",
+			leaseTimeout,
+		)
+		if _, err := s.TaskSvc.CancelTaskWithReason(ctx, prior.TaskID, taskReason, "lease_expired"); err != nil {
+			slog.Warn("autopilot stale run cleanup: failed to cancel linked agent task",
+				"run_id", util.UUIDToString(prior.ID),
+				"task_id", util.UUIDToString(prior.TaskID),
+				"lease_timeout", leaseTimeout.String(),
+				"error", err,
+			)
+		}
+	}
 	failureReason := fmt.Sprintf(
 		"Run exceeded lease timeout (%s) and was terminated by stale run cleanup",
 		leaseTimeout,
 	)
 	_, err := s.Queries.TerminalizeStaleAutopilotRun(ctx, db.TerminalizeStaleAutopilotRunParams{
-		ID:            runID,
+		ID:            prior.ID,
 		FailureReason: pgtype.Text{String: failureReason, Valid: true},
 		ReasonCode:    pgtype.Text{String: "lease_expired", Valid: true},
 		CompletedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
@@ -1370,12 +1444,12 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 	prior, err := s.Queries.GetAutopilotRunInFlight(ctx, ap.ID)
 	switch {
 	case err == nil:
-		leaseTimeout := s.leaseTimeout()
+		leaseTimeout := s.leaseTimeout(ctx, ap)
 		if time.Now().Before(prior.CreatedAt.Time.Add(leaseTimeout)) {
 			return "previous run still in flight (" + util.UUIDToString(prior.ID) + ")", dispatch.ReasonAlreadyActive, true
 		}
 		// Lease expired: reclaim the stale run, then fall through to admit.
-		if err := s.terminalizeStaleRun(ctx, prior.ID, leaseTimeout); err != nil {
+		if err := s.terminalizeStaleRun(ctx, prior, leaseTimeout); err != nil {
 			// Fail-open: the unique index still protects mutual exclusion, so
 			// the worst case is a 23505 on the INSERT below, which is mapped to
 			// a skipped/already_active run — never a duplicate dispatch.

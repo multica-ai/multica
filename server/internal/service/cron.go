@@ -88,6 +88,35 @@ func NextOccurrencesUTC(cronExpr, timezone string, after, until time.Time) ([]ti
 	return out, nil
 }
 
+// SlotIntervalFromCron returns the longest gap between two consecutive
+// occurrences of the cron schedule, measured over the next year of
+// activations. It is the "slot interval" the autopilot in-flight lease must
+// cover (ALL-226 / ALL-234 defect 1): a run started by this schedule must
+// never be reclaimed before the next slot could legitimately fire. The
+// lookahead window is finite and deliberate — a schedule too sparse to
+// produce a second occurrence within a year (e.g. "0 0 29 2 *") has no
+// measurable cadence, so the caller falls back to the base lease timeout
+// instead of guessing at a multi-year period.
+func SlotIntervalFromCron(cronExpr, timezone string, after time.Time) (time.Duration, bool) {
+	occurrences, err := NextOccurrencesUTC(cronExpr, timezone, after, after.AddDate(1, 0, 0))
+	if err != nil {
+		return 0, false
+	}
+	if len(occurrences) < 2 {
+		return 0, false
+	}
+	var maxGap time.Duration
+	for i := 1; i < len(occurrences); i++ {
+		if gap := occurrences[i].Sub(occurrences[i-1]); gap > maxGap {
+			maxGap = gap
+		}
+	}
+	if maxGap <= 0 {
+		return 0, false
+	}
+	return maxGap, true
+}
+
 // ComputeNextRun evaluates the cron at the app's local now() and backs
 // the display-only autopilot_trigger.next_run_at column for the trigger
 // create/update handlers and the failure monitor. Using the local clock
