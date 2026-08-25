@@ -53,6 +53,11 @@ const (
 	// ReasonAlreadyActive: a run is already active/pending for this target and
 	// this trigger did not coalesce.
 	ReasonAlreadyActive ReasonCode = "already_active"
+	// ReasonLeaseExpired: an autopilot run outlived its dispatch lease (or the
+	// sweeper's hard timeout) and was terminalized as failed, releasing the
+	// slot. Stored on autopilot_run.reason_code so the failure monitor groups
+	// reclaimed runs distinctly from genuine failures (ALL-211 BLOCKING 1).
+	ReasonLeaseExpired ReasonCode = "lease_expired"
 	// ReasonSelfTriggerSuppressed: the target was intentionally not (re-)triggered
 	// because doing so would be a self-trigger the guard suppresses, and no active
 	// run remains to cover it — e.g. a squad leader's own @mention of its squad

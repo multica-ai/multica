@@ -19,6 +19,7 @@ import (
 	sweeperpkg "github.com/multica-ai/multica/server/internal/autopilot"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -631,7 +632,7 @@ func main() {
 		// terminalized run never leaves its task executing while the next
 		// slot is admitted (ALL-234 defect 2).
 		CancelTask: func(ctx context.Context, taskID pgtype.UUID, reason string) error {
-			_, err := autopilotSvc.TaskSvc.CancelTaskWithReason(ctx, taskID, reason, "lease_expired")
+			_, err := autopilotSvc.TaskSvc.CancelTaskWithReason(ctx, taskID, reason, string(dispatch.ReasonLeaseExpired))
 			return err
 		},
 	})

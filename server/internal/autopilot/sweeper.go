@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -199,13 +200,14 @@ func (s *StaleRunSweeper) SweepOnce(ctx context.Context) {
 		UPDATE autopilot_run
 		SET status = 'failed',
 		    failure_reason = $1,
-		    reason_code = 'lease_expired',
+		    reason_code = $3,
 		    completed_at = NOW()
 		WHERE status IN ('issue_created', 'running')
 		  AND created_at < $2
 	`,
 		fmt.Sprintf("Run exceeded hard timeout (%s) and was terminated by sweeper", s.hardTimeout),
 		deadline,
+		string(dispatch.ReasonLeaseExpired),
 	)
 	if err != nil {
 		s.logger.Error("autopilot stale run sweeper: sweep failed",

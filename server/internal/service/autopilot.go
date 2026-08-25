@@ -1372,7 +1372,7 @@ func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, prior db.Aut
 			"Run exceeded lease timeout (%s) and was terminated by stale run cleanup; linked agent task cancelled",
 			leaseTimeout,
 		)
-		if _, err := s.TaskSvc.CancelTaskWithReason(ctx, prior.TaskID, taskReason, "lease_expired"); err != nil {
+		if _, err := s.TaskSvc.CancelTaskWithReason(ctx, prior.TaskID, taskReason, string(dispatch.ReasonLeaseExpired)); err != nil {
 			slog.Warn("autopilot stale run cleanup: failed to cancel linked agent task",
 				"run_id", util.UUIDToString(prior.ID),
 				"task_id", util.UUIDToString(prior.TaskID),
@@ -1388,7 +1388,7 @@ func (s *AutopilotService) terminalizeStaleRun(ctx context.Context, prior db.Aut
 	_, err := s.Queries.TerminalizeStaleAutopilotRun(ctx, db.TerminalizeStaleAutopilotRunParams{
 		ID:            prior.ID,
 		FailureReason: pgtype.Text{String: failureReason, Valid: true},
-		ReasonCode:    pgtype.Text{String: "lease_expired", Valid: true},
+		ReasonCode:    pgtype.Text{String: string(dispatch.ReasonLeaseExpired), Valid: true},
 		CompletedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	})
 	return err

@@ -16,6 +16,14 @@
 -- The migration runner cannot mix CONCURRENTLY with other statements in the
 -- same file, so this file is a single statement; the index comment lives in
 -- migration 434.
-CREATE UNIQUE INDEX CONCURRENTLY uq_autopilot_run_inflight
+--
+-- IF NOT EXISTS (257/261 convention) pairs with the registered cleanup hook
+-- in cmd/migrate/main.go (concurrentIndexCleanups): an interrupted build
+-- leaves an INVALID uq_autopilot_run_inflight behind, the hook drops it
+-- before the retry, and IF NOT EXISTS then rebuilds instead of wedging on
+-- "already exists" — otherwise an interrupted build could be recorded as
+-- applied while the mutual-exclusion guarantee is silently INVALID, which
+-- is exactly the duplicate-execution risk ALL-234 defect 2 closes.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS uq_autopilot_run_inflight
 ON autopilot_run (autopilot_id)
 WHERE status IN ('issue_created', 'running');
