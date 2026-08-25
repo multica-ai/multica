@@ -715,10 +715,13 @@ export function AgentTranscriptDialog({
         // A server-cancelled run (worktree claim gate, preserved-work
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
-        // cancels have no reason and keep the plain label.
-        const cancelReason = cancelReasonLabel(task);
+        // cancels have no reason and keep the plain label. The badge carries
+        // no `title`: the raw `task.error` behind it is untranslated
+        // operator prose (#7411) and belongs in Run details, not in hover
+        // text on a status pill.
+        const cancelReason = cancelReasonLabel(task, t);
         return (
-          <span className={cn(base, "bg-muted text-muted-foreground")} title={task.error ?? undefined}>
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
             <XCircle className="h-3 w-3" />
             {cancelReason
               ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
