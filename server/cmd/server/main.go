@@ -487,6 +487,7 @@ func main() {
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	var seatCapacityMetrics *obsmetrics.SeatCapacityMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
@@ -517,6 +518,7 @@ func main() {
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
+		seatCapacityMetrics = metricsRegistry.SeatCapacity
 		wecomMetrics = metricsRegistry.Wecom
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
@@ -554,6 +556,7 @@ func main() {
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
 		ChannelLeaseMetrics: channelLeaseMetrics,
+		SeatCapacityMetrics: seatCapacityMetrics,
 		ChannelLeaseRedis:   channelLeaseRedis,
 		WecomMetrics:        wecomMetrics,
 		DaemonHub:           daemonHub,
@@ -598,7 +601,12 @@ func main() {
 		)
 		runtimeReconnectGrace = minimumRuntimeReconnectGrace
 	}
-	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	// MULTICA_TASK_QUEUED_TTL lets self-hosted deployments that legitimately
+	// hold queued work behind long-running tasks — e.g. a runtime with low
+	// task concurrency — raise the built-in 2h queued expiry without losing
+	// work to queued_expired failures.
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
+		envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL))
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {
@@ -607,6 +615,9 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
+	if h.SeatCapacityWorker != nil {
+		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
@@ -660,6 +671,11 @@ func main() {
 	// — there is no separate goroutine for scheduled Autopilot anymore.
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	// Manifest-declared Plugin schedules share the same durable lease and retry
+	// machinery. The job is inert while plugins_v1 is disabled.
+	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
+		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)

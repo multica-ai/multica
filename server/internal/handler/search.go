@@ -14,9 +14,9 @@ import (
 //
 // The two search handlers (SearchIssues, SearchProjects) run LOWER(col) LIKE
 // '%pattern%' queries whose fast path depends on pg_bigm / pg_trgm GIN
-// indexes (see migrations 032, 033, 036, 134). When those extensions are
+// indexes (see migrations 032, 033, 036, 137–142). When those extensions are
 // missing — as they were on every self-hosted deployment using the bundled
-// pgvector/pgvector:pg17 image before migration 134 shipped — Postgres
+// pgvector/pgvector:pg17 image before migration 137 shipped — Postgres
 // falls back to a Seq Scan on `issue` plus correlated Seq Scans on
 // `comment`. On workspaces with thousands of rows the query takes long
 // enough that the frontend Loader2 spinner appears to hang forever

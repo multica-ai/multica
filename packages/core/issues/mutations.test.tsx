@@ -11,6 +11,7 @@ import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
   useCreateComment,
+  useCreateCommentSubIssue,
   useDeleteComment,
   useResolveComment,
   useUpdateComment,
@@ -95,6 +96,44 @@ function createWrapper(qc: QueryClient) {
     return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
   };
 }
+
+describe("useCreateCommentSubIssue", () => {
+  it("applies the normal issue-create cache coordination", async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const listKey = issueKeys.list(WS_ID);
+    qc.setQueryData<ListIssuesCache>(listKey, {
+      byStatus: { todo: { issues: [], total: 0 } },
+    });
+    const child = makeIssue(2, { parent_issue_id: "issue-1" });
+    const createCommentSubIssue = vi.fn().mockResolvedValue(child);
+    setApiInstance({ createCommentSubIssue } as unknown as ApiClient);
+    const { result } = renderHook(() => useCreateCommentSubIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        anchorCommentId: "comment-1",
+        data: {
+          mode: "manual",
+          capture_token: "sha256:capture",
+          issue: { title: "Child" },
+        },
+      });
+    });
+
+    expect(createCommentSubIssue).toHaveBeenCalledWith("comment-1", {
+      mode: "manual",
+      capture_token: "sha256:capture",
+      issue: { title: "Child" },
+    });
+    expect(
+      qc.getQueryData<ListIssuesCache>(listKey)?.byStatus.todo?.issues,
+    ).toContainEqual(child);
+    expect(qc.getQueryState(listKey)?.isInvalidated).toBe(true);
+    qc.clear();
+  });
+});
 
 describe("useUpdateIssue — optimistic move keeps every bucketed board in sync", () => {
   const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };

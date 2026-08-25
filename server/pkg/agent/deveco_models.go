@@ -30,7 +30,7 @@ func discoverDevecoModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models")
 	hideAgentWindow(cmd)
-	out, _ := cmd.Output()
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
 	models := parseDevecoModels(string(out))
 	if len(models) == 0 {
 		return []Model{}, nil

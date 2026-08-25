@@ -27,7 +27,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
-import { useFeatureEnabled } from "@multica/core/config";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { issueStatusColor, issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import {
@@ -123,7 +122,6 @@ const EMPTY_DRAFT: StatusDraft = {
 export function IssueStatusesTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
-  const canCreate = useFeatureEnabled("custom_issue_statuses");
 
   const [showArchived, setShowArchived] = useState(false);
   const [createCategory, setCreateCategory] = useState<IssueStatusCategory | null>(null);
@@ -164,12 +162,6 @@ export function IssueStatusesTab() {
       description={t(($) => $.issue_statuses.description)}
     >
       <div className="space-y-4">
-        {!canCreate && (
-          <p className="rounded-lg border border-surface-border bg-muted/20 px-4 py-3 text-caption text-muted-foreground">
-            {t(($) => $.issue_statuses.flag_off)}
-          </p>
-        )}
-
         {/* Offered only once the workspace has something archived. A permanently
             disabled "Show archived (0)" is a control that can never do
             anything. */}
@@ -196,7 +188,6 @@ export function IssueStatusesTab() {
                 builtIn={group.builtIn}
                 custom={group.custom}
                 canManage={isAdmin}
-                canCreate={isAdmin && canCreate}
                 onCreate={() => setCreateCategory(group.category)}
                 onEdit={setEditing}
                 onArchive={setPendingArchive}
@@ -227,7 +218,6 @@ function CategorySection({
   builtIn,
   custom,
   canManage,
-  canCreate,
   onCreate,
   onEdit,
   onArchive,
@@ -236,7 +226,6 @@ function CategorySection({
   builtIn: IssueStatusEntry | undefined;
   custom: IssueStatusEntry[];
   canManage: boolean;
-  canCreate: boolean;
   onCreate: () => void;
   onEdit: (status: IssueStatusEntry) => void;
   onArchive: (status: IssueStatusEntry) => void;
@@ -295,7 +284,7 @@ function CategorySection({
         <span className="text-caption font-medium text-muted-foreground">
           {labelOf(category)}
         </span>
-        {canCreate && (
+        {canManage && (
           <Tooltip>
             <TooltipTrigger
               render={

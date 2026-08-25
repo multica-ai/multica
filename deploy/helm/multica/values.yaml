@@ -29,6 +29,7 @@ images:
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
 #     --from-literal=MULTICA_ENTITLEMENT_SERVICE_TOKEN="" \
+#     --from-literal=MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # External postgres (postgres.external.enabled=true):
@@ -40,6 +41,7 @@ images:
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
 #     --from-literal=MULTICA_ENTITLEMENT_SERVICE_TOKEN="" \
+#     --from-literal=MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # The chart references this Secret by name; it does not template it, so real
@@ -48,7 +50,7 @@ images:
 existingSecret: multica-secrets
 
 # -----------------------------------------------------------------------------
-# PostgreSQL (pgvector)
+# PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
   # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
@@ -148,6 +150,12 @@ backend:
       staleGrace: 15m
       # Local down switch applied by the next chart rollout; it only forces off.
       emergencyDisabled: false
+    # Managed Cloud seat-capacity executor. Keep off for self-hosting. When
+    # enabled, put the matching service token in existingSecret.
+    subscriptionCapacity:
+      enabled: false
+      url: ""
+      timeout: 3s
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""
@@ -155,6 +163,11 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
+    # How long a task may sit in the queue unclaimed before failing with
+    # `queued_expired`; raise it when a runtime's low task concurrency lets
+    # tasks legitimately wait behind long-running work.
+    # Accepts a positive duration and empty/unset falls back to the server default of 2h.
+    taskQueuedTTL: 2h
   resources:
     requests:
       cpu: 100m
@@ -172,7 +185,7 @@ backend:
 frontend:
   replicas: 1
   config:
-    # Backend origin used by the frontend runtime proxy for /api, /auth,
+    # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
     # /uploads, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
@@ -227,4 +240,7 @@ monitoring:
     additionalLabels: {}
     samplerQueryErrorsFor: 5m
     samplerQueryLatencyFor: 10m
+    seatCapacityDeadLetteredFor: 5m
+    seatCapacityPendingAgeSeconds: 900
+    seatCapacityPendingFor: 5m
     severity: warning

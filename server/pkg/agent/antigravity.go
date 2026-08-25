@@ -97,7 +97,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		_ = os.Remove(logPath)
 		return nil, fmt.Errorf("start agy: %w", err)
@@ -130,12 +130,22 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		for scanner.Scan() {
 			line := scanner.Text()
+			// The daemon concatenates streamed MessageText with no separator
+			// (pendingText.WriteString), so the streamed text must carry the
+			// line breaks itself. Mirror output's construction — prefix the
+			// newline on every line after the first, and stream blank lines
+			// too — so the persisted task_message text reconstructs output
+			// exactly. Emitting bare, blank-skipped lines dropped every newline,
+			// collapsing block markdown (headings, lists) onto one line in
+			// chat (#6149).
+			chunk := line
 			if output.Len() > 0 {
 				output.WriteByte('\n')
+				chunk = "\n" + line
 			}
 			output.WriteString(line)
-			if strings.TrimSpace(line) != "" {
-				trySend(msgCh, Message{Type: MessageText, Content: line})
+			if chunk != "" {
+				trySend(msgCh, Message{Type: MessageText, Content: chunk})
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -143,6 +153,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 
 		waitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		sessionID := readAntigravityConversationID(logPath)

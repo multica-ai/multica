@@ -12,12 +12,56 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var testSeq atomic.Int64
+
+type shareJoinCapacityStub struct {
+	mu          sync.Mutex
+	claimTokens []uuid.UUID
+	claimGate   *sync.WaitGroup
+}
+
+func (s *shareJoinCapacityStub) Enabled() bool { return true }
+func (s *shareJoinCapacityStub) ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) ClaimShareJoin(_ context.Context, _ uuid.UUID, token uuid.UUID) (seatcapacity.Decision, error) {
+	s.mu.Lock()
+	s.claimTokens = append(s.claimTokens, token)
+	s.mu.Unlock()
+	if s.claimGate != nil {
+		s.claimGate.Done()
+		s.claimGate.Wait()
+	}
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) Consume(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) Confirm(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) Release(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) ReleaseMember(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
+}
+func (s *shareJoinCapacityStub) GetOperation(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
+	return seatcapacity.Decision{}, nil
+}
+
+func (s *shareJoinCapacityStub) tokens() []uuid.UUID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]uuid.UUID(nil), s.claimTokens...)
+}
 
 func pgInt32(v int32) *int32 { return &v }
 
@@ -372,6 +416,109 @@ func TestJoinShareLink_DuplicateJoinDoesNotConsumeUse(t *testing.T) {
 	}
 	if useCount != 1 {
 		t.Fatalf("duplicate join must not consume a use: expected use_count=1, got %d", useCount)
+	}
+}
+
+func TestJoinShareLink_ReactivatesDeadLetterWithSameCapacityToken(t *testing.T) {
+	clearShareLinksForTestWorkspace(t)
+	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
+	userID := createTestUserAndMember(t, "")
+	stub := &shareJoinCapacityStub{}
+	useSeatCapacity(t, stub)
+
+	queries := db.New(testPool)
+	originalToken := uuid.New()
+	intent, err := queries.CreateOrReactivateShareJoinCapacityIntent(context.Background(), db.CreateOrReactivateShareJoinCapacityIntentParams{
+		WorkspaceID: link.WorkspaceID, OperationToken: uuidToPG(originalToken),
+		ShareLinkID: link.ID, UserID: parseUUID(userID),
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, intent.OperationToken)
+	})
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE seat_capacity_outbox
+		SET attempt_count = 10, dead_lettered_at = now(), last_error = 'stuck'
+		WHERE operation_token = $1
+	`, intent.OperationToken); err != nil {
+		t.Fatal(err)
+	}
+
+	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
+	req.Header.Set("X-User-ID", userID)
+	w := httptest.NewRecorder()
+	testHandler.JoinByShareLink(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("join: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	tokens := stub.tokens()
+	if len(tokens) != 1 || tokens[0] != originalToken {
+		t.Fatalf("claim tokens=%v, want original %s", tokens, originalToken)
+	}
+}
+
+func TestJoinShareLink_ConcurrentSameUserUsesOneCapacityOperation(t *testing.T) {
+	clearShareLinksForTestWorkspace(t)
+	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
+	userID := createTestUserAndMember(t, "")
+	gate := &sync.WaitGroup{}
+	gate.Add(2)
+	stub := &shareJoinCapacityStub{claimGate: gate}
+	useSeatCapacity(t, stub)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM seat_capacity_outbox
+			WHERE workspace_id = $1 AND share_link_id = $2 AND user_id = $3
+		`, link.WorkspaceID, link.ID, parseUUID(userID))
+	})
+
+	start := make(chan struct{})
+	statuses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
+			req.Header.Set("X-User-ID", userID)
+			w := httptest.NewRecorder()
+			testHandler.JoinByShareLink(w, req)
+			statuses <- w.Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(statuses)
+	var successes, conflicts int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			successes++
+		case http.StatusConflict:
+			conflicts++
+		default:
+			t.Fatalf("unexpected concurrent join status %d", status)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("successes=%d conflicts=%d, want 1/1", successes, conflicts)
+	}
+	tokens := stub.tokens()
+	if len(tokens) != 2 || tokens[0] != tokens[1] {
+		t.Fatalf("concurrent claim tokens=%v, want one logical operation", tokens)
+	}
+	var members int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2
+	`, link.WorkspaceID, parseUUID(userID)).Scan(&members); err != nil {
+		t.Fatal(err)
+	}
+	if members != 1 {
+		t.Fatalf("member rows=%d, want 1", members)
 	}
 }
 

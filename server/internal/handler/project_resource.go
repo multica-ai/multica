@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -864,15 +866,139 @@ func parseUUIDLoose(s string) (pgtype.UUID, error) {
 	return u, nil
 }
 
-// listProjectResourcesForProject is a small helper used by the daemon claim
-// handler to attach project resources to outgoing tasks.
-func (h *Handler) listProjectResourcesForProject(ctx context.Context, projectID pgtype.UUID) []db.ProjectResource {
-	if !projectID.Valid {
-		return nil
+// claimProjectContext is the project-scoped context a daemon claim exposes to
+// the agent: the project identity the prompt names, the resource manifest
+// execenv materializes into .multica/project/resources.json, and the repo list
+// `multica repo checkout` reads.
+type claimProjectContext struct {
+	ProjectID   string
+	Title       string
+	Description string
+	Resources   []ProjectResourceData
+	Repos       []RepoData
+}
+
+// applyTo copies the resolved context onto a claim response. Callers assign the
+// whole context or none of it, so a claim can never carry a project's title
+// without its resources.
+func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
+	resp.ProjectID = c.ProjectID
+	resp.ProjectTitle = c.Title
+	resp.ProjectDescription = c.Description
+	if len(c.Resources) > 0 {
+		resp.ProjectResources = c.Resources
 	}
-	rows, err := h.Queries.ListProjectResources(ctx, projectID)
+	resp.Repos = c.Repos
+}
+
+// resolveClaimProjectContext loads the project context for one daemon claim.
+//
+// Every claim path (issue, chat, autopilot, quick-create) resolves the same
+// thing from a soft project reference, so the tenant and failure rules live
+// here once rather than in a copy per path:
+//
+//   - Both reads are workspace-scoped. project_resource carries its own
+//     workspace_id, so a corrupt project reference cannot lift another tenant's
+//     repository URLs or local paths into a claim.
+//   - A read FAILURE is not "no project". It returns an error so the caller can
+//     preserve the task for redelivery; collapsing it into the workspace-repo
+//     fallback is what lets a transient DB error silently run an agent against
+//     the wrong repository (the same rule the chat-input load follows,
+//     MUL-4351).
+//   - A project that resolves to no row IS "no project": the reference is stale,
+//     deleted, or points outside this workspace, and the claim degrades to
+//     workspace context.
+//
+// Repo precedence: project-bound github_repo resources override workspace repos
+// when present. Mixing both would just confuse the agent — if a project
+// explicitly attached its repos, those are the authoritative set. With no
+// project, no github_repo resources, or a stale reference, the workspace repos
+// are the fallback.
+func (h *Handler) resolveClaimProjectContext(ctx context.Context, projectID, workspaceID pgtype.UUID) (claimProjectContext, error) {
+	var out claimProjectContext
+
+	if projectID.Valid {
+		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID:          projectID,
+			WorkspaceID: workspaceID,
+		})
+		switch {
+		case err == nil:
+			out.ProjectID = uuidToString(project.ID)
+			out.Title = project.Title
+			out.Description = project.Description.String
+
+			rows, resErr := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{
+				ProjectID:   project.ID,
+				WorkspaceID: workspaceID,
+			})
+			if resErr != nil {
+				return claimProjectContext{}, fmt.Errorf("list project resources: %w", resErr)
+			}
+			out.Resources, out.Repos = projectResourcesForClaim(rows)
+		case errors.Is(err, pgx.ErrNoRows):
+			// Stale/deleted/foreign reference: degrade to workspace context.
+		default:
+			return claimProjectContext{}, fmt.Errorf("get project: %w", err)
+		}
+	}
+
+	if len(out.Repos) > 0 {
+		return out, nil
+	}
+
+	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
 	if err != nil {
-		return nil
+		return claimProjectContext{}, fmt.Errorf("get workspace: %w", err)
 	}
-	return rows
+	if ws.Repos != nil {
+		var repos []RepoData
+		if jsonErr := json.Unmarshal(ws.Repos, &repos); jsonErr != nil {
+			// Corrupt stored JSON is not transient: failing the claim would
+			// wedge every claim in this workspace until someone repairs the
+			// row. Degrade to no repos and leave a trail instead.
+			slog.Error("claim project context: workspace repos are not valid JSON; claiming without repos",
+				"workspace_id", uuidToString(workspaceID), "error", jsonErr)
+		} else if len(repos) > 0 {
+			out.Repos = repos
+		}
+	}
+	return out, nil
+}
+
+// projectResourcesForClaim maps resource rows onto the claim wire shape and
+// lifts github_repo resources into the repo list so `multica repo checkout` and
+// the meta-skill render them as the task's repos.
+func projectResourcesForClaim(rows []db.ProjectResource) ([]ProjectResourceData, []RepoData) {
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	resources := make([]ProjectResourceData, 0, len(rows))
+	var repos []RepoData
+	for _, row := range rows {
+		label := ""
+		if row.Label.Valid {
+			label = row.Label.String
+		}
+		ref := json.RawMessage(row.ResourceRef)
+		if len(ref) == 0 {
+			ref = json.RawMessage("{}")
+		}
+		resources = append(resources, ProjectResourceData{
+			ID:           uuidToString(row.ID),
+			ResourceType: row.ResourceType,
+			ResourceRef:  ref,
+			Label:        label,
+		})
+		if row.ResourceType == "github_repo" {
+			var payload struct {
+				URL string `json:"url"`
+				Ref string `json:"ref,omitempty"`
+			}
+			if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+				repos = append(repos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+			}
+		}
+	}
+	return resources, repos
 }

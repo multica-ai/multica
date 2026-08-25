@@ -244,12 +244,26 @@ var concurrentIndexCleanups = map[string]string{
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
 	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
 	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
+	"378_channel_chat_context_generation_key":                   "channel_chat_context_generation_session_revision_idx",
 	"390_agent_task_queue_dispatched_reclaim_v2_index":          "idx_agent_task_queue_dispatched_reclaim_v2",
 	"393_plugin_package_workspace_key_index":                    "idx_plugin_package_workspace_key",
 	"394_plugin_package_version_unique_index":                   "idx_plugin_package_version_unique",
 	"395_plugin_package_version_package_index":                  "idx_plugin_package_version_package",
 	"396_plugin_package_file_path_index":                        "idx_plugin_package_file_path",
 	"397_plugin_installation_package_version_index":             "idx_plugin_installation_package_version",
+	"398_issue_workspace_status_position_index":                 "idx_issue_workspace_status_position",
+	"400_plugin_hook_schedule_installation_key_index":           "idx_plugin_hook_schedule_installation_key",
+	"401_plugin_hook_schedule_enabled_index":                    "idx_plugin_hook_schedule_enabled",
+	"408_issue_source_context_id_index":                         "idx_issue_source_context_id",
+	"409_issue_source_context_issue_index":                      "idx_issue_source_context_issue",
+	"410_issue_source_context_origin_task_index":                "idx_issue_source_context_origin_task",
+	"411_attachment_source_context_index":                       "idx_attachment_source_context",
+	"412_issue_source_context_object_intent_key_index":          "idx_issue_source_context_object_intent_key",
+	"413_issue_source_context_object_intent_due_index":          "idx_issue_source_context_object_intent_due",
+	"414_issue_source_context_object_intent_context_index":      "idx_issue_source_context_object_intent_context",
+	"416_seat_capacity_operation_token_index":                   "idx_seat_capacity_outbox_operation_token",
+	"418_seat_capacity_due_index":                               "idx_seat_capacity_outbox_due",
+	"419_seat_capacity_share_join_index":                        "idx_seat_capacity_outbox_share_join",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -285,12 +299,29 @@ var preMigrationHooks = func() map[string]preMigrationHook {
 }()
 
 var preRollbackHooks = func() map[string]preMigrationHook {
-	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups))
+	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups)+len(sourceContextMigrationVersions))
 	for version, index := range concurrentDownIndexCleanups {
 		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
 	}
+	// Source-context indexes are split into one-statement concurrent
+	// migrations. Register the guard on every step so a rollback from any
+	// partially applied version fails before dropping its first live index.
+	for _, version := range sourceContextMigrationVersions {
+		hooks[version] = ensureSourceContextRollbackSafe
+	}
 	return hooks
 }()
+
+var sourceContextMigrationVersions = []string{
+	"407_issue_source_context",
+	"408_issue_source_context_id_index",
+	"409_issue_source_context_issue_index",
+	"410_issue_source_context_origin_task_index",
+	"411_attachment_source_context_index",
+	"412_issue_source_context_object_intent_key_index",
+	"413_issue_source_context_object_intent_due_index",
+	"414_issue_source_context_object_intent_context_index",
+}
 
 var upMigrationConditions = map[string]migrationCondition{
 	// Fresh databases that successfully built the CJK-friendly bigram index do
@@ -311,6 +342,21 @@ func hooksForDirection(direction string) map[string]preMigrationHook {
 	default:
 		return nil
 	}
+}
+
+func ensureSourceContextRollbackSafe(ctx context.Context, pool *pgxpool.Pool) error {
+	var dataExists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM issue_source_context)
+		    OR EXISTS (SELECT 1 FROM attachment WHERE source_context_id IS NOT NULL)
+		    OR EXISTS (SELECT 1 FROM issue_source_context_object_intent)
+	`).Scan(&dataExists); err != nil {
+		return fmt.Errorf("inspect source-context rollback ownership: %w", err)
+	}
+	if dataExists {
+		return errors.New("cannot roll back issue source context while captured data or stored objects still exist; remove source-context captures and their stored objects through application cleanup, then retry")
+	}
+	return nil
 }
 
 func conditionsForDirection(direction string) map[string]migrationCondition {

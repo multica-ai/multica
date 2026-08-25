@@ -74,17 +74,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	// Run claude in its own process group so cancellation can reach the whole
-	// tree — the claude CLI plus the MCP servers and tool subprocesses it
-	// spawns — not just the direct child. The default CommandContext behaviour
-	// SIGKILLs only the leader, which orphans those descendants; on a resumed
-	// stream-json session with no wall-clock timeout they then keep running and
-	// burning model budget long after the task was cancelled, and under
-	// --max-concurrent-tasks 1 starve every queued task (#5918). This mirrors
-	// the fix already made for codex (#4520) and opencode (#4533).
-	configureProcessGroup(cmd)
-	// Take over context cancellation: the default would SIGKILL only the leader
-	// the instant runCtx is done. We instead drive a graceful group-wide
+	// Take over context cancellation: the default kills the whole group the
+	// instant runCtx is done. We instead drive a graceful group-wide
 	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
 	// only after the tree has been signalled. Returning nil keeps os/exec from
 	// racing us with its own kill; WaitDelay remains the hard backstop.
@@ -120,7 +111,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
@@ -128,7 +119,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
-	// cmd.Start() succeeded — transfer temp file ownership to the goroutine.
+	// The process started — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
 
 	msgCh := make(chan Message, 256)
@@ -284,6 +275,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
+		// The leader is reaped; drop ownership. On Windows that closes the Job
+		// Object, which kills anything still inside it — precisely what should
+		// happen to a descendant that outlived the CLI (GH #7522).
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a
@@ -1118,7 +1113,7 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
 	// reaps shortly after the context fires so this call always returns.
 	cmd.WaitDelay = 2 * time.Second
-	data, err := cmd.Output()
+	data, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		// One provider-agnostic boundary for probes: DetectVersion routes every
 		// provider through here, so an ENOEXEC diagnosis added at this point

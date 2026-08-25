@@ -120,7 +120,8 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | Workspace skills FIRST | 1115 | `skills := h.TaskService.LoadAgentSkills(...)` |
 | Built-ins appended | 1116 | `skills = append(skills, h.TaskService.BuiltinSkills()...)` |
 | Runtime payload | `daemon.go` `TaskAgentData` | Carries `Instructions`, `Skills`, `CustomEnv`, `CustomArgs`, `Model`, `ThinkingLevel`, `ServiceTier`, and `McpConfig`; metadata-only fields remain absent |
-| `custom_args` argv and safe launch log | `internal/daemon/daemon.go` `ExecOptions.CustomArgs`; `pkg/agent/launch.go` `Config.logAgentCommand` | Custom args reach the provider process argv. Launch logs preserve flag names but redact inline values and positional/value tokens; OS process-list exposure remains, so credentials belong in `custom_env`. |
+| `custom_args` argv and safe launch log | `internal/daemon/daemon.go` `ExecOptions.CustomArgs`; `pkg/agent/launch.go` `Config.logAgentCommand` | Custom args normally reach the provider process argv. Launch logs preserve flag names but redact inline values and positional/value tokens; OS process-list exposure remains, so credentials belong in `custom_env`. |
+| ZeroClaw agent alias pseudo-args | `pkg/agent/zeroclaw.go` `takeZeroclawAgentAlias` / `zeroclawBlockedArgs` | `--agent` and `--agent-alias` (separate or `=value`) are consumed from `custom_args` and sent as `session/new.agentAlias`; neither token reaches argv because `zeroclaw acp` rejects those CLI flags. Omit the selector for sole-agent auto-selection; use it when multiple agents exist without `[acp].default_agent`. |
 
 ## Skill loading — `server/internal/service/task.go`
 

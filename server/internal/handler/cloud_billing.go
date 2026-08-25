@@ -54,7 +54,6 @@ const maxCloudSubscriptionSeats = 10_000
 type cloudSubscriptionCheckoutRequest struct {
 	Interval       string `json:"interval"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	CustomerEmail  string `json:"customer_email,omitempty"`
 }
 
 // This is an intentional allowlist: additive cloud fields are not forwarded
@@ -205,8 +204,9 @@ func (h *Handler) GetCloudWorkspaceSubscriptionPrices(w http.ResponseWriter, r *
 }
 
 // CreateCloudWorkspaceSubscriptionCheckout injects the middleware-resolved
-// workspace into the upstream body. A caller cannot use a valid role in one
-// workspace to smuggle a different workspace_id through JSON.
+// workspace and authenticated user's stored email into the upstream body. A
+// caller cannot smuggle a different workspace or Stripe payer identity through
+// JSON; Cloud remains authoritative for the price, quantity, and Checkout.
 func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter, r *http.Request) {
 	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r, "owner", "admin")
 	if !ok {
@@ -229,11 +229,25 @@ func (h *Handler) CreateCloudWorkspaceSubscriptionCheckout(w http.ResponseWriter
 	if !ok {
 		return
 	}
+	payerUserID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	user, err := h.Queries.GetUser(r.Context(), payerUserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve checkout payer")
+		return
+	}
+	customerEmail := strings.TrimSpace(user.Email)
+	if customerEmail == "" {
+		writeError(w, http.StatusInternalServerError, "checkout payer email is unavailable")
+		return
+	}
 	upstreamBody, err := json.Marshal(cloudSubscriptionCheckoutUpstreamRequest{
 		WorkspaceID:    workspaceID,
 		Interval:       in.Interval,
 		IdempotencyKey: idempotencyKey,
-		CustomerEmail:  in.CustomerEmail,
+		CustomerEmail:  customerEmail,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to build subscription request")

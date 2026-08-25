@@ -42,6 +42,7 @@ You also need to pick an email service, otherwise verification codes and invitat
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | How long a task may sit in the queue unclaimed before failing with `queued_expired`; raise it when low-concurrency runtimes can legitimately wait behind long-running work |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
 
@@ -52,9 +53,14 @@ When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must
 | `FRONTEND_ORIGIN` | empty | Frontend origin users visit; used for CORS, cookies, and invitation links |
 | `MULTICA_APP_URL` | falls back to `FRONTEND_ORIGIN` | User-reachable web URL; CLI sign-in and account-link URLs use it |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL; used for webhook URLs and runtime connection instructions |
+| `MULTICA_DAEMON_SERVER_URL` | falls back to `MULTICA_PUBLIC_URL`, then `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | Server URL the API process inserts into `multica setup self-host`; set it when daemons reach the API at a different URL than the public webhook URL |
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
 | `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
 | `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` is returned by the unauthenticated `/api/config` endpoint and is visible to clients. Treat it as public configuration; never put credentials, tokens, or other secrets in it.
+</Callout>
 
 When the frontend and API run on different hosts and the browser talks to the API domain directly, you must set `COOKIE_DOMAIN` — otherwise the browser cannot read the CSRF cookie: every write request returns `403 CSRF validation failed` while reads work fine. Use the narrowest parent domain that covers both hosts (`.agent.example.com` over `.example.com`). It spreads the sign-in session cookie to every host under that domain, which is only acceptable when all of those hosts are operated by the same trusted party. After changing it, clear the old cookies on both hosts and sign in again. If you follow the same-origin recipe in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) (the browser only visits the app domain), keep it empty. Do not use an IP address — browsers ignore cookies whose Domain is an IP.
 
@@ -175,6 +181,10 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
 | Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Base64-encoded 32-byte key for stored secrets and encrypted surface launch URLs |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Dedicated cookie-free browser origin routed to this backend; must differ from app/API origins and preserve `Host` |
+| Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
+| Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
@@ -230,7 +240,7 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-task temp dirs; must be an existing, writable absolute directory, and an invalid value fails task startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

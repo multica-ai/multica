@@ -44,9 +44,13 @@ const (
 
 // ModelListRequest represents a pending or completed model list request.
 // Supported is false when the provider ignores per-agent model
-// selection entirely (currently: hermes). The UI uses this to
-// disable its dropdown rather than silently accepting a value the
-// backend will drop.
+// selection entirely — agent.ModelSelectionSupported is the single
+// source of truth, and it names qwenpaw and mcode. Hermes is NOT in
+// that set: it honours opts.Model through the ACP `session/set_model`
+// RPC, so do not "align" this list by adding it (MUL-6606 — an earlier
+// version of this comment said hermes, which would have cost Hermes its
+// model picker outright). The UI uses this to disable its dropdown
+// rather than silently accepting a value the backend will drop.
 //
 // RunStartedAt is set when PopPending claims the request. It is
 // `json:"-"` because it's a server-side bookkeeping field — the UI only

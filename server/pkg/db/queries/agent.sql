@@ -590,7 +590,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    id
+    channel_context_revision, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -610,6 +610,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
+    p.channel_context_revision,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -619,6 +620,51 @@ ON CONFLICT (issue_id, agent_id) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
 RETURNING *;
+
+-- name: CreateManualQuickCreateRetryTask :one
+-- A human retry of an issue-less quick-create is a new direct_human run, not
+-- an automatic retry. It preserves the immutable quick-create context JSON
+-- (including source_context_id), but deliberately starts a fresh session and
+-- records rerun_of_task_id so attribution/reporting can distinguish the human
+-- action from CreateRetryTask's retry_of_task_id lineage.
+--
+-- The caller locks and transfers the pending issue_source_context in the same
+-- transaction. lock_task_owner_rows provides the usual workspace-teardown
+-- fence; a deleted workspace therefore yields pgx.ErrNoRows and no task.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, status, priority, context,
+    force_fresh_session, is_leader_task, squad_id,
+    originator_user_id, accountable_user_id,
+    runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, rerun_of_task_id, id
+)
+SELECT
+    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
+    TRUE, p.is_leader_task, p.squad_id,
+    sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
+    sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
+    'direct_human', p.id, sqlc.arg(new_task_id)
+FROM agent_task_queue p
+WHERE p.id = sqlc.arg(source_task_id)
+  AND p.status = 'failed'
+  AND p.issue_id IS NULL
+  AND p.chat_session_id IS NULL
+  AND p.autopilot_run_id IS NULL
+  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+RETURNING *;
+
+-- name: DeleteUnstartedQuickCreateRetryTask :execrows
+-- FailTask creates an automatic retry in the same transaction as the parent
+-- terminal write. An issue-less source-context retry has no pending-slot
+-- unique key, so a competing retry or an already-attached context can make
+-- the subsequent attach-authority transfer lose after this row was inserted.
+-- Remove only that still-uncommitted child and let the parent's failure commit.
+DELETE FROM agent_task_queue
+WHERE id = sqlc.arg(task_id)
+  AND status IN ('queued', 'deferred')
+  AND issue_id IS NULL
+  AND chat_session_id IS NULL
+  AND autopilot_run_id IS NULL;
 
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
@@ -1126,7 +1172,11 @@ LIMIT 1;
 -- session because the rollout was missing. When true the next chat claim resumed
 -- an older session (or none), so it must disclose the continuity gap.
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
-WHERE chat_session_id = $1
+WHERE chat_session_id = sqlc.arg('chat_session_id')
+  AND (
+    sqlc.narg('channel_context_revision')::bigint IS NULL
+    OR COALESCE(channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
+  )
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC

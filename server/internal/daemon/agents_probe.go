@@ -269,6 +269,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
 	}
+	// ZeroClaw (`zeroclaw`) is a Rust-based generic agent CLI, driven over
+	// ACP via `zeroclaw acp`. It takes no model env var: its ACP server has no
+	// `session/set_model` and no handler reads a model param, so the model
+	// comes from ZeroClaw's own agent profile and ExecOptions.Model can never
+	// be applied — see ModelSelectionSupported. Reading one here would only
+	// advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
+		agents["zeroclaw"] = e
+	}
 	return agents
 }
 

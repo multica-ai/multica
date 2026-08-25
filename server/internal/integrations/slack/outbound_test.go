@@ -30,6 +30,9 @@ type fakeOutboundQueries struct {
 	task                db.AgentTaskQueue
 	taskErr             error
 	taskChannelIngested bool
+	provenanceRows      int64
+	provenanceErr       error
+	gotProvenance       db.SetChatMessageChannelOutboundProvenanceByTaskParams
 }
 
 func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -48,14 +51,26 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 	return f.inst, f.instErr
 }
 
+func (f *fakeOutboundQueries) SetChatMessageChannelOutboundProvenanceByTask(_ context.Context, arg db.SetChatMessageChannelOutboundProvenanceByTaskParams) (int64, error) {
+	f.gotProvenance = arg
+	if f.provenanceRows == 0 && f.provenanceErr == nil {
+		return 1, nil
+	}
+	return f.provenanceRows, f.provenanceErr
+}
+
 type fakeSender struct {
 	called int
 	got    channel.OutboundMessage
+	result channel.SendResult
 }
 
 func (f *fakeSender) Send(_ context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
 	f.called++
 	f.got = out
+	if len(f.result.MessageIDs) > 0 || f.result.MessageID != "" {
+		return f.result, nil
+	}
 	return channel.SendResult{MessageID: "1.1"}, nil
 }
 
@@ -121,12 +136,21 @@ func TestOutbound_PostsSealedChannelTaskReply(t *testing.T) {
 		},
 		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
 	}
-	fs := &fakeSender{}
+	fs := &fakeSender{result: channel.SendResult{MessageID: "1.2", MessageIDs: []string{"1.1", "1.2"}}}
 
 	newTestOutbound(q, fs).handleEvent(chatDoneEvent("00000000-0000-0000-0000-000000000001", "channel answer"))
 
 	if fs.called != 1 {
 		t.Fatalf("sender called %d times, want 1 for a sealed channel task", fs.called)
+	}
+	if len(q.gotProvenance.MessageIds) != 2 || q.gotProvenance.MessageIds[0] != "1.1" || q.gotProvenance.MessageIds[1] != "1.2" {
+		t.Fatalf("recorded message ids = %v, want [1.1 1.2]", q.gotProvenance.MessageIds)
+	}
+	if !q.gotProvenance.ChannelType.Valid || q.gotProvenance.ChannelType.String != "slack" {
+		t.Fatalf("recorded channel type = %+v, want slack", q.gotProvenance.ChannelType)
+	}
+	if q.gotProvenance.InstallationID != uid(1) || !q.gotProvenance.ChannelChatID.Valid || q.gotProvenance.ChannelChatID.String != "C123" {
+		t.Fatalf("recorded target = installation:%+v chat:%+v", q.gotProvenance.InstallationID, q.gotProvenance.ChannelChatID)
 	}
 }
 

@@ -127,6 +127,85 @@ func TestStartOwnedProcessTreeCapturesImmediateDescendants(t *testing.T) {
 	}
 }
 
+// TestProbeOutputOwnsItsProcessTree is the Windows regression for the probe
+// path in GH #7522. cmd.Output() calls Start itself, so a probe written with it
+// never reaches startOwnedProcessTree and owns nothing here — and on Windows
+// the direct child of a `--version` probe is typically the npm shim, with the
+// real CLI already a grandchild. outputOwned has to put both in the job and
+// take both down when the probe's context is cancelled.
+func TestProbeOutputOwnsItsProcessTree(t *testing.T) {
+	exePath, pidPath := buildDescendantSpawner(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := NewCommand(exePath, nil).exec(ctx, "spawn")
+	cmd.Env = append(os.Environ(), "DESCENDANT_PID_FILE="+pidPath)
+	hideAgentWindow(cmd)
+	// The grandchild inherits the stdout pipe, so without this a wedged
+	// descendant would hold Wait open past the cancellation — the exact stall
+	// detectCLIVersion documents.
+	cmd.WaitDelay = 5 * time.Second
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = outputOwned(cmd, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+
+	descendantPid := waitForDescendantPid(t, pidPath)
+	if !processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d was not running; the test cannot prove anything", descendantPid)
+	}
+	if total := jobTotalProcesses(t, cmd); total < 2 {
+		t.Fatalf("job accounted for %d processes, want the probe and its descendant; the descendant escaped the job", total)
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("outputOwned never returned after the probe was cancelled")
+	}
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d survived cancellation of the probe that spawned it", descendantPid)
+	}
+}
+
+// TestProbeReturnsWhenLeaderExitsHoldingPipes is the normal-exit counterpart to
+// the test above: nobody cancels anything here.
+//
+// The spawner leaves a descendant holding the inherited stdout/stderr write
+// ends and its leader exits. cmd.Wait cannot return until those close, and on
+// Windows the thing that closes them is the Job Object going away — which is
+// the release that runs after Wait. Without a bound the probe waits for its own
+// cleanup forever, and checkOpenclawVersion runs before any task timeout
+// exists, so the task would hang until a human cancelled it.
+func TestProbeReturnsWhenLeaderExitsHoldingPipes(t *testing.T) {
+	exePath, pidPath := buildDescendantSpawner(t)
+
+	cmd := NewCommand(exePath, nil).exec(context.Background(), "spawn-and-exit")
+	cmd.Env = append(os.Environ(), "DESCENDANT_PID_FILE="+pidPath)
+	hideAgentWindow(cmd)
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = outputOwned(cmd, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		close(done)
+	}()
+
+	descendantPid := waitForDescendantPid(t, pidPath)
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("outputOwned never returned: the leader exited, but Wait is still waiting for a pipe " +
+			"that only releaseProcessGroup can close, and releaseProcessGroup runs after Wait")
+	}
+	if processStillRunning(descendantPid) {
+		t.Fatalf("descendant %d outlived the probe that spawned it", descendantPid)
+	}
+}
+
 // TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed covers the
 // degraded path: a command started with a plain Start owns no job, so there is
 // nothing to observe, and callers must read that as "cleanup unconfirmed"
@@ -211,8 +290,13 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "descendant" { time.Sleep(10*time.Minute); return }
 	child := exec.Command(os.Args[0], "descendant")
+	// Inherit stdio: the descendant holding the parent's pipes open after the
+	// parent exits is what "spawn-and-exit" exists to reproduce.
+	child.Stdout = os.Stdout
+	child.Stderr = os.Stderr
 	if err := child.Start(); err != nil { panic(err) }
 	if err := os.WriteFile(os.Getenv("DESCENDANT_PID_FILE"), []byte(fmt.Sprint(child.Process.Pid)), 0600); err != nil { panic(err) }
+	if len(os.Args) > 1 && os.Args[1] == "spawn-and-exit" { return }
 	time.Sleep(10*time.Minute)
 }`
 	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {

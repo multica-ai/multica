@@ -222,7 +222,6 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	args := dshLaunchArgs()
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return nil }
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -242,7 +241,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[dsh:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start dsh: %w", err)
 	}
@@ -266,6 +265,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	if err := writeFrame(command); err != nil {
 		signalProcessGroup(cmd, syscall.SIGKILL)
 		_ = cmd.Wait()
+		releaseProcessGroup(cmd)
 		cancel()
 		return nil, fmt.Errorf("send dsh execute command: %w", err)
 	}
@@ -323,6 +323,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		}
 		exitErr := cmd.Wait()
 		close(procDone)
+		releaseProcessGroup(cmd)
 
 		result := state.result
 		if result == nil {
@@ -441,7 +442,7 @@ func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 		return nil, err
 	}
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		return nil, err
 	}
 	var models []Model
@@ -461,6 +462,7 @@ func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 	}
 	scanErr := scanner.Err()
 	exitErr := cmd.Wait()
+	releaseProcessGroup(cmd)
 	if scanErr != nil {
 		return nil, scanErr
 	}

@@ -122,6 +122,9 @@ export function runtimeRewriteDestination(
   const remoteApiUrl = resolveRemoteApiUrl(env);
   if (!remoteApiUrl) return undefined;
 
+  if (pathname === "/v1" || pathname.startsWith("/v1/")) {
+    return appendPath(remoteApiUrl, pathname);
+  }
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     return appendPath(remoteApiUrl, pathname);
   }
@@ -130,6 +133,14 @@ export function runtimeRewriteDestination(
   }
   if (pathname === "/ws") {
     return appendPath(remoteApiUrl, "/ws");
+  }
+  // `multica setup self-host` probes `{server-url}/health` and treats any
+  // non-200 as "Server not reachable". The backend serves it, but a
+  // same-origin reverse proxy that forwards everything to the web image left
+  // the probe 404ing at the Next.js router, so setup failed against a healthy
+  // stack. Proxy the exact path like /ws.
+  if (pathname === "/health") {
+    return appendPath(remoteApiUrl, "/health");
   }
   if (isBackendAuthPath(pathname)) {
     return appendPath(remoteApiUrl, pathname);
