@@ -32,9 +32,11 @@ guess.
    Verify it now: it must return `{"keys":[...]}`. A `404` means task tokens
    are not configured on that server, and you cannot proceed.
 2. **The `sub` claim's meaning** — what identifier the deployment templated into
-   `sub`, and which column in *this* system it corresponds to. Usually the
-   corporate email local part (`alice`) matching a username column. Confirm it;
-   an incorrect mapping is a silent privilege error, not a crash.
+   `sub`, and which column in *this* system it corresponds to. The recommended
+   default is the full corporate email (`alice@corp.com`); some deployments use
+   the local part (`alice`) against a username column, which is safe only when
+   the issuing side restricts signing to the corporate domain. Confirm it; an
+   incorrect mapping is a silent privilege error, not a crash.
 3. **The expected `iss`, and `aud` if used** — the exact strings this system
    must require. See the warning in Step 4.
 4. **Which header carries the token** — `Authorization: Bearer <jwt>` unless the
@@ -135,11 +137,16 @@ Hand the resolved user to the same code path a browser session uses. Concretely:
 
 - Authorization must go through the existing checks, unchanged. No new role, no
   "agent" bypass, no elevated path.
-- The audit trail must name **that person**. If your audit schema has room for
-  it, also record that the action arrived via an agent — the `jti` claim is a
-  good correlation id, and `identity.source` (if templated, commonly as `src`)
-  records which attribution path authorized the run. Adding this context is
-  fine. Replacing the human's name with "bot" is not.
+- The audit trail must record **both halves of the delegation**: the
+  accountable human (`sub`) as the actor, and that an agent performed it on
+  their behalf. The recommended template carries the actor claims for exactly
+  this — `act_sub` / `act_name` name the executing agent and `task_id` names
+  the run — and `jti` is the correlation id that joins your audit row to
+  Multica's own issuance log. Store what your schema has room for; "was this
+  automation?" must stay answerable with a query, or you have traded the
+  service account's blind spot ("who asked?") for a new one.
+  `identity.source` (if templated, commonly as `src`) additionally records
+  which attribution path authorized the run.
 
 ## Step 6 — Optional: reject replays
 
@@ -207,9 +214,13 @@ def authenticate(authorization_header):
     if claims.get("scope") != EXPECTED_SCOPE:
         raise ValueError("token is not scoped to this system")
 
-    user = User.objects.filter(username=claims["sub"], is_active=True).first()
+    # sub is the full corporate email in the recommended template; adjust the
+    # column if your deployment maps something else (confirm in Step 1).
+    user = User.objects.filter(email=claims["sub"], is_active=True).first()
     if user is None:
         raise ValueError("no active local user for this identity")
+    # Keep the delegation visible to your audit code: who acted for the user.
+    request.delegation = {k: claims.get(k) for k in ("act_sub", "act_name", "task_id", "jti", "src")}
     return user                            # from here on: your existing code
 ```
 
@@ -240,7 +251,11 @@ run and observed:
       created.
 - [ ] A token for a disabled user is rejected.
 - [ ] A token scoped to a different system is rejected.
-- [ ] The audit row for an agent-performed action names the human.
+- [ ] The audit row for an agent-performed action names the human **and**
+      records that an agent acted for them (and which one, when `act_sub` /
+      `act_name` are present).
+- [ ] "Which actions came from agents?" is answerable with a query against
+      your audit store.
 - [ ] A user with limited rights gets exactly those rights — not more, not the
       old service account's.
 - [ ] The JWKS is not refetched on every request.
@@ -260,7 +275,7 @@ Each of these has been the actual cause of a broken integration.
 | Auto-create a user when `sub` is unknown | Turns an authentication failure into account provisioning, from an unauthenticated endpoint. |
 | Fall back to a service account when verification fails | Restores exactly the anonymous-bot problem this replaces. |
 | Grant agent requests a special role or bypass | The point is that the human's existing permissions apply. |
-| Log the actor as "bot" or the agent's name | Audit must name the accountable human. |
+| Log the actor as "bot" or the agent's name — or as only the human | Audit must name **both**: the accountable human as the actor, and the agent that acted for them (`act_sub` / `act_name` / `task_id`). Only the human, and agent actions are indistinguishable from their own logins; only the bot, and accountability is lost. |
 | Hard-code the public key in configuration | Rotation then requires editing every system. Fetch the JWKS. |
 | Cache the JWKS forever with no refetch on unknown `kid` | Rotation breaks silently at the next key change. |
 | Skip `iss`/`scope` because "the signature proves it's ours" | The signature proves Multica issued it, not that it was meant for *this* system. |
@@ -278,4 +293,5 @@ Each of these has been the actual cause of a broken integration.
 | Signature fails, everything else looks right | Usually an algorithm mismatch, or a proxy altering the response body. Compare the token header's `alg` with your allowlist. |
 | `iss` check fails on every token | The deployment did not template `iss`. Fix the server catalog; do not remove the check. |
 | Token is absent from the agent's environment | Not your side. Either the agent has no template enabled, or the run had no precise accountable human — Multica issues nothing in that case, by design. |
-| Works for one person, fails for another | The `sub` mapping does not hold for every user. Check for an email local part that does not match the local username. |
+| Works for one person, fails for another | The `sub` mapping does not hold for every user. Check for an address that does not match the local record — or, on a local-part mapping, an email whose local part does not match the username. |
+| One template never produces tokens for some users | The issuing side's `allowed_domains` excludes their email domain — intended behavior for guests/contractors. Confirm with the operator before "fixing" it. |
