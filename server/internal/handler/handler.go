@@ -194,16 +194,15 @@ type Handler struct {
 	Entitlements entitlement.Provider
 	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
 	// disabled preserves self-hosted behavior.
-	SeatCapacity                   seatcapacity.Executor
-	SeatCapacityEnforcementEnabled bool
-	SeatCapacityLocker             seatcapacity.WorkspaceLocker
-	SeatCapacityWorker             *seatcapacity.Worker
-	EmailService                   *service.EmailService
-	UpdateStore                    UpdateStore
-	ModelListStore                 ModelListStore
-	LocalSkillListStore            LocalSkillListStore
-	LocalSkillImportStore          LocalSkillImportStore
-	FeatureFlags                   *featureflag.Service
+	SeatCapacity          seatcapacity.Executor
+	SeatCapacityLocker    seatcapacity.WorkspaceLocker
+	SeatCapacityWorker    *seatcapacity.Worker
+	EmailService          *service.EmailService
+	UpdateStore           UpdateStore
+	ModelListStore        ModelListStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
+	FeatureFlags          *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that

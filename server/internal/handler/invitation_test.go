@@ -66,12 +66,9 @@ func (s *stubSeatCapacity) GetOperation(context.Context, uuid.UUID, uuid.UUID) (
 func useSeatCapacity(t *testing.T, executor seatcapacity.Executor) {
 	t.Helper()
 	previous := testHandler.SeatCapacity
-	previousEnforcement := testHandler.SeatCapacityEnforcementEnabled
 	testHandler.SeatCapacity = executor
-	testHandler.SeatCapacityEnforcementEnabled = true
 	t.Cleanup(func() {
 		testHandler.SeatCapacity = previous
-		testHandler.SeatCapacityEnforcementEnabled = previousEnforcement
 	})
 }
 

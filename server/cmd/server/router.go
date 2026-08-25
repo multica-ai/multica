@@ -421,14 +421,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
 	}
-	capacityEnforcementEnabled := envBool("MULTICA_SUBSCRIPTION_CAPACITY_ENABLED", false)
-	// Settlement remains independently enabled during an enforcement rollback
-	// so existing confirm/release intents keep draining. Enforcement always
-	// implies settlement; operators only need the separate flag when pausing
-	// new capacity admission.
-	capacityWorkerEnabled := capacityEnforcementEnabled || envBool("MULTICA_SUBSCRIPTION_CAPACITY_WORKER_ENABLED", false)
+	// This is deployment wiring, not a business mode: when connected, admission
+	// and settlement both follow Cloud's single strict prepaid-seat policy.
+	capacityEnabled := envBool("MULTICA_SUBSCRIPTION_CAPACITY_ENABLED", false)
 	capacityClient, capacityErr := seatcapacity.New(seatcapacity.Config{
-		Enabled:      capacityWorkerEnabled,
+		Enabled:      capacityEnabled,
 		BaseURL:      strings.TrimSpace(os.Getenv("MULTICA_SUBSCRIPTION_CAPACITY_URL")),
 		ServiceToken: os.Getenv("MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN"),
 		Timeout:      envDuration("MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT", 3*time.Second),
@@ -442,10 +439,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	} else {
 		h.SeatCapacity = capacityClient
 	}
-	h.SeatCapacityEnforcementEnabled = capacityEnforcementEnabled
 	capacityLocker := seatcapacity.NewWorkspaceLocker(pool)
 	h.SeatCapacityLocker = capacityLocker
-	if capacityWorkerEnabled && h.SeatCapacity.Enabled() {
+	if capacityEnabled && h.SeatCapacity.Enabled() {
 		h.SeatCapacityWorker = seatcapacity.NewWorker(queries, h.SeatCapacity, capacityLocker, seatcapacity.WorkerConfig{
 			Metrics: opts.SeatCapacityMetrics,
 		})

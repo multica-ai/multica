@@ -64,6 +64,16 @@ func TestClientRejectsRedirectAndDoesNotForwardCredential(t *testing.T) {
 	}
 }
 
+func TestIsCapacityFullRequiresCloudConflictCode(t *testing.T) {
+	if !IsCapacityFull(&HTTPError{StatusCode: http.StatusConflict, Code: "capacity_full"}) {
+		t.Fatal("capacity_full conflict was not recognized")
+	}
+	if IsCapacityFull(&HTTPError{StatusCode: http.StatusConflict, Code: "seat_quote_changed"}) ||
+		IsCapacityFull(&HTTPError{StatusCode: http.StatusServiceUnavailable, Code: "capacity_full"}) {
+		t.Fatal("unrelated Cloud error was recognized as capacity full")
+	}
+}
+
 func TestDisabledClientPreservesLegacyBehavior(t *testing.T) {
 	client, err := New(Config{})
 	if err != nil {

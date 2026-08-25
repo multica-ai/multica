@@ -1160,7 +1160,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			// disappear. Skipped for self-hosted/unmanaged deployments.
 			name: "prepare seat capacity release",
 			run: func() error {
-				if !h.seatCapacitySettlementEnabled() {
+				if !h.seatCapacityEnabled() {
 					return nil
 				}
 				if err := qtx.DeleteSeatCapacityConfirmIntentsForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {

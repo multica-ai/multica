@@ -72,7 +72,7 @@ type Executor interface {
 type unavailableExecutor struct{ err error }
 
 // NewUnavailable preserves fail-closed behavior when an operator explicitly
-// enabled capacity enforcement with invalid configuration.
+// enabled managed capacity with invalid configuration.
 func NewUnavailable(err error) Executor { return &unavailableExecutor{err: err} }
 
 func (u *unavailableExecutor) Enabled() bool { return true }
@@ -257,4 +257,9 @@ func (e *HTTPError) Error() string {
 func IsNotFound(err error) bool {
 	var remote *HTTPError
 	return errors.As(err, &remote) && remote.StatusCode == http.StatusNotFound
+}
+
+func IsCapacityFull(err error) bool {
+	var remote *HTTPError
+	return errors.As(err, &remote) && remote.StatusCode == http.StatusConflict && remote.Code == "capacity_full"
 }

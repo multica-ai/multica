@@ -79,36 +79,13 @@ import {
   hasWorkspaceBillingRelationship,
   resolveAutopilotUsage,
 } from "./billing-state";
+import { formatStripeMinorAmount } from "./billing-format";
+
+export { formatStripeMinorAmount } from "./billing-format";
 
 const CHECKOUT_SYNC_TIMEOUT_MS = 30_000;
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
-
-const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set([
-  "BIF",
-  "CLP",
-  "DJF",
-  "GNF",
-  "JPY",
-  "KMF",
-  "KRW",
-  "MGA",
-  "PYG",
-  "RWF",
-  "VND",
-  "VUV",
-  "XAF",
-  "XOF",
-  "XPF",
-]);
-const STRIPE_TWO_DECIMAL_COMPAT_CURRENCIES = new Set(["ISK", "UGX"]);
-const STRIPE_THREE_DECIMAL_CURRENCIES = new Set([
-  "BHD",
-  "JOD",
-  "KWD",
-  "OMR",
-  "TND",
-]);
 
 type WorkspaceBillingReturnResult = "success" | "cancel" | "portal";
 
@@ -147,49 +124,6 @@ function formatDateTime(value: string | null, locale: string): string | null {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-/**
- * Stripe API amounts use its own minor-unit contract: two decimals by default,
- * an explicit zero-decimal list, five three-decimal currencies, and ISK/UGX in
- * a backwards-compatible two-decimal representation. Intl localizes the
- * already-converted major amount; it must not decide the divisor.
- */
-export function formatStripeMinorAmount(
-  amount: number,
-  currency: string,
-  locale: string,
-): string | null {
-  if (!Number.isSafeInteger(amount) || amount < 0) return null;
-  const normalizedCurrency = currency.trim().toUpperCase();
-  if (!normalizedCurrency) return null;
-
-  try {
-    const fractionDigits = STRIPE_TWO_DECIMAL_COMPAT_CURRENCIES.has(
-      normalizedCurrency,
-    )
-      ? 2
-      : STRIPE_ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency)
-        ? 0
-        : STRIPE_THREE_DECIMAL_CURRENCIES.has(normalizedCurrency)
-          ? 3
-          : 2;
-    const majorAmount = amount / 10 ** fractionDigits;
-    const showStripeFraction = !Number.isInteger(majorAmount);
-    const formatter = new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: normalizedCurrency,
-      ...(showStripeFraction
-        ? {
-            minimumFractionDigits: fractionDigits,
-            maximumFractionDigits: fractionDigits,
-          }
-        : {}),
-    });
-    return formatter.format(majorAmount);
-  } catch {
-    return null;
-  }
 }
 
 function planBadgeVariant(plan: string): "default" | "secondary" | "outline" {

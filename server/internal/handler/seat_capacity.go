@@ -22,10 +22,6 @@ var (
 const seatCapacityWorkspaceLockWait = 2 * time.Second
 
 func (h *Handler) seatCapacityEnabled() bool {
-	return h != nil && h.SeatCapacityEnforcementEnabled && h.seatCapacitySettlementEnabled()
-}
-
-func (h *Handler) seatCapacitySettlementEnabled() bool {
 	return h != nil && h.SeatCapacity != nil && h.SeatCapacity.Enabled()
 }
 
@@ -72,6 +68,10 @@ func (h *Handler) reserveInvitationCapacity(ctx context.Context, workspaceID, in
 	}
 	decision, err := h.SeatCapacity.ReserveInvitation(ctx, workspaceID, invitationID, expiresAt)
 	if err != nil {
+		if seatcapacity.IsCapacityFull(err) {
+			_ = deleteCapacityIntentForAction(ctx, q, invitationID, seatcapacity.ActionReserveInvitation)
+			return errSeatCapacityFull
+		}
 		h.compensateCapacityIntentLocked(ctx, q, invitationID)
 		return fmt.Errorf("%w: %v", errSeatCapacityUnavailable, err)
 	}
@@ -95,10 +95,9 @@ func (h *Handler) reserveInvitationCapacity(ctx context.Context, workspaceID, in
 }
 
 func (h *Handler) beginCapacityConsume(ctx context.Context, workspaceID, token, invitationID, userID uuid.UUID) (bool, error) {
-	if !h.seatCapacitySettlementEnabled() {
+	if !h.seatCapacityEnabled() {
 		return false, nil
 	}
-	enforced := h.seatCapacityEnabled()
 	q, unlock, err := h.lockSeatCapacityWorkspace(ctx, workspaceID)
 	if err != nil {
 		return false, fmt.Errorf("%w: acquire workspace capacity lock: %v", errSeatCapacityUnavailable, err)
@@ -113,11 +112,10 @@ func (h *Handler) beginCapacityConsume(ctx context.Context, workspaceID, token, 
 	}
 	decision, err := h.SeatCapacity.Consume(ctx, workspaceID, token)
 	if err != nil {
-		if !enforced {
-			if deleteErr := deleteCapacityIntentForAction(ctx, q, token, seatcapacity.ActionConsumeInvitation); deleteErr != nil {
-				return false, fmt.Errorf("discard unenforced invitation consume intent: %w", deleteErr)
-			}
-			return false, nil
+		if seatcapacity.IsCapacityFull(err) {
+			_ = deleteCapacityIntentForAction(ctx, q, token, seatcapacity.ActionConsumeInvitation)
+			_ = q.ExpireInvitationForCapacityRecovery(ctx, uuidToPG(invitationID))
+			return false, errSeatCapacityFull
 		}
 		return false, fmt.Errorf("%w: %v", errSeatCapacityUnavailable, err)
 	}
@@ -127,9 +125,6 @@ func (h *Handler) beginCapacityConsume(ctx context.Context, workspaceID, token, 
 	if !decision.Allowed {
 		if deleteErr := deleteCapacityIntentForAction(ctx, q, token, seatcapacity.ActionConsumeInvitation); deleteErr != nil {
 			return false, fmt.Errorf("discard rejected invitation consume intent: %w", deleteErr)
-		}
-		if !enforced {
-			return false, nil
 		}
 		_ = q.ExpireInvitationForCapacityRecovery(ctx, uuidToPG(invitationID))
 		return false, errSeatCapacityFull
@@ -209,7 +204,7 @@ func enqueueMemberCapacityRelease(ctx context.Context, q *db.Queries, workspaceI
 }
 
 func (h *Handler) confirmCapacityIntent(ctx context.Context, workspaceID, token, memberID uuid.UUID) {
-	if !h.seatCapacitySettlementEnabled() {
+	if !h.seatCapacityEnabled() {
 		return
 	}
 	q, unlock, err := h.lockSeatCapacityWorkspace(ctx, workspaceID)
@@ -238,7 +233,7 @@ func (h *Handler) confirmCapacityIntent(ctx context.Context, workspaceID, token,
 }
 
 func (h *Handler) compensateCapacityIntent(ctx context.Context, token uuid.UUID) {
-	if !h.seatCapacitySettlementEnabled() {
+	if !h.seatCapacityEnabled() {
 		return
 	}
 	intent, err := h.Queries.GetSeatCapacityIntent(ctx, uuidToPG(token))
@@ -282,7 +277,7 @@ func (h *Handler) compensateCapacityIntentLocked(ctx context.Context, q *db.Quer
 }
 
 func (h *Handler) settleMemberCapacityRelease(ctx context.Context, workspaceID, memberID uuid.UUID) {
-	if !h.seatCapacitySettlementEnabled() {
+	if !h.seatCapacityEnabled() {
 		return
 	}
 	q, unlock, err := h.lockSeatCapacityWorkspace(ctx, workspaceID)

@@ -26,7 +26,6 @@ data:
   MULTICA_ENTITLEMENT_STALE_GRACE: {{ .Values.backend.config.entitlementPolicy.staleGrace | quote }}
   MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: {{ .Values.backend.config.entitlementPolicy.emergencyDisabled | quote }}
   MULTICA_SUBSCRIPTION_CAPACITY_ENABLED: {{ .Values.backend.config.subscriptionCapacity.enabled | quote }}
-  MULTICA_SUBSCRIPTION_CAPACITY_WORKER_ENABLED: {{ .Values.backend.config.subscriptionCapacity.workerEnabled | quote }}
   MULTICA_SUBSCRIPTION_CAPACITY_URL: {{ .Values.backend.config.subscriptionCapacity.url | quote }}
   MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT: {{ .Values.backend.config.subscriptionCapacity.timeout | quote }}
   GOOGLE_CLIENT_ID: {{ .Values.backend.config.googleClientId | quote }}

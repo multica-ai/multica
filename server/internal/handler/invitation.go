@@ -109,7 +109,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		for _, expired := range expiredInvitations {
 			if err := enqueueCapacityRelease(r.Context(), h.Queries, uuid.UUID(expired.WorkspaceID.Bytes), uuid.UUID(expired.ID.Bytes)); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to release expired invitation capacity")
@@ -313,7 +313,7 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
 			return
@@ -323,7 +323,7 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 
@@ -641,7 +641,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 			return
@@ -651,7 +651,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 

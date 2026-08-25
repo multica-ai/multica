@@ -154,9 +154,6 @@ backend:
     # enabled, put the matching service token in existingSecret.
     subscriptionCapacity:
       enabled: false
-      # Keep settlement running while enforcement is paused so durable
-      # confirm/release intents drain. enabled=true also starts the worker.
-      workerEnabled: false
       url: ""
       timeout: 3s
     googleClientId: ""
