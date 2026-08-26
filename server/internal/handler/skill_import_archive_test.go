@@ -582,6 +582,24 @@ func TestBuildSkillTarGzRejectsContentOutsideImportLimits(t *testing.T) {
 	}
 }
 
+func TestBuildSkillTarGzRejectsInvalidStoredFilePaths(t *testing.T) {
+	for _, filePath := range []string{
+		"../outside.md",
+		"scripts/../../outside.md",
+		"/outside.md",
+	} {
+		t.Run(filePath, func(t *testing.T) {
+			_, err := buildSkillTarGz("my-skill", "# Skill", []db.SkillFile{{
+				Path:    filePath,
+				Content: "must not be exported",
+			}})
+			if err == nil || !strings.Contains(err.Error(), "invalid archive path") {
+				t.Fatalf("buildSkillTarGz path %q error = %v, want invalid archive path", filePath, err)
+			}
+		})
+	}
+}
+
 func TestSkillArchiveDirName(t *testing.T) {
 	cases := map[string]string{
 		"my-skill":      "my-skill",

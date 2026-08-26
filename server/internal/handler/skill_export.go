@@ -102,6 +102,9 @@ func buildSkillTarGz(name, content string, files []db.SkillFile) ([]byte, error)
 		return nil, err
 	}
 	for _, f := range files {
+		if !validateFilePath(f.Path) {
+			return nil, fmt.Errorf("invalid archive path %q", f.Path)
+		}
 		if err := add(path.Join(root, f.Path), f.Content); err != nil {
 			return nil, err
 		}
