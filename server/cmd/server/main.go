@@ -592,6 +592,9 @@ func main() {
 	)
 	if err != nil {
 		slog.Error("invalid task token configuration", "error", err)
+		os.Exit(1)
+	}
+
 	// Same posture for the Codex capacity retry budget: a value above the
 	// ceiling would let one capacity failure spawn an unbounded task chain, so
 	// the boot stops rather than quietly restoring the default.
