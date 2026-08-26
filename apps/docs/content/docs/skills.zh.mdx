@@ -19,17 +19,18 @@ Skill 是工作区中可以复用的一组工作方法。它以 `SKILL.md` 为�
 
 ## 创建或导入 skill
 
-在工作区的 **Skills** 页面选择"新建 skill"，可以使用三种方式：
+在工作区的 **Skills** 页面选择"新建 skill"，可以使用四种方式：
 
 | 方式 | 适合什么情况 |
 |---|---|
 | **手动创建** | 从空白的 `SKILL.md` 开始编写。 |
+| **从本地导入** | 选择包含 `SKILL.md` 的文件夹，或这台电脑上的 `.skill` / `.zip` 压缩包。 |
 | **从 URL 导入** | 从 GitHub、ClawHub 或 Skills.sh 导入已经发布的 skill。 |
 | **从运行时复制** | 扫描连接电脑上的 skill，并把选中的内容复制到工作区。 |
 
 从运行时复制的是当时的文件快照。之后本地文件发生变化，不会自动更新工作区中的版本；需要重新导入或在 Multica 中编辑。
 
-使用 CLI 时，也可以从 `.skill` 或 `.zip` 文件导入：
+同一套压缩包格式也可以用 CLI 导入：
 
 ```bash
 multica skill import --file ./review-helper.skill
