@@ -333,7 +333,7 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	switch action {
 	case ActionOff:
 		return Gate{Action: ActionOff}, nil
-	case ActionObserve, ActionEnforce:
+	case ActionEnforce:
 	default:
 		return Gate{}, ErrInvalidPolicy
 	}

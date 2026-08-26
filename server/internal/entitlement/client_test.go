@@ -111,7 +111,7 @@ func TestGateCachesByWorkspaceAndClonesResults(t *testing.T) {
 	if second.Reason != ReasonCacheFresh || second.Gate.Limit == nil || *second.Gate.Limit != testIssueLimit {
 		t.Fatalf("cached decision = %+v", second)
 	}
-	if autopilot.Gate.Action != ActionObserve || calls.Load() != 1 {
+	if autopilot.Gate.Action != ActionEnforce || calls.Load() != 1 {
 		t.Fatalf("autopilot = %+v, calls = %d", autopilot, calls.Load())
 	}
 }
@@ -125,7 +125,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 			close(requestStarted)
 		}
 		<-release
-		writePolicy(t, w, samplePolicy(1, 0, 60, ActionObserve))
+		writePolicy(t, w, samplePolicy(1, 0, 60, ActionEnforce))
 	}))
 	defer server.Close()
 	client := newTestClient(t, server.URL, nil)
@@ -149,7 +149,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 	wg.Wait()
 	close(results)
 	for decision := range results {
-		if decision.Gate.Action != ActionObserve {
+		if decision.Gate.Action != ActionEnforce {
 			t.Errorf("decision = %+v", decision)
 		}
 	}
@@ -162,7 +162,7 @@ func TestCancelledLeaderDoesNotCancelSharedRefresh(t *testing.T) {
 	requestStarted := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int64
-	policyBody, err := json.Marshal(samplePolicy(1, 0, 60, ActionObserve))
+	policyBody, err := json.Marshal(samplePolicy(1, 0, 60, ActionEnforce))
 	if err != nil {
 		t.Fatalf("marshal policy: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestCancelledLeaderDoesNotCancelSharedRefresh(t *testing.T) {
 	close(release)
 
 	leader, follower := <-leaderResult, <-followerResult
-	if leader.Gate.Action != ActionObserve || follower.Gate.Action != ActionObserve {
+	if leader.Gate.Action != ActionEnforce || follower.Gate.Action != ActionEnforce {
 		t.Fatalf("leader = %+v, follower = %+v", leader, follower)
 	}
 	if calls.Load() != 1 {
@@ -252,6 +252,11 @@ func TestColdFailuresFailOpen(t *testing.T) {
 			gate.Action = "future"
 			p.Gates[string(GateIssueWindow)] = gate
 		}), ReasonInvalidPolicy},
+		{"cloud observe action", policyHandler(func(p *wirePolicy) {
+			gate := p.Gates[string(GateIssueWindow)]
+			gate.Action = string(ActionObserve)
+			p.Gates[string(GateIssueWindow)] = gate
+		}), ReasonInvalidPolicy},
 		{"missing gate", policyHandler(func(p *wirePolicy) { delete(p.Gates, string(GateAutopilotRuns)) }), ReasonInvalidPolicy},
 		{"excessive TTL", policyHandler(func(p *wirePolicy) { p.ValidForSeconds = 301 }), ReasonInvalidPolicy},
 		{"missing autopilot period", policyHandler(func(p *wirePolicy) {
@@ -279,7 +284,7 @@ func TestColdFailuresFailOpen(t *testing.T) {
 }
 
 func TestAutopilotResetMayFollowPeriodEnd(t *testing.T) {
-	policy := samplePolicy(1, 0, 60, ActionObserve)
+	policy := samplePolicy(1, 0, 60, ActionEnforce)
 	gate := policy.Gates[string(GateAutopilotRuns)]
 	resetAt := gate.PeriodEnd.Add(time.Hour)
 	gate.ResetAt = &resetAt
@@ -623,7 +628,7 @@ func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, is
 		Gates: map[string]wireGate{
 			string(GateIssueWindow): issueGate,
 			string(GateAutopilotRuns): {
-				Action: string(ActionObserve), Limit: &autopilotLimit,
+				Action: string(ActionEnforce), Limit: &autopilotLimit,
 				PeriodStart: &periodStart, PeriodEnd: &periodEnd, ResetAt: &periodEnd,
 			},
 		},
@@ -651,7 +656,7 @@ func bodyHandler(status int, body string) http.HandlerFunc {
 
 func policyHandler(mutate func(*wirePolicy)) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		policy := samplePolicy(1, 0, 60, ActionObserve)
+		policy := samplePolicy(1, 0, 60, ActionEnforce)
 		mutate(&policy)
 		data, _ := json.Marshal(policy)
 		_, _ = w.Write(data)
