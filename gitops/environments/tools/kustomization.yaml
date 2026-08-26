@@ -41,4 +41,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "cbb6896b"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
-    newTag: "701120a0"
+    newTag: "cbb6896b"
