@@ -1,8 +1,8 @@
 CREATE TABLE model_tier_map (
-    workspace_id UUID NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    workspace_id UUID REFERENCES workspace(id) ON DELETE CASCADE,
     tier TEXT NOT NULL,
     concrete TEXT NOT NULL,
-    PRIMARY KEY(workspace_id, tier)
+    UNIQUE NULLS NOT DISTINCT (workspace_id, tier)
 );
 
 INSERT INTO model_tier_map (workspace_id, tier, concrete) VALUES
