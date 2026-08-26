@@ -8,23 +8,7 @@ import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import { ChatMessageList } from "./chat-message-list";
 
-// TIM-55 regression: the chat viewport must stay at the live end while a reply
-// streams in and while the composer grows underneath it.
-//
-// Both failed for the same reason: Virtuoso's `followOutput` reacts to the ITEM
-// COUNT, and neither event changes it. A streaming reply is one row that keeps
-// growing, and the composer only shrinks the viewport. The list therefore drives
-// its own bottom-stick off a ResizeObserver — which is what these tests drive.
-//
-// This suite covers the WIRING and the pin state (release on scroll-up,
-// re-engagement): that the list measures the right boxes and applies the pin
-// to the real scroller. The pure geometry (thresholds, pin targets, shrinking
-// content) is canonical in stick-to-bottom.test.ts and is not re-run through a
-// DOM mount.
-
-// Real react-virtuoso renders no data rows under jsdom's zero-height viewport,
-// and this suite fakes the scroll geometry anyway; the stub keeps the row count
-// visible so the tests can assert that streaming leaves it unchanged.
+// Virtuoso cannot render rows in jsdom's zero-height viewport.
 vi.mock("react-virtuoso", () => ({
   Virtuoso: ({
     data,
@@ -50,8 +34,6 @@ const TASK_ID = "6af44cbe-80ab-4dfe-b07d-bd3cfd588f4d";
 
 const VIEWPORT = 600;
 
-// ─── A ResizeObserver the test can fire ──────────────────────────────────
-
 interface FakeObserver {
   targets: Element[];
   fire: () => void;
@@ -59,12 +41,10 @@ interface FakeObserver {
 
 let observers: FakeObserver[] = [];
 
-/** Every element the list asked to be measured, across all its observers. */
 function observedTargets(): Element[] {
   return observers.flatMap((o) => o.targets);
 }
 
-/** A box changed size: the browser would run every observer watching it. */
 function resize() {
   act(() => {
     for (const observer of observers) observer.fire();
@@ -101,29 +81,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// ─── Fake scroll geometry ────────────────────────────────────────────────
-//
-// jsdom has no layout, so scrollHeight/clientHeight are hard 0 and scrollTop
-// never moves. This wrapper gives the scroll container the geometry a browser
-// would, and records the scrollTop the component writes.
-
 interface Scroller {
   el: HTMLElement;
   scrollTop: number;
   contentHeight: number;
   viewportHeight: number;
   distanceFromBottom(): number;
-  /** Content grew (a streamed chunk) — the browser then notifies observers. */
   grow(px: number): void;
-  /** The composer grew, taking `px` off the list's height. */
   shrinkViewport(px: number): void;
-  /** The reader scrolls, leaving `fromBottom` px of content below the fold. */
   readerScrollsTo(fromBottom: number): void;
 }
 
 function scroller(el: HTMLElement): Scroller {
   const state = { scrollTop: 0, contentHeight: 2000, viewportHeight: VIEWPORT };
-  // Open at the bottom, matching Virtuoso's `initialTopMostItemIndex: LAST`.
   state.scrollTop = state.contentHeight - state.viewportHeight;
 
   Object.defineProperties(el, {
@@ -169,8 +139,6 @@ function scroller(el: HTMLElement): Scroller {
   };
 }
 
-// ─── Fixture ─────────────────────────────────────────────────────────────
-
 function taskMsg(seq: number, content: string): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type: "text", content } as TaskMessagePayload;
 }
@@ -199,7 +167,6 @@ function renderStreamingChat() {
     view,
     scroll: scroller(el),
     rowCount: () => view.container.querySelectorAll("[data-row-key]").length,
-    /** One more streamed chunk on the SAME live row. */
     streamChunk: (seq: number) => {
       act(() => {
         qc.setQueryData<TaskMessagePayload[]>(
@@ -211,16 +178,14 @@ function renderStreamingChat() {
   };
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────
-
+// Pure scroll geometry is covered in stick-to-bottom.test.ts.
 describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
   it("measures both the viewport and the content, not just the viewport", () => {
     const { scroll, view } = renderStreamingChat();
 
     const targets = observedTargets();
     expect(targets).toContain(scroll.el);
-    // A ResizeObserver reports an element's own box, never its scroll extent,
-    // so watching the container alone would miss a reply growing inside it.
+    // ResizeObserver tracks element dimensions, not scroll extent.
     expect(targets.some((t) => t !== scroll.el && scroll.el.contains(t))).toBe(true);
 
     view.unmount();
@@ -235,7 +200,6 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
       scroll.grow(180);
     }
 
-    // The whole point: Virtuoso saw no item-count change to follow.
     expect(rowCount()).toBe(rowsBefore);
     expect(scroll.distanceFromBottom()).toBe(0);
   });
@@ -243,7 +207,6 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
   it("keeps the newest content clear of a composer that grew", () => {
     const { scroll } = renderStreamingChat();
 
-    // Three lines of draft text push the composer up into the list.
     scroll.shrinkViewport(72);
 
     expect(scroll.distanceFromBottom()).toBe(0);

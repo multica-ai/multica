@@ -191,9 +191,6 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  // Keeps the newest content visible while a reply streams in and while the
-  // composer grows underneath it — neither of which Virtuoso's `followOutput`
-  // reacts to (see stick-to-bottom.ts).
   const isPinned = useStickToBottom(scrollContainerEl, contentEl);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
@@ -318,10 +315,7 @@ export function ChatMessageList({
       // "near-viewport" against that element rather than the browser viewport —
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
-      {/* Plain wrapper whose only job is to be measurable: a ResizeObserver
-       *  reports an element's own box, never its scroll extent, so the
-       *  bottom-stick needs a box that grows with the list to notice a reply
-       *  streaming in. */}
+      {/* ResizeObserver cannot report scroll extent, so observe a content wrapper. */}
       <div ref={setContentEl}>
       <Virtuoso
         customScrollParent={scrollContainerEl}
@@ -339,9 +333,7 @@ export function ChatMessageList({
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={STICK_EDGE_THRESHOLD}
-        // "auto", not "smooth": the bottom-stick pins instantly on every size
-        // change, so a smooth animation started here would be cancelled by the
-        // first streamed chunk anyway — leaving a half-played glide and a jump.
+        // Immediate scrolling avoids competing with resize-driven pinning.
         followOutput={() => (!isFetchingOlderMessages && isPinned() ? "auto" : false)}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {

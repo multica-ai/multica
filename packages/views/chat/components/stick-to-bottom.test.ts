@@ -10,7 +10,6 @@ import {
 
 const VIEWPORT = 600;
 
-/** Metrics for a list of `content` px scrolled so `fromBottom` px remain below. */
 function at(content: number, fromBottom: number): ScrollMetrics {
   return {
     clientHeight: VIEWPORT,
@@ -37,25 +36,16 @@ describe("isAtLiveEnd", () => {
 });
 
 describe("bottomPinTarget", () => {
-  // The regression: a streaming reply is ONE Virtuoso row that keeps growing,
-  // so the item count never changes and `followOutput` never fires. Every
-  // growth tick has to re-pin on its own or the tail runs off the fold.
   it("pins a grown row back to the bottom", () => {
     expect(bottomPinTarget({ clientHeight: VIEWPORT, scrollHeight: 920, scrollTop: 200 })).toBe(320);
   });
 
-  // A long reply that lands in one paint (cached session, non-streamed render)
-  // is the same event as a stream: content far taller than the viewport, pinned
-  // in a single step rather than a partial scroll.
   it("pins past a reply taller than the viewport in one step", () => {
     expect(bottomPinTarget({ clientHeight: VIEWPORT, scrollHeight: 50_000, scrollTop: 0 })).toBe(
       50_000 - VIEWPORT,
     );
   });
 
-  // The composer grows with the draft (and banners/queue appear above it), which
-  // shrinks the list's clientHeight while scrollTop stays put — the tail slides
-  // out of view behind the composer.
   it("re-pins when the composer grows and shrinks the viewport", () => {
     const shrunk = { clientHeight: VIEWPORT - 72, scrollHeight: 2000, scrollTop: 2000 - VIEWPORT };
     expect(distanceFromBottom(shrunk)).toBe(72);
@@ -63,8 +53,6 @@ describe("bottomPinTarget", () => {
   });
 
   it("never pins upward when content shrinks under a pinned viewport", () => {
-    // A collapsible closing: the browser clamps scrollTop itself, and dragging
-    // the reader further up would be a jump they did not ask for.
     expect(bottomPinTarget({ clientHeight: VIEWPORT, scrollHeight: 1000, scrollTop: 900 })).toBeNull();
   });
 
