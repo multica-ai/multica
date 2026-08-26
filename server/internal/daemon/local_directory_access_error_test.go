@@ -13,14 +13,31 @@ func TestDescribeDirAccessError_DarwinEPERM(t *testing.T) {
 	orig := accessErrorGOOS
 	accessErrorGOOS = "darwin"
 	defer func() { accessErrorGOOS = orig }()
+	const protected = "/Users/foo/Documents/bar"
 	for _, op := range []string{"read", "write"} {
-		err := describeDirAccessError(op, "/tmp/foo", syscall.EPERM)
+		err := describeDirAccessError(op, protected, syscall.EPERM)
 		msg := err.Error()
-		if !strings.Contains(msg, "/tmp/foo") || !strings.Contains(msg, "Full Disk Access") || !strings.Contains(msg, "Privacy & Security") {
+		if !strings.Contains(msg, protected) || !strings.Contains(msg, "may be blocking") || !strings.Contains(msg, "Full Disk Access") || !strings.Contains(msg, "Privacy & Security") {
 			t.Fatalf("op %s: missing advice text in %q", op, msg)
 		}
 		if !errors.Is(err, syscall.EPERM) {
 			t.Fatalf("op %s: wrapped EPERM lost", op)
+		}
+	}
+}
+
+func TestDescribeDirAccessError_DarwinEPERMUnprotectedPathNoAdvice(t *testing.T) {
+	orig := accessErrorGOOS
+	accessErrorGOOS = "darwin"
+	defer func() { accessErrorGOOS = orig }()
+	for _, op := range []string{"read", "write"} {
+		got := describeDirAccessError(op, "/tmp/foo", syscall.EPERM)
+		if strings.Contains(got.Error(), "Full Disk Access") || strings.Contains(got.Error(), "privacy protection") {
+			t.Fatalf("op %s: unprotected path must not be diagnosed as TCC: %q", op, got.Error())
+		}
+		want := fmt.Errorf("%s %q: %w", op, "/tmp/foo", syscall.EPERM)
+		if got.Error() != want.Error() {
+			t.Fatalf("op %s: got %q want %q", op, got.Error(), want.Error())
 		}
 	}
 }
