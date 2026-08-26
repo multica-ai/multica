@@ -20,13 +20,7 @@ func TestLoginShellProbeEnabled(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.val, func(t *testing.T) {
-			if c.val == "" {
-				// unset: need to clear env
-				t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "")
-				os.Unsetenv("MULTICA_LOGIN_SHELL_PROBE")
-			} else {
-				t.Setenv("MULTICA_LOGIN_SHELL_PROBE", c.val)
-			}
+			t.Setenv("MULTICA_LOGIN_SHELL_PROBE", c.val)
 			if got := loginShellProbeEnabled(); got != c.want {
 				t.Fatalf("val %q got %v want %v", c.val, got, c.want)
 			}
@@ -42,7 +36,7 @@ func TestResolveAgentsViaLoginShell_DisabledSkipsFork(t *testing.T) {
 	t.Setenv("SHELL", script)
 
 	// enabled: should fork and touch sentinel
-	os.Unsetenv("MULTICA_LOGIN_SHELL_PROBE")
+	t.Setenv("MULTICA_LOGIN_SHELL_PROBE", "true")
 	os.Remove(sentinel)
 	resolveAgentsViaLoginShell([]string{"claude"})
 	if _, err := os.Stat(sentinel); err != nil {
