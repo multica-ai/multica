@@ -104,10 +104,12 @@ export function LandingHero() {
 function LandingBackdrop() {
   return (
     <div className="pointer-events-none absolute inset-0">
+      {/* This artwork is above the fold, so preload it alongside the product preview. */}
       <Image
         src="/images/landing-bg.webp"
         alt=""
         fill
+        preload
         className="object-cover object-center"
       />
     </div>
