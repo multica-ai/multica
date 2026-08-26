@@ -72,8 +72,21 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 
 The code must be 6 digits. The fixed code is ignored when `APP_ENV=production`.
 
+For a production-built container that is reachable only through loopback, use
+the separate local self-host setting instead:
+
+```dotenv
+APP_ENV=production
+FRONTEND_ORIGIN=http://localhost:3000
+MULTICA_LOCAL_VERIFICATION_CODE=888888
+```
+
+The server accepts this code only when `FRONTEND_ORIGIN` uses `localhost`,
+`127.0.0.1`, or `::1`. The user must still request a code first, preserving the
+normal rate limit and expiration path.
+
 <Callout type="warning">
-Do not enable a fixed code on a publicly reachable instance. The production combination is `APP_ENV=production` with an empty `MULTICA_DEV_VERIFICATION_CODE`.
+Do not enable either fixed-code setting on a publicly reachable instance. Public production deployments must use an email provider or Google OAuth.
 </Callout>
 
 ## Google sign-in

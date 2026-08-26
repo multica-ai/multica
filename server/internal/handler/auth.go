@@ -38,7 +38,10 @@ func (e SignupError) Error() string {
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
-const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
+const (
+	devVerificationCodeEnv   = "MULTICA_DEV_VERIFICATION_CODE"
+	localVerificationCodeEnv = "MULTICA_LOCAL_VERIFICATION_CODE"
+)
 
 // supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
 // Keep both lists in sync when adding a locale — the user-controlled `language`
@@ -131,6 +134,29 @@ func isDevVerificationCode(code string) bool {
 	}
 
 	return subtle.ConstantTimeCompare([]byte(code), []byte(devCode)) == 1
+}
+
+func isLocalVerificationCode(code string) bool {
+	localCode := strings.TrimSpace(os.Getenv(localVerificationCodeEnv))
+	if !isSixDigitCode(localCode) || !isLoopbackFrontendOrigin() {
+		return false
+	}
+
+	return subtle.ConstantTimeCompare([]byte(code), []byte(localCode)) == 1
+}
+
+func isLoopbackFrontendOrigin() bool {
+	origin, err := url.Parse(strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")))
+	if err != nil || origin.Scheme == "" || origin.Host == "" {
+		return false
+	}
+
+	switch strings.ToLower(origin.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 func isProductionEnv() bool {
@@ -390,8 +416,8 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	isDevCode := isDevVerificationCode(code)
-	if !isDevCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
+	isFixedCode := isDevVerificationCode(code) || isLocalVerificationCode(code)
+	if !isFixedCode && subtle.ConstantTimeCompare([]byte(code), []byte(dbCode.Code)) != 1 {
 		_ = h.Queries.IncrementVerificationCodeAttempts(r.Context(), dbCode.ID)
 		writeError(w, http.StatusBadRequest, "invalid or expired code")
 		return

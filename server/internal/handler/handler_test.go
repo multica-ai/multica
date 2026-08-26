@@ -2338,6 +2338,59 @@ func TestVerifyCodeRejectsConfiguredDevCodeInProduction(t *testing.T) {
 	}
 }
 
+func TestVerifyCodeAcceptsConfiguredLocalCodeInProduction(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "")
+	t.Setenv(localVerificationCodeEnv, "777777")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("FRONTEND_ORIGIN", "http://localhost:3000")
+
+	const email = "local-code-production-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+
+	createVerificationCodeForTest(t, email, "123456")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "777777"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("VerifyCode (production local code): expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestVerifyCodeRejectsConfiguredLocalCodeForPublicOrigin(t *testing.T) {
+	t.Setenv(devVerificationCodeEnv, "")
+	t.Setenv(localVerificationCodeEnv, "777777")
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("FRONTEND_ORIGIN", "https://multica.example.com")
+
+	const email = "local-code-public-origin-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+	})
+
+	createVerificationCodeForTest(t, email, "123456")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "777777"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("VerifyCode (public-origin local code): expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestVerifyCodeWrongCode(t *testing.T) {
 	t.Setenv(devVerificationCodeEnv, "")
 

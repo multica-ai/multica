@@ -293,6 +293,9 @@ func main() {
 			slog.Warn("MULTICA_DEV_VERIFICATION_CODE is enabled. Use it only for local development or private test instances.")
 		}
 	}
+	if os.Getenv("MULTICA_LOCAL_VERIFICATION_CODE") != "" {
+		slog.Warn("MULTICA_LOCAL_VERIFICATION_CODE is enabled and accepted only when FRONTEND_ORIGIN uses localhost or a loopback IP. Do not expose this deployment publicly.")
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {
