@@ -194,7 +194,7 @@ export function ChatMessageList({
   // Keeps the newest content visible while a reply streams in and while the
   // composer grows underneath it — neither of which Virtuoso's `followOutput`
   // reacts to (see stick-to-bottom.ts).
-  const stick = useStickToBottom(scrollContainerEl, contentEl);
+  const isPinned = useStickToBottom(scrollContainerEl, contentEl);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -342,7 +342,7 @@ export function ChatMessageList({
         // "auto", not "smooth": the bottom-stick pins instantly on every size
         // change, so a smooth animation started here would be cancelled by the
         // first streamed chunk anyway — leaving a half-played glide and a jump.
-        followOutput={() => (!isFetchingOlderMessages && stick.isPinned() ? "auto" : false)}
+        followOutput={() => (!isFetchingOlderMessages && isPinned() ? "auto" : false)}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();

@@ -1,30 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 // Bottom-stick for the chat list (TIM-55).
 //
 // Virtuoso's `followOutput` only fires when the ITEM COUNT changes. A streaming
-// assistant turn is ONE row that keeps growing, so the count never moves while
-// the reply extends past the fold and the reader watches a truncated tail.
-// Virtuoso does have a SIZE_INCREASED recovery, but it is armed for only 100ms
-// after a count change — a multi-minute stream leaves that window behind on its
-// first token. Nothing re-arms it, so the list simply stops following.
-//
-// The other half is the viewport, not the content: the composer grows with the
-// draft, banners and the queue appear above it, and each one shrinks the list's
-// clientHeight. scrollTop stays where it was, so the tail slides out of view
-// under the composer.
-//
-// Both are the same event — the distance to the bottom grew without the reader
-// asking for it — so one controller handles both: while the reader is at the
-// live end, any content growth or viewport shrink re-pins the scroller to the
-// bottom. Scrolling away releases the pin until they come back.
-//
-// Unlike the newest-first transcript (see transcript-follow.ts), this list is
-// bottom-anchored: growth appends BELOW the viewport and never displaces it, so
-// absolute position is a truthful signal of reader intent and no gesture
-// tracking is needed.
+// reply is one row that keeps growing, and a growing composer shrinks the
+// viewport — neither changes the count, so the list has to re-pin itself: while
+// the reader is at the live end, any content growth or viewport shrink scrolls
+// back to the bottom. Scrolling away releases the pin until they come back.
 
 /**
  * Within this distance of the bottom the reader still counts as following the
@@ -43,67 +27,46 @@ export function distanceFromBottom(m: ScrollMetrics): number {
   return Math.max(0, m.scrollHeight - m.scrollTop - m.clientHeight);
 }
 
-export interface BottomStick {
-  isPinned(): boolean;
-  /** Scroll event: position alone decides whether the reader is still following. */
-  onScroll(m: ScrollMetrics): void;
-  /**
-   * Content grew or the viewport shrank. Returns the scrollTop to apply while
-   * the reader is following, or `null` to leave the viewport alone.
-   */
-  onResize(m: ScrollMetrics): number | null;
-}
-
-export function createBottomStick(threshold = STICK_EDGE_THRESHOLD): BottomStick {
-  // Chat opens pinned — the list mounts at `initialTopMostItemIndex: LAST`.
-  let pinned = true;
-
-  return {
-    isPinned: () => pinned,
-    onScroll(m) {
-      pinned = distanceFromBottom(m) <= threshold;
-    },
-    onResize(m) {
-      if (!pinned) return null;
-      const target = Math.max(0, m.scrollHeight - m.clientHeight);
-      // Only ever pin DOWNWARD. When content shrinks (a collapsible closing)
-      // the browser clamps scrollTop on its own; yanking the viewport back up
-      // to a smaller extent would move the reader for no reason.
-      return target > m.scrollTop ? target : null;
-    },
-  };
-}
-
-function readMetrics(el: HTMLElement): ScrollMetrics {
-  return {
-    scrollTop: el.scrollTop,
-    scrollHeight: el.scrollHeight,
-    clientHeight: el.clientHeight,
-  };
+export function isAtLiveEnd(m: ScrollMetrics): boolean {
+  return distanceFromBottom(m) <= STICK_EDGE_THRESHOLD;
 }
 
 /**
- * Wires a {@link BottomStick} to a scroll container and the content inside it.
+ * The scrollTop that re-pins a follower to the bottom, or `null` when there is
+ * nothing to do. Only ever pins DOWNWARD: when content shrinks (a collapsible
+ * closing) the browser clamps scrollTop on its own, and yanking the viewport up
+ * would move the reader for no reason.
+ */
+export function bottomPinTarget(m: ScrollMetrics): number | null {
+  const target = Math.max(0, m.scrollHeight - m.clientHeight);
+  return target > m.scrollTop ? target : null;
+}
+
+/**
+ * Keeps `scrollEl` pinned to the bottom while the reader is at the live end.
  * Observes BOTH boxes: the container for viewport shrink (composer growth), the
- * content for growth (streaming). Returns the controller so the caller can ask
- * whether the reader is still following.
+ * content for growth (streaming) — a ResizeObserver reports an element's own
+ * box, never its scroll extent. Returns a getter for whether the reader is
+ * still following.
  */
 export function useStickToBottom(
   scrollEl: HTMLElement | null,
   contentEl: HTMLElement | null,
-): BottomStick {
-  const ref = useRef<BottomStick | null>(null);
-  ref.current ??= createBottomStick();
-  const stick = ref.current;
+): () => boolean {
+  // Chat opens pinned — the list mounts at `initialTopMostItemIndex: LAST`.
+  const pinned = useRef(true);
 
   useEffect(() => {
     if (!scrollEl) return;
 
-    const onScroll = () => stick.onScroll(readMetrics(scrollEl));
+    const onScroll = () => {
+      pinned.current = isAtLiveEnd(scrollEl);
+    };
     scrollEl.addEventListener("scroll", onScroll, { passive: true });
 
     const observer = new ResizeObserver(() => {
-      const target = stick.onResize(readMetrics(scrollEl));
+      if (!pinned.current) return;
+      const target = bottomPinTarget(scrollEl);
       if (target !== null) scrollEl.scrollTop = target;
     });
     observer.observe(scrollEl);
@@ -113,7 +76,7 @@ export function useStickToBottom(
       scrollEl.removeEventListener("scroll", onScroll);
       observer.disconnect();
     };
-  }, [scrollEl, contentEl, stick]);
+  }, [scrollEl, contentEl]);
 
-  return stick;
+  return useCallback(() => pinned.current, []);
 }

@@ -16,10 +16,11 @@ import { ChatMessageList } from "./chat-message-list";
 // growing, and the composer only shrinks the viewport. The list therefore drives
 // its own bottom-stick off a ResizeObserver — which is what these tests drive.
 //
-// This suite covers the WIRING: that the list measures the right boxes and
-// applies the controller's decision to the real scroller. The decision matrix
-// itself (thresholds, re-engagement, shrinking content) is canonical in
-// stick-to-bottom.test.ts and is not re-run through a DOM mount.
+// This suite covers the WIRING and the pin state (release on scroll-up,
+// re-engagement): that the list measures the right boxes and applies the pin
+// to the real scroller. The pure geometry (thresholds, pin targets, shrinking
+// content) is canonical in stick-to-bottom.test.ts and is not re-run through a
+// DOM mount.
 
 // Real react-virtuoso renders no data rows under jsdom's zero-height viewport,
 // and this suite fakes the scroll geometry anyway; the stub keeps the row count
@@ -259,6 +260,18 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
     scroll.shrinkViewport(72);
 
     expect(scroll.scrollTop).toBe(parked);
+  });
+
+  it("re-engages when the reader scrolls back down to the live end", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.readerScrollsTo(900);
+    scroll.readerScrollsTo(0);
+
+    streamChunk(1);
+    scroll.grow(500);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
   });
 
   it("stops measuring once the list unmounts", () => {
