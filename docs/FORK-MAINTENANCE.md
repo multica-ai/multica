@@ -151,3 +151,39 @@ Dogfooding: run Multica on itself for `my-fixes` development.
 - **Prompt optimizer**: no `prompt-optimizer` skill linked → add `foundry prompt-optimizer` for `handoffNote`/`issue_context` templates.
 - **External dispatch**: no `MCP` tools for `gh`, `docker`, `cloudflared` → add `mcp: github-gh`, `docker-mcp` to `agent` `Workflow` for autonomous PR/migration.
 - **Blocked deps API**: `issue_dependency` `blocked_by` edges have no API — insert via SQL until handler lands.
+
+### Cross-workspace model control (proposed 404, pricing shifts)
+
+**Goal**: 1 row flip controls 40 agents across 4 workspaces — price jump needs no per-agent `UPDATE`.
+
+**Design**: tier indirection, not concrete pin. `agent.model` stores tier `cheap/balanced/premium` or concrete escape. `model_tier_map` holds concrete.
+
+```
+model_tier_map(workspace_id uuid NULL, tier text, concrete text, PRIMARY KEY(workspace_id,tier))
+NULL workspace_id → global default (all workspaces follow)
+workspace_id set → override that workspace only
+resolver: concrete = workspace_map[tier] ?? global_map[tier] ?? tier
+```
+
+**Migration 404**: `CREATE TABLE model_tier_map (...)` 3 global rows `cheap/balanced/premium` initially `mimo/muse-spark/qwen`. `ALTER` not needed, new table additive, no FK besides `workspace_id` cascade.
+
+**Handler**:
+- `PATCH /api/model-map` `{global:{cheap:"...",balanced:"...",premium:"..."}}` → `UPSERT` `NULL` rows
+- `PATCH /api/workspaces/{id}/settings {model_map:{cheap:"..."}}` → `UPSERT` `workspace_id` row
+- `GET /api/model-map` returns `global` + `overrides` + resolved concrete per agent + `cost` last 24h via `GAP-4` `usageByModel`
+
+**CLI**:
+- `multica model-map set --global --cheap mimo --balanced muse-spark --premium qwen` → global 3 rows
+- `multica model-map set --workspace dc85f04e --cheap other` → override only `multica-dev`
+
+**Resolver**: `server/internal/service/task.go:enqueueIssueTask` before `CreateAgentTask`:
+```go
+concrete := tier
+if m, ok := workspaceMap[tier]; ok { concrete = m } else if g, ok := globalMap[tier]; ok { concrete = g }
+// ponytail: 3-tier map, per-agent concrete escape when tier fails, add 4th tier when sweeper volume proves
+```
+`model NULL` → `balanced` fallback, per-agent `model="opencode/qwen..."` bypasses map (experiment).
+
+**Ops**: `costUSDTicks` alert → `PATCH /api/model-map` 1 call → next `ClaimAgentTask` resolves new concrete, no restart. `soft_drops_total` + `disk_free_percent` watch for capacity.
+
+**Status**: not yet migrated — `agent.model` still concrete (`mimo/x-preview/big-pickle` 33 pinned, 7 `NULL`). Until 404 lands, control via direct `UPDATE agent SET model='tier'` (40 rows) or `docker exec psql UPDATE model_tier_map` stub via `.env` `MULTICA_MODEL_MAP_CHEAP` fallback (needs `launchctl kickstart`).
