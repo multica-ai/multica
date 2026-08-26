@@ -63,11 +63,13 @@ During creation you can pick one or more [skills](/skills) from the workspace.
 
 Skills suit methods and material reused across agents; long-lived requirements that belong only to this agent go in the instructions.
 
-## Suggested first actions
+## Conversation starters
 
-Add up to three **suggested first actions** to show people what this agent is good at before they send a first chat message. Each suggestion has a short label and a complete prompt. Selecting one fills the composer so the user can review or edit it; it never starts a run automatically.
+Add up to three **conversation starters** to show people what this agent is good at before they send a first chat message. They appear when someone opens a new chat with the agent, above the composer. Each starter has a short label and a complete prompt. Selecting one fills the composer so the user can review or edit it; it never starts a run automatically.
 
-If you leave the list empty, Chat shows localized general-purpose suggestions. Agent-specific examples are usually more useful because they can reflect the role and boundaries in the instructions.
+The editor previews exactly what a new chat will show, and anyone who can edit the agent gets a **Customize starters** link in that empty state that deep-links back here.
+
+If you leave the list empty, Chat shows localized general-purpose defaults. Agent-specific examples are usually more useful because they can reflect the role and boundaries in the instructions.
 
 ## Runtime, model, and thinking level
 
@@ -133,7 +135,7 @@ MCP configuration may contain tokens; its storage and display rules match enviro
 
 ## Duplicating an agent
 
-Duplicating carries over most working configuration except the name, including instructions, suggested first actions, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
+Duplicating carries over most working configuration except the name, including instructions, conversation starters, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
 
 Environment variable values and MCP configuration are never copied and must be set again on the new agent. Duplication keeps the original agent's runtime binding and Access settings.
 

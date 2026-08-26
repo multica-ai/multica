@@ -641,7 +641,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		}
 		assigneeID = parsed
 	}
-	if code, message := h.validateAssigneePair(r.Context(), r, util.UUIDToString(workspaceID), assigneeType, assigneeID, nil); code != 0 {
+	if code, message := h.validateAssigneePair(r.Context(), r, util.UUIDToString(workspaceID), assigneeType, assigneeID, scopeNoDelegation()); code != 0 {
 		writeError(w, code, message)
 		return errSourceContextResponseWritten
 	}
@@ -754,7 +754,7 @@ func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Req
 		}
 		agentID = parsed
 	}
-	if status, message := h.validateAssigneePair(r.Context(), r, util.UUIDToString(workspaceID), pgtype.Text{String: "agent", Valid: true}, agentID, nil); status != 0 {
+	if status, message := h.validateAssigneePair(r.Context(), r, util.UUIDToString(workspaceID), pgtype.Text{String: "agent", Valid: true}, agentID, scopeNoDelegation()); status != 0 {
 		writeError(w, status, message)
 		return nil, errSourceContextResponseWritten
 	}

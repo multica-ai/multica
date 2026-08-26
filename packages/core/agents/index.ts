@@ -12,6 +12,8 @@ export * from "./use-update-agent-allowlist";
 export * from "./use-agent-activity";
 export * from "./use-workspace-presence-prefetch";
 export * from "./constants";
+export * from "./starter-prompts";
+export * from "./use-customize-starter-prompts-href";
 export * from "./visibility-label";
 export * from "./use-workspace-agent-availability";
 export * from "./mcp-support";

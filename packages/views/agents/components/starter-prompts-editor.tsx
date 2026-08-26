@@ -5,11 +5,16 @@ import {
   AGENT_STARTER_PROMPT_LABEL_MAX_LENGTH,
   AGENT_STARTER_PROMPT_MAX_LENGTH,
   AGENT_STARTER_PROMPTS_MAX,
+  selectStarterPrompts,
 } from "@multica/core/agents";
 import type { AgentStarterPrompt } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  StarterPromptList,
+  useFallbackStarterPrompts,
+} from "../../chat/components/starter-prompt-list";
 import { useT } from "../../i18n";
 
 export function StarterPromptsEditor({
@@ -25,6 +30,12 @@ export function StarterPromptsEditor({
   const hasIncompletePrompt = value.some(
     (item) => !item.label.trim() || !item.prompt.trim(),
   );
+  // Rendered through the same component and the same resolver the chat empty
+  // state uses, so the preview cannot drift from what it previews — including
+  // the fallback rule, which is how an author learns that the three
+  // suggestions they never configured are defaults they can replace.
+  const fallbackPrompts = useFallbackStarterPrompts();
+  const preview = selectStarterPrompts(value, fallbackPrompts);
 
   const update = (
     index: number,
@@ -110,6 +121,21 @@ export function StarterPromptsEditor({
           {t(($) => $.starter_prompts.incomplete)}
         </p>
       ) : null}
+
+      <div className="rounded-lg border border-dashed bg-muted/20 px-3 py-3">
+        <p className="text-caption font-medium text-muted-foreground">
+          {t(($) => $.starter_prompts.preview_label)}
+        </p>
+        <StarterPromptList
+          className="mt-2 max-w-sm"
+          prompts={preview.prompts}
+        />
+        {preview.isFallback ? (
+          <p className="mt-2 text-caption leading-5 text-muted-foreground">
+            {t(($) => $.starter_prompts.preview_defaults)}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

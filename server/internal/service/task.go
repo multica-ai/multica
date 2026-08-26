@@ -3374,6 +3374,15 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			outcome = "no_runtime"
 			return nil
 		}
+		// A daemon may still hold a stale candidate after the agent is rebound.
+		// Reject it before doing capacity work. ClaimAgentTask repeats the fence
+		// before its state transition; the claim handler then rechecks the freshly
+		// loaded Agent before returning any payload. Runtime mutation teardown is
+		// responsible for serializing and settling the remaining queued rows.
+		if runtimeID.Valid && agent.RuntimeID != runtimeID {
+			outcome = "runtime_mismatch"
+			return nil
+		}
 
 		t0 = time.Now()
 		running, err := qtx.CountRunningTasks(ctx, agentID)

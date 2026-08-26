@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func testLogger() *slog.Logger {
@@ -41,19 +42,392 @@ func TestShortID(t *testing.T) {
 
 func TestPredictRootDir(t *testing.T) {
 	t.Parallel()
-	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-	want := filepath.Join("/root", "ws-uuid", "ef1234567890")
+	got := PredictRootDir(RootDirParams{
+		WorkspacesRoot:  "/root",
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+		IssueIdentifier: "MUL-6063",
+	})
+	want := filepath.Join("/root", "asset-feed-a548b2390cb2", "mul-6063-b659c34a1dc3")
 	if got != want {
 		t.Errorf("PredictRootDir = %q, want %q", got, want)
 	}
-	if got := PredictRootDir("", "ws", "task"); got != "" {
+	if got := PredictRootDir(RootDirParams{WorkspaceID: "ws", TaskID: "task"}); got != "" {
 		t.Errorf("expected empty when workspaces root missing, got %q", got)
 	}
-	if got := PredictRootDir("/r", "", "task"); got != "" {
+	if got := PredictRootDir(RootDirParams{WorkspacesRoot: "/r", TaskID: "task"}); got != "" {
 		t.Errorf("expected empty when workspace ID missing, got %q", got)
 	}
-	if got := PredictRootDir("/r", "ws", ""); got != "" {
+	if got := PredictRootDir(RootDirParams{WorkspacesRoot: "/r", WorkspaceID: "ws"}); got != "" {
 		t.Errorf("expected empty when task ID missing, got %q", got)
+	}
+}
+
+func TestResolveRootDirFreezesReadableNamesBeforePrepare(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	base := RootDirParams{
+		WorkspacesRoot: root,
+		WorkspaceID:    "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		TaskID:         "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+	}
+
+	first, err := ResolveRootDir(base)
+	if err != nil {
+		t.Fatalf("resolve fallback root: %v", err)
+	}
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("ResolveRootDir should freeze identity before creating the env root; stat err = %v", err)
+	}
+
+	enriched := base
+	enriched.WorkspaceSlug = "Asset Feed"
+	enriched.IssueIdentifier = "MUL-6063"
+	second, err := ResolveRootDir(enriched)
+	if err != nil {
+		t.Fatalf("resolve enriched root: %v", err)
+	}
+	if second != first {
+		t.Fatalf("same task moved from %q to %q when readable fields arrived", first, second)
+	}
+
+	renamed := enriched
+	renamed.WorkspaceSlug = "Renamed Workspace"
+	renamed.IssueIdentifier = "NEW-6063"
+	third, err := ResolveRootDir(renamed)
+	if err != nil {
+		t.Fatalf("resolve renamed root: %v", err)
+	}
+	if third != first {
+		t.Fatalf("same task moved from %q to %q after workspace/issue rename", first, third)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:  renamed.WorkspacesRoot,
+		WorkspaceID:     renamed.WorkspaceID,
+		WorkspaceSlug:   renamed.WorkspaceSlug,
+		TaskID:          renamed.TaskID,
+		IssueIdentifier: renamed.IssueIdentifier,
+		AgentName:       "Stable Root",
+		Task:            TaskContextForEnv{IssueID: "issue-stable-root"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare after pre-StartTask reclaim: %v", err)
+	}
+	defer env.Cleanup(true)
+	if env.RootDir != first {
+		t.Fatalf("Prepare root = %q, want frozen root %q", env.RootDir, first)
+	}
+
+	liveRename := renamed
+	liveRename.WorkspaceSlug = "Renamed Again"
+	liveRename.IssueIdentifier = "NEXT-6063"
+	afterPrepare, err := ResolveRootDir(liveRename)
+	if err != nil {
+		t.Fatalf("resolve after live rename: %v", err)
+	}
+	if afterPrepare != first {
+		t.Fatalf("live task moved from %q to %q after issue prefix changed", first, afterPrepare)
+	}
+}
+
+func TestResolveRootDirAdoptsExistingOwnedRootBeforeIndex(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const (
+		workspaceID = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+		taskID      = "5c57b65b-ee7a-4603-a72d-b659c34a1dc3"
+	)
+	original := PredictRootDir(RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-6063",
+	})
+	if err := os.MkdirAll(original, 0o755); err != nil {
+		t.Fatalf("seed existing root: %v", err)
+	}
+	if err := writeEnvRootOwner(original, workspaceID, taskID); err != nil {
+		t.Fatalf("seed existing owner: %v", err)
+	}
+
+	resolved, err := ResolveRootDir(RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Renamed Workspace",
+		TaskID:          taskID,
+		IssueIdentifier: "NEW-6063",
+	})
+	if err != nil {
+		t.Fatalf("resolve renamed existing root: %v", err)
+	}
+	if resolved != original {
+		t.Fatalf("existing owned root %q was orphaned in favor of %q", original, resolved)
+	}
+}
+
+func TestResolveRootDirAdoptsRootWithInterruptedOwnerTemp(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	const (
+		workspaceID = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+		taskID      = "5c57b65b-ee7a-4603-a72d-b659c34a1dc3"
+	)
+	original := PredictRootDir(RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-6063",
+	})
+	if err := os.MkdirAll(original, 0o755); err != nil {
+		t.Fatalf("seed existing root: %v", err)
+	}
+	tempOwner := filepath.Join(original, envRootOwnerTempPrefix+"crashed"+envRootOwnerTempSuffix)
+	if err := os.WriteFile(tempOwner, []byte(`{"workspace_id":"`+workspaceID+`"`), 0o600); err != nil {
+		t.Fatalf("seed interrupted owner temp: %v", err)
+	}
+
+	resolved, err := ResolveRootDir(RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Renamed Workspace",
+		TaskID:          taskID,
+		IssueIdentifier: "NEW-6063",
+	})
+	if err != nil {
+		t.Fatalf("resolve root with interrupted owner temp: %v", err)
+	}
+	if resolved != original {
+		t.Fatalf("recoverable root %q was orphaned in favor of %q", original, resolved)
+	}
+	if _, err := os.Stat(tempOwner); err != nil {
+		t.Fatalf("resolution unexpectedly mutated the candidate root: %v", err)
+	}
+}
+
+func TestResolveRootDirConcurrentFirstClaimsChooseOnePhysicalRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	params := []RootDirParams{
+		{
+			WorkspacesRoot: root,
+			WorkspaceID:    "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+			TaskID:         "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+		},
+		{
+			WorkspacesRoot:  root,
+			WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+			WorkspaceSlug:   "Asset Feed",
+			TaskID:          "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+			IssueIdentifier: "MUL-6063",
+		},
+	}
+
+	start := make(chan struct{})
+	paths := make([]string, len(params))
+	errs := make([]error, len(params))
+	var wg sync.WaitGroup
+	for i := range params {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			paths[i], errs[i] = ResolveRootDir(params[i])
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("resolve %d: %v", i, err)
+		}
+	}
+	if paths[0] != paths[1] {
+		t.Fatalf("concurrent claims chose two roots: %q and %q", paths[0], paths[1])
+	}
+}
+
+func TestRemoveRootDirRecordKeepsSharedIndexParent(t *testing.T) {
+	t.Parallel()
+
+	params := RootDirParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		TaskID:         "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+	}
+	envRoot, err := ResolveRootDir(params)
+	if err != nil {
+		t.Fatalf("ResolveRootDir: %v", err)
+	}
+	if err := RemoveRootDirRecord(params.WorkspacesRoot, envRoot, EnvRootOwner{
+		WorkspaceID: params.WorkspaceID,
+		TaskID:      params.TaskID,
+	}); err != nil {
+		t.Fatalf("RemoveRootDirRecord: %v", err)
+	}
+	indexInfo, err := os.Stat(filepath.Join(params.WorkspacesRoot, taskRootIndexDir))
+	if err != nil {
+		t.Fatalf("shared task root index was removed: %v", err)
+	}
+	if !indexInfo.IsDir() {
+		t.Fatal("shared task root index is not a directory")
+	}
+}
+
+func TestPruneTaskRootIndexBoundsAbandonedEntries(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	terminal := RootDirParams{
+		WorkspacesRoot: root,
+		WorkspaceID:    "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		TaskID:         "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+	}
+	running := terminal
+	running.TaskID = "6d68c76c-ff8b-5704-b83e-c76ad45b2ed4"
+	materialized := terminal
+	materialized.TaskID = "7e79d87d-008c-6805-c94f-d87be56c3fe5"
+	recent := terminal
+	recent.TaskID = "8f8ae98e-119d-7906-da50-e98cf67d40f6"
+	var materializedRoot string
+	for _, params := range []RootDirParams{terminal, running, materialized, recent} {
+		resolved, err := ResolveRootDir(params)
+		if err != nil {
+			t.Fatalf("ResolveRootDir(%s): %v", params.TaskID, err)
+		}
+		if params.TaskID == materialized.TaskID {
+			materializedRoot = resolved
+		}
+	}
+	if err := os.MkdirAll(materializedRoot, 0o755); err != nil {
+		t.Fatalf("materialize protected env root: %v", err)
+	}
+
+	indexDir := filepath.Join(root, taskRootIndexDir)
+	stalePending := filepath.Join(indexDir, taskRootPendingPrefix+"stale")
+	recentPending := filepath.Join(indexDir, taskRootPendingPrefix+"recent")
+	for _, dir := range []string{stalePending, recentPending} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("seed pending entry: %v", err)
+		}
+	}
+	now := time.Now()
+	old := now.Add(-2 * taskRootIndexMinPruneAge)
+	for _, params := range []RootDirParams{terminal, running, materialized} {
+		recordPath := filepath.Join(taskRootRecordDir(params), taskRootRecordFile)
+		if err := os.Chtimes(recordPath, old, old); err != nil {
+			t.Fatalf("age task root record %s: %v", recordPath, err)
+		}
+	}
+	if err := os.Chtimes(stalePending, old, old); err != nil {
+		t.Fatalf("age pending entry %s: %v", stalePending, err)
+	}
+
+	removed, err := PruneTaskRootIndex(root, 0, now, func(_, taskID string) bool {
+		return taskID == terminal.TaskID || taskID == materialized.TaskID || taskID == recent.TaskID
+	})
+	if err != nil {
+		t.Fatalf("PruneTaskRootIndex: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("removed = %d, want terminal record plus stale pending entry", removed)
+	}
+	for _, removedPath := range []string{taskRootRecordDir(terminal), stalePending} {
+		if _, err := os.Stat(removedPath); !os.IsNotExist(err) {
+			t.Fatalf("stale entry %s still exists: %v", removedPath, err)
+		}
+	}
+	for _, keptPath := range []string{taskRootRecordDir(running), taskRootRecordDir(materialized), taskRootRecordDir(recent), recentPending} {
+		if _, err := os.Stat(keptPath); err != nil {
+			t.Fatalf("protected entry %s was removed: %v", keptPath, err)
+		}
+	}
+}
+
+func TestResolveRootDirRejectsRecordOutsideStableIdentity(t *testing.T) {
+	t.Parallel()
+
+	params := RootDirParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		TaskID:         "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+	}
+	if err := installTaskRootRecord(taskRootRecordDir(params), taskRootRecord{
+		WorkspaceID:  params.WorkspaceID,
+		TaskID:       params.TaskID,
+		RelativePath: filepath.Join("unrelated-workspace", "unrelated-task"),
+	}); err != nil {
+		t.Fatalf("seed corrupt record: %v", err)
+	}
+	if _, err := ResolveRootDir(params); err == nil {
+		t.Fatal("ResolveRootDir accepted a record outside the task's stable identity")
+	} else if !strings.Contains(err.Error(), "does not match its stable identity") {
+		t.Fatalf("error = %v, want stable identity rejection", err)
+	} else if !strings.Contains(err.Error(), taskRootRecordDir(params)) {
+		t.Fatalf("error = %v, want actionable record directory", err)
+	}
+}
+
+func TestReadablePathSegmentSanitizesUserControlledLabels(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		label    string
+		fallback string
+		id       string
+		want     string
+	}{
+		{name: "separators and traversal", label: `../Asset\\Feed/Team`, fallback: "workspace", id: "a05b0e10-ee7a-4603-a72d-a548b2390cb2", want: "asset-feed-a548b2390cb2"},
+		{name: "non ascii removed", label: "日本語 Product", fallback: "workspace", id: "a05b0e10-ee7a-4603-a72d-a548b2390cb2", want: "product-a548b2390cb2"},
+		{name: "case normalized", label: "MUL-6063", fallback: "task", id: "5c57b65b-ee7a-4603-a72d-a548b2390cb2", want: "mul-6063-a548b2390cb2"},
+		{name: "empty label falls back", label: "...", fallback: "task", id: "5c57b65b-ee7a-4603-a72d-a548b2390cb2", want: "task-a548b2390cb2"},
+		{name: "label is bounded", label: strings.Repeat("a", 100), fallback: "task", id: "5c57b65b-ee7a-4603-a72d-a548b2390cb2", want: strings.Repeat("a", 11) + "-a548b2390cb2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := readablePathSegment(tt.label, tt.fallback, tt.id); got != tt.want {
+				t.Fatalf("readablePathSegment(%q) = %q, want %q", tt.label, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPredictRootDirWorstCaseLabelsStayWithinWindowsBudget(t *testing.T) {
+	t.Parallel()
+
+	root := PredictRootDir(RootDirParams{
+		WorkspacesRoot:  "/root",
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   strings.Repeat("workspace", 20),
+		TaskID:          "01a01ec0-e69d-7000-8000-0123456789ab",
+		IssueIdentifier: strings.Repeat("issue", 20),
+	})
+	rel, err := filepath.Rel("/root", root)
+	if err != nil {
+		t.Fatalf("relative env root: %v", err)
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) != 2 {
+		t.Fatalf("relative env root = %q, want exactly two segments", rel)
+	}
+	for _, part := range parts {
+		if len(part) > readablePathSegmentMax {
+			t.Fatalf("path segment %q has length %d, want <= %d", part, len(part), readablePathSegmentMax)
+		}
+	}
+	// main's opaque layout spent 36 + 1 + 12 characters below WorkspacesRoot.
+	// The readable layout must not consume a larger Windows path budget.
+	if got, max := len(rel), 36+1+taskKeyLen; got > max {
+		t.Fatalf("relative env root %q has length %d, want <= %d", rel, got, max)
 	}
 }
 
@@ -6171,7 +6545,13 @@ func TestPredictRootDirDistinctForSharedUUIDv7Prefix(t *testing.T) {
 	}
 	seen := make(map[string]string, len(ids))
 	for _, id := range ids {
-		root := PredictRootDir("/root", "ws-uuid", id)
+		root := PredictRootDir(RootDirParams{
+			WorkspacesRoot:  "/root",
+			WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+			WorkspaceSlug:   "Asset Feed",
+			TaskID:          id,
+			IssueIdentifier: "MUL-6063",
+		})
 		if prev, dup := seen[root]; dup {
 			t.Fatalf("tasks %s and %s share env root %q — a truncated task id is back", prev, id, root)
 		}
@@ -6208,11 +6588,13 @@ func TestPrepareDoesNotDeleteConcurrentTaskEnv(t *testing.T) {
 	)
 
 	envA, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-collision",
-		TaskID:         taskA,
-		AgentName:      "Agent A",
-		Task:           TaskContextForEnv{IssueID: taskA},
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskA,
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "Agent A",
+		Task:            TaskContextForEnv{IssueID: taskA},
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("Prepare task A: %v", err)
@@ -6226,11 +6608,13 @@ func TestPrepareDoesNotDeleteConcurrentTaskEnv(t *testing.T) {
 	}
 
 	envB, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-collision",
-		TaskID:         taskB,
-		AgentName:      "Agent B",
-		Task:           TaskContextForEnv{IssueID: taskB},
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          taskB,
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "Agent B",
+		Task:            TaskContextForEnv{IssueID: taskB},
 	}, testLogger())
 	if err != nil {
 		t.Fatalf("Prepare task B: %v", err)
@@ -6280,11 +6664,17 @@ func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
 
-	envRoot := PredictRootDir(workspacesRoot, "ws-owned", taskID)
+	envRoot := PredictRootDir(RootDirParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "ws-owned",
+		WorkspaceSlug:   "Owned Workspace",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-1",
+	})
 	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
 		t.Fatalf("seed env root: %v", err)
 	}
-	if err := writeEnvRootOwner(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
+	if err := writeEnvRootOwner(envRoot, "ws-owned", "11111111-2222-3333-4444-555555555555"); err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
 	survivor := filepath.Join(envRoot, "workdir", "other-task-work.txt")
@@ -6293,11 +6683,13 @@ func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
 	}
 
 	_, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-owned",
-		TaskID:         taskID,
-		AgentName:      "Intruder",
-		Task:           TaskContextForEnv{IssueID: taskID},
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     "ws-owned",
+		WorkspaceSlug:   "Owned Workspace",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-1",
+		AgentName:       "Intruder",
+		Task:            TaskContextForEnv{IssueID: taskID},
 	}, testLogger())
 	if err == nil {
 		t.Fatal("Prepare accepted an env root owned by another task")
@@ -6439,7 +6831,7 @@ func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if _, _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
+	if _, _, err := claimEnvRoot(envRoot, "ws", "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
 		t.Fatal("claimEnvRoot took a directory holding files with no owner")
 	} else if !strings.Contains(err.Error(), "names no owning task") {
 		t.Fatalf("error = %v, want it to explain the missing owner", err)
@@ -6459,7 +6851,7 @@ func TestClaimEnvRootAdoptsEmptyDirectory(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
-	lock, reset, err := claimEnvRoot(envRoot, id)
+	lock, reset, err := claimEnvRoot(envRoot, "ws", id)
 	if err != nil {
 		t.Fatalf("claimEnvRoot on an empty directory: %v", err)
 	}
@@ -6578,13 +6970,87 @@ func TestClaimEnvRootRepairsTornOwnerMarker(t *testing.T) {
 	}
 
 	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
-	lock, _, err := claimEnvRoot(envRoot, id)
+	lock, _, err := claimEnvRoot(envRoot, "ws", id)
 	if err != nil {
 		t.Fatalf("claimEnvRoot wedged on a torn marker: %v", err)
 	}
 	defer releaseLockFile(lock)
 	if owner, _ := readEnvRootOwner(envRoot); owner != id {
 		t.Fatalf("owner = %q, want the repairing task %q", owner, id)
+	}
+}
+
+// TestWriteEnvRootOwnerAtomicallyReplacesMarker pins the write protocol used
+// when a legacy task-only marker is upgraded. Rewriting the file in place can
+// expose empty or partial JSON to disk-usage readers and permanently wedge the
+// root after a crash. Renaming a complete same-directory temp file changes the
+// file identity while leaving only a fully parseable marker at the public path.
+func TestWriteEnvRootOwnerAtomicallyReplacesMarker(t *testing.T) {
+	t.Parallel()
+	envRoot := t.TempDir()
+	ownerPath := filepath.Join(envRoot, envRootOwnerFile)
+	const taskID = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	if err := os.WriteFile(ownerPath, []byte(taskID), 0o644); err != nil {
+		t.Fatalf("seed legacy owner: %v", err)
+	}
+	before, err := os.Stat(ownerPath)
+	if err != nil {
+		t.Fatalf("stat legacy owner: %v", err)
+	}
+
+	if err := writeEnvRootOwner(envRoot, "ws-authoritative", taskID); err != nil {
+		t.Fatalf("upgrade owner: %v", err)
+	}
+	after, err := os.Stat(ownerPath)
+	if err != nil {
+		t.Fatalf("stat upgraded owner: %v", err)
+	}
+	if os.SameFile(before, after) {
+		t.Fatal("owner marker was rewritten in place instead of atomically replaced")
+	}
+
+	owner, err := ReadEnvRootOwner(envRoot)
+	if err != nil {
+		t.Fatalf("read upgraded owner: %v", err)
+	}
+	if owner.WorkspaceID != "ws-authoritative" || owner.TaskID != taskID {
+		t.Fatalf("owner = %#v, want authoritative workspace and task identity", owner)
+	}
+	entries, err := os.ReadDir(envRoot)
+	if err != nil {
+		t.Fatalf("read env root: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != envRootOwnerFile {
+		t.Fatalf("env root entries = %v, want only %s", entries, envRootOwnerFile)
+	}
+}
+
+func TestClaimEnvRootRecoversOwnerTempLeftBeforeRename(t *testing.T) {
+	t.Parallel()
+	envRoot := t.TempDir()
+	staleTemp := filepath.Join(envRoot, envRootOwnerTempPrefix+"crashed"+envRootOwnerTempSuffix)
+	if err := os.WriteFile(staleTemp, []byte(`{"workspace_id":"ws"`), 0o600); err != nil {
+		t.Fatalf("seed unpublished owner temp: %v", err)
+	}
+
+	const taskID = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	lock, reset, err := claimEnvRoot(envRoot, "ws", taskID)
+	if err != nil {
+		t.Fatalf("claim after interrupted owner write: %v", err)
+	}
+	defer releaseLockFile(lock)
+	if reset {
+		t.Fatal("recovering an unpublished owner write should not reset the env root")
+	}
+	if _, err := os.Stat(staleTemp); !os.IsNotExist(err) {
+		t.Fatalf("stale owner temp still exists: %v", err)
+	}
+	owner, err := ReadEnvRootOwner(envRoot)
+	if err != nil {
+		t.Fatalf("read recovered owner: %v", err)
+	}
+	if owner.WorkspaceID != "ws" || owner.TaskID != taskID {
+		t.Fatalf("owner = %#v, want recovered workspace and task identity", owner)
 	}
 }
 

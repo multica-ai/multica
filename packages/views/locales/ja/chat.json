@@ -147,7 +147,7 @@
     "chat_with_named": "{{name}} とチャット"
   },
   "starter_prompts": {
-    "aria_label": "おすすめの最初のアクション",
+    "aria_label": "会話の開始例",
     "capabilities": {
       "label": "何を手伝えますか？",
       "prompt": "あなたが得意な支援を簡潔に教えてください。"
@@ -159,7 +159,8 @@
     "recommend": {
       "label": "アクションを提案",
       "prompt": "私のワークスペースについて知っていることを踏まえ、最初に役立つアクションを提案してください。"
-    }
+    },
+    "customize": "開始例をカスタマイズ"
   },
   "onboarding_cards": {
     "aria_label": "はじめ方",

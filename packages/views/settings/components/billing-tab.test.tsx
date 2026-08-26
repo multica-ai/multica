@@ -656,7 +656,7 @@ describe("BillingTab", () => {
     }
   });
 
-  it("confirms Pro after an entitlement fetch newer than the return callback", () => {
+  it("confirms Pro despite stale metered quota after the return callback", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
     navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
@@ -666,13 +666,6 @@ describe("BillingTab", () => {
       issueWindow: null,
       autopilotRuns: null,
     });
-    Object.assign(mocks.usage, {
-      action: "off",
-      used: null,
-      reserved: null,
-      limit: null,
-      reset_at: null,
-    });
     mocks.entitlementsDataUpdatedAt = Date.now() + 1;
     mocks.entitlementsFetchedAfterMount = true;
     try {
@@ -680,6 +673,7 @@ describe("BillingTab", () => {
 
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
       expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+      expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -1321,7 +1315,7 @@ describe("BillingTab", () => {
     expect(screen.queryByText(/Pro remains available/)).not.toBeInTheDocument();
   });
 
-  it("shows Pro management and unlimited limits without a second Checkout", () => {
+  it("shows Pro unlimited on a normal load despite stale metered quota", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
@@ -1329,13 +1323,6 @@ describe("BillingTab", () => {
       autopilotRuns: null,
       currentPeriodEnd: "2026-09-13T00:00:00Z",
       version: 3,
-    });
-    Object.assign(mocks.usage, {
-      action: "off",
-      used: null,
-      reserved: null,
-      limit: null,
-      reset_at: null,
     });
     mocks.summary.hasStripeCustomer = true;
     setSeatCapacity({ humanMembers: 3, purchased: 3 });
@@ -1346,6 +1333,7 @@ describe("BillingTab", () => {
       screen.getByRole("button", { name: "Manage billing" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+    expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),
     ).not.toBeInTheDocument();

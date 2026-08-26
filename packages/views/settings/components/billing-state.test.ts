@@ -93,7 +93,18 @@ describe("resolveAutopilotUsage", () => {
     ).toEqual({ kind: "unavailable" });
   });
 
-  it("keeps authoritative metered usage independent of entitlement unlimited", () => {
+  it("prefers trusted Pro unlimited over stale metered usage", () => {
+    expect(
+      resolveAutopilotUsage(
+        { ...freeEntitlements, plan: "pro", autopilotRuns: null },
+        quotaUsage,
+        false,
+        true,
+      ),
+    ).toEqual({ kind: "unlimited" });
+  });
+
+  it("keeps metered usage when the Pro entitlement is not trusted", () => {
     expect(
       resolveAutopilotUsage(
         { ...freeEntitlements, plan: "pro", autopilotRuns: null },

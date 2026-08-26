@@ -368,6 +368,67 @@ func (q *Queries) ListAgentSkillsByWorkspace(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const listSkillFileMetadata = `-- name: ListSkillFileMetadata :many
+SELECT id, skill_id, path,
+       octet_length(content)::bigint AS size,
+       encode(sha256(convert_to(content, 'UTF8')), 'hex') AS content_hash,
+       created_at, updated_at
+FROM skill_file
+WHERE skill_id = $1
+ORDER BY path ASC
+`
+
+type ListSkillFileMetadataRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	Path        string             `json:"path"`
+	Size        int64              `json:"size"`
+	ContentHash string             `json:"content_hash"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Metadata-only variant of ListSkillFiles: path, byte size and content hash
+// without the body. Same reason as ListSkillSummariesByWorkspace — a skill
+// whose supporting files total ~600KB cannot be listed at all when every row
+// carries its full content, and the one command that would show which file is
+// oversized was the command that timed out (GH multica-ai/multica#7498).
+// size/hash are computed in Postgres so the file bodies never leave it.
+//
+// convert_to(content, 'UTF8'), never content::bytea: the cast runs the bytea
+// INPUT parser over the text, so it reads backslash escapes instead of taking
+// the bytes. A file containing `\x41` would hash as the single byte `A`, and
+// one containing a bare backslash — a regex `\d+`, a Windows path, a LaTeX
+// snippet — fails outright with "invalid input syntax for type bytea",
+// turning an ordinary skill into a 500 on this endpoint.
+func (q *Queries) ListSkillFileMetadata(ctx context.Context, skillID pgtype.UUID) ([]ListSkillFileMetadataRow, error) {
+	rows, err := q.db.Query(ctx, listSkillFileMetadata, skillID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSkillFileMetadataRow{}
+	for rows.Next() {
+		var i ListSkillFileMetadataRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Size,
+			&i.ContentHash,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillFiles = `-- name: ListSkillFiles :many
 
 SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
