@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,15 +17,15 @@ func TestClientReserveInvitation(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Path != "/base/api/v1/internal/subscriptions/"+workspaceID.String()+"/capacity/reserve" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer "+strings.Repeat("s", 32) {
-			t.Fatalf("Authorization = %q", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("Authorization must be absent, got %q", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"managed":true,"allowed":false,"reason":"capacity_full"}`))
 	}))
 	defer server.Close()
 
-	client, err := New(Config{BaseURL: server.URL + "/base", ServiceToken: strings.Repeat("s", 32)})
+	client, err := New(Config{BaseURL: server.URL + "/base"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,10 +38,10 @@ func TestClientReserveInvitation(t *testing.T) {
 	}
 }
 
-func TestClientRejectsRedirectAndDoesNotForwardCredential(t *testing.T) {
-	var redirectedAuth string
-	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		redirectedAuth = r.Header.Get("Authorization")
+func TestClientRejectsRedirect(t *testing.T) {
+	var redirected bool
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		redirected = true
 	}))
 	defer target.Close()
 	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +49,7 @@ func TestClientRejectsRedirectAndDoesNotForwardCredential(t *testing.T) {
 	}))
 	defer source.Close()
 
-	client, err := New(Config{BaseURL: source.URL, ServiceToken: strings.Repeat("s", 32)})
+	client, err := New(Config{BaseURL: source.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,8 +58,8 @@ func TestClientRejectsRedirectAndDoesNotForwardCredential(t *testing.T) {
 	if !errors.As(err, &remote) || remote.StatusCode != http.StatusTemporaryRedirect {
 		t.Fatalf("error = %v", err)
 	}
-	if redirectedAuth != "" {
-		t.Fatalf("credential reached redirect target: %q", redirectedAuth)
+	if redirected {
+		t.Fatal("redirect target received an internal Cloud request")
 	}
 }
 
@@ -83,7 +82,7 @@ func TestClientPreservesCapacityRateLimit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New(Config{BaseURL: server.URL, ServiceToken: strings.Repeat("s", 32)})
+	client, err := New(Config{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +106,7 @@ func TestClientPreservesCloudWorkspaceRateLimitScope(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := New(Config{BaseURL: server.URL, ServiceToken: strings.Repeat("s", 32)})
+	client, err := New(Config{BaseURL: server.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +124,7 @@ func TestRetryAfterDurationAcceptsHTTPDate(t *testing.T) {
 	}
 }
 
-func TestClientIsDisabledOnlyWhenCloudURLAndTokenAreAbsent(t *testing.T) {
+func TestClientIsDisabledWhenCloudURLIsAbsent(t *testing.T) {
 	client, err := New(Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -135,23 +134,8 @@ func TestClientIsDisabledOnlyWhenCloudURLAndTokenAreAbsent(t *testing.T) {
 	}
 }
 
-func TestCloudConnectedClientRejectsUnsafeConfiguration(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-	}{
-		{name: "missing URL", cfg: Config{ServiceToken: strings.Repeat("s", 32)}},
-		{name: "missing token", cfg: Config{BaseURL: "https://example.com"}},
-		{name: "URL credentials", cfg: Config{BaseURL: "https://user:password@example.com", ServiceToken: strings.Repeat("s", 32)}},
-		{name: "short token", cfg: Config{BaseURL: "https://example.com", ServiceToken: "short"}},
-		{name: "token whitespace", cfg: Config{BaseURL: "https://example.com", ServiceToken: strings.Repeat("s", 31) + "\n"}},
-		{name: "excessive timeout", cfg: Config{BaseURL: "https://example.com", ServiceToken: strings.Repeat("s", 32), Timeout: 6 * time.Second}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := New(tt.cfg); !errors.Is(err, ErrInvalidConfig) {
-				t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
-			}
-		})
+func TestCloudConnectedClientRejectsUnsafeURL(t *testing.T) {
+	if _, err := New(Config{BaseURL: "https://user:password@example.com"}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
 	}
 }

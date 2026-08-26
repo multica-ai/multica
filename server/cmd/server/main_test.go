@@ -513,27 +513,3 @@ func TestJWTSecretBootError(t *testing.T) {
 		})
 	}
 }
-
-func TestRetiredCloudEnvironmentError(t *testing.T) {
-	tests := []struct {
-		name string
-		env  map[string]string
-		want bool
-	}{
-		{name: "current configuration", env: map[string]string{"MULTICA_CLOUD_URL": "https://cloud.internal"}},
-		{name: "empty retired variable", env: map[string]string{"MULTICA_FLEET_URL": ""}},
-		{name: "retired fleet URL", env: map[string]string{"MULTICA_FLEET_URL": "https://fleet.internal"}, want: true},
-		{name: "retired capacity switch", env: map[string]string{"MULTICA_SUBSCRIPTION_CAPACITY_ENABLED": "false"}, want: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := retiredCloudEnvironmentError(func(name string) (string, bool) {
-				value, ok := tt.env[name]
-				return value, ok
-			})
-			if (err != nil) != tt.want {
-				t.Fatalf("retiredCloudEnvironmentError() = %v, want error %v", err, tt.want)
-			}
-		})
-	}
-}

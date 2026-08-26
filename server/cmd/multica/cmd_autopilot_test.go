@@ -20,7 +20,6 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("mode", "", "")
-	cmd.Flags().String("priority", "none", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
@@ -34,7 +33,6 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("project", "", "")
-	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
@@ -42,6 +40,22 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestAutopilotCommandsRejectRemovedPriorityFlag(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"create": autopilotCreateCmd,
+		"update": autopilotUpdateCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if cmd.Flags().Lookup("priority") != nil {
+				t.Fatalf("autopilot %s still exposes the removed --priority flag", name)
+			}
+			if err := cmd.ParseFlags([]string{"--priority", "high"}); err == nil {
+				t.Fatalf("autopilot %s silently accepted the removed --priority flag", name)
+			}
+		})
+	}
 }
 
 func newAutopilotGetTestCmd() *cobra.Command {

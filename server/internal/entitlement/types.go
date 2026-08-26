@@ -37,7 +37,6 @@ type Reason string
 
 const (
 	ReasonDisabled          Reason = "disabled"
-	ReasonEmergencyDisabled Reason = "emergency_disabled"
 	ReasonInvalidWorkspace  Reason = "invalid_workspace"
 	ReasonUnknownGate       Reason = "unknown_gate"
 	ReasonCacheFresh        Reason = "cache_fresh"
@@ -83,7 +82,7 @@ type Observer interface {
 	RecordEntitlementCache(outcome string)
 	RecordEntitlementRefresh(outcome string, durationSeconds float64)
 	RecordEntitlementDecision(gate, action, reason string)
-	RecordEntitlementVersionRegression(source string)
+	RecordEntitlementVersionRegression()
 }
 
 func offDecision(reason Reason) Decision {
