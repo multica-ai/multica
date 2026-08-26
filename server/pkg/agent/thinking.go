@@ -177,7 +177,7 @@ func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*Mod
 func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
 	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
 	}
@@ -358,7 +358,7 @@ var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
 	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
-	return cmd.Output()
+	return outputOwned(cmd, runtimeCmd.logger)
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire

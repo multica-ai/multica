@@ -28,6 +28,8 @@ var agentCopyCmd = &cobra.Command{
 The source agent is left untouched. By default the copy lands on the same
 runtime as the source; pass --runtime-id to fork it onto a different runtime.
 
+Copied by default without a dedicated override flag: conversation starters.
+
 Copied by default, each overridable with the matching flag: name (suffixed
 " (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
 invocation permission (permission_mode + allow-list), assigned workspace skills,
@@ -149,6 +151,9 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("instructions") {
 		v, _ := cmd.Flags().GetString("instructions")
 		body["instructions"] = v
+	}
+	if conversationStarters, ok := src["conversation_starters"].([]any); ok {
+		body["conversation_starters"] = conversationStarters
 	}
 
 	// Avatar reference travels with the copy (both agents point at the same

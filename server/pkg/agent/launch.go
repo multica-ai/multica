@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 )
 
 const redactedAgentCommandArg = "<redacted>"
@@ -107,8 +111,144 @@ func (c Command) Argv(args ...string) []string {
 // reintroduce GH #7046. TestOnlyLaunchGoSpawnsRuntimeProcesses enforces it.
 func (c Command) exec(ctx context.Context, args ...string) *exec.Cmd {
 	warnLaunchPrefixOverlap(c.Prefix, args, c.logger)
-	return exec.CommandContext(ctx, c.Path, c.Argv(args...)...)
+	return newRuntimeCmd(exec.CommandContext(ctx, c.Path, c.Argv(args...)...))
 }
+
+// newRuntimeCmd applies the process-lifecycle defaults every runtime process in
+// this package gets. It runs at construction because both of them have to be in
+// place before the process exists.
+//
+// Both used to be opt-in, and opt-in is why GH #7522 happened. Of the 27 places
+// this package starts a process, 8 asked for a process group; the rest left
+// their CLI in the daemon's group, where a group-wide signal cannot reach it.
+// os/exec's default Cancel is the same leak by another route: it kills the
+// leader alone, so a cancelled task's tool subprocesses — MCP servers, shells,
+// whatever the agent spawned — survive it. On Linux that was #5918. On Windows,
+// where the leader is often a cmd.exe shim and the real CLI is already a
+// grandchild, a cancelled agent kept working for 40 minutes.
+//
+// A backend that wants a graceful shutdown instead of an immediate kill assigns
+// its own cmd.Cancel after construction and wins; claude, dsh and deveco do,
+// because they drive SIGTERM → grace → SIGKILL themselves.
+func newRuntimeCmd(cmd *exec.Cmd) *exec.Cmd {
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error {
+		signalProcessGroup(cmd, syscall.SIGKILL)
+		return nil
+	}
+	return cmd
+}
+
+// runOwned is Run() over an owned process tree: start, wait, drop ownership.
+//
+// os/exec's Run/Output/CombinedOutput call Start themselves, so a probe written
+// with them never reaches startOwnedProcessTree and owns nothing on Windows —
+// where the direct child of a `--version` probe is typically the shim, not the
+// CLI. That is the same escape GH #7522 was reported for, in a path nobody was
+// looking at: detectCLIVersion's own comment already describes a broken CLI
+// leaving grandchildren behind. These three helpers are how a synchronous probe
+// gets the same ownership a task launch has.
+func runOwned(cmd *exec.Cmd, logger *slog.Logger) error {
+	// Without a bound this waits for its own cleanup and never returns. A
+	// descendant that inherited the output pipes holds them open after the
+	// leader exits; cmd.Wait blocks until the copy goroutines see EOF; and the
+	// thing that would close those pipes is the release below, which runs
+	// after Wait. WaitDelay is defined for exactly this case — "a child
+	// process that exits but leaves its I/O pipes unclosed" — and cancellation
+	// is no help, because a probe like checkOpenclawVersion runs on the
+	// caller's context before any task timeout exists.
+	//
+	// A caller that set its own bound keeps it; detectCLIVersion has had one
+	// since MUL-3812 for this exact shape.
+	if cmd.WaitDelay == 0 {
+		cmd.WaitDelay = probeWaitDelay
+	}
+	if err := startOwnedProcessTree(cmd, logger); err != nil {
+		return err
+	}
+	err := cmd.Wait()
+	// The probe is over the moment its leader is: nothing it spawned should
+	// outlive the answer. Signalling before the release covers Unix, where
+	// releasing a process group is a no-op; on Windows closing the Job Object
+	// would take the tree down on its own.
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	releaseProcessGroup(cmd)
+	return err
+}
+
+// probeWaitDelay bounds how long a finished probe waits on output pipes its
+// descendants left open. It matches the bound detectCLIVersion already sets by
+// hand. The timer only starts once the child has exited or the context is
+// done, so a healthy probe never pays it.
+const probeWaitDelay = 2 * time.Second
+
+// outputOwned is cmd.Output() over an owned process tree. It matches the
+// stdlib's contract — stdout returned, a failed run's stderr attached to the
+// *exec.ExitError — except that the stderr sample is the last
+// probeStderrSampleBytes rather than the stdlib's head-and-tail, which is where
+// a CLI's actual failure line ends up.
+func outputOwned(cmd *exec.Cmd, logger *slog.Logger) ([]byte, error) {
+	if cmd.Stdout != nil {
+		return nil, errors.New("exec: Stdout already set")
+	}
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+
+	// A caller that set its own Stderr wants it; only fill in the sample when
+	// nothing else is watching, exactly as Output() does.
+	var stderr *tailBuffer
+	if cmd.Stderr == nil {
+		stderr = &tailBuffer{max: probeStderrSampleBytes}
+		cmd.Stderr = stderr
+	}
+
+	err := runOwned(cmd, logger)
+	var exitErr *exec.ExitError
+	if stderr != nil && errors.As(err, &exitErr) {
+		exitErr.Stderr = stderr.Bytes()
+	}
+	return stdout.Bytes(), err
+}
+
+// combinedOutputOwned is cmd.CombinedOutput() over an owned process tree.
+// Stdout and Stderr are the same writer value, which is what makes os/exec give
+// them one pipe and therefore one interleaving, as the stdlib does.
+func combinedOutputOwned(cmd *exec.Cmd, logger *slog.Logger) ([]byte, error) {
+	if cmd.Stdout != nil {
+		return nil, errors.New("exec: Stdout already set")
+	}
+	if cmd.Stderr != nil {
+		return nil, errors.New("exec: Stderr already set")
+	}
+	var combined bytes.Buffer
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
+	err := runOwned(cmd, logger)
+	return combined.Bytes(), err
+}
+
+// probeStderrSampleBytes bounds the stderr kept for a failed probe's error.
+// os/exec bounds the same sample at 32 KiB; a CLI stuck in a log loop should
+// not be able to grow the daemon's heap through a `--version` call.
+const probeStderrSampleBytes = 32 << 10
+
+// tailBuffer keeps the last max bytes written to it and discards the rest. It
+// always reports a full write, so a child is never blocked or shortened by the
+// bound.
+type tailBuffer struct {
+	buf []byte
+	max int
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.buf = append(t.buf, p...)
+	if len(t.buf) > t.max {
+		t.buf = t.buf[len(t.buf)-t.max:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) Bytes() []byte { return t.buf }
 
 // invocationChooser is the shape of the per-tool platform launch rewrites
 // (chooseCursorInvocation, chooseCopilotInvocation, choosePiInvocation). On
@@ -127,7 +267,7 @@ type invocationChooser func(execName, lookedUp string, args []string, logger *sl
 func (c Command) execVia(ctx context.Context, choose invocationChooser, lookedUp string, args []string, logger *slog.Logger) (*exec.Cmd, string, []string) {
 	warnLaunchPrefixOverlap(c.Prefix, args, logger)
 	argv0, cmdArgs := choose(c.Path, lookedUp, c.Argv(args...), logger)
-	return exec.CommandContext(ctx, argv0, cmdArgs...), argv0, cmdArgs
+	return newRuntimeCmd(exec.CommandContext(ctx, argv0, cmdArgs...)), argv0, cmdArgs
 }
 
 // withFilteredPrefix returns a copy of the command whose prefix has been

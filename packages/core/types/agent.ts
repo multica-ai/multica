@@ -477,6 +477,8 @@ export interface Agent {
   /** What this agent's owner wrote. For a system agent this holds only the
    *  workspace's own notes — the product half is `system_instructions`. */
   instructions: string;
+  /** Up to three agent-authored first-turn suggestions. Older servers omit it. */
+  conversation_starters?: AgentConversationStarter[];
   /** Set for product-defined agents (e.g. "mika"). Absent for user- and
    *  template-created agents. Identity for "maintained by Multica" checks —
    *  never the display name, which owners may change. */
@@ -588,6 +590,13 @@ export interface Agent {
   archived_by: string | null;
 }
 
+export interface AgentConversationStarter {
+  /** Short chip label shown in the empty state. */
+  label: string;
+  /** Full editable text copied into the composer when selected. */
+  prompt: string;
+}
+
 export interface DisabledRuntimeSkill {
   runtime_id: string;
   provider: string;
@@ -625,6 +634,7 @@ export interface CreateAgentRequest {
   name: string;
   description?: string;
   instructions?: string;
+  conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id: string;
   runtime_config?: Record<string, unknown>;
@@ -677,6 +687,7 @@ export interface StoredAgentDraft {
   name: string;
   description: string;
   instructions: string;
+  conversation_starters: AgentConversationStarter[];
   avatar_url: string | null;
   model: string;
   thinking_level: string;
@@ -719,6 +730,7 @@ export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
+  conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;
   runtime_config?: Record<string, unknown>;

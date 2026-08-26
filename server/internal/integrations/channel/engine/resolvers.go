@@ -27,6 +27,7 @@ const (
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
 	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeChatStarted   Outcome = "chat_started"
 	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
@@ -49,10 +50,12 @@ const (
 // consumed by the outbound side (OutboundReplier / typing). It mirrors the
 // legacy lark.DispatchResult.
 type Result struct {
-	Outcome        Outcome
-	DropReason     DropReason
-	InstallationID pgtype.UUID
-	ChatSessionID  pgtype.UUID
+	Outcome              Outcome
+	DropReason           DropReason
+	InstallationID       pgtype.UUID
+	ChatSessionID        pgtype.UUID
+	ChannelBindingID     pgtype.UUID
+	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
 	Sender          string
@@ -100,6 +103,30 @@ type EnsureSessionParams struct {
 	Message      channel.InboundMessage
 }
 
+// StartSessionParams carries a /new route rotation. Creator owns the new Chat;
+// Sender is the authenticated user who issued the command and initiated its
+// first context. They differ for group chats, where the installer owns the Chat
+// but the group member remains the turn initiator. PersistMessage is false only
+// for the bare control command; a media-only /new is a real first turn.
+type StartSessionParams struct {
+	Installation           ResolvedInstallation
+	Creator                pgtype.UUID
+	Sender                 pgtype.UUID
+	Message                channel.InboundMessage
+	ClaimToken             pgtype.UUID
+	MediaPendingSeconds    float64
+	PersistMessage         bool
+	HistoryBoundaryPending bool
+	BeforeCommit           func(context.Context, pgx.Tx, db.ChatSession) error
+}
+
+type StartSessionResult struct {
+	SessionID     pgtype.UUID
+	BindingID     pgtype.UUID
+	RouteRevision int64
+	Append        AppendResult
+}
+
 // AppendParams carries the inputs for SessionBinder.AppendMessage. ClaimToken
 // is the dedup owner-fence token; the binder runs the dedup Mark INSIDE its
 // chat_message+session tx so the durable write and the Mark commit atomically.
@@ -133,6 +160,12 @@ type AppendResult struct {
 	// its authenticated sender snapshot. It re-arms debounce windows lost on
 	// process crash without borrowing the sender of a later generation.
 	PendingContexts []PendingContext
+	InitialTitle    string
+	// BecameVisible is true only when this committed ordinary turn changed an
+	// implicit channel session from hidden orchestration state into a public Chat.
+	BecameVisible bool
+	BindingID     pgtype.UUID
+	RouteRevision int64
 }
 
 // PendingContext identifies durable unowned input that needs a run timer. The
@@ -141,6 +174,28 @@ type AppendResult struct {
 type PendingContext struct {
 	Revision        int64
 	InitiatorUserID pgtype.UUID
+}
+
+// ChannelChatLifecycle bridges committed channel Chat changes to the server's
+// existing realtime and best-effort title services without coupling the engine
+// package to HTTP handlers.
+type ChannelChatLifecycle interface {
+	ChannelChatStarted(event ChannelChatStartedEvent)
+	ChannelChatTitleInitialized(workspaceID, creatorID, sessionID pgtype.UUID, title string)
+	GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string)
+}
+
+// ChannelChatStartedEvent contains enough committed metadata for clients to
+// add or invalidate a channel-created Chat without changing their navigation.
+type ChannelChatStartedEvent struct {
+	WorkspaceID    pgtype.UUID
+	CreatorID      pgtype.UUID
+	AgentID        pgtype.UUID
+	SessionID      pgtype.UUID
+	InstallationID pgtype.UUID
+	ChannelType    channel.Type
+	RouteRevision  int64
+	Title          string
 }
 
 // BindMediaParams carries stored media references to the post-append
@@ -162,6 +217,14 @@ type BindMediaParams struct {
 	MediaRefs            []channel.MediaRef
 }
 
+// BindMediaResult reports a title initialized only after the first media
+// attachment committed. The Router uses it to publish realtime state and run
+// the same best-effort LLM/CAS title flow as a text-first Chat.
+type BindMediaResult struct {
+	InitialTitle string
+	TitleSource  string
+}
+
 // IssueCommand is the parsed /issue command.
 type IssueCommand struct {
 	Title       string
@@ -179,6 +242,9 @@ var (
 	// ErrSenderNotMember: the sender is bound but not a workspace member →
 	// non_workspace_member drop.
 	ErrSenderNotMember = errors.New("engine: sender not a workspace member")
+	// ErrRouteChanged asks the Router to resolve the platform route again and
+	// retry the same claimed message before any durable write is made.
+	ErrRouteChanged = errors.New("engine: route changed")
 	// ErrDuplicate: Claim found the message already processed / in flight →
 	// duplicate drop.
 	ErrDuplicate = errors.New("engine: duplicate message")
@@ -216,9 +282,10 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	StartSession(ctx context.Context, p StartSessionParams) (StartSessionResult, error)
 	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
-	BindMedia(ctx context.Context, p BindMediaParams) error
+	BindMedia(ctx context.Context, p BindMediaParams) (BindMediaResult, error)
 }
 
 // MediaResolver resolves platform media after the user message and dedup mark
@@ -349,7 +416,10 @@ type IssueCreator interface {
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, bindingID pgtype.UUID, routeRevision int64) (db.AgentTaskQueue, error)
+	PrepareChatTaskEnqueue(ctx context.Context, agentID, initiatorUserID pgtype.UUID) (service.PreparedChatTaskEnqueue, error)
+	EnqueuePreparedChannelChatTaskInTx(ctx context.Context, tx pgx.Tx, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, prepared service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error)
+	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
 	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }

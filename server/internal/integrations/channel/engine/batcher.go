@@ -20,7 +20,7 @@ type stoppableTimer interface {
 // pendingBatcher debounces a per-(chat_session, context generation) run trigger.
 // Each inbound message calls Schedule, which (re)arms one timer for that
 // generation; when it goes quiet the latest flush runs exactly once. This
-// collapses an in-generation burst into one agent run while preserving /new as
+// collapses an in-generation burst into one agent run while preserving /clear as
 // a hard batch boundary. Only the run trigger is debounced; chat_message rows,
 // dedup, and frame ACK already happened synchronously upstream.
 //
@@ -29,7 +29,7 @@ type stoppableTimer interface {
 // debounced by one process. A hard crash inside the window drops the pending
 // trigger (messages are durable; they just do not fire a run until the next
 // message). Callers include the durable context revision in the key, so a
-// /new boundary can never replace the pending flush for the preceding context.
+// /clear boundary can never replace the pending flush for the preceding context.
 // Graceful shutdown calls FlushAll so that boundary is not hit on a normal
 // restart. Goroutine-safe; one instance is shared across supervisors.
 type pendingBatcher struct {

@@ -134,7 +134,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[qwen:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start qwen: %w", err)
@@ -197,6 +197,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			_ = stdout.Close()
 		}
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(started)
 
 		// Wait has already closed the stdin pipe, so a prompt write still

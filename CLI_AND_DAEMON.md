@@ -835,6 +835,11 @@ multica autopilot get <id>
 multica autopilot get <id> --output json   # includes triggers
 ```
 
+In JSON output `triggers` is a **top-level key alongside `autopilot`**, not nested
+inside it — the payload is `{"autopilot": {...}, "triggers": [...], "collaborators": [...]}`.
+Read trigger ids with `jq '.triggers[].id'`, or use `autopilot trigger-list` below.
+The table output shows only the autopilot's own fields, not its triggers.
+
 ### Create / Update / Delete
 
 ```bash
@@ -871,12 +876,22 @@ multica autopilot runs <id> --limit 50 --output json
 ### Schedule Triggers
 
 ```bash
+multica autopilot trigger-list <autopilot-id>              # ids, kind, schedule, next run
+multica autopilot trigger-list <autopilot-id> --full-id    # canonical UUIDs
 multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
 multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
 multica autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
 
-Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
+`trigger-list` is the way to obtain the `<trigger-id>` that `trigger-update`,
+`trigger-delete` and `trigger-rotate-url` require. Like autopilot ids, trigger ids
+may be passed as a short prefix as long as it is unique within that autopilot; use
+`--full-id` to print canonical UUIDs. Webhook credentials are redacted in this
+output — use `autopilot get <id> --output json --show-secrets` to reveal them.
+
+The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
+triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
+also defines an `api` kind, which is not surfaced here.
 
 ## Other Commands
 
@@ -973,3 +988,47 @@ always at least this value, so raising it takes effect across all commands.
 ```bash
 MULTICA_HTTP_TIMEOUT=60s multica issue list
 ```
+
+### Stall detection (skill commands)
+
+A total-elapsed timeout punishes the transfer that is working: a large skill
+arriving steadily over a slow link is cut off mid-body, while a dead connection
+is held open for the full budget. The `skill` commands therefore fail on a lack
+of *progress* instead:
+
+- A read that receives no bytes for **15 seconds** fails immediately, reported
+  as a stalled transfer rather than a timeout.
+- A transfer that keeps producing bytes runs to completion, however long it
+  takes, behind a loose **10 minute** whole-request ceiling.
+
+Override the no-progress budget with `MULTICA_HTTP_STALL_TIMEOUT` (same format
+as `MULTICA_HTTP_TIMEOUT`). If only `MULTICA_HTTP_TIMEOUT` is set it applies on
+this path too, as the no-progress budget — it keeps meaning "the longest I will
+wait for this server", not "the longest this download may take".
+
+```bash
+MULTICA_HTTP_STALL_TIMEOUT=45s multica skill get <id>
+```
+
+Every other command still uses the total-elapsed timeout above. Stall detection
+starts here because skill payloads are the largest responses the CLI reads; the
+mechanism itself is not skill-specific.
+
+### Skill payload size
+
+`multica skill get` and `multica skill files list` return **metadata only** by
+default — path, byte size and content hash for each file, plus the size and
+hash of the SKILL.md body. Sizes are what tell you which file makes a skill
+large, and they stay available no matter how large it gets.
+
+Pass `--with-content` when you actually need the bodies:
+
+```bash
+multica skill files list <id>                  # paths and sizes
+multica skill files list <id> --with-content   # bodies inlined
+```
+
+On the API, both endpoints accept `?include=content` and `?include=metadata`.
+A request that sends neither still gets `content`, on both endpoints, so a
+server upgrade never changes what an un-upgraded client receives — it is the
+CLI that asks for the smaller shape.

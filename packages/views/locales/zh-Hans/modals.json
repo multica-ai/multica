@@ -202,6 +202,7 @@
       "version_missing": "该智能体的守护进程没有报告 CLI 版本。通过智能体创建需要 multica CLI ≥ {{min}}。请升级守护进程并重连，或切换到手动创建。",
       "version_below": "该智能体的守护进程 CLI 是 {{current}}——通过智能体创建需要 ≥ {{min}}。请升级守护进程，或切换到手动创建。",
       "prompt_placeholder": "告诉智能体要做什么，例如：\"让 Bohan 修一下 Web 项目里收件箱加载慢的问题\"",
+      "source_context_prompt_placeholder": "告诉智能体要基于这段上下文完成什么，例如：\"继续排查并修复这里提到的问题\"",
       "more_fields_aria": "更多字段",
       "set_project": "设置项目...",
       "set_priority": "设置优先级...",

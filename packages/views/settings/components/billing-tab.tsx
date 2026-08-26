@@ -19,7 +19,6 @@ import {
   useCreateWorkspaceSubscriptionPortal,
   usePreviewWorkspaceSeatPurchase,
   usePurchaseWorkspaceSeats,
-  useReconcileWorkspaceSubscriptionSeats,
   workspaceSubscriptionEntitlementsOptions,
   workspaceSubscriptionPricesOptions,
   workspaceSubscriptionSummaryOptions,
@@ -76,39 +75,17 @@ import {
 } from "./settings-layout";
 import {
   canPurchaseWorkspaceSubscription,
-  hasManagedWorkspaceSubscription,
+  hasActiveWorkspaceSeatCapacity,
+  hasWorkspaceBillingRelationship,
   resolveAutopilotUsage,
 } from "./billing-state";
+import { formatStripeMinorAmount } from "./billing-format";
+
+export { formatStripeMinorAmount } from "./billing-format";
 
 const CHECKOUT_SYNC_TIMEOUT_MS = 30_000;
 const SEAT_PURCHASE_POLL_TIMEOUT_MS = 2 * 60_000;
 const SEAT_PURCHASE_PREVIEW_DEBOUNCE_MS = 800;
-
-const STRIPE_ZERO_DECIMAL_CURRENCIES = new Set([
-  "BIF",
-  "CLP",
-  "DJF",
-  "GNF",
-  "JPY",
-  "KMF",
-  "KRW",
-  "MGA",
-  "PYG",
-  "RWF",
-  "VND",
-  "VUV",
-  "XAF",
-  "XOF",
-  "XPF",
-]);
-const STRIPE_TWO_DECIMAL_COMPAT_CURRENCIES = new Set(["ISK", "UGX"]);
-const STRIPE_THREE_DECIMAL_CURRENCIES = new Set([
-  "BHD",
-  "JOD",
-  "KWD",
-  "OMR",
-  "TND",
-]);
 
 type WorkspaceBillingReturnResult = "success" | "cancel" | "portal";
 
@@ -147,49 +124,6 @@ function formatDateTime(value: string | null, locale: string): string | null {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(date);
-}
-
-/**
- * Stripe API amounts use its own minor-unit contract: two decimals by default,
- * an explicit zero-decimal list, five three-decimal currencies, and ISK/UGX in
- * a backwards-compatible two-decimal representation. Intl localizes the
- * already-converted major amount; it must not decide the divisor.
- */
-export function formatStripeMinorAmount(
-  amount: number,
-  currency: string,
-  locale: string,
-): string | null {
-  if (!Number.isSafeInteger(amount) || amount < 0) return null;
-  const normalizedCurrency = currency.trim().toUpperCase();
-  if (!normalizedCurrency) return null;
-
-  try {
-    const fractionDigits = STRIPE_TWO_DECIMAL_COMPAT_CURRENCIES.has(
-      normalizedCurrency,
-    )
-      ? 2
-      : STRIPE_ZERO_DECIMAL_CURRENCIES.has(normalizedCurrency)
-        ? 0
-        : STRIPE_THREE_DECIMAL_CURRENCIES.has(normalizedCurrency)
-          ? 3
-          : 2;
-    const majorAmount = amount / 10 ** fractionDigits;
-    const showStripeFraction = !Number.isInteger(majorAmount);
-    const formatter = new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: normalizedCurrency,
-      ...(showStripeFraction
-        ? {
-            minimumFractionDigits: fractionDigits,
-            maximumFractionDigits: fractionDigits,
-          }
-        : {}),
-    });
-    return formatter.format(majorAmount);
-  } catch {
-    return null;
-  }
 }
 
 function planBadgeVariant(plan: string): "default" | "secondary" | "outline" {
@@ -281,7 +215,9 @@ function BillingTabContent() {
     useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [portalUnavailable, setPortalUnavailable] = useState(false);
-  const [reconcileMessage, setReconcileMessage] = useState<string | null>(null);
+  const [seatPurchaseMessage, setSeatPurchaseMessage] = useState<string | null>(
+    null,
+  );
   const [isSyncingCheckout, setIsSyncingCheckout] = useState(
     returnResult === "success",
   );
@@ -319,7 +255,7 @@ function BillingTabContent() {
     setSeatPurchasePollingTimedOut(false);
     setPortalUnavailable(false);
     setActionError(null);
-    setReconcileMessage(null);
+    setSeatPurchaseMessage(null);
   }, [wsId]);
 
   // Consume Stripe callback params once, then remove them with replace so a
@@ -377,13 +313,13 @@ function BillingTabContent() {
     // browser polling forever.
     refetchInterval: (query) =>
       isSyncingCheckout ||
-      (query.state.data?.activeSeatPurchase &&
+      (query.state.data?.seatCapacity?.activePurchase &&
         !seatPurchasePollingTimedOut)
         ? 2_000
         : false,
   });
   const activeSeatPurchaseRequestId =
-    summaryQuery.data?.activeSeatPurchase?.requestId ?? null;
+    summaryQuery.data?.seatCapacity?.activePurchase?.requestId ?? null;
 
   useEffect(() => {
     if (!activeSeatPurchaseRequestId) {
@@ -401,9 +337,10 @@ function BillingTabContent() {
     summaryQuery.isError ||
     (!summaryQuery.isPending && summaryQuery.data == null);
   const quotaUsageQuery = useQuery(autopilotQuotaUsageOptions(wsId));
-  const hasManagedSubscription = entitlements
-    ? hasManagedWorkspaceSubscription(entitlements, summaryQuery.data)
-    : false;
+  const hasSeatCapacity = hasActiveWorkspaceSeatCapacity(summaryQuery.data);
+  const hasBillingRelationship = hasWorkspaceBillingRelationship(
+    summaryQuery.data,
+  );
   const canUpgrade = entitlements
     ? canPurchaseWorkspaceSubscription(entitlements)
     : false;
@@ -413,7 +350,6 @@ function BillingTabContent() {
   });
   const checkoutMutation = useCreateWorkspaceSubscriptionCheckout(wsId);
   const portalMutation = useCreateWorkspaceSubscriptionPortal(wsId);
-  const reconcileMutation = useReconcileWorkspaceSubscriptionSeats(wsId);
   const previewSeatPurchaseMutation = usePreviewWorkspaceSeatPurchase();
   const purchaseSeatsMutation = usePurchaseWorkspaceSeats(wsId);
   const refetchEntitlements = entitlementQuery.refetch;
@@ -424,8 +360,8 @@ function BillingTabContent() {
     if (!seatPurchaseOpen) return;
     const value = additionalSeatsInput.trim();
     const additionalSeats = /^\d+$/.test(value) ? Number(value) : 0;
-    const currentSeats = summaryQuery.data?.billedSeats ?? null;
-    const purchaseVersion = summaryQuery.data?.purchaseVersion ?? null;
+    const currentSeats = summaryQuery.data?.seatCapacity?.purchased ?? null;
+    const purchaseVersion = summaryQuery.data?.seatCapacity?.version ?? null;
     const retryInputKey = `${wsId}:${value}`;
     if (seatPreviewCapacityRetryRef.current?.inputKey !== retryInputKey) {
       seatPreviewCapacityRetryRef.current = {
@@ -517,9 +453,10 @@ function BillingTabContent() {
                 );
                 return;
               }
-              const refreshedSeats = refreshed.data?.billedSeats ?? null;
+              const refreshedSeats =
+                refreshed.data?.seatCapacity?.purchased ?? null;
               const refreshedVersion =
-                refreshed.data?.purchaseVersion ?? null;
+                refreshed.data?.seatCapacity?.version ?? null;
               if (
                 refreshedSeats === currentSeats &&
                 refreshedVersion === purchaseVersion
@@ -558,8 +495,8 @@ function BillingTabContent() {
     refetchSummary,
     seatPurchaseOpen,
     seatPreviewRevision,
-    summaryQuery.data?.billedSeats,
-    summaryQuery.data?.purchaseVersion,
+    summaryQuery.data?.seatCapacity?.purchased,
+    summaryQuery.data?.seatCapacity?.version,
     t,
     wsId,
   ]);
@@ -702,27 +639,6 @@ function BillingTabContent() {
     }
   };
 
-  const handleReconcile = async () => {
-    setActionError(null);
-    setReconcileMessage(null);
-    try {
-      const response = await reconcileMutation.mutateAsync();
-      if (!response) {
-        setActionError(t(($) => $.workspace.errors.reconcile_response));
-        return;
-      }
-      setReconcileMessage(
-        t(($) => $.workspace.seats.reconciled, {
-          actual: response.actualSeats,
-          billed: response.billedSeats,
-        }),
-      );
-      await Promise.all([entitlementQuery.refetch(), summaryQuery.refetch()]);
-    } catch (error) {
-      reportActionError(error, t(($) => $.workspace.errors.reconcile_failed));
-    }
-  };
-
   const handleSeatPurchase = async () => {
     const confirmedPreview = seatPreview;
     if (!confirmedPreview) return;
@@ -772,7 +688,7 @@ function BillingTabContent() {
       seatPreviewInputRef.current = "";
       setSeatPurchaseOpen(false);
       setSeatPreview(null);
-      setReconcileMessage(
+      setSeatPurchaseMessage(
         t(($) => $.workspace.seat_purchase.submitted, {
           count: response.resultingSeats,
         }),
@@ -900,29 +816,27 @@ function BillingTabContent() {
     entitlements.plan === "pro" &&
     (entitlements.status !== "past_due" || hasActiveProGrace) &&
     (returnResult !== "success" || isCheckoutProConfirmed);
-  const actualSeats = summaryQuery.data?.actualSeats ?? entitlements.seats;
-  const usedSeats = summaryQuery.data?.usedSeats ?? actualSeats;
-  const billedSeats = summaryQuery.data?.billedSeats;
-  const pendingSeatQuantity = summaryQuery.data?.pendingSeatQuantity;
-  const reservedSeats = summaryQuery.data?.reservedSeats ?? 0;
-  const availableSeats =
-    billedSeats === null || billedSeats === undefined
-      ? null
-      : Math.max(0, billedSeats - usedSeats - reservedSeats);
-  const activeSeatPurchase = summaryQuery.data?.activeSeatPurchase ?? null;
+  const actualSeats = summaryQuery.data?.humanMembers ?? entitlements.seats;
+  const seatCapacity = summaryQuery.data?.seatCapacity ?? null;
+  const usedSeats = seatCapacity?.used ?? actualSeats;
+  const billedSeats = seatCapacity?.purchased ?? null;
+  const pendingSeatQuantity = seatCapacity?.pendingQuantity ?? null;
+  const reservedSeats = seatCapacity?.reserved ?? 0;
+  const membersExceedPurchasedSeats =
+    hasSeatCapacity &&
+    billedSeats !== null &&
+    actualSeats > billedSeats;
+  const availableSeats = seatCapacity?.available ?? null;
+  const activeSeatPurchase = seatCapacity?.activePurchase ?? null;
   const activeSeatPurchaseExpiry = formatDateTime(
     activeSeatPurchase?.expiresAt ?? null,
     locale,
   );
   const canAddSeats =
     canManage &&
-    hasManagedSubscription &&
+    hasSeatCapacity &&
     (entitlements.status === "active" || entitlements.status === "trialing") &&
     !summaryQuery.data?.cancelAtPeriodEnd &&
-    summaryQuery.data?.purchaseVersion !== null &&
-    summaryQuery.data?.purchaseVersion !== undefined &&
-    billedSeats !== null &&
-    billedSeats !== undefined &&
     activeSeatPurchase === null;
   const quotaUsage = resolveAutopilotUsage(
     entitlements,
@@ -938,7 +852,6 @@ function BillingTabContent() {
   const isMutating =
     checkoutMutation.isPending ||
     portalMutation.isPending ||
-    reconcileMutation.isPending ||
     purchaseSeatsMutation.isPending;
   const selectedPrice = pricesQuery.data?.[interval] ?? null;
   const formattedUnitPrice = selectedPrice
@@ -1311,7 +1224,7 @@ function BillingTabContent() {
         </SettingsSection>
       ) : null}
 
-      {hasManagedSubscription && canManage ? (
+      {hasBillingRelationship && canManage ? (
         <SettingsSection
           title={t(($) => $.workspace.management.title)}
           description={t(($) => $.workspace.management.description)}
@@ -1446,130 +1359,66 @@ function BillingTabContent() {
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.workspace.seats.title)}
-        description={t(($) => $.workspace.seats.description)}
-      >
-        {summaryUnavailable ? (
-          <Alert className="mb-3">
-            <AlertCircle />
-            <AlertTitle>
-              {t(($) => $.workspace.seats.summary_unavailable_title)}
-            </AlertTitle>
-            <AlertDescription>
-              <p>
-                {t(($) => $.workspace.seats.summary_unavailable_description)}
-              </p>
-              <Button
-                className="mt-3"
-                type="button"
-                variant="outline"
-                size="sm"
-                aria-busy={summaryQuery.isFetching}
-                disabled={summaryQuery.isFetching}
-                onClick={() => void summaryQuery.refetch()}
-              >
-                {summaryQuery.isFetching ? (
-                  <Loader2 className="animate-spin motion-reduce:animate-none" />
-                ) : (
-                  <RefreshCw />
-                )}
-                {t(($) => $.workspace.actions.retry)}
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {reconcileMessage ? (
-          <Alert className="mb-3">
-            <CheckCircle2 />
-            <AlertTitle>{t(($) => $.workspace.seats.updated)}</AlertTitle>
-            <AlertDescription>{reconcileMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-        {activeSeatPurchase ? (
-          <Alert className="mb-3">
-            {seatPurchasePollingTimedOut ? (
+      {hasSeatCapacity || summaryUnavailable ? (
+        <SettingsSection
+          title={t(($) => $.workspace.seats.title)}
+          description={t(($) => $.workspace.seats.description)}
+        >
+          {summaryUnavailable ? (
+            <Alert className="mb-3">
               <AlertCircle />
-            ) : (
-              <Loader2 className="animate-spin motion-reduce:animate-none" />
-            )}
-            <AlertTitle>
-              {seatPurchasePollingTimedOut
-                ? t(($) => $.workspace.seat_purchase.delayed_title)
-                : t(($) => $.workspace.seat_purchase.pending_title)}
-            </AlertTitle>
-            <AlertDescription>
-              {seatPurchasePollingTimedOut
-                ? activeSeatPurchaseExpiry
-                  ? t(
-                      ($) =>
-                        $.workspace.seat_purchase
-                          .delayed_description_with_expiry,
-                      { date: activeSeatPurchaseExpiry },
-                    )
-                  : t(($) => $.workspace.seat_purchase.delayed_description)
-                : t(($) => $.workspace.seat_purchase.pending_description, {
-                    count: activeSeatPurchase.targetSeats,
-                  })}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <SettingsCard>
-          <SettingsRow
-            label={t(($) => $.workspace.seats.human_members)}
-            description={t(($) => $.workspace.seats.human_members_description)}
-          >
-            <div className="flex flex-col gap-2 sm:items-end">
-              <span className="tabular-nums">
-                {t(($) => $.workspace.seats.seat_count, {
-                  count: usedSeats,
-                })}
-              </span>
-              {canManage && hasManagedSubscription ? (
+              <AlertTitle>
+                {t(($) => $.workspace.seats.summary_unavailable_title)}
+              </AlertTitle>
+              <AlertDescription>
+                <p>
+                  {t(($) => $.workspace.seats.summary_unavailable_description)}
+                </p>
                 <Button
-                  className="h-11 w-full sm:w-auto"
+                  className="mt-3"
+                  type="button"
                   variant="outline"
-                  disabled={isMutating}
-                  onClick={() => void handleReconcile()}
+                  size="sm"
+                  aria-busy={summaryQuery.isFetching}
+                  disabled={summaryQuery.isFetching}
+                  onClick={() => void summaryQuery.refetch()}
                 >
-                  {reconcileMutation.isPending ? (
+                  {summaryQuery.isFetching ? (
                     <Loader2 className="animate-spin motion-reduce:animate-none" />
                   ) : (
                     <RefreshCw />
                   )}
-                  {t(($) => $.workspace.actions.refresh_seats)}
+                  {t(($) => $.workspace.actions.retry)}
                 </Button>
-              ) : null}
-            </div>
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.workspace.seats.billed)}
-            description={t(($) => $.workspace.seats.billed_description)}
-          >
-            {summaryQuery.isPending ? (
-              <Skeleton
-                className="h-5 w-20 motion-reduce:animate-none"
-                aria-label={t(($) => $.workspace.seats.summary_loading)}
-              />
-            ) : summaryUnavailable ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.unavailable)}
-              </span>
-            ) : billedSeats === null || billedSeats === undefined ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.not_subscribed)}
-              </span>
-            ) : (
-              <div className="flex flex-col gap-2 sm:items-end">
-                <span className="tabular-nums">
-                  {t(($) => $.workspace.seats.seat_count, {
-                    count: billedSeats,
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {seatPurchaseMessage ? (
+            <Alert className="mb-3">
+              <CheckCircle2 />
+              <AlertTitle>{t(($) => $.workspace.seats.updated)}</AlertTitle>
+              <AlertDescription>{seatPurchaseMessage}</AlertDescription>
+            </Alert>
+          ) : null}
+          {membersExceedPurchasedSeats ? (
+            <Alert className="mb-3">
+              <AlertCircle />
+              <AlertTitle>
+                {t(($) => $.workspace.seats.members_over_capacity_title)}
+              </AlertTitle>
+              <AlertDescription>
+                <p>
+                  {t(($) => $.workspace.seats.members_over_capacity_description, {
+                    actual: actualSeats,
+                    purchased: billedSeats,
                   })}
-                </span>
+                </p>
                 {canAddSeats ? (
                   <Button
-                    className="h-11 w-full sm:w-auto"
+                    className="mt-3"
                     type="button"
+                    variant="outline"
+                    size="sm"
                     disabled={isMutating}
                     onClick={() => handleSeatPurchaseOpenChange(true)}
                   >
@@ -1577,88 +1426,165 @@ function BillingTabContent() {
                     {t(($) => $.workspace.actions.add_seats)}
                   </Button>
                 ) : null}
-              </div>
-            )}
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.workspace.seats.pending_invitations)}
-            description={t(
-              ($) => $.workspace.seats.pending_invitations_description,
-            )}
-          >
-            {summaryQuery.isPending ? (
-              <Skeleton
-                className="h-5 w-20 motion-reduce:animate-none"
-                aria-label={t(($) => $.workspace.seats.summary_loading)}
-              />
-            ) : summaryUnavailable ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.unavailable)}
-              </span>
-            ) : (
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {activeSeatPurchase ? (
+            <Alert className="mb-3">
+              {seatPurchasePollingTimedOut ? (
+                <AlertCircle />
+              ) : (
+                <Loader2 className="animate-spin motion-reduce:animate-none" />
+              )}
+              <AlertTitle>
+                {seatPurchasePollingTimedOut
+                  ? t(($) => $.workspace.seat_purchase.delayed_title)
+                  : t(($) => $.workspace.seat_purchase.pending_title)}
+              </AlertTitle>
+              <AlertDescription>
+                {seatPurchasePollingTimedOut
+                  ? activeSeatPurchaseExpiry
+                    ? t(
+                        ($) =>
+                          $.workspace.seat_purchase
+                            .delayed_description_with_expiry,
+                        { date: activeSeatPurchaseExpiry },
+                      )
+                    : t(($) => $.workspace.seat_purchase.delayed_description)
+                  : t(($) => $.workspace.seat_purchase.pending_description, {
+                      count: activeSeatPurchase.targetSeats,
+                    })}
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <SettingsCard>
+            <SettingsRow
+              label={t(($) => $.workspace.seats.human_members)}
+              description={t(($) => $.workspace.seats.human_members_description)}
+            >
               <span className="tabular-nums">
                 {t(($) => $.workspace.seats.seat_count, {
-                  count: reservedSeats,
+                  count: usedSeats,
                 })}
               </span>
-            )}
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.workspace.seats.available)}
-            description={t(($) => $.workspace.seats.available_description)}
-          >
-            {summaryQuery.isPending ? (
-              <Skeleton
-                className="h-5 w-20 motion-reduce:animate-none"
-                aria-label={t(($) => $.workspace.seats.summary_loading)}
-              />
-            ) : summaryUnavailable || availableSeats === null ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.unavailable)}
-              </span>
-            ) : (
-              <span className="tabular-nums">
-                {t(($) => $.workspace.seats.seat_count, {
-                  count: availableSeats,
-                })}
-              </span>
-            )}
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.workspace.seats.pending)}
-            description={t(($) => $.workspace.seats.pending_description)}
-          >
-            {summaryQuery.isPending ? (
-              <Skeleton
-                className="h-5 w-28 motion-reduce:animate-none"
-                aria-label={t(($) => $.workspace.seats.summary_loading)}
-              />
-            ) : summaryUnavailable ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.unavailable)}
-              </span>
-            ) : pendingSeatQuantity === null ||
-              pendingSeatQuantity === undefined ? (
-              <span className="text-muted-foreground">
-                {t(($) => $.workspace.seats.none_pending)}
-              </span>
-            ) : summaryPeriodEnd ? (
-              <span className="tabular-nums">
-                {t(($) => $.workspace.seats.pending_with_date, {
-                  count: pendingSeatQuantity,
-                  date: summaryPeriodEnd,
-                })}
-              </span>
-            ) : (
-              <span className="tabular-nums">
-                {t(($) => $.workspace.seats.seat_count, {
-                  count: pendingSeatQuantity,
-                })}
-              </span>
-            )}
-          </SettingsRow>
-        </SettingsCard>
-      </SettingsSection>
+            </SettingsRow>
+            <SettingsRow
+              label={t(($) => $.workspace.seats.billed)}
+              description={t(($) => $.workspace.seats.billed_description)}
+            >
+              {summaryQuery.isPending ? (
+                <Skeleton
+                  className="h-5 w-20 motion-reduce:animate-none"
+                  aria-label={t(($) => $.workspace.seats.summary_loading)}
+                />
+              ) : summaryUnavailable ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.unavailable)}
+                </span>
+              ) : billedSeats === null ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.not_subscribed)}
+                </span>
+              ) : (
+                <div className="flex flex-col gap-2 sm:items-end">
+                  <span className="tabular-nums">
+                    {t(($) => $.workspace.seats.seat_count, {
+                      count: billedSeats,
+                    })}
+                  </span>
+                  {canAddSeats ? (
+                    <Button
+                      className="h-11 w-full sm:w-auto"
+                      type="button"
+                      disabled={isMutating}
+                      onClick={() => handleSeatPurchaseOpenChange(true)}
+                    >
+                      <Plus />
+                      {t(($) => $.workspace.actions.add_seats)}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            </SettingsRow>
+            <SettingsRow
+              label={t(($) => $.workspace.seats.pending_invitations)}
+              description={t(
+                ($) => $.workspace.seats.pending_invitations_description,
+              )}
+            >
+              {summaryQuery.isPending ? (
+                <Skeleton
+                  className="h-5 w-20 motion-reduce:animate-none"
+                  aria-label={t(($) => $.workspace.seats.summary_loading)}
+                />
+              ) : summaryUnavailable ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.unavailable)}
+                </span>
+              ) : (
+                <span className="tabular-nums">
+                  {t(($) => $.workspace.seats.seat_count, {
+                    count: reservedSeats,
+                  })}
+                </span>
+              )}
+            </SettingsRow>
+            <SettingsRow
+              label={t(($) => $.workspace.seats.available)}
+              description={t(($) => $.workspace.seats.available_description)}
+            >
+              {summaryQuery.isPending ? (
+                <Skeleton
+                  className="h-5 w-20 motion-reduce:animate-none"
+                  aria-label={t(($) => $.workspace.seats.summary_loading)}
+                />
+              ) : summaryUnavailable || availableSeats === null ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.unavailable)}
+                </span>
+              ) : (
+                <span className="tabular-nums">
+                  {t(($) => $.workspace.seats.seat_count, {
+                    count: availableSeats,
+                  })}
+                </span>
+              )}
+            </SettingsRow>
+            <SettingsRow
+              label={t(($) => $.workspace.seats.pending)}
+              description={t(($) => $.workspace.seats.pending_description)}
+            >
+              {summaryQuery.isPending ? (
+                <Skeleton
+                  className="h-5 w-28 motion-reduce:animate-none"
+                  aria-label={t(($) => $.workspace.seats.summary_loading)}
+                />
+              ) : summaryUnavailable ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.unavailable)}
+                </span>
+              ) : pendingSeatQuantity === null ? (
+                <span className="text-muted-foreground">
+                  {t(($) => $.workspace.seats.none_pending)}
+                </span>
+              ) : summaryPeriodEnd ? (
+                <span className="tabular-nums">
+                  {t(($) => $.workspace.seats.pending_with_date, {
+                    count: pendingSeatQuantity,
+                    date: summaryPeriodEnd,
+                  })}
+                </span>
+              ) : (
+                <span className="tabular-nums">
+                  {t(($) => $.workspace.seats.seat_count, {
+                    count: pendingSeatQuantity,
+                  })}
+                </span>
+              )}
+            </SettingsRow>
+          </SettingsCard>
+        </SettingsSection>
+      ) : null}
 
       <Dialog
         open={seatPurchaseOpen}
@@ -1688,9 +1614,7 @@ function BillingTabContent() {
                 inputMode="numeric"
                 min={1}
                 max={
-                  billedSeats === null || billedSeats === undefined
-                    ? 10_000
-                    : 10_000 - billedSeats
+                  billedSeats === null ? 10_000 : 10_000 - billedSeats
                 }
                 step={1}
                 value={additionalSeatsInput}

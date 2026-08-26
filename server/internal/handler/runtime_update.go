@@ -211,18 +211,7 @@ func (s *InMemoryUpdateStore) Fail(_ context.Context, id string, errMsg string) 
 // InitiateUpdate creates a new CLI update request (protected route, called by frontend).
 func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
-	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}
@@ -272,17 +261,7 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 // GetUpdate returns the status of an update request (protected route, called by frontend).
 func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
-	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}

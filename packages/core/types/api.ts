@@ -22,6 +22,30 @@ export interface CreateIssueRequest {
   label_ids?: string[];
 }
 
+export interface CreateCommentSubIssueManualRequest {
+  mode: "manual";
+  capture_token: string;
+  issue: CreateIssueRequest;
+}
+
+export interface CreateCommentSubIssueAgentRequest {
+  mode: "agent";
+  capture_token: string;
+  quick_create: {
+    agent_id?: string;
+    squad_id?: string;
+    prompt: string;
+    priority?: IssuePriority;
+    due_date?: string;
+    project_id?: string | null;
+    attachment_ids?: string[];
+  };
+}
+
+export type CreateCommentSubIssueRequest =
+  | CreateCommentSubIssueManualRequest
+  | CreateCommentSubIssueAgentRequest;
+
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
    * baselines so unrelated issue activity does not reject their edits. */

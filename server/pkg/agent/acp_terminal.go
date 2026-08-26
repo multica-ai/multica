@@ -156,11 +156,6 @@ func (c *hermesClient) acpTerminalCreate(params json.RawMessage) (map[string]any
 		cmd = NewCommand("/bin/sh", nil).exec(c.terminalContext(), "-c", p.Command)
 	}
 	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
-	cmd.Cancel = func() error {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		return nil
-	}
 	cmd.Dir = cwd
 	cmd.Env = env
 

@@ -70,4 +70,23 @@ describe("descriptionPreview", () => {
       "open C:\\Users\\zain to continue",
     );
   });
+
+  // The board mounts one preview per card, so an unbounded description makes
+  // every card carry text the clamp will never show. (#6633)
+  it("bounds a long description before it reaches the DOM", () => {
+    const preview = descriptionPreview("a".repeat(600));
+
+    expect(preview).toBe(`${"a".repeat(299)}…`);
+    expect(preview).toHaveLength(300);
+  });
+
+  it("does not split a Unicode surrogate pair at the preview boundary", () => {
+    expect(descriptionPreview(`${"a".repeat(298)}🙂${"b".repeat(300)}`)).toBe(
+      `${"a".repeat(298)}…`,
+    );
+  });
+
+  it("leaves a description at the boundary untouched", () => {
+    expect(descriptionPreview("a".repeat(300))).toBe("a".repeat(300));
+  });
 });

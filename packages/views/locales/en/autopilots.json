@@ -285,6 +285,7 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "section_project": "Project",
+    "project_hint": "Also sets where runs execute — the project's repository or local directory",
     "no_project": "No project",
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",

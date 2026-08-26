@@ -1,9 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "../config";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
+  configStore.getState().setAgentConversationStartersSupported(false);
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient agent conversation-starter compatibility", () => {
+  const prompt = {
+    label: "Review a PR",
+    prompt: "Review the open pull request.",
+  };
+
+  it("rejects create writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.createAgent({
+        name: "Reviewer",
+        runtime_id: "runtime-1",
+        conversation_starters: [prompt],
+      }),
+    ).rejects.toThrow(/server version does not support agent conversation starters/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects update writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.updateAgent("agent-1", { conversation_starters: [prompt] }),
+    ).rejects.toThrow(/server version does not support agent conversation starters/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows declared-capability create and update writes through", async () => {
+    configStore.getState().setAgentConversationStartersSupported(true);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "agent-1" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.createAgent({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      conversation_starters: [prompt],
+    });
+    await client.updateAgent("agent-1", {
+      conversation_starters: [prompt],
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      conversation_starters: [prompt],
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      conversation_starters: [prompt],
+    });
+  });
 });
 
 describe("ApiClient edit guards", () => {

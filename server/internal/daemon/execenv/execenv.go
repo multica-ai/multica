@@ -37,10 +37,12 @@ type ProjectResourceForEnv struct {
 
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
-	WorkspacesRoot string // base path for all envs (e.g., ~/multica_workspaces)
-	WorkspaceID    string // workspace UUID — tasks are grouped under this
-	TaskID         string // task UUID — used for directory name
-	AgentName      string // for git branch naming only
+	WorkspacesRoot  string // base path for all envs (e.g., ~/multica_workspaces)
+	WorkspaceID     string // workspace UUID — stable identity and path suffix
+	WorkspaceSlug   string // human-readable workspace path prefix
+	TaskID          string // task UUID — stable identity and path suffix
+	IssueIdentifier string // human-readable issue key (e.g. MUL-6063); empty for non-issue tasks
+	AgentName       string // for git branch naming only
 	// EnvRootPreclaimed says the CALLER already holds this env root's claim
 	// (see ClaimEnvRoot) and has already reset it. Prepare then skips claiming.
 	//
@@ -350,14 +352,59 @@ type Environment struct {
 	lockFile *os.File
 }
 
-// PredictRootDir returns the env root path that Prepare would create for the
-// given task, without performing any I/O. Callers use this to claim ownership
-// of the directory (e.g. against the GC loop) before Prepare/Reuse runs.
-func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
-	if workspacesRoot == "" || workspaceID == "" || taskID == "" {
+// RootDirParams is the identity and display data used to derive a new task's
+// environment root. IDs provide stable collision-safe suffixes; user-controlled
+// labels are only readable prefixes and never serve as identity.
+type RootDirParams struct {
+	WorkspacesRoot  string
+	WorkspaceID     string
+	WorkspaceSlug   string
+	TaskID          string
+	IssueIdentifier string
+}
+
+// Keep each readable segment within the same aggregate budget as main's
+// <workspace UUID>/<12-char task key> layout. The env root prefixes both the
+// checkout and git ref paths, so every extra character is costly on Windows.
+const readablePathSegmentMax = 24
+
+// PredictRootDir returns the readable path proposed for a task without doing
+// I/O. ResolveRootDir freezes the first proposal and must be used by callers
+// that need the task's authoritative physical root.
+func PredictRootDir(params RootDirParams) string {
+	if params.WorkspacesRoot == "" || params.WorkspaceID == "" || params.TaskID == "" {
 		return ""
 	}
-	return filepath.Join(workspacesRoot, workspaceID, taskKey(taskID))
+	return filepath.Join(
+		params.WorkspacesRoot,
+		readablePathSegment(params.WorkspaceSlug, "workspace", params.WorkspaceID),
+		readablePathSegment(params.IssueIdentifier, "task", params.TaskID),
+	)
+}
+
+// readablePathSegment converts a user-controlled label into a bounded,
+// lowercase ASCII prefix and appends the stable ID suffix. The suffix keeps
+// paths distinct when labels differ only by case, sanitize to the same value,
+// or change later.
+func readablePathSegment(label, fallback, id string) string {
+	prefix := strings.ToLower(strings.TrimSpace(label))
+	prefix = nonAlphanumeric.ReplaceAllString(prefix, "-")
+	prefix = strings.Trim(prefix, "-")
+	if prefix == "" {
+		prefix = fallback
+	}
+
+	// UUIDv7's leading bits are a timestamp shared by burst-created tasks.
+	// taskKey takes the random tail; it is equally suitable for workspace UUIDs.
+	suffix := strings.ToLower(taskKey(id))
+	maxPrefix := readablePathSegmentMax - len(suffix) - 1
+	if len(prefix) > maxPrefix {
+		prefix = strings.TrimRight(prefix[:maxPrefix], "-")
+	}
+	if prefix == "" {
+		prefix = fallback
+	}
+	return prefix + "-" + suffix
 }
 
 // Prepare creates an isolated execution environment for a task.
@@ -374,7 +421,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	envRoot := PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID)
+	envRoot, err := ResolveRootDir(RootDirParams{
+		WorkspacesRoot:  params.WorkspacesRoot,
+		WorkspaceID:     params.WorkspaceID,
+		WorkspaceSlug:   params.WorkspaceSlug,
+		TaskID:          params.TaskID,
+		IssueIdentifier: params.IssueIdentifier,
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	// Self-heal the root-level daemon marker on every task start so a marker
 	// removed while the daemon runs is restored before the agent spawns. The
@@ -409,7 +465,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create env root %s: %w", envRoot, err)
 		}
 	} else {
-		lock, reset, err := claimEnvRoot(envRoot, params.TaskID)
+		lock, reset, err := claimEnvRoot(envRoot, params.WorkspaceID, params.TaskID)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: %w", err)
 		}
@@ -1013,7 +1069,10 @@ const (
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
 // can decide whether the directory is reclaimable. It is a discriminated
-// union keyed on Kind: only the ID field matching Kind is meaningful.
+// union keyed on Kind: only the parent ID field matching Kind is meaningful.
+// TaskID is also persisted for every new task so local reports never need to
+// recover task identity from the directory name; for quick-create it doubles
+// as the parent ID used by the GC status endpoint.
 //
 // Older meta files (pre-v2) lack the Kind field; readers must default empty
 // Kind to GCKindIssue for backward compatibility — only IssueID was written
@@ -1222,12 +1281,15 @@ func (c *EnvRootClaim) Release() {
 // Callers that pass the claim to Prepare must also set
 // PrepareParams.EnvRootPreclaimed, or Prepare will try to take a lock this
 // claim already holds and fail.
-func ClaimEnvRoot(workspacesRoot, workspaceID, taskID string) (*EnvRootClaim, error) {
-	envRoot := PredictRootDir(workspacesRoot, workspaceID, taskID)
+func ClaimEnvRoot(params RootDirParams) (*EnvRootClaim, error) {
+	envRoot, err := ResolveRootDir(params)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: resolve env root: %w", err)
+	}
 	if envRoot == "" {
 		return nil, fmt.Errorf("execenv: claim env root: workspaces root, workspace ID and task ID are all required")
 	}
-	lock, reset, err := claimEnvRoot(envRoot, taskID)
+	lock, reset, err := claimEnvRoot(envRoot, params.WorkspaceID, params.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: %w", err)
 	}
@@ -1313,8 +1375,15 @@ func LockEnvRootForReuse(wsRoot *os.Root, rel, envRoot string) (*EnvRootClaim, o
 	return &EnvRootClaim{rootDir: envRoot, lock: lock}, info, nil
 }
 
-// envRootOwnerFile records which task an env root belongs to: WHO owns it.
+// envRootOwnerFile records which workspace and task an env root belongs to:
+// WHO owns it. The execution lock below separately answers whether that owner
+// is still running.
 const envRootOwnerFile = ".task_owner"
+
+const (
+	envRootOwnerTempPrefix = ".task_owner-"
+	envRootOwnerTempSuffix = ".tmp"
+)
 
 // envRootLockFile carries the env root's exclusive execution lock: whether the
 // owner is STILL RUNNING. The two answer different questions and both are
@@ -1344,7 +1413,7 @@ const envRootLockFile = ".task_lock"
 //
 // Holding the lock also serialises everything below it, which is what makes
 // repairing a torn marker safe: no other execution can be mid-claim.
-func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err error) {
+func claimEnvRoot(envRoot, workspaceID, taskID string) (lockFile *os.File, reset bool, err error) {
 	if err := os.MkdirAll(envRoot, 0o755); err != nil {
 		return nil, false, fmt.Errorf("create env root %s: %w", envRoot, err)
 	}
@@ -1370,18 +1439,28 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 			lockFile = nil
 		}
 	}()
+	if err := removeStaleEnvRootOwnerTemps(envRoot); err != nil {
+		return nil, false, fmt.Errorf("remove stale env root owner temp files for %s: %w", envRoot, err)
+	}
 
-	owner, err := readEnvRootOwner(envRoot)
+	owner, err := ReadEnvRootOwner(envRoot)
 	if err != nil {
 		return nil, false, fmt.Errorf("read env root owner for %s: %w", envRoot, err)
 	}
 	switch {
-	case owner == taskID:
+	case owner.TaskID == taskID && (owner.WorkspaceID == "" || owner.WorkspaceID == workspaceID):
+		// Upgrade legacy task-only markers while the lock makes the rewrite
+		// exclusive. Disk usage can then attribute active roots by workspace.
+		if owner.WorkspaceID == "" {
+			if err := writeEnvRootOwner(envRoot, workspaceID, taskID); err != nil {
+				return nil, false, err
+			}
+		}
 		// Ours, and the execution that left it is provably gone — we hold the
 		// lock it would still be holding.
 		return lockFile, true, nil
-	case owner != "":
-		return nil, false, fmt.Errorf("env root %s belongs to task %s; refusing to reset it for task %s", envRoot, owner, taskID)
+	case owner.TaskID != "":
+		return nil, false, fmt.Errorf("env root %s belongs to task %s in workspace %s; refusing to reset it for task %s in workspace %s", envRoot, owner.TaskID, owner.WorkspaceID, taskID, workspaceID)
 	}
 
 	// No owner recorded. Either the directory is new, or a crash tore the
@@ -1394,7 +1473,7 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 	if hasWork {
 		return nil, false, fmt.Errorf("env root %s already holds files but names no owning task; refusing to delete it", envRoot)
 	}
-	if err := writeEnvRootOwner(envRoot, taskID); err != nil {
+	if err := writeEnvRootOwner(envRoot, workspaceID, taskID); err != nil {
 		return nil, false, err
 	}
 	return lockFile, false, nil
@@ -1423,13 +1502,61 @@ func releaseLockFile(f *os.File) {
 	_ = f.Close()
 }
 
-// writeEnvRootOwner records taskID as the owner. Callers must hold the env
-// root lock, which is what lets this overwrite a marker torn by an earlier
-// crash without racing another execution mid-claim.
-func writeEnvRootOwner(envRoot, taskID string) error {
+// writeEnvRootOwner records authoritative workspace/task identity. Callers
+// must hold the env root lock, which makes overwriting a torn or legacy marker
+// safe from another execution racing mid-claim. The same-directory temp file
+// and rename keep lock-free readers from observing a truncated JSON marker.
+func writeEnvRootOwner(envRoot, workspaceID, taskID string) error {
 	path := filepath.Join(envRoot, envRootOwnerFile)
-	if err := os.WriteFile(path, []byte(taskID), 0o644); err != nil {
-		return fmt.Errorf("record env root owner for %s: %w", envRoot, err)
+	data, err := json.Marshal(EnvRootOwner{WorkspaceID: workspaceID, TaskID: taskID})
+	if err != nil {
+		return fmt.Errorf("encode env root owner for %s: %w", envRoot, err)
+	}
+
+	tmp, err := os.CreateTemp(envRoot, envRootOwnerTempPrefix+"*"+envRootOwnerTempSuffix)
+	if err != nil {
+		return fmt.Errorf("create temp env root owner for %s: %w", envRoot, err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp env root owner for %s: %w", envRoot, err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp env root owner for %s: %w", envRoot, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp env root owner for %s: %w", envRoot, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp env root owner for %s: %w", envRoot, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace env root owner for %s: %w", envRoot, err)
+	}
+	return nil
+}
+
+// removeStaleEnvRootOwnerTemps clears unpublished files left by a process that
+// exited before the atomic rename. Callers hold the env root lock, so no live
+// owner write can be using one of these files.
+func removeStaleEnvRootOwnerTemps(envRoot string) error {
+	entries, err := os.ReadDir(envRoot)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.HasPrefix(name, envRootOwnerTempPrefix) || !strings.HasSuffix(name, envRootOwnerTempSuffix) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(envRoot, name)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1439,14 +1566,40 @@ func writeEnvRootOwner(envRoot, taskID string) error {
 // error, not an empty owner: treating it as unowned would hand the caller a
 // licence to delete the very directory it could not identify.
 func readEnvRootOwner(envRoot string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(envRoot, envRootOwnerFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
+	owner, err := ReadEnvRootOwner(envRoot)
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(b)), nil
+	return owner.TaskID, nil
+}
+
+// EnvRootOwner is written before any task content so active and partially
+// prepared roots retain authoritative identity without completion metadata.
+type EnvRootOwner struct {
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	TaskID      string `json:"task_id"`
+}
+
+// ReadEnvRootOwner reads both current JSON markers and legacy plain task IDs.
+func ReadEnvRootOwner(envRoot string) (*EnvRootOwner, error) {
+	b, err := os.ReadFile(filepath.Join(envRoot, envRootOwnerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return &EnvRootOwner{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	trimmed := strings.TrimSpace(string(b))
+	if !strings.HasPrefix(trimmed, "{") {
+		return &EnvRootOwner{TaskID: trimmed}, nil
+	}
+	var owner EnvRootOwner
+	if err := json.Unmarshal(b, &owner); err != nil {
+		return nil, err
+	}
+	owner.TaskID = strings.TrimSpace(owner.TaskID)
+	owner.WorkspaceID = strings.TrimSpace(owner.WorkspaceID)
+	return &owner, nil
 }
 
 // resetEnvRootContents empties an env root the caller already owns and holds
@@ -1485,5 +1638,14 @@ func envRootHoldsWork(envRoot string) (bool, error) {
 }
 
 func isEnvRootBookkeeping(name string) bool {
-	return name == envRootOwnerFile || name == envRootLockFile
+	if name == envRootOwnerFile || name == envRootLockFile {
+		return true
+	}
+	// An unpublished owner temp is a crash leftover from writeEnvRootOwner, not
+	// task content. claimEnvRoot clears these before it looks, but
+	// findOwnedTaskRoot inspects candidate roots WITHOUT the lock — and reading
+	// one as work makes adoption refuse a root that holds nothing a task could
+	// lose, wedging that task permanently.
+	return strings.HasPrefix(name, envRootOwnerTempPrefix) &&
+		strings.HasSuffix(name, envRootOwnerTempSuffix)
 }

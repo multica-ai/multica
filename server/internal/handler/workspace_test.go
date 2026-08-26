@@ -296,6 +296,13 @@ INSERT INTO channel_media_pending_object (
 )
 VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 `, pendingObjectKey, wsID)
+	const sourceContextObjectKey = "workspace-delete-source-context-object"
+	dbfx.Exec(t, `
+INSERT INTO issue_source_context_object_intent (
+	storage_key, workspace_id, source_context_id, attachment_id, object_url
+)
+VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 's3://workspace-delete/source-context-object')
+`, sourceContextObjectKey, wsID)
 
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, wsID)
@@ -303,6 +310,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/pending-object')
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, runtimeProfileID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot_rule_version WHERE id = $1`, ruleVersionID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_media_pending_object WHERE storage_key = $1`, pendingObjectKey)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context_object_intent WHERE storage_key = $1`, sourceContextObjectKey)
 	})
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -354,6 +362,16 @@ WHERE storage_key = $1
 `, pendingObjectKey).Scan(&pendingObjectState)
 	if pendingObjectState != "deleting" {
 		t.Fatalf("pending channel media object state = %q, want deleting", pendingObjectState)
+	}
+
+	var sourceContextIntentState string
+	dbfx.QueryRow(t, `
+SELECT state
+FROM issue_source_context_object_intent
+WHERE storage_key = $1
+`, sourceContextObjectKey).Scan(&sourceContextIntentState)
+	if sourceContextIntentState != "pending" {
+		t.Fatalf("source context object intent state = %q, want pending durable retry ledger", sourceContextIntentState)
 	}
 }
 

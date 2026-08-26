@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -729,7 +730,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// Parse whatever the verbose command printed, even on a non-zero exit — a
 	// stale config entry can make `opencode models` exit non-zero while still
 	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
-	out, _ := cmd.Output()
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
 	models := parseOpenCodeModels(string(out))
 	if len(models) == 0 {
 		// Verbose yielded nothing usable (unsupported flag, error text, or an
@@ -737,7 +738,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		// but still prints the IDs.
 		cmd = runtimeCmd.exec(runCtx, "models")
 		hideAgentWindow(cmd)
-		out, _ = cmd.Output()
+		out, _ = outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
 	if len(models) == 0 {
@@ -1020,10 +1021,11 @@ func discoverPiModelsRPC(ctx context.Context, runtimeCmd Command, lookedUp strin
 		_ = stdin.Close()
 		return nil, false
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		_ = stdin.Close()
 		return nil, false
 	}
+	defer releaseProcessGroup(cmd)
 
 	encoder := json.NewEncoder(stdin)
 	requests := []map[string]string{
@@ -1175,7 +1177,7 @@ func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, er
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
@@ -1307,7 +1309,7 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--json")
 	hideAgentWindow(cmd)
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil || len(stdout) == 0 {
 		return []Model{}, nil
 	}
@@ -1588,7 +1590,7 @@ func discoverKimiProviderThinking(ctx context.Context, runtimeCmd Command) (map[
 	cmd := runtimeCmd.exec(runCtx, "provider", "list", "--json")
 	hideAgentWindow(cmd)
 	cmd.Stderr = io.Discard
-	raw, err := cmd.Output()
+	raw, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return nil, fmt.Errorf("kimi provider list: %w", err)
 	}
@@ -1918,14 +1920,17 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		return fail("process start", err)
 	}
-	// Ensure the child process is always reaped.
+	// Ensure the child process and everything it spawned are always reaped.
+	// This probe runs on a discovery schedule, so a leaked ACP server here
+	// accumulates rather than showing up once.
 	defer func() {
 		_ = stdin.Close()
-		_ = cmd.Process.Kill()
+		signalProcessGroup(cmd, syscall.SIGKILL)
 		_, _ = cmd.Process.Wait()
+		releaseProcessGroup(cmd)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -2285,7 +2290,7 @@ func discoverAntigravityModels(ctx context.Context, runtimeCmd Command) ([]Model
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return nil, nil
 	}
@@ -2483,7 +2488,7 @@ func discoverCursorModels(ctx context.Context, runtimeCmd Command) (Catalog, err
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "--list-models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
@@ -2580,7 +2585,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	} {
 		cmd := runtimeCmd.exec(runCtx, jsonArgs...)
 		hideAgentWindow(cmd)
-		out, err := cmd.Output()
+		out, err := outputOwned(cmd, runtimeCmd.logger)
 		if err != nil && len(out) == 0 {
 			continue
 		}
@@ -2594,7 +2599,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := runtimeCmd.exec(runCtx, "agents", "list")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}

@@ -432,11 +432,40 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Subscribers are fetched for the whole page in one batched query. An
+	// earlier version passed nil here to dodge an N+1, but the response type
+	// serializes a nil slice as [] rather than omitting it, so every listed
+	// autopilot claimed to have no subscribers while the detail endpoint
+	// reported the real ones — a silently wrong value is worse than a missing
+	// one (MUL-6680). The batch keys off the primary key's leading column, so
+	// this costs one indexed query per page, not one per row.
+	subsByAutopilot := map[string][]db.AutopilotSubscriber{}
+	autopilotIDs := make([]pgtype.UUID, 0, len(autopilots))
+	for _, row := range autopilots {
+		autopilotIDs = append(autopilotIDs, row.Autopilot.ID)
+	}
+	if len(autopilotIDs) > 0 {
+		subs, err := h.Queries.ListAutopilotSubscribersForAutopilots(r.Context(), autopilotIDs)
+		if err != nil {
+			// Fail closed. Degrading to an empty set here would reintroduce
+			// exactly the bug this endpoint was fixed for: subscribers is a
+			// non-omitempty field documented as authoritative, so an empty
+			// value on a failed read is indistinguishable from "none
+			// configured" — and a caller acting on it can overwrite a real
+			// subscriber list. An error the caller can see and retry is the
+			// only honest answer.
+			writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+			return
+		}
+		for _, s := range subs {
+			id := uuidToString(s.AutopilotID)
+			subsByAutopilot[id] = append(subsByAutopilot[id], s)
+		}
+	}
+
 	resp := make([]AutopilotResponse, len(autopilots))
 	for i, row := range autopilots {
-		// Omit subscribers to avoid an N+1; GET /api/autopilots/{id} is
-		// the source of truth for the populated template.
-		r := autopilotToResponse(row.Autopilot, nil)
+		r := autopilotToResponse(row.Autopilot, subsByAutopilot[uuidToString(row.Autopilot.ID)])
 		r.TriggerKinds = row.TriggerKinds
 		if row.NextRunAt.Valid {
 			r.NextRunAt = timestampToPtr(row.NextRunAt)
@@ -466,8 +495,11 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
 	if err != nil {
-		// Don't 500 the detail fetch over template metadata.
-		subs = nil
+		// Fail closed for the same reason the list endpoint does: an empty
+		// subscribers array is a claim, not an absence, and this response is
+		// what clients round-trip back into a full-replace PATCH.
+		writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+		return
 	}
 	resp := autopilotToResponse(autopilot, subs)
 

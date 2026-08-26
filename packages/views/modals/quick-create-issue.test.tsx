@@ -12,6 +12,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 
 const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
+const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -26,6 +27,37 @@ const mockSetManual = vi.hoisted(() => vi.fn());
 const mockSetAgent = vi.hoisted(() => vi.fn());
 const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
+
+const sourceContextPanelData = {
+  anchor_comment_id: "comment-source",
+  source_context_preview: {
+    source_issue: {
+      id: "issue-source",
+      identifier: "MUL-9",
+      number: 9,
+      title: "Source",
+      description: "Historical body",
+      created_at: "2026-08-20T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    },
+    comment_thread: [{
+      id: "comment-source",
+      parent_id: null,
+      type: "comment",
+      content: "Historical comment",
+      author: { type: "member", id: "user-1", name: "Alice" },
+      created_at: "2026-08-21T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    }],
+    anchor_comment_id: "comment-source",
+    capture_token: "sha256:preview-token",
+    limits: { comment_count: 1, text_bytes: 100, attachment_count: 0, attachment_bytes: 0 },
+  },
+};
 
 const emptyIssueDraft = () => ({
   shared: {
@@ -124,6 +156,7 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    createCommentSubIssue: mockCreateCommentSubIssue,
     quickCreateIssue: mockQuickCreateIssue,
     uploadFile: mockApiUploadFile,
   },
@@ -413,8 +446,8 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
   // `disabled` is forwarded so the "can still queue another file mid-upload"
   // guarantee is actually assertable here (MUL-4808).
-  FileUploadButton: ({ disabled }: { disabled?: boolean }) => (
-    <button type="button" disabled={disabled}>Upload file</button>
+  FileUploadButton: ({ disabled, size }: { disabled?: boolean; size?: string }) => (
+    <button type="button" disabled={disabled} data-size={size}>Upload file</button>
   ),
 }));
 
@@ -429,10 +462,11 @@ import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
 import enProjects from "../locales/en/projects.json";
+import enIssues from "../locales/en/issues.json";
 import { AgentCreatePanel } from "./quick-create-issue";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects },
+  en: { common: enCommon, modals: enModals, editor: enEditor, projects: enProjects, issues: enIssues },
 };
 
 function renderPanel(props: React.ComponentProps<typeof AgentCreatePanel>) {
@@ -470,6 +504,7 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
+    mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
     mockApiUploadFile.mockResolvedValue({
       id: "019ec09d-6222-722b-bdfa-427b105d80be",
       workspace_id: "ws-test",
@@ -970,6 +1005,60 @@ describe("AgentCreatePanel", () => {
     expect(screen.queryByTestId("agent-sub-issue-chip")).toBeNull();
   });
 
+  it("keeps captured context separate from the upstream prompt scroller", () => {
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: sourceContextPanelData,
+    });
+
+    const prompt = screen.getByPlaceholderText(
+      'Tell the agent what to do with this context, e.g. "continue investigating and fix the issue described here"',
+    ).parentElement;
+    const sourceContext = document.querySelector<HTMLElement>('[data-slot="source-context-preview"]');
+
+    expect(prompt).toHaveClass("flex-1", "min-h-[140px]", "overflow-y-auto");
+    expect(sourceContext).toHaveClass("shrink-0");
+    expect(prompt?.parentElement).toBe(sourceContext?.parentElement);
+    expect(prompt?.nextElementSibling).toBe(sourceContext);
+    expect(prompt).not.toContainElement(sourceContext);
+  });
+
+  it("submits source-context agent create through the dedicated endpoint", async () => {
+    const user = userEvent.setup();
+    renderPanel({
+      onClose: vi.fn(),
+      isExpanded: false,
+      setIsExpanded: vi.fn(),
+      data: {
+        ...sourceContextPanelData,
+        parent_issue_id: "parent-uuid-1",
+        parent_issue_identifier: "MUL-9",
+      },
+    });
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do with this context, e.g. "continue investigating and fix the issue described here"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Investigate with captured context");
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => expect(mockCreateCommentSubIssue).toHaveBeenCalledWith(
+      "comment-source",
+      {
+        mode: "agent",
+        capture_token: "sha256:preview-token",
+        quick_create: expect.objectContaining({
+          agent_id: "agent-1",
+          prompt: "Investigate with captured context",
+        }),
+      },
+    ));
+    expect(mockQuickCreateIssue).not.toHaveBeenCalled();
+  });
+
   // MUL-4808 — Quick Create already gated Create; these pin the two gaps:
   // the mode switch (which re-serializes the prompt into the manual draft)
   // and the file button that used to lock during an upload for no reason.
@@ -1073,6 +1162,7 @@ describe("AgentCreatePanel", () => {
       expect(create.parentElement).toBe(footer);
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
+      expect(attach).toHaveAttribute("data-size", "sm");
     });
 
     it("hides the send keycaps below the sm breakpoint", () => {

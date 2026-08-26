@@ -712,6 +712,22 @@ WHERE s.autopilot_id = $1
   AND s.user_type = 'member'
 ORDER BY s.created_at ASC, s.user_id ASC;
 
+-- name: ListAutopilotSubscribersForAutopilots :many
+-- Batch form of ListAutopilotSubscribers for the list endpoint, which must not
+-- issue one query per row. The autopilot_subscriber primary key leads with
+-- autopilot_id, so ANY($1) is index-supported and no extra index is needed.
+-- The member join and ordering are identical to the single-autopilot query on
+-- purpose: list and detail have to agree on who counts as a subscriber, or the
+-- two projections disagree again (MUL-6680).
+SELECT s.* FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = ANY($1::uuid[])
+  AND s.user_type = 'member'
+ORDER BY s.autopilot_id ASC, s.created_at ASC, s.user_id ASC;
+
 -- name: AddAutopilotSubscriber :exec
 INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
 VALUES ($1, $2, $3)

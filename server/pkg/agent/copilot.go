@@ -365,7 +365,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[copilot:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start copilot: %w", err)
 	}
@@ -415,6 +415,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {

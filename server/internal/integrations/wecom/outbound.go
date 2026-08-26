@@ -44,7 +44,7 @@ import (
 // outboundQueries is the slice of generated queries the WeCom outbound
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
@@ -144,16 +144,6 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks carry no chat_session.
 		return nil
 	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   channelTypeWecom,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // not a wecom session (Slack / Lark / web-only)
-		}
-		return fmt.Errorf("wecom: lookup chat binding: %w", err)
-	}
 	// An empty completion normally ends the turn here. It does not when the
 	// agent produced a file and said nothing about it: the platform writes an
 	// assistant message for exactly that case, and returning now would throw
@@ -180,6 +170,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if !ok {
 		return nil
 	}
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("wecom: lookup task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeWecom {
+		return nil
+	}
+	binding := wecomBindingFromTaskDelivery(delivery)
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -238,6 +239,16 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		ChatType:       chatType,
 	})
 	return nil
+}
+
+func wecomBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType:      delivery.ChatType,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		RouteRevision: delivery.RouteRevision, Config: delivery.Config,
+	}
 }
 
 // chatDoneTaskID recovers the task id an EventChatDone belongs to. The

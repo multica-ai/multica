@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -93,6 +95,26 @@ type SkillFileResponse struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// SkillFileMetadataResponse is the file-listing shape: everything
+// SkillFileResponse has except `content`, plus the size and hash that answer
+// "which file makes this skill big?" without downloading any of it.
+//
+// A ~600KB skill could not be listed at all while every row carried its full
+// body, so the one command that would have diagnosed the problem was itself a
+// casualty of it (GH multica-ai/multica#7498). A list endpoint lists.
+type SkillFileMetadataResponse struct {
+	ID      string `json:"id"`
+	SkillID string `json:"skill_id"`
+	Path    string `json:"path"`
+	// Size is the byte length of the file body, computed in Postgres.
+	Size int64 `json:"size"`
+	// ContentHash is the hex SHA-256 of the file body. Callers that cache
+	// skill files can use it to skip an unchanged download.
+	ContentHash string `json:"content_hash"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type SkillSearchCandidateResponse struct {
 	Name         string  `json:"name"`
 	URL          string  `json:"url"`
@@ -106,6 +128,19 @@ type SkillSearchCandidateResponse struct {
 type SkillWithFilesResponse struct {
 	SkillResponse
 	Files []SkillFileResponse `json:"files"`
+}
+
+// SkillWithFileMetadataResponse is `GET /api/skills/{id}?include=metadata`:
+// the skill without its SKILL.md body, and its files without theirs. Sizes and
+// hashes stand in for the content that was dropped, so a caller can still see
+// how large the skill is and which part of it is large.
+type SkillWithFileMetadataResponse struct {
+	SkillSummaryResponse
+	// ContentSize / ContentHash describe the SKILL.md body that `content`
+	// would have carried.
+	ContentSize int64                       `json:"content_size"`
+	ContentHash string                      `json:"content_hash"`
+	Files       []SkillFileMetadataResponse `json:"files"`
 }
 
 type SkillImportResult struct {
@@ -210,6 +245,26 @@ func skillFileToResponse(f db.SkillFile) SkillFileResponse {
 		CreatedAt: timestampToString(f.CreatedAt),
 		UpdatedAt: timestampToString(f.UpdatedAt),
 	}
+}
+
+func skillFileMetadataToResponse(f db.ListSkillFileMetadataRow) SkillFileMetadataResponse {
+	return SkillFileMetadataResponse{
+		ID:          uuidToString(f.ID),
+		SkillID:     uuidToString(f.SkillID),
+		Path:        f.Path,
+		Size:        f.Size,
+		ContentHash: f.ContentHash,
+		CreatedAt:   timestampToString(f.CreatedAt),
+		UpdatedAt:   timestampToString(f.UpdatedAt),
+	}
+}
+
+// contentHash is the hex SHA-256 the metadata shapes report in place of a
+// body. It matches Postgres `encode(sha256(content::bytea), 'hex')`, so a
+// SKILL.md hash computed here and a file hash computed in SQL are comparable.
+func contentHash(content string) string {
+	sum := sha256.Sum256([]byte(content))
+	return hex.EncodeToString(sum[:])
 }
 
 // --- Request structs ---
@@ -324,10 +379,55 @@ func (h *Handler) SearchSkills(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, candidates)
 }
 
+// Values for the `include` query parameter shared by the skill detail and
+// skill-file list endpoints.
+const (
+	skillIncludeContent  = "content"
+	skillIncludeMetadata = "metadata"
+)
+
+// resolveSkillInclude reads `?include=`. `content` inlines the SKILL.md body
+// and every file body; `metadata` returns path/size/hash only.
+//
+// A request that says nothing keeps getting content, on both endpoints. The
+// clients that call them are installed software — desktop builds for the skill
+// editor, older CLI versions whose `skill files list --output json` scripts
+// read `content` — and none of them can be asked retroactively to send a query
+// parameter. Flipping a default here would make a server deploy silently
+// change what an un-upgraded client receives, which no client-side change can
+// prevent.
+//
+// So the shrink is opt-in and travels with the caller: the CLI sends
+// `include=metadata` itself, which fixes GH #7498 without requiring the server
+// and every client to ship together. The default can flip once clients that
+// send `include=content` have aged in.
+func resolveSkillInclude(w http.ResponseWriter, r *http.Request) (bool, bool) {
+	switch strings.TrimSpace(r.URL.Query().Get("include")) {
+	case "":
+		return true, true
+	case skillIncludeContent:
+		return true, true
+	case skillIncludeMetadata:
+		return false, true
+	default:
+		writeError(w, http.StatusBadRequest, `invalid include: expected "content" or "metadata"`)
+		return false, false
+	}
+}
+
 func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	includeContent, ok := resolveSkillInclude(w, r)
+	if !ok {
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !includeContent {
+		h.writeSkillMetadata(w, r, skill)
 		return
 	}
 
@@ -345,6 +445,33 @@ func (h *Handler) GetSkill(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, SkillWithFilesResponse{
 		SkillResponse: skillToResponse(skill),
 		Files:         fileResps,
+	})
+}
+
+// writeSkillMetadata answers GET /api/skills/{id}?include=metadata. The skill
+// row is already loaded (loadSkillForUser needs it for the tenant check), so
+// the SKILL.md size and hash cost nothing extra; only the file bodies are
+// worth a separate metadata query.
+func (h *Handler) writeSkillMetadata(w http.ResponseWriter, r *http.Request, skill db.Skill) {
+	files, err := h.Queries.ListSkillFileMetadata(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list skill files")
+		return
+	}
+
+	fileResps := make([]SkillFileMetadataResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileMetadataToResponse(f)
+	}
+
+	writeJSON(w, http.StatusOK, SkillWithFileMetadataResponse{
+		SkillSummaryResponse: skillSummaryToResponse(
+			skill.ID, skill.WorkspaceID, skill.Name, skill.Description,
+			skill.Config, skill.CreatedBy, skill.CreatedAt, skill.UpdatedAt,
+		),
+		ContentSize: int64(len(skill.Content)),
+		ContentHash: contentHash(skill.Content),
+		Files:       fileResps,
 	})
 }
 
@@ -2302,8 +2429,26 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 
 func (h *Handler) ListSkillFiles(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	includeContent, ok := resolveSkillInclude(w, r)
+	if !ok {
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, id)
 	if !ok {
+		return
+	}
+
+	if !includeContent {
+		metadata, err := h.Queries.ListSkillFileMetadata(r.Context(), skill.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list skill files")
+			return
+		}
+		resp := make([]SkillFileMetadataResponse, len(metadata))
+		for i, f := range metadata {
+			resp[i] = skillFileMetadataToResponse(f)
+		}
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 

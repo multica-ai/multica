@@ -28,7 +28,6 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_ENTITLEMENT_SERVICE_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # External postgres (postgres.external.enabled=true):
@@ -39,7 +38,6 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
-#     --from-literal=MULTICA_ENTITLEMENT_SERVICE_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # The chart references this Secret by name; it does not template it, so real
@@ -137,17 +135,10 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
-    # Managed Cloud policy consumer. The public/self-host chart keeps this off
-    # by default, which also guarantees no quota-table access. To enable it,
-    # set enabled=true and url to multica-cloud's HTTPS internal base URL, then
-    # put a matching 32+ byte MULTICA_ENTITLEMENT_SERVICE_TOKEN in existingSecret.
-    entitlementPolicy:
-      enabled: false
+    # Managed multica-cloud connection. Empty keeps self-hosting independent.
+    # Fleet, Billing, entitlement policy and strict seat capacity share it.
+    cloud:
       url: ""
-      timeout: 3s
-      staleGrace: 15m
-      # Local down switch applied by the next chart rollout; it only forces off.
-      emergencyDisabled: false
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""
@@ -232,4 +223,7 @@ monitoring:
     additionalLabels: {}
     samplerQueryErrorsFor: 5m
     samplerQueryLatencyFor: 10m
+    seatCapacityDeadLetteredFor: 5m
+    seatCapacityPendingAgeSeconds: 900
+    seatCapacityPendingFor: 5m
     severity: warning

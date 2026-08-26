@@ -20,9 +20,9 @@ export type AutopilotUsageView =
 
 /**
  * Quota admission counts completed and reserved runs. Keep reserved work
- * visible so the progress bar matches the server's blocking decision. A
- * complete metered response is authoritative independently of entitlement
- * state; only the unlimited fallback comes from the entitlement response.
+ * visible so the progress bar matches the server's blocking decision for a
+ * limited workspace. A trusted Pro entitlement is authoritative for plan
+ * limits because the server enforcement policy may lag a subscription change.
  */
 export function resolveAutopilotUsage(
   entitlements: WorkspaceSubscriptionEntitlements,
@@ -30,6 +30,14 @@ export function resolveAutopilotUsage(
   failed: boolean,
   allowEntitlementUnlimited: boolean,
 ): AutopilotUsageView {
+  if (
+    allowEntitlementUnlimited &&
+    entitlements.plan === "pro" &&
+    entitlements.autopilotRuns === null
+  ) {
+    return { kind: "unlimited" };
+  }
+
   if (!failed && usage !== undefined && usage.action !== "off") {
     const { used, reserved, limit, reset_at: resetAt } = usage;
     if (
@@ -64,27 +72,8 @@ export function resolveAutopilotUsage(
     }
   }
 
-  if (
-    allowEntitlementUnlimited &&
-    entitlements.plan === "pro" &&
-    entitlements.autopilotRuns === null
-  ) {
-    return { kind: "unlimited" };
-  }
-
   return { kind: "unavailable" };
 }
-
-const MANAGED_SUBSCRIPTION_STATUSES = new Set([
-  "active",
-  "trialing",
-  "past_due",
-  "canceled",
-  "incomplete",
-  "incomplete_expired",
-  "paused",
-  "unpaid",
-]);
 
 const PURCHASABLE_SUBSCRIPTION_STATUSES = new Set([
   "inactive",
@@ -92,20 +81,16 @@ const PURCHASABLE_SUBSCRIPTION_STATUSES = new Set([
   "incomplete_expired",
 ]);
 
-/**
- * Summary facts are primary. Plan and status are compatibility fallbacks so
- * an older or temporarily unavailable summary does not hide the recovery UI.
- */
-export function hasManagedWorkspaceSubscription(
-  entitlements: WorkspaceSubscriptionEntitlements,
+export function hasActiveWorkspaceSeatCapacity(
   summary: WorkspaceSubscriptionSummary | null | undefined,
 ): boolean {
-  return (
-    summary?.hasStripeCustomer === true ||
-    summary?.billedSeats !== null && summary?.billedSeats !== undefined ||
-    entitlements.plan === "pro" ||
-    MANAGED_SUBSCRIPTION_STATUSES.has(entitlements.status)
-  );
+  return summary?.seatCapacity != null;
+}
+
+export function hasWorkspaceBillingRelationship(
+  summary: WorkspaceSubscriptionSummary | null | undefined,
+): boolean {
+  return summary?.hasStripeCustomer === true;
 }
 
 /**

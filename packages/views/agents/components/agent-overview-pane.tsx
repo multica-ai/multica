@@ -426,9 +426,7 @@ export function AgentOverviewPane({
                   {effectiveView === "instructions" && (
                     <InstructionsTab
                       agent={agent}
-                      onSave={(instructions) =>
-                        onUpdate(agent.id, { instructions })
-                      }
+                      onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />
                   )}
@@ -436,6 +434,7 @@ export function AgentOverviewPane({
                     <SkillsTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
                       canEdit={canEdit}
                     />
                   )}
@@ -443,6 +442,7 @@ export function AgentOverviewPane({
                     <McpConfigTab
                       agent={agent}
                       runtime={runtime}
+                      currentUserId={currentUserId}
                       canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}

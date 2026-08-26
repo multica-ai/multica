@@ -49,4 +49,22 @@ describe("AgentSchema invocation permissions", () => {
     expect(parsed.runtime_id).toBe("");
     expect(parsed.runtime_bound).toBe(false);
   });
+
+  it("parses conversation starters and degrades malformed additive data", () => {
+    expect(
+      AgentSchema.parse({
+        id: "agent-1",
+        conversation_starters: [
+          { label: "Review a PR", prompt: "Review the open pull request." },
+        ],
+      }).conversation_starters,
+    ).toEqual([
+      { label: "Review a PR", prompt: "Review the open pull request." },
+    ]);
+
+    expect(
+      AgentSchema.parse({ id: "agent-1", conversation_starters: "invalid" })
+        .conversation_starters,
+    ).toEqual([]);
+  });
 });

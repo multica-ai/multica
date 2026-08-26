@@ -97,7 +97,6 @@
       "upgrade": "Upgrade to Pro",
       "manage": "Manage billing",
       "add_seats": "Add seats",
-      "refresh_seats": "Refresh seats",
       "cancel": "Cancel",
       "continue_to_stripe": "Continue to Stripe"
     },
@@ -110,9 +109,7 @@
       "checkout_failed": "Checkout could not be created. Retry in a moment.",
       "portal_response": "The Billing Portal could not open because the server response was unreadable.",
       "portal_unavailable": "The Billing Portal is not available for this workspace. The current plan has been refreshed.",
-      "portal_failed": "The Billing Portal could not be opened. Retry in a moment.",
-      "reconcile_response": "Seats were refreshed, but the result could not be read. Reload the page to confirm the current count.",
-      "reconcile_failed": "Seats could not be refreshed. Member changes are still saved and periodic reconciliation will retry."
+      "portal_failed": "The Billing Portal could not be opened. Retry in a moment."
     },
     "return": {
       "cancel_title": "Checkout canceled",
@@ -225,8 +222,10 @@
       "summary_loading": "Loading subscription seat details",
       "summary_unavailable_title": "Some seat details are unavailable",
       "summary_unavailable_description": "The current plan is still shown, but purchased and scheduled seat quantities could not be loaded.",
-      "updated": "Seats refreshed",
-      "reconciled": "Current members: {{actual}} · billed seats: {{billed}}"
+      "members_over_capacity_title": "Members exceed purchased seats",
+      "members_over_capacity_description": "This workspace has {{actual}} members but only {{purchased}} purchased seats. Add enough seats or remove members before sending more invitations.",
+      "occupancy_over_capacity_description": "This workspace occupies {{occupied}} of {{purchased}} purchased seats ({{members}} members and {{reserved}} pending invitations). Add seats, remove a member, or revoke a pending invitation before inviting someone else.",
+      "updated": "Seat purchase submitted"
     },
     "seat_purchase": {
       "title": "Add seats",
@@ -253,7 +252,7 @@
       "pending_description_other": "Stripe is confirming the subscription update to {{count}} seats.",
       "delayed_title": "Seat confirmation is taking longer than expected",
       "delayed_description": "Automatic checking has stopped. The purchase may still complete; check again later or contact support before starting another purchase.",
-      "delayed_description_with_expiry": "Automatic checking has stopped. If the attempt is still pending after {{date}}, refresh seats to release it and request a new quote; contact support before starting another purchase.",
+      "delayed_description_with_expiry": "Automatic checking has stopped. If the attempt is still pending after {{date}}, reload this page before requesting another quote; contact support if it remains pending.",
       "submitted_one": "A purchase for {{count}} seat was submitted. The new capacity appears after Stripe confirms it.",
       "submitted_other": "A purchase for {{count}} seats was submitted. The new capacity appears after Stripe confirms it.",
       "error_title": "Could not update the estimate"
