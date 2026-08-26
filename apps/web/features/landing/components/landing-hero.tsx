@@ -111,6 +111,7 @@ function LandingBackdrop() {
         fill
         preload
         className="object-cover object-center"
+        sizes="100vw"
       />
     </div>
   );
