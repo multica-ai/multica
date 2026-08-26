@@ -40,12 +40,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 누가 신원을 얻는가
 
-신원은 실행의 귀속 정보에서 오며, **정밀한 출처만 서명됩니다** —— 아무도 승인하지 않은 실행은 토큰을 받지 못하고, 실행은 정상적으로 진행되며, 토큰이 필요했던 쪽에는 일반적인 "미인가"가 보일 뿐 작업 실패가 되지 않습니다.
+신원은 그 실행을 **승인한 사람**에게서 옵니다 —— `originator_user_id`에 기록되며, 아무도 권한을 빌려주지 않았다면 NULL입니다. 그 옆의 감사 레이블은 오토파일럿을 포함한 거의 모든 실행에 대해 사람을 찾아내지만, 그것은 레이블일 뿐 승인이 아니며 서명의 근거도 아닙니다. 아무도 승인하지 않은 실행은 토큰을 받지 못하고, 실행은 정상적으로 진행되며, 토큰이 필요했던 쪽에는 일반적인 "미인가"가 보일 뿐 작업 실패가 되지 않습니다.
 
 | 출처 | 서명 |
 | --- | --- |
-| `direct_human`, `delegation`, `comment_source`, `trigger_owner`, `rule_owner` | 예 |
+| `direct_human`, `delegation`, `comment_source` | 예 |
+| `trigger_owner`, `rule_owner` —— 오토파일럿 트리거가 스스로 발화 | 아니오 |
 | `owner_fallback`, `backfill`, `unattributed` | 아니오 |
+
+토큰은 주입할 수 있다고 알린 daemon(`task-identity-tokens-v1`)에게만 서명됩니다. 기능을 켜기 전에 daemon을 먼저 업그레이드하세요 —— 오래된 daemon에게 발행하면 아무도 받지 못한 발행 기록만 감사에 남습니다.
 
 서명이 성공할 때마다 활동 로그에 `agent_task_tokens_issued` 행이 기록됩니다 —— 책임자, 에이전트, task, 각 토큰의 `jti`와 만료 시각. 그리고 fail-closed입니다. 이 행을 쓸 수 없으면 토큰은 발급되지 않습니다.
 

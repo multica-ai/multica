@@ -3,8 +3,8 @@
 Let an agent act on your internal systems **as the person who asked**, instead
 of as a shared service account.
 
-At claim time the server signs a short-lived JWT naming the run's accountable
-human, and the daemon injects it into the agent process. The agent presents
+At claim time the server signs a short-lived JWT naming the human who
+authorized the run, and the daemon injects it into the agent process. The agent presents
 that token to your ERP, wiki, or admin backend, which sees a request from that
 person and applies the permissions it already has for them.
 
@@ -15,6 +15,7 @@ Off unless configured. An unconfigured deployment behaves exactly as before.
 - [Configuration](#configuration)
 - [Enabling tokens for an agent](#enabling-tokens-for-an-agent)
 - [Who gets an identity](#who-gets-an-identity)
+- [Daemon support](#daemon-support)
 - [Verifying tokens in your system](#verifying-tokens-in-your-system)
 - [Security boundaries](#security-boundaries)
 - [Troubleshooting](#troubleshooting)
@@ -50,12 +51,13 @@ instead of a shared bot.
  ┌───────────────────────────────────────────────────────────────────┐
  │ Multica server                                                    │
  │                                                                   │
- │  1. Claim: who is accountable for this run?                       │
- │     Read the task's attribution — accountable_user_id and         │
- │     originator_source — the same waterfall the activity UI shows. │
+ │  1. Claim: which human authorized this run?                       │
+ │     Read originator_user_id — the authorization column — not      │
+ │     accountable_user_id, which is an audit label that names       │
+ │     someone even when nobody authorized anything.                 │
  │                                                                   │
- │       precise source   → continue                                 │
- │       degraded source  → issue nothing, run proceeds without      │
+ │       a human authorized it → continue                            │
+ │       nobody did            → issue nothing, run proceeds without │
  │                                                                   │
  │  2. For each template this agent has enabled:                     │
  │     interpolate {{identity.*}} into the claims, sign a JWT        │
@@ -175,8 +177,11 @@ openssl ecparam -genkey -name prime256v1 -noout \
 | `manifest` | no | Opaque JSON, copied through verbatim. See below. |
 
 **The whole catalog is validated at startup.** An unknown variable, a bad env
-name, a TTL over the maximum, a reserved claim — the server refuses to boot
-rather than run on half a configuration and emit an empty claim at 3am.
+name, a TTL over the maximum, a reserved claim, two templates sharing one `env`
+(the second would silently replace the first's token), a manifest variable
+named after a template's `env`, or an `algorithm` the configured key cannot
+produce (`RS256` with an EC key) — the server refuses to boot rather than run
+on half a configuration and fail at 3am.
 
 ### Interpolation variables
 
@@ -239,24 +244,34 @@ agent environment variables — and every change lands in the activity log.
 
 ## Who gets an identity
 
-The identity comes from the run's attribution, and only a **precise** source is
-signed:
+A token is signed only for a run **a human authorized**. Multica records that
+in `originator_user_id`, which is NULL whenever nobody lent their authority.
+That column, not the audit label beside it, decides:
 
 | Source | Signed | Meaning |
 | --- | --- | --- |
 | `direct_human` | yes | A person acted |
 | `delegation` | yes | A person delegated |
 | `comment_source` | yes | Traced to a person's comment |
-| `trigger_owner` | yes | The trigger's owner |
-| `rule_owner` | yes | The rule's owner |
+| `trigger_owner` | **no** | An autopilot trigger fired on its own |
+| `rule_owner` | **no** | Same, with the rule's publisher as the audit label |
 | `owner_fallback` | **no** | Nobody authorized this; the owner is a guess |
 | `backfill` | **no** | Reconstructed after the fact |
 | `unattributed` | **no** | Unknown |
 
-Signing on a degraded source would lend the agent owner's identity to work
-nobody asked for. A run with no precise accountable human simply gets no token,
-proceeds normally, and whatever needed the token sees an ordinary
-"unauthorized" — never a task failure.
+The autopilot rows are the ones worth understanding, because the activity UI
+*does* name a human for them — whoever armed the trigger or published the rule.
+That name is an audit label, resolvable for every run by design; it is not a
+statement that the person asked for this run. A schedule firing at 3am carries
+no authorization from anyone, and signing there would give an unattended run
+that person's full permissions in your systems, on input they never saw. So it
+is refused, for the same reason `owner_fallback` is.
+
+A run with no authorizing human simply gets no token, proceeds normally, and
+whatever needed the token sees an ordinary "unauthorized" — never a task
+failure. If you want a scheduled run to reach an internal system, give that
+system its own service account for that job: the point of this feature is that
+a *person's* authority is only ever lent to work that person asked for.
 
 **Every issuance is audited in-product.** Each time tokens are minted for a
 run, an `agent_task_tokens_issued` row lands in the activity log, tied to the
@@ -265,6 +280,20 @@ run's issue, recording the accountable human, the agent, the task, and the
 receiving system that logs it can be joined against Multica's activity log
 end-to-end. If the audit row cannot be written, the tokens are withheld — a
 credential minted in someone's name is never invisible to them.
+
+## Daemon support
+
+Tokens are only signed for a daemon that advertises it can inject them
+(`task-identity-tokens-v1`). A daemon older than that support silently ignores
+the field, so issuing for one would write an "a credential was minted for
+Alice" audit row for a token that never reached a process — worse than no row
+at all. The server therefore checks first and signs nothing.
+
+**Upgrade order: daemons first, then enable the feature.** If you enable it
+while a runtime is still on an older daemon, its runs simply get no tokens and
+nothing is logged as issued; upgrading that daemon starts issuance with no
+further server change. Runs already in flight keep whatever environment they
+started with.
 
 ## Verifying tokens in your system
 
@@ -369,9 +398,11 @@ and never any private component.
 | --- | --- |
 | Server refuses to start, complains about the catalog | A template is invalid. The message names the entry and the field; the catalog is all-or-nothing on purpose. |
 | Server refuses to start: "catalog is configured but the private key is empty" | Only one of the two variables is set. |
+| Server refuses to start: "needs an EC private key" / "needs a P-256 key" | A template's `algorithm` does not match the configured key. Change one of the two; the check exists so this fails at boot instead of on every task. |
+| Server refuses to start: "env … is already used by template" | Two templates share one `env`, or the manifest variable is named after a template's. Each token needs its own variable. |
 | `/.well-known/jwks.json` returns 404 | The feature is not configured on this server. |
 | Identity Tokens tab is missing | Same — the tab is hidden when the catalog is unset. |
-| No token in the agent's environment | The agent has none enabled, the run had no precise accountable human, or the identity's email domain is outside the template's `allowed_domains`. The server logs the reason with the task id. Runs that did receive tokens carry an `agent_task_tokens_issued` row in the activity log; a run without that row was issued nothing. |
+| No token in the agent's environment | The agent has none enabled, no human authorized the run (an autopilot trigger, for instance), the daemon is older than the injection support, or the identity's email domain is outside the template's `allowed_domains`. The server logs the reason with the task id. Runs that did receive tokens carry an `agent_task_tokens_issued` row in the activity log; a run without that row was issued nothing. |
 | The variable holds a different value than expected | An agent's own `custom_env` wins over an injected token, by design. |
 | Verifier reports "no matching key" | The template has no `key_id`, so its tokens carry no `kid`. Either configure one, or have the verifier fall back to the kid-less entry the set publishes for exactly this case. |
 | Verifier reports a malformed EC coordinate | Not from this server — `x` and `y` are padded to the curve size. Check for a proxy rewriting the response. |

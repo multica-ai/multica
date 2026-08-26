@@ -40,12 +40,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 谁会获得身份
 
-身份来自这次运行的归因，而且**只有精确来源才会被签发** —— 一个没有人授权的运行不会拿到令牌，运行照常进行，需要令牌的那一方看到的是普通的「未授权」，绝不会变成任务失败。
+身份来自**授权**这次运行的人 —— 记在 `originator_user_id` 里，没有人出借权限时该列为 NULL。旁边那个审计标签几乎能为每次运行解析出一个人，自动驾驶触发的也不例外；那是标签而不是授权，也不是签发的依据。没有人授权的运行不会拿到令牌，运行照常进行，需要令牌的那一方看到的是普通的「未授权」，绝不会变成任务失败。
 
 | 来源 | 是否签发 |
 | --- | --- |
-| `direct_human`、`delegation`、`comment_source`、`trigger_owner`、`rule_owner` | 是 |
+| `direct_human`、`delegation`、`comment_source` | 是 |
+| `trigger_owner`、`rule_owner` —— 自动驾驶触发器自行触发 | 否 |
 | `owner_fallback`、`backfill`、`unattributed` | 否 |
+
+只有声明自己能注入令牌（`task-identity-tokens-v1`）的 daemon 才会拿到签发，所以启用该功能前先升级 daemon：给旧 daemon 签发，只会在审计里留下一条谁都没收到的签发记录。
 
 每次成功签发都会往活动日志写一行 `agent_task_tokens_issued` —— 问责人、智能体、task，以及每枚令牌的 `jti` 和过期时间 —— 并且 fail-closed：这行写不进去，令牌就不发。
 

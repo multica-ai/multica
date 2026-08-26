@@ -40,12 +40,15 @@ Named precisely, this is **delegated user impersonation** in the [RFC 8693](http
 
 ## Who gets an identity
 
-The identity comes from the run's attribution, and **only a precise source is signed** — a run that no human authorized gets no token, proceeds normally, and whatever needed the token sees an ordinary "unauthorized", never a task failure.
+The identity comes from the human who **authorized** the run — recorded in `originator_user_id`, which is NULL whenever nobody lent their authority. The audit label beside it resolves a human for almost every run, autopilot included; that is a label, not authorization, and it is not what gets signed. A run nobody authorized gets no token, proceeds normally, and whatever needed the token sees an ordinary "unauthorized", never a task failure.
 
 | Source | Signed |
 | --- | --- |
-| `direct_human`, `delegation`, `comment_source`, `trigger_owner`, `rule_owner` | yes |
+| `direct_human`, `delegation`, `comment_source` | yes |
+| `trigger_owner`, `rule_owner` — an autopilot trigger fired on its own | no |
 | `owner_fallback`, `backfill`, `unattributed` | no |
+
+Tokens are only signed for a daemon that advertises it can inject them (`task-identity-tokens-v1`), so upgrade daemons before enabling the feature: issuing for an older one would record an issuance nothing ever received.
 
 Every successful issuance writes an `agent_task_tokens_issued` row to the activity log — the accountable human, the agent, the task, and each token's `jti` and expiry — and fails closed: if that row cannot be written, the tokens are withheld.
 

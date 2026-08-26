@@ -40,12 +40,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 誰が身元を得るか
 
-身元は実行の帰属情報から来ます。そして**精密な発生源のみが署名対象**です —— 誰も承認していない実行はトークンを得ず、実行はそのまま進み、トークンを必要とした側には通常の「未認可」が見えるだけで、タスク失敗にはなりません。
+身元は、その実行を**承認した人間**から来ます —— `originator_user_id` に記録され、誰も権限を貸していなければ NULL です。その隣の監査ラベルは、オートパイロットを含むほぼすべての実行について人間を解決しますが、それはラベルであって承認ではなく、署名の根拠でもありません。誰も承認していない実行はトークンを得ず、実行はそのまま進み、トークンを必要とした側には通常の「未認可」が見えるだけで、タスク失敗にはなりません。
 
 | 発生源 | 署名 |
 | --- | --- |
-| `direct_human`、`delegation`、`comment_source`、`trigger_owner`、`rule_owner` | あり |
+| `direct_human`、`delegation`、`comment_source` | あり |
+| `trigger_owner`、`rule_owner` —— オートパイロットのトリガーが自ら発火 | なし |
 | `owner_fallback`、`backfill`、`unattributed` | なし |
+
+トークンは、注入できると宣言した daemon（`task-identity-tokens-v1`）に対してのみ署名されます。機能を有効化する前に daemon を更新してください —— 古い daemon 向けに発行すると、誰も受け取っていない発行だけが監査に残ります。
 
 署名が成功するたびに、アクティビティログに `agent_task_tokens_issued` 行が書き込まれます —— 説明責任者、エージェント、task、各トークンの `jti` と有効期限。そして fail-closed です。この行が書けなければトークンは発行されません。
 
