@@ -150,7 +150,7 @@
     "returning_subtitle": "Try asking",
     "chat_with_named": "Chat with {{name}}"
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "aria_label": "Conversation starters",
     "capabilities": {
       "label": "What can you help with?",

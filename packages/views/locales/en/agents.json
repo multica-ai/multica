@@ -444,7 +444,7 @@
       "upload_failed_toast": "Avatar upload failed"
     }
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "label": "Conversation starters",
     "hint": "Up to three examples, shown when someone opens a new chat with this agent. Selecting one fills the composer without sending it.",
     "add": "Add suggestion",

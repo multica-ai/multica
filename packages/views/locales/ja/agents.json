@@ -327,7 +327,7 @@
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     }
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "label": "会話の開始例",
     "hint": "このエージェントで新しいチャットを開いたときに表示される例（最大3件）。選ぶと送信せずに入力欄へ入ります。",
     "add": "候補を追加",

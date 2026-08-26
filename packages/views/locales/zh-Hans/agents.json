@@ -434,7 +434,7 @@
       "upload_failed_toast": "头像上传失败"
     }
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "label": "对话开场建议",
     "hint": "最多三条示例，出现在别人与该智能体开始新对话时。选择后只会填入输入框，不会立即发送。",
     "add": "添加建议",

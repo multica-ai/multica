@@ -16,7 +16,7 @@ import { api, dispatchReasonCode } from "@multica/core/api";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
   useAgentPresenceDetail,
-  useCustomizeStarterPromptsHref,
+  useCustomizeConversationStartersHref,
   useWorkspaceAgentAvailability,
 } from "@multica/core/agents";
 import {
@@ -278,23 +278,23 @@ export function useChatController(opts?: { isActive?: boolean }) {
     () => setFocusInputRequest((n) => n + 1),
     [],
   );
-  const [starterPromptRequest, setStarterPromptRequest] = useState<{
+  const [conversationStarterRequest, setConversationStarterRequest] = useState<{
     id: number;
     content: string;
   } | null>(null);
-  const nextStarterPromptRequestIdRef = useRef(0);
-  const prefillStarterPrompt = useCallback(
+  const nextConversationStarterRequestIdRef = useRef(0);
+  const prefillConversationStarter = useCallback(
     (prompt: string) => {
-      setStarterPromptRequest({
-        id: ++nextStarterPromptRequestIdRef.current,
+      setConversationStarterRequest({
+        id: ++nextConversationStarterRequestIdRef.current,
         content: prompt,
       });
       requestInputFocus();
     },
     [requestInputFocus],
   );
-  const handleStarterPromptApplied = useCallback(
-    () => setStarterPromptRequest(null),
+  const handleConversationStarterApplied = useCallback(
+    () => setConversationStarterRequest(null),
     [],
   );
 
@@ -374,7 +374,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // "Customize" under the starter buttons in the empty state — the only place
   // that admits those buttons are configuration. Resolved here so the full
   // page and the floating window cannot disagree about who sees it.
-  const customizeStarterPromptsHref = useCustomizeStarterPromptsHref(
+  const customizeConversationStartersHref = useCustomizeConversationStartersHref(
     activeAgent,
     wsId,
   );
@@ -843,7 +843,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     isAgentAccessRevoked,
     isAgentRuntimeBound,
     activeAgent,
-    customizeStarterPromptsHref,
+    customizeConversationStartersHref,
     noAgent,
     availability,
     // messages
@@ -861,9 +861,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleRestoreDraftApplied,
     // compose-box focus nonce (bumped on new chat)
     focusInputRequest,
-    starterPromptRequest,
-    handleStarterPromptApplied,
-    prefillStarterPrompt,
+    conversationStarterRequest,
+    handleConversationStarterApplied,
+    prefillConversationStarter,
     // actions
     handleSend,
     handleStop,

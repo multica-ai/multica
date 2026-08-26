@@ -13,7 +13,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
-  starterPrompts: [],
+  conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
@@ -38,11 +38,11 @@ describe("agent builder protocol", () => {
     expect(parseBuilderDraft("<agent_draft>not json</agent_draft>")).toBeNull();
   });
 
-  it("accepts up to three complete starter prompts from the builder", () => {
+  it("accepts up to three complete conversation starters from the builder", () => {
     const merged = mergeBuilderDraft(
       draft(),
       {
-        starter_prompts: [
+        conversation_starters: [
           { label: " Review a PR ", prompt: " Review the open PR. " },
           { label: "", prompt: "Ignored" },
         ],
@@ -52,7 +52,7 @@ describe("agent builder protocol", () => {
       new Set(["model-1"]),
     );
 
-    expect(merged.starterPrompts).toEqual([
+    expect(merged.conversationStarters).toEqual([
       { label: "Review a PR", prompt: "Review the open PR." },
     ]);
   });
@@ -83,7 +83,7 @@ Return findings."}</agent_draft>`;
 
   it("round-trips only the user's natural-language request for chat display", () => {
     const currentDraft = draft();
-    currentDraft.starterPrompts = [
+    currentDraft.conversationStarters = [
       { label: "Plan a release", prompt: "Plan the next release." },
     ];
     const content = encodeBuilderInput(
@@ -106,7 +106,7 @@ Return findings."}</agent_draft>`;
         { id: "gpt-5.5", label: "GPT-5.5", provider: "openai" },
       ],
       current_draft: {
-        starter_prompts: [
+        conversation_starters: [
           { label: "Plan a release", prompt: "Plan the next release." },
         ],
       },

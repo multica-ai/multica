@@ -146,7 +146,7 @@
     "returning_subtitle": "こう聞いてみましょう",
     "chat_with_named": "{{name}} とチャット"
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "aria_label": "会話の開始例",
     "capabilities": {
       "label": "何を手伝えますか？",

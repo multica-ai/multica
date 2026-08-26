@@ -14,12 +14,12 @@ vi.mock("../../common/actor-avatar", () => ({
 
 import { EmptyState } from "./chat-empty-state";
 
-const agent = (starterPrompts: Agent["starter_prompts"] = []): Agent =>
+const agent = (conversationStarters: Agent["conversation_starters"] = []): Agent =>
   ({
     id: "agent-1",
     name: "Reviewer",
     description: "Reviews changes before they merge.",
-    starter_prompts: starterPrompts,
+    conversation_starters: conversationStarters,
   }) as Agent;
 
 const adapter = (): NavigationAdapter => ({
@@ -48,7 +48,7 @@ function renderEmptyState(value: Agent, customizeHref: string | null = null) {
   return onPickPrompt;
 }
 
-describe("chat empty-state starter prompts", () => {
+describe("chat empty-state conversation starters", () => {
   afterEach(cleanup);
 
   it("prefers the selected agent's configured prompts", () => {
@@ -90,9 +90,9 @@ describe("chat empty-state starter prompts", () => {
 describe("chat empty-state customize affordance", () => {
   afterEach(cleanup);
 
-  const href = "/acme/agents/agent-1?view=instructions&focus=starter_prompts";
+  const href = "/acme/agents/agent-1?view=instructions&focus=conversation_starters";
 
-  it("links a viewer who may edit the agent to its starter prompts", () => {
+  it("links a viewer who may edit the agent to its conversation starters", () => {
     renderEmptyState(agent(), href);
 
     expect(

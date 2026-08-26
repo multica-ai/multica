@@ -1,7 +1,7 @@
 export {
   paths,
   isGlobalPath,
-  AGENT_FOCUS_STARTER_PROMPTS,
+  AGENT_FOCUS_CONVERSATION_STARTERS,
 } from "./paths";
 export type { WorkspacePaths } from "./paths";
 export { RESERVED_SLUGS, isReservedSlug } from "./reserved-slugs";

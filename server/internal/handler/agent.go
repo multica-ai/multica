@@ -36,12 +36,12 @@ import (
 const maxAgentDescriptionLength = 255
 
 const (
-	maxAgentStarterPrompts      = 3
-	maxAgentStarterPromptLabel  = 80
-	maxAgentStarterPromptLength = 4000
+	maxAgentConversationStarters      = 3
+	maxAgentConversationStarterLabel  = 80
+	maxAgentConversationStarterLength = 4000
 )
 
-type AgentStarterPrompt struct {
+type AgentConversationStarter struct {
 	Label  string `json:"label"`
 	Prompt string `json:"prompt"`
 }
@@ -65,9 +65,9 @@ type AgentResponse struct {
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
 	Instructions string `json:"instructions"`
-	// StarterPrompts are optional, agent-specific first-turn suggestions. An
+	// ConversationStarters are optional, agent-specific first-turn suggestions. An
 	// empty list tells clients to render their localized fallback prompts.
-	StarterPrompts []AgentStarterPrompt `json:"starter_prompts"`
+	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
 	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
@@ -181,11 +181,11 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		mcpConfig = json.RawMessage(a.McpConfig)
 	}
 
-	starterPrompts := []AgentStarterPrompt{}
-	if len(a.StarterPrompts) > 0 {
-		if err := json.Unmarshal(a.StarterPrompts, &starterPrompts); err != nil {
-			slog.Warn("failed to unmarshal agent starter_prompts", "agent_id", uuidToString(a.ID), "error", err)
-			starterPrompts = []AgentStarterPrompt{}
+	conversationStarters := []AgentConversationStarter{}
+	if len(a.ConversationStarters) > 0 {
+		if err := json.Unmarshal(a.ConversationStarters, &conversationStarters); err != nil {
+			slog.Warn("failed to unmarshal agent conversation_starters", "agent_id", uuidToString(a.ID), "error", err)
+			conversationStarters = []AgentConversationStarter{}
 		}
 	}
 
@@ -206,7 +206,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
-		StarterPrompts:           starterPrompts,
+		ConversationStarters:     conversationStarters,
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
@@ -1137,17 +1137,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name           string               `json:"name"`
-	Description    string               `json:"description"`
-	Instructions   string               `json:"instructions"`
-	StarterPrompts []AgentStarterPrompt `json:"starter_prompts"`
-	AvatarURL      *string              `json:"avatar_url"`
-	RuntimeID      string               `json:"runtime_id"`
-	RuntimeConfig  any                  `json:"runtime_config"`
-	CustomEnv      map[string]string    `json:"custom_env"`
-	CustomArgs     []string             `json:"custom_args"`
-	McpConfig      json.RawMessage      `json:"mcp_config"`
-	Visibility     string               `json:"visibility"`
+	Name                 string                     `json:"name"`
+	Description          string                     `json:"description"`
+	Instructions         string                     `json:"instructions"`
+	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
+	AvatarURL            *string                    `json:"avatar_url"`
+	RuntimeID            string                     `json:"runtime_id"`
+	RuntimeConfig        any                        `json:"runtime_config"`
+	CustomEnv            map[string]string          `json:"custom_env"`
+	CustomArgs           []string                   `json:"custom_args"`
+	McpConfig            json.RawMessage            `json:"mcp_config"`
+	Visibility           string                     `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1196,26 +1196,26 @@ func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMe
 	return raw, nil
 }
 
-func normaliseAgentStarterPrompts(prompts []AgentStarterPrompt) ([]AgentStarterPrompt, error) {
-	if len(prompts) > maxAgentStarterPrompts {
-		return nil, fmt.Errorf("starter_prompts must contain at most %d items", maxAgentStarterPrompts)
+func normaliseAgentConversationStarters(starters []AgentConversationStarter) ([]AgentConversationStarter, error) {
+	if len(starters) > maxAgentConversationStarters {
+		return nil, fmt.Errorf("conversation_starters must contain at most %d items", maxAgentConversationStarters)
 	}
 
-	normalised := make([]AgentStarterPrompt, 0, len(prompts))
-	for i, item := range prompts {
+	normalised := make([]AgentConversationStarter, 0, len(starters))
+	for i, item := range starters {
 		item.Label = strings.TrimSpace(item.Label)
 		item.Prompt = strings.TrimSpace(item.Prompt)
 		if item.Label == "" {
-			return nil, fmt.Errorf("starter_prompts[%d].label is required", i)
+			return nil, fmt.Errorf("conversation_starters[%d].label is required", i)
 		}
 		if item.Prompt == "" {
-			return nil, fmt.Errorf("starter_prompts[%d].prompt is required", i)
+			return nil, fmt.Errorf("conversation_starters[%d].prompt is required", i)
 		}
-		if utf8.RuneCountInString(item.Label) > maxAgentStarterPromptLabel {
-			return nil, fmt.Errorf("starter_prompts[%d].label must be %d characters or fewer", i, maxAgentStarterPromptLabel)
+		if utf8.RuneCountInString(item.Label) > maxAgentConversationStarterLabel {
+			return nil, fmt.Errorf("conversation_starters[%d].label must be %d characters or fewer", i, maxAgentConversationStarterLabel)
 		}
-		if utf8.RuneCountInString(item.Prompt) > maxAgentStarterPromptLength {
-			return nil, fmt.Errorf("starter_prompts[%d].prompt must be %d characters or fewer", i, maxAgentStarterPromptLength)
+		if utf8.RuneCountInString(item.Prompt) > maxAgentConversationStarterLength {
+			return nil, fmt.Errorf("conversation_starters[%d].prompt must be %d characters or fewer", i, maxAgentConversationStarterLength)
 		}
 		normalised = append(normalised, item)
 	}
@@ -1249,7 +1249,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
 		return
 	}
-	starterPrompts, err := normaliseAgentStarterPrompts(req.StarterPrompts)
+	conversationStarters, err := normaliseAgentConversationStarters(req.ConversationStarters)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -1356,7 +1356,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ca = []byte("[]")
 	}
 
-	sp, _ := json.Marshal(starterPrompts)
+	sp, _ := json.Marshal(conversationStarters)
 
 	var mc []byte
 	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
@@ -1420,7 +1420,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
 		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
-		StarterPrompts:           sp,
+		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -1487,13 +1487,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name           *string               `json:"name"`
-	Description    *string               `json:"description"`
-	Instructions   *string               `json:"instructions"`
-	StarterPrompts *[]AgentStarterPrompt `json:"starter_prompts"`
-	AvatarURL      *string               `json:"avatar_url"`
-	RuntimeID      *string               `json:"runtime_id"`
-	RuntimeConfig  any                   `json:"runtime_config"`
+	Name                 *string                     `json:"name"`
+	Description          *string                     `json:"description"`
+	Instructions         *string                     `json:"instructions"`
+	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
+	AvatarURL            *string                     `json:"avatar_url"`
+	RuntimeID            *string                     `json:"runtime_id"`
+	RuntimeConfig        any                         `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -1758,14 +1758,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Instructions != nil {
 		params.Instructions = pgtype.Text{String: *req.Instructions, Valid: true}
 	}
-	if req.StarterPrompts != nil {
-		starterPrompts, err := normaliseAgentStarterPrompts(*req.StarterPrompts)
+	if req.ConversationStarters != nil {
+		conversationStarters, err := normaliseAgentConversationStarters(*req.ConversationStarters)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		encoded, _ := json.Marshal(starterPrompts)
-		params.StarterPrompts = encoded
+		encoded, _ := json.Marshal(conversationStarters)
+		params.ConversationStarters = encoded
 	}
 	if req.AvatarURL != nil {
 		avatarURL, ok := h.acceptAvatarURL(w, r, *req.AvatarURL, existing.AvatarUrl.String)

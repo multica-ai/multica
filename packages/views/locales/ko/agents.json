@@ -335,7 +335,7 @@
       "upload_failed_toast": "아바타 업로드 실패"
     }
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "label": "대화 시작 예시",
     "hint": "이 에이전트로 새 채팅을 열 때 표시되는 예시입니다(최대 3개). 선택하면 전송하지 않고 입력창에 채웁니다.",
     "add": "추천 추가",

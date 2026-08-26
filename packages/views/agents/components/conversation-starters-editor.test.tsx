@@ -3,26 +3,26 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { AgentStarterPrompt } from "@multica/core/types";
+import type { AgentConversationStarter } from "@multica/core/types";
 import enAgents from "../../locales/en/agents.json";
 import enChat from "../../locales/en/chat.json";
-import { StarterPromptsEditor } from "./starter-prompts-editor";
+import { ConversationStartersEditor } from "./conversation-starters-editor";
 
 // The selection matrix (which rows count, when the fallback wins) is covered
-// once in packages/core/agents/starter-prompts.test.ts. This suite only
+// once in packages/core/agents/conversation-starters.test.ts. This suite only
 // proves the editor previews what a new chat would actually show.
-function renderEditor(value: AgentStarterPrompt[]) {
+function renderEditor(value: AgentConversationStarter[]) {
   render(
     <I18nProvider
       locale="en"
       resources={{ en: { agents: enAgents, chat: enChat } }}
     >
-      <StarterPromptsEditor value={value} onChange={vi.fn()} />
+      <ConversationStartersEditor value={value} onChange={vi.fn()} />
     </I18nProvider>,
   );
 }
 
-describe("StarterPromptsEditor preview", () => {
+describe("ConversationStartersEditor preview", () => {
   afterEach(cleanup);
 
   it("previews the built-in defaults and says so when nothing is configured", () => {

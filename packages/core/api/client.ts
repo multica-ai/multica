@@ -504,15 +504,15 @@ export class ApiError extends Error {
   }
 }
 
-function assertAgentStarterPromptsWriteSupported(data: {
-  starter_prompts?: unknown;
+function assertAgentConversationStartersWriteSupported(data: {
+  conversation_starters?: unknown;
 }): void {
   if (
-    Object.prototype.hasOwnProperty.call(data, "starter_prompts") &&
-    !configStore.getState().agentStarterPromptsSupported
+    Object.prototype.hasOwnProperty.call(data, "conversation_starters") &&
+    !configStore.getState().agentConversationStartersSupported
   ) {
     throw new Error(
-      "This server version does not support agent starter prompts. Update the server before saving them.",
+      "This server version does not support agent conversation starters. Update the server before saving them.",
     );
   }
 }
@@ -1425,7 +1425,7 @@ export class ApiClient {
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {
-    assertAgentStarterPromptsWriteSupported(data);
+    assertAgentConversationStartersWriteSupported(data);
     return this.fetch("/api/agents", {
       method: "POST",
       body: JSON.stringify(data),
@@ -1541,7 +1541,7 @@ export class ApiClient {
   }
 
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
-    assertAgentStarterPromptsWriteSupported(data);
+    assertAgentConversationStartersWriteSupported(data);
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),

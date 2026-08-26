@@ -10,7 +10,7 @@ const draft = (): AgentDraft => ({
   name: "Release manager",
   description: "Ships carefully",
   instructions: "# Role\nShip.",
-  starterPrompts: [
+  conversationStarters: [
     { label: "Plan a release", prompt: "Plan the next release." },
   ],
   avatarUrl: "🚀",

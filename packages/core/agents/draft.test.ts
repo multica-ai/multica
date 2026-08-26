@@ -15,7 +15,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
-  starterPrompts: [],
+  conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
@@ -103,13 +103,13 @@ describe("duplicate access", () => {
   });
 });
 
-describe("agent starter prompts", () => {
-  it("copies prompts into a duplicate and the create request", () => {
-    const starterPrompts = [
+describe("agent conversation starters", () => {
+  it("copies starters into a duplicate and the create request", () => {
+    const conversationStarters = [
       { label: "Review a PR", prompt: "Review the open pull request." },
     ];
     const duplicate = buildDuplicateDraft(
-      sourceAgent({ starter_prompts: starterPrompts }),
+      sourceAgent({ conversation_starters: conversationStarters }),
       {
         runtimes: [CODEX_RUNTIME],
         currentUserId: "user-1",
@@ -118,36 +118,36 @@ describe("agent starter prompts", () => {
       },
     );
 
-    expect(duplicate.starterPrompts).toEqual(starterPrompts);
+    expect(duplicate.conversationStarters).toEqual(conversationStarters);
     expect(
       buildCreateAgentRequest({ draft: duplicate, runtimeId: "runtime-1" })
-        .starter_prompts,
-    ).toEqual(starterPrompts);
+        .conversation_starters,
+    ).toEqual(conversationStarters);
   });
 
   it("trims prompt fields before submission", () => {
     const request = buildCreateAgentRequest({
       draft: {
         ...draft(),
-        starterPrompts: [
+        conversationStarters: [
           { label: "  Plan a release  ", prompt: "  Plan the next release.  " },
         ],
       },
       runtimeId: "runtime-1",
     });
 
-    expect(request.starter_prompts).toEqual([
+    expect(request.conversation_starters).toEqual([
       { label: "Plan a release", prompt: "Plan the next release." },
     ]);
   });
 
-  it("omits the field when there are no prompts", () => {
+  it("omits the field when there are no starters", () => {
     const request = buildCreateAgentRequest({
       draft: draft(),
       runtimeId: "runtime-1",
     });
 
-    expect(request).not.toHaveProperty("starter_prompts");
+    expect(request).not.toHaveProperty("conversation_starters");
   });
 });
 
