@@ -127,6 +127,13 @@ func requestUsedTaskToken(resp *http.Response) bool {
 // opaque "context deadline exceeded" to users.
 const defaultHTTPTimeout = 30 * time.Second
 
+const getJSONMaxAttempts = 3
+
+var getJSONRetryBackoffs = []time.Duration{
+	100 * time.Millisecond,
+	250 * time.Millisecond,
+}
+
 // httpTimeout returns the HTTP client timeout, honoring MULTICA_HTTP_TIMEOUT.
 // The value may be a Go duration string ("45s", "2m") or a plain integer
 // number of seconds ("45"). Invalid or non-positive values fall back to the
@@ -246,6 +253,35 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	}
 }
 
+func (c *APIClient) doGETWithRetry(req *http.Request) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt < getJSONMaxAttempts; attempt++ {
+		attemptReq := req
+		if attempt > 0 {
+			attemptReq = req.Clone(req.Context())
+		}
+
+		resp, err := c.HTTPClient.Do(attemptReq)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if attempt == getJSONMaxAttempts-1 || !isTransientGETTransportError(err) {
+			return nil, wrapTransport(attemptReq, err)
+		}
+
+		backoff := getJSONRetryBackoffs[attempt]
+		timer := time.NewTimer(backoff)
+		select {
+		case <-timer.C:
+		case <-req.Context().Done():
+			timer.Stop()
+			return nil, wrapTransport(attemptReq, req.Context().Err())
+		}
+	}
+	return nil, wrapTransport(req, lastErr)
+}
+
 // GetJSON performs a GET request and decodes the JSON response.
 //
 // On an HTTP error response (status >= 400) the returned error is a
@@ -260,8 +296,7 @@ func (c *APIClient) GetJSON(ctx context.Context, path string, out any) error {
 	}
 	c.setHeaders(req)
 
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
+	resp, err := c.doGETWithRetry(req)
 	if err != nil {
 		return err
 	}
@@ -286,8 +321,7 @@ func (c *APIClient) GetJSONWithHeaders(ctx context.Context, path string, out any
 	}
 	c.setHeaders(req)
 
-	resp, err := c.HTTPClient.Do(req)
-	err = wrapTransport(req, err)
+	resp, err := c.doGETWithRetry(req)
 	if err != nil {
 		return nil, err
 	}
