@@ -119,7 +119,7 @@ jobs:
   extract-server-tags:
     if: contains(github.event.pull_request.labels.*.name, 'Development')
     needs: [bake-build-backend, bake-build-web]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
@@ -172,7 +172,7 @@ jobs:
   extract-agentrunner-runtime-tag:
     if: contains(github.event.pull_request.labels.*.name, 'Development')
     needs: [bake-build-agentrunner-runtime]
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     outputs:
       agentrunner_runtime_tag: ${{ steps.extract.outputs.agentrunner_runtime_tag }}
     steps:

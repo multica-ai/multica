@@ -21,7 +21,7 @@ jobs:
   # a `go test -race` run. The outputs are consumed by the focused jobs
   # below.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     permissions:
       contents: read
       pull-requests: read
@@ -167,7 +167,7 @@ jobs:
 
   sqlc-check:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Checkout
         if: ${{ needs.changes.outputs.sqlc == 'true' }}
@@ -202,7 +202,7 @@ jobs:
   # increases total runner-minutes but reduces wall-clock feedback time.
   frontend-build:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     env:
       # Pin turbo's filesystem cache somewhere actions/cache can address.
       TURBO_CACHE_DIR: .turbo/cache
@@ -313,7 +313,7 @@ jobs:
 
   frontend-test:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     env:
       TURBO_CACHE_DIR: .turbo/cache
     steps:
@@ -375,7 +375,7 @@ jobs:
             total: 2
           - index: 2
             total: 2
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     env:
       TURBO_CACHE_DIR: .turbo/cache
     steps:
@@ -432,7 +432,7 @@ jobs:
     # is cancelled by the concurrency group above, and there is no reason to
     # spend a runner reporting a verdict nobody will read.
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Check frontend job results
         env:
@@ -450,7 +450,7 @@ jobs:
 
   backend-tests:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     # `services` cannot be conditional, so the Postgres and Redis containers
     # still start on a filtered PR. That is ~1 minute of runner time against
     # the several minutes the gated steps below cost; job-level `if` would
@@ -538,7 +538,7 @@ jobs:
   # The aggregate backend job below still treats both jobs as one merge gate.
   go-vulnerability-scan:
     needs: changes
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Checkout
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -564,7 +564,7 @@ jobs:
   backend:
     needs: [backend-tests, sqlc-check, go-vulnerability-scan]
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Check backend job results
         env:
@@ -758,7 +758,7 @@ jobs:
     # and the branch it came from was already checked.
     needs: changes
     if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6

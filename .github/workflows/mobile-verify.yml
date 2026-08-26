@@ -45,7 +45,7 @@ concurrency:
 
 jobs:
   mobile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.GH_RUNNER || 'ubicloud-standard-2-ubuntu-2404' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
