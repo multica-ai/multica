@@ -28,10 +28,11 @@ type startMikaOnboardingResponse struct {
 }
 
 var mikaOnboardingLanguages = map[string]string{
-	"en": "English",
-	"zh": "Simplified Chinese",
-	"ko": "Korean",
-	"ja": "Japanese",
+	"en":      "English",
+	"zh":      "Simplified Chinese",
+	"zh-Hant": "Traditional Chinese",
+	"ko":      "Korean",
+	"ja":      "Japanese",
 }
 
 // StartMikaOnboarding opens an otherwise empty Mika chat by writing two rows:
@@ -68,7 +69,7 @@ func (h *Handler) StartMikaOnboarding(w http.ResponseWriter, r *http.Request) {
 	}
 	languageName, ok := mikaOnboardingLanguages[req.Language]
 	if !ok {
-		writeError(w, http.StatusBadRequest, "language must be en, zh, ko, or ja")
+		writeError(w, http.StatusBadRequest, "language must be en, zh, zh-Hant, ko, or ja")
 		return
 	}
 

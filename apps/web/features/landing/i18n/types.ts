@@ -9,6 +9,7 @@ export const locales: Locale[] = ["en", "zh-Hans", "ko", "ja"];
 export const localeLabels: Record<Locale, string> = {
   en: "EN",
   "zh-Hans": "\u4e2d\u6587",
+  "zh-Hant": "繁中",
   ko: "\ud55c\uad6d\uc5b4",
   ja: "\u65e5\u672c\u8a9e",
 };
@@ -22,7 +23,7 @@ export function toLandingDictionaryLocale(
 }
 
 export function isZhLocale(locale: Locale): boolean {
-  return locale === "zh-Hans";
+  return locale === "zh-Hans" || locale === "zh-Hant";
 }
 
 type FeatureSection = {

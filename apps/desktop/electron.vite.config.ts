@@ -5,7 +5,12 @@ import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // fix-path v5 is ESM-only. Leaving it external makes the CommonJS main
+    // bundle emit `require("fix-path")`, which returns a module namespace in
+    // packaged Electron and crashes before the first window opens with
+    // `TypeError: fixPath is not a function`. Bundle it into main so Vite
+    // preserves the default export interop.
+    plugins: [externalizeDepsPlugin({ exclude: ["fix-path"] })],
   },
   preload: {
     // `@electron-toolkit/preload` must be bundled INTO the preload script:

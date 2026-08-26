@@ -1,0 +1,44 @@
+{
+  "page": {
+    "breadcrumb": "我的任務",
+    "workspace_fallback": "工作區",
+    "empty_title": "沒有分配給你的任務",
+    "empty_description": "你建立或被分配到的任務會顯示在這裡。"
+  },
+  "header": {
+    "scope": {
+      "all_label": "全部",
+      "all_description": "分給我的、我建立的、或我的智慧體和小隊相關的",
+      "assigned_label": "已分配",
+      "assigned_description": "分配給我的任務",
+      "created_label": "我建立的",
+      "created_description": "我建立的任務",
+      "agents_label": "我的智慧體和小隊",
+      "agents_description": "分配給我的智慧體的任務"
+    },
+    "filter_button": "篩選",
+    "filter_status": "狀態",
+    "filter_priority": "優先順序",
+    "issue_count_other": "{{count}} 個任務",
+    "reset_filters": "重置所有篩選",
+    "display_settings": "顯示設定",
+    "grouping": "分組",
+    "group_status": "狀態",
+    "group_assignee": "負責人",
+    "ordering": "排序",
+    "ascending": "升序",
+    "descending": "降序",
+    "card_properties": "卡片屬性",
+    "view_board": "看板檢視",
+    "view_list": "清單檢視",
+    "view_swimlane": "泳道檢視",
+    "view_label": "檢視",
+    "view_board_short": "看板",
+    "view_list_short": "清單",
+    "view_swimlane_short": "泳道",
+    "sort_manual": "手動"
+  },
+  "errors": {
+    "move_failed": "移動任務失敗"
+  }
+}

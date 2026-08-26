@@ -5,6 +5,7 @@ export type MikaContentLang = MikaOnboardingLanguage;
 interface LocalizedText {
   en: string;
   zh: string;
+  "zh-Hant": string;
   ko: string;
   ja: string;
 }
@@ -27,6 +28,7 @@ export interface MikaOnboardingDefinition {
 const MIKA_CHAT_TITLE: LocalizedText = {
   en: "Getting started with Mika",
   zh: "和 Mika 开始",
+  "zh-Hant": "開始使用 Mika",
   ko: "Mika와 시작하기",
   ja: "Mika と始める",
 };

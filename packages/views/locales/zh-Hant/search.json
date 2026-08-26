@@ -1,0 +1,37 @@
+{
+  "title": "搜尋",
+  "description": "搜尋頁面、任務、專案和成員",
+  "placeholder": "輸入命令或關鍵詞搜尋...",
+  "groups": {
+    "pages": "頁面",
+    "commands": "命令",
+    "members": "成員",
+    "projects": "專案",
+    "issues": "任務",
+    "cancelled": "已取消",
+    "recent": "最近"
+  },
+  "commands": {
+    "current_theme_aria": "目前主題",
+    "new_issue": "新增任務",
+    "new_project": "新增專案",
+    "copy_issue_link": "複製任務連結",
+    "copy_identifier": "複製識別符號 ({{identifier}})",
+    "fold_all_comments": "收起全部留言",
+    "unfold_all_comments": "展開全部留言",
+    "switch_to_light": "切換到淺色主題",
+    "switch_to_dark": "切換到深色主題",
+    "use_system_theme": "跟隨系統主題"
+  },
+  "toast": {
+    "link_copied": "已複製連結",
+    "copied_identifier": "已複製 {{identifier}}"
+  },
+  "empty": {
+    "no_results": "未找到結果。",
+    "type_to_search": "輸入關鍵詞搜尋任務和專案"
+  },
+  "trigger": {
+    "label": "搜尋..."
+  }
+}

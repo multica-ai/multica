@@ -1,0 +1,127 @@
+{
+  "avatar_upload": {
+    "change": "更換頭像",
+    "remove": "移除",
+    "select_image": "請選擇一張圖片檔案。",
+    "updated": "頭像已更新",
+    "failed": "頭像上傳失敗",
+    "upload_image": "上傳圖片",
+    "emoji_label": "表情",
+    "more_emojis": "更多表情…",
+    "emoji_loading": "載入中…"
+  },
+  "avatar_crop": {
+    "title": "編輯頭像",
+    "zoom": "縮放",
+    "zoom_in": "放大",
+    "zoom_out": "縮小",
+    "rotate": "旋轉",
+    "reset": "重置",
+    "cancel": "取消",
+    "apply": "儲存",
+    "uploading": "上傳中…",
+    "loading": "載入中…",
+    "load_failed": "圖片載入失敗"
+  },
+  "color_picker": {
+    "saturation": "飽和度與明度",
+    "hue": "色相",
+    "hex": "十六進位制顏色",
+    "eyedropper": "從螢幕取色",
+    "presets": "預設顏色",
+    "random": "隨機"
+  },
+  "save": "儲存",
+  "cancel": "取消",
+  "delete": "刪除",
+  "confirm": "確認",
+  "loading": "載入中...",
+  "time": {
+    "just_now": "剛剛",
+    "minutes_ago": "{{count}} 分鐘前",
+    "hours_ago": "{{count}} 小時前",
+    "days_ago": "{{count}} 天前"
+  },
+  "lark_bind": {
+    "page_title": "繫結飛書帳號",
+    "redeeming": "正在兌換繫結 token…",
+    "needs_auth_description": "需要登入 Multica 才能完成繫結。連結中的 token 會將你的飛書帳號繫結到目前登入的 Multica 使用者。",
+    "sign_in": "登入",
+    "done_title": "已繫結。",
+    "done_description": "下次在飛書向 Bot 傳送訊息時，會直接送達繫結的智慧體。可以關閉此頁面。",
+    "error_title": "繫結未完成",
+    "error_admin_hint": "如果反覆失敗，請讓工作區管理員從飛書重新傳送繫結連結。",
+    "error_missing_token": "連結缺少繫結 token。請讓 Bot 在飛書重新傳送一份。",
+    "error_expired": "繫結連結無效或已過期（有效期 15 分鐘）。請讓 Bot 重新傳送一份。",
+    "error_already_bound": "該飛書帳號已繫結到其他 Multica 使用者。帳戶轉移需要先明確解綁。",
+    "error_not_member": "你登入的 Multica 帳號不是目前工作區成員。",
+    "error_unknown": "出現未知錯誤。請稍後再試，如反覆失敗請聯絡工作區管理員。"
+  },
+  "slack_bind": {
+    "page_title": "關聯 Slack 帳號",
+    "redeeming": "正在關聯帳號…",
+    "needs_auth_description": "需要登入 Multica 才能完成關聯。連結中的 token 會將你的 Slack 帳號繫結到目前登入的 Multica 使用者。",
+    "sign_in": "登入",
+    "done_title": "已關聯。",
+    "done_description": "下次在 Slack 向機器人傳送訊息時，會直接送達繫結的智慧體。可以關閉此頁面。",
+    "error_title": "關聯未完成",
+    "error_admin_hint": "如果反覆失敗，請在 Slack 重新向機器人發訊息以取得新的連結。",
+    "error_missing_token": "連結缺少 token。請在 Slack 重新向機器人發訊息以取得新的連結。",
+    "error_expired": "連結無效或已過期（有效期 15 分鐘）。請重新向機器人發訊息取得新的連結。",
+    "error_already_bound": "該 Slack 帳號已關聯到其他 Multica 使用者。帳戶轉移需要先明確解綁。",
+    "error_not_member": "你登入的 Multica 帳號不是目前工作區成員。",
+    "error_unknown": "出現未知錯誤。請稍後再試，如反覆失敗請聯絡工作區管理員。"
+  },
+  "dingtalk_bind": {
+    "page_title": "關聯釘釘帳號",
+    "redeeming": "正在關聯帳號…",
+    "needs_auth_description": "需要登入 Multica 才能完成關聯。連結中的 token 會將你的釘釘帳號繫結到目前登入的 Multica 使用者。",
+    "sign_in": "登入",
+    "done_title": "已關聯。",
+    "done_description": "下次在釘釘向機器人傳送訊息時，會直接送達繫結的智慧體。可以關閉此頁面。",
+    "error_title": "關聯未完成",
+    "error_admin_hint": "如果反覆失敗，請在釘釘重新向機器人發訊息以取得新的連結。",
+    "error_missing_token": "連結缺少 token。請在釘釘重新向機器人發訊息以取得新的連結。",
+    "error_expired": "連結無效或已過期（有效期 15 分鐘）。請重新向機器人發訊息取得新的連結。",
+    "error_already_bound": "該釘釘帳號已關聯到其他 Multica 使用者。帳戶轉移需要先明確解綁。",
+    "error_not_member": "你登入的 Multica 帳號不是目前工作區成員。",
+    "error_unknown": "出現未知錯誤。請稍後再試，如反覆失敗請聯絡工作區管理員。"
+  },
+  "telegram_bind": {
+    "page_title": "繫結你的 Telegram 帳號",
+    "redeeming": "正在繫結…",
+    "needs_auth_description": "請先登入 Multica 完成繫結。連結中的 token 會把你的 Telegram 帳號繫結到目前登入的 Multica 使用者，因此需要先登入。",
+    "sign_in": "登入",
+    "done_title": "繫結成功。",
+    "done_description": "你在 Telegram 中發給機器人的下一條訊息將直達智慧體。可以關閉此頁面了。",
+    "error_title": "繫結未完成",
+    "error_admin_hint": "如果問題持續出現，請在 Telegram 中再給機器人發一條訊息以取得新連結。",
+    "error_missing_token": "連結缺少 token。請在 Telegram 中再給機器人發一條訊息以取得新連結。",
+    "error_expired": "連結無效或已過期（有效期 15 分鐘）。請再給機器人發一條訊息以取得新連結。",
+    "error_already_bound": "該 Telegram 帳號已繫結到另一個 Multica 使用者。如需轉移帳號，請先明確解綁。",
+    "error_not_member": "目前登入的 Multica 帳號不是該工作區的成員。",
+    "error_unknown": "出了點問題。請重試；若問題持續，請聯絡工作區管理員。"
+  },
+  "expandable_description": {
+    "expand": "檢視詳情",
+    "collapse": "收起"
+  },
+  "wecom_bind": {
+    "page_title": "關聯 Multica 帳號",
+    "redeeming": "正在關聯帳號…",
+    "needs_auth_description": "需要登入 Multica 才能完成關聯。連結中的 token 會將你在企業微信的身分繫結到目前登入的 Multica 使用者。",
+    "sign_in": "登入",
+    "done_title": "已關聯。",
+    "done_description": "下次在企業微信向智慧機器人傳送訊息時，會直接送達繫結的智慧體。可以關閉此頁面。",
+    "error_title": "關聯未完成",
+    "error_admin_hint": "如果反覆失敗，請在企業微信重新向機器人發訊息以取得新的連結。",
+    "error_missing_token": "連結缺少 token。請在企業微信重新向機器人發訊息以取得新的連結。",
+    "error_expired": "連結無效或已過期（有效期 15 分鐘）。請重新向機器人發訊息取得新的連結。",
+    "error_already_bound": "該企業微信身分已關聯到其他 Multica 使用者。帳戶轉移需要先明確解綁。",
+    "error_not_member": "你登入的 Multica 帳號不是目前工作區成員。",
+    "error_unknown": "出現未知錯誤。請稍後再試，如反覆失敗請聯絡工作區管理員。"
+  },
+  "navigation": {
+    "open_in_new_tab": "在新標籤頁開啟"
+  }
+}

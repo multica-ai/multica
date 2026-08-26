@@ -1,0 +1,461 @@
+{
+  "page": {
+    "title": "自動化",
+    "new_autopilot": "新增自動化",
+    "start_blank": "從空白開始",
+    "table": {
+      "name": "名稱",
+      "agent": "智慧體",
+      "created_by": "建立者",
+      "mode": "模式",
+      "status": "狀態",
+      "last_run": "上次執行",
+      "assignee": "執行者",
+      "trigger": "觸發器",
+      "next_run": "下次執行",
+      "created": "建立時間"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "還沒有自動化",
+      "hint": "為你的智慧體安排週期性 task。從範本選一個，或從空白開始。"
+    },
+    "scope_all": "全部",
+    "no_matches": "沒有相符的自動化",
+    "retry": "重試"
+  },
+  "status": {
+    "active": "啟用",
+    "paused": "已暫停",
+    "paused_runtime_required": "已暫停——執行智慧體需繫結執行環境",
+    "archived": "已歸檔"
+  },
+  "execution_mode": {
+    "create_issue": "建立任務",
+    "run_only": "僅執行"
+  },
+  "relative_date": {
+    "today": "今天",
+    "one_day_ago": "1 天前",
+    "days_ago": "{{count}} 天前",
+    "months_ago": "{{count}} 個月前"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "每日新聞摘要",
+      "summary": "搜尋並彙總今天的新聞給團隊"
+    },
+    "pr_review": {
+      "title": "PR review 提醒",
+      "summary": "標記需要 review 的滯留 pull request"
+    },
+    "bug_triage": {
+      "title": "Bug 分診",
+      "summary": "評估並安排新提交的 bug"
+    },
+    "weekly_progress": {
+      "title": "每週進度報告",
+      "summary": "彙總團隊本週進展"
+    },
+    "dependency_audit": {
+      "title": "依賴審計",
+      "summary": "掃描安全漏洞和過時的依賴包"
+    },
+    "documentation_check": {
+      "title": "檔案檢查",
+      "summary": "檢查近期改動是否缺失檔案"
+    }
+  },
+  "detail": {
+    "not_found": "未找到該自動化",
+    "pause_aria": "暫停自動化",
+    "activate_aria": "啟用自動化",
+    "paused_runtime_required": "由於執行智慧體失去執行環境，自動化已暫停。繫結執行環境後請重新啟用。",
+    "bind_runtime": "繫結執行環境",
+    "edit": "編輯",
+    "run_now": "立即執行",
+    "running": "執行中...",
+    "toast_triggered": "已觸發自動化",
+    "toast_trigger_failed": "觸發自動化失敗",
+    "run_blocked_invocation_not_allowed": "未觸發——你沒有該自動化所用智慧體的使用許可權",
+    "run_blocked_runtime_offline": "未觸發——該智慧體的執行環境已離線",
+    "run_blocked_agent_runtime_required": "未觸發——該智慧體未繫結執行環境，繫結後才能執行",
+    "run_blocked_target_unavailable": "未觸發——該智慧體不可用",
+    "run_blocked_attribution": "未觸發——無法確定本次執行的負責成員",
+    "run_blocked_already_active": "未觸發——最近已有一次執行覆蓋了本次",
+    "run_blocked_quota_exceeded": "未觸發——本週期的執行額度已用盡",
+    "run_blocked_generic": "未觸發——本次執行已被攔截",
+    "section_properties": "屬性",
+    "section_triggers": "觸發器",
+    "section_run_history": "執行歷史",
+    "section_danger": "危險操作",
+    "field_agent": "智慧體",
+    "field_created_by": "建立者",
+    "field_output_mode": "輸出模式",
+    "field_project": "關聯專案",
+    "no_project": "不關聯專案",
+    "project_unavailable": "專案不可用",
+    "field_prompt": "Prompt",
+    "field_subscribers": "訂閱者",
+    "field_subscribers_none": "無",
+    "add_trigger": "新增觸發器",
+    "no_triggers": "未設定觸發器。新增一個時間表讓它自動執行。",
+    "no_runs": "暫無執行記錄。點選\"立即執行\"手動觸發。",
+    "delete_button": "刪除自動化",
+    "toast_deleted": "已刪除自動化",
+    "toast_delete_failed": "刪除自動化失敗",
+    "delete_dialog": {
+      "title": "刪除自動化",
+      "description": "將永久刪除\"{{title}}\"，連同它的觸發器和執行歷史。此操作不可撤銷。",
+      "cancel": "取消",
+      "confirm": "刪除",
+      "deleting": "刪除中..."
+    }
+  },
+  "access": {
+    "title": "管理訪問",
+    "description": "你新增的成員可以編輯、執行並管理這個自動化的觸發器和 webhook。",
+    "current_label": "已授權",
+    "add": "新增成員",
+    "search_placeholder": "搜尋成員…",
+    "no_results": "未找到成員",
+    "remove_tooltip": "移除訪問許可權",
+    "empty": "還沒有授權任何人。",
+    "toast_granted": "已授予訪問許可權",
+    "toast_revoked": "已移除訪問許可權",
+    "toast_failed": "更新訪問許可權失敗",
+    "owner_note": "建立者和工作區管理員始終擁有訪問許可權。"
+  },
+  "run_status": {
+    "issue_created": "已建立任務",
+    "running": "執行中",
+    "skipped": "已跳過",
+    "completed": "已完成",
+    "failed": "失敗"
+  },
+  "run_source": {
+    "schedule": "時間表",
+    "manual": "手動",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "已關聯任務",
+    "view_log": "檢視執行日誌",
+    "skipped_group": {
+      "label": "已跳過",
+      "summary": "{{count}} 條跳過的執行"
+    }
+  },
+  "webhook_payload": {
+    "label": "Webhook 事件：",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type：{{type}}",
+    "copy": "複製",
+    "copied": "已複製 Webhook payload",
+    "copied_short": "已複製",
+    "copy_failed": "複製失敗",
+    "truncated_marker": "[已截斷——點選\"複製\"取得完整 payload]"
+  },
+  "trigger_kind": {
+    "schedule": "時間表",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "已禁用",
+    "deprecated_badge": "已棄用",
+    "next_label": "下次：{{date}}",
+    "webhook_url_label": "Webhook URL",
+    "show_url": "顯示 URL",
+    "hide_url": "隱藏 URL",
+    "hidden_url_aria": "Webhook URL 已隱藏——點選顯示",
+    "copy_url": "複製 URL",
+    "url_copied": "已複製 Webhook URL",
+    "url_copy_failed": "複製失敗",
+    "rotate_url": "重新生成 URL",
+    "rotate_confirm_title": "重新生成 Webhook URL",
+    "rotate_confirm_description": "目前 URL 將立即失效。所有呼叫它的外部系統都需要更新為新 URL。繼續嗎？",
+    "rotate_confirm_cancel": "取消",
+    "rotate_confirm_action": "重新生成",
+    "rotate_in_progress": "生成中...",
+    "toast_rotated": "Webhook URL 已重新生成",
+    "toast_rotate_failed": "重新生成 URL 失敗",
+    "toast_deleted": "已刪除觸發器",
+    "toast_delete_failed": "刪除觸發器失敗",
+    "delete_dialog": {
+      "title": "刪除觸發器",
+      "description": "將移除該觸發器，自動化不再按此時間表執行。此操作不可撤銷。",
+      "cancel": "取消",
+      "confirm": "刪除",
+      "deleting": "刪除中..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Webhook 投遞",
+    "empty": "暫無 Webhook 投遞記錄。向 Webhook URL 傳送一次 POST 後會顯示在這裡。",
+    "row": {
+      "attempts": "{{count}} 次嘗試",
+      "replay_badge": "重放"
+    },
+    "status": {
+      "queued": "排隊中",
+      "dispatched": "已分發",
+      "rejected": "已拒絕",
+      "ignored": "已忽略",
+      "failed": "失敗"
+    },
+    "signature": {
+      "not_required": "無需簽名",
+      "valid": "簽名透過",
+      "invalid": "簽名無效",
+      "missing": "缺少簽名"
+    },
+    "detail": {
+      "title": "投遞詳情",
+      "received_at": "接收時間",
+      "last_attempt_at": "最近一次嘗試",
+      "attempt_count": "嘗試次數",
+      "dispatch_attempts": "分發嘗試次數",
+      "available_at": "下次分發時間",
+      "response_status": "響應狀態碼",
+      "dedupe_key": "去重 Key",
+      "dedupe_source": "去重來源",
+      "content_type": "Content-Type",
+      "replayed_from": "重放自",
+      "error_label": "錯誤資訊",
+      "raw_body": "原始 Body",
+      "selected_headers": "保留的請求頭",
+      "response_body": "響應 Body"
+    },
+    "replay": {
+      "action": "重放",
+      "in_progress": "重放中...",
+      "toast_success": "已重放該投遞",
+      "toast_failed": "重放失敗",
+      "disabled_invalid_signature": "無法重放——簽名驗證失敗",
+      "disabled_rejected": "無法重放已拒絕的投遞",
+      "disabled_queued": "投遞仍在排隊，處理完成後再重放"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "新增觸發器",
+    "type_label": "型別",
+    "type_schedule": "時間表",
+    "type_webhook": "Webhook",
+    "label_field": "標籤（可選）",
+    "label_placeholder": "例如：工作日早晨",
+    "webhook_help": "儲存後 Multica 會生成一個 Webhook URL。向它 POST 任意 JSON 即可觸發本自動化。",
+    "submit": "新增觸發器",
+    "submitting": "新增中...",
+    "toast_added_schedule": "已新增時間表觸發器",
+    "toast_added_webhook": "已新增 Webhook 觸發器",
+    "toast_add_failed": "新增觸發器失敗"
+  },
+  "dialog": {
+    "sr_create": "新增自動化",
+    "sr_edit": "編輯自動化",
+    "header_create": "新增自動化",
+    "header_edit": "編輯自動化",
+    "subtitle": "週期性的 AI task",
+    "expand": "展開",
+    "collapse": "收起",
+    "close": "關閉",
+    "title_placeholder": "自動化名稱",
+    "runbook_label": "Runbook",
+    "runbook_hint": "智慧體每次執行環境讀取",
+    "description_placeholder": "# 目標\n你希望智慧體完成什麼？\n\n# 上下文\n這是給誰的？有什麼約束？\n\n# 步驟\n1. ...\n2. ...",
+    "auto_run_hint": "儲存後會自動執行，直到暫停。",
+    "cancel": "取消",
+    "create": "建立自動化",
+    "save": "儲存",
+    "creating": "建立中...",
+    "saving": "儲存中...",
+    "toast_created": "已建立自動化",
+    "toast_create_partial": "自動化已建立，但時間表儲存失敗",
+    "toast_create_partial_with_reason": "自動化已建立，但時間表儲存失敗：{{reason}}",
+    "toast_create_failed": "建立自動化失敗",
+    "toast_updated": "已更新自動化",
+    "toast_update_partial": "自動化已更新，但時間表儲存失敗",
+    "toast_update_partial_with_reason": "自動化已更新，但時間表儲存失敗：{{reason}}",
+    "toast_update_failed": "更新自動化失敗",
+    "section_agent": "智慧體",
+    "section_assignee": "執行方",
+    "select_agent": "選擇智慧體",
+    "select_assignee": "選擇智慧體或小隊",
+    "section_project": "關聯專案",
+    "project_hint": "同時決定執行環境的執行環境 —— 該專案的儲存庫或本機目錄",
+    "no_project": "不關聯專案",
+    "section_output_mode": "輸出模式",
+    "section_subscribers": "訂閱者",
+    "subscribers_hint": "每次跑出來的任務預設訂閱",
+    "subscribers_empty": "暫無訂閱者——新增成員後，每次觸發都會通知到他",
+    "subscribers_add": "新增訂閱者",
+    "subscribers_search_placeholder": "按名稱搜尋成員……",
+    "subscribers_no_results": "沒有相符的成員",
+    "subscribers_remove_tooltip": "移除",
+    "section_schedule": "時間表",
+    "section_trigger_kind": "觸發方式",
+    "trigger_kind_schedule": "時間表",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Autopilot 建立後 Multica 會生成一個 Webhook URL。向它 POST 任意 JSON 即可觸發。",
+    "webhook_help_edit": "該 Autopilot 由 Webhook 觸發。請在詳情頁複製或重新生成 URL。",
+    "webhook_created_title": "Webhook Autopilot 已就緒",
+    "webhook_created_description": "向下方的 URL POST 任意 JSON 即可觸發該 Autopilot。請立即複製——之後也能在 Autopilot 詳情頁檢視或重新生成。",
+    "webhook_created_warning": "請把該 URL 當作密碼對待，任何拿到它的人都能觸發該 Autopilot。",
+    "webhook_created_done": "完成",
+    "event_filter_label": "事件過濾",
+    "event_filter_docs_link_label": "瞭解事件過濾的工作方式",
+    "event_filter_event_placeholder": "例如 workflow_run",
+    "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "新增",
+    "event_filter_remove_label": "移除過濾條件",
+    "event_filter_hint": "只處理相符這些事件的 webhook。留空則接受所有事件。",
+    "schedule_disabled_reason": "該自動化有多個時間表——請到詳情頁編輯。",
+    "schedule_empty": "還沒有時間表——這個自動化只在手動觸發時執行。",
+    "schedule_add": "新增時間表",
+    "error_title_required": "請填寫自動化名稱。",
+    "error_assignee_required": "請選擇執行該自動化的智慧體或小隊。",
+    "output_modes": {
+      "create_issue": {
+        "label": "建立任務",
+        "description": "每次執行都建立一個可追蹤的任務"
+      },
+      "run_only": {
+        "label": "僅執行",
+        "description": "靜默執行，不建立任務"
+      }
+    }
+  },
+  "schedule_editor": {
+    "time_label": "時間",
+    "time_at": "定點",
+    "time_every": "按間隔",
+    "every_prefix": "每",
+    "unit_hours": "小時",
+    "unit_minutes": "分鐘",
+    "days_label": "重複",
+    "days_every": "每天",
+    "days_weekly": "每週特定幾天",
+    "days_monthly": "每月",
+    "monthly_short_month_hint": "沒有 {{day}} 日的月份將跳過。",
+    "days_short": {
+      "sun": "日",
+      "mon": "一",
+      "tue": "二",
+      "wed": "三",
+      "thu": "四",
+      "fri": "五",
+      "sat": "六"
+    },
+    "timezone_label": "時區",
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "點選編輯",
+    "cron_hint": "標準 5 欄位 cron（分 時 日 月 星期）",
+    "cron_invalid": "該 cron 表示式無效。",
+    "timezone_invalid": "伺服器端無法識別該時區。",
+    "advanced_hint": "該表示式包含視覺化編輯器暫不支援的特性。可直接編輯 cron 文字，或簡化表示式以恢復視覺化編輯。",
+    "advanced_unverified": "暫時無法連線伺服器驗證該表示式，視覺化控制元件保持停用。儲存前請確認 cron 文字無誤。",
+    "advanced_checking": "正在向伺服器驗證該表示式，結果返回前視覺化控制元件保持停用。",
+    "next_runs_label": "接下來",
+    "next_in": "{{countdown}}後",
+    "preview_unavailable": "暫時無法取得下次執行環境間。",
+    "no_upcoming_runs": "該表示式沒有即將到來的執行。",
+    "describe": {
+      "days_every": "每天",
+      "days_monthly": "每月 {{day}} 日",
+      "days_long": {
+        "sun": "週日",
+        "mon": "週一",
+        "tue": "週二",
+        "wed": "週三",
+        "thu": "週四",
+        "fri": "週五",
+        "sat": "週六"
+      },
+      "days_range": "{{from}}至{{to}}",
+      "days_join": "、",
+      "time_at": "{{time}}",
+      "time_every_hour": "每小時的第 {{minute}} 分",
+      "time_every_hours": "每 {{interval}} 小時的第 {{minute}} 分",
+      "time_every_hour_window": "每小時",
+      "time_every_hours_window": "每 {{interval}} 小時",
+      "time_every_minute": "每分鐘",
+      "time_every_minutes": "每 {{interval}} 分鐘",
+      "window": "{{from}}–{{to}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}} 天 {{hours}} 小時 {{minutes}} 分",
+      "hours_minutes": "{{hours}} 小時 {{minutes}} 分",
+      "minutes": "{{minutes}} 分",
+      "less_than_minute": "不到 1 分"
+    },
+    "a11y": {
+      "fixed_hour": "小時",
+      "fixed_minute": "分鐘",
+      "interval": "間隔",
+      "interval_unit": "間隔單位",
+      "window_start_hour": "時間視窗起始小時",
+      "window_start_minute": "時間視窗起始分鐘",
+      "window_end_hour": "時間視窗結束小時",
+      "window_end_minute": "時間視窗結束分鐘",
+      "day_pattern": "重複方式",
+      "day_of_month": "每月幾號",
+      "timezone": "時區",
+      "days_full": {
+        "sun": "週日",
+        "mon": "週一",
+        "tue": "週二",
+        "wed": "週三",
+        "thu": "週四",
+        "fri": "週五",
+        "sat": "週六"
+      }
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "篩選智慧體或小隊...",
+    "select_agent": "選擇智慧體",
+    "select_assignee": "選擇智慧體或小隊",
+    "agents_group": "智慧體",
+    "squads_group": "小隊",
+    "agent_runtime_required": "請先為該智慧體繫結執行環境",
+    "squad_runtime_required": "請先為該小隊的負責人繫結執行環境"
+  },
+  "timezone_picker": {
+    "search_placeholder": "搜尋時區..."
+  },
+  "toolbar": {
+    "result_count_title": "目前結果 / 全部自動化",
+    "filter_label": "篩選",
+    "filter_active_count_other": "{{count}} 項篩選",
+    "clear_filters": "清除篩選",
+    "section_assignee": "執行者",
+    "section_mode": "模式",
+    "section_trigger": "觸發器",
+    "section_creator": "建立者",
+    "display": "顯示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "列"
+  },
+  "actions": {
+    "row_menu": "自動化操作",
+    "pause": "暫停",
+    "resume": "恢復",
+    "delete": "刪除",
+    "selected_other": "已選 {{count}} 項",
+    "clear_selection": "清除選擇",
+    "delete_dialog": {
+      "title": "刪除自動化？",
+      "description_other": "將永久刪除 {{count}} 個自動化及其執行歷史。",
+      "warning": "此操作無法撤銷。",
+      "cancel": "取消",
+      "confirm": "永久刪除",
+      "deleting": "刪除中…"
+    }
+  }
+}

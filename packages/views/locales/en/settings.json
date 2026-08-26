@@ -112,7 +112,8 @@
     "language": {
       "title": "Language",
       "english": "English",
-      "chinese": "中文",
+      "simplified_chinese": "简体中文",
+      "traditional_chinese": "繁體中文",
       "korean": "한국어",
       "japanese": "日本語",
       "sync_failed": "Language saved on this device, but failed to sync to your account. Other devices may show the previous language."

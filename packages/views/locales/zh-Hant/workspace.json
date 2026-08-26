@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "工作區名稱",
+    "name_placeholder": "我的工作區",
+    "url_label": "工作區 URL",
+    "url_placeholder": "my-workspace",
+    "submit": "建立工作區",
+    "submitting": "建立中...",
+    "errors": {
+      "slug_format": "只能包含小寫字母、數字和連字元",
+      "slug_taken": "該工作區 URL 已被佔用。",
+      "slug_reserved": "該工作區 URL 是系統保留的，無法使用。",
+      "slug_conflict_toast": "請換一個工作區 URL",
+      "create_failed": "建立工作區失敗"
+    }
+  },
+  "new_page": {
+    "back": "返回",
+    "log_out": "退出登入",
+    "title": "歡迎使用 Multica",
+    "description": "一個工作區，讓你和 AI 隊友並肩協作——一起處理任務、留下留言、共享同一份上下文。",
+    "invite_hint": "工作區建立後可邀請隊友加入。"
+  },
+  "creation_disabled": {
+    "title": "已禁用建立工作區",
+    "description": "該 Multica 例項不允許建立新的工作區，請聯絡管理員邀請你加入已有工作區。"
+  },
+  "no_access": {
+    "title": "工作區不可用",
+    "description": "該工作區不存在，或你沒有訪問許可權。",
+    "go_to_workspaces": "前往我的工作區",
+    "sign_in_different": "使用其他帳號登入"
+  }
+}

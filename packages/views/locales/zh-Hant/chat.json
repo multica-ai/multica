@@ -1,0 +1,245 @@
+{
+  "page": {
+    "title": "聊天",
+    "select_prompt": "選擇一個對話，或點 + 新增",
+    "agent_link_no_access": "你沒有許可權與該智慧體聊天。"
+  },
+  "fab": {
+    "running": "Multica 正在工作...",
+    "unread_other": "{{count}} 條未讀對話",
+    "default": "問 Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "建立一個智慧體後才能開始對話",
+    "placeholder_archived": "此會話已歸檔",
+    "placeholder_archived_agent": "該智慧體已歸檔",
+    "placeholder_runtime_required": "繫結執行環境後繼續",
+    "placeholder_access_revoked": "你已沒有執行該智慧體的許可權",
+    "placeholder_named": "給 {{name}} 發訊息…",
+    "placeholder_default": "輸入訊息…",
+    "send_tooltip": "傳送",
+    "queue_send_tooltip": "排隊傳送",
+    "stop_tooltip": "停止",
+    "send_failed_toast": "傳送訊息失敗",
+    "send_blocked_toast": "訊息未傳送——你已沒有該智慧體的使用許可權",
+    "runtime_required_toast": "訊息未傳送——請先為該智慧體繫結執行環境",
+    "attachment_bind_failed_toast": "訊息已傳送，但檔案未能附加。請稍後重試。",
+    "add_tooltip": "新增",
+    "upload_file": "圖片或檔案",
+    "project_context": "專案上下文",
+    "change_project_context": "更改專案上下文",
+    "remove_project_context": "移除專案上下文",
+    "no_projects": "還沒有專案",
+    "project_context_unsupported": "專案描述不會生效——該智慧體的守護程序版本過舊，需要升級"
+  },
+  "queue": {
+    "title_other": "{{count}} 條排隊訊息",
+    "clear": "全部清空",
+    "steer": "引導",
+    "steer_unavailable": "目前回覆開始後才能引導",
+    "steer_no_permission": "你已沒有執行該智慧體的許可權",
+    "steer_unavailable_toast": "暫時無法引導，正在重新整理佇列。",
+    "edit": "編輯排隊訊息",
+    "remove": "移除排隊訊息",
+    "more": "更多佇列操作",
+    "fallback": "排隊訊息",
+    "action_failed_toast": "無法更新排隊訊息"
+  },
+  "message_list": {
+    "show_details": "檢視詳情",
+    "replied_in": "{{elapsed}} 內回覆",
+    "failed_after": "{{elapsed}} 後失敗",
+    "finished_in": "{{elapsed}} 內結束",
+    "no_response": "本輪已結束，Agent 沒有返回文字回覆。",
+    "failure": {
+      "agent_error": "智慧體執行環境出錯，沒能完成回覆。請重試。",
+      "timeout": "智慧體處理逾時，未能完成。可以重試，或把需求拆得更小一些。",
+      "codex_semantic_inactivity": "智慧體長時間無響應，已停止。請重試。",
+      "runtime_offline": "智慧體目前離線，暫時無法回覆。等它恢復線上後再試。",
+      "runtime_recovery": "智慧體在完成前重啟了。請重試。",
+      "manual": "這次回覆已取消。",
+      "skill_bundle_unavailable": "沒能下載到智慧體的 skill，這次回覆沒有啟動。通常是網路連線問題，請重試。",
+      "runtime_cli_timeout": "本機 OpenClaw CLI 沒能在逾時時間內響應，這次執行沒有啟動。這是本機啟動逾時，不是網路問題——除非 CLI 變快或調大逾時（MULTICA_OPENCLAW_CLI_TIMEOUT），否則重試也不會成功。",
+      "provider_network": "與模型服務的連線中斷，回覆沒能完成。檢查網路後重試。",
+      "provider_auth_or_access": "智慧體的模型帳號登入已失效。重新登入後再試。",
+      "provider_quota_limit": "智慧體的模型帳號額度已用盡。充值或更換帳號後再試。",
+      "provider_capacity_or_rate_limit": "模型服務繁忙或觸發了限流。稍後再試。",
+      "context_overflow": "這次對話超出了模型的上下文長度。開一個新會話，或把需求拆得更小一些。",
+      "runtime_missing_executable": "無法在這臺裝置上執行智慧體的 CLI。確認已正確安裝並且在 PATH 中，然後重試。",
+      "runtime_version_unsupported": "智慧體的 CLI 版本過低。升級後重試。",
+      "fallback": "出了點問題，智慧體未能完成回覆。請重試。"
+    },
+    "tools_other": "{{count}} 個工具",
+    "tool_result_named": "{{tool}} 結果：",
+    "tool_result_unnamed": "結果：",
+    "process_steps_other": "{{count}} 步",
+    "copy_action": "複製",
+    "copied_toast": "已複製",
+    "copy_failed_toast": "複製失敗",
+    "loading_older": "正在載入更早的訊息…",
+    "quick_actions_heading": "後續提問",
+    "quick_actions_regenerate": "重新生成建議",
+    "quick_actions_regenerate_failed": "無法重新生成建議，請重試。"
+  },
+  "session_history": {
+    "untitled": "無標題",
+    "time": {
+      "just_now": "剛剛",
+      "minutes": "{{count}} 分鐘前",
+      "hours": "{{count}} 小時前",
+      "days": "{{count}} 天前"
+    },
+    "row_delete_aria": "刪除對話",
+    "row_rename_aria": "重新命名對話",
+    "row_stop_aria": "停止目前執行",
+    "stop_action": "停止",
+    "row_subtitle": {
+      "working": "處理中",
+      "completed": "已完成",
+      "new_reply": "新回覆"
+    },
+    "stop_dialog": {
+      "title": "停止這次執行？",
+      "description_with_title": "這會取消 \"{{title}}\" 裡的目前智慧體 task。已產生的內容會保留在對話裡。",
+      "description_default": "這會取消目前智慧體 task。已產生的內容會保留在對話裡。",
+      "cancel": "繼續執行",
+      "confirm": "停止執行",
+      "confirming": "停止中..."
+    },
+    "delete_dialog": {
+      "title": "刪除對話",
+      "description_with_title": "\"{{title}}\" 及其訊息會被永久刪除，無法撤銷。",
+      "description_default": "此對話及其訊息會被永久刪除，無法撤銷。",
+      "cancel": "取消",
+      "confirm": "刪除",
+      "confirming": "刪除中..."
+    },
+    "row_actions_aria": "聊天操作"
+  },
+  "window": {
+    "new_chat_tooltip": "新對話",
+    "restore_tooltip": "還原",
+    "expand_tooltip": "展開",
+    "minimize_tooltip": "最小化",
+    "another_running": "另一個對話正在執行",
+    "another_unread": "另一個對話有未讀回覆",
+    "running": "執行中",
+    "unread": "未讀",
+    "no_previous": "暫無歷史對話",
+    "untitled": "新對話",
+    "my_agents": "我的智慧體",
+    "others": "其他",
+    "no_agents": "暫無智慧體",
+    "history_group": "歷史對話",
+    "agent_filter_placeholder": "搜尋智慧體...",
+    "agent_needs_runtime": "需繫結執行環境",
+    "agent_needs_runtime_hint": "請先繫結執行環境，再與該智慧體開始對話"
+  },
+  "empty_state": {
+    "first_time_title": "和你的智慧體對話",
+    "first_time_intro": "✨ 它們瞭解你的工作區——",
+    "first_time_pillars": "任務、專案、skill",
+    "first_time_pillars_suffix": "。",
+    "first_time_actions": "讓它做一份總結、規劃你的一天，或交給它一個小任務。",
+    "returning_title_named": "你好，我是 {{name}}",
+    "returning_title_default": "歡迎使用 Multica",
+    "returning_subtitle": "試試問",
+    "chat_with_named": "與 {{name}} 對話"
+  },
+  "conversation_starters": {
+    "aria_label": "對話開場建議",
+    "capabilities": {
+      "label": "你能幫我做什麼？",
+      "prompt": "你最擅長幫我做什麼？請簡要介紹。"
+    },
+    "first_task": {
+      "label": "建議第一個任務",
+      "prompt": "建議三個適合交給你的實用任務。"
+    },
+    "recommend": {
+      "label": "推薦一個操作",
+      "prompt": "根據你對我的工作區的瞭解，推薦一個有用的初始操作。"
+    },
+    "customize": "自訂開場建議"
+  },
+  "onboarding_cards": {
+    "aria_label": "開始方式",
+    "cta": "開始",
+    "board": {
+      "title": "幾分鐘搭好任務看板",
+      "desc": "告訴我目標，我來建專案、拆任務、排好優先順序。",
+      "prompt": "把我們的目標整理成一個專案看板"
+    },
+    "delegate": {
+      "title": "先交給我一件事",
+      "desc": "比如一次調研——結果會變成任務和報告交回來。",
+      "prompt": "先交給你一件事：幫我做一次調研，把結果整理成報告交回來"
+    },
+    "digest": {
+      "title": "讓日報自己寫好",
+      "desc": "每天自動彙總工作區進展，發到你的收件箱。",
+      "prompt": "幫我建一個每天早上自動彙總工作區進展的日報自動化"
+    },
+    "digest_badge": "每天 9:00"
+  },
+  "no_agent_banner": "需要先有一個智慧體才能開始對話。",
+  "archived_agent_banner": "{{name}} 已歸檔——此會話為只讀。",
+  "agent_access_revoked_banner": "你已沒有執行 {{name}} 的許可權——此會話為只讀。",
+  "runtime_required_banner": {
+    "fallback_name": "該智慧體",
+    "message": "{{name}} 需要繫結執行環境後才能回覆。",
+    "action": "繫結執行環境"
+  },
+  "offline_banner": {
+    "fallback_name": "智慧體",
+    "unstable": "{{name}} 的連線不穩定——回覆可能延遲。",
+    "offline": "{{name}} 離線——你的訊息將在它上線後傳送。"
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "離線",
+      "reconnecting": "重連中",
+      "retrying": "重試中",
+      "queued": "排隊中",
+      "waiting_local_directory": "等待本機目錄釋放",
+      "waiting_local_directory_reason": "等待 {{reason}}",
+      "starting_up": "啟動中",
+      "thinking": "思考中",
+      "typing": "輸入中"
+    },
+    "tools": {
+      "running_command": "執行命令",
+      "reading_files": "讀取檔案",
+      "searching_code": "搜尋程式碼",
+      "making_edits": "修改檔案",
+      "searching_web": "搜尋網頁",
+      "fallback": "處理中"
+    }
+  },
+  "list": {
+    "typing": "正在輸入…",
+    "failed": "傳送失敗",
+    "you_prefix": "你：",
+    "no_messages": "還沒有訊息",
+    "no_response_preview": "無文字回覆",
+    "quick_agents": "常用 Agent",
+    "add": "新增",
+    "add_agent": "新增常用 Agent",
+    "unpin_agent": "移出常用",
+    "waiting": "等待回覆",
+    "pin": "置頂",
+    "unpin": "取消置頂",
+    "pinned": "已置頂",
+    "archive": "歸檔",
+    "unarchive": "取消歸檔",
+    "archived_title": "已歸檔",
+    "row_actions_aria": "聊天操作"
+  },
+  "header": {
+    "view_profile": "檢視 Agent 資料",
+    "rename": "重新命名會話",
+    "delete": "刪除會話",
+    "archive": "歸檔會話",
+    "unarchive": "取消歸檔"
+  }
+}

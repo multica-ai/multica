@@ -12,11 +12,12 @@ export {
   type MikaContentLang,
   type MikaOnboardingDefinition,
 } from "./mika";
-type ContentLang = "en" | "zh" | "ko" | "ja";
+type ContentLang = "en" | "zh" | "zh-Hant" | "ko" | "ja";
 
 const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   en: "en",
   "zh-Hans": "zh",
+  "zh-Hant": "zh-Hant",
   ko: "ko",
   ja: "ja",
 };

@@ -1,0 +1,10 @@
+{
+  "remove_label": "移除標籤 {{name}}",
+  "resource_picker": {
+    "empty": "暫無標籤",
+    "add": "新增標籤",
+    "search": "搜尋標籤...",
+    "no_labels": "請先在設定中建立標籤",
+    "no_results": "沒有相符的標籤"
+  }
+}

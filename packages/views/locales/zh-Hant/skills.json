@@ -1,0 +1,357 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "工作區裡任何智慧體都能使用的指令。",
+    "learn_more": "瞭解更多 →",
+    "new_skill": "新增 skill",
+    "search_placeholder": "搜尋 skill...",
+    "scopes": {
+      "all": {
+        "label": "全部",
+        "description": "工作區裡所有 skill"
+      },
+      "used": {
+        "label": "使用中",
+        "description": "至少分配給一個智慧體的 skill"
+      },
+      "unused": {
+        "label": "未使用",
+        "description": "未分配給任何智慧體的 skill"
+      },
+      "mine": {
+        "label": "我建立的",
+        "description": "你建立的 skill"
+      }
+    },
+    "empty": {
+      "title": "還沒有 skill",
+      "description": "建立第一個 skill、從 URL 匯入、或從已連線的執行環境複製——之後工作區裡每個智慧體都能用它。"
+    },
+    "no_matches": {
+      "title": "無相符",
+      "with_query": "沒有 skill 相符 \"{{query}}\"{{filterSuffix}}。",
+      "with_query_filter_suffix": "（在目前篩選下）",
+      "filter_only": "目前篩選下沒有相符的 skill。",
+      "try_different": " 換個關鍵詞試試。"
+    },
+    "intro_banner": {
+      "title": "在工作區內共享。",
+      "body": "任何成員都可以建立 skill、從 URL 匯入、或從本機執行環境複製——之後所有智慧體都能用它。",
+      "highlight": "本機執行環境裡的 skill 在你複製過來之前是私有的。"
+    },
+    "list_error": {
+      "title": "無法載入 skill",
+      "fallback": "拉取 skill 清單時出錯。",
+      "retry": "重試"
+    },
+    "supporting_data_warning": "部分工作區資料載入失敗。建立者歸屬、執行環境名稱、編輯許可權可能顯示不完整。"
+  },
+  "table": {
+    "name": "名稱",
+    "created_by": "新增者",
+    "used_by": "被誰使用",
+    "source": "來源",
+    "updated": "更新時間",
+    "created": "建立時間",
+    "lock_tooltip": "只讀——只有建立者或管理員能編輯",
+    "unused": "— 未使用",
+    "by_creator": "由 {{name}} 建立",
+    "source_manual": "手動建立",
+    "source_runtime_named": "來自 {{name}}",
+    "source_runtime_provider": "來自 {{provider}} 執行環境",
+    "source_runtime_unknown": "來自某個執行環境",
+    "source_clawhub": "來自 ClawHub",
+    "source_skills_sh": "來自 Skills.sh",
+    "source_github": "來自 GitHub"
+  },
+  "actions": {
+    "row_menu": "操作",
+    "add_to_agent": "新增到智慧體",
+    "refresh": "從來源更新",
+    "my_agents": "我的智慧體",
+    "other_agents": "其他智慧體",
+    "no_agents": "暫無可用智慧體",
+    "search_placeholder": "搜尋智慧體…",
+    "no_agents_match": "沒有相符的智慧體。",
+    "has_partial": "已有 {{owned}}/{{total}}",
+    "added_toast": "已新增到 {{name}}",
+    "add_failed_toast": "新增 skill 失敗",
+    "delete": "刪除",
+    "selected": "已選 {{count}} 項",
+    "clear_selection": "清除選擇",
+    "delete_no_permission": "選中項包含僅建立者或管理員可刪除的 skill",
+    "delete_dialog_title_other": "刪除 {{count}} 個 skill？",
+    "delete_dialog_desc_other": "將永久刪除選中的 {{count}} 個 skill，並從所有智慧體上移除。",
+    "deleted_toast_other": "已刪除 {{count}} 個 skill",
+    "delete_failed_toast": "刪除 skill 失敗",
+    "update": "更新",
+    "update_none": "所選內容中沒有你可以更新的已匯入 skill",
+    "update_dialog_title": "從來源更新 skill？",
+    "update_summary_selected_other": "將從來源更新 {{count}} 個 skill",
+    "update_summary_skipped_other": "{{count}} 個無法從來源更新，跳過",
+    "update_confirm": "更新 {{count}} 個",
+    "update_updating": "更新中 {{done}}/{{total}}...",
+    "updated_toast_other": "已從來源更新 {{count}} 個 skill",
+    "update_partial_toast": "已更新 {{count}} 個，{{failed}} 個失敗",
+    "add_dialog_description": "選擇要獲得所選 skill 的智慧體。",
+    "cancel": "取消",
+    "add_confirm": "新增（{{num}}）",
+    "adding": "新增中...",
+    "added_multi_toast_other": "已新增到 {{count}} 個智慧體"
+  },
+  "toolbar": {
+    "result_count_title": "目前結果 / 全部 skill",
+    "filter_label": "篩選",
+    "filter_active_count_other": "{{count}} 項篩選",
+    "clear_filters": "清除篩選",
+    "section_usage": "使用狀態",
+    "display": "顯示",
+    "sort_by": "排序",
+    "direction_asc": "升序",
+    "direction_desc": "降序",
+    "section_columns": "顯示列"
+  },
+  "detail": {
+    "all_skills": "全部 skill",
+    "read_only": "只讀",
+    "delete_aria": "刪除 skill",
+    "delete_tooltip": "刪除 skill",
+    "supporting_data_warning": "部分工作區資料載入失敗。建立者歸屬、執行環境名稱、編輯許可權可能要等下次重新整理才完整。",
+    "delete_file": "刪除檔案",
+    "name_placeholder": "skill-name",
+    "description_placeholder": "用一句話描述智慧體什麼時候應該使用這個 skill...",
+    "subline": {
+      "origin_runtime_named": "本機執行環境 · {{name}}",
+      "origin_runtime_provider": "本機執行環境 · {{provider}}",
+      "origin_runtime_unknown": "本機執行環境",
+      "origin_clawhub": "匯入自 · ClawHub",
+      "origin_skills_sh": "匯入自 · Skills.sh",
+      "origin_github": "匯入自 · GitHub",
+      "origin_workspace": "手動建立"
+    },
+    "conflict_banner": {
+      "title": "其他人更新了這個 skill",
+      "body": "你的修改已保留。Discard 來拉取他們的版本，或 Save 覆蓋。"
+    },
+    "save_bar": {
+      "changed_summary": "已修改:{{parts}}",
+      "changed_files_other": "{{count}} 個檔案",
+      "discard": "丟棄",
+      "save": "儲存修改",
+      "saving": "儲存中..."
+    },
+    "not_found": {
+      "title": "未找到該 skill",
+      "fallback": "這個 skill 可能已被刪除，或你沒有訪問許可權。",
+      "back": "返回 Skills"
+    },
+    "toast_saved": "已儲存 skill",
+    "toast_save_failed": "儲存 skill 失敗",
+    "toast_deleted": "已刪除 skill",
+    "toast_delete_failed": "刪除 skill 失敗",
+    "refresh": {
+      "button": "更新",
+      "tooltip": "從來源重新下載這個 skill",
+      "source_github": "GitHub",
+      "source_skills_sh": "Skills.sh",
+      "source_clawhub": "ClawHub",
+      "toast_success": "已從 {{source}} 更新 skill",
+      "toast_failed": "更新 skill 失敗",
+      "dialog": {
+        "title": "從來源更新這個 skill？",
+        "description": "將從 {{source}} 重新下載\"{{name}}\"，並用最新版本替換它的名稱、描述、SKILL.md 和檔案。",
+        "warning": "對這個 skill 的本機修改將被覆蓋。智慧體分配、標籤和建立者保持不變。",
+        "cancel": "取消",
+        "confirm": "更新",
+        "refreshing": "更新中..."
+      }
+    },
+    "delete_dialog": {
+      "title": "刪除這個 skill？",
+      "description_with_agents_other": "將永久刪除\"{{name}}\"，並從目前正在使用它的 {{count}} 個智慧體上移除。",
+      "description_no_agents": "將永久刪除\"{{name}}\"，並從所有智慧體上移除。",
+      "warning": "此操作不可撤銷。",
+      "cancel": "取消",
+      "confirm": "永久刪除",
+      "deleting": "刪除中..."
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "新增",
+      "cancel": "取消",
+      "errors": {
+        "empty": "路徑不能為空。",
+        "absolute": "不允許絕對路徑。",
+        "double_dot": "路徑不能包含 \"..\"。",
+        "reserved": "SKILL.md 已為主檔案保留。",
+        "exists": "該路徑已存在檔案。",
+        "is_directory": "已有同名資料夾",
+        "under_file": "該位置已被一個檔案佔用"
+      }
+    },
+    "header": {
+      "files_other": "{{count}} 個檔案",
+      "used_by_other": "{{count}} 個智慧體在用",
+      "updated": "{{when}}更新",
+      "updated_by": "{{name}} 於{{when}}更新"
+    },
+    "tabs": {
+      "aria": "技能分割槽",
+      "overview": "概覽",
+      "files_other": "檔案 {{count}}"
+    },
+    "overview": {
+      "properties": "屬性",
+      "properties_hint": "這些欄位與 SKILL.md 的 frontmatter 保持同步。",
+      "name": "名稱",
+      "description": "描述",
+      "description_hint": "{{count}} 個字元。智慧體根據這段文字判斷是否載入該技能。",
+      "labels": "標籤",
+      "used_by_other": "被 {{count}} 個智慧體使用",
+      "used_by_empty": "還未分配給任何智慧體。開啟某個智慧體的 Skills 標籤頁進行分配。",
+      "permissions_owner": "你可以編輯和刪除該技能。改動將在智慧體下次執行環境生效。",
+      "permissions_locked_creator": "只有建立者（{{name}}）或工作區管理員可以編輯該技能。",
+      "permissions_locked": "只有建立者或工作區管理員可以編輯該技能。"
+    },
+    "files": {
+      "list_aria": "技能檔案",
+      "main": "主檔案",
+      "supporting_other": "附屬檔案 {{count}}",
+      "supporting_empty": "暫無附屬檔案。",
+      "add_file": "新增檔案",
+      "mode_aria": "檔案檢視",
+      "mode_preview": "預覽",
+      "mode_edit": "編輯",
+      "mode_raw": "純文字"
+    }
+  },
+  "create": {
+    "back": "返回",
+    "back_aria": "返回方式選擇",
+    "close": "關閉",
+    "close_aria": "關閉",
+    "method": {
+      "chooser": {
+        "title": "新增 skill",
+        "desc": "選擇一種方式把 skill 新增到工作區。"
+      },
+      "manual": {
+        "title": "手動建立",
+        "desc": "從空白 SKILL.md 開始寫。"
+      },
+      "url": {
+        "title": "從 URL 匯入",
+        "desc": "透過 URL 拉取已釋出的 skill，檔案由伺服器端拉取。"
+      },
+      "runtime": {
+        "title": "從執行環境複製",
+        "desc": "掃描本機執行環境，把它磁碟上的 skill 提升到工作區。"
+      }
+    },
+    "method_card": {
+      "manual_title": "手動建立",
+      "manual_desc": "從空白 SKILL.md 開始，自己寫指令。",
+      "url_title": "從 URL 匯入",
+      "url_desc": "從 ClawHub 或 Skills.sh 拉取已釋出的 skill。",
+      "runtime_title": "從執行環境複製",
+      "runtime_desc": "把本機執行環境裡已經裝好的 skill 提升過來。"
+    },
+    "manual": {
+      "name_label": "名稱",
+      "name_placeholder": "例如：review-helper",
+      "name_hint": "工作區內必須唯一。",
+      "description_label": "描述",
+      "description_placeholder": "用一句話說什麼時候應該把這個 skill 分配給智慧體。",
+      "name_conflict_hint": "請換一個名字再提交。",
+      "fallback_error": "建立 skill 失敗",
+      "cancel": "取消",
+      "submit": "建立 skill",
+      "submitting": "建立中...",
+      "toast_created": "已建立 skill"
+    },
+    "url": {
+      "url_label": "Skill URL",
+      "supported_sources": "支援的來源",
+      "import": "匯入",
+      "importing": "匯入中...",
+      "importing_clawhub": "正在從 ClawHub 匯入...",
+      "importing_skills_sh": "正在從 Skills.sh 匯入...",
+      "importing_github": "正在從 GitHub 匯入...",
+      "name_conflict_hint": "匯入的 skill 名稱已存在——請先刪除已有的再重試。",
+      "fallback_error": "匯入失敗",
+      "cancel": "取消",
+      "toast_imported": "已匯入 skill"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "執行環境",
+    "runtime_placeholder": "選擇一個本機執行環境",
+    "no_local_runtimes_title": "暫無可用的本機執行環境",
+    "no_local_runtimes_hint": "連線一個本機執行環境，才能瀏覽並匯入其本機 skill。",
+    "choose_runtime": "請選擇一個執行環境繼續",
+    "must_be_online": "執行環境必須線上才能瀏覽本機 skill。",
+    "load_failed": "載入本機 skill 失敗",
+    "not_supported": "這個 provider 暫不支援本機 skill 清單。",
+    "no_skills_title": "未找到本機 skill",
+    "no_skills_hint": "這個執行環境上還沒有可發現的本機 skill。",
+    "search_placeholder": "搜尋本機 skill",
+    "no_search_results_title": "沒有相符的本機 skill",
+    "no_search_results_hint": "沒有本機 skill 相符 \"{{query}}\"。",
+    "ignored_files_hint": "匯入時會忽略軟鏈、不可讀檔案、超大檔案以及超大目錄。",
+    "ready": "準備匯入",
+    "into_workspace": "到工作區。",
+    "select_skill": "請選擇一個 skill 繼續。",
+    "import_button": "匯入到工作區",
+    "importing": "匯入中...",
+    "skill_files_other": "{{count}} 個檔案",
+    "skill_name_label": "工作區裡的 skill 名稱",
+    "skill_description_label": "描述",
+    "skill_description_placeholder": "可選——描述智慧體什麼時候應該使用這個 skill。",
+    "toast_imported": "已匯入 skill",
+    "toast_import_failed": "匯入 skill 失敗",
+    "select_all": "全選 ({{count}})",
+    "bulk_ready": "已選擇 {{count}} 個 skill",
+    "bulk_import_button": "匯入 {{count}} 個 skill",
+    "bulk_progress": "正在匯入 {{completed}} / {{total}}…",
+    "bulk_cancel_button": "取消",
+    "bulk_complete_hint": "匯入完成。",
+    "bulk_cancelled_hint": "匯入已取消。",
+    "bulk_done_button": "完成",
+    "bulk_summary_created": "已建立",
+    "bulk_summary_updated": "已更新",
+    "bulk_summary_conflicts": "衝突",
+    "bulk_summary_skipped": "已跳過",
+    "bulk_summary_failed": "失敗",
+    "conflict_single_title": "工作區裡已存在同名 skill",
+    "conflict_bulk_title": "{{count}} 個 skill 需要處理衝突",
+    "conflict_hint": "選擇覆蓋現有工作區 skill、改名匯入，或跳過。",
+    "conflict_locked_creator": "該 skill 由 {{creator}} 建立，只能由建立者透過本機匯入覆蓋；如需修改請到 Skill 詳情頁編輯。",
+    "conflict_locked": "該 skill 只能由建立者透過本機匯入覆蓋；如需修改請到 Skill 詳情頁編輯。",
+    "conflict_overwrite": "覆蓋",
+    "conflict_rename": "重新命名",
+    "conflict_skip": "跳過",
+    "conflict_cancel": "取消",
+    "conflict_overwrite_all": "全部覆蓋",
+    "conflict_skip_all": "全部跳過",
+    "conflict_rename_label": "新的 skill 名稱",
+    "conflict_footer": "還有 {{count}} 個衝突決策待處理。",
+    "conflict_apply_button": "應用決策",
+    "conflict_missing_resolution": "請選擇如何處理這個衝突。",
+    "conflict_name_still_exists": "這個名稱仍然已存在。請換一個名稱或跳過。"
+  },
+  "file_tree": {
+    "no_files": "無檔案",
+    "actions": {
+      "label": "{{path}} 的操作",
+      "edit": "編輯",
+      "rename": "重新命名",
+      "delete": "刪除"
+    }
+  },
+  "file_viewer": {
+    "no_content": "*暫無內容*",
+    "markdown_placeholder": "輸入 Markdown 內容...",
+    "raw_placeholder": "檔案內容...",
+    "raw_aria": "{{path}} 的純文字內容"
+  }
+}
