@@ -360,7 +360,7 @@
       "hint_jump": "jump",
       "hint_close": "close"
     },
-    "sidebar_tooltip": "Toggle sidebar",
+    "sidebar_tooltip": "Toggle right sidebar",
     "find": {
       "placeholder": "Find in issue...",
       "count": "{{current}}/{{total}}",

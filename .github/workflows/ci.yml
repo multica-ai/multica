@@ -64,6 +64,8 @@ jobs:
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
               - 'scripts/worktree-db.test.sh'
+              - 'scripts/dev-env.sh'
+              - 'scripts/dev-env.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -256,6 +258,10 @@ jobs:
       - name: Test worktree database cleanup
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/worktree-db.test.sh
+
+      - name: Test development environment registry
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/dev-env.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -610,7 +616,7 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
-        # official cursor-agent.ps1 and pi.ps1 launch native children with
+        # official cursor-agent.ps1, pi.ps1, and qwen.ps1 launch native children with
         # `$args`, and PowerShell re-serialises them onto the child command
         # line. Under
         # Legacy native argument passing (powershell.exe 5.1, pwsh <= 7.2) a
@@ -621,7 +627,7 @@ jobs:
         # the backend job still runs the full package on Linux.
         # -v so a silent skip (no PowerShell host resolved, or a -run pattern
         # that stops matching) is visible in the log instead of passing as "ok".
-        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestQwenExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation|TestPlatformQwenInvocation)' -count=1 -timeout=5m
 
       - name: Test Windows OpenCode oversized prompt reaches stdin
         if: ${{ needs.changes.outputs.backend == 'true' }}
@@ -714,6 +720,20 @@ jobs:
         run: |
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
+
+      - name: Test Windows task temp dir sweep survives a sharing violation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The GC's task temp sweep has to cope with a file it cannot delete: a
+        # leftover child process holding one open is what left 174 directories
+        # behind in #7364. Only a real Windows filesystem produces that sharing
+        # violation — on unix an open file unlinks fine — so this is the only
+        # place we can prove the two things that matter: the failed cleanup
+        # keeps .task_lock (without it the directory reads as a pre-lock
+        # leftover and stops being reclaimable on liveness), and the next cycle
+        # removes the directory once the handle closes.
+        # -v so a skip is visible instead of passing silently as "ok".
+        run: go test ./internal/daemon/execenv -v -run '^TestPruneTaskTempDirsSurvivesRealSharingViolation$' -count=1 -timeout=5m
 
       - name: Test Windows agent executable junction resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}

@@ -62,7 +62,7 @@
     "icon_tooltip": "Change icon",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
-    "sidebar_tooltip": "Toggle sidebar",
+    "sidebar_tooltip": "Toggle right sidebar",
     "copy_link": "Copy link",
     "delete_action": "Delete project",
     "section_properties": "Properties",

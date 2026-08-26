@@ -118,6 +118,22 @@ describe("useStatusOptions", () => {
     expect(result.current.map((o) => o.key)).not.toContain("qa");
   });
 
+  it("lets a read-only filter include an archived status still in use", () => {
+    catalogEntries = [
+      ...BUILT_INS,
+      entry({
+        key: "qa",
+        name: "QA",
+        archived_at: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    const { result } = renderHook(() =>
+      useStatusOptions("workspace-1", ["qa"]),
+    );
+
+    expect(result.current.map((o) => o.key)).toContain("qa");
+  });
+
   // Built-ins keep their semantic token color; a hex here would override it.
   it("carries a color for custom statuses only", () => {
     catalogEntries = [...BUILT_INS, entry({ key: "qa", name: "QA", color: "#ff0000" })];

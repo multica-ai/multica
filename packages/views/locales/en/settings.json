@@ -168,8 +168,12 @@
         "description": "Open your preferred issue creation flow."
       },
       "toggleSidebar": {
-        "label": "Toggle sidebar",
-        "description": "Show or hide the main sidebar."
+        "label": "Toggle left sidebar",
+        "description": "Show or hide the left sidebar."
+      },
+      "toggleRightSidebar": {
+        "label": "Toggle right sidebar",
+        "description": "Show or hide the right sidebar when the current page has one."
       },
       "toggleChat": {
         "label": "Toggle chat window",
@@ -363,6 +367,20 @@
       "installed": "Plugin installed",
       "upgrade_from": " · upgrading from v{{version}}",
       "new_scope": "New"
+    },
+    "schedule": {
+      "title": "Automatic schedules",
+      "consent_title": "This Plugin will run hooks automatically",
+      "consent_description": "Installing or upgrading enables these schedules. If several times are missed, only the latest due run is delivered.",
+      "next_run": "Next: {{time}}",
+      "activity_title": "Recent deliveries",
+      "activity_last": "{{status}} · planned {{planned}} · sent {{actual}} · attempt {{attempt}}",
+      "activity_empty": "Not delivered yet",
+      "frequency_minutes_one": "Every minute",
+      "frequency_minutes_other": "Every {{count}} minutes",
+      "frequency_hourly": "Every hour at minute {{minute}}",
+      "frequency_daily": "Every day at {{hour}}:{{minute}}",
+      "frequency_custom": "Custom recurring schedule"
     },
     "config": {
       "title": "Configuration",

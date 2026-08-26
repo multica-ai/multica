@@ -232,6 +232,7 @@
       "preview_loading": "正在更新估算金额...",
       "preview_unreadable": "无法读取估算结果。请修改席位数或重试。",
       "preview_failed": "暂时无法获取估算金额，请稍后重试。",
+      "capacity_out_of_sync": "Stripe 席位数与计费记录不一致。再次购买前，请联系支持人员。",
       "in_progress": "另一笔席位购买正在处理中。请等待其完成；若长时间未完成，请联系支持人员。",
       "purchase_unreadable": "无法读取购买响应。请重试当前报价；系统会复用同一购买请求。",
       "purchase_failed": "无法添加席位。可使用同一报价重试；报价过期时请刷新。",

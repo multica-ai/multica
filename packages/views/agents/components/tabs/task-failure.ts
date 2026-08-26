@@ -1,93 +1,97 @@
-// Human-readable copy for the back-end task failure reason. Surfaced in the
-// agent detail Recent Work list and the issue execution log — the two places
-// the front-end exposes failure_reason directly to the user, and the
-// destination the Usage page's Errors breakdown drills into.
-//
-// Lives next to the consuming tab (rather than in agents/presence) because
-// failed tasks no longer have a top-level workload state; failure context
-// is purely a detail-page concern now.
-//
-// Covers the canonical taxonomy in server/pkg/taskfailure — platform-side
-// reasons plus 14 `agent_error.*` sub-reasons — and the pre-MUL-1949 coarse
-// values still present on historical rows. This used to be a
-// `Record<TaskFailureReason, string>` indexed with a cast, which silently
-// resolved to `undefined` for every refined reason the backend has written
-// since MUL-1949: a task that failed on a provider 401 rendered no reason
-// at all.
-const REASON_LABEL: Record<string, string> = {
+import type { useT } from "../../../i18n";
+
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+// Stable translation keys for the canonical server taxonomy, provider-specific
+// operational reasons, and coarse values still present on historical rows.
+// The wire value remains an open string: clients can meet a newer reason than
+// they know, and failureReasonLabel deliberately falls back to that raw value.
+export const FAILURE_REASON_I18N_KEYS = {
   // Platform / scheduler side.
-  queued_expired: "Expired in queue",
-  runtime_offline: "Daemon offline",
-  runtime_reconnect_timeout: "Daemon did not reconnect in time",
-  runtime_recovery: "Daemon restarted",
-  timeout: "Task timed out",
-  iteration_limit: "Hit the iteration limit",
-  agent_blocked: "Waiting on human input",
-  api_invalid_request: "Rejected by the model API",
-  skill_bundle_unavailable: "Couldn't download the agent's skills",
-  runtime_cli_timeout: "Local runtime CLI timed out",
+  queued_expired: "queued_expired",
+  runtime_offline: "runtime_offline",
+  runtime_reconnect_timeout: "runtime_reconnect_timeout",
+  runtime_recovery: "runtime_recovery",
+  timeout: "timeout",
+  iteration_limit: "iteration_limit",
+  agent_blocked: "agent_blocked",
+  api_invalid_request: "api_invalid_request",
+  skill_bundle_unavailable: "skill_bundle_unavailable",
+  runtime_cli_timeout: "runtime_cli_timeout",
+  invalid_task_identity: "invalid_task_identity",
+  issue_window_restricted: "issue_window_restricted",
 
   // Agent process side — provider.
-  "agent_error.provider_auth_or_access": "Provider auth failed",
-  "agent_error.provider_quota_limit": "Provider quota exhausted",
-  "agent_error.provider_capacity_or_rate_limit": "Rate limited by provider",
-  "agent_error.provider_server_error": "Provider server error",
-  "agent_error.provider_network": "Network error reaching provider",
+  "agent_error.provider_auth_or_access":
+    "agent_error_provider_auth_or_access",
+  "agent_error.provider_quota_limit": "agent_error_provider_quota_limit",
+  "agent_error.provider_capacity_or_rate_limit":
+    "agent_error_provider_capacity_or_rate_limit",
+  "agent_error.provider_server_error": "agent_error_provider_server_error",
+  "agent_error.provider_network": "agent_error_provider_network",
 
   // Agent process side — agent / runner.
-  "agent_error.process_failure": "Agent process crashed",
-  "agent_error.empty_or_unparseable_output": "Agent returned no usable output",
-  "agent_error.agent_timeout": "Agent timed out",
-  "agent_error.context_overflow": "Context window exceeded",
-  "agent_error.missing_config": "Missing API key or configuration",
-  "agent_error.model_not_found_or_unavailable": "Model unavailable",
-  "agent_error.runtime_version_unsupported": "Runner CLI version unsupported",
-  "agent_error.runtime_missing_executable": "Runner CLI not installed",
-  "agent_error.unknown": "Agent execution error",
+  "agent_error.process_failure": "agent_error_process_failure",
+  "agent_error.empty_or_unparseable_output":
+    "agent_error_empty_or_unparseable_output",
+  "agent_error.agent_timeout": "agent_error_agent_timeout",
+  "agent_error.context_overflow": "agent_error_context_overflow",
+  "agent_error.missing_config": "agent_error_missing_config",
+  "agent_error.model_not_found_or_unavailable":
+    "agent_error_model_not_found_or_unavailable",
+  "agent_error.runtime_version_unsupported":
+    "agent_error_runtime_version_unsupported",
+  "agent_error.runtime_missing_executable":
+    "agent_error_runtime_missing_executable",
+  "agent_error.unknown": "agent_error_unknown",
 
-  // Provider-specific operational reasons, outside the canonical taxonomy.
-  codex_resume_oversized: "Session too large to resume",
-  local_directory_error: "Local directory error",
+  // Daemon operational reasons, outside the canonical taxonomy.
+  agent_fallback_message: "agent_fallback_message",
+  codex_semantic_inactivity: "codex_semantic_inactivity",
+  codex_resume_oversized: "codex_resume_oversized",
+  idle_watchdog: "idle_watchdog",
+  local_directory_error: "local_directory_error",
+  cancelled: "cancelled",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.
-  agent_error: "Agent execution error",
-  codex_semantic_inactivity: "Codex semantic inactivity timeout",
-  manual: "Cancelled by user",
-};
+  agent_error: "agent_error",
+  manual: "manual",
+  user_cancelled: "user_cancelled",
+} as const;
+
+type KnownFailureReason = keyof typeof FAILURE_REASON_I18N_KEYS;
 
 /**
- * Label for a `failure_reason`, or `null` when there is nothing to show.
- *
- * `failure_reason` is an open string, not a closed enum: the taxonomy grows
- * as classifier rules land, and an installed desktop client will meet
- * reasons its build predates. Those fall back to the raw wire value rather
- * than to nothing — machine-y, but truthful, and it is the exact string an
- * operator would paste into a log search.
+ * Localized label for a `failure_reason`, or `null` when there is nothing to
+ * show. Unknown values remain raw so an older installed client degrades
+ * truthfully when a newer backend adds a reason.
  */
 export function failureReasonLabel(
   reason: string | null | undefined,
+  t: AgentsT,
 ): string | null {
   if (!reason) return null;
-  return REASON_LABEL[reason] ?? reason;
+  if (!Object.prototype.hasOwnProperty.call(FAILURE_REASON_I18N_KEYS, reason)) {
+    return reason;
+  }
+  const key = FAILURE_REASON_I18N_KEYS[reason as KnownFailureReason];
+  return t(($) => $.task_failure.reasons[key]);
 }
 
 /**
- * Label for a cancelled task the SERVER cancelled for a persisted reason —
- * the worktree claim gate refusing a too-old daemon, or a cancel-ack carrying
- * a preserved-work error. Those are conditions only the user can fix, so the
- * row must explain itself like a failed row does.
- *
- * Returns `null` for a user-initiated cancel (no persisted reason): the user
- * knows why they clicked, and stamping a label on every ordinary cancel would
- * bury the rows that actually need attention.
+ * Label for a cancelled task the server cancelled for a persisted reason.
+ * User-initiated cancellation has no reason and stays unlabeled.
  */
-export function cancelReasonLabel(task: {
-  status: string;
-  error?: string | null;
-  failure_reason?: string | null;
-}): string | null {
+export function cancelReasonLabel(
+  task: {
+    status: string;
+    error?: string | null;
+    failure_reason?: string | null;
+  },
+  t: AgentsT,
+): string | null {
   if (task.status !== "cancelled") return null;
-  const reason = failureReasonLabel(task.failure_reason);
+  const reason = failureReasonLabel(task.failure_reason, t);
   if (reason) return reason;
-  return task.error ? "Cancelled by the system" : null;
+  return task.error ? t(($) => $.task_failure.cancelled_by_system) : null;
 }

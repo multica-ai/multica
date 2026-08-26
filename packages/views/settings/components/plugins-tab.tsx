@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Loader2, Trash2, Upload } from "lucide-react";
+import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -37,8 +37,8 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { mcpHooks, PluginHookActivity, PluginMCPApproval } from "../../plugins";
-import { useT } from "../../i18n";
+import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
+import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
 /**
@@ -65,7 +65,66 @@ function ScopeList({ scopes, highlighted }: { scopes: string[]; highlighted?: st
   );
 }
 
+type ScheduledHook = {
+  key: string;
+  name: string;
+  schedule?: { cron: string; timezone: string; next_run_at?: string };
+};
+
+function ScheduleList({ hooks, showNextRun = false }: { hooks: ScheduledHook[]; showNextRun?: boolean }) {
+  const { t } = useT("settings");
+  const locale = useLocale();
+  return (
+    <ul className="mt-2 space-y-1.5">
+      {hooks.map((hook) => (
+        <li key={hook.key} className="flex flex-wrap items-baseline gap-2 text-caption">
+          <span className="font-medium">{hook.name}</span>
+          <span>{scheduleFrequency(hook.schedule?.cron ?? "", t)}</span>
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
+          <span className="text-muted-foreground">{hook.schedule?.timezone ?? ""}</span>
+          {showNextRun && hook.schedule?.next_run_at ? (
+            <span className="text-muted-foreground">
+              {t(($) => $.plugins.schedule.next_run, {
+                time: formatScheduleTime(hook.schedule?.next_run_at, locale),
+              })}
+            </span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function formatScheduleTime(value: string | undefined, locale: string): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp));
+}
+
 type Translate = ReturnType<typeof useT<"settings">>["t"];
+
+function scheduleFrequency(cron: string, t: Translate): string {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return t(($) => $.plugins.schedule.frequency_custom);
+  const everyMinutes = /^\*\/(\d+)$/.exec(fields[0] ?? "");
+  if (everyMinutes && fields.slice(1).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_minutes, { count: Number(everyMinutes[1]) });
+  }
+  if (/^\d+$/.test(fields[0] ?? "") && fields.slice(1).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_hourly, { minute: fields[0] });
+  }
+  if (/^\d+$/.test(fields[0] ?? "") && /^\d+$/.test(fields[1] ?? "") && fields.slice(2).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_daily, {
+      hour: String(fields[1]).padStart(2, "0"),
+      minute: String(fields[0]).padStart(2, "0"),
+    });
+  }
+  return t(($) => $.plugins.schedule.frequency_custom);
+}
 
 function scopeDescription(scope: string, t: Translate): string {
   if (scope.startsWith("net:")) {
@@ -270,6 +329,8 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
   const [preview, setPreview] = useState<PluginPreview | null>(null);
 
   const packages = useMemo(() => data?.packages ?? [], [data]);
+  const scheduledHooks = (preview?.manifest.contributes?.hooks ?? [])
+    .filter((hook) => hook.schedule !== undefined);
 
   const reportError = (error: unknown) => {
     toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
@@ -386,6 +447,17 @@ function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boole
 
             <ScopeList scopes={preview.scopes} highlighted={preview.added_scopes} />
 
+            {scheduledHooks.length > 0 ? (
+              <Alert>
+                <CalendarClock />
+                <AlertTitle>{t(($) => $.plugins.schedule.consent_title)}</AlertTitle>
+                <AlertDescription>
+                  {t(($) => $.plugins.schedule.consent_description)}
+                  <ScheduleList hooks={scheduledHooks} />
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setPreview(null)}>
                 {t(($) => $.plugins.consent.cancel)}
@@ -495,6 +567,7 @@ function InstalledPlugin({
   // An mcp hook is inert until its tools are approved, so the panel appears for
   // every one of them rather than only when something is already pinned.
   const mcpContributions = mcpHooks(installation.hooks ?? []);
+  const scheduledHooks = (installation.hooks ?? []).filter((hook) => hook.schedule !== undefined);
 
   const contributions = [
     ...installation.surfaces.map((surface) => `${surface.name} (${surface.type})`),
@@ -550,6 +623,21 @@ function InstalledPlugin({
           <div className="text-caption font-medium">{t(($) => $.plugins.granted_scopes)}</div>
           <ScopeList scopes={installation.granted_scopes} />
         </div>
+
+        {scheduledHooks.length > 0 ? (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-caption font-medium">
+              <CalendarClock className="size-4" />
+              {t(($) => $.plugins.schedule.title)}
+            </div>
+            <ScheduleList hooks={scheduledHooks} showNextRun />
+            <PluginScheduleActivity
+              wsId={wsId}
+              installationId={installation.id}
+              hooks={scheduledHooks}
+            />
+          </div>
+        ) : null}
 
         {mcpContributions.length > 0 ? (
           <div className="space-y-2">

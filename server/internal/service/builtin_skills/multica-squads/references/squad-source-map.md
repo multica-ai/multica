@@ -122,6 +122,47 @@ Contracts:
   members carry no skills segment (squad_briefing.go renderMemberRow);
 - no traced behavior injects `instructions` into every squad member.
 
+## Leader Evaluation Recording
+
+Source:
+
+```text
+server/internal/handler/squad.go                  # RecordSquadLeaderEvaluation ~949
+server/cmd/multica/cmd_squad.go                   # runSquadActivity ~459
+server/internal/service/squad_no_action.go        # HasSquadLeaderNoActionEvaluationForTask
+server/internal/handler/comment.go                # no_action comment rejection ~1851
+```
+
+Contracts:
+
+- authority is the TASK row from `X-Task-ID`, not the issue's assignee:
+  `task.issue_id == issue.id`, `task.is_leader_task`, `task.squad_id` valid.
+  The squad is loaded from `task.squad_id`; the target issue may be assigned to
+  anyone (MUL-6622 / GH #7487). The pre-fix `issue.assignee_type == "squad"`
+  gate diverged from the claim-side `is_leader_task` gate and made the call
+  unsatisfiable on `@squad`-on-agent-issue and leader-task-on-child paths;
+- the task is loaded with `GetAgentTaskInWorkspace`, not `GetAgentTask`: the
+  latter is a global lookup by id, and the rejection path quotes the task's
+  issue id. Check order is load-bearing — tenant scope, then "caller owns this
+  task", and only then any message naming a task-derived id;
+- two authorization gates: `task.agent_id == caller`, then
+  `squad.leader_id == caller`. The second is required because
+  `is_leader_task` on the row is enqueue-time INTENT: when the leader was
+  swapped before the claim, `handler/daemon.go` clears `resp.IsLeaderTask` and
+  runs the task as an ordinary agent turn while the row keeps
+  `is_leader_task = true`. Without the live check, such a downgraded run could
+  write a leader verdict and suppress its own comment. Removing this gate
+  requires persisting the role the claim actually delivered;
+- `activity_log.actor_id` is `task.agent_id`, not `squad.leader_id`: the
+  `no_action` comment suppression lookup matches on `task.agent_id`, so the
+  live leader id there would silently break suppression;
+- a leader agent running a NON-leader task is rejected — it is not running as
+  the leader, and the runtime only mandates the call for `is_leader_task`;
+- the `no_action` comment prohibition is conditional on this write succeeding
+  (comment.go:1851 checks the activity exists), so the injected instructions
+  tell leaders to fall back to a comment when the call errors — capped at one
+  comment, and only when the turn has not already commented.
+
 ## Issue Assignment
 
 Source:
@@ -152,6 +193,11 @@ Contracts:
   do not write issue status. There is no assignee gate anymore: a guest leader
   writes nothing not because it lacks a grant but because a turn that did not
   move the issue's state has nothing to record.
+- status names are category rules: custom statuses inherit their category's
+  behavior in full (MUL-6243, `server/internal/issuestatus/issuestatus.go`
+  `Effective`/`Resolve`); the brief lists the workspace catalog when any custom
+  statuses exist (MUL-6460, `writeIssueStatusCommand` in
+  `server/internal/daemon/execenv/runtime_config_sections.go`).
 
 ## Comment / Mention
 

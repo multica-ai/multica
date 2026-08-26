@@ -173,18 +173,25 @@ explicit model fail closed because the effective config.toml model is unknown.
 ### model vs custom_args
 
 `model` is a first-class persisted column the daemon reads directly.
-`custom_args` are raw provider CLI args. The CLI help notes that some providers
-(codex app-server, openclaw) reject `--model` inside `custom_args` — but that is
-documented CLI guidance, not a server-enforced invariant; nothing in the create
-handler inspects `custom_args` for a model flag. Pi is stricter at invocation
-time: `--thinking` in `custom_args` is filtered because the first-class
-`thinking_level` field owns that flag and must be the only source of its value.
+`custom_args` are normally raw provider CLI args. The CLI help notes that some
+providers (codex app-server, openclaw) reject `--model` inside `custom_args` —
+but that is documented CLI guidance, not a server-enforced invariant; nothing
+in the create handler inspects `custom_args` for a model flag. Provider
+backends may consume protocol selectors before launch:
+
+- Pi filters `--thinking` because the first-class `thinking_level` field owns
+  that flag and must be its only source.
+- ZeroClaw consumes `--agent <alias>` / `--agent-alias <alias>` (including
+  `=value` forms) and sends the value as the ACP `session/new.agentAlias`
+  parameter. `zeroclaw acp` has no such CLI flag. Set one of these custom args
+  when ZeroClaw has multiple agents and no `[acp].default_agent`; omit it for a
+  sole-agent config so ZeroClaw can auto-select that agent.
 
 Never put credentials or other secrets in `custom_args`. Daemon command logs
-redact argument values, but the values still live in the provider process's
-argv and may be visible to other local processes through `ps` or `/proc`. Put
-provider credentials in `custom_env` instead, using its stdin or 0600 file
-input where possible.
+redact argument values, but values that a backend does not consume still live
+in the provider process's argv and may be visible to other local processes
+through `ps` or `/proc`. Put provider credentials in `custom_env` instead,
+using its stdin or 0600 file input where possible.
 
 ## Env & secrets
 

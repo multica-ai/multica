@@ -237,6 +237,16 @@ describe("timelineTicks", () => {
   it("returns nothing for a run with no length", () => {
     expect(timelineTicks(0)).toEqual([]);
   });
+
+  it("omits a round tick that would crowd the exact run end", () => {
+    expect(timelineTicks(2 * 60_000 + 2_000, 6)).toEqual([
+      0,
+      30_000,
+      60_000,
+      90_000,
+      122_000,
+    ]);
+  });
 });
 
 describe("laneSegmentPosition", () => {

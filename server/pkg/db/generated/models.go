@@ -170,6 +170,7 @@ type AgentTaskQueue struct {
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
 	BranchName                pgtype.Text `json:"branch_name"`
 	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
+	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
 }
 
 type AgentToLabel struct {
@@ -319,18 +320,30 @@ type ChannelBindingToken struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChannelChatContextGeneration struct {
+	ChatSessionID          pgtype.UUID        `json:"chat_session_id"`
+	Revision               int64              `json:"revision"`
+	HistoryStartMessageID  pgtype.Text        `json:"history_start_message_id"`
+	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
+	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
+	PendingFresh           bool               `json:"pending_fresh"`
+	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelChatSessionBinding struct {
-	ID             pgtype.UUID        `json:"id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	InstallationID pgtype.UUID        `json:"installation_id"`
-	ChannelType    string             `json:"channel_type"`
-	ChannelChatID  string             `json:"channel_chat_id"`
-	ChatType       string             `json:"chat_type"`
-	LastMessageID  pgtype.Text        `json:"last_message_id"`
-	LastThreadID   pgtype.Text        `json:"last_thread_id"`
-	Config         []byte             `json:"config"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	PendingFresh   bool               `json:"pending_fresh"`
+	ID              pgtype.UUID        `json:"id"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	InstallationID  pgtype.UUID        `json:"installation_id"`
+	ChannelType     string             `json:"channel_type"`
+	ChannelChatID   string             `json:"channel_chat_id"`
+	ChatType        string             `json:"chat_type"`
+	LastMessageID   pgtype.Text        `json:"last_message_id"`
+	LastThreadID    pgtype.Text        `json:"last_thread_id"`
+	Config          []byte             `json:"config"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	PendingFresh    bool               `json:"pending_fresh"`
+	ContextRevision int64              `json:"context_revision"`
 }
 
 type ChannelInboundAudit struct {
@@ -417,18 +430,23 @@ type ChatDraftRestore struct {
 }
 
 type ChatMessage struct {
-	ID                       pgtype.UUID        `json:"id"`
-	ChatSessionID            pgtype.UUID        `json:"chat_session_id"`
-	Role                     string             `json:"role"`
-	Content                  string             `json:"content"`
-	TaskID                   pgtype.UUID        `json:"task_id"`
-	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	FailureReason            pgtype.Text        `json:"failure_reason"`
-	ElapsedMs                pgtype.Int8        `json:"elapsed_ms"`
-	MessageKind              string             `json:"message_kind"`
-	ChannelMediaPendingUntil pgtype.Timestamptz `json:"channel_media_pending_until"`
-	ChannelIngested          bool               `json:"channel_ingested"`
-	QuickActions             []byte             `json:"quick_actions"`
+	ID                            pgtype.UUID        `json:"id"`
+	ChatSessionID                 pgtype.UUID        `json:"chat_session_id"`
+	Role                          string             `json:"role"`
+	Content                       string             `json:"content"`
+	TaskID                        pgtype.UUID        `json:"task_id"`
+	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
+	FailureReason                 pgtype.Text        `json:"failure_reason"`
+	ElapsedMs                     pgtype.Int8        `json:"elapsed_ms"`
+	MessageKind                   string             `json:"message_kind"`
+	ChannelMediaPendingUntil      pgtype.Timestamptz `json:"channel_media_pending_until"`
+	ChannelIngested               bool               `json:"channel_ingested"`
+	QuickActions                  []byte             `json:"quick_actions"`
+	ChannelContextRevision        pgtype.Int8        `json:"channel_context_revision"`
+	ChannelOutboundType           pgtype.Text        `json:"channel_outbound_type"`
+	ChannelOutboundInstallationID pgtype.UUID        `json:"channel_outbound_installation_id"`
+	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
+	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 }
 
 type ChatPinnedAgent struct {
@@ -963,6 +981,21 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type PluginHookSchedule struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	HookKey        string             `json:"hook_key"`
+	CronExpression string             `json:"cron_expression"`
+	Timezone       string             `json:"timezone"`
+	Generation     pgtype.UUID        `json:"generation"`
+	ActivatedAt    pgtype.Timestamptz `json:"activated_at"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+	Enabled        bool               `json:"enabled"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PluginInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -993,6 +1026,8 @@ type PluginInvocation struct {
 	LatencyMs      int32              `json:"latency_ms"`
 	Error          pgtype.Text        `json:"error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	DeliveryID     pgtype.Text        `json:"delivery_id"`
+	PlannedAt      pgtype.Timestamptz `json:"planned_at"`
 }
 
 type PluginPackage struct {

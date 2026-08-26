@@ -6463,7 +6463,7 @@ func TestClaimEnvRootAdoptsEmptyDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claimEnvRoot on an empty directory: %v", err)
 	}
-	defer releaseEnvRootLock(lock)
+	defer releaseLockFile(lock)
 	if reset {
 		t.Fatal("adopting an empty directory should not ask for a reset")
 	}
@@ -6582,7 +6582,7 @@ func TestClaimEnvRootRepairsTornOwnerMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claimEnvRoot wedged on a torn marker: %v", err)
 	}
-	defer releaseEnvRootLock(lock)
+	defer releaseLockFile(lock)
 	if owner, _ := readEnvRootOwner(envRoot); owner != id {
 		t.Fatalf("owner = %q, want the repairing task %q", owner, id)
 	}

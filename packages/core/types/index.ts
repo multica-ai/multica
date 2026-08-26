@@ -98,7 +98,7 @@ export type {
   PluginPackage,
   PluginPackageVersion,
   PluginPackageListResponse,
-  PluginSurfaceScript,
+  PluginSurfaceLaunch,
   PluginPreview,
   PluginPreviewRequest,
   PluginInstallRequest,

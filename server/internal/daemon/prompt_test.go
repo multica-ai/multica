@@ -236,6 +236,37 @@ func TestBuildQuickCreatePromptParentPinning(t *testing.T) {
 	}
 }
 
+// TestBuildPromptSquadLeaderNoActionFailureFallback locks the escape hatch added
+// in MUL-6622 / GH #7487. The comment prohibition is conditional on the
+// `squad activity` call succeeding — the server only rejects a leader comment
+// once the no_action activity exists — so a failed call must not end the turn in
+// silence. The fallback is capped at ONE comment so it cannot collide with the
+// one-comment-per-turn rule.
+func TestBuildPromptSquadLeaderNoActionFailureFallback(t *testing.T) {
+	out := BuildPrompt(Task{
+		IssueID:               "issue-123",
+		TriggerCommentID:      "comment-456",
+		TriggerCommentContent: "LGTM",
+		TriggerAuthorType:     "member",
+		TriggerAuthorName:     "Bohan",
+		IsLeaderTask:          true,
+		LeaderRoleResolved:    true,
+		Agent: &AgentData{
+			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
+		},
+	}, "claude")
+
+	for _, want := range []string{
+		"conditional on that call SUCCEEDING",
+		"post exactly ONE short comment",
+		"does not license a second one",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad leader no_action rule must contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
 // TestBuildPromptSquadLeaderNoActionForMemberTrigger verifies that the
 // squad leader no_action prohibition is injected in the per-turn prompt
 // regardless of whether the triggering comment was posted by an agent or

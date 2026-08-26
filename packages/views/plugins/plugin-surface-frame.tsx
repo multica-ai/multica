@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { pluginSurfaceScriptOptions } from "@multica/core/plugins";
+import { pluginSurfaceLaunchOptions } from "@multica/core/plugins";
 import type { PluginInstallation, PluginSurface } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../i18n";
-import { buildSurfaceDocument, readThemeTokens } from "./surface-document";
+import { buildSurfaceFrameDocument, readThemeTokens } from "./surface-document";
 import { createSurfaceBridge } from "./surface-bridge";
 
 const DEFAULT_HEIGHT = 220;
@@ -22,77 +22,93 @@ interface PluginSurfaceFrameProps {
 /**
  * Mounts one plugin surface.
  *
- * `sandbox="allow-scripts"` WITHOUT `allow-same-origin` is the whole isolation
- * boundary and must never be loosened: the pairing is called out in the HTML
- * spec as defeating the sandbox, and it is what would hand a third-party script
- * our cookies and storage. Same rule, same reason as
- * `packages/views/editor/code-block-iframe.tsx`.
+ * This element is a TRUSTED wrapper. Its nested plugin iframe is the isolation
+ * boundary and is always `sandbox="allow-scripts"` without
+ * `allow-same-origin`; see buildSurfaceFrameDocument.
  */
 export function PluginSurfaceFrame({ wsId, installation, surface, issueId, className }: PluginSurfaceFrameProps) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const anchorRef = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const launchInstance = useId();
 
-  // The code comes from us, not from the plugin author's server. It is keyed by
-  // the installed version, which is immutable — so this is fetched once and an
-  // upgrade is what changes the key.
-  const { data: script, isPending, isError } = useQuery(
-    pluginSurfaceScriptOptions(wsId, installation.id, surface.key, installation.package_version_id),
+  // Every mounted frame gets its own launch. The artifact is immutable, but the
+  // bridge proof is deliberately neither cacheable nor shareable.
+  const { data: launch, isPending, isError } = useQuery(
+    pluginSurfaceLaunchOptions(wsId, installation.id, surface.key, installation.package_version_id, launchInstance, issueId),
   );
 
-  // Tokens are read off a mounted element, so the frame inherits whatever theme
-  // the app is actually in rather than a hardcoded copy that drifts. It has to
-  // happen after mount: on first render the ref is still null and the surface
-  // would be built with no theme at all.
-  const [theme, setTheme] = useState<Record<string, string>>({});
-  useEffect(() => setTheme(readThemeTokens(anchorRef.current)), []);
-
   const surfaceDocument = useMemo(() => {
-    // An empty body is what a malformed response parses to. Rendering it would
-    // mount a frame that runs nothing and looks like a working, silent panel.
-    if (!script?.code) return null;
-    return buildSurfaceDocument({ code: script.code, grantedScopes: installation.granted_scopes, theme });
-  }, [script?.code, installation.granted_scopes, theme]);
+    if (!launch?.url || !launch.bridge_token) return null;
+    try {
+      return buildSurfaceFrameDocument({ url: launch.url, bridgeToken: launch.bridge_token });
+    } catch {
+      return null;
+    }
+  }, [launch?.url, launch?.bridge_token]);
 
-  // A failure belongs to one rendered document on one issue. Keeping a plain
-  // boolean makes the banner survive an issue change or a version/code reload
-  // even though the replacement iframe is running normally.
+  // Terminal state belongs to one rendered document on one issue. Comparing
+  // the instance keeps an old failure/navigation from surviving a replacement
+  // launch even though the new iframe is running normally.
   const surfaceInstance = useMemo(() => ({ issueId, surfaceDocument }), [issueId, surfaceDocument]);
   const [failedSurfaceInstance, setFailedSurfaceInstance] = useState<typeof surfaceInstance | null>(null);
+  const [navigatedSurfaceInstance, setNavigatedSurfaceInstance] = useState<typeof surfaceInstance | null>(null);
   const failed = failedSurfaceInstance === surfaceInstance;
+  const navigated = navigatedSurfaceInstance === surfaceInstance;
 
   // One bridge per rendered document. srcDoc changing reloads the frame — and
   // therefore restarts the guest's handshake — so the old bridge is finished:
   // close() is terminal, and reusing a closed one across a document change is
   // exactly how the panel ends up permanently blank.
   const bridge = useMemo(
-    () => createSurfaceBridge({ installationId: installation.id, issueId, onResize: setHeight }),
-    [installation.id, issueId, surfaceDocument],
+    () => createSurfaceBridge({
+      installationId: installation.id,
+      bridgeToken: launch?.bridge_token ?? "",
+      issueId,
+      onResize: setHeight,
+    }),
+    [installation.id, launch?.bridge_token, issueId],
   );
 
-  // Arm as soon as the frame element exists. The surface announces itself once
-  // its listener is attached, so there is no load event to race.
+  // The listener is armed BEFORE srcdoc is assigned. That makes the guest-first
+  // one-shot port transfer race-free without retries or a reusable token.
   useEffect(() => {
-    if (frameRef.current) bridge.connect(frameRef.current, readThemeTokens(anchorRef.current));
-    return () => bridge.close();
-  }, [bridge]);
-
-  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !surfaceDocument) return () => bridge.close();
     const onMessage = (event: MessageEvent) => {
       const type = (event.data as { type?: string } | null)?.type;
-      if (type !== "multica:plugin-surface-error") return;
+      if (type !== "multica:plugin-surface-error" &&
+          type !== "multica:plugin-surface-navigated" &&
+          type !== "multica:plugin-surface-navigation-blocked") return;
       // Same window-identity rule as the bridge: without it any frame on the
       // page could light up the failure banner on every other panel.
-      if (!frameRef.current?.contentWindow || event.source !== frameRef.current.contentWindow) return;
-      // A surface whose script throws on its first line posts the error rather
-      // than rendering blank. Acknowledge it so the guest can stop repeating
-      // the signal it started before this effect was guaranteed to be mounted.
-      frameRef.current.contentWindow.postMessage({ type: "multica:plugin-surface-error-ack" }, "*");
-      setFailedSurfaceInstance(surfaceInstance);
+      if (!frame.contentWindow || event.source !== frame.contentWindow) return;
+      if (type === "multica:plugin-surface-error") setFailedSurfaceInstance(surfaceInstance);
+      else setNavigatedSurfaceInstance(surfaceInstance);
     };
+    // Terminal events and the bridge are both armed before srcdoc is assigned,
+    // so even a first-line plugin failure or navigation cannot outrun the host.
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [surfaceInstance]);
+    bridge.connect(frame, readThemeTokens(anchorRef.current));
+    frame.srcdoc = surfaceDocument;
+    return () => {
+      window.removeEventListener("message", onMessage);
+      bridge.close();
+      frame.removeAttribute("srcdoc");
+    };
+  }, [bridge, surfaceDocument, surfaceInstance]);
+
+  useEffect(() => {
+    if (navigated) bridge.close();
+  }, [navigated, bridge]);
+
+  if (navigated) {
+    return (
+      <div ref={anchorRef} className={cn("rounded-lg border border-surface-border px-4 py-3 text-caption text-muted-foreground", className)}>
+        <PluginSurfaceNotice installation={installation} kind="navigated" />
+      </div>
+    );
+  }
 
   if (!surfaceDocument) {
     return (
@@ -121,8 +137,9 @@ export function PluginSurfaceFrame({ wsId, installation, surface, issueId, class
         key={`${installation.id}:${surface.key}:${issueId ?? ""}`}
         ref={frameRef}
         title={`${installation.name} — ${surface.name}`}
-        srcDoc={surfaceDocument}
-        sandbox="allow-scripts"
+        // This is the host-authored wrapper, so same-origin is intentional. Its
+        // nested plugin iframe remains opaque and owns no app credential.
+        sandbox="allow-scripts allow-same-origin"
         className="w-full border-0 bg-transparent"
         style={{ height }}
       />
@@ -135,10 +152,11 @@ function PluginSurfaceNotice({
   kind,
 }: {
   installation: PluginInstallation;
-  kind: "unavailable" | "failed" | "loading";
+  kind: "unavailable" | "failed" | "loading" | "navigated";
 }) {
   const { t } = useT("issues");
   if (kind === "failed") return <>{t(($) => $.plugins.surface_failed, { name: installation.name })}</>;
   if (kind === "loading") return <>{t(($) => $.plugins.surface_loading, { name: installation.name })}</>;
+  if (kind === "navigated") return <>{t(($) => $.plugins.surface_navigated, { name: installation.name })}</>;
   return <>{t(($) => $.plugins.surface_unavailable, { name: installation.name })}</>;
 }

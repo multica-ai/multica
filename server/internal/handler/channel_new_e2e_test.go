@@ -170,6 +170,17 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 	`, sessionID, runtimeID); err != nil {
 		t.Fatalf("seed prior provider context: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id, status, priority,
+			started_at, completed_at, session_id, work_dir,
+			channel_context_revision
+		)
+		VALUES ($1, $2, $3, 'completed', 0, now(), now(),
+		        'old-provider-session', '/tmp/old-provider-workdir', 1)
+	`, agentID, runtimeID, sessionID); err != nil {
+		t.Fatalf("seed prior provider task: %v", err)
+	}
 
 	router := engine.NewRouter(nil, testHandler.TaskService, queries, engine.RouterConfig{})
 	router.Register(channelType, engine.ResolverSet{
@@ -200,7 +211,10 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 	if followUpText != "" {
 		var taskCount, userMessageCount int
 		var pendingFresh bool
-		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1`, sessionID).Scan(&taskCount); err != nil {
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE chat_session_id = $1 AND status NOT IN ('completed', 'failed', 'cancelled')
+		`, sessionID).Scan(&taskCount); err != nil {
 			t.Fatalf("count tasks after bare /new: %v", err)
 		}
 		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM chat_message WHERE chat_session_id = $1 AND role = 'user'`, sessionID).Scan(&userMessageCount); err != nil {
@@ -232,17 +246,25 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 
 	var taskID string
 	var forceFresh bool
+	var contextRevision int64
 	if err := testPool.QueryRow(ctx, `
-		SELECT id, force_fresh_session
+		SELECT id, force_fresh_session, channel_context_revision
 		FROM agent_task_queue
 		WHERE chat_session_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, sessionID).Scan(&taskID, &forceFresh); err != nil {
+	`, sessionID).Scan(&taskID, &forceFresh, &contextRevision); err != nil {
 		t.Fatalf("load queued chat task: %v", err)
 	}
 	if forceFresh != wantForceFresh {
 		t.Fatalf("queued task %s: force_fresh_session = %t, want %t", taskID, forceFresh, wantForceFresh)
+	}
+	wantRevision := int64(1)
+	if wantForceFresh {
+		wantRevision = 2
+	}
+	if contextRevision != wantRevision {
+		t.Fatalf("queued task %s: channel_context_revision = %d, want %d", taskID, contextRevision, wantRevision)
 	}
 	var pendingFresh bool
 	if err := testPool.QueryRow(ctx, `SELECT pending_fresh FROM channel_chat_session_binding WHERE chat_session_id = $1`, sessionID).Scan(&pendingFresh); err != nil {
@@ -267,16 +289,20 @@ func runChannelNewCommandE2E(t *testing.T, channelType channel.Type, text, comma
 	}
 
 	var storedText string
+	var storedRevision int64
 	if err := testPool.QueryRow(ctx, `
-		SELECT content FROM chat_message
+		SELECT content, channel_context_revision FROM chat_message
 		WHERE chat_session_id = $1 AND role = 'user'
 		ORDER BY created_at DESC, id DESC
 		LIMIT 1
-	`, sessionID).Scan(&storedText); err != nil {
+	`, sessionID).Scan(&storedText, &storedRevision); err != nil {
 		t.Fatalf("load persisted chat message: %v", err)
 	}
 	if storedText != wantStoredText {
 		t.Fatalf("persisted message = %q, want %q", storedText, wantStoredText)
+	}
+	if storedRevision != wantRevision {
+		t.Fatalf("persisted message context revision = %d, want %d", storedRevision, wantRevision)
 	}
 
 	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
@@ -355,8 +381,8 @@ func (b *channelNewE2ESessionBinder) EnsureSession(ctx context.Context, p engine
 	})
 }
 
-func (b *channelNewE2ESessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
-	return b.session.MarkPendingFresh(ctx, sessionID)
+func (b *channelNewE2ESessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	return b.session.MarkPendingFresh(ctx, sessionID, messageID)
 }
 
 func (b *channelNewE2ESessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
