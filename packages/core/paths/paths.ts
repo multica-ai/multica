@@ -17,10 +17,10 @@ const encode = (id: string) => encodeURIComponent(id);
 /**
  * `?focus=` token that scrolls the agent's Instructions tab to its
  * conversation-starters editor and flashes it. Lives here because it is URL
- * vocabulary: `agentStarterPrompts()` writes it and the tab reads it, and a
- * shared constant is what stops the two from drifting apart.
+ * vocabulary: `agentConversationStarters()` writes it and the tab reads it,
+ * and a shared constant is what stops the two from drifting apart.
  */
-export const AGENT_FOCUS_STARTER_PROMPTS = "starter_prompts";
+export const AGENT_FOCUS_CONVERSATION_STARTERS = "conversation_starters";
 
 function workspaceScoped(slug: string) {
   const ws = `/${encode(slug)}`;
@@ -48,8 +48,8 @@ function workspaceScoped(slug: string) {
     // Deep link behind "customize" in a chat's empty state: the agent's
     // Instructions tab, scrolled to the conversation starters that produced
     // the buttons the viewer just looked at.
-    agentStarterPrompts: (id: string) =>
-      `${ws}/agents/${encode(id)}?view=instructions&focus=${AGENT_FOCUS_STARTER_PROMPTS}`,
+    agentConversationStarters: (id: string) =>
+      `${ws}/agents/${encode(id)}?view=instructions&focus=${AGENT_FOCUS_CONVERSATION_STARTERS}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,

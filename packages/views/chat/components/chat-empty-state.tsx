@@ -1,15 +1,15 @@
 "use client";
 
 import { Settings2 } from "lucide-react";
-import { selectStarterPrompts } from "@multica/core/agents";
+import { selectConversationStarters } from "@multica/core/agents";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { AppLink } from "../../navigation";
 import {
-  StarterPromptList,
-  useFallbackStarterPrompts,
-} from "./starter-prompt-list";
+  ConversationStarterList,
+  useFallbackConversationStarters,
+} from "./conversation-starter-list";
 
 /** Empty compose placeholder shown before the first user message. */
 export function EmptyState({
@@ -24,7 +24,7 @@ export function EmptyState({
   /**
    * Where "customize" sends this viewer, or `null` to hide the affordance.
    * The container resolves it: only someone who may edit THIS agent on a
-   * backend that persists starter prompts gets a link. Keeping it a prop
+   * backend that persists conversation starters gets a link. Keeping it a prop
    * leaves this component presentational — and keeps the link out of the DOM
    * entirely for readers, rather than rendering a disabled tease.
    */
@@ -32,10 +32,10 @@ export function EmptyState({
 }) {
   const { t } = useT("chat");
   const description = agent?.description?.trim();
-  const fallbackPrompts = useFallbackStarterPrompts();
-  const { prompts } = selectStarterPrompts(
-    agent?.starter_prompts,
-    fallbackPrompts,
+  const fallbackStarters = useFallbackConversationStarters();
+  const { starters } = selectConversationStarters(
+    agent?.conversation_starters,
+    fallbackStarters,
   );
 
   return (
@@ -66,9 +66,9 @@ export function EmptyState({
       {agent ? (
         <div
           className="w-full max-w-sm space-y-2"
-          aria-label={t(($) => $.starter_prompts.aria_label)}
+          aria-label={t(($) => $.conversation_starters.aria_label)}
         >
-          <StarterPromptList prompts={prompts} onPick={onPickPrompt} />
+          <ConversationStarterList starters={starters} onPick={onPickPrompt} />
           {customizeHref ? (
             <div className="flex justify-center pt-1">
               <AppLink
@@ -76,7 +76,7 @@ export function EmptyState({
                 className="inline-flex items-center gap-1.5 text-caption text-muted-foreground transition-colors hover:text-foreground"
               >
                 <Settings2 className="size-3.5" aria-hidden="true" />
-                {t(($) => $.starter_prompts.customize)}
+                {t(($) => $.conversation_starters.customize)}
               </AppLink>
             </div>
           ) : null}

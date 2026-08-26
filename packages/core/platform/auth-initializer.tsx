@@ -91,8 +91,8 @@ export function AuthInitializer({
         // the persistence contract explicitly.
         configStore
           .getState()
-          .setAgentStarterPromptsSupported(
-            cfg.agent_starter_prompts_supported === true,
+          .setAgentConversationStartersSupported(
+            cfg.agent_conversation_starters_supported === true,
           );
         if (cfg.posthog_key) {
           initAnalytics({

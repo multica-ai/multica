@@ -71,7 +71,7 @@ const baseDraft: AgentDraft = {
   name: "Fast Codex",
   description: "",
   instructions: "",
-  starterPrompts: [],
+  conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "gpt-5.6-sol",

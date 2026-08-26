@@ -146,7 +146,7 @@
     "returning_subtitle": "이렇게 요청해 보세요",
     "chat_with_named": "{{name}}와 채팅"
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "aria_label": "대화 시작 예시",
     "capabilities": {
       "label": "어떤 일을 도와줄 수 있나요?",

@@ -3,17 +3,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { useConfigStore } from "@multica/core/config";
-import { AGENT_FOCUS_STARTER_PROMPTS } from "@multica/core/paths";
-import type { Agent, AgentStarterPrompt } from "@multica/core/types";
+import { AGENT_FOCUS_CONVERSATION_STARTERS } from "@multica/core/paths";
+import type { Agent, AgentConversationStarter } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../../i18n";
 import { useOptionalNavigation } from "../../../navigation";
 
-import { StarterPromptsEditor } from "../starter-prompts-editor";
+import { ConversationStartersEditor } from "../conversation-starters-editor";
 
-/** How long the deep-linked starter-prompts editor stays ringed. */
+/** How long the deep-linked conversation-starters editor stays ringed. */
 const FOCUS_FLASH_MS = 1600;
 
 export function InstructionsTab({
@@ -24,7 +24,7 @@ export function InstructionsTab({
   agent: Agent;
   onSave: (updates: {
     instructions: string;
-    starter_prompts?: AgentStarterPrompt[];
+    conversation_starters?: AgentConversationStarter[];
   }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
@@ -33,42 +33,42 @@ export function InstructionsTab({
   // only navigation-dependent behaviour (the deep-link focus below) degrades
   // to "no highlight" when there is no adapter.
   const navigation = useOptionalNavigation();
-  const starterPromptsSupported = useConfigStore(
-    (state) => state.agentStarterPromptsSupported,
+  const conversationStartersSupported = useConfigStore(
+    (state) => state.agentConversationStartersSupported,
   );
   const [value, setValue] = useState(agent.instructions ?? "");
-  const [starterPrompts, setStarterPrompts] = useState<AgentStarterPrompt[]>(
-    agent.starter_prompts ?? [],
+  const [conversationStarters, setConversationStarters] = useState<AgentConversationStarter[]>(
+    agent.conversation_starters ?? [],
   );
   const [saving, setSaving] = useState(false);
-  const [starterPromptsFocused, setStarterPromptsFocused] = useState(false);
-  const starterPromptsRef = useRef<HTMLDivElement | null>(null);
+  const [conversationStartersFocused, setConversationStartersFocused] = useState(false);
+  const conversationStartersRef = useRef<HTMLDivElement | null>(null);
   const focusHandledForAgentRef = useRef<string | null>(null);
   const focusFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [systemOpen, setSystemOpen] = useState(false);
-  const persistedStarterPromptsKey = JSON.stringify(
-    agent.starter_prompts ?? [],
+  const persistedConversationStartersKey = JSON.stringify(
+    agent.conversation_starters ?? [],
   );
   const persistedRef = useRef({
     agentId: agent.id,
     instructions: agent.instructions ?? "",
-    starterPromptsKey: persistedStarterPromptsKey,
+    conversationStartersKey: persistedConversationStartersKey,
   });
   const localRef = useRef({
     instructions: value,
-    starterPromptsKey: JSON.stringify(starterPrompts),
+    conversationStartersKey: JSON.stringify(conversationStarters),
   });
   localRef.current = {
     instructions: value,
-    starterPromptsKey: JSON.stringify(starterPrompts),
+    conversationStartersKey: JSON.stringify(conversationStarters),
   };
   const isDirty =
     value !== (agent.instructions ?? "") ||
-    (starterPromptsSupported &&
-      JSON.stringify(starterPrompts) !== persistedStarterPromptsKey);
-  const starterPromptsValid =
-    !starterPromptsSupported ||
-    starterPrompts.every(
+    (conversationStartersSupported &&
+      JSON.stringify(conversationStarters) !== persistedConversationStartersKey);
+  const conversationStartersValid =
+    !conversationStartersSupported ||
+    conversationStarters.every(
       (item) => item.label.trim() && item.prompt.trim(),
     );
 
@@ -95,23 +95,23 @@ export function InstructionsTab({
     const local = localRef.current;
     const wasLocallyDirty =
       local.instructions !== previous.instructions ||
-      local.starterPromptsKey !== previous.starterPromptsKey;
+      local.conversationStartersKey !== previous.conversationStartersKey;
     const persistedContentsChanged =
       previous.instructions !== (agent.instructions ?? "") ||
-      previous.starterPromptsKey !== persistedStarterPromptsKey;
+      previous.conversationStartersKey !== persistedConversationStartersKey;
 
     persistedRef.current = {
       agentId: agent.id,
       instructions: agent.instructions ?? "",
-      starterPromptsKey: persistedStarterPromptsKey,
+      conversationStartersKey: persistedConversationStartersKey,
     };
     if (switchingAgents || (!wasLocallyDirty && persistedContentsChanged)) {
       setValue(agent.instructions ?? "");
-      setStarterPrompts(
-        JSON.parse(persistedStarterPromptsKey) as AgentStarterPrompt[],
+      setConversationStarters(
+        JSON.parse(persistedConversationStartersKey) as AgentConversationStarter[],
       );
     }
-  }, [agent.id, agent.instructions, persistedStarterPromptsKey, saving]);
+  }, [agent.id, agent.instructions, persistedConversationStartersKey, saving]);
 
   // Arriving from "customize" in a chat's empty state: bring the starter
   // prompts into view and flash them, so the deep link lands ON the setting
@@ -120,9 +120,9 @@ export function InstructionsTab({
   // for — but every fresh click must land, including a second one from a chat
   // window still open beside this page, and one aimed at a different agent.
   useEffect(() => {
-    if (!navigation || !starterPromptsSupported) return;
+    if (!navigation || !conversationStartersSupported) return;
 
-    if (navigation.searchParams.get("focus") !== AGENT_FOCUS_STARTER_PROMPTS) {
+    if (navigation.searchParams.get("focus") !== AGENT_FOCUS_CONVERSATION_STARTERS) {
       // The param is gone: either this is an ordinary visit, or the `replace`
       // below has landed. Re-arm so the next click focuses again.
       focusHandledForAgentRef.current = null;
@@ -137,8 +137,8 @@ export function InstructionsTab({
 
     // `block: "nearest"` deliberately: native scrollIntoView scrolls every
     // scrollable ancestor, which on desktop drags the shell itself (#3929).
-    starterPromptsRef.current?.scrollIntoView?.({ block: "nearest" });
-    setStarterPromptsFocused(true);
+    conversationStartersRef.current?.scrollIntoView?.({ block: "nearest" });
+    setConversationStartersFocused(true);
 
     const params = new URLSearchParams(navigation.searchParams);
     params.delete("focus");
@@ -154,10 +154,10 @@ export function InstructionsTab({
     // window rather than inheriting the previous one's remaining time.
     if (focusFlashTimerRef.current) clearTimeout(focusFlashTimerRef.current);
     focusFlashTimerRef.current = setTimeout(
-      () => setStarterPromptsFocused(false),
+      () => setConversationStartersFocused(false),
       FOCUS_FLASH_MS,
     );
-  }, [agent.id, navigation, starterPromptsSupported]);
+  }, [agent.id, navigation, conversationStartersSupported]);
 
   useEffect(
     () => () => {
@@ -176,8 +176,8 @@ export function InstructionsTab({
     try {
       await onSave({
         instructions: value,
-        ...(starterPromptsSupported
-          ? { starter_prompts: starterPrompts }
+        ...(conversationStartersSupported
+          ? { conversation_starters: conversationStarters }
           : {}),
       });
     } catch {
@@ -249,17 +249,17 @@ export function InstructionsTab({
         />
       </div>
 
-      {starterPromptsSupported ? (
+      {conversationStartersSupported ? (
         <div
-          ref={starterPromptsRef}
+          ref={conversationStartersRef}
           className={cn(
             "scroll-mt-4 rounded-lg transition-shadow duration-500",
-            starterPromptsFocused && "ring-2 ring-brand/50 ring-offset-2 ring-offset-background",
+            conversationStartersFocused && "ring-2 ring-brand/50 ring-offset-2 ring-offset-background",
           )}
         >
-          <StarterPromptsEditor
-            value={starterPrompts}
-            onChange={setStarterPrompts}
+          <ConversationStartersEditor
+            value={conversationStarters}
+            onChange={setConversationStarters}
           />
         </div>
       ) : null}
@@ -273,7 +273,7 @@ export function InstructionsTab({
         <Button
           size="sm"
           onClick={handleSave}
-          disabled={!isDirty || !starterPromptsValid || saving}
+          disabled={!isDirty || !conversationStartersValid || saving}
         >
           {saving ? (
             <Loader2

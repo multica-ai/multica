@@ -8,7 +8,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent } from "@multica/core/types";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
-// The starter-prompt editor previews the chat empty state, so it reads the
+// The conversation-starter editor previews the chat empty state, so it reads the
 // chat namespace for the built-in defaults it renders when nothing is set.
 import enChat from "../../../locales/en/chat.json";
 import { NavigationProvider } from "../../../navigation";
@@ -29,7 +29,7 @@ const baseAgent: Agent = {
   name: "Reviewer",
   description: "",
   instructions: "Review carefully.",
-  starter_prompts: [persistedPrompt],
+  conversation_starters: [persistedPrompt],
   avatar_url: null,
   runtime_mode: "local",
   runtime_config: {},
@@ -58,12 +58,12 @@ function tab(agent: Agent, onSave = vi.fn().mockResolvedValue(undefined)) {
 
 describe("InstructionsTab persisted-state synchronization", () => {
   beforeEach(() => {
-    configStore.getState().setAgentStarterPromptsSupported(true);
+    configStore.getState().setAgentConversationStartersSupported(true);
   });
 
   afterEach(() => {
     act(() => {
-      configStore.getState().setAgentStarterPromptsSupported(false);
+      configStore.getState().setAgentConversationStartersSupported(false);
     });
   });
 
@@ -77,7 +77,7 @@ describe("InstructionsTab persisted-state synchronization", () => {
     rerender(
       tab({
         ...baseAgent,
-        starter_prompts: [{ ...persistedPrompt }],
+        conversation_starters: [{ ...persistedPrompt }],
       }),
     );
 
@@ -96,7 +96,7 @@ describe("InstructionsTab persisted-state synchronization", () => {
     rerender(
       tab({
         ...baseAgent,
-        starter_prompts: [
+        conversation_starters: [
           { label: "Server-side change", prompt: "A different prompt." },
         ],
       }),
@@ -133,7 +133,7 @@ describe("InstructionsTab persisted-state synchronization", () => {
       tab(
         {
           ...baseAgent,
-          starter_prompts: [optimisticPrompt],
+          conversation_starters: [optimisticPrompt],
         },
         onSave,
       ),
@@ -142,7 +142,7 @@ describe("InstructionsTab persisted-state synchronization", () => {
       tab(
         {
           ...baseAgent,
-          starter_prompts: [{ ...persistedPrompt }],
+          conversation_starters: [{ ...persistedPrompt }],
         },
         onSave,
       ),
@@ -157,8 +157,8 @@ describe("InstructionsTab persisted-state synchronization", () => {
     );
   });
 
-  it("omits starter prompts from settings writes to an older backend", async () => {
-    configStore.getState().setAgentStarterPromptsSupported(false);
+  it("omits conversation starters from settings writes to an older backend", async () => {
+    configStore.getState().setAgentConversationStartersSupported(false);
     const onSave = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(tab(baseAgent, onSave));
@@ -180,17 +180,17 @@ describe("InstructionsTab persisted-state synchronization", () => {
 // The "customize" link in a chat's empty state lands here with ?focus=. The
 // tab must bring the editor into view and then clear the param, so a refresh
 // or a later tab switch does not replay the flash.
-describe("InstructionsTab starter-prompts deep link", () => {
+describe("InstructionsTab conversation-starters deep link", () => {
   // Mirrors FOCUS_FLASH_MS in instructions-tab.tsx.
   const FLASH_MS = 1600;
 
   beforeEach(() => {
-    configStore.getState().setAgentStarterPromptsSupported(true);
+    configStore.getState().setAgentConversationStartersSupported(true);
   });
 
   afterEach(() => {
     act(() => {
-      configStore.getState().setAgentStarterPromptsSupported(false);
+      configStore.getState().setAgentConversationStartersSupported(false);
     });
   });
 
@@ -236,7 +236,7 @@ describe("InstructionsTab starter-prompts deep link", () => {
 
   it("scrolls to the editor and drops the focus param, keeping the view", () => {
     const { replace, scrollIntoView } = renderWithSearch(
-      "view=instructions&focus=starter_prompts",
+      "view=instructions&focus=conversation_starters",
     );
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
@@ -253,7 +253,7 @@ describe("InstructionsTab starter-prompts deep link", () => {
     vi.useFakeTimers();
     try {
       const { settleUrl } = renderWithSearch(
-        "view=instructions&focus=starter_prompts",
+        "view=instructions&focus=conversation_starters",
       );
       expect(ringed()).not.toBeNull();
 
@@ -275,12 +275,12 @@ describe("InstructionsTab starter-prompts deep link", () => {
   // page can send the very same link again, and it has to land again.
   it("focuses again when the link is clicked a second time", () => {
     const { replace, scrollIntoView, settleUrl } = renderWithSearch(
-      "view=instructions&focus=starter_prompts",
+      "view=instructions&focus=conversation_starters",
     );
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
 
     act(() => settleUrl("view=instructions"));
-    act(() => settleUrl("view=instructions&focus=starter_prompts"));
+    act(() => settleUrl("view=instructions&focus=conversation_starters"));
 
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
     expect(replace).toHaveBeenCalledTimes(2);
@@ -292,12 +292,12 @@ describe("InstructionsTab starter-prompts deep link", () => {
   it("focuses a link aimed at a different agent", () => {
     const other: Agent = { ...baseAgent, id: "agent-2" };
     const { scrollIntoView, settleUrl } = renderWithSearch(
-      "view=instructions&focus=starter_prompts",
+      "view=instructions&focus=conversation_starters",
     );
     expect(scrollIntoView).toHaveBeenCalledTimes(1);
 
     // The URL still carries focus — it is the NEXT agent's deep link.
-    act(() => settleUrl("view=instructions&focus=starter_prompts", other));
+    act(() => settleUrl("view=instructions&focus=conversation_starters", other));
 
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
   });

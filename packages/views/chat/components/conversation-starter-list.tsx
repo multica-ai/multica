@@ -1,6 +1,6 @@
 "use client";
 
-import type { AgentStarterPrompt } from "@multica/core/types";
+import type { AgentConversationStarter } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
@@ -10,20 +10,20 @@ import { useT } from "../../i18n";
  * renders the same hook, so an author configuring an agent sees exactly what
  * a real new chat will show rather than a hand-maintained mock of it.
  */
-export function useFallbackStarterPrompts(): AgentStarterPrompt[] {
+export function useFallbackConversationStarters(): AgentConversationStarter[] {
   const { t } = useT("chat");
   return [
     {
-      label: t(($) => $.starter_prompts.capabilities.label),
-      prompt: t(($) => $.starter_prompts.capabilities.prompt),
+      label: t(($) => $.conversation_starters.capabilities.label),
+      prompt: t(($) => $.conversation_starters.capabilities.prompt),
     },
     {
-      label: t(($) => $.starter_prompts.first_task.label),
-      prompt: t(($) => $.starter_prompts.first_task.prompt),
+      label: t(($) => $.conversation_starters.first_task.label),
+      prompt: t(($) => $.conversation_starters.first_task.prompt),
     },
     {
-      label: t(($) => $.starter_prompts.recommend.label),
-      prompt: t(($) => $.starter_prompts.recommend.prompt),
+      label: t(($) => $.conversation_starters.recommend.label),
+      prompt: t(($) => $.conversation_starters.recommend.prompt),
     },
   ];
 }
@@ -38,19 +38,19 @@ const ROW_CLASS =
  * settings preview, which must look like the real thing without offering a
  * second, non-functional way to "send" a prompt from a settings page.
  */
-export function StarterPromptList({
-  prompts,
+export function ConversationStarterList({
+  starters,
   onPick,
   className,
 }: {
-  prompts: AgentStarterPrompt[];
+  starters: AgentConversationStarter[];
   onPick?: (prompt: string) => void;
   className?: string;
 }) {
   if (!onPick) {
     return (
       <div className={cn("w-full space-y-2", className)} aria-hidden="true">
-        {prompts.map((item, index) => (
+        {starters.map((item, index) => (
           <div key={index} className={cn(ROW_CLASS, "truncate")}>
             {item.label}
           </div>
@@ -61,7 +61,7 @@ export function StarterPromptList({
 
   return (
     <div className={cn("w-full space-y-2", className)}>
-      {prompts.map((item, index) => (
+      {starters.map((item, index) => (
         <button
           key={index}
           type="button"

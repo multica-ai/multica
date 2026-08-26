@@ -146,7 +146,7 @@
     "returning_subtitle": "试试问",
     "chat_with_named": "与 {{name}} 对话"
   },
-  "starter_prompts": {
+  "conversation_starters": {
     "aria_label": "对话开场建议",
     "capabilities": {
       "label": "你能帮我做什么？",
