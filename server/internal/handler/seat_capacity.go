@@ -20,10 +20,14 @@ var (
 	errSeatCapacityUnavailable   = errors.New("seat capacity service is unavailable")
 )
 
+func isPersistentSeatCapacityAdmissionRejection(err error) bool {
+	return errors.Is(err, errSeatCapacityFull) || errors.Is(err, errSeatCapacityOvercommitted)
+}
+
 const seatCapacityWorkspaceLockWait = 2 * time.Second
 
 func (h *Handler) seatCapacityEnabled() bool {
-	return h != nil && h.SeatCapacity != nil && h.SeatCapacity.Enabled()
+	return h != nil && h.SeatCapacity != nil
 }
 
 func (h *Handler) lockSeatCapacityWorkspace(ctx context.Context, workspaceID uuid.UUID) (*db.Queries, func(), error) {
@@ -69,6 +73,12 @@ func (h *Handler) reserveInvitationCapacity(ctx context.Context, workspaceID, in
 	}
 	decision, err := h.SeatCapacity.ReserveInvitation(ctx, workspaceID, invitationID, expiresAt)
 	if err != nil {
+		if seatcapacity.IsRateLimited(err) {
+			if deleteErr := deleteCapacityIntentForAction(ctx, q, invitationID, seatcapacity.ActionReserveInvitation); deleteErr != nil {
+				return fmt.Errorf("discard rate-limited invitation capacity intent: %w", deleteErr)
+			}
+			return fmt.Errorf("reserve invitation capacity: %w", err)
+		}
 		if seatcapacity.IsCapacityOvercommitted(err) {
 			if deleteErr := deleteCapacityIntentForAction(ctx, q, invitationID, seatcapacity.ActionReserveInvitation); deleteErr != nil {
 				return fmt.Errorf("discard overcommitted invitation capacity intent: %w", deleteErr)
@@ -117,6 +127,9 @@ func (h *Handler) beginCapacityConsume(ctx context.Context, workspaceID, token, 
 	}
 	decision, err := h.SeatCapacity.Consume(ctx, workspaceID, token)
 	if err != nil {
+		if seatcapacity.IsRateLimited(err) {
+			return false, fmt.Errorf("consume invitation capacity: %w", err)
+		}
 		return false, fmt.Errorf("%w: %v", errSeatCapacityUnavailable, err)
 	}
 	if !decision.Managed {
@@ -157,6 +170,12 @@ func (h *Handler) beginShareJoinCapacity(ctx context.Context, workspaceID, share
 	token := uuid.UUID(intent.OperationToken.Bytes)
 	decision, err := h.SeatCapacity.ClaimShareJoin(ctx, workspaceID, token)
 	if err != nil {
+		if seatcapacity.IsRateLimited(err) {
+			if deleteErr := deleteCapacityIntentForAction(ctx, q, token, seatcapacity.ActionClaimShareJoin); deleteErr != nil {
+				return uuid.Nil, fmt.Errorf("discard rate-limited share-join capacity intent: %w", deleteErr)
+			}
+			return uuid.Nil, fmt.Errorf("claim share-join capacity: %w", err)
+		}
 		if seatcapacity.IsCapacityOvercommitted(err) {
 			if deleteErr := deleteCapacityIntentForAction(ctx, q, token, seatcapacity.ActionClaimShareJoin); deleteErr != nil {
 				return uuid.Nil, fmt.Errorf("discard overcommitted share-join capacity intent: %w", deleteErr)
@@ -332,6 +351,15 @@ func recordCapacityFailure(ctx context.Context, q *db.Queries, token uuid.UUID, 
 
 func writeSeatCapacityError(w http.ResponseWriter, err error) {
 	switch {
+	case seatcapacity.IsRateLimited(err):
+		retryAfter := seatcapacity.RateLimitRetryAfter(err)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		retryAfterSeconds := int64((retryAfter + time.Second - 1) / time.Second)
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfterSeconds))
+		writeErrorCode(w, http.StatusTooManyRequests, "seat_capacity_rate_limited", "Member capacity is busy. Please retry shortly.")
 	case errors.Is(err, errSeatCapacityOvercommitted):
 		writeErrorCode(w, http.StatusConflict, "seat_capacity_overcommitted", "Workspace members exceed purchased seats. Add enough seats or remove members before adding another member.")
 	case errors.Is(err, errSeatCapacityFull):

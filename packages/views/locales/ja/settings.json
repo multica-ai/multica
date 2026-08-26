@@ -1155,6 +1155,7 @@
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",
     "toast_seat_capacity_unavailable": "メンバー席を確認できませんでした。もう一度お試しください。",
+    "toast_seat_capacity_rate_limited": "席数のリクエストが集中しています。しばらくしてからもう一度お試しください。",
     "seat_purchase_title": "席を追加して招待を送信しますか？",
     "seat_purchase_description": "{{email}} に使用できる購入済みの席がありません。Stripe の見積もりを確認し、席の購入と招待をまとめて承認してください。",
     "purchase_seat_and_invite": "1 席を購入して招待",

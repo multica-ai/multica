@@ -267,6 +267,17 @@ WHERE operation_token = sqlc.arg('operation_token')
   AND action = sqlc.arg('action')
   AND lease_token = sqlc.arg('lease_token');
 
+-- name: DeferClaimedSeatCapacityIntent :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left(sqlc.arg('last_error'), 1000),
+    next_attempt_at = sqlc.arg('next_attempt_at'),
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = sqlc.arg('operation_token')
+  AND action = sqlc.arg('action')
+  AND lease_token = sqlc.arg('lease_token')
+  AND dead_lettered_at IS NULL;
+
 -- name: DeleteSeatCapacityIntentForAction :exec
 DELETE FROM seat_capacity_outbox
 WHERE operation_token = $1 AND action = $2;

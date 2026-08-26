@@ -4,6 +4,33 @@ import type {
   WorkspaceSubscriptionSummary,
 } from "@multica/core/types";
 
+export type SeatInvitationCapacityFailure =
+  | "full"
+  | "unavailable"
+  | "rate_limited";
+
+export function seatInvitationCapacityFailure(
+  errorCode: string | undefined,
+): SeatInvitationCapacityFailure | undefined {
+  switch (errorCode) {
+    case "seat_capacity_full":
+      return "full";
+    case "seat_capacity_unavailable":
+      return "unavailable";
+    case "seat_capacity_rate_limited":
+      return "rate_limited";
+    default:
+      return undefined;
+  }
+}
+
+export function seatInvitationCanRetryAfterPurchase(
+  errorCode: string | undefined,
+): boolean {
+  const failure = seatInvitationCapacityFailure(errorCode);
+  return failure === "unavailable" || failure === "rate_limited";
+}
+
 export function isSingleSeatInvitePreview(
   preview: WorkspaceSeatPurchasePreview | null | undefined,
 ): preview is WorkspaceSeatPurchasePreview {

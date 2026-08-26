@@ -349,3 +349,141 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 		})
 	}
 }
+
+// TestFailTaskCodexCapacityBudget locks the exact COM-44 error to its dedicated
+// deployment budget. It exercises the real fail transaction so the persisted
+// child ceiling, immediate queue state, and resume fields cannot drift away
+// from the pure retry-policy helpers.
+func TestFailTaskCodexCapacityBudget(t *testing.T) {
+	const capacityErr = "Selected model is at capacity. Please try a different model."
+
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+
+	cases := []struct {
+		name            string
+		rawError        string
+		reason          string
+		attempt         int32
+		maxAttempts     int32
+		capacityRetries int32
+		wantChild       bool
+	}{
+		{
+			name:            "enabled policy overrides generic retry disable",
+			rawError:        capacityErr,
+			reason:          "agent_error.model_not_found_or_unavailable",
+			attempt:         1,
+			maxAttempts:     1,
+			capacityRetries: 6,
+			wantChild:       true,
+		},
+		{
+			name:            "zero disables capacity policy",
+			rawError:        capacityErr,
+			reason:          "agent_error.model_not_found_or_unavailable",
+			attempt:         1,
+			maxAttempts:     2,
+			capacityRetries: 0,
+			wantChild:       false,
+		},
+		{
+			name:            "seventh execution exhausts six retries",
+			rawError:        capacityErr,
+			reason:          "agent_error.provider_capacity_or_rate_limit",
+			attempt:         7,
+			maxAttempts:     7,
+			capacityRetries: 6,
+			wantChild:       false,
+		},
+		{
+			name:            "generic rate limit is terminal",
+			rawError:        "API Error: 429 Too Many Requests",
+			reason:          "agent_error.provider_capacity_or_rate_limit",
+			attempt:         1,
+			maxAttempts:     2,
+			capacityRetries: 6,
+			wantChild:       false,
+		},
+		{
+			name:            "padded capacity error is terminal",
+			rawError:        " Selected model is at capacity. Please try a different model. ",
+			reason:          "agent_error.model_not_found_or_unavailable",
+			attempt:         1,
+			maxAttempts:     2,
+			capacityRetries: 6,
+			wantChild:       false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var parentID pgtype.UUID
+			if err := pool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+				VALUES ($1, $2, $3, 'running', 0, $4, $5, 'capacity-session', '/tmp/capacity-workdir')
+				RETURNING id
+			`, agentID, runtimeID, issueID, tc.attempt, tc.maxAttempts).Scan(&parentID); err != nil {
+				t.Fatalf("insert parent task: %v", err)
+			}
+			t.Cleanup(func() {
+				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+			})
+
+			svc := &TaskService{
+				Queries:                 q,
+				TxStarter:               pool,
+				Bus:                     events.New(),
+				CodexCapacityRetryCount: tc.capacityRetries,
+			}
+			if _, err := svc.FailTask(ctx, parentID, tc.rawError, "capacity-session", "/tmp/capacity-workdir", "", tc.reason, false, "", ""); err != nil {
+				t.Fatalf("FailTask: %v", err)
+			}
+
+			var childCount int
+			if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`, parentID).Scan(&childCount); err != nil {
+				t.Fatalf("count retry children: %v", err)
+			}
+			if !tc.wantChild {
+				if childCount != 0 {
+					t.Fatalf("retry child count = %d, want 0", childCount)
+				}
+				return
+			}
+			if childCount != 1 {
+				t.Fatalf("retry child count = %d, want 1", childCount)
+			}
+
+			var (
+				attempt, maxAttempts int32
+				status, sessionID    string
+				workDir              string
+				fireAtValid          bool
+				forceFreshSession    bool
+			)
+			if err := pool.QueryRow(ctx, `
+				SELECT attempt, max_attempts, status, fire_at IS NOT NULL,
+				       force_fresh_session, COALESCE(session_id, ''), COALESCE(work_dir, '')
+				FROM agent_task_queue WHERE parent_task_id = $1
+			`, parentID).Scan(&attempt, &maxAttempts, &status, &fireAtValid, &forceFreshSession, &sessionID, &workDir); err != nil {
+				t.Fatalf("read retry child: %v", err)
+			}
+			if attempt != 2 || maxAttempts != 7 {
+				t.Errorf("child attempt/max_attempts = %d/%d, want 2/7", attempt, maxAttempts)
+			}
+			if status != "queued" || fireAtValid {
+				t.Errorf("child status/fire_at = %q/%v, want queued/false", status, fireAtValid)
+			}
+			if forceFreshSession || sessionID != "capacity-session" || workDir != "/tmp/capacity-workdir" {
+				t.Errorf("child resume state = fresh:%v session:%q workdir:%q", forceFreshSession, sessionID, workDir)
+			}
+		})
+	}
+}

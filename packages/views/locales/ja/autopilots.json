@@ -285,6 +285,7 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "section_project": "プロジェクト",
+    "project_hint": "実行環境も決まります — このプロジェクトのリポジトリまたはローカルディレクトリ",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
     "subscribers_hint": "このオートパイロットが作成するすべてのタスクを自動で購読します",

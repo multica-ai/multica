@@ -46,6 +46,12 @@ You also need to pick an email service, otherwise verification codes and invitat
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
 
+### Task retries
+
+| Variable | Default | Description |
+|---|---|---|
+| `MULTICA_CODEX_CAPACITY_RETRY_COUNT` | `6` | Additional immediate retries when a task's persisted raw Codex error is exactly `Selected model is at capacity. Please try a different model.` The default allows seven total executions; `0` disables this dedicated policy. Maximum `20` — a negative, malformed or larger value stops the server at startup instead of falling back to the default, because every retry writes a task row, launches a runtime and calls the provider again. Other capacity or rate-limit errors are not retried by this policy. |
+
 ## Public URLs and browser access
 
 | Variable | Default | Description |

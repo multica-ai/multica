@@ -134,28 +134,36 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	if existingUser.ID.Valid {
 		inviteeUserID = existingUser.ID
 	}
-
-	invitationID := uuid.New()
-	expiresAt := time.Now().Add(7 * 24 * time.Hour)
-	if err := h.reserveInvitationCapacity(r.Context(), uuid.UUID(requester.WorkspaceID.Bytes), invitationID, expiresAt); err != nil {
-		writeSeatCapacityError(w, err)
-		return
-	}
-
-	// Consume rate-limit budgets only after capacity is secured. A request that
-	// must purchase a seat can then retry without spending the same invitation
-	// budgets twice. If admission rejects, the durable capacity intent releases
-	// the hold immediately or through the recovery worker.
-	if !h.admitInvitation(
+	admission, ok := h.checkInvitationAdmission(
 		w,
 		r,
 		uuidToString(requester.UserID),
 		uuidToString(requester.WorkspaceID),
 		email,
-	) {
-		h.compensateCapacityIntent(r.Context(), invitationID)
+	)
+	if !ok {
 		return
 	}
+
+	invitationID := uuid.New()
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	if err := h.reserveInvitationCapacity(r.Context(), uuid.UUID(requester.WorkspaceID.Bytes), invitationID, expiresAt); err != nil {
+		if isPersistentSeatCapacityAdmissionRejection(err) {
+			// Full and overcommitted workspaces cannot admit another member until
+			// their durable capacity facts change. Charge repeated attempts to the
+			// actor budget so this endpoint cannot hammer the capacity service,
+			// while preserving workspace and recipient budgets for a later valid
+			// invitation.
+			h.consumeInvitationActorAdmission(r, admission)
+		}
+		writeSeatCapacityError(w, err)
+		return
+	}
+
+	// The non-consuming abuse checks run before Cloud. Spend all budgets only
+	// after Cloud has secured capacity. Persistent capacity rejections spend the
+	// actor budget only in the branch above; transient failures spend none.
+	h.consumeInvitationAdmission(r, admission)
 
 	createParams := db.CreateInvitationParams{
 		ID: uuidToPG(invitationID), WorkspaceID: requester.WorkspaceID, InviterID: requester.UserID,

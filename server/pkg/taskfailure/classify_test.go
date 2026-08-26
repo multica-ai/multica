@@ -84,6 +84,11 @@ func TestClassifyRules(t *testing.T) {
 		{"rate limit", "rate limit exceeded for tier 3", ReasonAgentProviderCapacityOrRateLimit},
 		{"overloaded", "overloaded_error: please retry", ReasonAgentProviderCapacityOrRateLimit},
 		{"no capacity available", "no capacity available; try again later", ReasonAgentProviderCapacityOrRateLimit},
+		{"codex selected model at capacity", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
+		{"codex capacity uppercase stays model unavailable", "SELECTED MODEL IS AT CAPACITY. PLEASE TRY A DIFFERENT MODEL.", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity leading whitespace stays model unavailable", " Selected model is at capacity. Please try a different model.", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity trailing whitespace stays model unavailable", "Selected model is at capacity. Please try a different model. ", ReasonAgentModelNotFoundOrUnavailable},
+		{"codex capacity near-match stays model unavailable", "Selected model is at capacity. Please try a different model. Contact support if this persists.", ReasonAgentModelNotFoundOrUnavailable},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},
@@ -380,6 +385,53 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			reason: "",
 			raw:    legacyErr,
 			want:   Reason(""),
+		},
+
+		// --- COM-54: Codex model-capacity failures. Daemons whose
+		// classifier predates the dedicated capacity witness report the exact
+		// message as model_not_found_or_unavailable because it contains
+		// "selected model". Upgrade that stale non-empty label server-side.
+		{
+			name:   "old daemon model-unavailable guess on codex capacity is upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "old daemon catchall on codex capacity is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason on codex capacity is upgraded",
+			reason: "agent_error",
+			raw:    "Selected model is at capacity. Please try a different model.",
+			want:   ReasonAgentProviderCapacityOrRateLimit,
+		},
+		{
+			name:   "codex capacity uppercase is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "SELECTED MODEL IS AT CAPACITY. PLEASE TRY A DIFFERENT MODEL.",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
+		},
+		{
+			name:   "codex capacity with surrounding whitespace is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    " Selected model is at capacity. Please try a different model. ",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
+		},
+		{
+			name:   "unrelated refined reason with codex capacity text is left alone",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    "401 Unauthorized: Selected model is at capacity.",
+			want:   ReasonAgentProviderAuthOrAccess,
+		},
+		{
+			name:   "capacity near-match is not upgraded",
+			reason: string(ReasonAgentModelNotFoundOrUnavailable),
+			raw:    "Selected model is at capacity. Please try a different model. Contact support if this persists.",
+			want:   ReasonAgentModelNotFoundOrUnavailable,
 		},
 
 		// --- GH #6360: response-side context overflow. An un-upgraded daemon

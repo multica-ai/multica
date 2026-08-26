@@ -543,30 +543,18 @@ func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) boo
 		status == RuntimeLocalSkillTimeout || status == RuntimeLocalSkillConflict
 }
 
-// requireRuntimeCapabilityReadAccess resolves the runtime and asserts the
-// caller is a member of its workspace. This is the read-level gate for
-// capability discovery (local skills + the redacted MCP inventory): the
-// payload is deliberately non-secret so any member viewing an agent can see
-// what it inherits from its runtime, regardless of who owns that runtime.
-// Flows that copy skill files off the owner's machine must use the stricter
-// requireRuntimeLocalSkillAccess instead.
+// requireRuntimeCapabilityReadAccess applies the runtime read gate to
+// capability discovery (local skills + the redacted MCP inventory). Private
+// machines remain owner-only even for admins; public runtimes are readable by
+// workspace members. Flows that copy skill files off the owner's machine add
+// the stricter owner-only check in requireRuntimeLocalSkillAccess.
 func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, db.Member, bool) {
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, member, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return runtimeIDAndWorkspace{}, db.Member{}, false
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
 		return runtimeIDAndWorkspace{}, db.Member{}, false
 	}
 
 	wsID := uuidToString(rt.WorkspaceID)
-	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
-	if !ok {
-		return runtimeIDAndWorkspace{}, db.Member{}, false
-	}
 
 	return runtimeIDAndWorkspace{
 		runtimeID:   uuidToString(rt.ID),

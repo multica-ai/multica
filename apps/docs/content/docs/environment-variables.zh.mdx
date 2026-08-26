@@ -46,6 +46,12 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
+### 任务重试
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MULTICA_CODEX_CAPACITY_RETRY_COUNT` | `6` | 当任务持久化的 Codex 原始错误与 `Selected model is at capacity. Please try a different model.` 完全一致时，立即追加的重试次数。默认值允许总计执行 7 次；`0` 关闭此专用策略。上限为 `20`：负数、格式错误或超过上限的值会让服务在启动时直接失败，而不是回退到默认值，因为每次重试都会写入一条任务记录、拉起一个运行时并再次调用模型提供方。其他容量或限流错误不会被此策略重试。 |
+
 ## 对外地址与浏览器访问
 
 | 变量 | 默认值 | 说明 |

@@ -1158,6 +1158,7 @@
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",
     "toast_seat_capacity_unavailable": "Member capacity could not be verified. Please try again.",
+    "toast_seat_capacity_rate_limited": "Seat capacity is busy. Try again shortly.",
     "seat_purchase_title": "Add a seat to send this invitation?",
     "seat_purchase_description": "No purchased seat is available for {{email}}. Review Stripe's estimate, then approve the purchase and invitation together.",
     "purchase_seat_and_invite": "Buy 1 seat and invite",

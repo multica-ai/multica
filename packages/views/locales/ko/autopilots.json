@@ -285,6 +285,7 @@
     "select_agent": "에이전트 선택",
     "select_assignee": "에이전트 또는 스쿼드 선택",
     "section_project": "프로젝트",
+    "project_hint": "실행 환경도 결정합니다 — 해당 프로젝트의 저장소 또는 로컬 디렉터리",
     "no_project": "프로젝트 없음",
     "section_subscribers": "구독자",
     "subscribers_hint": "이 오토파일럿이 만드는 모든 태스크를 자동으로 구독합니다",

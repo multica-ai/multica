@@ -122,6 +122,40 @@ func (q *Queries) CreateOrReactivateShareJoinCapacityIntent(ctx context.Context,
 	return i, err
 }
 
+const deferClaimedSeatCapacityIntent = `-- name: DeferClaimedSeatCapacityIntent :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left($1, 1000),
+    next_attempt_at = $2,
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = $3
+  AND action = $4
+  AND lease_token = $5
+  AND dead_lettered_at IS NULL
+`
+
+type DeferClaimedSeatCapacityIntentParams struct {
+	LastError      string             `json:"last_error"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	OperationToken pgtype.UUID        `json:"operation_token"`
+	Action         string             `json:"action"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+}
+
+func (q *Queries) DeferClaimedSeatCapacityIntent(ctx context.Context, arg DeferClaimedSeatCapacityIntentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deferClaimedSeatCapacityIntent,
+		arg.LastError,
+		arg.NextAttemptAt,
+		arg.OperationToken,
+		arg.Action,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteClaimedSeatCapacityIntent = `-- name: DeleteClaimedSeatCapacityIntent :execrows
 DELETE FROM seat_capacity_outbox
 WHERE operation_token = $1

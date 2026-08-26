@@ -80,6 +80,8 @@ import { formatStripeMinorAmount } from "./billing-format";
 import {
   isSingleSeatInvitePreview,
   purchasedSeatIsReadyForInvitation,
+  seatInvitationCanRetryAfterPurchase,
+  seatInvitationCapacityFailure,
   seatPurchaseCanRetryWithSameQuote,
   seatPurchaseMatchesPreview,
 } from "./seat-invite-purchase";
@@ -433,6 +435,7 @@ export function MembersTab() {
       await sendInvitation(email, role);
     } catch (e) {
       const code = errorCode(e);
+      const capacityFailure = seatInvitationCapacityFailure(code);
       if (code === "seat_capacity_overcommitted") {
         try {
           const summary = await qc.fetchQuery({
@@ -467,7 +470,7 @@ export function MembersTab() {
         }
         return;
       }
-      if (code === "seat_capacity_full") {
+      if (capacityFailure === "full") {
         try {
           const preview = await previewSeatPurchase.mutateAsync({
             additionalSeats: 1,
@@ -496,8 +499,12 @@ export function MembersTab() {
         }
         return;
       }
-      if (code === "seat_capacity_unavailable") {
+      if (capacityFailure === "unavailable") {
         toast.error(t(($) => $.members.toast_seat_capacity_unavailable));
+        return;
+      }
+      if (capacityFailure === "rate_limited") {
+        toast.error(t(($) => $.members.toast_seat_capacity_rate_limited));
         return;
       }
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
@@ -519,6 +526,10 @@ export function MembersTab() {
       setInviteSeatPurchase(null);
       return;
     }
+    // A transient failure may happen after the purchase succeeded and the
+    // first invitation dispatch ran. Reusing the same idempotency key is safe,
+    // but the dispatch guard must be reopened for the retried invitation.
+    dispatchedInvitePurchaseKey.current = null;
     setInviteSeatPurchase({
       ...current,
       phase: "purchasing",
@@ -605,18 +616,29 @@ export function MembersTab() {
       .then(() => setInviteSeatPurchase(null))
       .catch((error) => {
         const code = errorCode(error);
+        const capacityFailure = seatInvitationCapacityFailure(code);
+        let message: string;
+        switch (capacityFailure) {
+          case "full":
+            message = t(($) => $.members.seat_purchase_capacity_taken);
+            break;
+          case "unavailable":
+            message = t(($) => $.members.toast_seat_capacity_unavailable);
+            break;
+          case "rate_limited":
+            message = t(($) => $.members.toast_seat_capacity_rate_limited);
+            break;
+          default:
+            message =
+              error instanceof Error
+                ? error.message
+                : t(($) => $.members.toast_invitation_failed);
+        }
         setInviteSeatPurchase({
           ...purchase,
           phase: "error",
-          retryable: false,
-          error:
-            code === "seat_capacity_full"
-              ? t(($) => $.members.seat_purchase_capacity_taken)
-              : code === "seat_capacity_unavailable"
-                ? t(($) => $.members.toast_seat_capacity_unavailable)
-                : error instanceof Error
-                  ? error.message
-                  : t(($) => $.members.toast_invitation_failed),
+          retryable: seatInvitationCanRetryAfterPurchase(code),
+          error: message,
         });
       });
   }, [

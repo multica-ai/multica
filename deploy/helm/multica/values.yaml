@@ -123,6 +123,7 @@ backend:
     databaseConnectTimeout: 5s
     appEnv: production
     appUrl: http://multica.dev.lan
+    codexCapacityRetryCount: 6
     frontendOrigin: http://multica.dev.lan
     corsAllowedOrigins: ""
     cookieDomain: ""
@@ -150,12 +151,13 @@ backend:
       staleGrace: 15m
       # Local down switch applied by the next chart rollout; it only forces off.
       emergencyDisabled: false
-    # Managed Cloud seat-capacity executor. Keep off for self-hosting. When
-    # enabled, put the matching service token in existingSecret.
-    subscriptionCapacity:
-      enabled: false
+    # Managed multica-cloud connection. Empty keeps self-hosting independent.
+    # When set, Fleet, Billing and strict seat capacity share this URL; put the
+    # matching seat-capacity service token in existingSecret.
+    cloud:
       url: ""
-      timeout: 3s
+      timeout: 35s
+      capacityTimeout: 3s
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""

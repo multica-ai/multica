@@ -317,17 +317,8 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 // HeartbeatInterval away.
 func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 	if rt.Status != "online" {
@@ -436,6 +427,12 @@ func (h *Handler) requestDaemonPendingWork(runtimeID, kind string) {
 
 // GetModelListRequest returns the status of a model list request.
 func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+
 	requestID := chi.URLParam(r, "requestId")
 
 	req, err := h.ModelListStore.Get(r.Context(), requestID)
@@ -443,7 +440,7 @@ func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
 		return
 	}
-	if req == nil {
+	if req == nil || req.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}

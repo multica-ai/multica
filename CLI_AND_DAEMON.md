@@ -835,6 +835,11 @@ multica autopilot get <id>
 multica autopilot get <id> --output json   # includes triggers
 ```
 
+In JSON output `triggers` is a **top-level key alongside `autopilot`**, not nested
+inside it — the payload is `{"autopilot": {...}, "triggers": [...], "collaborators": [...]}`.
+Read trigger ids with `jq '.triggers[].id'`, or use `autopilot trigger-list` below.
+The table output shows only the autopilot's own fields, not its triggers.
+
 ### Create / Update / Delete
 
 ```bash
@@ -871,12 +876,22 @@ multica autopilot runs <id> --limit 50 --output json
 ### Schedule Triggers
 
 ```bash
+multica autopilot trigger-list <autopilot-id>              # ids, kind, schedule, next run
+multica autopilot trigger-list <autopilot-id> --full-id    # canonical UUIDs
 multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
 multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
 multica autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
 
-Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
+`trigger-list` is the way to obtain the `<trigger-id>` that `trigger-update`,
+`trigger-delete` and `trigger-rotate-url` require. Like autopilot ids, trigger ids
+may be passed as a short prefix as long as it is unique within that autopilot; use
+`--full-id` to print canonical UUIDs. Webhook credentials are redacted in this
+output — use `autopilot get <id> --output json --show-secrets` to reveal them.
+
+The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
+triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
+also defines an `api` kind, which is not surfaced here.
 
 ## Other Commands
 

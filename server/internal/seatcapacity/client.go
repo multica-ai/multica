@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,16 +19,19 @@ import (
 )
 
 const (
-	defaultTimeout      = 3 * time.Second
-	maxTimeout          = 5 * time.Second
-	maxResponseBodySize = 64 << 10
-	minServiceTokenSize = 32
+	defaultTimeout       = 3 * time.Second
+	maxTimeout           = 5 * time.Second
+	maxResponseBodySize  = 64 << 10
+	minServiceTokenSize  = 32
+	rateLimitScopeHeader = "X-Multica-RateLimit-Scope"
+
+	RateLimitScopeGlobal    = "global"
+	RateLimitScopeWorkspace = "workspace"
 )
 
 var ErrInvalidConfig = errors.New("seat capacity: invalid configuration")
 
 type Config struct {
-	Enabled      bool
 	BaseURL      string
 	ServiceToken string
 	Timeout      time.Duration
@@ -59,7 +63,11 @@ type Decision struct {
 }
 
 type Executor interface {
-	Enabled() bool
+	// RecoveryAvailable reports whether this executor may settle durable
+	// product-side intents. Implementations and decorators must forward this
+	// capability explicitly, so an unavailable executor cannot be hidden by a
+	// wrapper and accidentally start the recovery worker.
+	RecoveryAvailable() bool
 	ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (Decision, error)
 	ClaimShareJoin(context.Context, uuid.UUID, uuid.UUID) (Decision, error)
 	Consume(context.Context, uuid.UUID, uuid.UUID) (Decision, error)
@@ -71,11 +79,17 @@ type Executor interface {
 
 type unavailableExecutor struct{ err error }
 
-// NewUnavailable preserves fail-closed behavior when an operator explicitly
-// enabled managed capacity with invalid configuration.
+// NewUnavailable preserves fail-closed behavior when a Cloud-connected
+// deployment has invalid capacity credentials.
 func NewUnavailable(err error) Executor { return &unavailableExecutor{err: err} }
 
-func (u *unavailableExecutor) Enabled() bool { return true }
+// CanRunWorker reports whether executor can safely settle durable intents.
+func CanRunWorker(executor Executor) bool {
+	return executor != nil && executor.RecoveryAvailable()
+}
+
+func (*unavailableExecutor) RecoveryAvailable() bool { return false }
+
 func (u *unavailableExecutor) fail() (Decision, error) {
 	return Decision{}, fmt.Errorf("seat capacity executor unavailable: %w", u.err)
 }
@@ -102,7 +116,6 @@ func (u *unavailableExecutor) GetOperation(context.Context, uuid.UUID, uuid.UUID
 }
 
 type Client struct {
-	enabled      bool
 	baseURL      *url.URL
 	serviceToken string
 	timeout      time.Duration
@@ -111,11 +124,16 @@ type Client struct {
 
 var _ Executor = (*Client)(nil)
 
-func New(cfg Config) (*Client, error) {
-	if !cfg.Enabled {
-		return &Client{}, nil
-	}
+func (*Client) RecoveryAvailable() bool { return true }
+
+func New(cfg Config) (Executor, error) {
 	rawURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if rawURL == "" && cfg.ServiceToken == "" {
+		return nil, nil
+	}
+	if rawURL == "" {
+		return nil, fmt.Errorf("%w: base URL is required when a service token is configured", ErrInvalidConfig)
+	}
 	baseURL, err := url.Parse(rawURL)
 	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Host == "" ||
 		baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
@@ -139,15 +157,12 @@ func New(cfg Config) (*Client, error) {
 	// The machine credential must never cross an HTTP redirect boundary.
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{
-		enabled:      true,
 		baseURL:      baseURL,
 		serviceToken: cfg.ServiceToken,
 		timeout:      timeout,
 		httpClient:   httpClient,
 	}, nil
 }
-
-func (c *Client) Enabled() bool { return c != nil && c.enabled }
 
 func (c *Client) ReserveInvitation(ctx context.Context, workspaceID, invitationID uuid.UUID, expiresAt time.Time) (Decision, error) {
 	return c.post(ctx, workspaceID, "reserve", map[string]any{
@@ -190,9 +205,6 @@ func (c *Client) post(ctx context.Context, workspaceID uuid.UUID, action string,
 }
 
 func (c *Client) do(ctx context.Context, method string, workspaceID uuid.UUID, suffix string, body []byte) (Decision, error) {
-	if !c.Enabled() {
-		return Decision{Allowed: true}, nil
-	}
 	if workspaceID == uuid.Nil {
 		return Decision{}, fmt.Errorf("seat capacity: workspace ID is required")
 	}
@@ -232,7 +244,13 @@ func (c *Client) do(ctx context.Context, method string, workspaceID uuid.UUID, s
 			Code  string `json:"code"`
 		}
 		_ = json.Unmarshal(payload, &remote)
-		return Decision{}, &HTTPError{StatusCode: resp.StatusCode, Code: remote.Code, Message: remote.Error}
+		return Decision{}, &HTTPError{
+			StatusCode:     resp.StatusCode,
+			Code:           remote.Code,
+			Message:        remote.Error,
+			RetryAfter:     retryAfterDuration(resp.Header.Get("Retry-After")),
+			RateLimitScope: normalizedRateLimitScope(resp.Header.Get(rateLimitScopeHeader)),
+		}
 	}
 	var out Decision
 	if err := json.Unmarshal(payload, &out); err != nil {
@@ -242,9 +260,11 @@ func (c *Client) do(ctx context.Context, method string, workspaceID uuid.UUID, s
 }
 
 type HTTPError struct {
-	StatusCode int
-	Code       string
-	Message    string
+	StatusCode     int
+	Code           string
+	Message        string
+	RetryAfter     time.Duration
+	RateLimitScope string
 }
 
 func (e *HTTPError) Error() string {
@@ -262,4 +282,65 @@ func IsNotFound(err error) bool {
 func IsCapacityOvercommitted(err error) bool {
 	var remote *HTTPError
 	return errors.As(err, &remote) && remote.StatusCode == http.StatusConflict && remote.Code == "capacity_overcommitted"
+}
+
+func IsRateLimited(err error) bool {
+	var remote *HTTPError
+	// A proxy, ingress, or WAF may generate the 429 before the request reaches
+	// Cloud and therefore cannot attach Cloud's JSON error code. HTTP 429 is
+	// sufficient to preserve the retryable semantics and Retry-After value.
+	return errors.As(err, &remote) && remote.StatusCode == http.StatusTooManyRequests
+}
+
+func RateLimitRetryAfter(err error) time.Duration {
+	var remote *HTTPError
+	if !errors.As(err, &remote) || !IsRateLimited(remote) {
+		return 0
+	}
+	return remote.RetryAfter
+}
+
+// RateLimitScopeOf returns a trusted Cloud scope hint. Proxy-generated 429s
+// normally have no scope and remain conservatively global to the caller.
+func RateLimitScopeOf(err error) string {
+	var remote *HTTPError
+	if !errors.As(err, &remote) || !IsRateLimited(remote) {
+		return ""
+	}
+	return normalizedRateLimitScope(remote.RateLimitScope)
+}
+
+func normalizedRateLimitScope(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case RateLimitScopeGlobal:
+		return RateLimitScopeGlobal
+	case RateLimitScopeWorkspace:
+		return RateLimitScopeWorkspace
+	default:
+		return ""
+	}
+}
+
+func retryAfterDuration(value string) time.Duration {
+	return retryAfterDurationAt(value, time.Now())
+}
+
+func retryAfterDurationAt(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	seconds, err := strconv.ParseInt(value, 10, 64)
+	if err == nil {
+		if seconds < 1 {
+			return 0
+		}
+		return time.Duration(seconds) * time.Second
+	}
+	retryAt, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	delay := retryAt.Sub(now)
+	if delay <= 0 {
+		return 0
+	}
+	return delay
 }

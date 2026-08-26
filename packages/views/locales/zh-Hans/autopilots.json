@@ -285,6 +285,7 @@
     "select_agent": "选择智能体",
     "select_assignee": "选择智能体或小队",
     "section_project": "关联项目",
+    "project_hint": "同时决定运行时的执行环境 —— 该项目的仓库或本地目录",
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",
