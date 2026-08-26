@@ -30,7 +30,7 @@ spec:
     - host: agentfarm.g2.com
       http:
         paths:
-          - path: /health
+          - path: /readyz
             pathType: Exact
             backend:
               service:
