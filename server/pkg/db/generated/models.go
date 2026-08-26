@@ -952,6 +952,12 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ModelTierMap struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Tier        string      `json:"tier"`
+	Concrete    string      `json:"concrete"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

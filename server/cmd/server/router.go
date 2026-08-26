@@ -1477,6 +1477,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace context.
 		r.Get("/api/attachments/{id}/download", h.DownloadAttachment)
 
+		// 404 model_tier_map global
+		r.Get("/api/model-map", h.GetModelMap)
+		r.Patch("/api/model-map", h.PatchModelMap)
+
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
 			r.Post("/", h.CreateWorkspace)
@@ -1515,6 +1519,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// because opening an issue is what asks for it; executable
 					// bytes stay off the authenticated app/API origin.
 					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
+					// 404 model_tier_map per-workspace
+					r.Get("/model-map", h.GetWorkspaceModelMap)
+					r.Patch("/model-map", h.PatchWorkspaceModelMap)
+					r.Get("/settings", h.GetWorkspaceModelMap)
+					r.Patch("/settings", h.PatchWorkspaceModelMap)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

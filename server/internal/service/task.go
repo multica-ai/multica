@@ -396,6 +396,24 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 	return data
 }
 
+// resolveConcreteModel maps logical tier to concrete model via 404 model_tier_map.
+// concrete = workspace_map[tier] ?? global_map[tier] ?? tier, with fallback.
+// ponytail: no cache, direct DB reads; nil Queries or empty tier returns tier.
+func (s *TaskService) resolveConcreteModel(ctx context.Context, workspaceID pgtype.UUID, tier string) string {
+	if tier == "" || s == nil || s.Queries == nil {
+		return tier
+	}
+	if workspaceID.Valid {
+		if m, err := s.Queries.GetWorkspaceModelTier(ctx, db.GetWorkspaceModelTierParams{WorkspaceID: workspaceID, Tier: tier}); err == nil && m.Concrete != "" {
+			return m.Concrete
+		}
+	}
+	if m, err := s.Queries.GetGlobalModelTier(ctx, tier); err == nil && m.Concrete != "" {
+		return m.Concrete
+	}
+	return tier
+}
+
 // resolveOriginatorFromTriggerComment returns the top-of-chain HUMAN user
 // id for a comment that triggered an Enqueue* path. The chain rules
 // (MUL-3869):
@@ -943,6 +961,38 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 	}
 }
 
+// autoSyncIssueStatusOnCompletion flips issue status when task completes with branch.
+// ponytail: minimal, no migration, uses existing UpdateIssueStatus; backlog/todo/in_progress -> in_review on branch push, trivial done output -> done to unblock blocked_by gate; best-effort, never fails completion
+func (s *TaskService) autoSyncIssueStatusOnCompletion(ctx context.Context, task db.AgentTaskQueue, branchName string, result []byte) {
+	if !task.IssueID.Valid || branchName == "" {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	switch effective {
+	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview, issuestatus.Blocked:
+		return
+	case issuestatus.Backlog, issuestatus.Todo, issuestatus.InProgress:
+	default:
+		return
+	}
+	target := issuestatus.InReview
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err == nil {
+		if isTrivialDoneOutput(payload.Output) {
+			target = issuestatus.Done
+		}
+	}
+	if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: target, WorkspaceID: issue.WorkspaceID}); err != nil {
+		slog.Warn("auto issue status sync failed", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "error", err)
+		return
+	}
+	slog.Info("auto issue status sync", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "branch", branchName)
+}
+
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
 	failureReason := taskFailureReason(task)
 	if s.Metrics != nil {
@@ -1362,6 +1412,13 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	// 404 model_tier_map: concrete = workspace_map[tier] ?? global_map[tier] ?? tier
+	tier := ""
+	if agent.ServiceTier.Valid {
+		tier = agent.ServiceTier.String
+	}
+	concrete := s.resolveConcreteModel(ctx, issue.WorkspaceID, tier)
+	_ = concrete // ponytail: resolved with fallback; model column not yet on task, keep minimal
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -4089,7 +4146,7 @@ func startsWithAbsolutePath(s string) bool {
 }
 
 // CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// ponytail: auto-syncs issue status when branch pushed (backlog/todo/in_progress -> in_review, trivial done -> done) to unblock blocked_by gate; uses existing UpdateIssueStatus, no migration, best-effort after captureTaskCompleted before verifier
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -4205,6 +4262,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.autoSyncIssueStatusOnCompletion(ctx, task, branchName, result)
 
 	// GAP-24: opt-in verification pass. When the completing agent declares a
 	// verifier and the run produced a branch, enqueue a follow-up task for the
