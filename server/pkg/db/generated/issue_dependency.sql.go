@@ -74,3 +74,32 @@ func (q *Queries) ListIssueDependencies(ctx context.Context, issueID pgtype.UUID
 	}
 	return items, nil
 }
+
+const listIssueDependencyDependents = `-- name: ListIssueDependencyDependents :many
+SELECT id, issue_id, depends_on_issue_id, type FROM issue_dependency WHERE depends_on_issue_id=$1 AND type='blocked_by'
+`
+
+func (q *Queries) ListIssueDependencyDependents(ctx context.Context, dependsOnIssueID pgtype.UUID) ([]IssueDependency, error) {
+	rows, err := q.db.Query(ctx, listIssueDependencyDependents, dependsOnIssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []IssueDependency{}
+	for rows.Next() {
+		var i IssueDependency
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.DependsOnIssueID,
+			&i.Type,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

@@ -961,10 +961,16 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 	}
 }
 
-// autoSyncIssueStatusOnCompletion flips issue status when task completes with branch.
-// ponytail: minimal, no migration, uses existing UpdateIssueStatus; backlog/todo/in_progress -> in_review on branch push, trivial done output -> done to unblock blocked_by gate; best-effort, never fails completion
+// autoSyncIssueStatusOnCompletion flips the linked issue to done when its task
+// completes, then reactivates any dependent issues the now-done issue was
+// blocking. Previously this only fired on a branch push and only advanced the
+// issue to in_review, so issues with no PR (or a branch that never flipped to
+// done) left their blocked_by dependents stranded in cancelled/queued.
+// ponytail: minimal, no migration, uses existing UpdateIssueStatus; Done (not
+// InReview) so the ClaimAgentTask blocked_by gate (issue.status NOT IN
+// ('done','cancelled')) clears; best-effort, never fails completion.
 func (s *TaskService) autoSyncIssueStatusOnCompletion(ctx context.Context, task db.AgentTaskQueue, branchName string, result []byte) {
-	if !task.IssueID.Valid || branchName == "" {
+	if !task.IssueID.Valid {
 		return
 	}
 	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
@@ -973,24 +979,88 @@ func (s *TaskService) autoSyncIssueStatusOnCompletion(ctx context.Context, task 
 	}
 	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	switch effective {
-	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview, issuestatus.Blocked:
+	case issuestatus.Done, issuestatus.Cancelled:
+		// Already terminal: re-evaluate dependents in case an earlier pass
+		// missed them, then stop.
+		s.maybeUnblockDependents(ctx, issue.ID)
 		return
-	case issuestatus.Backlog, issuestatus.Todo, issuestatus.InProgress:
-	default:
+	case issuestatus.Blocked:
 		return
+	default: // Backlog, Todo, InProgress, InReview
 	}
-	target := issuestatus.InReview
-	var payload protocol.TaskCompletedPayload
-	if err := json.Unmarshal(result, &payload); err == nil {
-		if isTrivialDoneOutput(payload.Output) {
-			target = issuestatus.Done
-		}
-	}
+	target := issuestatus.Done
 	if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: target, WorkspaceID: issue.WorkspaceID}); err != nil {
 		slog.Warn("auto issue status sync failed", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "error", err)
 		return
 	}
 	slog.Info("auto issue status sync", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "branch", branchName)
+	s.maybeUnblockDependents(ctx, issue.ID)
+}
+
+// maybeUnblockDependents reactivates work on issues that were blocked_by the
+// given (now-terminal) issue. For each dependent whose blockers are all done, it
+// revives the dependent's cancelled task (un-cancel) or, if no task exists,
+// enqueues a fresh one — so the ClaimAgentTask blocked_by gate lets it run.
+// ponytail: no migration; reuses ListIssueDependencyDependents/CountOpenBlockers/
+// ListCancelledTasksForIssue/RequeueCancelledAgentTask + EnqueueTaskForIssue;
+// best-effort, never fails completion.
+func (s *TaskService) maybeUnblockDependents(ctx context.Context, blockerIssueID pgtype.UUID) {
+	deps, err := s.Queries.ListIssueDependencyDependents(ctx, blockerIssueID)
+	if err != nil {
+		slog.Warn("unblock dependents: list failed", "blocker", util.UUIDToString(blockerIssueID), "error", err)
+		return
+	}
+	for _, dep := range deps {
+		open, err := s.Queries.CountOpenBlockersForIssue(ctx, dep.IssueID)
+		if err != nil {
+			slog.Warn("unblock dependents: count blockers failed", "issue", util.UUIDToString(dep.IssueID), "error", err)
+			continue
+		}
+		if open > 0 {
+			continue
+		}
+		s.unblockDependentIssue(ctx, dep.IssueID)
+	}
+}
+
+func (s *TaskService) unblockDependentIssue(ctx context.Context, issueID pgtype.UUID) {
+	tasks, err := s.Queries.ListCancelledTasksForIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: list cancelled tasks failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if len(tasks) > 0 {
+		task, err := s.Queries.RequeueCancelledAgentTask(ctx, tasks[0].ID)
+		if err != nil {
+			slog.Warn("unblock: requeue failed", "task", util.UUIDToString(tasks[0].ID), "error", err)
+			return
+		}
+		s.NotifyTaskEnqueued(ctx, task)
+		slog.Info("dependent task un-cancelled", "task", util.UUIDToString(task.ID), "issue", util.UUIDToString(issueID))
+		return
+	}
+	has, err := s.Queries.HasActiveTaskForIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: active task check failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if has {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: get issue failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if !issue.AssigneeID.Valid {
+		return
+	}
+	task, err := s.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
+		slog.Warn("unblock: enqueue failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	slog.Info("dependent task created", "task", util.UUIDToString(task.ID), "issue", util.UUIDToString(issueID))
 }
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {

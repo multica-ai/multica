@@ -1686,6 +1686,33 @@ WHERE issue_id = @issue_id
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
   );
 
+-- name: CountOpenBlockersForIssue :one
+-- GAP-13 companion: number of issue_dependency 'blocked_by' edges whose blocker
+-- issue has NOT reached a terminal status (done/cancelled). Zero means the issue
+-- is fully unblocked and its queued task may dispatch. Mirrors the NOT EXISTS
+-- guard in ClaimAgentTask so this count and the claim gate never disagree.
+SELECT count(*) FROM issue_dependency dep
+JOIN issue blocker ON blocker.id = dep.depends_on_issue_id
+WHERE dep.issue_id = $1 AND dep.type = 'blocked_by'
+  AND blocker.status NOT IN ('done', 'cancelled');
+
+-- name: ListCancelledTasksForIssue :many
+-- Tasks on an issue parked in 'cancelled' (e.g. cancelled while the issue was
+-- blocked). Used to reactivate a dependent's work once all blockers clear.
+-- Most-recent first so we revive the newest plan.
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1 AND status = 'cancelled'
+ORDER BY created_at DESC;
+
+-- name: RequeueCancelledAgentTask :one
+-- Revive a cancelled dependent task once its blockers clear. Resets the
+-- terminal fields the cancel set so the claim sweep picks it up like a fresh
+-- enqueue. Idempotent: only matches status='cancelled'.
+UPDATE agent_task_queue
+SET status = 'queued', completed_at = NULL, prepare_lease_expires_at = NULL, fire_at = NULL
+WHERE id = $1 AND status = 'cancelled'
+RETURNING *;
+
 -- name: MergeCommentIntoPendingTask :one
 -- MUL-4195: fold a newly-arrived comment into an existing task for (issue,
 -- agent) that has NOT yet been claimed, instead of letting the
