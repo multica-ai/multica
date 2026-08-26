@@ -512,6 +512,45 @@ func TestSyncWorkspaces_ProbesBuiltinCLIsOncePerBatch(t *testing.T) {
 	}
 }
 
+func TestSyncWorkspaces_RestrictsRegistrationToConfiguredWorkspace(t *testing.T) {
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-2")
+
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/fake/claude"}}
+	fx.setWorkspaces(
+		WorkspaceInfo{ID: "ws-1", Name: "one"},
+		WorkspaceInfo{ID: "ws-2", Name: "two"},
+	)
+
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+	if _, calls := fx.registrationFor("ws-1"); calls != 0 {
+		t.Fatalf("ws-1 Register calls = %d, want 0", calls)
+	}
+	if _, calls := fx.registrationFor("ws-2"); calls != 1 {
+		t.Fatalf("ws-2 Register calls = %d, want 1", calls)
+	}
+}
+
+func TestSyncWorkspaces_ConfiguredWorkspaceMustBeAvailable(t *testing.T) {
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-missing")
+
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/fake/claude"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+
+	err := d.syncWorkspacesFromAPI(context.Background(), false)
+	if err == nil || !strings.Contains(err.Error(), "ws-missing") {
+		t.Fatalf("syncWorkspacesFromAPI error = %v, want unavailable configured workspace", err)
+	}
+	if calls := fx.registerCallCount(); calls != 0 {
+		t.Fatalf("Register calls = %d, want 0", calls)
+	}
+}
+
 // TestSyncWorkspaces_CustomProfilesDoNotLeakAcrossWorkspaces guards the sharing
 // mechanism: the batch built-in payload is reused by reference-free copy, so a
 // workspace-scoped custom runtime profile must land only in its own

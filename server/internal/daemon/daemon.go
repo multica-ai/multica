@@ -3612,6 +3612,24 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	if err != nil {
 		return fmt.Errorf("list workspaces: %w", err)
 	}
+	// Agentfarm runners receive MULTICA_WORKSPACE_ID for the workspace their
+	// pod is provisioned to serve. Restrict this daemon before it can register
+	// a runtime in any other workspace reachable by the service-account PAT.
+	// A normal local daemon leaves the variable unset and continues to serve
+	// every workspace the authenticated user belongs to.
+	targetWorkspaceID := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACE_ID"))
+	targetWorkspaceFound := targetWorkspaceID == ""
+	if targetWorkspaceID != "" {
+		selected := make([]WorkspaceInfo, 0, 1)
+		for _, ws := range workspaces {
+			if ws.ID == targetWorkspaceID {
+				selected = append(selected, ws)
+				targetWorkspaceFound = true
+				break
+			}
+		}
+		workspaces = selected
+	}
 	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
@@ -3782,6 +3800,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))
+	}
+	if !targetWorkspaceFound {
+		return fmt.Errorf("configured workspace %q is not available to this daemon", targetWorkspaceID)
 	}
 	return nil
 }
