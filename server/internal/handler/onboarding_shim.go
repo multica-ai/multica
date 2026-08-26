@@ -43,11 +43,11 @@ import (
 // small cap so this endpoint cannot be used as bulk storage.
 const runtimeBootstrapBodyLimit = 8 * 1024
 
-// maxConversationStarterLen caps the user-supplied ConversationStarter on
+// maxStarterPromptLen caps the user-supplied StarterPrompt on
 // bootstrapOnboardingRuntimeRequest. The prompt becomes the seeded
 // onboarding issue's description, so it needs room for a real paragraph
 // or two without inviting bulk payload. 2 KiB matches pre-v3 cap.
-const maxConversationStarterLen = 2 * 1024
+const maxStarterPromptLen = 2 * 1024
 
 const (
 	onboardingAssistantName       = "Multica Helper"
@@ -65,7 +65,7 @@ const onboardingAssistantAvatarURL = "data:image/svg+xml,%3Csvg xmlns='http://ww
 
 // onboardingAssistantInstructions is the system prompt persisted on every
 // Multica Helper agent created by this shim. Pre-v3 desktop submits a
-// conversation starter from the historical workspace OnboardingHelperModal; that prompt
+// starter prompt from the historical workspace OnboardingHelperModal; that prompt
 // becomes the issue body, while this constant becomes the agent's identity
 // block in CLAUDE.md / AGENTS.md / GEMINI.md.
 const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI assistant for this Multica workspace. Your role is to help any member use Multica better — answer questions, give advice, and execute workspace operations on their behalf.
@@ -105,9 +105,9 @@ This is your guided first run. Multica Helper is assigned to this issue and will
 You can close this issue when the workflow makes sense.`
 
 type bootstrapOnboardingRuntimeRequest struct {
-	WorkspaceID         string `json:"workspace_id"`
-	RuntimeID           string `json:"runtime_id"`
-	ConversationStarter string `json:"conversation_starter,omitempty"`
+	WorkspaceID   string `json:"workspace_id"`
+	RuntimeID     string `json:"runtime_id"`
+	StarterPrompt string `json:"starter_prompt,omitempty"`
 }
 
 type bootstrapOnboardingRuntimeResponse struct {
@@ -149,9 +149,9 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "runtime_id is required")
 		return
 	}
-	req.ConversationStarter = strings.TrimSpace(req.ConversationStarter)
-	if utf8.RuneCountInString(req.ConversationStarter) > maxConversationStarterLen {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("conversation_starter exceeds %d characters", maxConversationStarterLen))
+	req.StarterPrompt = strings.TrimSpace(req.StarterPrompt)
+	if utf8.RuneCountInString(req.StarterPrompt) > maxStarterPromptLen {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("starter_prompt exceeds %d characters", maxStarterPromptLen))
 		return
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, req.WorkspaceID, "workspace_id")
@@ -252,8 +252,8 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		description := onboardingIssueDescription
-		if req.ConversationStarter != "" {
-			description = req.ConversationStarter
+		if req.StarterPrompt != "" {
+			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			ID:            dbid.NewV7(),

@@ -353,7 +353,7 @@ func TestBootstrapOnboardingRuntimeCreatesSingleGuideIssue(t *testing.T) {
 	}
 }
 
-func TestBootstrapOnboardingRuntime_WithConversationStarter(t *testing.T) {
+func TestBootstrapOnboardingRuntime_WithStarterPrompt(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -395,9 +395,9 @@ func TestBootstrapOnboardingRuntime_WithConversationStarter(t *testing.T) {
 
 	const wantPrompt = "Introduce Multica to me, please."
 	body := map[string]string{
-		"workspace_id":         testWorkspaceID,
-		"runtime_id":           testRuntimeID,
-		"conversation_starter": wantPrompt,
+		"workspace_id":   testWorkspaceID,
+		"runtime_id":     testRuntimeID,
+		"starter_prompt": wantPrompt,
 	}
 	w := httptest.NewRecorder()
 	testHandler.BootstrapOnboardingRuntime(w, newRequest(http.MethodPost, "/api/me/onboarding/runtime-bootstrap", body))
@@ -420,7 +420,7 @@ func TestBootstrapOnboardingRuntime_WithConversationStarter(t *testing.T) {
 	}
 }
 
-func TestBootstrapOnboardingRuntime_NoConversationStarter(t *testing.T) {
+func TestBootstrapOnboardingRuntime_NoStarterPrompt(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
