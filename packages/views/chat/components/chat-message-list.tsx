@@ -48,6 +48,7 @@ import { buildTimeline } from "../../common/task-transcript";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { STICK_EDGE_THRESHOLD, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -185,10 +186,15 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
+  // Keeps the newest content visible while a reply streams in and while the
+  // composer grows underneath it — neither of which Virtuoso's `followOutput`
+  // reacts to (see stick-to-bottom.ts).
+  const stick = useStickToBottom(scrollContainerEl, contentEl);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -312,6 +318,11 @@ export function ChatMessageList({
       // "near-viewport" against that element rather than the browser viewport —
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
+      {/* Plain wrapper whose only job is to be measurable: a ResizeObserver
+       *  reports an element's own box, never its scroll extent, so the
+       *  bottom-stick needs a box that grows with the list to notice a reply
+       *  streaming in. */}
+      <div ref={setContentEl}>
       <Virtuoso
         customScrollParent={scrollContainerEl}
         data={renderItems}
@@ -327,14 +338,11 @@ export function ChatMessageList({
         // than the viewport, so switching sessions always shows the latest reply.
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        atBottomThreshold={120}
-        // Follow rapid streamed output only while Virtuoso says the reader is
-        // at the live end. An in-flight smooth animation temporarily reports
-        // "not at bottom" on the next append and permanently drops the follow
-        // (#6697), so live growth must use an immediate scroll.
-        followOutput={(atBottom) =>
-          !isFetchingOlderMessages && atBottom ? "auto" : false
-        }
+        atBottomThreshold={STICK_EDGE_THRESHOLD}
+        // "auto", not "smooth": the bottom-stick pins instantly on every size
+        // change, so a smooth animation started here would be cancelled by the
+        // first streamed chunk anyway — leaving a half-played glide and a jump.
+        followOutput={() => (!isFetchingOlderMessages && stick.isPinned() ? "auto" : false)}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
@@ -359,6 +367,7 @@ export function ChatMessageList({
           </div>
         )}
       />
+      </div>
       </RichContentScrollRootProvider>
       )}
     </div>
