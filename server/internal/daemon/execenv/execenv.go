@@ -126,7 +126,12 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID          string
+	IssueID string
+	// IssueContext is a bounded current-state snapshot supplied by the control
+	// plane at claim time. It is rendered into issue_context.md, while the
+	// per-turn prompt only points to the file so provider prompt prefixes stay
+	// cacheable across revisions.
+	IssueContext     IssueContextForEnv
 	TriggerCommentID string // comment that triggered this task (empty for on_assign)
 	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
 	// CommentReplyTargets is set for a comment run that coalesced comments
@@ -255,6 +260,16 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+}
+
+// IssueContextForEnv is the execution-environment representation of the
+// compact issue snapshot carried on a claim. It deliberately contains no
+// mutable task instructions; trigger comments remain per-turn delta context.
+type IssueContextForEnv struct {
+	Revision  int64
+	Content   string
+	Truncated bool
+	Bytes     int
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.

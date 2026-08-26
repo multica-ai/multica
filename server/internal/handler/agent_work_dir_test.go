@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -224,5 +226,25 @@ func TestTaskDirSegmentMatchesDaemon(t *testing.T) {
 	expected := workspacesRoot + "/" + workspaceID + "/" + taskDirSegment(taskID)
 	if daemonRoot != expected {
 		t.Fatalf("daemon PredictRootDir = %q, handler-side reconstruction = %q — taskDirSegment is out of sync with execenv.taskKey", daemonRoot, expected)
+	}
+}
+
+func TestBuildTaskIssueContext_BoundsWithoutBreakingUTF8(t *testing.T) {
+	issue := db.Issue{
+		Title:              "Planning context",
+		Description:        pgtype.Text{String: strings.Repeat("界", taskIssueContextMaxBytes), Valid: true},
+		AcceptanceCriteria: []byte(`[{"id":"REQ-001","text":"prove the capsule"}]`),
+		Revision:           7,
+	}
+
+	context := buildTaskIssueContext(issue)
+	if context.Revision != issue.Revision || !context.Truncated {
+		t.Fatalf("context metadata = %#v", context)
+	}
+	if context.Bytes != len(context.Content) || context.Bytes > taskIssueContextMaxBytes {
+		t.Fatalf("context bytes = %d, content len = %d", context.Bytes, len(context.Content))
+	}
+	if !utf8.ValidString(context.Content) || !strings.Contains(context.Content, "[context capsule truncated]") {
+		t.Fatalf("expected UTF-8-safe truncation marker")
 	}
 }

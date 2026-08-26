@@ -6673,6 +6673,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// via `multica repo checkout <url>`.
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:             task.IssueID,
+		IssueContext:        convertIssueContextForEnv(task.IssueContext),
 		TriggerCommentID:    task.TriggerCommentID,
 		TriggerThreadID:     task.TriggerThreadID,
 		CommentReplyTargets: commentReplyThreads(task),
@@ -8610,6 +8611,16 @@ func convertIssueStatusesForEnv(statuses []IssueStatusData) []execenv.IssueStatu
 		result[i] = execenv.IssueStatusForEnv{Key: s.Key, Name: s.Name, Category: s.Category, Description: s.Description}
 	}
 	return result
+}
+
+func convertIssueContextForEnv(context *IssueContextData) execenv.IssueContextForEnv {
+	if context == nil {
+		return execenv.IssueContextForEnv{}
+	}
+	return execenv.IssueContextForEnv{
+		Revision: context.Revision, Content: context.Content,
+		Truncated: context.Truncated, Bytes: context.Bytes,
+	}
 }
 
 func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {

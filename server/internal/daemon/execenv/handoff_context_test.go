@@ -31,3 +31,20 @@ func TestRenderIssueContext_NoHandoffNote(t *testing.T) {
 		t.Fatalf("unexpected Handoff Note section when no note set:\n%s", md)
 	}
 }
+
+func TestRenderIssueContext_UsesCompactCapsule(t *testing.T) {
+	ctx := TaskContextForEnv{IssueID: "issue-1", IssueContext: IssueContextForEnv{
+		Revision: 42, Content: "**Title:** Faster planning", Truncated: true, Bytes: 31,
+	}}
+	md := renderIssueContext("claude", ctx)
+
+	if !strings.Contains(md, "## Feature Context Capsule") || !strings.Contains(md, "Faster planning") {
+		t.Fatalf("compact capsule missing:\n%s", md)
+	}
+	if !strings.Contains(md, "revision 42") || !strings.Contains(md, "reached its size limit") {
+		t.Fatalf("capsule metadata missing:\n%s", md)
+	}
+	if strings.Contains(md, "Run `multica issue get") {
+		t.Fatalf("capsule should replace eager full issue fetch:\n%s", md)
+	}
+}

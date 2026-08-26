@@ -62,6 +62,10 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
+	if task.IssueContext != nil && strings.TrimSpace(task.IssueContext.Content) != "" {
+		b.WriteString("## Compact issue context\n\n")
+		fmt.Fprintf(&b, "Read `.agent_context/issue_context.md` first; it contains the current compact issue capsule (revision %d). Use `multica issue get` only when that capsule is truncated or you need a detail it does not contain. Treat this turn's trigger comment as the newest delta.\n\n", task.IssueContext.Revision)
+	}
 	b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	if task.PriorSessionResumeUnavailable {

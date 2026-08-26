@@ -36,3 +36,16 @@ func TestBuildPrompt_NoHandoffNote_Unchanged(t *testing.T) {
 		t.Fatalf("unexpected handoff framing when no note set:\n%s", out)
 	}
 }
+
+func TestBuildPrompt_CompactIssueContextReminder(t *testing.T) {
+	out := BuildPrompt(Task{IssueID: "issue-123", IssueContext: &IssueContextData{
+		Revision: 9, Content: "**Title:** Compact context", Bytes: 28,
+	}}, "claude")
+
+	if !strings.Contains(out, ".agent_context/issue_context.md") || !strings.Contains(out, "revision 9") {
+		t.Fatalf("compact context reminder missing:\n%s", out)
+	}
+	if !strings.Contains(out, "trigger comment as the newest delta") {
+		t.Fatalf("compact context must retain delta guidance:\n%s", out)
+	}
+}

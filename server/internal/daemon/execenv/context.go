@@ -1033,6 +1033,19 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 
 	b.WriteString("## Quick Start\n\n")
+	if strings.TrimSpace(ctx.IssueContext.Content) != "" {
+		fmt.Fprintf(&b, "This task includes a compact current-state issue capsule (revision %d, %d bytes). Start with it before using the issue API.\n\n", ctx.IssueContext.Revision, ctx.IssueContext.Bytes)
+		b.WriteString("## Feature Context Capsule\n\n")
+		b.WriteString(ctx.IssueContext.Content)
+		if !strings.HasSuffix(ctx.IssueContext.Content, "\n") {
+			b.WriteString("\n")
+		}
+		if ctx.IssueContext.Truncated {
+			b.WriteString("\n> This capsule reached its size limit. Fetch the full issue only if the missing detail is required for this task.\n")
+		}
+		b.WriteString("\n")
+		return b.String()
+	}
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
 	return b.String()
