@@ -43,4 +43,4 @@ images:
     newTag: "86cca3d2"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "7467367a"
+    newTag: "86cca3d2"
