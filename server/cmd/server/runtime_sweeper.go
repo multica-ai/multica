@@ -584,7 +584,7 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 		return
 	}
 	// Fallback path used by tests that don't construct a TaskService:
-	// publish task:failed events with workspace IDs and reset stuck issues.
+	// publish task:failed events with workspace IDs and park stuck issues.
 	processedIssues := make(map[string]bool)
 	affectedAgents := make(map[string]pgtype.UUID)
 	for _, t := range tasks {
@@ -598,17 +598,24 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				issueKey := util.UUIDToString(t.IssueID)
 				// Only issues whose status means "an agent is actively working"
-				// get reset. in_review and blocked are deliberately excluded —
+				// get parked. in_review and blocked are deliberately excluded —
 				// they mean a human or an external dependency owns the issue
 				// now, and resetting those to todo would re-trigger an agent on
 				// work someone else is holding. A custom status resolves to the
 				// canonical status it inherits, so a custom review gate is
 				// excluded for the same reason In Review is. (MUL-6243)
+				// I1121.ENS: park (never reset to todo) — with no retry service
+				// here a task can never be re-enqueued, so a bare todo flip
+				// would leave a false-green issue with no queued task.
 				effectiveStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, issue.Status)
 				if effectiveStatus == "in_progress" && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
-						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})
+						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "blocked", WorkspaceID: issue.WorkspaceID})
+						slog.Warn("fallback failed-task path parked issue as blocked",
+							"issue_id", issueKey,
+							"failure_reason", failureReason,
+						)
 					}
 				}
 			}

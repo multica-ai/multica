@@ -4932,6 +4932,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
+	// I1121.ENS: when a daemon-reported failure is terminal (no retry child),
+	// an issue still in an executable status (in_progress/todo) with no other
+	// active task must be parked as blocked with an explicit reason — never
+	// left looking executable without a runnable task (the daemon claims
+	// tasks, not issues, so a bare in_progress/todo state would be a false
+	// green).
+	if retried == nil && task.IssueID.Valid {
+		if issue, ierr := s.Queries.GetIssue(ctx, task.IssueID); ierr == nil &&
+			(issue.Status == "in_progress" || issue.Status == "todo") {
+			if hasActive, herr := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID); herr == nil && !hasActive {
+				s.blockIssueAfterTerminalFailure(ctx, issue, task, failureReason)
+			}
+		}
+	}
+
 	// Quick-create tasks: push a failure inbox notification to the
 	// requester so they can either retry or fall back to the advanced form
 	// without losing their original prompt. Skipped when an auto-retry is
@@ -5647,8 +5662,14 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 // HandleFailedTasks runs the post-failure side effects for a batch of
 // freshly-failed tasks: optional auto-retry, task:failed event broadcast,
 // agent status reconciliation, and (when an issue has no remaining active
-// task and isn't being retried) resetting the issue back to todo so the
-// daemon can pick it up again.
+// task and isn't being retried) parking the issue as `blocked` with an
+// explicit reason so it cannot masquerade as queued work.
+//
+// I1121.ENS invariant: an executable issue must have exactly one queued or
+// running task, or an explicit blocked reason. A bare status flip to `todo`
+// would bypass the HTTP enqueue path (WillEnqueueRun → EnqueueTaskForIssue)
+// and leave an issue that looks queued but has no task — the daemon claims
+// tasks, not issues, so nothing would ever run it again (false green).
 //
 // All callers that surface a task as failed — sweepers, FailTask,
 // recover-orphans — funnel through here so the same UI-consistency
@@ -5666,8 +5687,21 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
+		child, retryErr := s.MaybeRetryFailedTask(ctx, t)
+		if retryErr != nil {
+			// I1121.ENS: a retry-creation error must not be silently
+			// swallowed. Log it loudly with issue context; the park branch
+			// below treats the issue as NOT safely retried (no queued child
+			// exists), never as cleanly finished.
+			slog.Error("handle failed tasks: retry creation failed",
+				"task_id", util.UUIDToString(t.ID),
+				"issue_id", util.UUIDToString(t.IssueID),
+				"agent_id", util.UUIDToString(t.AgentID),
+				"error", retryErr,
+			)
+		}
 		retryPending := false
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		if child != nil {
 			retryPending = true
 			retried++
 			if t.IssueID.Valid {
@@ -5694,16 +5728,19 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		if t.IssueID.Valid {
 			if issue, err := s.Queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
-				// Reset stuck in_progress issues only when no other active
+				// Park stuck executable issues only when no other active
 				// task exists for the issue and no retry was just enqueued.
 				issueKey := util.UUIDToString(t.IssueID)
-				// Only "an agent is actively working" resets. in_review and
-				// blocked are excluded — a human or an external dependency owns
-				// the issue then — and a custom status resolves to the canonical
-				// status it inherits, so a custom review gate is excluded for
-				// the same reason In Review is. (MUL-6243)
+				// Only "an agent is actively working" gets parked. in_review
+				// and blocked are excluded — a human or an external dependency
+				// owns the issue then — and a custom status resolves to the
+				// canonical status it inherits, so a custom review gate is
+				// excluded for the same reason In Review is. (MUL-6243)
+				// I1121.ENS: todo counts as executable too — a bare todo
+				// state without a queued task is a false green, so it parks
+				// the same way in_progress does.
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if (effectiveStatus == "in_progress" || effectiveStatus == "todo") && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
@@ -5712,24 +5749,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
-						})
-						if updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
-						} else {
-							// This direct reset bypasses the HTTP UpdateIssue
-							// handler that normally emits issue:updated, so emit
-							// it here too. Without it the board / status-filter
-							// caches keep showing the issue as in_progress until
-							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(ctx, updatedIssue, issue.Status)
-						}
+						s.blockIssueAfterTerminalFailure(ctx, issue, t, failureReason)
 					}
 				}
 			}
@@ -6289,6 +6309,45 @@ func (s *TaskService) dispatchDelegatedFailureRecoveryComment(ctx context.Contex
 	}
 	target.comment = comment
 	return s.dispatchDelegatedFailureRecovery(ctx, target, completedTaskID)
+}
+
+// blockIssueAfterTerminalFailure parks a stuck in_progress issue in `blocked`
+// with an explicit reason when its run failed terminally and no retry child or
+// other active task remains. This is the I1121.ENS enforcement of the
+// issue-run invariant: an executable issue must have exactly one queued or
+// running task, or an explicit blocked reason. A bare `todo` flip would bypass
+// the HTTP enqueue path and leave the issue looking queued with no task.
+func (s *TaskService) blockIssueAfterTerminalFailure(ctx context.Context, issue db.Issue, task db.AgentTaskQueue, failureReason string) {
+	issueKey := util.UUIDToString(issue.ID)
+	blocked, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		Status:      "blocked",
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if updateErr != nil {
+		slog.Warn("handle failed tasks: block stuck issue failed",
+			"issue_id", issueKey,
+			"error", updateErr,
+		)
+		return
+	}
+	// This direct status write bypasses the HTTP UpdateIssue handler that
+	// normally emits issue:updated, so emit it here too. Without it the board /
+	// status-filter caches keep showing the issue as in_progress until the next
+	// write touches it (#4648 / MUL-3782).
+	s.broadcastIssueUpdated(ctx, blocked, issue.Status)
+
+	// The invariant demands an EXPLICIT blocked reason, not just a status. The
+	// task:failed system comment below names the failure reason and task so the
+	// issue thread itself documents why the issue is parked (visible to the
+	// user and to the pipeline monitor alike). createAgentComment is best-effort
+	// and internally swallows write errors; the status change above is the
+	// durable enforcement.
+	if task.AgentID.Valid {
+		s.createAgentComment(ctx, issue.ID, task.AgentID,
+			fmt.Sprintf("Issue blocked: run failed (%s) and no active or retried task remains. Rerun manually to start a fresh attempt.", failureReason),
+			"system", task.TriggerCommentID, task.ID)
+	}
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
