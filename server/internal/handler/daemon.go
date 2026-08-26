@@ -2153,7 +2153,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
-		Model:                 agent.Model.String,
+		Model:                 concreteModelForTask(task, agent),
 		ThinkingLevel:         agent.ThinkingLevel.String,
 		ServiceTier:           agent.ServiceTier.String,
 		RuntimeConfig:         runtimeConfig,
@@ -5194,4 +5194,15 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
 	})
+}
+
+// concreteModelForTask returns the launch model for a claimed task. A
+// non-empty per-task ConcreteModel (resolved via the 404 model_tier_map at
+// enqueue) overrides the agent's stored model; otherwise the agent's own
+// model is used unchanged (MUL-404/405 data plane).
+func concreteModelForTask(task *db.AgentTaskQueue, agent db.Agent) string {
+	if task.ConcreteModel.Valid && task.ConcreteModel.String != "" {
+		return task.ConcreteModel.String
+	}
+	return agent.Model.String
 }

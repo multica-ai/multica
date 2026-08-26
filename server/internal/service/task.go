@@ -1488,7 +1488,6 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		tier = agent.ServiceTier.String
 	}
 	concrete := s.resolveConcreteModel(ctx, issue.WorkspaceID, tier)
-	_ = concrete // ponytail: resolved with fallback; model column not yet on task, keep minimal
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1510,6 +1509,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		ConcreteModel:        pgtype.Text{String: concrete, Valid: concrete != ""},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
