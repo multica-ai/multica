@@ -10,13 +10,6 @@ vi.mock("../i18n", () => ({
           show_preview: "Show preview",
           show_source: "Show source",
           fullscreen: "Fullscreen",
-          edit_preview: "Edit live preview",
-          live_workspace: "Live preview workspace",
-          editor_label: "HTML editor",
-          local_draft: "Local draft",
-          original: "Original",
-          reset_changes: "Reset changes",
-          copy_changes: "Copy changes",
         },
       }),
   }),
@@ -92,38 +85,5 @@ describe("HtmlBlockPreview — Maximize → Dialog", () => {
       expect(srcdoc).toContain("scrollIntoView");
       expect(f.getAttribute("sandbox")).toBe("allow-scripts");
     }
-  });
-});
-
-describe("HtmlBlockPreview — live preview workspace", () => {
-  it("opens an editable split view and updates the sandboxed preview live", () => {
-    render(<HtmlBlockPreview html="<p>original</p>" />);
-
-    fireEvent.click(screen.getByTitle("Edit live preview"));
-
-    const editor = screen.getByLabelText("HTML editor") as HTMLTextAreaElement;
-    expect(editor.value).toBe("<p>original</p>");
-    expect(screen.getByText("Original")).toBeTruthy();
-
-    fireEvent.change(editor, { target: { value: "<h1>changed</h1>" } });
-
-    expect(editor.value).toBe("<h1>changed</h1>");
-    expect(screen.getByText("Local draft")).toBeTruthy();
-    const frames = document.querySelectorAll("iframe");
-    const liveFrame = frames[frames.length - 1]!;
-    expect(liveFrame.getAttribute("srcdoc")?.startsWith("<h1>changed</h1>")).toBe(true);
-    expect(liveFrame.getAttribute("sandbox")).toBe("allow-scripts");
-  });
-
-  it("resets a local edit to the assistant's original HTML", () => {
-    render(<HtmlBlockPreview html="<p>original</p>" />);
-    fireEvent.click(screen.getByTitle("Edit live preview"));
-
-    const editor = screen.getByLabelText("HTML editor") as HTMLTextAreaElement;
-    fireEvent.change(editor, { target: { value: "<p>draft</p>" } });
-    fireEvent.click(screen.getByRole("button", { name: "Reset changes" }));
-
-    expect(editor.value).toBe("<p>original</p>");
-    expect(screen.getByText("Original")).toBeTruthy();
   });
 });

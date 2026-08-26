@@ -84,14 +84,7 @@
     "copy_code": "コードをコピー",
     "show_preview": "プレビューを表示",
     "show_source": "ソースを表示",
-    "fullscreen": "全画面",
-    "edit_preview": "ライブプレビューを編集",
-    "live_workspace": "ライブプレビュー",
-    "editor_label": "HTML エディター",
-    "local_draft": "ローカル下書き",
-    "original": "元の内容",
-    "reset_changes": "変更をリセット",
-    "copy_changes": "変更をコピー"
+    "fullscreen": "全画面"
   },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"

@@ -84,14 +84,7 @@
     "copy_code": "코드 복사",
     "show_preview": "미리보기 표시",
     "show_source": "소스 표시",
-    "fullscreen": "전체 화면",
-    "edit_preview": "실시간 미리보기 편집",
-    "live_workspace": "실시간 미리보기 작업공간",
-    "editor_label": "HTML 편집기",
-    "local_draft": "로컬 초안",
-    "original": "원본",
-    "reset_changes": "변경 사항 초기화",
-    "copy_changes": "변경 사항 복사"
+    "fullscreen": "전체 화면"
   },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"

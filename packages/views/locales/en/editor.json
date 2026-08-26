@@ -91,14 +91,7 @@
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
-    "fullscreen": "Fullscreen",
-    "edit_preview": "Edit live preview",
-    "live_workspace": "Live preview workspace",
-    "editor_label": "HTML editor",
-    "local_draft": "Local draft",
-    "original": "Original",
-    "reset_changes": "Reset changes",
-    "copy_changes": "Copy changes"
+    "fullscreen": "Fullscreen"
   },
   "file_card": {
     "uploading": "Uploading {{filename}}"
