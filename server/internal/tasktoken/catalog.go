@@ -129,6 +129,7 @@ func ParseCatalog(raw string) (*Catalog, error) {
 	}
 
 	c := &Catalog{byID: make(map[string]Template, len(entries))}
+	byEnv := make(map[string]string, len(entries))
 	for i, e := range entries {
 		tpl, err := validateEntry(e)
 		if err != nil {
@@ -137,6 +138,14 @@ func ParseCatalog(raw string) (*Catalog, error) {
 		if _, dup := c.byID[tpl.ID]; dup {
 			return nil, fmt.Errorf("catalog entry %d: duplicate id %q", i, tpl.ID)
 		}
+		// Issue() keys its output by env name, so two templates sharing one
+		// would overwrite each other there: a system's token simply missing,
+		// with nothing anywhere saying which one won. An operator can only act
+		// on that if it is a startup error.
+		if other, dup := byEnv[tpl.Env]; dup {
+			return nil, fmt.Errorf("catalog entry %d (id=%q): env %q is already used by template %q", i, tpl.ID, tpl.Env, other)
+		}
+		byEnv[tpl.Env] = tpl.ID
 		c.byID[tpl.ID] = tpl
 		c.ordered = append(c.ordered, tpl)
 	}

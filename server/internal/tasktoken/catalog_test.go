@@ -102,6 +102,7 @@ func TestParseCatalogRejects(t *testing.T) {
 		{"malformed json", `not json`, "parse catalog"},
 		{"missing id", `[{"label":"A","env":"TOKEN_A","claims":{"sub":"x"}}]`, "id is required"},
 		{"duplicate id", `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"x"}},{"id":"a","label":"B","env":"TOKEN_B","claims":{"sub":"x"}}]`, "duplicate id"},
+		{"duplicate env", `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"x"}},{"id":"b","label":"B","env":"TOKEN_A","claims":{"sub":"x"}}]`, "already used by template"},
 		{"missing label", `[{"id":"a","env":"TOKEN_A","claims":{"sub":"x"}}]`, "label is required"},
 		{"missing env", `[{"id":"a","label":"A","claims":{"sub":"x"}}]`, "env is required"},
 		{"lowercase env", `[{"id":"a","label":"A","env":"token_a","claims":{"sub":"x"}}]`, "env must match"},

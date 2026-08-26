@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -105,6 +105,63 @@ describe("TaskTokensTab", () => {
     expect(mockOpenExternal).toHaveBeenCalledWith(
       "https://multica.ai/docs/task-identity-tokens",
     );
+  });
+
+  // Rapid toggling is the lost-write case: the endpoint replaces the whole
+  // enabled set, so a second PUT computed from the pre-first-toggle snapshot
+  // would silently undo the first one. On the surface that decides which
+  // identities an agent may be issued, that must not happen quietly.
+  it("keeps an earlier toggle when a second one follows immediately", async () => {
+    const updateAgentTaskTokens = vi.fn(async (_id: string, next: string[]) => ({
+      ...CATALOG,
+      enabled: next,
+    }));
+    installApi({ updateAgentTaskTokens });
+    renderTab();
+
+    const app = await screen.findByRole("checkbox", { name: /APP/ });
+    const erp = screen.getByRole("checkbox", { name: /ERP/ });
+    await waitFor(() => expect(erp).toBeChecked());
+
+    // Both clicks in one synchronous block: the component has not re-rendered
+    // in between, which is exactly what a fast double-toggle looks like.
+    fireEvent.click(app);
+    fireEvent.click(erp);
+
+    await waitFor(() => expect(updateAgentTaskTokens).toHaveBeenCalledTimes(2));
+    expect(updateAgentTaskTokens.mock.calls[0]?.[1]).toEqual(["erp", "app"]);
+    // ["app"], not []: the second payload is computed after the first landed.
+    expect(updateAgentTaskTokens.mock.calls[1]?.[1]).toEqual(["app"]);
+
+    await waitFor(() => expect(app).toBeChecked());
+    expect(erp).not.toBeChecked();
+  });
+
+  it("locks every checkbox while a save is in flight", async () => {
+    let release: (value: unknown) => void = () => {};
+    const inFlight = new Promise((resolve) => {
+      release = resolve;
+    });
+    const updateAgentTaskTokens = vi.fn(async (_id: string, next: string[]) => {
+      await inFlight;
+      return { ...CATALOG, enabled: next };
+    });
+    installApi({ updateAgentTaskTokens });
+    renderTab();
+
+    const app = await screen.findByRole("checkbox", { name: /APP/ });
+    const erp = screen.getByRole("checkbox", { name: /ERP/ });
+    fireEvent.click(app);
+
+    // Not just the box being saved: any other box would compute its payload
+    // from a set the server is in the middle of replacing. The checkbox is a
+    // span with role="checkbox", so the disabled state is aria-disabled.
+    await waitFor(() => expect(app).toHaveAttribute("aria-disabled", "true"));
+    expect(erp).toHaveAttribute("aria-disabled", "true");
+
+    release(undefined);
+    await waitFor(() => expect(app).not.toHaveAttribute("aria-disabled", "true"));
+    expect(erp).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("shows the unconfigured notice when the catalog is empty", async () => {

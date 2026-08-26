@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
+import type { AgentTaskTokens } from "@multica/core/api/schemas";
 import type { Agent } from "@multica/core/types";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { BookOpen } from "lucide-react";
@@ -35,7 +36,6 @@ export function agentTaskTokensKey(agentId: string) {
 export function TaskTokensTab({ agent }: { agent: Agent }) {
   const { t, i18n } = useT("agents");
   const qc = useQueryClient();
-  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const { data } = useQuery({
     queryKey: agentTaskTokensKey(agent.id),
@@ -48,7 +48,25 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
   const enabled = useMemo(() => data?.enabled ?? [], [data]);
 
   const mutation = useMutation({
-    mutationFn: (next: string[]) => api.updateAgentTaskTokens(agent.id, next),
+    // Scoped so toggles on this agent run one at a time. Parallel mutations
+    // could have their responses land out of order, leaving the cache showing
+    // a set the server does not hold.
+    scope: { id: `agent-task-tokens:${agent.id}` },
+    mutationFn: ({ id, checked }: { id: string; checked: boolean }) => {
+      // The set is read when the mutation RUNS, not when the box was clicked.
+      // The endpoint replaces the whole set, so a payload computed from a
+      // snapshot taken before an earlier toggle landed would silently undo it —
+      // a lost write on the surface that decides which identities this agent
+      // may be issued.
+      const current =
+        qc.getQueryData<AgentTaskTokens>(agentTaskTokensKey(agent.id))?.enabled ?? [];
+      const next = checked
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.filter((e) => e !== id);
+      return api.updateAgentTaskTokens(agent.id, next);
+    },
     onSuccess: (result) => {
       qc.setQueryData(agentTaskTokensKey(agent.id), result);
       toast.success(t(($) => $.tab_body.task_tokens.saved));
@@ -61,17 +79,11 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
       // than leaving the checkboxes showing a change that did not persist.
       qc.invalidateQueries({ queryKey: agentTaskTokensKey(agent.id) });
     },
-    onSettled: () => setPendingId(null),
   });
 
   const toggle = useCallback(
-    (id: string, checked: boolean) => {
-      setPendingId(id);
-      // Send the whole set, matching the endpoint's replace semantics.
-      const next = checked ? [...enabled, id] : enabled.filter((e) => e !== id);
-      mutation.mutate(next);
-    },
-    [enabled, mutation],
+    (id: string, checked: boolean) => mutation.mutate({ id, checked }),
+    [mutation],
   );
 
   if (available.length === 0) {
@@ -107,7 +119,7 @@ export function TaskTokensTab({ agent }: { agent: Agent }) {
           >
             <Checkbox
               checked={enabled.includes(tpl.id)}
-              disabled={pendingId === tpl.id}
+              disabled={mutation.isPending}
               onCheckedChange={(checked) => toggle(tpl.id, checked === true)}
               aria-label={tpl.label}
             />

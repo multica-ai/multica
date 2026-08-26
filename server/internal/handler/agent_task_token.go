@@ -201,13 +201,40 @@ func (h *Handler) UpdateAgentTaskTokens(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// taskTokenIdentityUser returns the human whose identity may be signed for a
+// run, and whether signing is permitted at all.
+//
+// The gate reads originator_user_id — the AUTHORIZATION column — and never
+// accountable_user_id. The two are not interchangeable here (migration 185):
+// accountable_user_id is an audit/visibility output that degrades to *some*
+// human for every run, while originator_user_id is NULL exactly when no human
+// lent their authority. An autopilot schedule firing at 3am carries
+// originator_source = trigger_owner, which attribution.Precise() reports true
+// because the audit label is compliance-grade — but its originator is NULL by
+// construction, and signing there would hand the trigger's long-departed
+// creator's full permissions to a run they did not request and are not
+// watching. That is the same refusal owner_fallback already gets.
+//
+// Precise() is still required on top, so a source that names an authorizing
+// human only in hindsight (backfill) does not mint a live credential. It is a
+// second condition, never the deciding one.
+func taskTokenIdentityUser(task *db.AgentTaskQueue) (pgtype.UUID, bool) {
+	if !task.OriginatorUserID.Valid {
+		return pgtype.UUID{}, false
+	}
+	if !attribution.Source(task.OriginatorSource.String).Precise() {
+		return pgtype.UUID{}, false
+	}
+	return task.OriginatorUserID, true
+}
+
 // issueTaskTokens signs the identity tokens this run's agent has enabled.
 //
-// The identity is the run's accountable human, taken straight from the task
-// row's attribution columns — the same waterfall the activity UI shows
-// (MUL-4302). Only a PRECISE source is signed: owner_fallback / backfill /
-// unattributed mean no human authorized this run, and issuing on those would
-// lend the agent owner's identity to work nobody asked for.
+// The identity is the human who authorized the run (see taskTokenIdentityUser).
+// When originator_user_id is set the attribution invariant makes it equal to
+// accountable_user_id, so the token still speaks for the person the activity UI
+// shows (MUL-4302) — it just refuses the sources where the two diverge, which
+// are precisely the runs nobody authorized.
 //
 // Returns nil on every degraded path. Failing to obtain a token is an
 // "unauthorized" condition for whatever wanted it, never a task failure, so
@@ -222,18 +249,19 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 	}
 
 	src := attribution.Source(task.OriginatorSource.String)
-	if !src.Precise() || !task.AccountableUserID.Valid {
-		slog.Info("task token: run has no precise accountable human; issuing none",
+	identityID, authorized := taskTokenIdentityUser(task)
+	if !authorized {
+		slog.Info("task token: run carries no human authorization; issuing none",
 			"task_id", uuidToString(task.ID),
 			"originator_source", task.OriginatorSource.String)
 		return nil
 	}
 
-	user, err := h.Queries.GetUser(ctx, task.AccountableUserID)
+	user, err := h.Queries.GetUser(ctx, identityID)
 	if err != nil {
-		slog.Warn("task token: accountable user lookup failed; issuing none",
+		slog.Warn("task token: authorizing user lookup failed; issuing none",
 			"task_id", uuidToString(task.ID),
-			"user_id", uuidToString(task.AccountableUserID), "error", err)
+			"user_id", uuidToString(identityID), "error", err)
 		return nil
 	}
 
@@ -297,6 +325,15 @@ func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, 
 		slog.Error("task token: issuance audit write failed; withholding tokens",
 			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
 		return nil
+	}
+
+	// Logged only once the tokens are actually going out, so a jti in the
+	// server log always corresponds to a credential someone could have used.
+	for _, rc := range receipts {
+		slog.Info("task token issued",
+			"template_id", rc.TemplateID, "env", rc.Env, "jti", rc.JTI,
+			"identity_source", string(src), "user_id", uuidToString(user.ID),
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID))
 	}
 	return tokens
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,6 +26,21 @@ func testKeyPEM(t *testing.T) (string, *ecdsa.PublicKey) {
 		t.Fatalf("marshal key: %v", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})), &key.PublicKey
+}
+
+// testECKeyPEM returns a PKCS#8 EC key on the named curve, for the checks that
+// care which curve a template's algorithm needs.
+func testECKeyPEM(t *testing.T, curve elliptic.Curve) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(curve, rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 }
 
 func TestEmailLocal(t *testing.T) {
@@ -336,6 +352,83 @@ func TestNewIssuerRejectsBadManifestEnvName(t *testing.T) {
 		if _, err := NewIssuer(catalog, keyPEM, bad); err == nil {
 			t.Errorf("NewIssuer(manifestEnv=%q) error = nil, want rejection", bad)
 		}
+	}
+}
+
+// TestNewIssuerRejectsManifestEnvCollidingWithTemplate pins the boot-time
+// refusal for a manifest name a template already owns. Issue() writes the
+// manifest after the token loop, so the collision would replace a credential
+// with a JSON blob and the agent would simply fail to authenticate.
+func TestNewIssuerRejectsManifestEnvCollidingWithTemplate(t *testing.T) {
+	keyPEM, _ := testKeyPEM(t)
+	catalog := `[{"id":"a","label":"A","env":"TOKEN_A","claims":{"sub":"x"}}]`
+	_, err := NewIssuer(catalog, keyPEM, "TOKEN_A")
+	if err == nil {
+		t.Fatal("NewIssuer() error = nil, want a rejection for a manifest env a template already uses")
+	}
+	if !strings.Contains(err.Error(), "already used by template") {
+		t.Errorf("NewIssuer() error = %q, want it to name the colliding template", err)
+	}
+}
+
+// TestNewIssuerRejectsAlgorithmTheKeyCannotSign is the fence against a
+// configuration that boots clean and then fails inside sign() on every task:
+// the catalog and the key are separate env vars, so nothing but this check
+// relates them.
+func TestNewIssuerRejectsAlgorithmTheKeyCannotSign(t *testing.T) {
+	cases := []struct {
+		name    string
+		keyPEM  string
+		alg     string
+		wantSub string
+	}{
+		{"rsa algorithm with ec key", testECKeyPEM(t, elliptic.P256()), "RS256", "needs an RSA private key"},
+		{"ec algorithm with rsa key", testRSAKeyPEM(t), "ES256", "needs an EC private key"},
+		{"es256 with p-384 key", testECKeyPEM(t, elliptic.P384()), "ES256", "needs a P-256 key"},
+		{"es384 with p-256 key", testECKeyPEM(t, elliptic.P256()), "ES384", "needs a P-384 key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := `[{"id":"a","label":"A","env":"TOKEN_A","algorithm":"` + tc.alg + `","claims":{"sub":"x"}}]`
+			_, err := NewIssuer(catalog, tc.keyPEM, "")
+			if err == nil {
+				t.Fatalf("NewIssuer() error = nil, want a rejection for %s signed by this key", tc.alg)
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Errorf("NewIssuer() error = %q, want it to contain %q", err, tc.wantSub)
+			}
+			if strings.Contains(err.Error(), "PRIVATE KEY") {
+				t.Errorf("NewIssuer() error = %q, must not carry key material", err)
+			}
+		})
+	}
+}
+
+// TestNewIssuerAcceptsMatchingKeyAndAlgorithm keeps the check above from
+// hardening into "EC only": an RSA deployment is supported and must boot.
+func TestNewIssuerAcceptsMatchingKeyAndAlgorithm(t *testing.T) {
+	cases := []struct {
+		name   string
+		keyPEM string
+		alg    string
+	}{
+		{"es256 with p-256 key", testECKeyPEM(t, elliptic.P256()), "ES256"},
+		{"es384 with p-384 key", testECKeyPEM(t, elliptic.P384()), "ES384"},
+		{"rs256 with rsa key", testRSAKeyPEM(t), "RS256"},
+		{"rs384 with rsa key", testRSAKeyPEM(t), "RS384"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := `[{"id":"a","label":"A","env":"TOKEN_A","algorithm":"` + tc.alg + `","claims":{"sub":"x"}}]`
+			issuer, err := NewIssuer(catalog, tc.keyPEM, "")
+			if err != nil {
+				t.Fatalf("NewIssuer() error = %v, want %s to boot on a matching key", err, tc.alg)
+			}
+			tokens, _ := issuer.Issue([]string{"a"}, Context{}, time.Now())
+			if tokens["TOKEN_A"] == "" {
+				t.Errorf("Issue() = %v, want a signed TOKEN_A", tokens)
+			}
+		})
 	}
 }
 

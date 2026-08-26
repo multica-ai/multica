@@ -196,6 +196,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
+		protocol.DaemonCapabilityTaskIdentityTokensV1,
 	}, ",")
 }
 

@@ -178,11 +178,12 @@ type Task struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`
 	InitiatorName  string `json:"initiator_name,omitempty"`
 	InitiatorEmail string `json:"initiator_email,omitempty"`
-	// TaskTokens are identity tokens the server signed for this run's
-	// accountable human, keyed by the environment variable name each is
-	// injected under. Absent on servers predating the feature and on
-	// deployments that have not configured it — both mean "inject nothing",
-	// which is the same handling.
+	// TaskTokens are identity tokens the server signed for the human who
+	// authorized this run, keyed by the environment variable name each is
+	// injected under. Absent on servers predating the feature, on deployments
+	// that have not configured it, and whenever this daemon did not advertise
+	// task-identity-tokens-v1 — all three mean "inject nothing", which is the
+	// same handling.
 	TaskTokens map[string]string `json:"task_tokens,omitempty"`
 	// AuthToken is the task-scoped credential the server mints at claim time.
 	// The daemon injects it into the spawned agent as MULTICA_TOKEN so the

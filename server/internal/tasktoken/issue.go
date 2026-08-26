@@ -2,7 +2,9 @@ package tasktoken
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -15,9 +17,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Identity is the resolved accountable human a token speaks for. It is
-// produced by the server from the task row — never from anything the agent
-// or the daemon can influence.
+// Identity is the human a token speaks for: the one who authorized the run.
+// It is produced by the server from the task row — never from anything the
+// agent or the daemon can influence.
 type Identity struct {
 	Email  string
 	Name   string
@@ -106,12 +108,60 @@ func NewIssuer(rawCatalog, rawPrivateKey, manifestEnv string) (*Issuer, error) {
 		return nil, err
 	}
 
+	// The catalog and the key are configured independently, so a template can
+	// name an algorithm this key cannot produce. Unchecked, that boots cleanly
+	// and fails inside sign() on every single task — exactly the "discover it
+	// at 3am" outcome all-or-nothing startup validation exists to prevent.
+	for _, tpl := range catalog.List() {
+		if err := validateKeyForAlgorithm(key, tpl.Algorithm); err != nil {
+			return nil, fmt.Errorf("task token template %q: %w", tpl.ID, err)
+		}
+	}
+
 	if manifestEnv != "" {
 		if err := ValidateEnvName(manifestEnv); err != nil {
 			return nil, fmt.Errorf("task token manifest env: %w", err)
 		}
+		// Issue() writes the manifest after the token loop, so a name shared
+		// with a template does not merely shadow that token — it replaces a
+		// credential with a JSON blob, and the receiving system sees an agent
+		// that suddenly cannot authenticate.
+		for _, tpl := range catalog.List() {
+			if tpl.Env == manifestEnv {
+				return nil, fmt.Errorf("task token manifest env %q is already used by template %q", manifestEnv, tpl.ID)
+			}
+		}
 	}
 	return &Issuer{catalog: catalog, key: key, manifestEnv: manifestEnv}, nil
+}
+
+// validateKeyForAlgorithm reports whether the configured private key can sign
+// alg. Only the key's type and curve are inspected, and only its type appears
+// in the error — nothing here can put key material into a log line.
+func validateKeyForAlgorithm(key crypto.PrivateKey, alg string) error {
+	switch alg {
+	case "ES256", "ES384":
+		ec, ok := key.(*ecdsa.PrivateKey)
+		if !ok {
+			return fmt.Errorf("algorithm %q needs an EC private key, got %T", alg, key)
+		}
+		// jwt's ECDSA signer requires the curve to match the algorithm's hash
+		// size exactly, so a P-521 key cannot stand in for ES256.
+		want := 256
+		if alg == "ES384" {
+			want = 384
+		}
+		if bits := ec.Curve.Params().BitSize; bits != want {
+			return fmt.Errorf("algorithm %q needs a P-%d key, got %s", alg, want, ec.Curve.Params().Name)
+		}
+	case "RS256", "RS384":
+		if _, ok := key.(*rsa.PrivateKey); !ok {
+			return fmt.Errorf("algorithm %q needs an RSA private key, got %T", alg, key)
+		}
+	default:
+		return fmt.Errorf("unsupported algorithm %q", alg)
+	}
+	return nil
 }
 
 // parsePrivateKey accepts PKCS#8 ("PRIVATE KEY"), SEC 1 EC ("EC PRIVATE KEY")
@@ -156,6 +206,11 @@ func (i *Issuer) Catalog() *Catalog {
 // Issue signs every enabled template it can and returns env name -> token,
 // plus a receipt per signed token for the caller's audit trail.
 //
+// Successful signing is deliberately not logged here: the caller can still
+// withhold a signed token (its audit write is fail-closed), and a log line
+// claiming issuance for a token nobody received makes jti forensics lie. The
+// caller logs from the receipts once the token is really going out.
+//
 // Issuing is best-effort by design: a template that has been removed from the
 // catalog, one that fails to sign, or one whose domain allowlist excludes this
 // identity, is skipped with a log line while the rest still reach the agent.
@@ -185,9 +240,6 @@ func (i *Issuer) Issue(enabledIDs []string, tctx Context, now time.Time) (map[st
 			slog.Error("task token: signing failed", "template_id", id, "error", err)
 			continue
 		}
-		slog.Info("task token issued",
-			"template_id", tpl.ID, "env", tpl.Env, "jti", jti,
-			"identity_source", tctx.Identity.Source, "user_id", tctx.Identity.UserID)
 		out[tpl.Env] = token
 		receipts = append(receipts, Receipt{
 			TemplateID: tpl.ID, Env: tpl.Env, JTI: jti, ExpiresAt: now.Add(tpl.TTL),

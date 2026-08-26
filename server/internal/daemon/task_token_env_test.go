@@ -1,6 +1,30 @@
 package daemon
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+// TestDaemonAdvertisesTaskIdentityTokens is the other half of the server's
+// pre-signing gate: the server withholds tokens from a daemon that does not
+// advertise this, so a daemon that injects them must say so or silently stop
+// receiving them.
+func TestDaemonAdvertisesTaskIdentityTokens(t *testing.T) {
+	caps := daemonClientCapabilities()
+	found := false
+	for _, part := range strings.Split(caps, ",") {
+		if strings.TrimSpace(part) == protocol.DaemonCapabilityTaskIdentityTokensV1 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("daemonClientCapabilities() = %q, want it to advertise %q",
+			caps, protocol.DaemonCapabilityTaskIdentityTokensV1)
+	}
+}
 
 func TestLayerTaskTokensInjects(t *testing.T) {
 	agentEnv := map[string]string{"CODEX_HOME": "/tmp/codex"}

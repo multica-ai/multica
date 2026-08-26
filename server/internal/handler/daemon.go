@@ -2072,9 +2072,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			message: "failed to load task agent",
 		}
 	}
-	// Identity tokens for this run's accountable human. Degrades to nil on
-	// every path that cannot name a precise human; never fails the claim.
-	resp.TaskTokens = h.issueTaskTokens(r.Context(), task, agent, runtimeWorkspaceID)
+	// Identity tokens for the human who authorized this run. Degrades to nil on
+	// every path that cannot name one; never fails the claim.
+	//
+	// Gated on the daemon advertising that it injects them, and gated BEFORE
+	// signing: an older daemon drops the response field, so issuing anyway
+	// would write an "a credential was minted for Alice" audit row for a token
+	// that never reached a process. A missing row is recoverable; a false one
+	// is not.
+	if requestHasClientCapability(r, protocol.DaemonCapabilityTaskIdentityTokensV1) {
+		resp.TaskTokens = h.issueTaskTokens(r.Context(), task, agent, runtimeWorkspaceID)
+	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {
