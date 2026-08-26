@@ -126,7 +126,7 @@ function ProductImage({ alt }: { alt: string }) {
           alt={alt}
           width={2640}
           height={1781}
-          priority
+          preload
           className="block h-auto w-full"
           sizes="(max-width: 1320px) 100vw, 1320px"
           quality={85}
