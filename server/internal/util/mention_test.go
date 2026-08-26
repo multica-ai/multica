@@ -108,6 +108,31 @@ func TestParseMentions(t *testing.T) {
 			content: "```\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\nand more text",
 			want:    nil,
 		},
+		{
+			name:    "longer closing fence still closes and mention after it is returned",
+			content: "```\ncode\n````\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "four-space indented fence is not a closer so mention stays inert",
+			content: "```\ncode\n    ```\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n```",
+			want:    nil,
+		},
+		{
+			name:    "mention inside multiline code span is ignored",
+			content: "use ``[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\nstill code`` to mention",
+			want:    nil,
+		},
+		{
+			name:    "fenced code inside a blockquote is ignored",
+			content: "> ```\n> [@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n> ```",
+			want:    nil,
+		},
+		{
+			name:    "prose mention inside a blockquote is still returned next to quoted code",
+			content: "> [@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n>\n> ```\n> [@B](mention://agent/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb)\n> ```",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
 	}
 
 	for _, tt := range tests {
