@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "../config";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage, parseContentDispositionFilename } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
@@ -2517,5 +2517,59 @@ describe("clientErrorMessage", () => {
   it("withholds a transport failure, whose message says nothing actionable", () => {
     expect(clientErrorMessage(new TypeError("Failed to fetch"))).toBeUndefined();
     expect(clientErrorMessage(undefined)).toBeUndefined();
+  });
+});
+
+describe("ApiClient skill export", () => {
+  it("downloads a skill archive and surfaces the server filename", async () => {
+    const bytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00]);
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/gzip",
+          "Content-Disposition": 'attachment; filename="review-helper.tar.gz"',
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { blob, filename } = await new ApiClient(
+      "https://api.example.test",
+    ).exportSkillArchive("skill-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/skills/skill-1/export",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(filename).toBe("review-helper.tar.gz");
+    expect(blob.size).toBe(bytes.length);
+    expect(blob.type).toBe("application/gzip");
+  });
+
+  it("falls back to the skill id when no filename header is present", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { filename } = await new ApiClient(
+      "https://api.example.test",
+    ).exportSkillArchive("skill-1");
+
+    expect(filename).toBe("skill-1.tar.gz");
+  });
+});
+
+describe("parseContentDispositionFilename", () => {
+  it("extracts a quoted filename and rejects header injection", () => {
+    expect(
+      parseContentDispositionFilename('attachment; filename="a b.tar.gz"'),
+    ).toBe("a b.tar.gz");
+    expect(
+      parseContentDispositionFilename('attachment; filename="a\r\nb.tar.gz"'),
+    ).toBeNull();
+    expect(parseContentDispositionFilename(null)).toBeNull();
+    expect(parseContentDispositionFilename("inline")).toBeNull();
   });
 });

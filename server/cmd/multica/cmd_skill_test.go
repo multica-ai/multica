@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -540,5 +541,82 @@ func TestRunSkillRefreshJsonPrintsSkill(t *testing.T) {
 	}
 	if got["id"] != "skill-123" || got["name"] != "review-helper" {
 		t.Fatalf("got = %#v", got)
+	}
+}
+
+func TestRunSkillExportWritesTarGz(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+
+	archive := []byte("fake-tar-gz-bytes")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/skills/skill-123/export" {
+			t.Fatalf("path = %q, want /api/skills/skill-123/export", r.URL.Path)
+		}
+		if r.Header.Get("X-Workspace-ID") != "workspace-123" {
+			t.Fatalf("X-Workspace-ID = %q, want workspace-123", r.Header.Get("X-Workspace-ID"))
+		}
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="review-helper.tar.gz"`)
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "export"}
+	cmd.Flags().String("output", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+
+	dest := filepath.Join(t.TempDir(), "out.tar.gz")
+	_ = cmd.Flags().Set("output", dest)
+
+	if err := runSkillExport(cmd, []string{"skill-123"}); err != nil {
+		t.Fatalf("runSkillExport: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if string(got) != string(archive) {
+		t.Fatalf("output = %q, want %q", got, archive)
+	}
+}
+
+func TestRunSkillExportDefaultsToServerFilename(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+	t.Chdir(t.TempDir())
+
+	archive := []byte("fake-tar-gz-bytes")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", `attachment; filename="my-skill.tar.gz"`)
+		_, _ = w.Write(archive)
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "export"}
+	cmd.Flags().String("output", "", "")
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+
+	if err := runSkillExport(cmd, []string{"skill-123"}); err != nil {
+		t.Fatalf("runSkillExport: %v", err)
+	}
+	got, err := os.ReadFile("my-skill.tar.gz")
+	if err != nil {
+		t.Fatalf("read default-named output: %v", err)
+	}
+	if string(got) != string(archive) {
+		t.Fatalf("output = %q, want %q", got, archive)
 	}
 }

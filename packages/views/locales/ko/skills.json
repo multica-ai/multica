@@ -76,6 +76,9 @@
     "has_partial": "{{owned}}/{{total}} 보유",
     "added_toast": "{{name}}에 추가했습니다",
     "add_failed_toast": "스킬 추가에 실패했습니다",
+    "export": "내보내기",
+    "export_toast": "{{name}} 내보냄",
+    "export_failed": "스킬 내보내기에 실패했습니다",
     "delete": "삭제",
     "selected": "{{count}}개 선택됨",
     "clear_selection": "선택 해제",
@@ -114,6 +117,7 @@
   "detail": {
     "all_skills": "모든 스킬",
     "read_only": "읽기 전용",
+    "export_button": "내보내기",
     "delete_aria": "스킬 삭제",
     "delete_tooltip": "스킬 삭제",
     "supporting_data_warning": "일부 워크스페이스 데이터를 불러오지 못했습니다. 다음 새로고침 전까지 생성자 표시, 런타임 이름, 수정 권한이 불완전하게 보일 수 있습니다.",

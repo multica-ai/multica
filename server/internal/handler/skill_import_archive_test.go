@@ -1,15 +1,21 @@
 package handler
 
 import (
+	"archive/tar"
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // buildTestZip packs the given path->content map into an in-memory zip and
@@ -37,6 +43,56 @@ func buildTestZip(t *testing.T, entries map[string]string) []byte {
 		t.Fatalf("close zip: %v", err)
 	}
 	return buf.Bytes()
+}
+
+// buildTestTar packs the given path->content map into an in-memory tar
+// archive (no compression) and returns its bytes. A path ending in "/" is
+// written as a directory entry.
+func buildTestTar(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	writeTestTarEntries(t, tw, entries)
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	return buf.Bytes()
+}
+
+// buildTestTarGz packs the given path->content map into an in-memory
+// gzip-compressed tar archive and returns its bytes. A path ending in "/" is
+// written as a directory entry.
+func buildTestTarGz(t *testing.T, entries map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	writeTestTarEntries(t, tw, entries)
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func writeTestTarEntries(t *testing.T, tw *tar.Writer, entries map[string]string) {
+	t.Helper()
+	for name, content := range entries {
+		if strings.HasSuffix(name, "/") {
+			if err := tw.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeDir, Mode: 0o755}); err != nil {
+				t.Fatalf("create dir entry %q: %v", name, err)
+			}
+			continue
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(content))}); err != nil {
+			t.Fatalf("create entry %q: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("write entry %q: %v", name, err)
+		}
+	}
 }
 
 func filePaths(imported *importedSkill) []string {
@@ -308,5 +364,257 @@ func TestImportSkill_ArchiveUploadRejectsNonZip(t *testing.T) {
 	testHandler.ImportSkill(w, newSkillArchiveImportRequest(testUserID, []byte("not a zip at all"), "bad.skill", "fail"))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestParseSkillArchive_TarGzNestedWrapper(t *testing.T) {
+	data := buildTestTarGz(t, map[string]string{
+		"review-helper/":                "",
+		"review-helper/SKILL.md":        testSkillMd,
+		"review-helper/scripts/run.sh":  "echo hi",
+		"review-helper/references/g.md": "guide",
+	})
+
+	imported, err := parseSkillArchive(data, "review-helper.skill.tar.gz")
+	if err != nil {
+		t.Fatalf("parseSkillArchive: %v", err)
+	}
+	if imported.name != "review-helper" {
+		t.Errorf("name = %q, want review-helper", imported.name)
+	}
+	if imported.description != "Reviews code changes" {
+		t.Errorf("description = %q", imported.description)
+	}
+	if !strings.Contains(imported.content, "# Review Helper") {
+		t.Errorf("content missing SKILL.md body: %q", imported.content)
+	}
+	got := filePaths(imported)
+	want := map[string]bool{"scripts/run.sh": true, "references/g.md": true}
+	if len(got) != len(want) {
+		t.Fatalf("files = %v, want keys %v", got, want)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected file %q (SKILL.md must not be a supporting file)", p)
+		}
+	}
+	if c, ok := fileContent(imported, "scripts/run.sh"); !ok || c != "echo hi" {
+		t.Errorf("scripts/run.sh content = %q, ok=%v", c, ok)
+	}
+}
+
+func TestParseSkillArchive_PlainTarRootLayout(t *testing.T) {
+	data := buildTestTar(t, map[string]string{
+		"SKILL.md":          testSkillMd,
+		"references/doc.md": "doc",
+	})
+
+	imported, err := parseSkillArchive(data, "anything.tar")
+	if err != nil {
+		t.Fatalf("parseSkillArchive: %v", err)
+	}
+	if imported.name != "review-helper" {
+		t.Errorf("name = %q, want review-helper", imported.name)
+	}
+	if got := filePaths(imported); len(got) != 1 || got[0] != "references/doc.md" {
+		t.Errorf("files = %v, want [references/doc.md]", got)
+	}
+}
+
+func TestParseSkillArchive_TarSlipRejected(t *testing.T) {
+	data := buildTestTarGz(t, map[string]string{
+		"SKILL.md":    testSkillMd,
+		"../evil.md":  "evil",
+		"sub/../../x": "x",
+	})
+
+	imported, err := parseSkillArchive(data, "slip.tar.gz")
+	if err != nil {
+		t.Fatalf("parseSkillArchive: %v", err)
+	}
+	if got := filePaths(imported); len(got) != 0 {
+		t.Errorf("files = %v, want [] (traversal entries must be dropped)", got)
+	}
+}
+
+func TestParseSkillArchive_TarGzRejectsOversizedEntryBeforeDraining(t *testing.T) {
+	data := buildTestTarGz(t, map[string]string{
+		"SKILL.md":           testSkillMd,
+		"references/huge.md": strings.Repeat("x", maxImportFileSize+1),
+	})
+
+	_, err := parseSkillArchive(data, "oversized.tar.gz")
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversize archive error, got %v", err)
+	}
+}
+
+func TestReadTarArchiveEntriesRejectsExpandedBundle(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	writeTestTarEntries(t, tw, map[string]string{"SKILL.md": testSkillMd})
+	for i := 0; i < 9; i++ {
+		name := fmt.Sprintf("references/%d.md", i)
+		body := strings.Repeat("x", maxImportFileSize)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatalf("write header %q: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatalf("write body %q: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("close gzip: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "expanded size limit") {
+		t.Fatalf("expected expanded-size error, got %v", err)
+	}
+}
+
+func TestReadTarArchiveEntriesRejectsSpecialEntries(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name:     "review-helper/link",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "../outside",
+		Mode:     0o777,
+	}); err != nil {
+		t.Fatalf("write symlink header: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "unsupported archive entry") {
+		t.Fatalf("expected unsupported-entry error, got %v", err)
+	}
+}
+
+func TestReadTarArchiveEntriesRejectsTooManyEntries(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	for i := 0; i <= maxImportArchiveEntryCount; i++ {
+		name := fmt.Sprintf("files/%04d.txt", i)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644}); err != nil {
+			t.Fatalf("write header %q: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	_, err := readTarArchiveEntries(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "entry limit") {
+		t.Fatalf("expected entry-limit error, got %v", err)
+	}
+}
+
+func TestParseSkillArchive_InvalidGzipRejected(t *testing.T) {
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	_, _ = gz.Write([]byte("this is not a tar archive"))
+	_ = gz.Close()
+
+	_, err := parseSkillArchive(buf.Bytes(), "broken.tar.gz")
+	if err == nil || !strings.Contains(err.Error(), "not a valid") {
+		t.Fatalf("expected invalid-archive error, got %v", err)
+	}
+}
+
+func TestBuildSkillTarGz_RoundTrip(t *testing.T) {
+	// No frontmatter name on purpose: the wrapper directory must carry the
+	// skill name through the round trip for skills whose content lacks a name
+	// field (manual skills created before the structured editor).
+	content := "# My Skill\n\nBody.\n"
+	data, err := buildSkillTarGz("my-skill", content, []db.SkillFile{
+		{Path: "scripts/run.sh", Content: "echo hi"},
+		{Path: "references/g.md", Content: "guide"},
+	})
+	if err != nil {
+		t.Fatalf("buildSkillTarGz: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("buildSkillTarGz returned empty archive")
+	}
+
+	imported, err := parseSkillArchive(data, "my-skill.tar.gz")
+	if err != nil {
+		t.Fatalf("round-trip parseSkillArchive: %v", err)
+	}
+	if imported.name != "my-skill" {
+		t.Errorf("name = %q, want my-skill", imported.name)
+	}
+	if imported.content != content {
+		t.Errorf("content not preserved verbatim")
+	}
+	got := filePaths(imported)
+	want := map[string]bool{"scripts/run.sh": true, "references/g.md": true}
+	if len(got) != len(want) {
+		t.Fatalf("files = %v, want keys %v", got, want)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected file %q", p)
+		}
+	}
+	if c, ok := fileContent(imported, "references/g.md"); !ok || c != "guide" {
+		t.Errorf("references/g.md content = %q, ok=%v", c, ok)
+	}
+}
+
+func TestBuildSkillTarGzRejectsContentOutsideImportLimits(t *testing.T) {
+	_, err := buildSkillTarGz("too-large", strings.Repeat("a", maxImportFileSize+1), nil)
+	if !errors.Is(err, errSkillExportNotPortable) {
+		t.Fatalf("buildSkillTarGz error = %v, want portable-limit error", err)
+	}
+
+	_, err = buildSkillTarGz("too-many-files", "# Skill", make([]db.SkillFile, maxImportFileCount+1))
+	if !errors.Is(err, errSkillExportNotPortable) {
+		t.Fatalf("buildSkillTarGz error = %v, want portable-limit error", err)
+	}
+}
+
+func TestBuildSkillTarGzRejectsInvalidStoredFilePaths(t *testing.T) {
+	for _, filePath := range []string{
+		"../outside.md",
+		"scripts/../../outside.md",
+		"/outside.md",
+	} {
+		t.Run(filePath, func(t *testing.T) {
+			_, err := buildSkillTarGz("my-skill", "# Skill", []db.SkillFile{{
+				Path:    filePath,
+				Content: "must not be exported",
+			}})
+			if err == nil || !strings.Contains(err.Error(), "invalid archive path") {
+				t.Fatalf("buildSkillTarGz path %q error = %v, want invalid archive path", filePath, err)
+			}
+		})
+	}
+}
+
+func TestSkillArchiveDirName(t *testing.T) {
+	cases := map[string]string{
+		"my-skill":      "my-skill",
+		"Code Reviewer": "Code-Reviewer",
+		"a/b\\c":        "a-b-c",
+		"..":            "skill",
+		".":             "skill",
+		"":              "skill",
+		"    ":          "skill",
+		"代码审查":          "代码审查",
+		"a\nb":          "a-b",
+	}
+	for in, want := range cases {
+		if got := skillArchiveDirName(in); got != want {
+			t.Errorf("skillArchiveDirName(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

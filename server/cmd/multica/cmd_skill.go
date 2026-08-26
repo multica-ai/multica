@@ -63,6 +63,13 @@ var skillImportCmd = &cobra.Command{
 	RunE:  runSkillImport,
 }
 
+var skillExportCmd = &cobra.Command{
+	Use:   "export <id>",
+	Short: "Export a skill as a portable .tar.gz archive",
+	Args:  exactArgs(1),
+	RunE:  runSkillExport,
+}
+
 var skillRefreshCmd = &cobra.Command{
 	Use:   "refresh <id>",
 	Short: "Re-download a skill from its imported source, preserving its id and agent assignments",
@@ -112,6 +119,7 @@ func init() {
 	skillCmd.AddCommand(skillUpdateCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillExportCmd)
 	skillCmd.AddCommand(skillRefreshCmd)
 	skillCmd.AddCommand(skillSearchCmd)
 	skillCmd.AddCommand(skillFilesCmd)
@@ -152,6 +160,9 @@ func init() {
 	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url.")
 	skillImportCmd.Flags().String("on-conflict", "fail", "Conflict strategy when a skill with the same name exists: fail, overwrite, rename, or skip")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill export
+	skillExportCmd.Flags().String("output", "", "Output file path (defaults to <skill-name>.tar.gz in the current directory)")
 
 	// skill refresh
 	skillRefreshCmd.Flags().String("output", "json", "Output format: table or json")
@@ -590,6 +601,33 @@ func nestedMap(m map[string]any, key string) map[string]any {
 		return map[string]any{}
 	}
 	return nested
+}
+
+func runSkillExport(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	data, filename, err := client.DownloadSkillArchive(ctx, args[0])
+	if err != nil {
+		return fmt.Errorf("export skill: %w", err)
+	}
+
+	dest := output
+	if dest == "" {
+		dest = filename
+	}
+	if err := os.WriteFile(dest, data, 0o644); err != nil {
+		return fmt.Errorf("write skill archive: %w", err)
+	}
+	_, _ = fmt.Fprintf(os.Stdout, "Exported skill %s to %s\n", args[0], dest)
+	return nil
 }
 
 func runSkillSearch(cmd *cobra.Command, args []string) error {

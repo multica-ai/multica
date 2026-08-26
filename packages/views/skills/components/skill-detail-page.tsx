@@ -84,6 +84,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
+import { downloadSkillArchive } from "../lib/export-skill";
 import { useT } from "../../i18n";
 import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 
@@ -785,6 +786,19 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     isAdmin: myRole === "owner" || myRole === "admin",
   };
 
+  const handleExport = async () => {
+    if (!skill || exporting) return;
+    setExporting(true);
+    try {
+      await downloadSkillArchive(skill.id);
+      toast.success(t(($) => $.actions.export_toast, { name: skill.name }));
+    } catch {
+      toast.error(t(($) => $.actions.export_failed));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
@@ -794,6 +808,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmRefresh, setConfirmRefresh] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [showAddToAgents, setShowAddToAgents] = useState(false);
   const [addingFile, setAddingFile] = useState(false);
   const [conflictPending, setConflictPending] = useState(false);
@@ -1186,6 +1201,20 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 </TooltipContent>
               </Tooltip>
             )}
+            <Button
+              variant="outline"
+              size="xs"
+              className="gap-1"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="h-3 w-3" />
+              )}
+              {t(($) => $.detail.export_button)}
+            </Button>
             <Button
               variant="outline"
               size="xs"

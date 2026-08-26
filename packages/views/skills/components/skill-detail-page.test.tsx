@@ -17,6 +17,9 @@ const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const canEditRef = vi.hoisted(() => ({ current: true }));
 
+const downloadSkillArchive = vi.hoisted(() => vi.fn());
+vi.mock("../lib/export-skill", () => ({ downloadSkillArchive }));
+
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   skillDetailOptions: (wsId: string, id: string) => ({
@@ -467,5 +470,18 @@ describe("SkillDetailPage origin link", () => {
     expect(
       screen.queryByRole("link", { name: "Imported · GitHub" }),
     ).toBeNull();
+  });
+});
+
+
+describe("SkillDetailPage export", () => {
+  it("downloads the skill archive from the header Export button", async () => {
+    canEditRef.current = false; // export is available to viewers, not just editors
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Export" }));
+
+    expect(downloadSkillArchive).toHaveBeenCalledTimes(1);
+    expect(downloadSkillArchive).toHaveBeenCalledWith("skill-1");
   });
 });

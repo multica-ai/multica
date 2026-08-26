@@ -29,13 +29,24 @@ On the workspace **Skills** page, choose "New skill". Three options are availabl
 
 Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
-With the CLI, you can also import from a `.skill` or `.zip` file:
+With the CLI, you can also import from a `.skill`, `.zip`, `.tar`, or `.tar.gz` file:
 
 ```bash
 multica skill import --file ./review-helper.skill
 ```
 
 If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import. To pull a newer version of a skill that is already in the workspace, use [Updating an imported skill](#updating-an-imported-skill) instead.
+
+## Sharing or backing up a skill
+
+Use **Export** from a skill's row menu or detail page to download its `SKILL.md` and supporting files as a portable `.tar.gz` archive. The CLI provides the same operation:
+
+```bash
+multica skill export <skill-id>
+multica skill export <skill-id> --output ./review-helper.tar.gz
+```
+
+Import the resulting archive in another workspace or with `multica skill import --file <path>`. Binary supporting files are included in the download, but the importer skips binary assets, so they are not restored on re-import.
 
 ## Updating an imported skill
 

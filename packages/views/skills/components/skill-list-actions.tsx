@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Check,
   ChevronRight,
+  Download,
   ExternalLink,
   Loader2,
   MoreHorizontal,
@@ -54,6 +55,7 @@ import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
 import { isRefreshableOrigin, readOrigin } from "../lib/origin";
 import { RefreshSkillDialog } from "./refresh-skill-dialog";
+import { downloadSkillArchive } from "../lib/export-skill";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -667,9 +669,23 @@ export function SkillRowActions({
   const [addOpen, setAddOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const origin = readOrigin(row.skill);
   const canRefresh = row.canEdit && isRefreshableOrigin(origin);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await downloadSkillArchive(row.skill.id);
+      toast.success(t(($) => $.actions.export_toast, { name: row.skill.name }));
+    } catch {
+      toast.error(t(($) => $.actions.export_failed));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <span
@@ -705,6 +721,14 @@ export function SkillRowActions({
           <DropdownMenuItem onClick={() => setAddOpen(true)}>
             <Plus className="size-3.5" />
             {t(($) => $.actions.add_to_agent)}
+          </DropdownMenuItem>
+          <DropdownMenuItem disabled={exporting} onClick={handleExport}>
+            {exporting ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Download className="size-3.5" />
+            )}
+            {t(($) => $.actions.export)}
           </DropdownMenuItem>
           {canRefresh && (
             <DropdownMenuItem onClick={() => setRefreshOpen(true)}>

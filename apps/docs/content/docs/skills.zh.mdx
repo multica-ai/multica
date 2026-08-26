@@ -29,13 +29,24 @@ Skill 是工作区中可以复用的一组工作方法。它以 `SKILL.md` 为�
 
 从运行时复制的是当时的文件快照。之后本地文件发生变化，不会自动更新工作区中的版本；需要重新导入或在 Multica 中编辑。
 
-使用 CLI 时，也可以从 `.skill` 或 `.zip` 文件导入：
+使用 CLI 时，也可以从 `.skill`、`.zip`、`.tar` 或 `.tar.gz` 文件导入：
 
 ```bash
 multica skill import --file ./review-helper.skill
 ```
 
 导入时如果工作区已经存在同名 skill，可以停止导入、覆盖原内容、使用新名称保存，或跳过。通过导入覆盖仅限该 skill 的创建者本人；工作区 `admin` 即使可以在应用内编辑它，也不能用导入的方式覆盖。要为已在工作区里的 skill 拉取新版本，请改用[更新已导入的 skill](#更新已导入的-skill)。
+
+## 分享或备份 skill
+
+在 skill 的行菜单或详情页选择**导出**，即可把 `SKILL.md` 和支持文件下载为可移植的 `.tar.gz` 压缩包。CLI 也支持相同操作：
+
+```bash
+multica skill export <skill-id>
+multica skill export <skill-id> --output ./review-helper.tar.gz
+```
+
+生成的压缩包可以导入另一个工作区，也可以通过 `multica skill import --file <path>` 导入。二进制支持文件会包含在下载中，但导入器会跳过二进制资源，因此重新导入时不会恢复这些文件。
 
 ## 更新已导入的 skill
 

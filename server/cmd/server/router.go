@@ -93,6 +93,7 @@ var corsAllowedHeaders = []string{
 // rename from quietly switching the signal off (MUL-5492).
 var corsExposedHeaders = []string{
 	"ETag",
+	"Content-Disposition",
 	"X-Request-ID",
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
@@ -2088,6 +2089,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+					r.Get("/export", h.ExportSkill)
 				})
 			})
 

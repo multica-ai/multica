@@ -48,3 +48,12 @@ func TestCORSExposedHeaders_IncludeTruncationSignals(t *testing.T) {
 		}
 	}
 }
+
+// Skill export names its archive through Content-Disposition. The Web app
+// downloads from the API cross-origin, so the response header must be exposed
+// or browser JavaScript falls back to the skill UUID as the filename.
+func TestCORSExposedHeaders_IncludeContentDisposition(t *testing.T) {
+	if !slices.Contains(corsExposedHeaders, "Content-Disposition") {
+		t.Fatalf("Content-Disposition missing from CORS exposed headers: %v", corsExposedHeaders)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -699,6 +700,77 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+const maxSkillExportDownloadSize = 16 << 20
+
+// DownloadSkillArchive downloads a skill's portable .tar.gz export
+// (GET /api/skills/{id}/export) and returns the raw bytes plus the
+// server-provided attachment filename (sanitized skill name + ".tar.gz"). The
+// bundle can be re-imported through POST /api/skills/import.
+func (c *APIClient) DownloadSkillArchive(ctx context.Context, id string) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/api/skills/"+id+"/export", nil)
+	if err != nil {
+		return nil, "", err
+	}
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, "", newHTTPError(http.MethodGet, "/api/skills/"+id+"/export", resp)
+	}
+
+	// Exports mirror the import bundle cap (maxImportTotalSize + SKILL.md), so
+	// 16 MiB is a generous ceiling that still stops an unbounded read.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxSkillExportDownloadSize+1))
+	if err != nil {
+		return nil, "", err
+	}
+	if len(data) > maxSkillExportDownloadSize {
+		return nil, "", fmt.Errorf("skill export exceeds %d bytes", maxSkillExportDownloadSize)
+	}
+
+	filename := contentDispositionFilename(resp.Header.Get("Content-Disposition"))
+	if filename == "" {
+		filename = id + ".tar.gz"
+	}
+	return data, filename, nil
+}
+
+// contentDispositionFilename extracts the filename from an RFC 6266
+// `Content-Disposition: attachment; filename="..."` header. Returns "" when
+// the header is absent, carries no filename, or contains unsafe characters.
+// It always returns a basename: although this server sanitizes its header,
+// the response remains an untrusted boundary for a CLI that writes the result
+// to disk by default.
+func contentDispositionFilename(disposition string) string {
+	if disposition == "" {
+		return ""
+	}
+	lower := strings.ToLower(disposition)
+	idx := strings.Index(lower, "filename=")
+	if idx < 0 {
+		return ""
+	}
+	rest := disposition[idx+len("filename="):]
+	if semi := strings.Index(rest, ";"); semi >= 0 {
+		rest = rest[:semi]
+	}
+	rest = strings.Trim(strings.TrimSpace(rest), `"`)
+	if rest == "" || strings.ContainsAny(rest, "\r\n") {
+		return ""
+	}
+	filename := path.Base(strings.ReplaceAll(rest, "\\", "/"))
+	if filename == "." || filename == ".." || filename == "/" || strings.ContainsAny(filename, "\r\n\x00:") {
+		return ""
+	}
+	return filename
 }
 
 // UploadPrivatePlugin installs workspace-private Plugin archive bytes. The
