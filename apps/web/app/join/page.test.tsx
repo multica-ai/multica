@@ -6,6 +6,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
+import { ApiError } from "@multica/core/api";
 import type { ReactNode } from "react";
 
 const TEST_RESOURCES = {
@@ -60,13 +61,19 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
-vi.mock("@multica/core/api", () => ({
-  api: {
-    getShareLinkInfo: mockGetShareLinkInfo,
-    joinByShareLink: mockJoinByShareLink,
-    listWorkspaces: mockListWorkspaces,
-  },
-}));
+vi.mock("@multica/core/api", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/api")>(
+    "@multica/core/api",
+  );
+  return {
+    ...actual,
+    api: {
+      getShareLinkInfo: mockGetShareLinkInfo,
+      joinByShareLink: mockJoinByShareLink,
+      listWorkspaces: mockListWorkspaces,
+    },
+  };
+});
 
 import JoinPage from "./page";
 
@@ -213,5 +220,29 @@ describe("JoinPage", () => {
         screen.getByText("share link not found or expired"),
       ).toBeInTheDocument(),
     );
+  });
+
+  it.each([
+    [
+      "seat_capacity_full",
+      "All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.",
+    ],
+    [
+      "seat_capacity_unavailable",
+      "Member capacity could not be verified. Please try again.",
+    ],
+  ])("maps %s to a user-facing capacity message", async (code, message) => {
+    const user = userEvent.setup();
+    authStateRef.state.user = { id: "u1", email: "a@b.com" };
+    mockJoinByShareLink.mockRejectedValue(
+      new ApiError("server fallback", 409, "Conflict", { code }),
+    );
+
+    render(<JoinPage />, { wrapper: createWrapper() });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Join Workspace" }),
+    );
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument());
   });
 });

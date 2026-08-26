@@ -449,6 +449,13 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
 	}
+	// Deliberately unpublished: pre-v0.4.33 clients gate their "New status"
+	// button on this key and fail closed, which is how a client that predates
+	// the v0.4.31 rendering fixes is kept from creating one. See
+	// featureflags.TestCustomIssueStatusesIsNotPublished.
+	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
+		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
+	}
 
 	withComposioMCPAppsFlag(t, h, true)
 	w = httptest.NewRecorder()

@@ -61,11 +61,25 @@ type APIClient struct {
 	OS       string
 }
 
+// TaskTokenPrefix marks a task-scoped agent token, as minted by
+// internal/auth.NewAgentTaskToken. A 401 on one is not the "your login
+// expired" that a 401 on a member credential is: the token belongs to a single
+// run and there is no sign-in that brings it back. Why it was rejected is not
+// something the CLI can see — a terminal task is the usual cause, but a
+// malformed token, one sent to the wrong server, and one dropped by an
+// unrelated cleanup all look identical from here.
+const TaskTokenPrefix = "mat_"
+
 type HTTPError struct {
 	Method     string
 	Path       string
 	StatusCode int
 	Body       string
+	// TaskScoped records that the failing request actually carried a
+	// task-scoped `mat_` token. It changes nothing about the request; it only
+	// lets FormatError tell a 401 worth signing in again for from one where
+	// the right move is to stop (GH #7522).
+	TaskScoped bool
 }
 
 func (e *HTTPError) Error() string {
@@ -84,7 +98,25 @@ func newHTTPError(method, path string, resp *http.Response) *HTTPError {
 		Path:       path,
 		StatusCode: resp.StatusCode,
 		Body:       strings.TrimSpace(string(data)),
+		TaskScoped: requestUsedTaskToken(resp),
 	}
+}
+
+// requestUsedTaskToken reports whether the request that produced resp actually
+// sent a task token.
+//
+// Reading the client's own Token field would be wrong twice over. DownloadFile
+// deliberately sends no Authorization header for an absolute signed URL, so a
+// 401 from object storage would be reported as a rejected task token purely
+// because the client happened to hold a `mat_` token. And Go strips Authorization
+// across a cross-host redirect, so the request that was sent is not always the
+// one the caller built. resp.Request is the request that actually went out,
+// after redirects, which is the only thing this claim can honestly rest on.
+func requestUsedTaskToken(resp *http.Response) bool {
+	if resp == nil || resp.Request == nil {
+		return false
+	}
+	return strings.HasPrefix(resp.Request.Header.Get("Authorization"), "Bearer "+TaskTokenPrefix)
 }
 
 // defaultHTTPTimeout is the per-request timeout for the CLI's HTTP client.
@@ -769,6 +801,7 @@ func (c *APIClient) HealthCheck(ctx context.Context) (string, error) {
 			Path:       "/health",
 			StatusCode: resp.StatusCode,
 			Body:       strings.TrimSpace(string(data)),
+			TaskScoped: requestUsedTaskToken(resp),
 		}
 	}
 	return strings.TrimSpace(string(data)), nil

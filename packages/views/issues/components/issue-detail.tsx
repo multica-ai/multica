@@ -78,6 +78,7 @@ import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
+import { SourceContextBadge } from "./source-context-viewer";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
@@ -99,6 +100,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
+import { useModalStore } from "@multica/core/modals";
 import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -1124,6 +1126,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const id = issueId;
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
+  const openModal = useModalStore((state) => state.open);
 
   // Issue navigation — read from TQ list cache
   const wsId = useWorkspaceId();
@@ -1339,13 +1342,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; the list API omits it, so a partial
   // list row must not masquerade as a hydrated issue detail.
-  const { data: issue = null, isLoading: issueLoading } = useQuery({
+  const { data: issue = null, isLoading: issueLoading, refetch: refetchIssue } = useQuery({
     ...issueDetailOptions(wsId, id),
+    // List rows and issue-created realtime payloads intentionally omit the
+    // detail-only source-context snapshot. They can still seed this query via
+    // initialData, so always reconcile with the authoritative detail endpoint
+    // when the detail view mounts. Without this, the global Infinity staleTime
+    // hides source context until a full page refresh.
+    refetchOnMount: "always",
     initialData: () => {
       const cached = allIssues.find((i) => i.id === id);
       return cached?.description != null ? cached : undefined;
     },
   });
+  const openCommentSubIssue = useCallback((commentId: string) => {
+    if (!issue) return;
+    openModal("quick-create-issue", {
+      anchor_comment_id: commentId,
+      parent_issue_id: issue.id,
+      parent_issue_identifier: issue.identifier,
+      ...(issue.project_id ? { project_id: issue.project_id } : {}),
+      ...(issue.assignee_type && issue.assignee_id
+        ? { assignee_type: issue.assignee_type, assignee_id: issue.assignee_id }
+        : {}),
+    });
+  }, [issue, openModal]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -2653,6 +2674,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onEdit={editComment}
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
+            onCreateSubIssue={openCommentSubIssue}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
@@ -2970,7 +2992,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             />
           ) : null}
 
-          {parentIssue && (
+          {parentIssue && !issue.source_context && (
             <AppLink
               href={paths.issueDetail(parentIssue.id)}
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/parent"
@@ -2997,6 +3019,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })()}
             </AppLink>
+          )}
+
+          {issue.source_context && (
+            <SourceContextBadge
+              context={issue.source_context}
+              parentIssue={parentIssue}
+              parentProgress={parentChildIssues.length > 0
+                ? {
+                    done: parentChildIssues.filter((child) => issueBehavesAs(child, "done")).length,
+                    total: parentChildIssues.length,
+                  }
+                : undefined}
+              refetchIssue={async () => {
+                const result = await refetchIssue();
+                return result.isError ? null : result.data;
+              }}
+            />
           )}
 
           <div

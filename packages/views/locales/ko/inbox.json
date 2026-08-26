@@ -44,6 +44,7 @@
     "select_prompt": "자세히 볼 알림을 선택하세요",
     "empty": "인박스가 비어 있습니다",
     "original_input": "원본 입력",
+    "retry_with_context": "컨텍스트를 유지하여 재시도",
     "edit_advanced": "고급 양식으로 수정",
     "archive": "보관",
     "unarchive": "보관 해제"
@@ -83,10 +84,13 @@
     "failed_with_detail": "실패: {{detail}}"
   },
   "toasts": {
+    "source_context_retry_started": "원본 컨텍스트로 재시도를 시작했습니다",
     "archived": "알림을 보관했습니다",
     "unarchived": "알림을 복원했습니다"
   },
   "errors": {
+    "source_context_retry_failed": "원본 컨텍스트로 재시도하지 못했습니다",
+    "source_context_retry_unavailable": "이 컨텍스트는 더 이상 재시도할 수 없습니다. 분기 지점에서 다시 시작하세요.",
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
     "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",

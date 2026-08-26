@@ -138,6 +138,10 @@ func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, querie
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Every stage below is DB-only and latency-critical: it is what
+			// flips a dead runtime offline and reclaims its orphaned tasks
+			// within ~180s. Object-store work belongs on its own goroutine
+			// (runSourceContextSweeper), never in this tick.
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 			sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)

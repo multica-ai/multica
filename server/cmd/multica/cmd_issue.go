@@ -1611,9 +1611,10 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("get issue: %w", err)
 	}
+	targetDisplay := issueDisplayKey(target)
 	status := strVal(target, "status")
 	if status == "" {
-		return fmt.Errorf("issue %s has no status, cannot determine its column", issueRef.Display)
+		return fmt.Errorf("issue %s has no status, cannot determine its column", targetDisplay)
 	}
 
 	// Resolve the relative target up front, before any no-op shortcut, so a bad
@@ -1631,7 +1632,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("resolve target issue: %w", err)
 		}
 		if otherRef.ID == issueRef.ID {
-			return fmt.Errorf("cannot reorder issue %s relative to itself", issueRef.Display)
+			return fmt.Errorf("cannot reorder issue %s relative to itself", targetDisplay)
 		}
 	}
 
@@ -1663,9 +1664,9 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 		// succeed here (its target is necessarily in another column), so report
 		// that rather than a misleading "nothing to reorder".
 		if relative {
-			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
 		}
-		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", issueRef.Display, status)
+		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", targetDisplay, status)
 		return issueReorderOutput(cmd, target)
 	}
 
@@ -1678,7 +1679,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	default:
 		idx := indexOfString(ordered, otherRef.ID)
 		if idx == -1 {
-			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+			return reorderTargetNotInColumnError(ctx, client, otherRef, targetDisplay, status)
 		}
 		if before != "" {
 			insertIdx = idx
@@ -1695,7 +1696,7 @@ func runIssueReorder(cmd *cobra.Command, args []string) error {
 	currentPos := positions[issueRef.ID]
 	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
 	if newPos == currentPos {
-		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", issueRef.Display)
+		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", targetDisplay)
 		return issueReorderOutput(cmd, target)
 	}
 
@@ -1729,13 +1730,15 @@ func issueReorderOutput(cmd *cobra.Command, issue map[string]any) error {
 // not be used. It fetches the target only to report its actual column in the
 // message, so the common mistake (target lives in a different column) gets a
 // precise, actionable error instead of a bare "not found".
-func reorderTargetNotInColumnError(ctx context.Context, client *cli.APIClient, otherRef, issueRef resolvedID, status string) error {
+func reorderTargetNotInColumnError(ctx context.Context, client *cli.APIClient, otherRef resolvedID, issueDisplay, status string) error {
+	otherDisplay := otherRef.Display
 	if other, err := fetchIssue(ctx, client, otherRef.ID); err == nil {
+		otherDisplay = issueDisplayKey(other)
 		if otherStatus := strVal(other, "status"); otherStatus != "" && otherStatus != status {
-			return fmt.Errorf("issue %s is in the %q column but %s is in %q; move one with `multica issue status` first, or pick a target in the same column", otherRef.Display, otherStatus, issueRef.Display, status)
+			return fmt.Errorf("issue %s is in the %q column but %s is in %q; move one with `multica issue status` first, or pick a target in the same column", otherDisplay, otherStatus, issueDisplay, status)
 		}
 	}
-	return fmt.Errorf("issue %s was not found in the %q column", otherRef.Display, status)
+	return fmt.Errorf("issue %s was not found in the %q column", otherDisplay, status)
 }
 
 // fetchIssue retrieves a single issue by canonical ID.

@@ -281,6 +281,40 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("comment source-context sub-issues", () => {
+    it("uses the dedicated endpoint for agent creation", async () => {
+      stubFetchJson({ task_id: "task-1" }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "sha256:digest:issue",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).resolves.toEqual({ task_id: "task-1" });
+      expect(fetch).toHaveBeenCalledWith(
+        "https://api.example.test/api/comments/comment-1/sub-issues",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it.each([404, 405])("maps server status %s to source_context_server_unsupported", async (status) => {
+      stubFetchJson({ error: "not found" }, status);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "token",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).rejects.toMatchObject({ body: { code: "source_context_server_unsupported" } });
+    });
+
+    it("rejects a malformed source-context retry response", async () => {
+      stubFetchJson({ id: 42 }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.retrySourceContextQuickCreate("task-1")).rejects.toThrow(
+        "Invalid source-context retry response",
+      );
+    });
+  });
+
   describe("searchIssues", () => {
     it("falls back to an empty result when the response is malformed", async () => {
       stubFetchJson({ issues: "not-an-array", total: 0 });
@@ -1023,9 +1057,8 @@ describe("ApiClient schema fallback", () => {
     it("parses seat reconciliation into camelCase", async () => {
       stubFetchJson({
         workspace_id: "workspace-1",
-        billed_seats: 5,
-        actual_seats: 4,
-        action: "scheduled_decrease",
+        action: "restored_high_water",
+        version: 8,
       });
       const client = new ApiClient("https://api.example.test");
 
@@ -1033,9 +1066,8 @@ describe("ApiClient schema fallback", () => {
         client.reconcileWorkspaceSubscriptionSeats(),
       ).resolves.toEqual({
         workspaceId: "workspace-1",
-        billedSeats: 5,
-        actualSeats: 4,
-        action: "scheduled_decrease",
+        action: "restored_high_water",
+        version: 8,
       });
     });
   });
@@ -1088,16 +1120,19 @@ describe("workspace subscription contract", () => {
     stubFetchJson({
       entitlement,
       billing_interval: "year",
-      actual_seats: 3,
-      billed_seats: 5,
-      pending_seat_quantity: 3,
-      used_seats: 3,
-      reserved_seats: 2,
-      purchase_version: 11,
-      active_seat_purchase: {
-        request_id: "22222222-2222-2222-2222-222222222222",
-        target_seats: 7,
-        status: "processing",
+      human_members: 3,
+      seat_capacity: {
+        purchased: 5,
+        used: 3,
+        reserved: 2,
+        available: 0,
+        version: 11,
+        pending_quantity: 3,
+        active_purchase: {
+          request_id: "22222222-2222-2222-2222-222222222222",
+          target_seats: 7,
+          status: "processing",
+        },
       },
       cancel_at_period_end: true,
       grace_until: "2026-09-08T00:00:00Z",
@@ -1110,12 +1145,14 @@ describe("workspace subscription contract", () => {
     expect(summary?.entitlement.plan).toBe("pro");
     expect(summary?.entitlement.version).toBe(7);
     expect(summary?.billingInterval).toBe("year");
-    expect(summary?.billedSeats).toBe(5);
-    expect(summary?.pendingSeatQuantity).toBe(3);
-    expect(summary?.usedSeats).toBe(3);
-    expect(summary?.reservedSeats).toBe(2);
-    expect(summary?.purchaseVersion).toBe(11);
-    expect(summary?.activeSeatPurchase).toEqual({
+    expect(summary?.humanMembers).toBe(3);
+    expect(summary?.seatCapacity?.purchased).toBe(5);
+    expect(summary?.seatCapacity?.pendingQuantity).toBe(3);
+    expect(summary?.seatCapacity?.used).toBe(3);
+    expect(summary?.seatCapacity?.reserved).toBe(2);
+    expect(summary?.seatCapacity?.available).toBe(0);
+    expect(summary?.seatCapacity?.version).toBe(11);
+    expect(summary?.seatCapacity?.activePurchase).toEqual({
       requestId: "22222222-2222-2222-2222-222222222222",
       targetSeats: 7,
       status: "processing",
@@ -1126,32 +1163,35 @@ describe("workspace subscription contract", () => {
     expect(summary?.hasStripeCustomer).toBe(true);
   });
 
-  it("keeps a paid summary readable when optional fields are absent", async () => {
-    // A cloud that predates the optional seat/cancellation fields still has to
-    // produce a usable Pro summary rather than failing the whole read.
-    stubFetchJson({ entitlement, actual_seats: 3 });
+  it("represents canceled subscriptions without current seat capacity", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, plan: "free", status: "canceled" },
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+    });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
 
-    expect(summary?.entitlement.plan).toBe("pro");
-    expect(summary?.billingInterval).toBeNull();
-    expect(summary?.billedSeats).toBeNull();
-    expect(summary?.pendingSeatQuantity).toBeNull();
-    expect(summary?.usedSeats).toBe(3);
-    expect(summary?.reservedSeats).toBe(0);
-    expect(summary?.purchaseVersion).toBeNull();
-    expect(summary?.activeSeatPurchase).toBeNull();
-    expect(summary?.cancelAtPeriodEnd).toBe(false);
-    expect(summary?.graceUntil).toBeNull();
-    // Absent means "no Stripe customer known", which is the safe reading: the
-    // caller hides Portal rather than offering a control that would 404.
-    expect(summary?.hasStripeCustomer).toBe(false);
+    expect(summary?.entitlement.plan).toBe("free");
+    expect(summary?.entitlement.status).toBe("canceled");
+    expect(summary?.humanMembers).toBe(3);
+    expect(summary?.seatCapacity).toBeNull();
+    expect(summary?.hasStripeCustomer).toBe(true);
   });
 
   it("preserves unknown plans and statuses instead of coercing them", async () => {
     stubFetchJson({
       entitlement: { ...entitlement, plan: "business", status: "paused" },
-      actual_seats: 9,
+      billing_interval: null,
+      human_members: 9,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -1161,7 +1201,7 @@ describe("workspace subscription contract", () => {
   });
 
   it("returns null — never a Free-looking shape — for a malformed summary", async () => {
-    stubFetchJson({ entitlement: { plan: "pro" }, actual_seats: "many" });
+    stubFetchJson({ entitlement: { plan: "pro" }, human_members: "many" });
     const client = new ApiClient("https://api.example.test");
     expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
   });
@@ -1189,7 +1229,12 @@ describe("workspace subscription contract", () => {
   it("accepts additive cloud fields on summary and prices", async () => {
     stubFetchJson({
       entitlement: { ...entitlement, trial_ends_at: "2026-10-01T00:00:00Z" },
-      actual_seats: 3,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
       future_field: { nested: true },
     });
     const client = new ApiClient("https://api.example.test");

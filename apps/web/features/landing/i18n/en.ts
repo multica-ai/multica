@@ -294,6 +294,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.34",
+        date: "2026-08-25",
+        title: "Sub-Issues from comments, and custom Issue statuses for every workspace",
+        changes: [],
+        features: [
+          "Turn any comment into a sub-Issue with one click.",
+          "New sub-Issues carry the original discussion, so whoever picks them up starts with full context.",
+          "Custom Issue statuses are now open to every workspace — create your own right away.",
+        ],
+        improvements: [
+          "Checkout pre-fills your account email automatically.",
+          "Failed repository checkouts now say exactly what went wrong and how to fix it.",
+          "Self-hosting guides now cover health checks, single-domain setups, and choosing a release.",
+        ],
+        fixes: [
+          "MiniMax Code no longer fails intermittently on startup.",
+          "Members who leave a workspace no longer get its Autopilot notifications.",
+          "Automatic recovery replies for failed tasks now land in the original comment thread.",
+          "Comment timestamps no longer show the wrong timezone.",
+          "Agents locate Issues by full ID faster and more reliably.",
+          "Cancelling a task now truly stops the agent — nothing keeps running in the background.",
+          "Cancelled subscription seats no longer appear in billing.",
+          "When a task is cancelled, the CLI no longer asks you to sign in again.",
+        ],
+      },
+      {
         version: "0.4.33",
         date: "2026-08-24",
         title: "Inbox filters, the ZeroClaw runtime, and localized failure messages",
