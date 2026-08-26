@@ -38,9 +38,6 @@ func TestDefaultConfigIsDisabledAndPerformsNoIO(t *testing.T) {
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonDisabled || calls.Load() != 0 {
 		t.Fatalf("decision = %+v, calls = %d", decision, calls.Load())
 	}
-	if _, err := New(Config{Timeout: time.Hour}); err != nil {
-		t.Fatalf("disabled config must ignore Cloud-only settings: %v", err)
-	}
 }
 
 func TestConnectedConfigValidation(t *testing.T) {
@@ -52,9 +49,6 @@ func TestConnectedConfigValidation(t *testing.T) {
 		{"unsupported base URL scheme", func(c *Config) { c.BaseURL = "ftp://cloud.internal" }},
 		{"base URL credentials", func(c *Config) { c.BaseURL = "https://user:pass@cloud.internal" }},
 		{"base URL query", func(c *Config) { c.BaseURL = "https://cloud.internal?secret=value" }},
-		{"long timeout", func(c *Config) { c.Timeout = maxRequestTimeout + time.Millisecond }},
-		{"negative max entries", func(c *Config) { c.MaxEntries = -1 }},
-		{"negative stale grace", func(c *Config) { c.StaleGrace = -1 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -220,7 +214,8 @@ func TestWorkspaceIsolationAndBoundedLRUEviction(t *testing.T) {
 		writePolicy(t, w, policy)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.MaxEntries = 1 })
+	client := newTestClient(t, server.URL, nil)
+	client.cache = newPolicyCache(1)
 	for _, tc := range []struct {
 		workspaceID uuid.UUID
 		wantLimit   int
@@ -302,7 +297,8 @@ func TestTimeoutFailsOpenWithinIndependentBound(t *testing.T) {
 		close(requestCancelled)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.Timeout = 20 * time.Millisecond })
+	client := newTestClient(t, server.URL, nil)
+	client.timeout = 20 * time.Millisecond
 
 	started := time.Now()
 	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
@@ -413,7 +409,8 @@ func TestExpiredPolicyNeverEnforcesAndIgnoresCloudClock(t *testing.T) {
 		writePolicy(t, w, policy)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.StaleGrace = 10 * time.Second })
+	client := newTestClient(t, server.URL, nil)
+	client.staleGrace = 10 * time.Second
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
@@ -434,33 +431,6 @@ func TestExpiredPolicyNeverEnforcesAndIgnoresCloudClock(t *testing.T) {
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("calls = %d, want 3", calls.Load())
-	}
-}
-
-func TestPolicySwitchReplacesExpiredSnapshot(t *testing.T) {
-	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
-	var policyRevision atomic.Int64
-	policyRevision.Store(1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		action := ActionEnforce
-		if policyRevision.Load() == 2 {
-			action = ActionOff
-		}
-		writePolicy(t, w, samplePolicy(policyRevision.Load(), 0, 5, action))
-	}))
-	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
-	client.now = func() time.Time { return clock }
-	workspaceID := uuid.New()
-
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("initial = %+v", got)
-	}
-	policyRevision.Store(2)
-	clock = clock.Add(6 * time.Second)
-	got := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if got.Gate.Action != ActionOff || got.PolicyRevision != 2 || got.Reason != ReasonRefreshed {
-		t.Fatalf("switched = %+v", got)
 	}
 }
 
@@ -491,11 +461,11 @@ func TestSubscriptionVersionSwitchReplacesExpiredSnapshot(t *testing.T) {
 	}
 }
 
-func TestRevisionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
+func TestSubscriptionVersionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
 	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
 	observer := &recordingObserver{}
 	var mu sync.Mutex
-	policy := samplePolicy(2, 4, 5, ActionEnforce)
+	policy := samplePolicy(1, 4, 5, ActionEnforce)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -511,58 +481,47 @@ func TestRevisionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
 		t.Fatalf("initial = %+v", initial)
 	}
 	mu.Lock()
-	policy = samplePolicy(1, 5, 5, ActionOff)
+	policy = samplePolicy(1, 3, 5, ActionOff)
 	mu.Unlock()
 	clock = clock.Add(6 * time.Second)
 	regressed := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if regressed.Gate.Action != ActionObserve || regressed.PolicyRevision != 2 || regressed.SubscriptionVersion != 4 {
+	if regressed.Gate.Action != ActionObserve || regressed.PolicyRevision != 1 || regressed.SubscriptionVersion != 4 {
 		t.Fatalf("regressed = %+v", regressed)
 	}
-	if got := observer.regressions(); len(got) != 1 || got[0] != "policy" {
-		t.Fatalf("regressions = %v", got)
-	}
-
-	mu.Lock()
-	policy = samplePolicy(3, 3, 5, ActionOff)
-	mu.Unlock()
-	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	regressed = client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if regressed.PolicyRevision != 2 || regressed.SubscriptionVersion != 4 {
-		t.Fatalf("subscription regression replaced cache: %+v", regressed)
-	}
-	if got := observer.regressions(); len(got) != 2 || got[1] != "subscription" {
-		t.Fatalf("regressions = %v", got)
+	if got := observer.regressions(); got != 1 {
+		t.Fatalf("regressions = %d", got)
 	}
 }
 
-func TestRevisionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
+func TestSubscriptionVersionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
 	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
 	var calls atomic.Int64
-	var policyRevision atomic.Int64
-	policyRevision.Store(2)
+	var subscriptionVersion atomic.Int64
+	subscriptionVersion.Store(2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		writePolicy(t, w, samplePolicy(policyRevision.Load(), 0, 60, ActionOff))
+		writePolicy(t, w, samplePolicy(1, subscriptionVersion.Load(), 60, ActionOff))
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.StaleGrace = 10 * time.Second })
+	client := newTestClient(t, server.URL, nil)
+	client.staleGrace = 10 * time.Second
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
 	initial := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if initial.PolicyRevision != 2 || initial.Reason != ReasonRefreshed {
+	if initial.SubscriptionVersion != 2 || initial.Reason != ReasonRefreshed {
 		t.Fatalf("initial = %+v", initial)
 	}
-	policyRevision.Store(1)
+	subscriptionVersion.Store(1)
 	clock = clock.Add(71 * time.Second)
 	recovered := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if recovered.PolicyRevision != 1 || recovered.Reason != ReasonRefreshed {
+	if recovered.SubscriptionVersion != 1 || recovered.Reason != ReasonRefreshed {
 		t.Fatalf("recovered = %+v", recovered)
 	}
 
 	clock = clock.Add(defaultFailureRetry + time.Millisecond)
 	cached := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if cached.PolicyRevision != 1 || cached.Reason != ReasonCacheFresh || calls.Load() != 2 {
+	if cached.SubscriptionVersion != 1 || cached.Reason != ReasonCacheFresh || calls.Load() != 2 {
 		t.Fatalf("cached = %+v, HTTP calls = %d", cached, calls.Load())
 	}
 }
@@ -594,11 +553,8 @@ func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 	t.Helper()
 	cfg := Config{
-		BaseURL:    baseURL,
-		Timeout:    time.Second,
-		MaxEntries: 8,
-		StaleGrace: time.Minute,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		BaseURL: baseURL,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -672,7 +628,7 @@ type recordingObserver struct {
 	cache              []string
 	refresh            []string
 	decisions          []string
-	versionRegressions []string
+	versionRegressions int
 }
 
 func (o *recordingObserver) RecordEntitlementCache(outcome string) {
@@ -693,20 +649,20 @@ func (o *recordingObserver) RecordEntitlementDecision(gate, action, reason strin
 	o.decisions = append(o.decisions, gate+"/"+action+"/"+reason)
 }
 
-func (o *recordingObserver) RecordEntitlementVersionRegression(source string) {
+func (o *recordingObserver) RecordEntitlementVersionRegression() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.versionRegressions = append(o.versionRegressions, source)
+	o.versionRegressions++
 }
 
-func (o *recordingObserver) regressions() []string {
+func (o *recordingObserver) regressions() int {
 	_, _, _, regressions := o.snapshot()
 	return regressions
 }
 
-func (o *recordingObserver) snapshot() (cache, refresh, decisions, regressions []string) {
+func (o *recordingObserver) snapshot() (cache, refresh, decisions []string, regressions int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return append([]string(nil), o.cache...), append([]string(nil), o.refresh...),
-		append([]string(nil), o.decisions...), append([]string(nil), o.versionRegressions...)
+		append([]string(nil), o.decisions...), o.versionRegressions
 }

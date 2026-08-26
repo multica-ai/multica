@@ -134,19 +134,8 @@ func TestClientIsDisabledWhenCloudURLIsAbsent(t *testing.T) {
 	}
 }
 
-func TestCloudConnectedClientRejectsUnsafeConfiguration(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-	}{
-		{name: "URL credentials", cfg: Config{BaseURL: "https://user:password@example.com"}},
-		{name: "excessive timeout", cfg: Config{BaseURL: "https://example.com", Timeout: 6 * time.Second}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if _, err := New(tt.cfg); !errors.Is(err, ErrInvalidConfig) {
-				t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
-			}
-		})
+func TestCloudConnectedClientRejectsUnsafeURL(t *testing.T) {
+	if _, err := New(Config{BaseURL: "https://user:password@example.com"}); !errors.Is(err, ErrInvalidConfig) {
+		t.Fatalf("New() error = %v, want ErrInvalidConfig", err)
 	}
 }

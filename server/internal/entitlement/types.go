@@ -82,7 +82,7 @@ type Observer interface {
 	RecordEntitlementCache(outcome string)
 	RecordEntitlementRefresh(outcome string, durationSeconds float64)
 	RecordEntitlementDecision(gate, action, reason string)
-	RecordEntitlementVersionRegression(source string)
+	RecordEntitlementVersionRegression()
 }
 
 func offDecision(reason Reason) Decision {

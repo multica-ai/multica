@@ -20,7 +20,6 @@ import (
 
 const (
 	defaultTimeout       = 3 * time.Second
-	maxTimeout           = 5 * time.Second
 	maxResponseBodySize  = 64 << 10
 	rateLimitScopeHeader = "X-Multica-RateLimit-Scope"
 
@@ -32,7 +31,6 @@ var ErrInvalidConfig = errors.New("seat capacity: invalid configuration")
 
 type Config struct {
 	BaseURL    string
-	Timeout    time.Duration
 	HTTPClient *http.Client
 }
 
@@ -115,7 +113,6 @@ func (u *unavailableExecutor) GetOperation(context.Context, uuid.UUID, uuid.UUID
 
 type Client struct {
 	baseURL    *url.URL
-	timeout    time.Duration
 	httpClient *http.Client
 }
 
@@ -133,13 +130,6 @@ func New(cfg Config) (Executor, error) {
 		baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
 		return nil, fmt.Errorf("%w: base URL must be absolute and contain no credentials, query, or fragment", ErrInvalidConfig)
 	}
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = defaultTimeout
-	}
-	if timeout < 0 || timeout > maxTimeout {
-		return nil, fmt.Errorf("%w: timeout must be positive and at most %s", ErrInvalidConfig, maxTimeout)
-	}
 	httpClient := &http.Client{}
 	if cfg.HTTPClient != nil {
 		clone := *cfg.HTTPClient
@@ -149,7 +139,6 @@ func New(cfg Config) (Executor, error) {
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{
 		baseURL:    baseURL,
-		timeout:    timeout,
 		httpClient: httpClient,
 	}, nil
 }
@@ -201,7 +190,7 @@ func (c *Client) do(ctx context.Context, method string, workspaceID uuid.UUID, s
 	u := *c.baseURL
 	u.Path = strings.TrimRight(c.baseURL.Path, "/") + "/api/v1/internal/subscriptions/" + workspaceID.String() + "/capacity/" + suffix
 
-	requestCtx, cancel := context.WithTimeout(ctx, c.timeout)
+	requestCtx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
 	var reader io.Reader
 	if len(body) > 0 {

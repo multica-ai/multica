@@ -21,7 +21,7 @@ The client reads:
 - `policy_revision`: the policy protocol generation, currently fixed at `1` by
   Cloud and not deployment configuration.
 - `subscription_version`: the workspace's monotonic subscription revision. A
-  response that moves either revision backwards cannot replace a cached policy
+  response that moves this revision backwards cannot replace a cached policy
   while it is still usable for fresh or stale decisions. After the bounded
   stale window ends, the cache accepts the current Cloud response so a rollback
   cannot create a permanent retry loop.

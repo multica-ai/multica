@@ -18,7 +18,6 @@ import (
 
 const (
 	defaultRequestTimeout = 3 * time.Second
-	maxRequestTimeout     = 3 * time.Second
 	defaultMaxEntries     = 10_000
 	defaultStaleGrace     = 15 * time.Minute
 	defaultFailureRetry   = 5 * time.Second
@@ -35,9 +34,6 @@ var (
 // setting BaseURL connects the client to the internal Cloud policy endpoint.
 type Config struct {
 	BaseURL    string
-	Timeout    time.Duration
-	MaxEntries int
-	StaleGrace time.Duration
 	HTTPClient *http.Client
 	Observer   Observer
 	Logger     *slog.Logger
@@ -71,27 +67,6 @@ func New(cfg Config) (*Client, error) {
 		baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
 		return nil, fmt.Errorf("%w: base URL must be an absolute URL without credentials, query, or fragment", ErrInvalidConfig)
 	}
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = defaultRequestTimeout
-	}
-	if timeout < 0 || timeout > maxRequestTimeout {
-		return nil, fmt.Errorf("%w: timeout must be positive and at most %s", ErrInvalidConfig, maxRequestTimeout)
-	}
-	maxEntries := cfg.MaxEntries
-	if maxEntries == 0 {
-		maxEntries = defaultMaxEntries
-	}
-	if maxEntries < 0 {
-		return nil, fmt.Errorf("%w: max entries must be positive", ErrInvalidConfig)
-	}
-	staleGrace := cfg.StaleGrace
-	if staleGrace == 0 {
-		staleGrace = defaultStaleGrace
-	}
-	if staleGrace < 0 {
-		return nil, fmt.Errorf("%w: stale grace must not be negative", ErrInvalidConfig)
-	}
 	httpClient := &http.Client{}
 	if cfg.HTTPClient != nil {
 		clone := *cfg.HTTPClient
@@ -107,13 +82,13 @@ func New(cfg Config) (*Client, error) {
 	return &Client{
 		enabled:    true,
 		baseURL:    baseURL,
-		timeout:    timeout,
-		staleGrace: staleGrace,
+		timeout:    defaultRequestTimeout,
+		staleGrace: defaultStaleGrace,
 		httpClient: httpClient,
 		observer:   cfg.Observer,
 		logger:     logger,
 		now:        time.Now,
-		cache:      newPolicyCache(maxEntries),
+		cache:      newPolicyCache(defaultMaxEntries),
 	}, nil
 }
 
@@ -216,17 +191,12 @@ func (c *Client) refresh(ctx context.Context, workspaceID uuid.UUID) (cacheEntry
 		stored, err := c.cache.put(workspaceID, entry, receivedAt)
 		if err != nil {
 			c.cache.markFailure(workspaceID, c.now().Add(defaultFailureRetry))
-			var regression *revisionError
-			source := "unknown"
-			if errors.As(err, &regression) {
-				source = regression.source
-				if c.observer != nil {
-					c.observer.RecordEntitlementVersionRegression(source)
-				}
+			if c.observer != nil {
+				c.observer.RecordEntitlementVersionRegression()
 			}
 			c.recordRefresh("version_regression", time.Since(started))
-			c.logger.WarnContext(refreshCtx, "entitlement policy revision regressed",
-				"workspace_id", workspaceID.String(), "source", source)
+			c.logger.WarnContext(refreshCtx, "entitlement subscription version regressed",
+				"workspace_id", workspaceID.String())
 			return nil, err
 		}
 		c.recordRefresh("ok", time.Since(started))
