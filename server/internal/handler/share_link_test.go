@@ -27,7 +27,8 @@ type shareJoinCapacityStub struct {
 	claimGate   *sync.WaitGroup
 }
 
-func (s *shareJoinCapacityStub) Enabled() bool { return true }
+func (*shareJoinCapacityStub) RecoveryAvailable() bool { return true }
+
 func (s *shareJoinCapacityStub) ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (seatcapacity.Decision, error) {
 	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
 }

@@ -82,7 +82,7 @@ interface Props {
   hasSessions: boolean;
   /** Currently picked / inherited agent. */
   agent: Agent | null;
-  /** Receive a starter-prompt tap. Caller writes into the draft store
+  /** Receive a conversation-starter tap. Caller writes into the draft store
    *  (or focuses the composer with the text) — empty state stays neutral
    *  about send vs. preview. */
   onPickPrompt: (text: string) => void;

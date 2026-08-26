@@ -180,7 +180,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordEntitlementCache("hit")
 	m.RecordEntitlementRefresh("success", 0.01)
 	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
-	m.RecordEntitlementVersionRegression("refresh")
+	m.RecordEntitlementVersionRegression()
 	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
 	m.RecordIssueWindowDecision("observe", "list", "would_block")
 

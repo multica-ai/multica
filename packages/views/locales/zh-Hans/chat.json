@@ -146,8 +146,8 @@
     "returning_subtitle": "试试问",
     "chat_with_named": "与 {{name}} 对话"
   },
-  "starter_prompts": {
-    "aria_label": "推荐的初始操作",
+  "conversation_starters": {
+    "aria_label": "对话开场建议",
     "capabilities": {
       "label": "你能帮我做什么？",
       "prompt": "你最擅长帮我做什么？请简要介绍。"
@@ -159,7 +159,8 @@
     "recommend": {
       "label": "推荐一个操作",
       "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
-    }
+    },
+    "customize": "自定义开场建议"
   },
   "onboarding_cards": {
     "aria_label": "开始方式",

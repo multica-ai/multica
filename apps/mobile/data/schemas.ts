@@ -611,7 +611,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),
-  starter_prompts: z
+  conversation_starters: z
     .array(
       z
         .object({

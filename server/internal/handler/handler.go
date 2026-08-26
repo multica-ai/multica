@@ -108,11 +108,11 @@ type Config struct {
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.
 	TrustedProxies []netip.Prefix
-	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
-	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
-	// return 503 instead of attempting to dial a hard-coded private service.
-	CloudRuntimeFleetURL     string
-	CloudRuntimeFleetTimeout time.Duration
+	// CloudURL enables the SaaS-only multica-cloud connection when set. Empty
+	// keeps self-hosted deployments explicit: Cloud endpoints return 503 instead
+	// of attempting to dial a hard-coded private service.
+	CloudURL                 string
+	CloudTimeout             time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
@@ -474,8 +474,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
 		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
-			BaseURL: cfg.CloudRuntimeFleetURL,
-			Timeout: cfg.CloudRuntimeFleetTimeout,
+			BaseURL: cfg.CloudURL,
+			Timeout: cfg.CloudTimeout,
 		}),
 		LLM: llmClient,
 		cfg: cfg,

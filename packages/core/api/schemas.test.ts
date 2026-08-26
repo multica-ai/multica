@@ -1151,22 +1151,22 @@ describe("AppConfigSchema local_worktree_supported drift", () => {
   });
 });
 
-describe("AppConfigSchema agent_starter_prompts_supported drift", () => {
+describe("AppConfigSchema agent_conversation_starters_supported drift", () => {
   it("defaults to false when the server predates the persistence contract", () => {
-    expect(AppConfigSchema.parse({}).agent_starter_prompts_supported).toBe(false);
+    expect(AppConfigSchema.parse({}).agent_conversation_starters_supported).toBe(false);
   });
 
   it("coerces a malformed declaration to false", () => {
     expect(
-      AppConfigSchema.parse({ agent_starter_prompts_supported: "yes" })
-        .agent_starter_prompts_supported,
+      AppConfigSchema.parse({ agent_conversation_starters_supported: "yes" })
+        .agent_conversation_starters_supported,
     ).toBe(false);
   });
 
   it("carries a genuine declaration through", () => {
     expect(
-      AppConfigSchema.parse({ agent_starter_prompts_supported: true })
-        .agent_starter_prompts_supported,
+      AppConfigSchema.parse({ agent_conversation_starters_supported: true })
+        .agent_conversation_starters_supported,
     ).toBe(true);
   });
 });

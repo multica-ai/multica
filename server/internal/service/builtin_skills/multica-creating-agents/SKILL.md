@@ -71,9 +71,15 @@ strings. `--max-concurrent-tasks` is validated as 1–50 before the request is
 sent.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
-`instructions`, `starter_prompts`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
+`instructions`, `conversation_starters`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
 `custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
 `max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+
+The body accepts more than the CLI exposes. `conversation_starters` has no
+`agent create` / `agent update` flag — the CLI can only carry it across an
+`agent copy`. Setting it for a new agent means either calling `/api/agents`
+directly or telling the human to use the web UI; see below for where they
+will find it.
 
 ## Copying an agent
 
@@ -90,7 +96,7 @@ multica agent copy <source-agent-id> --name "My Agent (copy)"   # same runtime
 multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cross-runtime fork
 ```
 
-- Copied by default without a dedicated override flag: `starter_prompts`.
+- Copied by default without a dedicated override flag: `conversation_starters`.
 - Copied by default, each overridable with the matching flag: `name` (suffixed
   `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
@@ -117,7 +123,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `name` | `agent.name` | required, 400 if empty | listings, runtime payload |
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
-| `starter_prompts` | `agent.starter_prompts` (JSON array) | at most 3 items; each requires a label (≤80 code points) and prompt (≤4000 code points) | human-facing Chat empty state only; selecting one prefills the composer and does not start a run |
+| `conversation_starters` | `agent.conversation_starters` (JSON array) | at most 3 items; each requires a label (≤80 code points) and prompt (≤4000 code points) | human-facing Chat empty state only; selecting one prefills the composer and does not start a run |
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
@@ -171,6 +177,22 @@ display copy (currently `priority`, shown as Fast). The server accepts safe
 future Codex catalog IDs, while the daemon verifies the exact model/tier pair
 before execution and omits a stale incompatible override. Agents without an
 explicit model fail closed because the effective config.toml model is unknown.
+
+### conversation_starters
+
+The product calls this feature **Conversation starters** (中文：对话开场建议).
+Use that name when talking to a human — the wire field `conversation_starters`
+is an implementation detail they never see. A human configures them on the
+agent's **Instructions** tab; the deep link is
+`/<workspace>/agents/<id>?view=instructions&focus=conversation_starters`.
+
+They are up to three label + prompt pairs shown above the composer when
+someone opens a new Chat with this agent. Selecting one **only fills the
+composer** — it never starts a run, so they are suggestions, not actions.
+Omitting the field on create defaults to `[]`; omitting it on update preserves
+the stored value, and an explicit `[]` clears it. An agent with none
+configured still shows three built-in generic defaults in that empty state, so
+"the Chat shows suggestions" does not mean this agent has any of its own.
 
 ### model vs custom_args
 
@@ -337,6 +359,9 @@ State-changing (require an explicit instruction — do not run speculatively):
   clear; only `custom_env` is gated behind the dedicated env endpoint.
 - "`agent get` shows env values." It shows only `has_custom_env` and
   `custom_env_key_count`.
+- "Every accepted body field has a CLI flag." `conversation_starters` does not
+  — `agent create`/`agent update` cannot set it, and `agent copy` only carries
+  an existing value forward.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all

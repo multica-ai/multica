@@ -146,8 +146,8 @@
     "returning_subtitle": "이렇게 요청해 보세요",
     "chat_with_named": "{{name}}와 채팅"
   },
-  "starter_prompts": {
-    "aria_label": "추천 첫 작업",
+  "conversation_starters": {
+    "aria_label": "대화 시작 예시",
     "capabilities": {
       "label": "어떤 일을 도와줄 수 있나요?",
       "prompt": "가장 잘 도울 수 있는 일을 간단히 알려 주세요."
@@ -159,7 +159,8 @@
     "recommend": {
       "label": "작업 추천",
       "prompt": "내 워크스페이스에 대해 알고 있는 내용을 바탕으로 유용한 첫 작업을 추천해 주세요."
-    }
+    },
+    "customize": "시작 예시 편집"
   },
   "onboarding_cards": {
     "aria_label": "시작 방법",

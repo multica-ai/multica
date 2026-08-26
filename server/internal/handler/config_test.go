@@ -522,10 +522,10 @@ func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
 }
 
 // Web/Desktop can run ahead of a manually deployed backend. Handlers that
-// predate starter_prompts ignore the unknown JSON field and still answer 200,
+// predate conversation_starters ignore the unknown JSON field and still answer 200,
 // so clients must see an explicit declaration before sending either create or
 // update writes that contain it.
-func TestGetConfigDeclaresAgentStarterPromptsSupport(t *testing.T) {
+func TestGetConfigDeclaresAgentConversationStartersSupport(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
 	testHandler.GetConfig(w, req)
@@ -536,14 +536,14 @@ func TestGetConfigDeclaresAgentStarterPromptsSupport(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if !cfg.AgentStarterPromptsSupported {
-		t.Fatal("this build persists starter_prompts but does not advertise the contract")
+	if !cfg.AgentConversationStartersSupported {
+		t.Fatal("this build persists conversation_starters but does not advertise the contract")
 	}
 	var raw map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw config: %v", err)
 	}
-	if _, ok := raw["agent_starter_prompts_supported"]; !ok {
-		t.Fatal("agent_starter_prompts_supported missing from the JSON body")
+	if _, ok := raw["agent_conversation_starters_supported"]; !ok {
+		t.Fatal("agent_conversation_starters_supported missing from the JSON body")
 	}
 }

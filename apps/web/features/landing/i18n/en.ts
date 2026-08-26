@@ -294,6 +294,36 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.35",
+        date: "2026-08-26",
+        title: "Session controls in every chat channel, agent conversation starters, and Inbox filters",
+        changes: [],
+        features: [
+          "Start a fresh session with /new, or clear the current one with /clear.",
+          "Both work in DingTalk, Lark, Slack, Telegram, and WeCom.",
+          "Give an agent up to three conversation starters, shown in every empty chat.",
+          "Tapping a starter fills the composer, so you can edit it before sending.",
+          "Filter Inbox notifications by who started them, or show only unread ones.",
+        ],
+        improvements: [
+          "Run costs for Qwen, Kimi, and Ark models are now accurate.",
+          "The Autopilot list shows subscribers and the next scheduled run.",
+          "A single Cloud address turns on cloud runtimes, billing, and seat management together.",
+          "Local task folders now have readable names, so your files are easy to find.",
+        ],
+        fixes: [
+          "Autopilots can hand work to your private agents and Squads again.",
+          "An Autopilot keeps its Project when you edit its other settings.",
+          "Chat follows the newest output as it streams, and scrolling up no longer snaps you back.",
+          "Private runtimes are no longer visible to other members.",
+          "Billing reflects your Pro plan right after you subscribe.",
+          "Codex runs no longer end early, so nothing is missed or counted twice.",
+          "Autopilot commands no longer accept a priority option that did nothing.",
+          "Issue boards stay fast even when descriptions are very long.",
+          "Reading large Skills is reliable and no longer stops midway.",
+        ],
+      },
+      {
         version: "0.4.34",
         date: "2026-08-25",
         title: "Sub-Issues from comments, and custom Issue statuses for every workspace",

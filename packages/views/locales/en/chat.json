@@ -150,8 +150,8 @@
     "returning_subtitle": "Try asking",
     "chat_with_named": "Chat with {{name}}"
   },
-  "starter_prompts": {
-    "aria_label": "Suggested first actions",
+  "conversation_starters": {
+    "aria_label": "Conversation starters",
     "capabilities": {
       "label": "What can you help with?",
       "prompt": "What are you best at helping with? Give me a concise overview."
@@ -163,7 +163,8 @@
     "recommend": {
       "label": "Recommend an action",
       "prompt": "Review what you know about my workspace and recommend a useful first action."
-    }
+    },
+    "customize": "Customize starters"
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",

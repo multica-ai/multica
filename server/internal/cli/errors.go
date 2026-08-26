@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +31,11 @@ const (
 	KindNetworkRefused                  // connection refused
 	KindNetworkTLS                      // x509 / tls handshake failures
 	KindNetworkOffline                  // catch-all: host unreachable, reset, etc.
+	// KindNetworkStalled is a transfer that stopped producing bytes (see
+	// StallError). Distinct from KindNetworkTimeout because the remedy is
+	// different: a timeout says "this took too long", a stall says "this went
+	// quiet", and only the latter is unaffected by raising a time limit.
+	KindNetworkStalled
 
 	// HTTP status layer.
 	KindAuthRequired // 401
@@ -61,7 +67,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled:
 		return true
 	default:
 		return false
@@ -83,6 +89,8 @@ func (k ErrorKind) String() string {
 		return "network_tls"
 	case KindNetworkOffline:
 		return "network_offline"
+	case KindNetworkStalled:
+		return "network_stalled"
 	case KindAuthRequired:
 		return "auth_required"
 	case KindTaskTokenRejected:
@@ -190,6 +198,14 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindUnknown
 	}
 
+	// A stalled transfer is checked first: the guard implements it by
+	// canceling the request context, so the underlying error would otherwise
+	// read as a generic cancellation and lose the reason.
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return KindNetworkStalled
+	}
+
 	// Timeouts (context deadline or socket i/o timeout).
 	if errors.Is(err, context.DeadlineExceeded) {
 		return KindNetworkTimeout
@@ -261,6 +277,41 @@ func wrapTransport(req *http.Request, err error) error {
 	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
 }
 
+// wrapBodyRead classifies an error raised while reading or decoding a
+// response body.
+//
+// wrapTransport only sees errors from http.Client.Do, which returns as soon as
+// the response headers arrive. Everything that goes wrong afterwards — the
+// case #7498 actually reports, a body that never finishes arriving — surfaces
+// out of the JSON decoder instead, and used to reach the user as a raw
+// "context deadline exceeded ... while reading body". A transport failure is
+// still a transport failure when the decoder is the one that notices it; a
+// genuine malformed-JSON error is returned unchanged.
+//
+// io.ErrUnexpectedEOF is deliberately on the network side of that line. It is
+// what the decoder reports for a body that simply stops — a dropped
+// connection, a proxy cutting the response — which is vastly the more common
+// cause than a server that emits syntactically truncated JSON. Well-formed
+// nonsense (the ordinary server bug) raises *json.SyntaxError and is left
+// alone.
+func wrapBodyRead(req *http.Request, err error) error {
+	if err == nil {
+		return nil
+	}
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return wrapTransport(req, err)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return wrapTransport(req, err)
+	}
+	return err
+}
+
 // Language is the language FormatError renders messages in.
 type Language int
 
@@ -293,6 +344,10 @@ var kindMessages = map[ErrorKind][2]string{
 	KindNetworkTimeout: {
 		"Request timed out: the server did not respond in time. Check your network connection or try again later. You can raise the limit with MULTICA_HTTP_TIMEOUT.",
 		"请求超时：服务器未在规定时间内响应。请检查网络连接或稍后重试。可通过 MULTICA_HTTP_TIMEOUT 调高超时时间。",
+	},
+	KindNetworkStalled: {
+		"Transfer stalled: the connection stopped sending data before the response was complete. Check your network connection or try again. You can raise the no-progress budget with MULTICA_HTTP_STALL_TIMEOUT.",
+		"传输中断：响应尚未接收完毕，连接就停止发送数据。请检查网络连接或重试。可通过 MULTICA_HTTP_STALL_TIMEOUT 调高无进展等待时间。",
 	},
 	KindNetworkDNS: {
 		"Could not resolve the Multica server address. Check your network connection or the --server-url setting.",

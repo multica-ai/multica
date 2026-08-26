@@ -57,13 +57,13 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, starter_prompts,
+    service_tier, conversation_starters,
     composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17, COALESCE(sqlc.narg('starter_prompts')::jsonb, '[]'::jsonb),
+    $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -142,7 +142,7 @@ UPDATE agent SET
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
-    starter_prompts = COALESCE(sqlc.narg('starter_prompts'), starter_prompts),
+    conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
 WHERE id = $1
@@ -787,8 +787,28 @@ WHERE id = (
       AND atq.runtime_id = @runtime_id
       AND atq.status = 'queued'
       AND EXISTS (
-          SELECT 1 FROM agent_runtime r
-          WHERE r.id = atq.runtime_id
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            -- A task's persisted runtime is not authority after an agent rebind.
+            AND a.runtime_id = atq.runtime_id
+            -- Private runtimes only execute their owner's agents. Ownerless
+            -- runtime/agent rows remain claimable only so the handler can
+            -- settle them explicitly before daemon delivery; filtering them
+            -- here would leave every task silently queued until the TTL.
+            -- Public runtimes remain shareable across agent owners.
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -876,8 +896,23 @@ WHERE id = (
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
       AND EXISTS (
-          SELECT 1 FROM agent_runtime r
-          WHERE r.id = atq.runtime_id
+          -- Keep this authorization fence in sync with ClaimAgentTask.
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -907,8 +942,23 @@ WHERE id IN (
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
       AND EXISTS (
-          SELECT 1 FROM agent_runtime r
-          WHERE r.id = atq.runtime_id
+          -- Keep this authorization fence in sync with ClaimAgentTask.
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
                 now() - make_interval(secs => @runtime_stale_secs::double precision)
@@ -2022,7 +2072,7 @@ WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC;
 
 -- name: ListQueuedClaimCandidatesByRuntime :many
--- Returns rows the runtime can attempt to claim. Status is restricted to
+-- Returns rows the runtime is authorized to attempt to claim. Status is restricted to
 -- 'queued' (in contrast to ListPendingTasksByRuntime which also includes
 -- 'dispatched') because dispatched rows are by definition already owned
 -- and cannot be re-claimed — including them in the candidate list pads
@@ -2030,9 +2080,29 @@ ORDER BY priority DESC, created_at ASC;
 -- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
 -- runtime is busy on a long-running task. Backed by the partial index
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+SELECT atq.* FROM agent_task_queue atq
+WHERE atq.runtime_id = $1
+  AND atq.status = 'queued'
+  AND EXISTS (
+      -- Keep this authorization fence in sync with ClaimAgentTask.
+      SELECT 1
+      FROM agent a
+      JOIN agent_runtime r ON r.id = atq.runtime_id
+      WHERE a.id = atq.agent_id
+        AND a.runtime_id = atq.runtime_id
+        AND (
+            r.visibility = 'public'
+            OR (
+                r.visibility = 'private'
+                AND (
+                    r.owner_id IS NULL
+                    OR a.owner_id IS NULL
+                    OR r.owner_id = a.owner_id
+                )
+            )
+        )
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: CancelSupersededDeferredRetriesForRuntimes :many
 -- Cancels deferred auto-retry rows that a newer active task has already
@@ -2137,9 +2207,29 @@ RETURNING *;
 -- a sort step (each runtime's slice is index-ordered, but merging several
 -- runtimes' rows into one priority/FIFO order is not). The per-machine
 -- candidate set is small, so this is cheap in practice.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+SELECT atq.* FROM agent_task_queue atq
+WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+  AND atq.status = 'queued'
+  AND EXISTS (
+      -- Keep this authorization fence in sync with ClaimAgentTask.
+      SELECT 1
+      FROM agent a
+      JOIN agent_runtime r ON r.id = atq.runtime_id
+      WHERE a.id = atq.agent_id
+        AND a.runtime_id = atq.runtime_id
+        AND (
+            r.visibility = 'public'
+            OR (
+                r.visibility = 'private'
+                AND (
+                    r.owner_id IS NULL
+                    OR a.owner_id IS NULL
+                    OR r.owner_id = a.owner_id
+                )
+            )
+        )
+  )
+ORDER BY atq.priority DESC, atq.created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all

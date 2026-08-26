@@ -1155,6 +1155,7 @@
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",
     "toast_seat_capacity_unavailable": "暂时无法核验成员席位，请稍后重试。",
+    "toast_seat_capacity_rate_limited": "席位请求过于频繁，请稍后重试。",
     "seat_purchase_title": "增加一个席位并发送邀请？",
     "seat_purchase_description": "当前没有可供 {{email}} 使用的已购席位。请核对 Stripe 报价，然后一次确认补购和邀请。",
     "purchase_seat_and_invite": "购买 1 个席位并邀请",

@@ -47,7 +47,7 @@ type BusinessMetrics struct {
 	entitlementRefresh                *prometheus.CounterVec
 	entitlementRefreshDuration        *prometheus.HistogramVec
 	entitlementDecision               *prometheus.CounterVec
-	entitlementVersionRegression      *prometheus.CounterVec
+	entitlementVersionRegression      prometheus.Counter
 	autopilotQuotaDecision            *prometheus.CounterVec
 	issueWindowDecision               *prometheus.CounterVec
 
@@ -207,7 +207,7 @@ func NewBusinessMetrics() *BusinessMetrics {
 		}),
 		entitlementConfigError: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "entitlement", Name: "config_error_total",
-			Help: "Total startup failures caused by explicitly enabled but invalid entitlement policy configuration.",
+			Help: "Total startup failures caused by a malformed Multica Cloud URL for entitlement policy.",
 		}),
 		entitlementCache: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "entitlement", Name: "cache_total",
@@ -225,10 +225,10 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Namespace: "multica", Subsystem: "entitlement", Name: "decision_total",
 			Help: "Total entitlement decisions by bounded gate, action, and reason.",
 		}, metricLabels("multica_entitlement_decision_total")),
-		entitlementVersionRegression: prometheus.NewCounterVec(prometheus.CounterOpts{
+		entitlementVersionRegression: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "entitlement", Name: "version_regression_total",
-			Help: "Total rejected entitlement version regressions.",
-		}, metricLabels("multica_entitlement_version_regression_total")),
+			Help: "Total rejected entitlement subscription-version regressions.",
+		}),
 		autopilotQuotaDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
 			Help: "Total autopilot quota admission outcomes.",
@@ -306,9 +306,9 @@ func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string)
 	}
 }
 
-func (m *BusinessMetrics) RecordEntitlementVersionRegression(source string) {
+func (m *BusinessMetrics) RecordEntitlementVersionRegression() {
 	if m != nil {
-		m.entitlementVersionRegression.WithLabelValues(source).Inc()
+		m.entitlementVersionRegression.Inc()
 	}
 }
 

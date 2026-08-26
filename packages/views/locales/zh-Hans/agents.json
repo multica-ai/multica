@@ -434,16 +434,18 @@
       "upload_failed_toast": "头像上传失败"
     }
   },
-  "starter_prompts": {
-    "label": "推荐的初始操作",
-    "hint": "最多添加三个示例，帮助用户开始使用此智能体。选择后只会填入输入框，不会立即发送。",
+  "conversation_starters": {
+    "label": "对话开场建议",
+    "hint": "最多三条示例，出现在别人与该智能体开始新对话时。选择后只会填入输入框，不会立即发送。",
     "add": "添加建议",
     "item_label": "建议 {{number}} 的标题",
     "prompt_label": "建议 {{number}} 的提示词",
     "label_placeholder": "审查拉取请求",
     "prompt_placeholder": "审查当前拉取请求，总结风险并建议下一步。",
     "incomplete": "请填写完整或移除每条建议后再保存。",
-    "remove": "移除建议 {{number}}"
+    "remove": "移除建议 {{number}}",
+    "preview_label": "新对话预览",
+    "preview_defaults": "以上是内置的默认值。在上方添加一条建议即可整组替换。"
   },
   "tab_body": {
     "common": {

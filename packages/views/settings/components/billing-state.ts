@@ -20,9 +20,9 @@ export type AutopilotUsageView =
 
 /**
  * Quota admission counts completed and reserved runs. Keep reserved work
- * visible so the progress bar matches the server's blocking decision. A
- * complete metered response is authoritative independently of entitlement
- * state; only the unlimited fallback comes from the entitlement response.
+ * visible so the progress bar matches the server's blocking decision for a
+ * limited workspace. A trusted Pro entitlement is authoritative for plan
+ * limits because the server enforcement policy may lag a subscription change.
  */
 export function resolveAutopilotUsage(
   entitlements: WorkspaceSubscriptionEntitlements,
@@ -30,6 +30,14 @@ export function resolveAutopilotUsage(
   failed: boolean,
   allowEntitlementUnlimited: boolean,
 ): AutopilotUsageView {
+  if (
+    allowEntitlementUnlimited &&
+    entitlements.plan === "pro" &&
+    entitlements.autopilotRuns === null
+  ) {
+    return { kind: "unlimited" };
+  }
+
   if (!failed && usage !== undefined && usage.action !== "off") {
     const { used, reserved, limit, reset_at: resetAt } = usage;
     if (
@@ -62,14 +70,6 @@ export function resolveAutopilotUsage(
         resetAt,
       };
     }
-  }
-
-  if (
-    allowEntitlementUnlimited &&
-    entitlements.plan === "pro" &&
-    entitlements.autopilotRuns === null
-  ) {
-    return { kind: "unlimited" };
   }
 
   return { kind: "unavailable" };

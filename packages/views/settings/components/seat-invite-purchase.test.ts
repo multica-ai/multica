@@ -6,6 +6,8 @@ import type {
 import {
   isSingleSeatInvitePreview,
   purchasedSeatIsReadyForInvitation,
+  seatInvitationCanRetryAfterPurchase,
+  seatInvitationCapacityFailure,
   seatPurchaseCanRetryWithSameQuote,
   seatPurchaseMatchesPreview,
 } from "./seat-invite-purchase";
@@ -99,5 +101,30 @@ describe("invite seat purchase validation", () => {
     expect(purchasedSeatIsReadyForInvitation(summary(5, 1), preview, 100, 99)).toBe(false);
     expect(purchasedSeatIsReadyForInvitation(summary(4, 0), preview, 100, 101)).toBe(false);
     expect(purchasedSeatIsReadyForInvitation(summary(5, 0), preview, 100, 101)).toBe(false);
+  });
+
+  it("classifies capacity toast branches without confusing purchase limits", () => {
+    expect(seatInvitationCapacityFailure("seat_capacity_full")).toBe("full");
+    expect(seatInvitationCapacityFailure("seat_capacity_unavailable")).toBe(
+      "unavailable",
+    );
+    expect(seatInvitationCapacityFailure("seat_capacity_rate_limited")).toBe(
+      "rate_limited",
+    );
+    expect(
+      seatInvitationCapacityFailure("seat_purchase_rate_limited"),
+    ).toBeUndefined();
+  });
+
+  it("allows transient post-purchase invitation failures to retry idempotently", () => {
+    expect(
+      seatInvitationCanRetryAfterPurchase("seat_capacity_rate_limited"),
+    ).toBe(true);
+    expect(
+      seatInvitationCanRetryAfterPurchase("seat_capacity_unavailable"),
+    ).toBe(true);
+    expect(seatInvitationCanRetryAfterPurchase("seat_capacity_full")).toBe(
+      false,
+    );
   });
 });

@@ -58,5 +58,5 @@ spec:
             severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
           annotations:
             summary: "Seat capacity outbox is stalled"
-            description: "The oldest {{ "{{ $labels.action }}" }} seat capacity intent has remained unsettled beyond the configured age threshold."
+            description: "The oldest {{ "{{ $labels.action }}" }} seat capacity intent has remained unsettled beyond the configured age threshold. Repeated Cloud or proxy 429 deferrals intentionally remain pending and surface here instead of in the dead-letter alert."
 {{- end }}

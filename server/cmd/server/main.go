@@ -271,7 +271,6 @@ func jwtSecretBootError(jwtSecret, appEnv string) error {
 
 func main() {
 	logger.Init()
-
 	// Warn about missing configuration
 	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
 		slog.Error(

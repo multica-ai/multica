@@ -893,6 +893,7 @@
     "toast_invitation_sent": "초대를 보냈습니다",
     "toast_invitation_failed": "초대를 보내지 못했습니다",
     "toast_seat_capacity_unavailable": "멤버 좌석을 확인할 수 없습니다. 다시 시도해 주세요.",
+    "toast_seat_capacity_rate_limited": "좌석 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
     "seat_purchase_title": "좌석을 추가하고 초대를 보내시겠어요?",
     "seat_purchase_description": "{{email}}에 사용할 구매 좌석이 없습니다. Stripe 견적을 확인한 뒤 좌석 구매와 초대를 함께 승인하세요.",
     "purchase_seat_and_invite": "좌석 1개 구매 후 초대",

@@ -327,16 +327,18 @@
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     }
   },
-  "starter_prompts": {
-    "label": "おすすめの最初のアクション",
-    "hint": "このエージェントの使い始め方が伝わる例を3件まで追加できます。選ぶと送信せずに入力欄へ入ります。",
+  "conversation_starters": {
+    "label": "会話の開始例",
+    "hint": "このエージェントで新しいチャットを開いたときに表示される例（最大3件）。選ぶと送信せずに入力欄へ入ります。",
     "add": "候補を追加",
     "item_label": "候補 {{number}} のラベル",
     "prompt_label": "候補 {{number}} のプロンプト",
     "label_placeholder": "プルリクエストをレビュー",
     "prompt_placeholder": "開いているプルリクエストをレビューし、リスクと次の手順をまとめてください。",
     "incomplete": "各候補を完成させるか削除してから保存してください。",
-    "remove": "候補 {{number}} を削除"
+    "remove": "候補 {{number}} を削除",
+    "preview_label": "新しいチャットのプレビュー",
+    "preview_defaults": "これは組み込みの初期値です。上で候補を1件追加すると3件すべて置き換わります。"
   },
   "tab_body": {
     "common": {

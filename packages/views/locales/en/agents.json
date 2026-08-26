@@ -444,16 +444,18 @@
       "upload_failed_toast": "Avatar upload failed"
     }
   },
-  "starter_prompts": {
-    "label": "Suggested first actions",
-    "hint": "Add up to three examples that show people how to start with this agent. Selecting one fills the composer without sending it.",
+  "conversation_starters": {
+    "label": "Conversation starters",
+    "hint": "Up to three examples, shown when someone opens a new chat with this agent. Selecting one fills the composer without sending it.",
     "add": "Add suggestion",
     "item_label": "Suggestion {{number}} label",
     "prompt_label": "Suggestion {{number}} prompt",
     "label_placeholder": "Review a pull request",
     "prompt_placeholder": "Review the open pull request, summarize the risks, and recommend next steps.",
     "incomplete": "Complete or remove each suggestion before saving.",
-    "remove": "Remove suggestion {{number}}"
+    "remove": "Remove suggestion {{number}}",
+    "preview_label": "Preview of a new chat",
+    "preview_defaults": "These are the built-in defaults. Add a suggestion above to replace all three."
   },
   "tab_body": {
     "common": {

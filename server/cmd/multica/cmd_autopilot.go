@@ -130,7 +130,6 @@ func init() {
 	autopilotCreateCmd.Flags().String("description", "", "Autopilot description (used as task prompt)")
 	autopilotCreateCmd.Flags().String("agent", "", "Assignee agent (name or ID) — required")
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
-	autopilotCreateCmd.Flags().String("priority", "none", "Priority for created issues (none, low, medium, high, urgent)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
 	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
@@ -141,7 +140,6 @@ func init() {
 	autopilotUpdateCmd.Flags().String("description", "", "New description")
 	autopilotUpdateCmd.Flags().String("agent", "", "New assignee agent (name or ID)")
 	autopilotUpdateCmd.Flags().String("project", "", "New project ID (use empty string to clear)")
-	autopilotUpdateCmd.Flags().String("priority", "", "New priority")
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
@@ -418,10 +416,6 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
-	if cmd.Flags().Changed("priority") {
-		v, _ := cmd.Flags().GetString("priority")
-		body["priority"] = v
-	}
 	if v, _ := cmd.Flags().GetString("project"); v != "" {
 		projectRef, err := resolveProjectID(ctx, client, v)
 		if err != nil {
@@ -496,10 +490,6 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 			}
 			body["project_id"] = projectRef.ID
 		}
-	}
-	if cmd.Flags().Changed("priority") {
-		v, _ := cmd.Flags().GetString("priority")
-		body["priority"] = v
 	}
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
