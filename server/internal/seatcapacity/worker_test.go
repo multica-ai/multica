@@ -362,7 +362,7 @@ func TestWorkerDefersCloudRateLimitWithoutSpendingRetryBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	claimCalls, deferrals, attemptCount, deferredUntil := queries.rateLimitState()
-	_, _, _, failures, deadLetters := queries.counts()
+	_, _, _, failures, deadLetters, _ := queries.counts()
 	if claimCalls != 1 {
 		t.Fatalf("claim calls=%d, want 1 so the rate-limited batch stops immediately", claimCalls)
 	}
