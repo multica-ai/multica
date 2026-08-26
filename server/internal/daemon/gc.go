@@ -782,6 +782,10 @@ func isAgentTaskTerminal(status string) bool {
 // cleanTaskDir removes a task directory, logs the reclaimed bytes, and returns
 // that count for the cycle summary. A failed removal reports zero reclaimed.
 func (d *Daemon) cleanTaskDir(taskDir string) int64 {
+	if reason := taskDirCustodyHold(context.Background(), taskDir); reason != "" {
+		d.logger.Info("gc: retaining task dir; unique git work present", "dir", taskDir, "reason", reason)
+		return 0
+	}
 	bytes := dirSize(taskDir)
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
