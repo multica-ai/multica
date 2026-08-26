@@ -57,7 +57,6 @@ import type {
   Skill,
   SkillSummary,
   CreateSkillRequest,
-  SkillImportResult,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
   SetAgentRuntimeSkillEnabledRequest,
@@ -415,6 +414,8 @@ import {
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
   SkillSchema,
   EMPTY_SKILL,
+  SkillImportResultSchema,
+  EMPTY_SKILL_IMPORT_RESULT,
   IssueViewSchema,
   IssueViewListSchema,
   IssueViewPreferenceSchema,
@@ -594,7 +595,12 @@ function remapSkillImportError(err: unknown): unknown {
 }
 
 function skillFromImportResult(raw: unknown, endpoint: string): Skill {
-  const result = (raw ?? {}) as SkillImportResult;
+  const result = parseWithFallback(
+    raw,
+    SkillImportResultSchema,
+    EMPTY_SKILL_IMPORT_RESULT,
+    { endpoint },
+  );
   if (
     (result.status === "created" || result.status === "updated") &&
     result.skill

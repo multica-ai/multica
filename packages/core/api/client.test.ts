@@ -2538,6 +2538,21 @@ describe("importSkillArchive", () => {
     expect((uploaded as File).name).toBe("review-helper.skill");
   });
 
+  it("falls back to Import failed when the archive envelope is malformed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ not_a_status: true, skill: 42 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow(/import failed/i);
+  });
+
   it("throws the structured reason on a name conflict", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

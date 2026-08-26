@@ -10,9 +10,8 @@ const TEST_RESOURCES = {
 };
 
 const mockImportSkillArchive = vi.hoisted(() => vi.fn());
-const mockPrepare = vi.hoisted(() => vi.fn());
+const mockPrepareFromPicker = vi.hoisted(() => vi.fn());
 const mockWrap = vi.hoisted(() => vi.fn());
-const mockEntriesFromFileList = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({
   api: {
@@ -30,9 +29,9 @@ vi.mock("@multica/core/skills", async () => {
   >("@multica/core/skills");
   return {
     ...actual,
-    prepareSkillArchiveFromEntries: (...args: unknown[]) => mockPrepare(...args),
+    prepareSkillArchiveFromPickerFiles: (...args: unknown[]) =>
+      mockPrepareFromPicker(...args),
     wrapExistingSkillArchive: (...args: unknown[]) => mockWrap(...args),
-    entriesFromFileList: (...args: unknown[]) => mockEntriesFromFileList(...args),
   };
 });
 
@@ -108,14 +107,11 @@ function renderDialog(onCreated = vi.fn(), onClose = vi.fn()) {
 describe("CreateSkillDialog local import", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockPrepare.mockReturnValue(PREPARED_OK);
+    mockPrepareFromPicker.mockResolvedValue(PREPARED_OK);
     mockWrap.mockReturnValue({
       ...PREPARED_OK,
       preview: { ...PREPARED_OK.preview, source: "archive", fileCount: null },
     });
-    mockEntriesFromFileList.mockResolvedValue([
-      { relativePath: "review-helper/SKILL.md", data: new Uint8Array() },
-    ]);
     mockImportSkillArchive.mockResolvedValue({
       id: "skill-1",
       workspace_id: "ws-1",
@@ -160,7 +156,7 @@ describe("CreateSkillDialog local import", () => {
   });
 
   it("does not import when the folder has no SKILL.md", async () => {
-    mockPrepare.mockReturnValue({ ok: false, error: "missing_skill_md" });
+    mockPrepareFromPicker.mockResolvedValue({ ok: false, error: "missing_skill_md" });
     renderDialog();
 
     const input = document.querySelector(
@@ -176,12 +172,11 @@ describe("CreateSkillDialog local import", () => {
   });
 
   it("snapshots folder files before resetting the live FileList", async () => {
-    mockEntriesFromFileList.mockImplementation(async (list: File[] | FileList) => {
-      const files = Array.from(list);
-      if (files.length === 0) {
+    mockPrepareFromPicker.mockImplementation(async (list: File[]) => {
+      if (list.length === 0) {
         throw new Error("live FileList was emptied before snapshot");
       }
-      return [{ relativePath: "review-helper/SKILL.md", data: new Uint8Array() }];
+      return PREPARED_OK;
     });
     renderDialog();
 
@@ -193,8 +188,8 @@ describe("CreateSkillDialog local import", () => {
     fireEvent.change(input);
 
     expect((await screen.findAllByText("review-helper")).length).toBeGreaterThan(0);
-    expect(mockEntriesFromFileList).toHaveBeenCalled();
-    const passed = mockEntriesFromFileList.mock.calls[0]![0] as File[];
+    expect(mockPrepareFromPicker).toHaveBeenCalled();
+    const passed = mockPrepareFromPicker.mock.calls[0]![0] as File[];
     expect(Array.from(passed)).toHaveLength(1);
   });
 
@@ -235,6 +230,75 @@ describe("CreateSkillDialog local import", () => {
     await waitFor(() => {
       expect(mockImportSkillArchive).toHaveBeenCalled();
     });
-    expect(mockPrepare).not.toHaveBeenCalled();
+    expect(mockPrepareFromPicker).not.toHaveBeenCalled();
+  });
+
+  it("ignores a slower earlier folder selection", async () => {
+    type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+    const deferred = <T,>(): Deferred<T> => {
+      let resolve!: (value: T) => void;
+      const promise = new Promise<T>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    };
+    const first = deferred<typeof PREPARED_OK>();
+    const second = deferred<typeof PREPARED_OK>();
+    mockPrepareFromPicker
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    renderDialog();
+    const input = document.querySelector(
+      'input[type="file"][multiple]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["a"], "SKILL.md")] } });
+    fireEvent.change(input, { target: { files: [new File(["b"], "SKILL.md")] } });
+
+    const preparedB = {
+      ...PREPARED_OK,
+      preview: { ...PREPARED_OK.preview, skillName: "skill-b", displayName: "skill-b" },
+    };
+    const preparedA = {
+      ...PREPARED_OK,
+      preview: { ...PREPARED_OK.preview, skillName: "skill-a", displayName: "skill-a" },
+    };
+    second.resolve(preparedB);
+    expect((await screen.findAllByText("skill-b")).length).toBeGreaterThan(0);
+    first.resolve(preparedA);
+    await waitFor(() => {
+      expect(screen.queryByText("skill-a")).not.toBeInTheDocument();
+    });
+    expect(screen.getAllByText("skill-b").length).toBeGreaterThan(0);
+  });
+
+  it("clears a previous import error when a new folder is picked", async () => {
+    mockImportSkillArchive.mockRejectedValueOnce(
+      new Error("a skill with this name already exists"),
+    );
+    renderDialog();
+    const input = document.querySelector(
+      'input[type="file"][multiple]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [new File(["a"], "SKILL.md")] } });
+    expect((await screen.findAllByText("review-helper")).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^Import$/i }));
+    expect(
+      await screen.findByText(/a skill with this name already exists/i),
+    ).toBeInTheDocument();
+
+    mockPrepareFromPicker.mockResolvedValue({
+      ...PREPARED_OK,
+      preview: {
+        ...PREPARED_OK.preview,
+        skillName: "other-skill",
+        displayName: "other-skill",
+      },
+    });
+    fireEvent.change(input, { target: { files: [new File(["b"], "SKILL.md")] } });
+    expect((await screen.findAllByText("other-skill")).length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText(/a skill with this name already exists/i),
+    ).not.toBeInTheDocument();
   });
 });

@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_SKILL_FILE_BYTES,
   isIgnoredArchiveEntry,
   isSkillArchiveFilename,
   packStoreZip,
   prepareSkillArchiveFromEntries,
+  prepareSkillArchiveFromPickerFiles,
   wrapExistingSkillArchive,
 } from "./pack-archive";
 
@@ -148,6 +150,72 @@ describe("isIgnoredArchiveEntry", () => {
     expect(isIgnoredArchiveEntry("__MACOSX/foo")).toBe(true);
     expect(isIgnoredArchiveEntry("skill/LICENSE")).toBe(true);
     expect(isIgnoredArchiveEntry("skill/scripts/run.sh")).toBe(false);
+  });
+});
+
+function fileWithPath(
+  name: string,
+  relativePath: string,
+  content: Uint8Array,
+  opts?: { size?: number; arrayBuffer?: () => Promise<ArrayBuffer> },
+): File {
+  const copy = new Uint8Array(content.byteLength);
+  copy.set(content);
+  const file = new File([copy.buffer], name);
+  Object.defineProperty(file, "webkitRelativePath", { value: relativePath });
+  if (opts?.size != null) {
+    Object.defineProperty(file, "size", { value: opts.size });
+  }
+  if (opts?.arrayBuffer) {
+    Object.defineProperty(file, "arrayBuffer", { value: opts.arrayBuffer });
+  }
+  return file;
+}
+
+describe("prepareSkillArchiveFromPickerFiles", () => {
+  it("does not call arrayBuffer for ignored or oversized entries", async () => {
+    const skill = fileWithPath("SKILL.md", "skill/SKILL.md", bytes(SKILL_MD));
+    const ignored = fileWithPath(
+      ".DS_Store",
+      "skill/.DS_Store",
+      new Uint8Array([1]),
+      {
+        arrayBuffer: async () => {
+          throw new Error("should not read ignored");
+        },
+      },
+    );
+    const oversized = fileWithPath(
+      "big.md",
+      "skill/big.md",
+      new Uint8Array(0),
+      {
+        size: MAX_SKILL_FILE_BYTES + 1,
+        arrayBuffer: async () => {
+          throw new Error("should not read oversized");
+        },
+      },
+    );
+    const binary = fileWithPath(
+      "icon.png",
+      "skill/icon.png",
+      new Uint8Array([0x89, 0x50]),
+      {
+        arrayBuffer: async () => {
+          throw new Error("should not read binary");
+        },
+      },
+    );
+
+    const prepared = await prepareSkillArchiveFromPickerFiles([
+      skill,
+      ignored,
+      oversized,
+      binary,
+    ]);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(prepared.preview.fileCount).toBe(1);
   });
 });
 

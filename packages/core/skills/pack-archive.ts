@@ -138,21 +138,103 @@ export function prepareSkillArchiveFromEntries(
   };
 }
 
-export async function entriesFromFileList(
-  list: FileList | File[],
-): Promise<SkillArchiveEntry[]> {
-  const files = Array.from(list);
-  const out: SkillArchiveEntry[] = [];
+export type SkillArchiveMemberMeta = {
+  path: string;
+  size: number;
+};
+
+/**
+ * Decide which picker files belong in the archive using only path + size —
+ * no I/O. Callers then `arrayBuffer()` the survivors. Limits and ignore
+ * rules match `prepareSkillArchiveFromEntries` / the server importer.
+ */
+export function selectSkillArchiveMembers(
+  files: SkillArchiveMemberMeta[],
+):
+  | { ok: true; selected: SkillArchiveMemberMeta[] }
+  | { ok: false; error: PreparedSkillArchiveError } {
+  if (files.length === 0) return { ok: false, error: "empty" };
+
+  const normalized: SkillArchiveMemberMeta[] = [];
   for (const file of files) {
-    const relativePath =
-      (typeof file.webkitRelativePath === "string" && file.webkitRelativePath) ||
-      file.name;
-    out.push({
-      relativePath,
-      data: new Uint8Array(await file.arrayBuffer()),
+    const path = normalizeRelPath(file.path);
+    if (!path || isIgnoredArchiveEntry(path)) continue;
+    normalized.push({ path, size: file.size });
+  }
+  if (normalized.length === 0) return { ok: false, error: "empty" };
+
+  let skillMd: (SkillArchiveMemberMeta & { prefix: string }) | null = null;
+  for (const file of normalized) {
+    if (!isSkillMdPath(file.path)) continue;
+    const prefix = archiveEntryPrefix(file.path);
+    if (!skillMd || prefix.length < skillMd.prefix.length) {
+      skillMd = { ...file, prefix };
+    }
+  }
+  if (!skillMd) return { ok: false, error: "missing_skill_md" };
+  if (skillMd.size > MAX_SKILL_FILE_BYTES) {
+    return { ok: false, error: "too_large" };
+  }
+
+  const selected: SkillArchiveMemberMeta[] = [];
+  let supportingCount = 0;
+  let supportingBytes = 0;
+  for (const file of normalized) {
+    if (skillMd.prefix && !file.path.startsWith(skillMd.prefix)) continue;
+    const rel = skillMd.prefix ? file.path.slice(skillMd.prefix.length) : file.path;
+    if (!rel || rel.endsWith("/")) continue;
+    if (isSkillMdPath(rel)) {
+      selected.push(file);
+      continue;
+    }
+    if (isLikelyBinaryFilePath(rel)) continue;
+    if (file.size > MAX_SKILL_FILE_BYTES) continue;
+    supportingCount += 1;
+    if (supportingCount > MAX_SKILL_FILE_COUNT) {
+      return { ok: false, error: "too_many_files" };
+    }
+    supportingBytes += file.size;
+    if (supportingBytes > MAX_SKILL_BUNDLE_BYTES) {
+      return { ok: false, error: "too_large" };
+    }
+    selected.push(file);
+  }
+  return { ok: true, selected };
+}
+
+function pickerRelativePath(file: File): string {
+  const rel =
+    typeof file.webkitRelativePath === "string" && file.webkitRelativePath
+      ? file.webkitRelativePath
+      : file.name;
+  return normalizeRelPath(rel);
+}
+
+/**
+ * Pack a directory picker result. Ignored, binary, oversized and out-of-root
+ * files are dropped from path + `File.size` before any `arrayBuffer()` call.
+ */
+export async function prepareSkillArchiveFromPickerFiles(
+  files: File[],
+): Promise<PreparedSkillArchive> {
+  const refs = files.map((file) => ({
+    path: pickerRelativePath(file),
+    size: file.size,
+    file,
+  }));
+  const picked = selectSkillArchiveMembers(refs);
+  if (!picked.ok) return picked;
+
+  const selectedPaths = new Set(picked.selected.map((s) => s.path));
+  const entries: SkillArchiveEntry[] = [];
+  for (const ref of refs) {
+    if (!selectedPaths.has(ref.path)) continue;
+    entries.push({
+      relativePath: ref.path,
+      data: new Uint8Array(await ref.file.arrayBuffer()),
     });
   }
-  return out;
+  return prepareSkillArchiveFromEntries(entries);
 }
 
 // --- zip (STORE / uncompressed) -------------------------------------------

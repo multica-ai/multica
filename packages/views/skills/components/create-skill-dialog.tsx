@@ -19,8 +19,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type { Skill } from "@multica/core/types";
 import {
-  entriesFromFileList,
-  prepareSkillArchiveFromEntries,
+  prepareSkillArchiveFromPickerFiles,
   wrapExistingSkillArchive,
   type PreparedSkillArchive,
 } from "@multica/core/skills";
@@ -632,6 +631,8 @@ export function CreateSkillDialog({
     null,
   );
   const [localPreparing, setLocalPreparing] = useState(false);
+  const [localEpoch, setLocalEpoch] = useState(0);
+  const localGeneration = useRef(0);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const archiveInputRef = useRef<HTMLInputElement>(null);
 
@@ -640,7 +641,15 @@ export function CreateSkillDialog({
     onClose();
   };
 
+  const beginLocalSelection = (): number => {
+    const next = localGeneration.current + 1;
+    localGeneration.current = next;
+    setLocalEpoch(next);
+    return next;
+  };
+
   const resetLocal = () => {
+    beginLocalSelection();
     setLocalPrepared(null);
     setLocalPreparing(false);
   };
@@ -680,16 +689,19 @@ export function CreateSkillDialog({
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
     if (files.length === 0) return;
+    const gen = beginLocalSelection();
     setMethod("local");
     setLocalPreparing(true);
     setLocalPrepared(null);
     try {
-      const entries = await entriesFromFileList(files);
-      setLocalPrepared(prepareSkillArchiveFromEntries(entries));
+      const prepared = await prepareSkillArchiveFromPickerFiles(files);
+      if (gen !== localGeneration.current) return;
+      setLocalPrepared(prepared);
     } catch {
+      if (gen !== localGeneration.current) return;
       setLocalPrepared({ ok: false, error: "empty" });
     } finally {
-      setLocalPreparing(false);
+      if (gen === localGeneration.current) setLocalPreparing(false);
     }
   };
 
@@ -697,6 +709,7 @@ export function CreateSkillDialog({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    beginLocalSelection();
     setMethod("local");
     setLocalPreparing(false);
     setLocalPrepared(wrapExistingSkillArchive(file));
@@ -796,6 +809,7 @@ export function CreateSkillDialog({
         )}
         {method === "local" && (
           <LocalForm
+            key={localEpoch}
             prepared={localPrepared}
             preparing={localPreparing}
             onCreated={handleCreated}
