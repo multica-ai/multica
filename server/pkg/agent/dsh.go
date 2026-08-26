@@ -319,14 +319,6 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		defer writeMu.Unlock()
 		return encoder.Encode(value)
 	}
-	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = cmd.Wait()
-		releaseProcessGroup(cmd)
-		cancel()
-		return nil, fmt.Errorf("send dsh execute command: %w", err)
-	}
-
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 	procDone := make(chan struct{})
