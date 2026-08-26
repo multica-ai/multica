@@ -15,7 +15,14 @@ export default function OfflineAccountInfo() {
   const isLoading = useAuthStore((s) => s.isLoading);
 
   const retry = async () => {
-    await initialize();
+    // initialize() resets isLoading in a finally, so a rejection here only
+    // means "still no answer" — stay on this screen rather than surface an
+    // unhandled rejection from the press handler.
+    try {
+      await initialize();
+    } catch {
+      return;
+    }
     const { user, hasToken } = useAuthStore.getState();
     if (user) router.replace("/");
     else if (!hasToken) router.replace("/login");
