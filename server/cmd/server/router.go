@@ -393,18 +393,16 @@ func strictPositiveDurationEnv(name string, fallback time.Duration) (time.Durati
 	return value, nil
 }
 
-func seatCapacityExecutorFromEnv(cloudURL string) seatcapacity.Executor {
+func seatCapacityExecutor(cloudURL string) seatcapacity.Executor {
 	executor, err := seatcapacity.New(seatcapacity.Config{
-		BaseURL:      cloudURL,
-		ServiceToken: os.Getenv("MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN"),
-		Timeout:      envDuration("MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT", 3*time.Second),
+		BaseURL: cloudURL,
 	})
 	if err == nil {
 		return executor
 	}
-	// A Cloud-connected deployment with malformed credentials must not
+	// A Cloud-connected deployment with malformed connection settings must not
 	// silently restore unlimited membership. The fail-closed executor returns
-	// 503 until the operator repairs the machine credential; it is deliberately
+	// 503 until the operator repairs the Cloud URL; it is deliberately
 	// ineligible for recovery-worker startup so queued intents keep their retry
 	// budget while configuration is broken.
 	slog.Error("subscription seat capacity executor unavailable", "error", err)
@@ -451,7 +449,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AppURL:                   appURLFromEnv(),
 		TrustedProxies:           parseTrustedProxies(os.Getenv("MULTICA_TRUSTED_PROXIES")),
 		CloudURL:                 strings.TrimSpace(os.Getenv("MULTICA_CLOUD_URL")),
-		CloudTimeout:             envDuration("MULTICA_CLOUD_TIMEOUT", 35*time.Second),
+		CloudTimeout:             35 * time.Second,
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
 		AttachmentFrameAncestors: origins,
@@ -475,18 +473,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
 	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
-		Enabled:      envBool("MULTICA_ENTITLEMENT_POLICY_ENABLED", false),
-		BaseURL:      strings.TrimSpace(os.Getenv("MULTICA_ENTITLEMENT_POLICY_URL")),
-		ServiceToken: os.Getenv("MULTICA_ENTITLEMENT_SERVICE_TOKEN"),
-		Timeout:      envDuration("MULTICA_ENTITLEMENT_POLICY_TIMEOUT", 3*time.Second),
-		StaleGrace:   envNonNegativeDuration("MULTICA_ENTITLEMENT_STALE_GRACE", 15*time.Minute),
-		Observer:     opts.BusinessMetrics,
+		BaseURL:  signupConfig.CloudURL,
+		Observer: opts.BusinessMetrics,
 	})
 	if entitlementErr != nil {
 		slog.Error("entitlement policy client disabled by invalid configuration", "error", entitlementErr)
 		opts.BusinessMetrics.RecordEntitlementConfigError()
 	} else if entitlementClient.Enabled() {
-		entitlementClient.SetEmergencyDisabled(envBool("MULTICA_ENTITLEMENT_EMERGENCY_DISABLED", false))
 		h.Entitlements = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
@@ -494,7 +487,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Cloud Runtime and strict seat capacity are one managed deployment. Reuse
 	// the same base URL so Billing cannot be readable while invitation writes
 	// silently skip Cloud's authoritative seat policy.
-	h.SeatCapacity = seatCapacityExecutorFromEnv(signupConfig.CloudURL)
+	h.SeatCapacity = seatCapacityExecutor(signupConfig.CloudURL)
 	capacityLocker := seatcapacity.NewWorkspaceLocker(pool)
 	h.SeatCapacityLocker = capacityLocker
 	if seatcapacity.CanRunWorker(h.SeatCapacity) {

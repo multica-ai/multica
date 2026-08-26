@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	testServiceToken   = "01234567890123456789012345678901"
 	testIssueLimit     = 137
 	testAutopilotLimit = 23
 )
@@ -39,29 +38,20 @@ func TestDefaultConfigIsDisabledAndPerformsNoIO(t *testing.T) {
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonDisabled || calls.Load() != 0 {
 		t.Fatalf("decision = %+v, calls = %d", decision, calls.Load())
 	}
-	if _, err := New(Config{
-		Enabled: false, BaseURL: "://invalid", ServiceToken: "weak", Timeout: time.Hour,
-	}); err != nil {
+	if _, err := New(Config{Timeout: time.Hour}); err != nil {
 		t.Fatalf("disabled config must ignore Cloud-only settings: %v", err)
 	}
 }
 
-func TestEnabledConfigValidation(t *testing.T) {
-	valid := Config{
-		Enabled:      true,
-		BaseURL:      "https://cloud.internal",
-		ServiceToken: testServiceToken,
-	}
+func TestConnectedConfigValidation(t *testing.T) {
+	valid := Config{BaseURL: "https://cloud.internal"}
 	tests := []struct {
 		name   string
 		mutate func(*Config)
 	}{
-		{"missing base URL", func(c *Config) { c.BaseURL = "" }},
 		{"unsupported base URL scheme", func(c *Config) { c.BaseURL = "ftp://cloud.internal" }},
 		{"base URL credentials", func(c *Config) { c.BaseURL = "https://user:pass@cloud.internal" }},
 		{"base URL query", func(c *Config) { c.BaseURL = "https://cloud.internal?secret=value" }},
-		{"weak service token", func(c *Config) { c.ServiceToken = "short" }},
-		{"whitespace service token", func(c *Config) { c.ServiceToken = strings.Repeat("x", 32) + "\n" }},
 		{"long timeout", func(c *Config) { c.Timeout = maxRequestTimeout + time.Millisecond }},
 		{"negative max entries", func(c *Config) { c.MaxEntries = -1 }},
 		{"negative stale grace", func(c *Config) { c.StaleGrace = -1 }},
@@ -86,8 +76,8 @@ func TestGateFetchesMachinePolicyWithoutHumanIdentity(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/internal/entitlement-policies/"+workspaceID.String() {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer "+testServiceToken {
-			t.Errorf("Authorization = %q", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization must be absent, got %q", got)
 		}
 		if got := r.Header.Get("X-User-ID"); got != "" {
 			t.Errorf("X-User-ID must be absent, got %q", got)
@@ -320,7 +310,7 @@ func TestTimeoutFailsOpenWithinIndependentBound(t *testing.T) {
 	<-requestCancelled
 }
 
-func TestServiceTokenIsNeverForwardedThroughRedirect(t *testing.T) {
+func TestInternalPolicyClientDoesNotFollowRedirect(t *testing.T) {
 	var redirectedCalls atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		redirectedCalls.Add(1)
@@ -572,31 +562,6 @@ func TestRevisionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
 	}
 }
 
-func TestEmergencyDisableIsImmediateAndCannotPromote(t *testing.T) {
-	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		writePolicy(t, w, samplePolicy(1, 0, 60, ActionEnforce))
-	}))
-	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
-	workspaceID := uuid.New()
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("initial = %+v", got)
-	}
-	client.SetEmergencyDisabled(true)
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionOff || got.Reason != ReasonEmergencyDisabled {
-		t.Fatalf("emergency = %+v", got)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("emergency disable made HTTP call; calls = %d", calls.Load())
-	}
-	client.SetEmergencyDisabled(false)
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("restored = %+v", got)
-	}
-}
-
 func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -624,13 +589,11 @@ func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 	t.Helper()
 	cfg := Config{
-		Enabled:      true,
-		BaseURL:      baseURL,
-		ServiceToken: testServiceToken,
-		Timeout:      time.Second,
-		MaxEntries:   8,
-		StaleGrace:   time.Minute,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		BaseURL:    baseURL,
+		Timeout:    time.Second,
+		MaxEntries: 8,
+		StaleGrace: time.Minute,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if mutate != nil {
 		mutate(&cfg)

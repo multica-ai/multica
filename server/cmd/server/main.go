@@ -269,38 +269,8 @@ func jwtSecretBootError(jwtSecret, appEnv string) error {
 	return auth.ValidateJWTSecret(jwtSecret)
 }
 
-var retiredCloudEnvironmentVariables = []string{
-	"MULTICA_FLEET_URL",
-	"MULTICA_CLOUD_FLEET_URL",
-	"MULTICA_CLOUD_FLEET_TIMEOUT",
-	"MULTICA_SUBSCRIPTION_CAPACITY_ENABLED",
-	"MULTICA_SUBSCRIPTION_CAPACITY_URL",
-	"MULTICA_SUBSCRIPTION_CAPACITY_WORKER_ENABLED",
-}
-
-func retiredCloudEnvironmentError(lookupEnv func(string) (string, bool)) error {
-	var configured []string
-	for _, name := range retiredCloudEnvironmentVariables {
-		if value, exists := lookupEnv(name); exists && strings.TrimSpace(value) != "" {
-			configured = append(configured, name)
-		}
-	}
-	if len(configured) == 0 {
-		return nil
-	}
-	return fmt.Errorf(
-		"retired Cloud environment variables are still configured: %s; use MULTICA_CLOUD_URL and the current capacity token/timeout settings",
-		strings.Join(configured, ", "),
-	)
-}
-
 func main() {
 	logger.Init()
-	if err := retiredCloudEnvironmentError(os.LookupEnv); err != nil {
-		slog.Error("refusing to start with retired Cloud configuration", "error", err)
-		os.Exit(1)
-	}
-
 	// Warn about missing configuration
 	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
 		slog.Error(

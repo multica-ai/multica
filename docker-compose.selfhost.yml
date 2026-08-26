@@ -106,20 +106,9 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
-      # Managed entitlement policy is explicitly opt-in. The false/empty
-      # defaults keep self-hosted installs on the legacy path with no Cloud
-      # request and no quota-table access.
-      MULTICA_ENTITLEMENT_POLICY_ENABLED: ${MULTICA_ENTITLEMENT_POLICY_ENABLED:-false}
-      MULTICA_ENTITLEMENT_POLICY_URL: ${MULTICA_ENTITLEMENT_POLICY_URL:-}
-      MULTICA_ENTITLEMENT_SERVICE_TOKEN: ${MULTICA_ENTITLEMENT_SERVICE_TOKEN:-}
-      MULTICA_ENTITLEMENT_POLICY_TIMEOUT: ${MULTICA_ENTITLEMENT_POLICY_TIMEOUT:-3s}
-      MULTICA_ENTITLEMENT_STALE_GRACE: ${MULTICA_ENTITLEMENT_STALE_GRACE:-15m}
-      MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: ${MULTICA_ENTITLEMENT_EMERGENCY_DISABLED:-false}
-      # Managed Cloud stays off for self-hosting; seat capacity follows this URL.
+      # Managed Cloud stays off for self-hosting. All managed Cloud clients use
+      # this single URL when it is configured.
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}
-      MULTICA_CLOUD_TIMEOUT: ${MULTICA_CLOUD_TIMEOUT:-35s}
-      MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN: ${MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN:-}
-      MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT: ${MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT:-3s}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       # App API credentials. The pull_request webhook is what mirrors a PR

@@ -37,7 +37,6 @@ type Reason string
 
 const (
 	ReasonDisabled          Reason = "disabled"
-	ReasonEmergencyDisabled Reason = "emergency_disabled"
 	ReasonInvalidWorkspace  Reason = "invalid_workspace"
 	ReasonUnknownGate       Reason = "unknown_gate"
 	ReasonCacheFresh        Reason = "cache_fresh"

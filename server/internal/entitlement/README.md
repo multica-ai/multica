@@ -5,16 +5,13 @@ enforcement-policy endpoint. Commercial inputs stay in Cloud: this package does
 not contain plan names, subscription-state mapping, rollout dates, cohorts,
 exemptions, limit values, or kill-switch policy.
 
-Production wiring remains explicit and off by default. Set
-`MULTICA_ENTITLEMENT_POLICY_ENABLED=true`,
-`MULTICA_ENTITLEMENT_POLICY_URL`, and the independent
-`MULTICA_ENTITLEMENT_SERVICE_TOKEN` to enable the client. A disabled client
-performs no HTTP request, and the autopilot consumer does not access its quota
-tables; the issue-window consumer likewise keeps its legacy SQL and performs no
-window read. Self-hosted deployments therefore retain the legacy paths.
-Timeout, stale grace, and the emergency down switch are controlled by
-`MULTICA_ENTITLEMENT_POLICY_TIMEOUT`, `MULTICA_ENTITLEMENT_STALE_GRACE`, and
-`MULTICA_ENTITLEMENT_EMERGENCY_DISABLED`.
+Production wiring has one boundary: setting `MULTICA_CLOUD_URL` connects this
+consumer as well as the other managed Cloud clients. An empty URL performs no
+HTTP request, and the autopilot consumer does not access its quota tables; the
+issue-window consumer likewise keeps its legacy SQL and performs no window
+read. Self-hosted deployments therefore retain the legacy paths. Request
+timeout and stale grace use bounded code defaults instead of deployment
+configuration.
 
 ## Contract
 
@@ -34,8 +31,8 @@ The client reads:
 - `gates`: effective `off`, `observe`, or `enforce` instructions and parameters.
 
 Responses tolerate unknown JSON fields for additive compatibility. Unknown
-schema/action, malformed fields, missing gates, HTTP failures, authentication
-failures, and timeouts fail open.
+schema/action, malformed fields, missing gates, HTTP failures, and timeouts fail
+open.
 
 ## Cache and degradation
 
@@ -50,10 +47,10 @@ cached `enforce` is downgraded to `observe`; after the grace, the result is
 also bounds Cloud request rate when an outage returns errors immediately; cold
 failures are cached only as `off` and never as policy.
 
-`SetEmergencyDisabled(true)` is the local immediate down switch. It only returns
-`off`; it cannot promote a Cloud action. The client itself has no background
-goroutine and introduces no startup dependency; the autopilot consumer owns its
-policy-neutral accounting and recovery lifecycle separately.
+The client itself has no background goroutine and introduces no startup
+dependency; the autopilot consumer owns its policy-neutral accounting and
+recovery lifecycle separately. Cloud remains the only place that can change or
+disable the effective policy.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.
