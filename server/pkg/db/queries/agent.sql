@@ -580,9 +580,8 @@ WHERE id = $1 AND issue_id IS NULL
 -- p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
 -- here so the row stays self-consistent — e.g. provider_network's chain records
 -- attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
--- task API (MUL-4910). Generic failures keep max_attempts<=1 disabled, while an
--- enabled dedicated Codex capacity policy intentionally overrides that inherited
--- limit; this query persists whichever effective ceiling the caller computed.
+-- task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
+-- disabled (max_attempts<=1) task, so this only ever widens, never revives.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,

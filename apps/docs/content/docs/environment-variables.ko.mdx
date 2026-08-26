@@ -46,12 +46,6 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
-### 작업 재시도
-
-| 변수 | 기본값 | 설명 |
-|---|---|---|
-| `MULTICA_CODEX_CAPACITY_RETRY_COUNT` | `6` | 작업에 저장된 Codex 원본 오류가 `Selected model is at capacity. Please try a different model.`와 정확히 일치할 때 추가로 즉시 재시도하는 횟수입니다. 기본값은 총 7회 실행을 허용하며, `0`은 이 전용 정책을 비활성화합니다. 최댓값은 `20`이며, 음수·잘못된 형식·최댓값을 초과하는 값은 기본값으로 되돌리지 않고 서버 시작을 중단시킵니다. 재시도마다 작업 행을 기록하고 런타임을 실행하며 공급자를 다시 호출하기 때문입니다. 그 밖의 용량 또는 속도 제한 오류는 이 정책으로 재시도하지 않습니다. |
-
 ## 공개 주소와 브라우저 접근
 
 | 변수 | 기본값 | 설명 |

@@ -138,16 +138,13 @@ func Classify(rawError string) Reason {
 		):
 		return ReasonAgentProviderQuotaLimit
 
-	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit / Codex
-	//    selected-model capacity. This precedes rule 8 because Codex's wording
-	//    also contains the broader "selected model" witness.
+	// 5. Capacity / rate limit. 429 / 529 / overloaded / rate limit.
 	case httpCapacityCodeRe.MatchString(lower),
 		containsAny(lower,
 			"rate limit",
 			"overloaded",
 			"no capacity available",
-		),
-		IsCodexSelectedModelCapacityError(rawError):
+		):
 		return ReasonAgentProviderCapacityOrRateLimit
 
 	// 6. Provider 5xx / server error. The 5xx regex is checked here
@@ -348,20 +345,6 @@ var contextWindowExceededWitnesses = []string{
 	TerminalReasonPromptTooLong,
 }
 
-// codexSelectedModelCapacityError is Codex's complete transient model-capacity
-// error. It must be checked before the broader "selected model"
-// model-unavailable rule.
-const codexSelectedModelCapacityError = "Selected model is at capacity. Please try a different model."
-
-// IsCodexSelectedModelCapacityError reports whether rawError is exactly the
-// complete Codex capacity error. The retry gate uses the same byte-for-byte
-// predicate as classification and mixed-version normalization so the shared
-// capacity/rate-limit reason does not broaden COM-44 to unrelated provider
-// failures.
-func IsCodexSelectedModelCapacityError(rawError string) bool {
-	return rawError == codexSelectedModelCapacityError
-}
-
 // legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
 // failed skill-bundle download. It is an unambiguous witness: no other code
 // path ever produced it, and a current daemon writes "skill bundle
@@ -394,17 +377,6 @@ var legacySkillBundleReasons = map[string]bool{
 var legacyContextOverflowReasons = map[string]bool{
 	string(ReasonAgentUnknown): true,
 	"agent_error":              true,
-}
-
-// legacyCodexCapacityReasons are the labels an older daemon can report for
-// Codex's exact capacity wording. Its broad "selected model" rule chooses
-// model_not_found_or_unavailable; still older classifiers report unknown or
-// the pre-MUL-1949 coarse reason. The exact witness makes upgrading these
-// labels safe while preserving unrelated refined reasons.
-var legacyCodexCapacityReasons = map[string]bool{
-	string(ReasonAgentModelNotFoundOrUnavailable): true,
-	string(ReasonAgentUnknown):                    true,
-	"agent_error":                                 true,
 }
 
 // legacyOpenclawCLITimeoutWitnesses identify an OpenClaw config-discovery
@@ -486,13 +458,6 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable
-	}
-	// COM-44: installed daemons classify this exact error as model unavailable
-	// before the dedicated capacity witness reaches them. Upgrade their stale
-	// non-empty reason server-side so the bounded retry applies immediately.
-	if legacyCodexCapacityReasons[reason] &&
-		IsCodexSelectedModelCapacityError(rawError) {
-		return ReasonAgentProviderCapacityOrRateLimit
 	}
 	// GH #6360: the same mixed-version gap, on a failure where waiting for
 	// every host to update is more expensive. A daemon whose rule 1 predates

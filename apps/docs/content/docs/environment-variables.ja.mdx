@@ -46,12 +46,6 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
-### タスクのリトライ
-
-| 変数 | デフォルト | 説明 |
-|---|---|---|
-| `MULTICA_CODEX_CAPACITY_RETRY_COUNT` | `6` | タスクに保存された Codex の生エラーが `Selected model is at capacity. Please try a different model.` と完全に一致する場合の、追加の即時リトライ回数。デフォルトでは合計 7 回まで実行します。`0` にするとこの専用ポリシーは無効になります。上限は `20` です。負数・不正な値・上限を超える値を指定した場合は、デフォルトへフォールバックせず起動時にサーバーを停止します。リトライのたびにタスク行の書き込み、ランタイムの起動、プロバイダーへの再呼び出しが発生するためです。その他の容量不足やレート制限のエラーは、このポリシーではリトライされません。 |
-
 ## 公開アドレスとブラウザアクセス
 
 | 変数 | デフォルト | 説明 |

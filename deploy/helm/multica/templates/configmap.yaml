@@ -11,7 +11,6 @@ data:
   MULTICA_DATABASE_CONNECT_TIMEOUT: {{ .Values.backend.config.databaseConnectTimeout | quote }}
   APP_ENV: {{ .Values.backend.config.appEnv | quote }}
   MULTICA_APP_URL: {{ .Values.backend.config.appUrl | quote }}
-  MULTICA_CODEX_CAPACITY_RETRY_COUNT: {{ .Values.backend.config.codexCapacityRetryCount | quote }}
   FRONTEND_ORIGIN: {{ .Values.backend.config.frontendOrigin | quote }}
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.config.corsAllowedOrigins | quote }}
   COOKIE_DOMAIN: {{ .Values.backend.config.cookieDomain | quote }}
