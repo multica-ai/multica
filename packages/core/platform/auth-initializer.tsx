@@ -86,6 +86,14 @@ export function AuthInitializer({
         configStore
           .getState()
           .setLocalWorktreeSupported(cfg.local_worktree_supported === true);
+        // Older agent handlers returned success while silently dropping this
+        // additive field, so writes stay disabled unless the server declares
+        // the persistence contract explicitly.
+        configStore
+          .getState()
+          .setAgentStarterPromptsSupported(
+            cfg.agent_starter_prompts_supported === true,
+          );
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

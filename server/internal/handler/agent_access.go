@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -46,6 +47,30 @@ import (
 // agent/system principals, but member/team targets fail closed without a
 // matching human.
 func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType, actorID, originatorUserID, workspaceID string) bool {
+	allowed := h.invokeAgentDecision(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
+	if !allowed && actorType != "member" && originatorUserID == "" {
+		// MUL-6490: the wire reason stays the deliberately generic
+		// invocation_not_allowed (dispatch/reason.go — it must not reveal whether a
+		// target exists), which leaves the one denial a workspace CAN fix looking
+		// identical to a plain permission error. Name the root cause here, where
+		// only operators read it: the chain reached this gate with no human at its
+		// top, so member-scoped allow-lists could not match anyone. Without this
+		// line the reported failure mode (a broken originator chain N hops back)
+		// was only diagnosable by querying agent_task_queue directly.
+		slog.WarnContext(ctx, "agent invoke denied: delegation chain carries no human originator",
+			"agent_id", uuidToString(agent.ID),
+			"agent_permission_mode", agent.PermissionMode,
+			"actor_type", actorType,
+			"actor_id", actorID,
+			"workspace_id", workspaceID,
+		)
+	}
+	return allowed
+}
+
+// invokeAgentDecision is canInvokeAgent's pure verdict, split out so the gate has
+// exactly one place to observe a denial from.
+func (h *Handler) invokeAgentDecision(ctx context.Context, agent db.Agent, actorType, actorID, originatorUserID, workspaceID string) bool {
 	effectiveUser := actorID
 	if actorType != "member" {
 		// agent / system: never trust the immediate principal, only the
@@ -199,6 +224,18 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 	return ""
 }
 
+// effectiveInvocationAuthorityFromRequest returns the human principal used by
+// canInvokeAgent without changing attribution. A real top-of-chain originator
+// always wins. Only an unattributed agent request may fall back to the creator
+// of a lineage-verified autopilot issue supplied by the caller.
+func (h *Handler) effectiveInvocationAuthorityFromRequest(r *http.Request, delegationIssue *db.Issue, actorType, actorID string) string {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	if originatorUserID != "" || delegationIssue == nil {
+		return originatorUserID
+	}
+	return h.autopilotDelegationAuthorityFromRequest(r, *delegationIssue, actorType, actorID)
+}
+
 // autopilotDelegationAuthority resolves the effective invoking human for the A2A
 // invoke gate (canInvokeAgent) when a trigger comment is authored by an
 // UNATTRIBUTED autopilot dispatch delegating mid-chain on the very issue that
@@ -217,9 +254,12 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 // granted ONLY when the SPEAKING run is verified to be doing work on THIS very
 // autopilot-created issue. Binding to issue provenance + an empty originator alone
 // is NOT enough — an agent running a task on some OTHER issue can legitimately
-// comment here (comment.go CreateComment only stamps source_task_id when the
-// authoring task's issue matches), so it could otherwise borrow a stranger
-// autopilot creator's invoke rights just by mentioning on that autopilot's issue.
+// comment here, and since MUL-6490 that cross-issue lineage IS persisted on
+// source_task_id (so the human originator chain survives the hop), so it could
+// otherwise borrow a stranger autopilot creator's invoke rights just by mentioning
+// on that autopilot's issue. The task.issue_id check below is what keeps that shut:
+// this function is the sole owner of the same-issue requirement, which is why the
+// stamp itself no longer carries it.
 // `task` MUST therefore come from a server-trusted source — the X-Task-ID header
 // on create/preview, or the stored comment.source_task_id on reconcile/edit —
 // never a client-supplied field, and authority is granted only when ALL hold:
@@ -299,15 +339,21 @@ func (h *Handler) autopilotDelegationAuthorityFromComment(ctx context.Context, i
 	return h.autopilotDelegationAuthority(ctx, issue, comment.AuthorType, uuidToString(comment.AuthorID), task)
 }
 
-// commentSourceTaskIDForIssue returns the agent's currently-executing task (from
-// the X-Task-ID header) when it is running on the given issue, else an invalid
-// UUID. This is the exact issue-scoped lineage CreateComment stamps onto
-// source_task_id; a cross-issue (or missing) task yields invalid so the persisted
-// lineage — and every authority/originator resolution that reads it — fails closed
-// (MUL-4857).
-func (h *Handler) commentSourceTaskIDForIssue(r *http.Request, issue db.Issue) pgtype.UUID {
+// commentSourceTaskID returns the agent's currently-executing task (from the
+// server-trusted X-Task-ID header), else an invalid UUID. This is the exact
+// lineage CreateComment stamps onto source_task_id, so an edit re-stamps what a
+// fresh authoring of the same content would have stamped and the two resolvers
+// can never disagree (MUL-6490).
+//
+// The task is NOT required to be running on the edited comment's issue: the
+// stamp records "which run wrote this", and a run may legitimately write on
+// another issue. Authority rules that additionally require same-issue work keep
+// that check themselves — autopilotDelegationAuthority verifies
+// task.issue_id == issue.id before granting the autopilot creator's invoke
+// rights, so a cross-issue lineage still fails closed there (MUL-4857).
+func (h *Handler) commentSourceTaskID(r *http.Request) pgtype.UUID {
 	task, ok := h.taskFromRequestHeader(r)
-	if !ok || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
+	if !ok {
 		return pgtype.UUID{}
 	}
 	return task.ID

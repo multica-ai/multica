@@ -13,6 +13,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
+  starterPrompts: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
@@ -37,14 +38,33 @@ describe("agent builder protocol", () => {
     expect(parseBuilderDraft("<agent_draft>not json</agent_draft>")).toBeNull();
   });
 
+  it("accepts up to three complete starter prompts from the builder", () => {
+    const merged = mergeBuilderDraft(
+      draft(),
+      {
+        starter_prompts: [
+          { label: " Review a PR ", prompt: " Review the open PR. " },
+          { label: "", prompt: "Ignored" },
+        ],
+      },
+      new Set(),
+      new Set(),
+      new Set(["model-1"]),
+    );
+
+    expect(merged.starterPrompts).toEqual([
+      { label: "Review a PR", prompt: "Review the open PR." },
+    ]);
+  });
+
   // Streaming delivers the reply token by token, so for the seconds it takes to
   // emit the JSON there is an opening tag and no closing one. The closed-form
   // pattern cannot match that, and the raw payload scrolled past the user on
   // every turn.
   it("hides a block that is still being streamed", () => {
-    expect(
-      stripBuilderDraft('Here you go.\n<agent_draft>{"name":"Rel'),
-    ).toBe("Here you go.");
+    expect(stripBuilderDraft('Here you go.\n<agent_draft>{"name":"Rel')).toBe(
+      "Here you go.",
+    );
   });
 
   it("repairs literal line breaks emitted inside the instructions string", () => {
@@ -56,14 +76,19 @@ Return findings."}</agent_draft>`;
 
     expect(parseBuilderDraft(content)).toEqual({
       name: "Reviewer",
-      instructions: "# Role\nReview every change.\n\n# Output\nReturn findings.",
+      instructions:
+        "# Role\nReview every change.\n\n# Output\nReturn findings.",
     });
   });
 
   it("round-trips only the user's natural-language request for chat display", () => {
+    const currentDraft = draft();
+    currentDraft.starterPrompts = [
+      { label: "Plan a release", prompt: "Plan the next release." },
+    ];
     const content = encodeBuilderInput(
       "Create a release manager",
-      draft(),
+      currentDraft,
       [],
       [],
       { id: "runtime-1", name: "Codex", provider: "codex" },
@@ -80,6 +105,11 @@ Return findings."}</agent_draft>`;
       available_runtime_models: [
         { id: "gpt-5.5", label: "GPT-5.5", provider: "openai" },
       ],
+      current_draft: {
+        starter_prompts: [
+          { label: "Plan a release", prompt: "Plan the next release." },
+        ],
+      },
     });
     expect(decodeBuilderInput("ordinary chat message")).toBe(
       "ordinary chat message",
@@ -101,10 +131,12 @@ Return findings."}</agent_draft>`;
       [],
     );
 
-    expect(pickBuilderRestore(null, { id: "msg-1", content: encoded })).toEqual({
-      id: "msg-1",
-      content: "Create a release manager",
-    });
+    expect(pickBuilderRestore(null, { id: "msg-1", content: encoded })).toEqual(
+      {
+        id: "msg-1",
+        content: "Create a release manager",
+      },
+    );
     expect(pickBuilderRestore(null, null)).toBeNull();
   });
 
@@ -193,8 +225,13 @@ Return findings."}</agent_draft>`;
       ).model,
     ).toBe("model-1");
     expect(
-      mergeBuilderDraft(draft(), { model: "model-1" }, new Set(), new Set(), null)
-        .model,
+      mergeBuilderDraft(
+        draft(),
+        { model: "model-1" },
+        new Set(),
+        new Set(),
+        null,
+      ).model,
     ).toBe("model-1");
     expect(
       mergeBuilderDraft(

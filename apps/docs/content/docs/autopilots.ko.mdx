@@ -143,10 +143,13 @@ Multica는 최근 실행이 계속 실패하는지 정기적으로 확인합니�
 ## CLI 사용
 
 ```bash
+multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
+
+`autopilot get`은 기본적으로 `webhook_token`, `webhook_path`, `webhook_url`을 `null`로 설정하고 대신 `has_webhook_token`과 `webhook_token_hint`를 반환합니다. 실제 자격 증명이 꼭 필요할 때만 `--show-secrets`를 추가하세요. CLI는 경고를 stderr로 출력하므로 파이프로 전달되는 JSON은 유효하게 유지됩니다.
 
 전체 인수는 [CLI 사용](/cli)을 참고하세요.
 

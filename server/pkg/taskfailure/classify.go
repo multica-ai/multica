@@ -190,22 +190,30 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
-	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
-	case containsAny(lower,
-		"stream disconnected",
-		opencodeStreamEndedPrefix,
-		"connection closed",
-		"mid-response",
-		"error sending request",
-		"unable to connect",
-		"dial tcp",
-		"connection refused",
-		"connectionrefused",
-		"dns",
-		"i/o timeout",
-		"deadline exceeded",
-		"timeout exceeded while awaiting",
-	):
+	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
+	//    the bare strings "Connection error." and "Request timed out." on
+	//    turn_end.errorMessage (then exits 1). Those used to fall through to
+	//    process_failure via "exit status 1" and terminate the task with no
+	//    retry (BHD-135). isPiProviderNetworkError matches only the exact bare
+	//    messages and the stable Pi/OMP exit composite, rather than treating
+	//    the same broad substrings from local tools or MCP servers as retryable.
+	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
+	case isPiProviderNetworkError(lower),
+		containsAny(lower,
+			"stream disconnected",
+			opencodeStreamEndedPrefix,
+			"connection closed",
+			"mid-response",
+			"error sending request",
+			"unable to connect",
+			"dial tcp",
+			"connection refused",
+			"connectionrefused",
+			"dns",
+			"i/o timeout",
+			"deadline exceeded",
+			"timeout exceeded while awaiting",
+		):
 		return ReasonAgentProviderNetwork
 
 	// 8. Model not found / unavailable. The SQL uses `%model%not%found%`,
@@ -395,6 +403,17 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 	string(ReasonAgentUnknown):         true,
 	string(ReasonAgentProviderNetwork): true,
 	"agent_error":                      true,
+}
+
+func isPiProviderNetworkError(lower string) bool {
+	for _, message := range []string{"connection error.", "request timed out."} {
+		if lower == message ||
+			strings.HasPrefix(lower, message+"; pi exited with error: ") ||
+			strings.HasPrefix(lower, message+"; omp exited with error: ") {
+			return true
+		}
+	}
+	return false
 }
 
 // opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal

@@ -138,6 +138,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
 		return
 	}
+	session, err = qtx.MarkChatSessionExplicitlyCreated(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mark chat session explicit")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit chat session create")
@@ -237,6 +242,10 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -322,7 +331,15 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
+	resp := chatSessionToResponse(session)
+	// hydrateChatSessionChannelMetadata mutates the slice element, so retain a
+	// concrete slice here rather than passing a temporary value to writeJSON.
+	responses := []ChatSessionResponse{resp}
+	if err := h.hydrateChatSessionChannelMetadata(r.Context(), responses); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat channel metadata")
+		return
+	}
+	writeJSON(w, http.StatusOK, responses[0])
 }
 
 type UpdateChatSessionRequest struct {
@@ -893,8 +910,20 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// query error here is treated as "not first" so we simply skip generation
 	// (best-effort — never block the send).
 	hadUserMessage := true
-	if existed, err := h.Queries.ChatSessionHasUserMessage(r.Context(), session.ID); err == nil {
+	if existed, err := h.Queries.ChatSessionHasPublicUserMessage(r.Context(), session.ID); err == nil {
 		hadUserMessage = existed
+	}
+	channelBacked := false
+	channelSourceKnown := true
+	if !hadUserMessage {
+		if _, err := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), session.ID); err == nil {
+			channelBacked = true
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			// Title generation is optional. If source authority is unavailable,
+			// skip it rather than risk treating a channel manual rename as an
+			// auto-generated fallback and overwriting it.
+			channelSourceKnown = false
+		}
 	}
 
 	// Persist the whole turn atomically (MUL-4351): the owning task, the user
@@ -921,6 +950,11 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := sent.Message
 	task := sent.Task
+	currentTitle := session.Title
+	if sent.InitialTitle != "" {
+		currentTitle = sent.InitialTitle
+		h.ChannelChatTitleInitialized(session.WorkspaceID, session.CreatorID, session.ID, sent.InitialTitle)
+	}
 
 	// AttachmentIDs actually bound by the server. Requested-but-unbound ids are
 	// surfaced to the client so it can warn the user (see SendChatMessageResponse).
@@ -962,8 +996,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// silently keeps the original first-message-derived title. session.Title
 	// is the default/original title observed here and drives the CAS so a
 	// manual rename mid-generation is never clobbered.
-	if !hadUserMessage {
-		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, session.Title, req.Content)
+	shouldGenerateTitle := shouldGenerateFirstMessageTitle(hadUserMessage, currentTitle, sent.InitialTitle, channelBacked, channelSourceKnown)
+	if shouldGenerateTitle {
+		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, currentTitle, req.Content)
 	}
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
@@ -974,6 +1009,19 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
 	})
+}
+
+func shouldGenerateFirstMessageTitle(hadUserMessage bool, currentTitle, initializedTitle string, channelBacked, channelSourceKnown bool) bool {
+	if hadUserMessage || currentTitle == "" || !channelSourceKnown {
+		return false
+	}
+	if channelBacked {
+		// For an explicitly empty /new Chat, a pre-existing non-empty title is
+		// a manual rename. Only a title initialized by this send is eligible for
+		// the best-effort LLM replacement; otherwise manual naming always wins.
+		return initializedTitle != ""
+	}
+	return true
 }
 
 type ChatMessagesCursorResponse struct {
@@ -1225,11 +1273,29 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID        string                   `json:"task_id,omitempty"`
-	Status        string                   `json:"status,omitempty"`
-	CreatedAt     string                   `json:"created_at,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	// WaitReason explains a waiting_local_directory hold: which directory the
+	// task is parked on and, when known, the short id of the task holding it.
+	// Emitted only for that status — on any other one the column still carries
+	// the last hold's text, which would read as a live explanation for a task
+	// that is running fine. Absent on older servers, which the client renders
+	// as today's bare "Waiting for local directory".
+	WaitReason    string                   `json:"wait_reason,omitempty"`
 	SupportsQueue bool                     `json:"supports_queue"`
 	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
+}
+
+// waitReasonForStatus gates the stored hold text on the status it describes.
+// wait_reason is never cleared when a task resumes — the daemon writes it once
+// on the way into the hold — so returning it unconditionally would attach "held
+// by task abc12345" to a task that has been running for ten minutes.
+func waitReasonForStatus(status string, reason pgtype.Text) string {
+	if status != "waiting_local_directory" || !reason.Valid {
+		return ""
+	}
+	return strings.TrimSpace(reason.String)
 }
 
 type QueuedChatTaskResponse struct {
@@ -1606,6 +1672,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		TaskID:        uuidToString(head.ID),
 		Status:        head.Status,
 		CreatedAt:     timestampToString(head.CreatedAt),
+		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
 		SupportsQueue: true,
 		QueuedTasks:   queued,
 	})
@@ -1877,9 +1944,50 @@ type ChatSessionResponse struct {
 	LastMessage *ChatLastMessage `json:"last_message"`
 	// Pinned marks a chat the user has stuck to the top of the list. Populated
 	// by list endpoints and by the pin/unpin + single-session responses.
-	Pinned    bool   `json:"pinned"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	Pinned bool `json:"pinned"`
+	// ChannelSource is present only for Chats created from an external channel.
+	// IsCurrentChannelRoute distinguishes the active route generation from an
+	// older Chat that remains readable and writable in Multica.
+	ChannelSource         *ChatSessionChannelSourceResponse `json:"channel_source,omitempty"`
+	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
+	CreatedAt             string                            `json:"created_at"`
+	UpdatedAt             string                            `json:"updated_at"`
+}
+
+type ChatSessionChannelSourceResponse struct {
+	ChannelType    string `json:"channel_type"`
+	InstallationID string `json:"installation_id"`
+	RouteRevision  int64  `json:"route_revision"`
+}
+
+func (h *Handler) hydrateChatSessionChannelMetadata(ctx context.Context, sessions []ChatSessionResponse) error {
+	if len(sessions) == 0 {
+		return nil
+	}
+	ids := make([]pgtype.UUID, 0, len(sessions))
+	for _, session := range sessions {
+		ids = append(ids, parseUUID(session.ID))
+	}
+	bindings, err := h.Queries.ListChannelChatSessionBindingsBySessions(ctx, ids)
+	if err != nil {
+		return err
+	}
+	bySession := make(map[string]db.ChannelChatSessionBinding, len(bindings))
+	for _, binding := range bindings {
+		bySession[uuidToString(binding.ChatSessionID)] = binding
+	}
+	for i := range sessions {
+		binding, ok := bySession[sessions[i].ID]
+		if !ok {
+			continue
+		}
+		current := !binding.RetiredAt.Valid
+		sessions[i].ChannelSource = &ChatSessionChannelSourceResponse{
+			ChannelType: binding.ChannelType, InstallationID: uuidToString(binding.InstallationID), RouteRevision: binding.RouteRevision,
+		}
+		sessions[i].IsCurrentChannelRoute = &current
+	}
+	return nil
 }
 
 // ChatLastMessage is a preview of a session's most recent message, used to

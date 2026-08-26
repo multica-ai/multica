@@ -1,11 +1,11 @@
 ---
 title: Slack Bot
-description: 에이전트용 Slack Bot을 만들어 DM, 채널, /issue 명령에서 사용합니다.
+description: 에이전트용 Slack Bot을 만들어 DM, 채널, /issue, /new 및 /clear 명령에서 사용합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica는 사용자가 직접 만든 Slack app을 사용합니다. 연결하면 팀 멤버가 Bot과 DM을 나누고 채널에서 @멘션하거나 `/issue`로 이슈를 만들 수 있습니다.
+Multica는 사용자가 직접 만든 Slack app을 사용합니다. 연결하면 팀 멤버가 Bot과 DM을 나누고, 채널에서 @멘션하고, `/issue`로 이슈를 만들고, `/new`으로 새 Multica Chat을 시작하거나 `/clear`로 현재 Chat의 에이전트 컨텍스트를 초기화할 수 있습니다.
 
 Slack app 하나는 Multica 에이전트 하나에 대응합니다. 여러 에이전트를 연결하려면 에이전트마다 별도의 app을 만드세요.
 
@@ -35,6 +35,12 @@ features:
     - command: /issue
       description: Create a Multica issue
       usage_hint: "[description]"
+    - command: /new
+      description: Start a new Multica chat
+      usage_hint: "[message]"
+    - command: /clear
+      description: Clear the current Multica chat context
+      usage_hint: "[message]"
 oauth_config:
   scopes:
     bot:
@@ -63,7 +69,11 @@ settings:
   token_rotation_enabled: false
 ```
 
-만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`가 작동하지 않을 수 있습니다.
+만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`, `/new`, `/clear`가 작동하지 않을 수 있습니다.
+
+<Callout type="warning">
+Slack slash command 이름은 workspace 전체에서 공유됩니다. 설치된 다른 app이 이미 `/new` 또는 `/clear`를 사용 중이면 app을 만들거나 업데이트할 때 충돌하는 명령이 거부됩니다. 충돌을 해결하거나 메시지 형식인 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내 네이티브 slash command 가로채기를 우회하세요.
+</Callout>
 
 <Callout type="warning">
 첨부 파일 지원이 추가되기 전에 이 Slack app을 설치했다면 Bot scope에 `files:read`를 추가하고 workspace에 app을 다시 설치하세요. app을 다시 설치하기 전에는 새 scope가 기존 Bot token에 적용되지 않습니다.
@@ -135,6 +145,20 @@ DM이나 Bot을 @멘션한 채널 메시지에 파일을 그대로 첨부하세�
 
 이 명령에는 Bot @멘션이 필요 없습니다. Multica가 설명을 현재 Bot에 연결된 에이전트로 보내고 에이전트가 제목과 본문을 정리해 이슈를 만듭니다. Slack에는 먼저 나에게만 보이는 접수 메시지가 표시되며 생성이 끝나면 Multica 인박스에 알림이 도착합니다.
 
+### `/new`으로 새 Chat 시작하기
+
+Bot과의 DM에서 `/new`을 보내면 비어 있는 새 Chat이 즉시 생성되어 Multica에 표시됩니다. `/new <메시지>`를 보내면 해당 메시지가 새 Chat의 첫 번째 대화가 됩니다. 인자 없는 `/new`은 첫 번째 유효한 사용자 메시지가 도착할 때까지 “새 채팅”으로 표시되고, 이후에는 기존의 첫 메시지 제목 처리 방식을 따릅니다.
+
+이전 Chat은 Multica의 웹, 데스크톱, 모바일에 남아 있으며 계속 메시지를 보낼 수 있습니다. 이 Slack 대화의 후속 메시지만 새 Chat으로 라우팅됩니다.
+
+채널이나 thread에서는 Slack의 네이티브 slash command payload로 대상 thread를 식별할 수 없습니다. 대상 thread에서 `@Multica /new [메시지]`를 보내세요.
+
+### `/clear`로 현재 Chat 컨텍스트 지우기
+
+Bot과의 DM에서 `/clear`를 보내면 현재 Multica Chat은 유지되고 에이전트에게 보이는 컨텍스트만 초기화됩니다. 전체 Chat 기록은 Multica에 그대로 저장됩니다. `/clear <메시지>`는 해당 메시지를 새 컨텍스트의 첫 번째 대화로 사용하고, 인자 없는 `/clear`는 다음 실제 메시지에 경계를 적용합니다.
+
+채널이나 thread에서는 대상 thread에서 `@Multica /clear [메시지]`를 보내세요.
+
 ## 연결 관리
 
 **설정 → 연동**에서 연결된 모든 Slack Bot을 확인할 수 있습니다. 워크스페이스 owner와 admin이 연결을 해제할 수 있습니다.
@@ -165,7 +189,7 @@ API 서비스를 다시 시작한 뒤 Slack app을 연결하세요. 이 키는 �
 - **app을 확인할 수 없음**: manifest에 `users:read`가 포함되어 있는지 확인하고 권한을 업데이트한 뒤 app을 다시 설치합니다.
 - **DM 메뉴가 없음**: `app_home.messages_tab_enabled`가 `true`인지 확인합니다.
 - **채널에서 답변이 없음**: Bot이 채널에 초대되었고 메시지에서 @멘션했는지 확인합니다.
-- **`/issue`가 없음**: manifest에 slash command와 `commands` scope가 포함되어 있는지 확인하고 app을 다시 설치합니다.
+- **`/issue`, `/new` 또는 `/clear`가 없음**: manifest에 세 slash command와 `commands` scope가 포함되어 있는지 확인하고 app을 다시 설치합니다. Slack에서 `/new` 또는 `/clear`가 이미 사용 중이라고 표시되면 `@Multica` 메시지 형식을 사용하거나 workspace 수준의 명령 충돌을 먼저 해결하세요.
 - **파일이 에이전트에 도착하지 않음**: manifest에 `files:read`가 포함되어 있는지, scope를 추가한 뒤 app을 다시 설치했는지 확인하고, 파일이 20 MiB 이하인지도 확인합니다.
 - **Bot이 실행되지 않음**: 에이전트가 보관 처리되었는지, 사용하는 [런타임](/daemon-runtimes)이 온라인인지 확인합니다.
 

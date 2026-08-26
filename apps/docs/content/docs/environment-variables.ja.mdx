@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | ローカルの `multica` データベース | PostgreSQL 接続文字列 |
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | コンテナ起動時に migration と API が共有する、一時的なデータベース障害への再試行時間。`0` にすると各フェーズで 1 回だけ試行します |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 起動時の接続試行ごとのフォールバックタイムアウト。pgx ネイティブの `connect_timeout`、`PGCONNECT_TIMEOUT`、service 設定が優先されます |
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
@@ -40,6 +42,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
+| `MULTICA_TASK_QUEUED_TTL` | `2h` | タスクがキュー内でクレームされずに置かれることのできる最長時間。超過すると `queued_expired` で失敗します。低並行度のランタイムが長時間実行中の作業の後ろに正当に待機しうる場合は大きくしてください |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
@@ -50,9 +53,14 @@ Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeco
 | `FRONTEND_ORIGIN` | 空 | ユーザーがアクセスするフロントエンドの origin。CORS、cookie、招待リンクに使われます |
 | `MULTICA_APP_URL` | `FRONTEND_ORIGIN` にフォールバック | ユーザーが到達できる Web アドレス。CLI ログインとアカウント連携リンクが使います |
 | `MULTICA_PUBLIC_URL` | 空 | 公開 API アドレス。webhook URL とランタイム接続案内に使われます |
+| `MULTICA_DAEMON_SERVER_URL` | `MULTICA_PUBLIC_URL`、次に `MULTICA_APP_URL` / `FRONTEND_ORIGIN` にフォールバック | API プロセスが `multica setup self-host` コマンドに埋め込むサーバー URL。デーモンから到達する API URL が公開 webhook URL と異なる場合に設定します |
 | `CORS_ALLOWED_ORIGINS` | 空 | 追加で許可する HTTP origin。カンマ区切り |
 | `ALLOWED_ORIGINS` | CORS / フロントエンド設定にフォールバック | WebSocket origin の許可リスト。カンマ区切り |
 | `COOKIE_DOMAIN` | 空 | フロントエンドと API の host が異なり、ブラウザが API ドメインへ直接アクセスする場合は必須。単一ドメイン構成では空のまま |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` は認証なしの `/api/config` エンドポイントから返され、クライアントが読み取れます。公開設定として扱い、認証情報・トークンなどのシークレットを含めないでください。
+</Callout>
 
 フロントエンドと API が異なる host を使い、ブラウザが API ドメインへ直接アクセスする構成では、`COOKIE_DOMAIN` の設定が必須です。設定しないとブラウザが CSRF cookie を読めず、すべての書き込みリクエストが `403 CSRF validation failed` を返す一方、読み取りは正常に動きます。値には、両方の host を同時にカバーできる最も狭い親ドメインを使ってください（`.example.com` より `.agent.example.com`）。この設定はログインセッション cookie をそのドメイン配下のすべての host に広げるため、それらの host がすべて同一の信頼できる運用主体のものである場合にのみ使えます。変更後は両方の host で古い cookie を削除し、再ログインしてください。[セルフホストクイックスタート](/self-host-quickstart#3-アクセス方法を選ぶ)の同一オリジン構成（ブラウザは app ドメインのみアクセス）に従う場合は、空のままで構いません。IP アドレスは指定しないでください。ブラウザは Domain が IP の cookie を無視します。
 
@@ -173,6 +181,10 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
 | セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
 | セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | 保存済み secret と surface 起動 URL を暗号化する base64 形式の 32 バイト鍵 |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | バックエンドへルーティングする Cookie なしの専用 origin。app/API origin と分離し、`Host` を保持すること |
+| Plugins | `MULTICA_PLUGIN_API_URL` | バージョンを含む Plugin Public API の完全な Base URL（例: `https://plugin-api.example.com/v1`）。未設定時は `MULTICA_PUBLIC_URL` + `/v1` |
+| Plugins | `MULTICA_PLUGIN_DIR` | 開発時にローカル plugin bundle を公開するための任意の絶対ディレクトリ |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
@@ -228,7 +240,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用にタスクディレクトリを保持 |
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。ZeroClaw は `MULTICA_ZEROCLAW_PATH` に対応しますが、モデル変数はありません。モデルは ZeroClaw のエージェント設定で管理します。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

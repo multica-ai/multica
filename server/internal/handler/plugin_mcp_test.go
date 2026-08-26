@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -58,8 +59,8 @@ const httpHookManifest = `{
 func installMCPPlugin(t *testing.T, manifest string, scopes []string) string {
 	t.Helper()
 	withPluginsV1Flag(t, testHandler, true)
-	source := withLocalPluginSource(t, manifest)
-	body, _ := json.Marshal(map[string]any{"source_url": source, "granted_scopes": scopes})
+	versionID := withLocalPluginSource(t, manifest)
+	body, _ := json.Marshal(map[string]any{"version_id": versionID, "granted_scopes": scopes})
 	recorder := httptest.NewRecorder()
 	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
 	if recorder.Code != http.StatusCreated {
@@ -129,19 +130,31 @@ const scopelessMCPManifest = `{
   }
 }`
 
-// Refused at INSTALL, not at discovery: manifest validation already requires
+// Refused at PUBLISH, not at discovery: manifest validation already requires
 // every hook transport URL to sit inside a declared `net:` scope, and that check
 // does not care which transport it is. The equivalent check inside
 // DiscoverMCPHookTools is a second layer behind this one, not the gate.
-func TestMCPHookWithoutANetScopeCannotBeInstalled(t *testing.T) {
+//
+// The gate used to sit at install, because that was the first moment anybody
+// parsed the manifest. Now the artifact is parsed when the author hands it over,
+// so a manifest like this never becomes something an administrator can be shown.
+func TestMCPHookWithoutANetScopeCannotBePublished(t *testing.T) {
 	withPluginsV1Flag(t, testHandler, true)
-	source := withLocalPluginSource(t, scopelessMCPManifest)
-	body, _ := json.Marshal(map[string]any{"source_url": source, "granted_scopes": []string{"issues:read"}})
+	root := t.TempDir()
+	writeLocalPluginManifest(t, root, scopelessMCPManifest)
+	previousDir := testHandler.PluginService.LocalDir
+	testHandler.PluginService.LocalDir = root
+	t.Cleanup(func() { testHandler.PluginService.LocalDir = previousDir })
 
+	body, _ := json.Marshal(map[string]string{"name": "hello"})
 	recorder := httptest.NewRecorder()
-	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
+	testHandler.PublishLocalPluginPackage(recorder,
+		pluginHandlerRequest(http.MethodPost, "/plugins/packages/local", body, map[string]string{"id": testWorkspaceID}))
 	if recorder.Code == http.StatusCreated {
-		t.Fatal("a hook pointing outside its granted net: scopes was installed")
+		t.Fatal("a hook pointing outside its declared net: scopes was published")
+	}
+	if !strings.Contains(recorder.Body.String(), "net: scope") {
+		t.Fatalf("the refusal does not name the reason: %s", recorder.Body.String())
 	}
 }
 

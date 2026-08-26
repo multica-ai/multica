@@ -143,7 +143,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("traecli stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start traecli: %w", err)
 	}
@@ -225,6 +225,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

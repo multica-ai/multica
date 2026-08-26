@@ -68,6 +68,16 @@ type ActiveSiblingRunData struct {
 	StartedAt       string `json:"started_at,omitempty"`
 }
 
+// IssueStatusData mirrors one active custom workspace status from the claim
+// payload (MUL-6460). Mirror field: internal/handler/agent.go
+// TaskIssueStatusData, same JSON names.
+type IssueStatusData struct {
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	Category    string `json:"category"`
+	Description string `json:"description,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -88,7 +98,14 @@ type Task struct {
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
-	WorkspaceContext              string                 `json:"workspace_context,omitempty"`
+	WorkspaceContext string `json:"workspace_context,omitempty"`
+	// IssueStatuses mirrors the claim payload's active CUSTOM status catalog
+	// (MUL-6460): key/name/category/description per status, already in catalog
+	// order. Rendered into the brief's status-command line; empty (including on
+	// old servers that never send the field) keeps the brief byte-identical to
+	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
+	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
+	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
 	ActiveSiblingRuns             []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
@@ -131,6 +148,7 @@ type Task struct {
 	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
+	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // assignment handoff instruction; rendered into the opening prompt + issue_context.md
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader

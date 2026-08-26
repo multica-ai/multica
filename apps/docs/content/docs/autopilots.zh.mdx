@@ -143,10 +143,13 @@ Multica 会定期检查近期运行是否持续失败：过去 7 天内已完成
 ## 使用 CLI
 
 ```bash
+multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
+
+`autopilot get` 默认把 `webhook_token`、`webhook_path` 和 `webhook_url` 设为 `null`，并返回 `has_webhook_token` 与 `webhook_token_hint`。只有确实需要获取当前有效凭证时才添加 `--show-secrets`；CLI 会把警告输出到 stderr，确保管道中的 JSON 仍然有效。
 
 完整参数见[使用 CLI](/cli)。
 

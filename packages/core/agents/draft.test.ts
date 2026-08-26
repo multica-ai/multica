@@ -15,6 +15,7 @@ const draft = (): AgentDraft => ({
   name: "Old name",
   description: "Old description",
   instructions: "Old instructions",
+  starterPrompts: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
@@ -99,6 +100,54 @@ describe("duplicate access", () => {
         invocation_targets: [{ target_type: "workspace", target_id: null }],
       }).permissionScope,
     ).toBe("workspace");
+  });
+});
+
+describe("agent starter prompts", () => {
+  it("copies prompts into a duplicate and the create request", () => {
+    const starterPrompts = [
+      { label: "Review a PR", prompt: "Review the open pull request." },
+    ];
+    const duplicate = buildDuplicateDraft(
+      sourceAgent({ starter_prompts: starterPrompts }),
+      {
+        runtimes: [CODEX_RUNTIME],
+        currentUserId: "user-1",
+        fallbackRuntimeId: "runtime-2",
+        nameSuffix: " (Copy)",
+      },
+    );
+
+    expect(duplicate.starterPrompts).toEqual(starterPrompts);
+    expect(
+      buildCreateAgentRequest({ draft: duplicate, runtimeId: "runtime-1" })
+        .starter_prompts,
+    ).toEqual(starterPrompts);
+  });
+
+  it("trims prompt fields before submission", () => {
+    const request = buildCreateAgentRequest({
+      draft: {
+        ...draft(),
+        starterPrompts: [
+          { label: "  Plan a release  ", prompt: "  Plan the next release.  " },
+        ],
+      },
+      runtimeId: "runtime-1",
+    });
+
+    expect(request.starter_prompts).toEqual([
+      { label: "Plan a release", prompt: "Plan the next release." },
+    ]);
+  });
+
+  it("omits the field when there are no prompts", () => {
+    const request = buildCreateAgentRequest({
+      draft: draft(),
+      runtimeId: "runtime-1",
+    });
+
+    expect(request).not.toHaveProperty("starter_prompts");
   });
 });
 

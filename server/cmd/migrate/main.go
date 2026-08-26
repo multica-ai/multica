@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attributionbackfill"
+	"github.com/multica-ai/multica/server/internal/chatoriginbackfill"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/migrations"
 	"github.com/multica-ai/multica/server/internal/taskusagebackfill"
@@ -27,6 +31,35 @@ import (
 // not added to (up) or removed from (down) schema_migrations, so the next run
 // retries the hook + migration.
 type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
+
+// migrationCondition decides whether a pending migration's SQL should execute.
+// A false result still records the migration as applied (or rolled back), which
+// lets one migration encode environment-specific DDL without blocking later
+// versions. Conditions must be read-only and idempotent; schema changes belong
+// in the migration file so they remain visible to review and rollback tooling.
+type migrationCondition func(ctx context.Context, conn *pgxpool.Conn) (apply bool, reason string, err error)
+
+// usableIndexRequirement describes the exact index shape that may replace a
+// fallback. Checking only extension or relation existence is unsafe: historical
+// pg_bigm migrations swallowed CREATE INDEX errors, and an interrupted
+// concurrent build can leave an INVALID relation with the expected name.
+type usableIndexRequirement struct {
+	IndexRegclass string
+	TableRegclass string
+	AccessMethod  string
+	OperatorClass string
+	Expression    string
+	Extension     string
+}
+
+var commentContentBigramIndex = usableIndexRequirement{
+	IndexRegclass: "public.idx_comment_content_bigm",
+	TableRegclass: "public.comment",
+	AccessMethod:  "gin",
+	OperatorClass: "gin_bigm_ops",
+	Expression:    "lower(content)",
+	Extension:     "pg_bigm",
+}
 
 // preMigrationHooks wires migration version → hook. The version key is
 // the file basename without the `.up.sql` suffix, matching what
@@ -178,6 +211,9 @@ var concurrentIndexCleanups = map[string]string{
 	"305_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
+	"384_create_dingtalk_group_presence_identity_index":         "idx_dingtalk_group_presence_installation_conversation",
+	"385_create_dingtalk_group_presence_activity_index":         "idx_dingtalk_group_presence_workspace_activity",
+	"388_create_dingtalk_bot_identity_installation_index":       "idx_dingtalk_bot_identity_installation",
 	"309_agent_runtime_id_index":                                "idx_agent_runtime_id",
 	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
 	"316_workspace_mcp_server_name_unique":                      "idx_workspace_mcp_server_workspace_name",
@@ -209,6 +245,32 @@ var concurrentIndexCleanups = map[string]string{
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
 	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
 	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
+	"378_channel_chat_context_generation_key":                   "channel_chat_context_generation_session_revision_idx",
+	"390_agent_task_queue_dispatched_reclaim_v2_index":          "idx_agent_task_queue_dispatched_reclaim_v2",
+	"393_plugin_package_workspace_key_index":                    "idx_plugin_package_workspace_key",
+	"394_plugin_package_version_unique_index":                   "idx_plugin_package_version_unique",
+	"395_plugin_package_version_package_index":                  "idx_plugin_package_version_package",
+	"396_plugin_package_file_path_index":                        "idx_plugin_package_file_path",
+	"397_plugin_installation_package_version_index":             "idx_plugin_installation_package_version",
+	"398_issue_workspace_status_position_index":                 "idx_issue_workspace_status_position",
+	"400_plugin_hook_schedule_installation_key_index":           "idx_plugin_hook_schedule_installation_key",
+	"401_plugin_hook_schedule_enabled_index":                    "idx_plugin_hook_schedule_enabled",
+	"408_issue_source_context_id_index":                         "idx_issue_source_context_id",
+	"409_issue_source_context_issue_index":                      "idx_issue_source_context_issue",
+	"410_issue_source_context_origin_task_index":                "idx_issue_source_context_origin_task",
+	"411_attachment_source_context_index":                       "idx_attachment_source_context",
+	"412_issue_source_context_object_intent_key_index":          "idx_issue_source_context_object_intent_key",
+	"413_issue_source_context_object_intent_due_index":          "idx_issue_source_context_object_intent_due",
+	"414_issue_source_context_object_intent_context_index":      "idx_issue_source_context_object_intent_context",
+	"416_seat_capacity_operation_token_index":                   "idx_seat_capacity_outbox_operation_token",
+	"418_seat_capacity_due_index":                               "idx_seat_capacity_outbox_due",
+	"419_seat_capacity_share_join_index":                        "idx_seat_capacity_outbox_share_join",
+	"421_channel_chat_active_route_index":                       "idx_channel_chat_session_binding_active_route",
+	"423_channel_task_delivery_pkey_index":                      "channel_task_delivery_pkey",
+	"426_channel_outbound_message_id_index":                     "idx_channel_outbound_message_id",
+	"428_channel_task_delivery_binding_index":                   "idx_channel_task_delivery_binding",
+	"429_channel_task_delivery_installation_index":              "idx_channel_task_delivery_installation",
+	"430_channel_outbound_message_binding_index":                "idx_channel_outbound_message_binding_route",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -222,17 +284,22 @@ var concurrentDownIndexCleanups = map[string]string{
 	"256_drop_agent_task_queue_chat_pending_v2":             "idx_agent_task_queue_chat_pending_v2",
 	"258_drop_pending_issue_agent_v1":                       "idx_one_pending_task_per_issue_agent",
 	"262_drop_agent_task_queue_terminal_completed_at_v1":    "idx_agent_task_queue_terminal_completed_at",
+	"422_channel_chat_route_history":                        "channel_chat_session_binding_installation_id_channel_chat_i_key",
 	"300_drop_redundant_issue_workspace_number_index":       "idx_issue_workspace_number",
 	"301_drop_redundant_sys_cron_job_plan_index":            "idx_sys_cron_exec_job_plan",
 	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
 	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
 	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
+	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
+	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
+	"391_drop_agent_task_queue_dispatched_prepare_index":    "idx_agent_task_queue_dispatched_prepare",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
 	hooks := map[string]preMigrationHook{
 		"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 		"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
+		"431_chat_explicit_origin_backfill":                     runChatOriginBackfillHook,
 	}
 	for version, index := range concurrentIndexCleanups {
 		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
@@ -241,12 +308,72 @@ var preMigrationHooks = func() map[string]preMigrationHook {
 }()
 
 var preRollbackHooks = func() map[string]preMigrationHook {
-	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups))
+	hooks := make(map[string]preMigrationHook, len(concurrentDownIndexCleanups)+len(sourceContextMigrationVersions)+1)
 	for version, index := range concurrentDownIndexCleanups {
 		hooks[version] = cleanupInvalidConcurrentIndexHook(index)
 	}
+	// Source-context indexes are split into one-statement concurrent
+	// migrations. Register the guard on every step so a rollback from any
+	// partially applied version fails before dropping its first live index.
+	for _, version := range sourceContextMigrationVersions {
+		hooks[version] = ensureSourceContextRollbackSafe
+	}
+	hooks["430_channel_outbound_message_binding_index"] = refuseChannelChatRouteHistoryRollback
 	return hooks
 }()
+
+var sourceContextMigrationVersions = []string{
+	"407_issue_source_context",
+	"408_issue_source_context_id_index",
+	"409_issue_source_context_issue_index",
+	"410_issue_source_context_origin_task_index",
+	"411_attachment_source_context_index",
+	"412_issue_source_context_object_intent_key_index",
+	"413_issue_source_context_object_intent_due_index",
+	"414_issue_source_context_object_intent_context_index",
+}
+
+type rowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func refuseChannelChatRouteHistoryRollback(ctx context.Context, pool *pgxpool.Pool) error {
+	return refuseChannelChatRouteHistoryRollbackWith(ctx, pool)
+}
+
+func runChatOriginBackfillHook(ctx context.Context, pool *pgxpool.Pool) error {
+	_, err := chatoriginbackfill.Hook(ctx, pool, chatoriginbackfill.HookOptions{})
+	return err
+}
+
+func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQuerier) error {
+	var channelChatRouteStateExists bool
+	if err := query.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM channel_chat_session_binding AS binding
+			LEFT JOIN chat_session AS session ON session.id = binding.chat_session_id
+			WHERE binding.retired_at IS NOT NULL
+			   OR session.explicitly_created_at IS NOT NULL
+		)
+	`).Scan(&channelChatRouteStateExists); err != nil {
+		return fmt.Errorf("check channel chat route state: %w", err)
+	}
+	if channelChatRouteStateExists {
+		return errors.New("cannot roll back channel chat routes after /new has created a channel Chat")
+	}
+	return nil
+}
+
+var upMigrationConditions = map[string]migrationCondition{
+	// Fresh databases that successfully built the CJK-friendly bigram index do
+	// not need to build the trigram fallback only to remove it at migration 371.
+	"140_comment_content_trgm_index": whenIndexNotUsable(commentContentBigramIndex),
+	// Existing pg_bigm deployments already have both indexes. Remove the
+	// fallback only after proving the preferred index has the exact usable shape;
+	// pg_bigm-less self-hosted databases keep trgm and record 371 as a no-op.
+	"371_comment_content_search_index_strategy": whenIndexUsable(commentContentBigramIndex),
+}
 
 func hooksForDirection(direction string) map[string]preMigrationHook {
 	switch direction {
@@ -257,6 +384,113 @@ func hooksForDirection(direction string) map[string]preMigrationHook {
 	default:
 		return nil
 	}
+}
+
+func ensureSourceContextRollbackSafe(ctx context.Context, pool *pgxpool.Pool) error {
+	var dataExists bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM issue_source_context)
+		    OR EXISTS (SELECT 1 FROM attachment WHERE source_context_id IS NOT NULL)
+		    OR EXISTS (SELECT 1 FROM issue_source_context_object_intent)
+	`).Scan(&dataExists); err != nil {
+		return fmt.Errorf("inspect source-context rollback ownership: %w", err)
+	}
+	if dataExists {
+		return errors.New("cannot roll back issue source context while captured data or stored objects still exist; remove source-context captures and their stored objects through application cleanup, then retry")
+	}
+	return nil
+}
+
+func conditionsForDirection(direction string) map[string]migrationCondition {
+	if direction == "up" {
+		return upMigrationConditions
+	}
+	// Rollbacks intentionally ignore environment gates: they restore the
+	// portable pre-migration schema regardless of which up SQL actually ran.
+	return nil
+}
+
+func whenIndexUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if !usable {
+			return false, fmt.Sprintf("preferred index %s is unavailable or unusable", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+func whenIndexNotUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if usable {
+			return false, fmt.Sprintf("preferred index %s is ready", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+// indexIsUsable fails closed: every property needed by the search query must
+// match before a fallback index may be skipped or removed. In particular, the
+// preferred relation must be a live, ready, valid, non-partial GIN expression
+// index owned by the expected extension. A same-named stale or drifted index is
+// treated as unusable, preserving the fallback.
+func indexIsUsable(ctx context.Context, conn *pgxpool.Conn, requirement usableIndexRequirement) (bool, error) {
+	var usable bool
+	err := conn.QueryRow(ctx, `
+		SELECT COALESCE(
+			idx.relkind = 'i'
+			AND i.indisvalid
+			AND i.indisready
+			AND i.indislive
+			AND NOT i.indisunique
+			AND i.indpred IS NULL
+			AND i.indexprs IS NOT NULL
+			AND i.indrelid = to_regclass($2)
+			AND i.indnkeyatts = 1
+			AND i.indnatts = 1
+			AND am.amname = $3
+			AND opc.opcname = $4
+			AND pg_get_indexdef(i.indexrelid, 1, FALSE) = $5
+			AND EXISTS (
+				SELECT 1
+				FROM pg_depend dep
+				JOIN pg_extension ext ON ext.oid = dep.refobjid
+				WHERE dep.classid = 'pg_opclass'::regclass
+				  AND dep.objid = opc.oid
+				  AND dep.refclassid = 'pg_extension'::regclass
+				  AND dep.deptype = 'e'
+				  AND ext.extname = $6
+			),
+			FALSE
+		)
+		FROM pg_class idx
+		LEFT JOIN pg_index i ON i.indexrelid = idx.oid
+		LEFT JOIN pg_am am ON am.oid = idx.relam
+		-- pg_index.indclass is an int2vector, whose subscripts start at zero.
+		LEFT JOIN pg_opclass opc ON opc.oid = i.indclass[0]
+		WHERE idx.oid = to_regclass($1)
+	`,
+		requirement.IndexRegclass,
+		requirement.TableRegclass,
+		requirement.AccessMethod,
+		requirement.OperatorClass,
+		requirement.Expression,
+		requirement.Extension,
+	).Scan(&usable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect preferred index %q: %w", requirement.IndexRegclass, err)
+	}
+	return usable, nil
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an
@@ -374,6 +608,11 @@ type runOptions struct {
 	// passes the direction-specific hook map; tests leave this nil unless they
 	// exercise a hook.
 	Hooks map[string]preMigrationHook
+	// Conditions maps migration version → a read-only gate that decides
+	// whether the SQL file should execute. A false result still advances the
+	// migration ledger, allowing later migrations to run in environments where
+	// this version's DDL is intentionally unnecessary.
+	Conditions map[string]migrationCondition
 }
 
 func main() {
@@ -395,18 +634,13 @@ func main() {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dbURL)
+	startupSettings := dbstartup.SettingsFromEnv()
+	pool, err := dbstartup.NewPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		slog.Error("unable to ping database", "error", err)
-		os.Exit(1)
-	}
 
 	files, err := migrations.Files(direction)
 	if err != nil {
@@ -414,12 +648,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runMigrations(ctx, pool, runOptions{
-		Direction: direction,
-		Files:     files,
-		Hooks:     hooksForDirection(direction),
-	}); err != nil {
-		slog.Error("migration run failed", "error", err)
+	options := runOptions{
+		Direction:  direction,
+		Files:      files,
+		Hooks:      hooksForDirection(direction),
+		Conditions: conditionsForDirection(direction),
+	}
+	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopStartup()
+	retryOptions := startupSettings.RetryOptions()
+	retryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+	retryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+		slog.Warn("database unavailable before migrations; retrying",
+			"attempt", event.Attempt,
+			"retry_in", event.Delay,
+			"error", event.Err,
+		)
+	}
+	if err := dbstartup.Retry(startupCtx, retryOptions, pool.Ping); err != nil {
+		slog.Error("unable to ping database", "error", err)
+		os.Exit(1)
+	}
+
+	migrationErr := runMigrations(startupCtx, pool, options)
+	if migrationErr != nil && startupSettings.StartupTimeout > 0 && dbstartup.IsTransientDatabaseError(migrationErr) {
+		slog.Warn("migration interrupted by database unavailability; retrying", "error", migrationErr)
+		migrationRetryOptions := startupSettings.RetryOptions()
+		migrationRetryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+		migrationRetryOptions.AllowOperationPastTimeout = true
+		migrationRetryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+			slog.Warn("database unavailable during migration retry",
+				"attempt", event.Attempt,
+				"retry_in", event.Delay,
+				"error", event.Err,
+			)
+		}
+		migrationErr = dbstartup.Retry(startupCtx, migrationRetryOptions, func(attemptCtx context.Context) error {
+			if err := pool.Ping(attemptCtx); err != nil {
+				return fmt.Errorf("ping database: %w", err)
+			}
+			return runMigrations(attemptCtx, pool, options)
+		})
+	}
+	if migrationErr != nil {
+		slog.Error("migration run failed", "error", migrationErr)
 		os.Exit(1)
 	}
 
@@ -542,8 +814,19 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			}
 		}
 
-		if _, err := conn.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("apply migration %q: %w", file, err)
+		applySQL := true
+		conditionReason := ""
+		if condition, ok := opts.Conditions[version]; ok && condition != nil {
+			applySQL, conditionReason, err = condition(ctx, conn)
+			if err != nil {
+				return fmt.Errorf("evaluate migration condition for %q (%s): %w", version, opts.Direction, err)
+			}
+		}
+
+		if applySQL {
+			if _, err := conn.Exec(ctx, string(sql)); err != nil {
+				return fmt.Errorf("apply migration %q: %w", file, err)
+			}
 		}
 
 		if opts.Direction == "up" {
@@ -555,7 +838,11 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			return fmt.Errorf("record migration %q: %w", version, err)
 		}
 
-		fmt.Printf("  %s  %s\n", opts.Direction, version)
+		if applySQL {
+			fmt.Printf("  %s  %s\n", opts.Direction, version)
+		} else {
+			fmt.Printf("  %s  %s (SQL skipped: %s)\n", opts.Direction, version, conditionReason)
+		}
 	}
 
 	return nil

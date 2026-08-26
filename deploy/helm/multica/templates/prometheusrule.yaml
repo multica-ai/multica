@@ -40,4 +40,23 @@ spec:
           annotations:
             summary: "Business sampler query p95 is high"
             description: "Business sampler query {{ "{{ $labels.name }}" }} p95 is above 300ms, leaving little headroom before the 500ms statement_timeout."
+        - alert: MulticaSeatCapacityOutboxDeadLettered
+          expr: |
+            sum by (action) (multica_seat_capacity_outbox_dead_lettered) > 0
+          for: {{ .Values.monitoring.prometheusRule.seatCapacityDeadLetteredFor | quote }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
+          annotations:
+            summary: "Seat capacity intent requires repair"
+            description: "At least one {{ "{{ $labels.action }}" }} seat capacity intent exhausted automatic retries and entered the dead-letter state."
+        - alert: MulticaSeatCapacityOutboxStalled
+          expr: |
+            max by (action) (multica_seat_capacity_outbox_oldest_pending_age_seconds)
+              > {{ .Values.monitoring.prometheusRule.seatCapacityPendingAgeSeconds }}
+          for: {{ .Values.monitoring.prometheusRule.seatCapacityPendingFor | quote }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
+          annotations:
+            summary: "Seat capacity outbox is stalled"
+            description: "The oldest {{ "{{ $labels.action }}" }} seat capacity intent has remained unsettled beyond the configured age threshold."
 {{- end }}

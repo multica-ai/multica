@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -328,7 +329,6 @@ func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 // TestCreateIssueStatusValidation covers the reserved-key and category rules.
 func TestCreateIssueStatusValidation(t *testing.T) {
 	seedTestCatalog(t)
-	withCustomIssueStatusesFlag(t, testHandler, true)
 
 	cases := []struct {
 		name string
@@ -353,27 +353,20 @@ func TestCreateIssueStatusValidation(t *testing.T) {
 	}
 }
 
-// TestCreateIssueStatusIsGatedOnRollout pins the rollout gate. Creating the
-// first custom status mints a value older pods cannot interpret, so it must be
-// impossible until the whole fleet is on this code. Reads stay open.
-func TestCreateIssueStatusIsGatedOnRollout(t *testing.T) {
+// TestCreateIssueStatusIsNotGatedOnRollout pins the removal of the rollout gate
+// (MUL-6643). Creation used to 403 unless a feature flag was flipped on, because
+// the first custom status minted a value older pods could not interpret. Every
+// pod resolves categories now, so an unset flag must not be able to take the
+// feature away again — creation answers to workspace role alone.
+func TestCreateIssueStatusIsNotGatedOnRollout(t *testing.T) {
 	seedTestCatalog(t)
-	withCustomIssueStatusesFlag(t, testHandler, false)
 
-	rec := httptest.NewRecorder()
-	testHandler.CreateIssueStatus(rec, newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
-		"name": "Human Review", "category": "in_review", "color": "#123456",
-	}))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 while the rollout gate is closed, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	// Reading the catalog is never gated — clients need it to render statuses.
-	listRec := httptest.NewRecorder()
-	testHandler.ListIssueStatuses(listRec, newRequest(http.MethodGet, "/api/issue-statuses", nil))
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("listing must stay open while the gate is closed, got %d: %s", listRec.Code, listRec.Body.String())
-	}
+	var created IssueStatusResponse
+	testutil.Call(t, testHandler.CreateIssueStatus,
+		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
+			"name": "Human Review", "category": issuestatus.InReview, "color": "#123456",
+		})).Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
 }
 
 // TestIssueWriteStoresCanonicalStatusKey guards the 500 found in review:
@@ -1231,4 +1224,109 @@ func TestBackgroundEventCarriesCustomStatusCategory(t *testing.T) {
 	if authoritative["status"] != "human_review_bg" {
 		t.Errorf("status = %v, want the custom key verbatim", authoritative["status"])
 	}
+}
+
+// TestCatalogWritesAnnounceThemselves pins the realtime contract for the status
+// catalog (MUL-6458): every write that changes it publishes exactly one
+// workspace-scoped event, and a write that changes nothing publishes none.
+//
+// One event type covers all four writes because every client answers them the
+// same way — re-read the catalog. What the assertions below are really
+// protecting is the routing: an event with an empty WorkspaceID is dropped by
+// the SubscribeAll forwarder without a word, so the catalog would look
+// synchronized in tests and silently never reach another tab.
+func TestCatalogWritesAnnounceThemselves(t *testing.T) {
+	ctx := context.Background()
+	seedTestCatalog(t)
+
+	changes := make(chan events.Event, 8)
+	testHandler.Bus.Subscribe(protocol.EventIssueStatusChanged, func(e events.Event) {
+		select {
+		case changes <- e:
+		default:
+		}
+	})
+
+	expectChange := func(t *testing.T, action string) {
+		t.Helper()
+		select {
+		case e := <-changes:
+			if e.WorkspaceID != testWorkspaceID {
+				t.Errorf("event workspace_id = %q, want %q — an event without one never "+
+					"reaches a client", e.WorkspaceID, testWorkspaceID)
+			}
+			if e.ActorType != "member" || e.ActorID == "" {
+				t.Errorf("event actor = %q/%q, want the acting member", e.ActorType, e.ActorID)
+			}
+			payload, ok := e.Payload.(map[string]any)
+			if !ok {
+				t.Fatalf("event payload shape: %T", e.Payload)
+			}
+			if payload["action"] != action {
+				t.Errorf("event action = %v, want %q", payload["action"], action)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatalf("no issue_status:changed event for %s — other tabs keep the stale catalog "+
+				"until its 5 minute staleTime expires", action)
+		}
+	}
+	expectNoChange := func(t *testing.T) {
+		t.Helper()
+		select {
+		case e := <-changes:
+			t.Fatalf("unexpected issue_status:changed event: %v", e.Payload)
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	var created IssueStatusResponse
+	testutil.Call(t, testHandler.CreateIssueStatus,
+		newRequest(http.MethodPost, "/api/issue-statuses", map[string]any{
+			"name": "Realtime Gate", "category": issuestatus.InReview, "color": "#123456",
+		})).Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, `DELETE FROM issue_status WHERE id = $1`, parseUUID(created.ID))
+	expectChange(t, "created")
+
+	testutil.Call(t, testHandler.UpdateIssueStatus, withURLParam(
+		newRequest(http.MethodPatch, "/api/issue-statuses/"+created.ID, map[string]any{"name": "Renamed Gate"}),
+		"id", created.ID)).Want(http.StatusOK)
+	expectChange(t, "updated")
+
+	// Reorder demands EVERY active custom status in the category, so the
+	// payload is read back rather than assumed — a status left over from
+	// another test would otherwise turn this into a 409.
+	active, err := testHandler.Queries.ListActiveCustomIssueStatusEntries(ctx, db.ListActiveCustomIssueStatusEntriesParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		Category:    issuestatus.InReview,
+	})
+	if err != nil {
+		t.Fatalf("list active custom statuses: %v", err)
+	}
+	ids := make([]string, len(active))
+	for i, entry := range active {
+		ids[i] = uuidToString(entry.ID)
+	}
+	if code := reorderVia(t, issuestatus.InReview, ids).Code; code != http.StatusOK {
+		t.Fatalf("reorder: %d", code)
+	}
+	expectChange(t, "reordered")
+
+	entry, err := testHandler.Queries.GetIssueStatusEntryByID(ctx, db.GetIssueStatusEntryByIDParams{
+		ID:          parseUUID(created.ID),
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("reload created status: %v", err)
+	}
+	if code := archiveStatusVia(t, entry); code != http.StatusOK {
+		t.Fatalf("archive: %d", code)
+	}
+	expectChange(t, "archived")
+
+	// Archiving an already-archived status is a 200 no-op. Announcing it would
+	// have every other client re-read a catalog that did not move.
+	if code := archiveStatusVia(t, entry); code != http.StatusOK {
+		t.Fatalf("second archive: %d", code)
+	}
+	expectNoChange(t)
 }

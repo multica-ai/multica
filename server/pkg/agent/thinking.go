@@ -177,7 +177,7 @@ func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*Mod
 func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
 	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
-	out, err := cmd.CombinedOutput()
+	out, err := combinedOutputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
 	}
@@ -358,7 +358,7 @@ var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
 	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
-	return cmd.Output()
+	return outputOwned(cmd, runtimeCmd.logger)
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
@@ -589,6 +589,12 @@ func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel
 
 // ── Shared validation ────────────────────────────────────────────────
 
+// catalogLoader adapts the ambient ListModels call into the lazy loader the
+// Validate*With functions take, so the ctx-based entry points stay one line.
+func catalogLoader(ctx context.Context, providerType string, cmd Command) func() (Catalog, error) {
+	return func() (Catalog, error) { return ListModels(ctx, providerType, cmd) }
+}
+
 // ValidateThinkingLevel reports whether `value` is in the supported
 // catalog for the given (provider, model) pair. Empty value is always
 // valid — it means "use the runtime default".
@@ -620,17 +626,32 @@ func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel
 // daemon's pre-execution guard and the server's UpdateAgent gate can
 // share the same source of truth.
 func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
+	return ValidateThinkingLevelWith(catalogLoader(ctx, providerType, cmd), providerType, model, value)
+}
+
+// ValidateThinkingLevelWith is ValidateThinkingLevel over a caller-supplied
+// catalog loader. loadCatalog is invoked at most once, and only when the answer
+// genuinely depends on the catalog — the guards below settle their cases
+// without it.
+//
+// The daemon passes a loader memoized for the whole task so model
+// qualification and both capability checks share one discovery round. That
+// matters because discovery is a CLI subprocess with a 15-30s ceiling and
+// cachedDiscovery deliberately does not memoize an empty or fallback result
+// (#3729, MUL-5549), so each read costs the ceiling again on a logged-out or
+// timing-out runtime (MUL-6471 review).
+func ValidateThinkingLevelWith(loadCatalog func() (Catalog, error), providerType, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
-	// Codex empty-model fail-closed (see doc comment). Checked before
-	// ListModels so the outcome is deterministic even when discovery would
+	// Codex empty-model fail-closed (see doc comment). Checked before the
+	// catalog load so the outcome is deterministic even when discovery would
 	// error — an errored lookup makes the daemon pass the level through, which
 	// is exactly what we must NOT do for an unresolved codex model.
 	if model == "" && providerType == "codex" {
 		return false, nil
 	}
-	catalog, err := ListModels(ctx, providerType, cmd)
+	catalog, err := loadCatalog()
 	if err != nil {
 		return false, err
 	}
@@ -676,13 +697,19 @@ func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command
 // means "inherit runtime configuration". An empty Codex model fails closed:
 // its effective model comes from config.toml and may not support the tier.
 func ValidateServiceTier(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
+	return ValidateServiceTierWith(catalogLoader(ctx, providerType, cmd), providerType, model, value)
+}
+
+// ValidateServiceTierWith is ValidateServiceTier over a caller-supplied
+// catalog loader. See ValidateThinkingLevelWith for why the daemon needs one.
+func ValidateServiceTierWith(loadCatalog func() (Catalog, error), providerType, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
 	if providerType != "codex" || model == "" {
 		return false, nil
 	}
-	catalog, err := ListModels(ctx, providerType, cmd)
+	catalog, err := loadCatalog()
 	if err != nil {
 		return false, err
 	}
@@ -746,13 +773,6 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
-	// does not accept none, minimal, or xhigh.
-	"grok": {
-		"low":    true,
-		"medium": true,
-		"high":   true,
-	},
 	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
 	// the exact subset supported by each model before execution.
 	"pi": {
@@ -771,8 +791,12 @@ var providerThinkingEnums = map[string]map[string]bool{
 // server accepts any well-formed token for them and lets the daemon's
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
-	"codex":    true,
-	"dsh":      true,
+	"codex": true,
+	"dsh":   true,
+	// Grok advertises each model's effort catalog through session/new, so the
+	// server does not maintain a provider-wide fixed enum. The daemon applies
+	// the selected effort with `--effort`, not session/set_config_option.
+	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
 }

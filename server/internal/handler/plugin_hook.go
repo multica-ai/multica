@@ -28,7 +28,7 @@ type invokePluginHookRequest struct {
 	Input   json.RawMessage `json:"input,omitempty"`
 }
 
-// InvokePluginHook — POST /api/v1/plugin/hooks/{key}
+// InvokePluginHook — POST /api/plugin-bridge/v1/hooks/{key}
 func (h *Handler) InvokePluginHook(w http.ResponseWriter, r *http.Request) {
 	// No scope of its own: a hook is the plugin's own capability, and what it
 	// may do on the way back is bounded by the installation's scopes when the
@@ -40,7 +40,7 @@ func (h *Handler) InvokePluginHook(w http.ResponseWriter, r *http.Request) {
 	// A hook invoked from the UI is invoked BY somebody. A plugin's own server
 	// calling this would be asking us to call it back, which is a loop with no
 	// person in it and no reason to exist.
-	if !actor.requireMember(w) {
+	if !actor.requireMember(w, r) {
 		return
 	}
 
@@ -105,15 +105,17 @@ func rawOrNil(raw json.RawMessage) any {
 // --- Installation-scoped hook administration ---
 
 type pluginInvocationResponse struct {
-	ID        string  `json:"id"`
-	HookKey   string  `json:"hook_key"`
-	Trigger   string  `json:"trigger"`
-	Status    string  `json:"status"`
-	EventType *string `json:"event_type,omitempty"`
-	Attempt   int     `json:"attempt"`
-	LatencyMs int     `json:"latency_ms"`
-	Error     *string `json:"error,omitempty"`
-	CreatedAt string  `json:"created_at"`
+	ID         string  `json:"id"`
+	HookKey    string  `json:"hook_key"`
+	Trigger    string  `json:"trigger"`
+	Status     string  `json:"status"`
+	EventType  *string `json:"event_type,omitempty"`
+	Attempt    int     `json:"attempt"`
+	LatencyMs  int     `json:"latency_ms"`
+	Error      *string `json:"error,omitempty"`
+	DeliveryID *string `json:"delivery_id,omitempty"`
+	PlannedAt  *string `json:"planned_at,omitempty"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 // ListPluginInvocations — GET /api/workspaces/{id}/plugins/{installationId}/invocations
@@ -152,6 +154,14 @@ func (h *Handler) ListPluginInvocations(w http.ResponseWriter, r *http.Request) 
 			value := row.Error.String
 			item.Error = &value
 		}
+		if row.DeliveryID.Valid {
+			value := row.DeliveryID.String
+			item.DeliveryID = &value
+		}
+		if row.PlannedAt.Valid {
+			value := row.PlannedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
+			item.PlannedAt = &value
+		}
 		items = append(items, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"invocations": items})
@@ -164,7 +174,7 @@ type pluginTokenResponse struct {
 	// SigningSecret is what the author configures on their own server to verify
 	// our signature. Derived from the deployment key rather than stored, so it
 	// is stable for an installation and reproducible without a database copy.
-	SigningSecret string `json:"signing_secret"`
+	SigningSecret string `json:"signing_secret,omitempty"`
 }
 
 // RotatePluginToken — POST /api/workspaces/{id}/plugins/{installationId}/token
@@ -173,17 +183,12 @@ func (h *Handler) RotatePluginToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	token, err := h.PluginService.IssueInstallToken(r.Context(), installation.ID)
+	credentials, err := h.PluginService.RotateInstallCredentials(r.Context(), installation.ID)
 	if err != nil {
 		writePluginError(w, err, "failed to issue the Plugin token")
 		return
 	}
-	secret, err := h.PluginService.HookSigningSecret(installation.ID)
-	if err != nil {
-		writePluginError(w, err, "failed to derive the signing secret")
-		return
-	}
-	writeJSON(w, http.StatusOK, pluginTokenResponse{Token: token, SigningSecret: secret})
+	writeJSON(w, http.StatusOK, pluginTokenResponse{Token: credentials.Token, SigningSecret: credentials.SigningSecret})
 }
 
 // RevokePluginToken — DELETE /api/workspaces/{id}/plugins/{installationId}/token

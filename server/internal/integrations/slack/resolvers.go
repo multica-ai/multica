@@ -331,8 +331,25 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
-func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
-	return r.session.MarkPendingFresh(ctx, sessionID)
+func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	bindingKey, config, replyThread := slackSessionRouting(p.Message)
+	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
+		EnsureSessionInput: engine.EnsureSessionInput{
+			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
+			InstallationID: p.Installation.ID, Sender: p.Creator,
+			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
+		},
+		Initiator: p.Sender,
+		Body:      p.Message.Text, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
+		BeforeCommit: p.BeforeCommit,
+	})
+	return engine.StartSessionResult{SessionID: result.SessionID, BindingID: result.BindingID, RouteRevision: result.RouteRevision, Append: result.Append}, err
+}
+
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	return r.session.MarkPendingFresh(ctx, sessionID, messageID)
 }
 
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
@@ -355,8 +372,8 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 	})
 }
 
-func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
-	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) (engine.BindMediaResult, error) {
+	return r.session.BindMediaRefsWithResult(ctx, engine.BindMediaInput{
 		MessageID:            p.MessageID,
 		SessionID:            p.SessionID,
 		WorkspaceID:          p.WorkspaceID,

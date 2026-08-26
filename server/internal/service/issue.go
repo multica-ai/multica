@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -81,6 +82,10 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
+	// SourceContext is set only by the comment-scoped manual create endpoint.
+	// Its immutable snapshot and cloned attachment rows commit in the same
+	// transaction as the new issue.
+	SourceContext *SourceContextCapture
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -156,6 +161,8 @@ var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace"
 // it arrived, so retrying against the refreshed catalog is the remedy.
 var ErrIssueStatusUnavailable = errors.New("issue status is no longer available")
 
+var ErrSourceContextAlreadyAttached = errors.New("source context is already attached")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -207,6 +214,34 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	if p.SourceContext != nil {
+		if _, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
+			ID: p.SourceContext.SourceIssueID, WorkspaceID: p.WorkspaceID,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return IssueCreateResult{}, ErrSourceIssueDeleted
+			}
+			return IssueCreateResult{}, fmt.Errorf("lock source issue: %w", err)
+		}
+		locked, err := qtx.LockCommentAncestorPath(ctx, db.LockCommentAncestorPathParams{
+			CommentID: p.SourceContext.AnchorCommentID, WorkspaceID: p.WorkspaceID,
+			IssueID: p.SourceContext.SourceIssueID,
+		})
+		if err != nil {
+			return IssueCreateResult{}, fmt.Errorf("lock anchor comment thread: %w", err)
+		}
+		if len(locked) == 0 {
+			return IssueCreateResult{}, ErrAnchorCommentDeleted
+		}
+		current, err := BuildSourceContext(ctx, qtx, p.WorkspaceID, p.SourceContext.AnchorCommentID)
+		if err != nil {
+			return IssueCreateResult{}, err
+		}
+		if current.Digest != p.SourceContext.Digest {
+			return IssueCreateResult{}, ErrSourceContextChanged
+		}
+	}
 
 	// A create landing on a CUSTOM status takes the shared catalog lock AND
 	// re-resolves the status inside this transaction. The caller validated the
@@ -341,6 +376,63 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	if p.SourceContext != nil {
+		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("persist source context: %w", err)
+		}
+	} else if p.OriginType.Valid && p.OriginType.String == "quick_create" && p.OriginID.Valid {
+		task, taskErr := qtx.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
+			ID: p.OriginID, WorkspaceID: p.WorkspaceID,
+		})
+		if taskErr != nil {
+			return IssueCreateResult{}, fmt.Errorf("load quick-create origin task: %w", taskErr)
+		}
+		if p.CreatorType != "agent" || !p.CreatorID.Valid || p.CreatorID != task.AgentID {
+			return IssueCreateResult{}, errors.New("quick-create origin task does not belong to the creating agent")
+		}
+		var quickCreate QuickCreateContext
+		if err := json.Unmarshal(task.Context, &quickCreate); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("decode quick-create origin context: %w", err)
+		}
+		if quickCreate.Type != QuickCreateContextType {
+			return IssueCreateResult{}, errors.New("quick-create origin task has invalid context type")
+		}
+		contextWorkspaceID, parseErr := util.ParseUUID(quickCreate.WorkspaceID)
+		if parseErr != nil || contextWorkspaceID != p.WorkspaceID {
+			return IssueCreateResult{}, errors.New("quick-create origin context has invalid workspace")
+		}
+		if quickCreate.SourceContextID != "" {
+			contextID, parseErr := util.ParseUUID(quickCreate.SourceContextID)
+			if parseErr != nil {
+				return IssueCreateResult{}, fmt.Errorf("invalid quick-create source context id: %w", parseErr)
+			}
+			requesterID, parseErr := util.ParseUUID(quickCreate.RequesterID)
+			if parseErr != nil || !task.OriginatorUserID.Valid || requesterID != task.OriginatorUserID {
+				return IssueCreateResult{}, errors.New("quick-create source context has invalid requester")
+			}
+			pending, pendingErr := qtx.GetPendingIssueSourceContextByOriginTask(ctx, db.GetPendingIssueSourceContextByOriginTaskParams{
+				WorkspaceID: p.WorkspaceID, OriginTaskID: task.ID,
+			})
+			if pendingErr != nil {
+				if errors.Is(pendingErr, pgx.ErrNoRows) {
+					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
+				}
+				return IssueCreateResult{}, fmt.Errorf("load pending quick-create source context: %w", pendingErr)
+			}
+			if pending.ID != contextID || pending.CapturedByUserID != requesterID {
+				return IssueCreateResult{}, errors.New("quick-create source context ownership mismatch")
+			}
+			if _, attachErr := qtx.AttachIssueSourceContext(ctx, db.AttachIssueSourceContextParams{
+				IssueID: issue.ID, WorkspaceID: p.WorkspaceID, ID: contextID, OriginTaskID: task.ID,
+			}); attachErr != nil {
+				if errors.Is(attachErr, pgx.ErrNoRows) {
+					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
+				}
+				return IssueCreateResult{}, fmt.Errorf("attach quick-create source context: %w", attachErr)
+			}
+		}
 	}
 
 	// Attach labels inside the create transaction so the issue and its

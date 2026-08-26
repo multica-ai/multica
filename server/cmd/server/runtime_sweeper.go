@@ -79,17 +79,22 @@ const (
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
 	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
-	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
+	// defaultTaskQueuedTTL expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
 	// admission gate that blocks new enqueues against offline runtimes,
 	// tasks already on the queue when a runtime drops off (or that lost
 	// the race against a runtime that went offline mid-tick) need a
-	// time-bounded exit. 2 hours is conservatively above any reasonable
-	// "queued behind a long-running task" window for an online runtime, so we
-	// don't expire legitimately-pending work, while still draining the historical
-	// 87k autopilot backlog within ~24h once enabled.
-	queuedTTLSeconds = 2 * 3600.0
+	// time-bounded exit. The 2h default was chosen under the historical
+	// assumption that it sits conservatively above any reasonable "queued
+	// behind a long-running task" window for an online runtime, so the sweep
+	// drains the historical 87k autopilot backlog within ~24h without
+	// expiring legitimately-pending work. That assumption breaks down for
+	// self-hosted deployments whose runtimes have low task concurrency: a
+	// single slow task can hold the rest of the queue for longer than 2
+	// hours; raise it via MULTICA_TASK_QUEUED_TTL in that case to avoid
+	// queued_expired failures.
+	defaultTaskQueuedTTL = 2 * time.Hour
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
 	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
@@ -124,7 +129,7 @@ type runtimeGCTxStarter interface {
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration, queuedTTL time.Duration) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -133,11 +138,15 @@ func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, querie
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Every stage below is DB-only and latency-critical: it is what
+			// flips a dead runtime offline and reclaims its orphaned tasks
+			// within ~180s. Object-store work belongs on its own goroutine
+			// (runSourceContextSweeper), never in this tick.
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 			sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 			sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
-			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepExpiredQueuedTasks(ctx, queries, taskSvc, queuedTTL)
 			sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 			gcRuntimes(ctx, txStarter, queries, taskSvc.Metrics, bus)
@@ -524,9 +533,9 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 // historical backlog and catches the race where a runtime goes offline AFTER
 // a task is already queued. Capped to queuedExpireBatchSize per tick so a
 // big backlog can't monopolise the DB.
-func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, queuedTTL time.Duration) {
 	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTLSeconds,
+		TtlSecs:    queuedTTL.Seconds(),
 		MaxPerTick: queuedExpireBatchSize,
 	})
 	if err != nil {

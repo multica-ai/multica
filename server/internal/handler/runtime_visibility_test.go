@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -227,6 +228,136 @@ func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
 	testHandler.CreateAgent(w, newRequestAs(plainMemberID, http.MethodPost, "/api/agents", body))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateAgent as plain member on public runtime: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListAgentRuntimes_HidesOtherMembersPrivateRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	privateRuntimeID, _, plainMemberID := runtimeVisibilityFixture(t)
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, testRuntimeID,
+	); err != nil {
+		t.Fatalf("make fixture runtime public: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE agent_runtime SET visibility = 'private' WHERE id = $1`, testRuntimeID)
+	})
+
+	w := testutil.Call(t, testHandler.ListAgentRuntimes,
+		newRequestAs(plainMemberID, http.MethodGet, "/api/runtimes", nil),
+	).Want(http.StatusOK)
+	var runtimes []AgentRuntimeResponse
+	w.JSON(&runtimes)
+
+	for _, runtime := range runtimes {
+		if runtime.ID == privateRuntimeID {
+			t.Fatalf("private runtime %s owned by another member was returned", privateRuntimeID)
+		}
+	}
+	if len(runtimes) != 1 || runtimes[0].ID != testRuntimeID {
+		t.Fatalf("visible runtimes = %#v; want only public runtime %s", runtimes, testRuntimeID)
+	}
+}
+
+func TestListAgentRuntimes_AllowsAdminsToGovernPrivateRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	privateRuntimeID, _, adminID := runtimeVisibilityFixture(t)
+	promoteRuntimeTestMemberToAdmin(t, adminID)
+
+	w := testutil.Call(t, testHandler.ListAgentRuntimes,
+		newRequestAs(adminID, http.MethodGet, "/api/runtimes", nil),
+	).Want(http.StatusOK)
+	var runtimes []AgentRuntimeResponse
+	w.JSON(&runtimes)
+
+	for _, runtime := range runtimes {
+		if runtime.ID == privateRuntimeID {
+			return
+		}
+	}
+	t.Fatalf("admin runtime list did not include private runtime %s", privateRuntimeID)
+}
+
+func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID, runtimeOwnerID, plainMemberID := runtimeVisibilityFixture(t)
+
+	modelRequest, err := testHandler.ModelListStore.Create(context.Background(), runtimeID)
+	if err != nil {
+		t.Fatalf("create model list request: %v", err)
+	}
+	localSkillRequest, err := testHandler.LocalSkillListStore.Create(context.Background(), runtimeID)
+	if err != nil {
+		t.Fatalf("create local skill list request: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		handle func(http.ResponseWriter, *http.Request)
+		params []string
+	}{
+		{"usage", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage", testHandler.GetRuntimeUsage, []string{"runtimeId", runtimeID}},
+		{"activity", http.MethodGet, "/api/runtimes/" + runtimeID + "/activity", testHandler.GetRuntimeTaskActivity, []string{"runtimeId", runtimeID}},
+		{"usage by agent", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage/by-agent", testHandler.GetRuntimeUsageByAgent, []string{"runtimeId", runtimeID}},
+		{"usage by hour", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage/by-hour", testHandler.GetRuntimeUsageByHour, []string{"runtimeId", runtimeID}},
+		{"model discovery", http.MethodPost, "/api/runtimes/" + runtimeID + "/models", testHandler.InitiateListModels, []string{"runtimeId", runtimeID}},
+		{"model discovery poll", http.MethodGet, "/api/runtimes/" + runtimeID + "/models/" + modelRequest.ID, testHandler.GetModelListRequest, []string{"runtimeId", runtimeID, "requestId", modelRequest.ID}},
+		{"local skill discovery", http.MethodPost, "/api/runtimes/" + runtimeID + "/local-skills", testHandler.InitiateListLocalSkills, []string{"runtimeId", runtimeID}},
+		{"local skill discovery poll", http.MethodGet, "/api/runtimes/" + runtimeID + "/local-skills/" + localSkillRequest.ID, testHandler.GetLocalSkillListRequest, []string{"runtimeId", runtimeID, "requestId", localSkillRequest.ID}},
+	}
+
+	for _, tc := range tests {
+		t.Run("plain member/"+tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := withURLParams(newRequestAs(plainMemberID, tc.method, tc.path, nil), tc.params...)
+			tc.handle(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	promoteRuntimeTestMemberToAdmin(t, plainMemberID)
+	for _, tc := range tests {
+		t.Run("workspace admin/"+tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := withURLParams(newRequestAs(plainMemberID, tc.method, tc.path, nil), tc.params...)
+			tc.handle(w, req)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+
+	// The owner remains allowed to start discovery on their own private machine.
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequestAs(runtimeOwnerID, http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID)
+	testHandler.InitiateListModels(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("owner model discovery: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = withURLParam(newRequestAs(plainMemberID, http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID)
+	testHandler.InitiateListModels(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("public runtime model discovery: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

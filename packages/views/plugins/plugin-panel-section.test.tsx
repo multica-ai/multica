@@ -1,19 +1,34 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enIssues from "../locales/en/issues.json";
 
 const data = vi.hoisted(() => ({
   installed: { plugins: [] as Array<Record<string, unknown>> },
+  launch: {
+    url: "https://plugin-content.example.test/plugin-surfaces/opaque",
+    bridge_token: "single-use-proof",
+    version: "1.0.0",
+    digest: "abc",
+  } as Record<string, unknown> | null,
   flagEnabled: true,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: data.installed, isLoading: false, isError: false }),
+  // Two different queries reach this mock: the installation list and one
+  // surface's code. They are told apart by the query key the options object
+  // carries, so a test can make the code unavailable without touching the list.
+  useQuery: (options: { queryKey?: readonly unknown[] }) =>
+    options?.queryKey?.[0] === "surface"
+      ? { data: data.launch, isPending: false, isError: data.launch === null }
+      : { data: data.installed, isLoading: false, isError: false },
 }));
-vi.mock("@multica/core/plugins", () => ({ pluginInstallationsOptions: () => ({ queryKey: ["plugins"] }) }));
+vi.mock("@multica/core/plugins", () => ({
+  pluginInstallationsOptions: () => ({ queryKey: ["plugins"] }),
+  pluginSurfaceLaunchOptions: () => ({ queryKey: ["surface"] }),
+}));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "workspace-1", name: "Acme", slug: "acme" }) }));
 vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => data.flagEnabled }));
 vi.mock("../platform/local-directory", () => ({ isDesktopShell: () => false }));
@@ -32,7 +47,7 @@ function installation(overrides: Record<string, unknown> = {}) {
     plugin_key: "com.example.hello",
     name: "Hello Panel",
     version: "1.0.0",
-    source_url: "https://example.com/plugin/multica.plugin.json",
+    package_version_id: "version-1",
     enabled: true,
     granted_scopes: ["issues:read"],
     config_schema: [],
@@ -50,22 +65,28 @@ function installation(overrides: Record<string, unknown> = {}) {
 describe("PluginPanelSection", () => {
   beforeEach(() => {
     data.installed.plugins = [];
+    data.launch = {
+      url: "https://plugin-content.example.test/plugin-surfaces/opaque",
+      bridge_token: "single-use-proof",
+      version: "1.0.0",
+      digest: "abc",
+    };
     data.flagEnabled = true;
   });
 
-  it("mounts an enabled issue_panel in a sandbox that never gets allow-same-origin", () => {
+  it("mounts an enabled issue_panel with an opaque nested plugin frame", () => {
     data.installed.plugins = [installation()];
     render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
 
     const frame = screen.getByTitle("Hello Panel — Hello");
-    // allow-scripts WITHOUT allow-same-origin is the entire isolation boundary.
-    // The pairing is what the HTML spec calls out as defeating the sandbox, so
-    // this assertion is the regression guard for the whole surface model.
-    expect(frame).toHaveAttribute("sandbox", "allow-scripts");
-    expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
-    // srcDoc, not src: the host generates the document so it can set the CSP.
+    // The visible iframe is trusted host code. Its srcdoc creates the actual
+    // plugin iframe with allow-scripts and deliberately no allow-same-origin.
+    expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
     expect(frame).toHaveAttribute("srcdoc");
     expect(frame).not.toHaveAttribute("src");
+    const srcdoc = frame.getAttribute("srcdoc") ?? "";
+    expect(srcdoc).toContain('child.setAttribute("sandbox", "allow-scripts")');
+    expect(srcdoc).not.toContain('child.setAttribute("sandbox", "allow-scripts allow-same-origin")');
   });
 
   it("does not mount a disabled installation", () => {
@@ -105,11 +126,72 @@ describe("PluginPanelSection", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it("says why a local install cannot render instead of showing an empty frame", () => {
-    data.installed.plugins = [installation({ source_url: "local:hello" })];
+  it("says the surface could not load instead of showing an empty frame", () => {
+    // An empty body is what a malformed response parses to. Mounting a frame
+    // for it would look like a working panel that renders nothing.
+    data.launch = null;
+    data.installed.plugins = [installation()];
     render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
 
     expect(screen.queryByTitle("Hello Panel — Hello")).not.toBeInTheDocument();
-    expect(screen.getByText(/installed from a local source/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not load its interface/i)).toBeInTheDocument();
+  });
+
+  it("loads only Multica's dedicated content origin", () => {
+    data.installed.plugins = [installation()];
+    render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+
+    const srcdoc = screen.getByTitle("Hello Panel — Hello").getAttribute("srcdoc") ?? "";
+    expect(srcdoc).toContain("frame-src https://plugin-content.example.test");
+    expect(srcdoc).not.toContain("frame-src https:;");
+  });
+
+  it("shows a useful plugin bootstrap failure", () => {
+    data.installed.plugins = [installation()];
+    render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+
+    const frame = screen.getByTitle("Hello Panel — Hello") as HTMLIFrameElement;
+    const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
+    Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
+    act(() => window.dispatchEvent(event));
+
+    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+  });
+
+  it("clears a previous surface failure when the issue changes", () => {
+    data.installed.plugins = [installation()];
+    const { rerender } = render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+
+    const frame = screen.getByTitle("Hello Panel — Hello") as HTMLIFrameElement;
+    const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
+    Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
+    act(() => window.dispatchEvent(event));
+    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+
+    rerender(<PluginPanelSection issueId="issue-2" />);
+    expect(screen.queryByText("Hello Panel could not load its interface.")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Hello Panel — Hello")).toBeInTheDocument();
+  });
+
+  it("clears a previous surface failure when its document changes", () => {
+    data.installed.plugins = [installation()];
+    const { rerender } = render(<PluginPanelSection issueId="issue-1" />, { wrapper: Wrapper });
+
+    const frame = screen.getByTitle("Hello Panel — Hello") as HTMLIFrameElement;
+    const originalDocument = frame.getAttribute("srcdoc");
+    const event = new MessageEvent("message", { data: { type: "multica:plugin-surface-error" } });
+    Object.defineProperty(event, "source", { value: frame.contentWindow, configurable: true });
+    act(() => window.dispatchEvent(event));
+    expect(screen.getByText("Hello Panel could not load its interface.")).toBeInTheDocument();
+
+    data.launch = {
+      url: "https://plugin-content.example.test/plugin-surfaces/replacement",
+      bridge_token: "replacement-proof",
+      version: "1.0.1",
+      digest: "def",
+    };
+    rerender(<PluginPanelSection issueId="issue-1" />);
+    expect(screen.queryByText("Hello Panel could not load its interface.")).not.toBeInTheDocument();
+    expect(screen.getByTitle("Hello Panel — Hello").getAttribute("srcdoc")).not.toBe(originalDocument);
   });
 });

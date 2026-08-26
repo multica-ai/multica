@@ -223,16 +223,18 @@ func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	}
 }
 
-// Capability discovery (list + poll) is readable by any workspace member so
-// the Agent capabilities surfaces work for agents bound to someone else's
-// runtime. Import stays owner-only (tests below).
-func TestListLocalSkills_AllowsNonOwnerWorkspaceMember(t *testing.T) {
+// Capability discovery (list + poll) is readable by workspace members only
+// after the runtime owner shares the machine with the workspace.
+func TestListLocalSkills_AllowsNonOwnerForPublicRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
 	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
@@ -312,8 +314,8 @@ func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	)
 
 	testHandler.InitiateImportLocalSkill(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -341,8 +343,8 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 	)
 
 	testHandler.GetLocalSkillImportRequest(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

@@ -109,18 +109,8 @@ type RuntimeUsageResponse struct {
 // same tool).
 func (h *Handler) GetRuntimeUsage(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 
@@ -173,18 +163,8 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 // GetRuntimeTaskActivity returns hourly task activity distribution for a runtime.
 func (h *Handler) GetRuntimeTaskActivity(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 
@@ -241,18 +221,8 @@ type RuntimeUsageByAgentResponse struct {
 // since the cutoff window. Drives the runtime-detail "Cost by agent" tab.
 func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 
@@ -323,18 +293,8 @@ type RuntimeUsageByHourResponse struct {
 // `?tz=` param or the authenticated user's stored user.timezone.
 func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 
@@ -670,6 +630,34 @@ func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
 }
 
+// requireRuntimeReadAccess protects runtime data and machine-triggering
+// capabilities. Governance access is deliberately separate: workspace owners
+// and admins may list, rename, or delete another member's private runtime,
+// but a private machine is readable or usable only by its owner. Returning
+// 404 for that case prevents a known runtime ID from becoming an oracle.
+func (h *Handler) requireRuntimeReadAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (db.AgentRuntime, db.Member, bool) {
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	member, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found")
+	if !ok || !canUseRuntimeForAgent(member, rt) {
+		if ok {
+			writeError(w, http.StatusNotFound, "runtime not found")
+		}
+		return db.AgentRuntime{}, db.Member{}, false
+	}
+
+	return rt, member, true
+}
+
 func (h *Handler) runtimeHasLiveProfile(ctx context.Context, rt db.AgentRuntime) (bool, error) {
 	if !rt.ProfileID.Valid {
 		return false, nil
@@ -726,21 +714,33 @@ func canSetRuntimeVisibility(member db.Member, rt db.AgentRuntime) bool {
 
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	member, ok := h.requireWorkspaceMember(w, r, workspaceID, "workspace not found")
+	if !ok {
+		return
+	}
 
 	var runtimes []db.AgentRuntime
 	var err error
 
 	if ownerFilter := r.URL.Query().Get("owner"); ownerFilter == "me" {
-		userID, ok := requireUserID(w, r)
-		if !ok {
-			return
-		}
 		runtimes, err = h.Queries.ListAgentRuntimesByOwner(r.Context(), db.ListAgentRuntimesByOwnerParams{
 			WorkspaceID: parseUUID(workspaceID),
 			OwnerID:     parseUUID(userID),
 		})
-	} else {
+	} else if roleAllowed(member.Role, "owner", "admin") {
+		// Governance visibility preserves the existing owner/admin contract:
+		// admins can find a private runtime to rename or delete it, but the
+		// per-runtime read gate still denies data and machine access.
 		runtimes, err = h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+	} else {
+		runtimes, err = h.Queries.ListVisibleAgentRuntimes(r.Context(), db.ListVisibleAgentRuntimesParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(userID),
+		})
 	}
 
 	if err != nil {

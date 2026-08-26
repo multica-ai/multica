@@ -10,44 +10,22 @@
 // file with nothing to install.
 
 const pending = new Map();
-let port = null;
+const port = globalThis.__multicaPluginBridgePortV2;
 let sequence = 0;
 
-window.addEventListener("message", (event) => {
-  const data = event.data;
-  if (!data || data.type !== "multica:plugin-bridge-init" || !event.ports[0]) return;
-  // Only the embedder may hand this frame a port, and only once. Sibling frames
-  // are mutually opaque but `parent.frames[i]` is an allowed cross-origin
-  // access, so another plugin on this page could otherwise deliver its own port
-  // and become this surface's "host" — reading everything it writes. Origin is
-  // useless here (a sandboxed frame sees "null"), so identity is the window
-  // reference.
-  if (event.source !== window.parent || port) return;
-  port = event.ports[0];
-  port.onmessage = (message) => {
-    const payload = message.data;
-    if (payload?.kind === "theme") return applyTheme(payload.theme);
-    const entry = pending.get(payload?.id);
-    if (!entry) return;
-    pending.delete(payload.id);
-    if (payload.ok) entry.resolve(payload.data);
-    else entry.reject(new Error(payload.error));
-  };
-  port.start();
-  applyTheme(data.theme);
-  start();
-});
-
-// Announce until the host answers with a port. One announcement is not enough
-// in either direction: this frame can finish executing before the embedder's
-// effect attaches its listener, and a host waiting on the iframe load event can
-// miss that event entirely. Repeating makes the handshake independent of who is
-// ready first — the one ordering neither side controls.
-(function announce(attempts) {
-  if (port || attempts > 50) return;
-  window.parent.postMessage({ type: "multica:plugin-surface-ready" }, "*");
-  setTimeout(() => announce(attempts + 1), 120);
-})(0);
+if (!(port instanceof MessagePort)) throw new Error("Multica surface bridge is unavailable");
+delete globalThis.__multicaPluginBridgePortV2;
+port.onmessage = (message) => {
+  const payload = message.data;
+  if (payload?.kind === "theme") return applyTheme(payload.theme);
+  const entry = pending.get(payload?.id);
+  if (!entry) return;
+  pending.delete(payload.id);
+  if (payload.ok) entry.resolve(payload.data);
+  else entry.reject(new Error(payload.error));
+};
+port.start();
+start();
 
 function applyTheme(theme) {
   for (const [name, value] of Object.entries(theme ?? {})) {

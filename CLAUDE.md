@@ -9,7 +9,7 @@ The source of truth for code naming, i18n glossary, and Chinese product voice is
 - `apps/docs/content/docs/developers/conventions.mdx`
 - `apps/docs/content/docs/developers/conventions.zh.mdx`
 
-Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy. Do not rely on `packages/views/locales/glossary.md`; it is only a redirect stub.
+Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy.
 
 ## Project Shape
 
@@ -76,7 +76,12 @@ Mobile is independent. It may import types and pure functions from `@multica/cor
 Use the repo scripts as the source of truth. Common commands:
 
 ```bash
-make dev              # auto-setup and start the app
+make up               # start this checkout's environment (C=api,web,daemon,desktop)
+make status           # what is running, with pid/commit proof it is yours
+make list             # every development environment on this machine
+make down             # stop the processes, keep the database
+make destroy          # stop, then drop the database and free the slot
+make dev              # auto-setup and start the app in the foreground
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout
 make db-drop          # permanently drop this checkout's local database
@@ -96,7 +101,9 @@ pnpm exec playwright test
 pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 ```
 
-Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
+`make up` records each environment in `~/.multica/dev/`, allocates its API, Web and Desktop renderer ports plus database name under a lock instead of recomputing them from the path, and verifies the database through `DATABASE_URL` rather than `docker exec` — a `docker exec` create lands in the wrong server whenever a native PostgreSQL owns 5432. It reuses an API only when `/health` proves its listener pid, process group and commit belong to this checkout. `make down` keeps the data; `make destroy` consumes the database, profile, daemon workspaces, Desktop userData and registry entry. Agent-owned TTL environments are collected best-effort on the next `make up`, or explicitly with `make gc`.
+
+Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. Direct `pnpm dev:desktop` self-isolates from the path; `make up C=desktop` overrides that fallback with the registry-allocated renderer port and app name so Desktop shares the environment ledger.
 
 CI runs Node 22, the latest Go 1.26 patch, and a `pgvector/pgvector:pg17` PostgreSQL service.
 
@@ -106,6 +113,7 @@ These are hard requirements for every new or modified database design and produc
 
 - Do not add database foreign keys (`FOREIGN KEY` / `REFERENCES`), cascading deletes, or cascading updates. Resolve relationships, validation, and dependent cleanup explicitly in application code. Use an application transaction when cleanup and the parent operation must commit or roll back atomically.
 - Every index created by a migration must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`, including indexes on newly created tables. PostgreSQL rejects concurrent index creation inside a transaction or a multi-command string, so keep each concurrent index build in its own single-statement migration file. The repository migration runner executes migration files outside an explicit transaction to support this.
+- A conditionally skipped migration is still recorded in `schema_migrations`, so the ledger proves ordering, not that every migration's SQL executed. Later migrations that touch conditionally present objects must use idempotent DDL such as `IF EXISTS` / `IF NOT EXISTS`, and the introducing change must document recovery when losing the selected object would break runtime behavior.
 
 ## Coding Rules
 

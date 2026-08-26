@@ -124,6 +124,7 @@ Repository permissions：
 | 权限 | 级别 |
 |---|---|
 | Metadata | Read-only |
+| Contents | Read-only；PR 快照查询需要它，一次读取 head commit、可合并状态与 CI 汇总 |
 | Pull requests | Read-only |
 | Checks | Read-only；用于显示 CI 状态 |
 | Commit statuses | Read-only；用于汇总 legacy status 形式的 CI |
@@ -133,7 +134,7 @@ Repository permissions：
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用于触发 CI 与可合并性刷新。
 
-如果不需要在 Multica 中显示 CI，可以不授予 Checks 和 Commit statuses 权限，也不订阅对应事件。
+如果不需要在 Multica 中显示 CI，可以不授予 Checks 和 Commit statuses 权限，也不订阅对应事件。但 Contents 仍然必须授予——缺少它时整个快照查询会直接失败，PR 卡片连合并状态也会一起消失。
 
 <Callout type="warning">
 这里需要的是 **Webhook secret**，不是 OAuth Client secret。两边填写的 Webhook secret 不一致时，GitHub delivery 会返回 `401 invalid signature`。
@@ -176,7 +177,7 @@ make migrate-up
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启，以及编号是否属于当前工作区。
 - **正文写了编号但没显示**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中。
-- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Checks 与 Commit statuses 的只读权限并订阅了对应事件。给已安装的 App 补加权限后，还需要各 installation 的所有者在 GitHub 上批准才会生效。
+- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Contents、Checks 与 Commit statuses 的只读权限并订阅了对应事件。缺少 Contents 会让整个快照失败，PR 卡片既没有 CI 也没有合并状态。给已安装的 App 补加权限后，还需要各 installation 的所有者在 GitHub 上批准才会生效。
 - **PR 合并后 issue 没完成**：确认 PR 使用了关闭语句，并检查是否还有其他关联 PR 处于 Open 或 Draft。
 
 ## 接下来

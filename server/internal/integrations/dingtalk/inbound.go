@@ -3,6 +3,8 @@ package dingtalk
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -20,18 +22,25 @@ import (
 // reads; DingTalk sends more, which we ignore. Replaces the vendor SDK's
 // chatbot.BotCallbackDataModel.
 type botCallbackData struct {
-	ConversationId    string          `json:"conversationId"`
-	ConversationTitle string          `json:"conversationTitle"`
-	ConversationType  string          `json:"conversationType"`
-	SenderStaffId     string          `json:"senderStaffId"`
-	MsgId             string          `json:"msgId"`
-	Msgtype           string          `json:"msgtype"`
-	IsInAtList        bool            `json:"isInAtList"`
-	Text              botCallbackText `json:"text"`
+	ConversationId    string              `json:"conversationId"`
+	ConversationTitle string              `json:"conversationTitle"`
+	ConversationType  string              `json:"conversationType"`
+	AtUsers           []botCallbackAtUser `json:"atUsers"`
+	ChatbotUserId     string              `json:"chatbotUserId"`
+	SenderStaffId     string              `json:"senderStaffId"`
+	MsgId             string              `json:"msgId"`
+	Msgtype           string              `json:"msgtype"`
+	IsInAtList        bool                `json:"isInAtList"`
+	Text              botCallbackText     `json:"text"`
 	// Content is the msgtype-discriminated payload of non-text messages
 	// (picture / richText). Decoded lazily per msgtype; absent on over-quota
 	// callbacks (errorCode 20001 strips text/content entirely).
 	Content json.RawMessage `json:"content"`
+}
+
+type botCallbackAtUser struct {
+	DingtalkId string `json:"dingtalkId"`
+	StaffId    string `json:"staffId"`
 }
 
 type botCallbackText struct {
@@ -108,6 +117,14 @@ const (
 // message reaches the bot only when it carries an @-mention of it, which
 // DingTalk reports via isInAtList.
 func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMessage, bool) {
+	return inboundFromCallbackWithBotName(data, appID, "")
+}
+
+// inboundFromCallbackWithBotName translates one callback using only a Bot name
+// verified for this installation through DingTalk's group Bot list API. An
+// empty name is deliberately fail-closed: the adapter preserves every visible
+// mention rather than guessing its span from whitespace.
+func inboundFromCallbackWithBotName(data *botCallbackData, appID, botName string) (channel.InboundMessage, bool) {
 	if data == nil {
 		return channel.InboundMessage{}, false
 	}
@@ -116,7 +133,10 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	}
 
 	chatType := dingtalkChatType(data.ConversationType)
-	rawEvent := dingtalkRawEvent{AppID: appID, ConversationTitle: strings.TrimSpace(data.ConversationTitle)}
+	rawEvent := dingtalkRawEvent{
+		AppID:             appID,
+		ConversationTitle: strings.TrimSpace(data.ConversationTitle),
+	}
 	msg := channel.InboundMessage{
 		EventID:        data.MsgId,
 		MessageID:      data.MsgId,
@@ -132,7 +152,7 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	switch data.Msgtype {
 	case "text":
 		msg.Type = channel.MsgTypeText
-		msg.Text = strings.TrimSpace(data.Text.Content)
+		msg.Text = strings.TrimSpace(normalizeDingTalkBotMention(data, data.Text.Content, botName))
 		msg.CommandText = msg.Text
 		return withDingTalkRaw(msg, rawEvent), true
 
@@ -161,6 +181,7 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 			// identity-gated feedback rather than a silent adapter drop.
 			return mediaUnreadableMsg(msg, rawEvent), true
 		}
+		normalizeDingTalkRichTextBotMention(data, rc.RichText, botName)
 		var (
 			text                   strings.Builder
 			commandText            strings.Builder
@@ -193,7 +214,7 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 		}
 		msg.Text = strings.TrimSpace(text.String())
 		msg.CommandText = strings.TrimSpace(commandText.String())
-		normalizeDingTalkRichTextFreshLayout(&msg, rc.RichText, len(rawEvent.Media) > 0)
+		normalizeDingTalkRichTextControlLayout(&msg, rc.RichText, len(rawEvent.Media) > 0)
 		return withDingTalkRaw(msg, rawEvent), true
 
 	case "audio":
@@ -213,15 +234,14 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	return withDingTalkRaw(msg, rawEvent), true
 }
 
-// normalizeDingTalkRichTextFreshLayout strips /new from the visible rich-text
-// body before the shared Router handles it, preserving interleaved image
-// placeholders that Router cannot reconstruct from CommandText. It deliberately
-// keeps the original command source, so `/new /issue ...` remains one /new
-// command just like it does on Lark and Slack; the adapter never reclassifies
-// the remainder as a second command.
-func normalizeDingTalkRichTextFreshLayout(msg *channel.InboundMessage, items []richTextItem, hasMedia bool) {
-	body, ok := engine.ParseFreshSessionCommand(msg.CommandText)
-	if !ok || (body == "" && !hasMedia) {
+// normalizeDingTalkRichTextControlLayout strips either session-control
+// directive from the visible rich-text body before the shared Router handles
+// it, preserving interleaved image placeholders that Router cannot reconstruct
+// from CommandText. The original command source remains available to Router;
+// the adapter never applies /new route rotation or reclassifies a remainder.
+func normalizeDingTalkRichTextControlLayout(msg *channel.InboundMessage, items []richTextItem, hasMedia bool) {
+	control, ok := engine.ParseControlCommand(msg.CommandText)
+	if !ok || (control.Body == "" && !hasMedia) {
 		return
 	}
 
@@ -235,13 +255,15 @@ func normalizeDingTalkRichTextFreshLayout(msg *channel.InboundMessage, items []r
 	if firstText < 0 {
 		return
 	}
-	firstBody, ok := engine.ParseFreshSessionCommand(items[firstText].Text)
-	if !ok {
+	firstControl, ok := engine.ParseControlCommand(items[firstText].Text)
+	if !ok || firstControl.Kind != control.Kind {
 		return
 	}
 
-	msg.ForceFresh = true
-	items[firstText].Text = firstBody
+	if control.Kind == engine.ControlCommandFreshSession {
+		msg.ForceFresh = true
+	}
+	items[firstText].Text = firstControl.Body
 	var visible strings.Builder
 	for _, item := range items {
 		visible.WriteString(item.Text)
@@ -253,11 +275,109 @@ func normalizeDingTalkRichTextFreshLayout(msg *channel.InboundMessage, items []r
 		}
 	}
 	msg.Text = strings.TrimSpace(visible.String())
-	if body == "" {
-		// A media-bearing `/new` is a real turn, not the shared bare-command
+	if control.Kind == engine.ControlCommandFreshSession && control.Body == "" {
+		// A media-bearing `/clear` is a real turn, not the shared bare-command
 		// sentinel. ForceFresh carries the already-consumed directive.
 		msg.CommandText = msg.Text
 	}
+}
+
+// normalizeDingTalkRichTextBotMention removes the bot-addressing envelope from
+// whichever text run contains it. DingTalk can place that run before or after
+// media and independently from the run containing a control command.
+func normalizeDingTalkRichTextBotMention(data *botCallbackData, items []richTextItem, botName string) {
+	runs := make([]string, len(items))
+	for i := range items {
+		runs[i] = items[i].Text
+	}
+	removeDingTalkBotMention(data, runs, botName)
+	for i := range items {
+		items[i].Text = runs[i]
+	}
+}
+
+// normalizeDingTalkBotMention removes the bot-addressing token wherever it
+// appears in a plain-text message.
+func normalizeDingTalkBotMention(data *botCallbackData, text, botName string) string {
+	runs := []string{text}
+	removeDingTalkBotMention(data, runs, botName)
+	return runs[0]
+}
+
+type dingTalkMentionSpan struct {
+	run        int
+	start, end int
+}
+
+func removeDingTalkBotMention(data *botCallbackData, runs []string, botName string) {
+	botName = strings.TrimSpace(botName)
+	if data == nil || data.ConversationType != convTypeGroup || !data.IsInAtList || botName == "" {
+		return
+	}
+	mentions := exactDingTalkBotMentionSpans(runs, botName)
+	for i := len(mentions) - 1; i >= 0; i-- {
+		span := mentions[i]
+		prefix := runs[span.run][:span.start]
+		suffix := runs[span.run][span.end:]
+		switch {
+		case strings.TrimSpace(prefix) == "":
+			prefix = ""
+			suffix = trimLeftHorizontalSpace(suffix)
+		case strings.TrimSpace(suffix) == "":
+			prefix = trimRightHorizontalSpace(prefix)
+			suffix = ""
+		default:
+			suffix = trimLeftHorizontalSpace(suffix)
+		}
+		runs[span.run] = prefix + suffix
+	}
+}
+
+func exactDingTalkBotMentionSpans(runs []string, botName string) []dingTalkMentionSpan {
+	literal := "@" + botName
+	var spans []dingTalkMentionSpan
+	for run, text := range runs {
+		for offset := 0; offset < len(text); {
+			relative := strings.Index(text[offset:], literal)
+			if relative < 0 {
+				break
+			}
+			start := offset + relative
+			end := start + len(literal)
+			if dingTalkMentionLeftBoundary(text[:start]) && dingTalkMentionRightBoundary(text[end:]) {
+				spans = append(spans, dingTalkMentionSpan{run: run, start: start, end: end})
+			}
+			offset = end
+		}
+	}
+	return spans
+}
+
+func dingTalkMentionLeftBoundary(prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(prefix)
+	return unicode.IsSpace(r)
+}
+
+func dingTalkMentionRightBoundary(suffix string) bool {
+	if suffix == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(suffix)
+	// DingTalk supplies no mention span. Only whitespace/end can prove that the
+	// verified full name ended here; punctuation may itself extend another
+	// display name (for example "Bot-DEV"), so fail closed on it.
+	return unicode.IsSpace(r)
+}
+
+func trimLeftHorizontalSpace(value string) string {
+	return strings.TrimLeft(value, " \t\u3000")
+}
+
+func trimRightHorizontalSpace(value string) string {
+	return strings.TrimRight(value, " \t\u3000")
 }
 
 func withDingTalkRaw(msg channel.InboundMessage, rawEvent dingtalkRawEvent) channel.InboundMessage {

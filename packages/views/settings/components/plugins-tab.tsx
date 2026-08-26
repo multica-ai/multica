@@ -1,20 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertCircle, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, CalendarClock, Loader2, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
   pluginInstallationsOptions,
+  pluginPackagesOptions,
   useConfigurePlugin,
+  useDeletePluginPackage,
   useInstallPlugin,
   usePreviewPlugin,
+  usePublishPluginPackage,
   useSetPluginEnabled,
   useUninstallPlugin,
 } from "@multica/core/plugins";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import type { PluginConfigField, PluginInstallation, PluginPreview } from "@multica/core/types";
+import type {
+  PluginConfigField,
+  PluginInstallation,
+  PluginPackage,
+  PluginPreview,
+} from "@multica/core/types";
 import { Alert, AlertDescription, AlertTitle } from "@multica/ui/components/ui/alert";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -29,8 +37,8 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { mcpHooks, PluginHookActivity, PluginMCPApproval } from "../../plugins";
-import { useT } from "../../i18n";
+import { mcpHooks, PluginHookActivity, PluginMCPApproval, PluginScheduleActivity } from "../../plugins";
+import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
 /**
@@ -57,7 +65,66 @@ function ScopeList({ scopes, highlighted }: { scopes: string[]; highlighted?: st
   );
 }
 
+type ScheduledHook = {
+  key: string;
+  name: string;
+  schedule?: { cron: string; timezone: string; next_run_at?: string };
+};
+
+function ScheduleList({ hooks, showNextRun = false }: { hooks: ScheduledHook[]; showNextRun?: boolean }) {
+  const { t } = useT("settings");
+  const locale = useLocale();
+  return (
+    <ul className="mt-2 space-y-1.5">
+      {hooks.map((hook) => (
+        <li key={hook.key} className="flex flex-wrap items-baseline gap-2 text-caption">
+          <span className="font-medium">{hook.name}</span>
+          <span>{scheduleFrequency(hook.schedule?.cron ?? "", t)}</span>
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{hook.schedule?.cron ?? ""}</code>
+          <span className="text-muted-foreground">{hook.schedule?.timezone ?? ""}</span>
+          {showNextRun && hook.schedule?.next_run_at ? (
+            <span className="text-muted-foreground">
+              {t(($) => $.plugins.schedule.next_run, {
+                time: formatScheduleTime(hook.schedule?.next_run_at, locale),
+              })}
+            </span>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function formatScheduleTime(value: string | undefined, locale: string): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp));
+}
+
 type Translate = ReturnType<typeof useT<"settings">>["t"];
+
+function scheduleFrequency(cron: string, t: Translate): string {
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return t(($) => $.plugins.schedule.frequency_custom);
+  const everyMinutes = /^\*\/(\d+)$/.exec(fields[0] ?? "");
+  if (everyMinutes && fields.slice(1).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_minutes, { count: Number(everyMinutes[1]) });
+  }
+  if (/^\d+$/.test(fields[0] ?? "") && fields.slice(1).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_hourly, { minute: fields[0] });
+  }
+  if (/^\d+$/.test(fields[0] ?? "") && /^\d+$/.test(fields[1] ?? "") && fields.slice(2).every((field) => field === "*")) {
+    return t(($) => $.plugins.schedule.frequency_daily, {
+      hour: String(fields[1]).padStart(2, "0"),
+      minute: String(fields[0]).padStart(2, "0"),
+    });
+  }
+  return t(($) => $.plugins.schedule.frequency_custom);
+}
 
 function scopeDescription(scope: string, t: Translate): string {
   if (scope.startsWith("net:")) {
@@ -242,54 +309,117 @@ function ConfigField({
   );
 }
 
-function InstallFlow({ wsId, canManage }: { wsId: string; canManage: boolean }) {
+/**
+ * Publishing, and installing what was published.
+ *
+ * These are one screen because they are two halves of one story: an author
+ * uploads an artifact, and an administrator installs one specific version of it.
+ * There is no way to install code that was not published here first — which is
+ * what makes the consent screen below a statement about the code and not just
+ * about the manifest.
+ */
+function PublishAndInstall({ wsId, canManage }: { wsId: string; canManage: boolean }) {
   const { t } = useT("settings");
+  const { data, isLoading } = useQuery(pluginPackagesOptions(wsId));
+  const publishMutation = usePublishPluginPackage(wsId);
+  const deleteMutation = useDeletePluginPackage(wsId);
   const previewMutation = usePreviewPlugin(wsId);
   const installMutation = useInstallPlugin(wsId);
-  const [sourceUrl, setSourceUrl] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const [preview, setPreview] = useState<PluginPreview | null>(null);
 
-  const runPreview = async () => {
+  const packages = useMemo(() => data?.packages ?? [], [data]);
+  const scheduledHooks = (preview?.manifest.contributes?.hooks ?? [])
+    .filter((hook) => hook.schedule !== undefined);
+
+  const reportError = (error: unknown) => {
+    toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
+  };
+
+  const publish = async (file: File) => {
     try {
-      const result = await previewMutation.mutateAsync({ source_url: sourceUrl.trim() });
-      setPreview(result);
+      const published = await publishMutation.mutateAsync(file);
+      toast.success(t(($) => $.plugins.publish.published, {
+        name: published.name,
+        version: published.versions[0]?.version ?? "",
+      }));
+    } catch (error) {
+      reportError(error);
+    } finally {
+      // Cleared unconditionally so picking the same file again re-fires change,
+      // which is what a person does after fixing a rejected bundle.
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
+  const review = async (versionId: string) => {
+    try {
+      setPreview(await previewMutation.mutateAsync({ version_id: versionId }));
     } catch (error) {
       setPreview(null);
-      toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
+      reportError(error);
     }
   };
 
   const confirmInstall = async () => {
     if (!preview) return;
     try {
-      await installMutation.mutateAsync({ source_url: sourceUrl.trim(), granted_scopes: preview.scopes });
+      await installMutation.mutateAsync({ version_id: preview.version_id, granted_scopes: preview.scopes });
       setPreview(null);
-      setSourceUrl("");
       toast.success(t(($) => $.plugins.consent.installed));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
+      reportError(error);
     }
   };
 
   return (
-    <SettingsSection title={t(($) => $.plugins.install.title)} description={t(($) => $.plugins.install.description)}>
+    <SettingsSection title={t(($) => $.plugins.publish.title)} description={t(($) => $.plugins.publish.description)}>
       <SettingsCard>
-        <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center">
-          <Input
-            className="sm:flex-1"
-            disabled={!canManage || previewMutation.isPending}
-            value={sourceUrl}
-            placeholder={t(($) => $.plugins.install.placeholder)}
-            onChange={(event) => setSourceUrl(event.target.value)}
+        <div className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-caption text-muted-foreground">{t(($) => $.plugins.publish.hint)}</p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".zip,application/zip"
+            className="sr-only"
+            aria-label={t(($) => $.plugins.publish.upload)}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void publish(file);
+            }}
           />
           <Button
-            disabled={!canManage || previewMutation.isPending || sourceUrl.trim().length === 0}
-            onClick={runPreview}
+            disabled={!canManage || publishMutation.isPending}
+            onClick={() => fileRef.current?.click()}
           >
-            {previewMutation.isPending ? <Loader2 className="animate-spin" /> : null}
-            {t(($) => $.plugins.install.review)}
+            {publishMutation.isPending ? <Loader2 className="animate-spin" /> : <Upload />}
+            {t(($) => $.plugins.publish.upload)}
           </Button>
         </div>
+
+        {isLoading ? (
+          <div className="border-t border-surface-border px-4 py-4">
+            <Skeleton className="h-16 w-full" aria-label={t(($) => $.plugins.loading)} />
+          </div>
+        ) : packages.length === 0 ? (
+          <p className="border-t border-surface-border px-4 py-6 text-caption text-muted-foreground">
+            {t(($) => $.plugins.publish.empty)}
+          </p>
+        ) : (
+          packages.map((pluginPackage) => (
+            <PublishedPackage
+              key={pluginPackage.id}
+              pluginPackage={pluginPackage}
+              canManage={canManage}
+              busy={previewMutation.isPending || deleteMutation.isPending}
+              onReview={review}
+              onDelete={(packageId) => deleteMutation
+                .mutateAsync(packageId)
+                .then(() => toast.success(t(($) => $.plugins.publish.deleted)))
+                .catch(reportError)}
+            />
+          ))
+        )}
 
         {preview ? (
           <div className="space-y-4 border-t border-surface-border px-4 py-4">
@@ -298,7 +428,7 @@ function InstallFlow({ wsId, canManage }: { wsId: string; canManage: boolean }) 
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.plugins.byline, {
                   author: preview.manifest.author.name,
-                  version: preview.manifest.version,
+                  version: preview.version,
                 })}
                 {preview.installed
                   ? t(($) => $.plugins.consent.upgrade_from, { version: preview.installed_version ?? "" })
@@ -317,6 +447,17 @@ function InstallFlow({ wsId, canManage }: { wsId: string; canManage: boolean }) 
 
             <ScopeList scopes={preview.scopes} highlighted={preview.added_scopes} />
 
+            {scheduledHooks.length > 0 ? (
+              <Alert>
+                <CalendarClock />
+                <AlertTitle>{t(($) => $.plugins.schedule.consent_title)}</AlertTitle>
+                <AlertDescription>
+                  {t(($) => $.plugins.schedule.consent_description)}
+                  <ScheduleList hooks={scheduledHooks} />
+                </AlertDescription>
+              </Alert>
+            ) : null}
+
             <div className="flex justify-end gap-2">
               <Button variant="ghost" onClick={() => setPreview(null)}>
                 {t(($) => $.plugins.consent.cancel)}
@@ -332,6 +473,72 @@ function InstallFlow({ wsId, canManage }: { wsId: string; canManage: boolean }) 
         ) : null}
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+function PublishedPackage({
+  pluginPackage,
+  canManage,
+  busy,
+  onReview,
+  onDelete,
+}: {
+  pluginPackage: PluginPackage;
+  canManage: boolean;
+  busy: boolean;
+  onReview: (versionId: string) => void;
+  onDelete: (packageId: string) => void;
+}) {
+  const { t } = useT("settings");
+  // Versions arrive newest first, and the installed one is marked rather than
+  // inferred: after a publish those are different rows, and that difference is
+  // the whole reason an upgrade is a decision somebody makes.
+  const installed = pluginPackage.versions.find((version) => version.installed === true);
+
+  return (
+    <div className="space-y-3 border-t border-surface-border px-4 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-body font-medium">{pluginPackage.name}</div>
+          <p className="text-caption text-muted-foreground">{pluginPackage.plugin_key}</p>
+        </div>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={t(($) => $.plugins.publish.delete)}
+          disabled={!canManage || busy}
+          onClick={() => onDelete(pluginPackage.id)}
+        >
+          <Trash2 />
+        </Button>
+      </div>
+
+      <ul className="space-y-1.5">
+        {pluginPackage.versions.map((version) => (
+          <li key={version.id} className="flex flex-wrap items-center gap-2 text-caption">
+            <code className="rounded bg-muted px-1.5 py-0.5 font-mono">{version.version}</code>
+            {version.installed === true ? (
+              <Badge variant="secondary">{t(($) => $.plugins.publish.installed_version)}</Badge>
+            ) : null}
+            <span className="text-muted-foreground">{version.published_at.slice(0, 10)}</span>
+            <span className="font-mono text-muted-foreground" title={version.digest}>
+              {version.digest.slice(0, 12)}
+            </span>
+            {version.installed === true ? null : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="ml-auto"
+                disabled={!canManage || busy}
+                onClick={() => onReview(version.id)}
+              >
+                {installed ? t(($) => $.plugins.publish.review_upgrade) : t(($) => $.plugins.publish.review_install)}
+              </Button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -360,6 +567,7 @@ function InstalledPlugin({
   // An mcp hook is inert until its tools are approved, so the panel appears for
   // every one of them rather than only when something is already pinned.
   const mcpContributions = mcpHooks(installation.hooks ?? []);
+  const scheduledHooks = (installation.hooks ?? []).filter((hook) => hook.schedule !== undefined);
 
   const contributions = [
     ...installation.surfaces.map((surface) => `${surface.name} (${surface.type})`),
@@ -416,6 +624,21 @@ function InstalledPlugin({
           <ScopeList scopes={installation.granted_scopes} />
         </div>
 
+        {scheduledHooks.length > 0 ? (
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-caption font-medium">
+              <CalendarClock className="size-4" />
+              {t(($) => $.plugins.schedule.title)}
+            </div>
+            <ScheduleList hooks={scheduledHooks} showNextRun />
+            <PluginScheduleActivity
+              wsId={wsId}
+              installationId={installation.id}
+              hooks={scheduledHooks}
+            />
+          </div>
+        ) : null}
+
         {mcpContributions.length > 0 ? (
           <div className="space-y-2">
             <div className="text-caption font-medium">{t(($) => $.plugins.mcp.badge)}</div>
@@ -438,9 +661,6 @@ function InstalledPlugin({
           </div>
         ) : null}
 
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.plugins.source)}: <span className="font-mono break-all">{installation.source_url}</span>
-        </p>
       </div>
 
       <ConfigForm installation={installation} canManage={canManage} wsId={wsId} />
@@ -468,7 +688,7 @@ export function PluginsTab() {
         </Alert>
       ) : null}
 
-      {canManage ? <InstallFlow wsId={wsId} canManage={canManage} /> : null}
+      {canManage ? <PublishAndInstall wsId={wsId} canManage={canManage} /> : null}
 
       <SettingsSection title={t(($) => $.plugins.installed.title)}>
         {isLoading ? (

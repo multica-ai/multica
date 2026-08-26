@@ -585,15 +585,15 @@ function TaskRow({
 
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape.
-  // failureReasonLabel takes the raw open string — the taxonomy has 21
-  // values and grows, so there is no enum to cast to. Cancelled rows get a
+  // failureReasonLabel takes the raw open string because the taxonomy grows,
+  // so there is no enum to cast to. Cancelled rows get a
   // label only when the SERVER cancelled them for a persisted reason
   // (worktree claim gate, preserved-work delivery); a user's own cancel
   // stays a plain "Cancelled".
   const failureLabel =
     task.status === "failed"
-      ? failureReasonLabel(task.failure_reason)
-      : cancelReasonLabel(task);
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -682,11 +682,13 @@ function TaskRow({
           {failureLabel && (
             <>
               <Sep />
-              {/* Hover reveals the actionable text ("upgrade the daemon on
-                  that machine", "work preserved at …"), not just the bucket. */}
-              <span className="text-destructive" title={task.error ?? undefined}>
-                {failureLabel}
-              </span>
+              {/* The localized reason is the whole user-facing explanation
+                  here. The raw `task.error` used to ride along as this
+                  element's `title`, which put untranslated English (and
+                  absolute paths) in front of every non-English workspace
+                  (#7411); the full diagnostic lives in the transcript's Run
+                  details instead. */}
+              <span className="text-destructive">{failureLabel}</span>
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.

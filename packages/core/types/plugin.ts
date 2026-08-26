@@ -29,7 +29,14 @@ export interface PluginSurface {
   platforms?: string[];
 }
 
-export type PluginHookTrigger = "ui" | "manual" | "agent" | "event";
+export type PluginHookTrigger = "ui" | "manual" | "agent" | "event" | "schedule";
+
+export interface PluginHookSchedule {
+  cron: string;
+  timezone: string;
+  /** Display-only projection. Runtime correctness never depends on this value. */
+  next_run_at?: string;
+}
 
 export interface PluginHook {
   key: string;
@@ -37,6 +44,7 @@ export interface PluginHook {
   description: string;
   triggers: (PluginHookTrigger | string)[];
   events?: string[];
+  schedule?: PluginHookSchedule;
   transport: string;
 }
 
@@ -52,7 +60,12 @@ export interface PluginInstallation {
   name: string;
   description?: string;
   version: string;
-  source_url: string;
+  /**
+   * The published version this installation is bound to. Publishing a new
+   * version does not touch it — upgrading is an explicit second consent, which
+   * is what makes "the admin approved this code" true rather than aspirational.
+   */
+  package_version_id: string;
   enabled: boolean;
   granted_scopes: string[];
   config_schema: PluginConfigField[];
@@ -77,16 +90,29 @@ export interface PluginManifestSummary {
   description?: string;
   version: string;
   author: { name: string; url?: string };
+  contributes?: {
+    hooks?: Array<{
+      key: string;
+      name: string;
+      triggers: (PluginHookTrigger | string)[];
+      schedule?: PluginHookSchedule;
+    }>;
+  };
 }
 
 /**
  * What the consent screen renders. There is no signature and no trust tier in
  * this model: an administrator reading the scope list IS the trust decision.
+ *
+ * It describes one published version, and installing names that same version.
  */
 export interface PluginPreview {
   manifest: PluginManifestSummary;
   scopes: string[];
   config_schema: PluginConfigField[];
+  version_id: string;
+  version: string;
+  digest: string;
   installed: boolean;
   installed_version?: string;
   /** Scopes this install would add on top of what is already granted. */
@@ -94,12 +120,52 @@ export interface PluginPreview {
 }
 
 export interface PluginPreviewRequest {
-  source_url: string;
+  version_id: string;
 }
 
 export interface PluginInstallRequest {
-  source_url: string;
+  version_id: string;
   granted_scopes: string[];
+}
+
+/** One immutable published version of a plugin package. */
+export interface PluginPackageVersion {
+  id: string;
+  version: string;
+  /** sha256 of the artifact's contents, so two people can confirm they match. */
+  digest: string;
+  size_bytes: number;
+  published_at: string;
+  /** True for the version this workspace currently runs, if any. */
+  installed: boolean;
+}
+
+/**
+ * A plugin published into this workspace. Publishing is workspace-private: a
+ * public directory needs review, reporting and takedown, which is a separate
+ * decision from where the artifact lives.
+ */
+export interface PluginPackage {
+  id: string;
+  plugin_key: string;
+  name: string;
+  /** Newest first. */
+  versions: PluginPackageVersion[];
+  created_at: string;
+}
+
+export interface PluginPackageListResponse {
+  packages: PluginPackage[];
+}
+
+/** One short-lived, installation-bound launch of a hosted surface. */
+export interface PluginSurfaceLaunch {
+  /** Multica's cookie-free content URL, never the plugin author's server. */
+  url: string;
+  /** Single-use proof the generated document must present to this frame. */
+  bridge_token: string;
+  version: string;
+  digest: string;
 }
 
 export interface PluginConfigRequest {
@@ -136,6 +202,8 @@ export interface PluginInvocation {
   attempt: number;
   latency_ms: number;
   error?: string;
+  delivery_id?: string;
+  planned_at?: string;
   created_at: string;
 }
 

@@ -17,6 +17,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 |
 | 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 |
 | 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
+| 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
+| 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
 | 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling |
 
 새 연결은 현재 중국 본토 버전 Feishu에서만 만들 수 있습니다. 기존 국제 버전 Lark 연결은 계속 사용하고 관리할 수 있습니다.
@@ -47,6 +49,14 @@ Telegram은 현재 텍스트 메시지만 처리합니다. 미지원 미디어�
 Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 않으며 대화 컨텍스트에도 추가되지 않습니다.
 
 일반 메시지는 위 흐름으로 처리됩니다. `/issue`는 명령이며 채팅 turn이 아닙니다. Multica는 원래 플랫폼에 처리 결과를 보내지만 명령 자체는 Multica Chat에 추가하지 않습니다. Slack의 기본 slash 명령은 별도의 비동기 태스크 생성 흐름으로 처리됩니다.
+
+## 대화 컨텍스트 제어
+
+`/new`은 새 Multica Chat을 만들고 해당 외부 대화의 후속 메시지를 새 Chat으로 라우팅합니다. `/new <메시지>`를 보내면 해당 메시지가 첫 번째 대화가 됩니다. 이전 Chat은 Multica에 저장된 상태로 계속 사용할 수 있습니다.
+
+`/clear`는 현재 Multica Chat을 유지하면서 에이전트에게 보이는 컨텍스트만 새로 시작합니다. 전체 Chat 기록은 Multica에 남지만 에이전트는 경계 이전의 메시지를 가져올 수 없습니다. `/clear <메시지>`는 해당 메시지를 새 컨텍스트의 첫 번째 대화로 사용하고, 인자 없는 `/clear`는 다음 실제 메시지에 적용됩니다.
+
+Slack DM에서는 `/new`과 `/clear`가 네이티브 slash 명령입니다. 네이티브 slash command payload로는 채널의 대상 thread를 식별할 수 없으므로 대상 thread에서 `@Multica /new [메시지]` 또는 `@Multica /clear [메시지]`를 보내세요.
 
 ## 대화 격리
 

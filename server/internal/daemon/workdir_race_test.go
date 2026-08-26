@@ -344,11 +344,14 @@ func TestTaskTempBaseDir(t *testing.T) {
 
 	t.Run("configured base creates private 0700 task dir", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_TEMP_BASE", validBase)
-		dir, err := ensureTaskTempDir("root", "ws", "task")
+		dir, lock, err := ensureTaskTempDir("root", "ws", "task")
 		if err != nil {
 			t.Fatalf("ensureTaskTempDir(): %v", err)
 		}
-		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		t.Cleanup(func() {
+			execenv.ReleaseTaskTempLock(lock)
+			_ = os.RemoveAll(dir)
+		})
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("stat task temp dir: %v", err)
@@ -379,8 +382,9 @@ func TestTaskTempBaseDir(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.base)
-			dir, err := ensureTaskTempDir("root", "ws", "task")
+			dir, lock, err := ensureTaskTempDir("root", "ws", "task")
 			if err == nil {
+				execenv.ReleaseTaskTempLock(lock)
 				_ = os.RemoveAll(dir)
 				if tc.base == readOnlyBase {
 					t.Skip("process can write to the read-only fixture")

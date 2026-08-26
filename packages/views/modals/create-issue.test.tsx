@@ -15,10 +15,11 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
 import enEditor from "../locales/en/editor.json";
+import enIssues from "../locales/en/issues.json";
 
 const TEST_RESOURCES = {
   // `editor` carries the shared upload-gate copy ("Uploading…").
-  en: { common: enCommon, modals: enModals, editor: enEditor },
+  en: { common: enCommon, modals: enModals, editor: enEditor, issues: enIssues },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -31,6 +32,7 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockCreateCommentSubIssue = vi.hoisted(() => vi.fn());
 const mockAttachLabel = vi.hoisted(() => vi.fn());
 const mockListProperties = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
@@ -48,6 +50,42 @@ const mockToastError = vi.hoisted(() => vi.fn());
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+
+const sourceContextPanelData = () => ({
+  anchor_comment_id: "comment-source",
+  source_context_preview: {
+    source_issue: {
+      id: "issue-source",
+      identifier: "MUL-9",
+      number: 9,
+      title: "Source",
+      description: "Historical body",
+      created_at: "2026-08-20T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    },
+    comment_thread: [{
+      id: "comment-source",
+      parent_id: null,
+      type: "comment",
+      content: "Historical comment",
+      author: { type: "member", id: "user-1", name: "Alice" },
+      created_at: "2026-08-21T00:00:00Z",
+      updated_at: "2026-08-21T00:00:00Z",
+      revision: 1,
+      attachments: [],
+    }],
+    anchor_comment_id: "comment-source",
+    capture_token: "sha256:preview-token",
+    limits: {
+      comment_count: 1,
+      text_bytes: 100,
+      attachment_count: 0,
+      attachment_bytes: 0,
+    },
+  },
+});
 
 type DraftAttachment = {
   id: string;
@@ -220,6 +258,12 @@ vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
 
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
+  useCreateCommentSubIssue: () => ({
+    mutateAsync: ({ anchorCommentId, data }: {
+      anchorCommentId: string;
+      data: unknown;
+    }) => mockCreateCommentSubIssue(anchorCommentId, data),
+  }),
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
 
@@ -276,6 +320,7 @@ vi.mock("@multica/core/api", async () => {
   >("@multica/core/api/schemas");
   return {
     api: {
+      createCommentSubIssue: mockCreateCommentSubIssue,
       listProperties: mockListProperties,
       setIssueProperty: mockSetIssueProperty,
       uploadFile: mockApiUploadFile,
@@ -538,8 +583,8 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: ({ onSelect }: { onSelect: (file: File) => void }) => (
-    <button type="button" onClick={() => onSelect(new File(["test"], "test.txt"))}>
+  FileUploadButton: ({ onSelect, size }: { onSelect: (file: File) => void; size?: string }) => (
+    <button type="button" data-size={size} onClick={() => onSelect(new File(["test"], "test.txt"))}>
       Upload file
     </button>
   ),
@@ -627,6 +672,13 @@ describe("CreateIssueModal", () => {
       // is that the field is present (not undefined).
       labels: [],
     });
+    mockCreateCommentSubIssue.mockResolvedValue({
+      id: "issue-source-child",
+      identifier: "TES-124",
+      title: "Create from source comment",
+      status: "todo",
+      labels: [],
+    });
     mockAttachLabel.mockResolvedValue({ labels: [] });
     mockListProperties.mockResolvedValue({
       properties: [
@@ -651,6 +703,12 @@ describe("CreateIssueModal", () => {
     mockSetIssueProperty.mockResolvedValue({
       properties: { "property-tier": "option-enterprise" },
     });
+  });
+
+  it("uses the same compact attachment control as agent mode", () => {
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
@@ -1198,6 +1256,98 @@ describe("CreateIssueModal", () => {
       parent_issue_identifier: "MUL-2534",
     });
     expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
+  });
+
+  it("keeps captured context separate from the upstream description scroller", () => {
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    const description = screen.getByPlaceholderText("Add description...").parentElement;
+    const sourceContext = document.querySelector<HTMLElement>('[data-slot="source-context-preview"]');
+
+    expect(description).toHaveClass(
+      "relative",
+      "flex",
+      "flex-1",
+      "min-h-0",
+      "overflow-y-auto",
+      "px-5",
+    );
+    expect(sourceContext).toHaveClass("shrink-0");
+    expect(description?.parentElement).toBe(sourceContext?.parentElement);
+    expect(description?.nextElementSibling).toBe(sourceContext);
+    expect(description).not.toContainElement(sourceContext);
+  });
+
+  it("locks only a source-context parent and leaves ordinary parent controls unchanged", async () => {
+    const user = userEvent.setup();
+    const contextRender = renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={{
+          ...sourceContextPanelData(),
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("manual-sub-issue-chip")).toHaveTextContent("Sub-issue of MUL-2534");
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(screen.queryByText("Set parent issue...")).toBeNull();
+    expect(screen.queryByText("Remove parent")).toBeNull();
+
+    contextRender.unmount();
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={{
+          parent_issue_id: "parent-uuid-1",
+          parent_issue_identifier: "MUL-2534",
+        }}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "More options" }));
+    expect(screen.getByText("Set parent issue...")).toBeInTheDocument();
+  });
+
+  it("submits source-context manual create through the dedicated endpoint", async () => {
+    const user = userEvent.setup();
+    renderModal(
+      <ManualCreatePanel
+        onClose={vi.fn()}
+        onSwitchMode={vi.fn()}
+        data={sourceContextPanelData()}
+        isExpanded={false}
+        setIsExpanded={vi.fn()}
+      />,
+    );
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Create from source comment");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => expect(mockCreateCommentSubIssue).toHaveBeenCalledWith(
+      "comment-source",
+      {
+        mode: "manual",
+        capture_token: "sha256:preview-token",
+        issue: expect.objectContaining({ title: "Create from source comment" }),
+      },
+    ));
+    expect(mockCreateIssue).not.toHaveBeenCalled();
   });
 
   // Start date is a low-frequency field — by default it lives behind the

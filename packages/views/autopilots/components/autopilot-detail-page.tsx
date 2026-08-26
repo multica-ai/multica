@@ -18,7 +18,7 @@ import {
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api, dispatchReasonCode } from "@multica/core/api";
+import { api, clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -742,11 +742,14 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
       }
     } catch (e: any) {
       const reason = dispatchReasonCode(e);
-      toast.error(
-        reason
-          ? t(($) => $.detail[runNowBlockedKey(reason)])
-          : e?.message || t(($) => $.detail.toast_trigger_failed),
-      );
+      if (reason) {
+        toast.error(t(($) => $.detail[runNowBlockedKey(reason)]));
+        return;
+      }
+      // Only a 4xx message is written for the user; a 5xx one is internal
+      // server detail (MUL-6472), so an unclassified dispatch failure shows the
+      // localized generic sentence instead of the raw body.
+      toast.error(clientErrorMessage(e) || t(($) => $.detail.toast_trigger_failed));
     }
   };
 
@@ -895,28 +898,30 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
                 </div>
               </div>
-              {autopilot.execution_mode === "create_issue" && (
-                <div>
-                  <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_project)}</label>
-                  <div className="mt-1 min-w-0">
-                    {!autopilot.project_id ? (
-                      <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
-                    ) : projectLoading ? (
-                      <Skeleton className="h-5 w-32" />
-                    ) : project ? (
-                      <AppLink
-                        href={wsPaths.projectDetail(project.id)}
-                        className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
-                      >
-                        <ProjectIcon project={project} size="md" />
-                        <span className="truncate">{project.title}</span>
-                      </AppLink>
-                    ) : (
-                      <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
-                    )}
-                  </div>
+              {/* Shown for BOTH output modes (MUL-6681): a run_only autopilot's
+                  project decides its execution environment (repository /
+                  local_directory, and therefore worktree isolation), so an
+                  operator debugging a run needs to see it here. */}
+              <div>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_project)}</label>
+                <div className="mt-1 min-w-0">
+                  {!autopilot.project_id ? (
+                    <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
+                  ) : projectLoading ? (
+                    <Skeleton className="h-5 w-32" />
+                  ) : project ? (
+                    <AppLink
+                      href={wsPaths.projectDetail(project.id)}
+                      className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
+                    >
+                      <ProjectIcon project={project} size="md" />
+                      <span className="truncate">{project.title}</span>
+                    </AppLink>
+                  ) : (
+                    <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
+                  )}
                 </div>
-              )}
+              </div>
               {autopilot.execution_mode === "create_issue" && (
                 <div className="col-span-2">
                   <label className="text-caption text-muted-foreground">

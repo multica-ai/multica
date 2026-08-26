@@ -1,11 +1,11 @@
 ---
 title: Slack Bot
-description: 为智能体创建一个 Slack Bot，在私聊、频道和 /issue 命令中使用它。
+description: 为智能体创建一个 Slack Bot，在私聊、频道以及 /issue、/new、/clear 命令中使用它。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它，或用 `/issue` 创建 issue。
+Multica 使用你自己的 Slack app。连接后，团队成员可以私聊 Bot、在频道里 @ 它、用 `/issue` 创建 issue、用 `/new` 新建 Multica Chat，或用 `/clear` 重置当前 Chat 的智能体上下文。
 
 一个 Slack app 对应一个 Multica 智能体。需要接入多个智能体时，为每个智能体分别创建 app。
 
@@ -35,6 +35,12 @@ features:
     - command: /issue
       description: Create a Multica issue
       usage_hint: "[description]"
+    - command: /new
+      description: Start a new Multica chat
+      usage_hint: "[message]"
+    - command: /clear
+      description: Clear the current Multica chat context
+      usage_hint: "[message]"
 oauth_config:
   scopes:
     bot:
@@ -63,7 +69,11 @@ settings:
   token_rotation_enabled: false
 ```
 
-创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复或 `/issue` 可能无法工作。
+创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复、`/issue`、`/new` 或 `/clear` 可能无法工作。
+
+<Callout type="warning">
+Slack slash command 名称在整个 workspace 中共享。如果其他已安装 app 占用了 `/new` 或 `/clear`，Slack 会在创建或更新 app 时拒绝冲突命令。可以先解决名称冲突，也可以发送消息形式的 `@Multica /new [消息]` 或 `@Multica /clear [消息]`，绕过原生 slash command 拦截。
+</Callout>
 
 <Callout type="warning">
 如果这个 Slack app 是在附件支持上线前安装的，请添加 `files:read` Bot scope，并将 app 重新安装到 workspace。在重新安装 app 前，新增 scope 不会应用到现有 Bot token。
@@ -137,6 +147,20 @@ Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许�
 
 这条命令不需要 @ Bot。Multica 会把描述交给当前 Bot 对应的智能体，由它整理标题和正文并创建 issue。Slack 会先显示一条仅你可见的接收提示；创建完成后，你会在 Multica 收件箱中收到通知。
 
+### 用 `/new` 新建 Chat
+
+在与 Bot 的私聊中，发送 `/new` 会立即创建一个空的、可见的新 Chat；发送 `/new <消息>` 会把消息作为新 Chat 的第一轮。裸 `/new` 在第一条有效用户消息到来前显示为“新对话”，之后沿用现有的首条消息标题逻辑。
+
+旧 Chat 仍保留在 Multica 中，并可继续从 Web、桌面端或移动端发送消息；只有 Slack 这条外部会话的后续消息会切换到新 Chat。
+
+在频道或 thread 中，Slack 原生 slash command 的 payload 不包含目标 thread。请在目标 thread 里发送 `@Multica /new [消息]`。
+
+### 用 `/clear` 清空当前 Chat 上下文
+
+在与 Bot 的私聊中，`/clear` 会保留当前 Multica Chat，只重置智能体可见的上下文。完整 Chat 历史仍保存在 Multica 中。`/clear <消息>` 会把消息作为新上下文的第一轮；裸 `/clear` 会把边界应用到下一条真实消息。
+
+在频道或 thread 中，请在目标 thread 里发送 `@Multica /clear [消息]`，让 Multica 把边界应用到正确的会话。
+
 ## 管理连接
 
 打开 **设置 → 集成** 可以查看所有已连接的 Slack Bot。工作区 owner 和 admin 可以断开连接。
@@ -167,7 +191,7 @@ openssl rand -base64 32
 - **无法验证 app**：确认 manifest 包含 `users:read`，更新权限后重新安装 app。
 - **私聊没有入口**：确认 `app_home.messages_tab_enabled` 为 `true`。
 - **频道里没有回复**：确认 Bot 已被邀请进频道，并在消息中 @ 了它。
-- **`/issue` 不存在**：确认 manifest 包含 slash command 和 `commands` scope，随后重新安装 app。
+- **`/issue`、`/new` 或 `/clear` 不存在**：确认 manifest 包含这三个 slash command 和 `commands` scope，随后重新安装 app。如果 Slack 提示 `/new` 或 `/clear` 已被占用，请改用 `@Multica` 消息形式，或先解决 workspace 级命令冲突。
 - **文件没有送达智能体**：确认 manifest 里包含 `files:read`，并且在添加该权限后重新安装过应用，同时确认文件不超过 20 MiB。
 - **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。
 

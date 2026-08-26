@@ -85,6 +85,7 @@ const (
 	// draft restore (#5219). Channel outbounds (Slack/Lark) deliberately do
 	// not subscribe to it — cancellation stays silent on external channels.
 	EventChatCancelFinalized = "chat:cancel_finalized"
+	EventChatSessionCreated  = "chat:session_created"
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
@@ -108,6 +109,15 @@ const (
 	EventPropertyCreated        = "property:created"
 	EventPropertyUpdated        = "property:updated"
 	EventIssuePropertiesChanged = "issue_properties:changed"
+
+	// Issue status catalog events (MUL-6243). ONE event for all four writes
+	// — create, edit, archive, reorder — rather than a verb per write, because
+	// the catalog is read as a whole table and every client answers all four
+	// the same way: re-read it. Splitting it would mint four contracts that no
+	// consumer can tell apart, and reorder has no single row to name anyway.
+	// The `action` in the payload is advisory (it makes a frame in devtools
+	// self-describing); nothing routes on it.
+	EventIssueStatusChanged = "issue_status:changed"
 
 	// Pin events
 	EventPinCreated   = "pin:created"
@@ -190,7 +200,6 @@ const (
 	EventDingTalkInstallationCreated   = "dingtalk_installation:created"
 	EventDingTalkInstallationRevoked   = "dingtalk_installation:revoked"
 	EventDingTalkAccountBindingUpdated = "dingtalk_installation:binding_updated"
-	EventDingTalkGroupRouteUpdated     = "dingtalk_group_route:updated"
 
 	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
 	// Slack: `created` covers both first install and re-install via

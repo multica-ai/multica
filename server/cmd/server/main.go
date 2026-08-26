@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -322,21 +323,33 @@ func main() {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
-	// Connect to database
-	ctx := context.Background()
-	pool, err := newDBPool(ctx, dbURL)
+	startupSettings := dbstartup.SettingsFromEnv()
+	pool, err := newDBPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	if err := pool.Ping(ctx); err != nil {
+	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	retryOptions := startupSettings.RetryOptions()
+	retryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+	retryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+		slog.Warn("database unavailable during server startup; retrying",
+			"attempt", event.Attempt,
+			"retry_in", event.Delay,
+			"error", event.Err,
+		)
+	}
+	if err := dbstartup.Retry(startupCtx, retryOptions, pool.Ping); err != nil {
+		stopStartup()
 		slog.Error("unable to ping database", "error", err)
 		os.Exit(1)
 	}
+	stopStartup()
 	slog.Info("connected to database")
 	logPoolConfig(pool)
+	ctx := context.Background()
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -474,6 +487,7 @@ func main() {
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	var seatCapacityMetrics *obsmetrics.SeatCapacityMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
@@ -504,6 +518,7 @@ func main() {
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
+		seatCapacityMetrics = metricsRegistry.SeatCapacity
 		wecomMetrics = metricsRegistry.Wecom
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
@@ -541,6 +556,7 @@ func main() {
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
 		ChannelLeaseMetrics: channelLeaseMetrics,
+		SeatCapacityMetrics: seatCapacityMetrics,
 		ChannelLeaseRedis:   channelLeaseRedis,
 		WecomMetrics:        wecomMetrics,
 		DaemonHub:           daemonHub,
@@ -585,7 +601,15 @@ func main() {
 		)
 		runtimeReconnectGrace = minimumRuntimeReconnectGrace
 	}
-	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	// MULTICA_TASK_QUEUED_TTL lets self-hosted deployments that legitimately
+	// hold queued work behind long-running tasks — e.g. a runtime with low
+	// task concurrency — raise the built-in 2h queued expiry without losing
+	// work to queued_expired failures.
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
+		envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL))
+	// Source-context cleanup is object-store work, so it gets its own goroutine
+	// instead of a slot in the runtime sweep tick.
+	go runSourceContextSweeper(sweepCtx, taskSvc)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {
@@ -594,6 +618,9 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
+	if h.SeatCapacityWorker != nil {
+		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)
@@ -647,6 +674,11 @@ func main() {
 	// — there is no separate goroutine for scheduled Autopilot anymore.
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	// Manifest-declared Plugin schedules share the same durable lease and retry
+	// machinery. The job is inert while plugins_v1 is disabled.
+	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
+		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)

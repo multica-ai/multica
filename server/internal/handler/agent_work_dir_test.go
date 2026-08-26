@@ -25,6 +25,10 @@ func TestRelativeWorkDir(t *testing.T) {
 	const (
 		wsID   = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
 		taskID = "5c57b65b-ee7a-4603-a72d-a548b2390cb2"
+		// The env-root segment is the TAIL of the task id, not a leading
+		// prefix: UUIDv7 puts a timestamp in front, so a leading slice is
+		// shared by every task created in the same ~65.5s window (#7326).
+		taskSeg = "a548b2390cb2"
 	)
 
 	tests := []struct {
@@ -43,17 +47,17 @@ func TestRelativeWorkDir(t *testing.T) {
 		},
 		{
 			name:     "standard envRoot path strips workspaces root",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/" + taskSeg + "/workdir",
 			wsID:     wsID,
 			taskID:   taskID,
-			expected: wsID + "/5c57b65b/workdir",
+			expected: wsID + "/" + taskSeg + "/workdir",
 		},
 		{
 			name:     "standard envRoot path without trailing workdir",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/" + taskSeg,
 			wsID:     wsID,
 			taskID:   taskID,
-			expected: wsID + "/5c57b65b",
+			expected: wsID + "/" + taskSeg,
 		},
 		{
 			name:     "local_directory path under /Users home is stripped",
@@ -134,31 +138,31 @@ func TestRelativeWorkDir(t *testing.T) {
 		},
 		{
 			name:     "Windows backslash separators are normalized",
-			workDir:  `C:\Users\alice\multica_workspaces\` + wsID + `\5c57b65b\workdir`,
+			workDir:  `C:\Users\alice\multica_workspaces\` + wsID + `\` + taskSeg + `\workdir`,
 			wsID:     wsID,
 			taskID:   taskID,
-			expected: wsID + "/5c57b65b/workdir",
+			expected: wsID + "/" + taskSeg + "/workdir",
 		},
 		{
 			name:     "missing workspace_id under home strips home prefix instead of envRoot",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/" + taskSeg + "/workdir",
 			wsID:     "",
 			taskID:   taskID,
-			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			expected: "multica_workspaces/" + wsID + "/" + taskSeg + "/workdir",
 		},
 		{
 			name:     "missing task_id under home strips home prefix instead of envRoot",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/" + taskSeg + "/workdir",
 			wsID:     wsID,
 			taskID:   "",
-			expected: "multica_workspaces/" + wsID + "/5c57b65b/workdir",
+			expected: "multica_workspaces/" + wsID + "/" + taskSeg + "/workdir",
 		},
 		{
 			name:     "trailing slash on envRoot path is preserved in returned suffix",
-			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/5c57b65b/workdir/",
+			workDir:  "/Users/alice/multica_workspaces/" + wsID + "/" + taskSeg + "/workdir/",
 			wsID:     wsID,
 			taskID:   taskID,
-			expected: wsID + "/5c57b65b/workdir/",
+			expected: wsID + "/" + taskSeg + "/workdir/",
 		},
 		{
 			name:     "wsID prefix appearing elsewhere falls back to basename when not under home",
@@ -203,22 +207,22 @@ func TestTaskToResponseDerivesPrivateDurableWorkDir(t *testing.T) {
 	}
 }
 
-// TestShortTaskIDMatchesDaemon pins shortTaskID() to execenv.PredictRootDir's
-// path layout. Both helpers consume the same task UUID; if the daemon's
-// shortID logic drifts, this test trips loudly instead of letting the UI
-// silently fall back to the "tail two segments" branch. Without this guard,
-// a daemon-side change to, say, a 12-char prefix would not break a build —
-// it would just quietly degrade every standard-task work_dir chip into the
-// local_directory fallback.
-func TestShortTaskIDMatchesDaemon(t *testing.T) {
+// TestTaskDirSegmentMatchesDaemon pins taskDirSegment() to
+// execenv.PredictRootDir's path layout. Both helpers consume the same task
+// UUID; if the daemon's taskKey logic drifts, this test trips loudly instead
+// of letting the UI silently fall back to the "tail two segments" branch.
+// Without this guard, a daemon-side change back to a truncated prefix would
+// not break a build — it would just quietly degrade every standard-task
+// work_dir chip into the local_directory fallback.
+func TestTaskDirSegmentMatchesDaemon(t *testing.T) {
 	const (
 		workspacesRoot = "/tmp/workspaces"
 		workspaceID    = "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
 		taskID         = "5c57b65b-ee7a-4603-a72d-a548b2390cb2"
 	)
 	daemonRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
-	expected := workspacesRoot + "/" + workspaceID + "/" + shortTaskID(taskID)
+	expected := workspacesRoot + "/" + workspaceID + "/" + taskDirSegment(taskID)
 	if daemonRoot != expected {
-		t.Fatalf("daemon PredictRootDir = %q, handler-side reconstruction = %q — shortTaskID is out of sync with execenv.shortID", daemonRoot, expected)
+		t.Fatalf("daemon PredictRootDir = %q, handler-side reconstruction = %q — taskDirSegment is out of sync with execenv.taskKey", daemonRoot, expected)
 	}
 }
