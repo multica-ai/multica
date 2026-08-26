@@ -7,9 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/processtree"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -79,36 +81,10 @@ type gcStats struct {
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
-	root := d.cfg.WorkspacesRoot
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		d.logger.Warn("gc: read workspaces root failed", "error", err)
-		return
-	}
-
 	stats := &gcStats{byPattern: map[string]int{}}
-	for _, wsEntry := range entries {
-		// Skip every daemon-internal dot directory, not just .repos. A
-		// workspace directory is always a UUID, so a dot-prefixed entry is one
-		// of our own caches. Walking .skill-cache as if it were a workspace
-		// made its `v1` directory look like a task dir with no .gc_meta.json,
-		// so the orphan path would delete the entire bundle cache once its
-		// mtime went 72h without a new bundle. That reclaimed a few hundred KB
-		// and cost a full re-download.
-		if !wsEntry.IsDir() || strings.HasPrefix(wsEntry.Name(), ".") {
-			continue
-		}
-		wsDir := filepath.Join(root, wsEntry.Name())
-		d.gcWorkspace(ctx, wsDir, stats)
+	for _, gr := range d.gcWorkspaceRoots() {
+		d.gcRoot(ctx, gr.root, stats)
 	}
-
-	// Prune stale worktree references from all bare repo caches, then evict the
-	// caches nothing needs anymore. These live outside any workspace directory
-	// and are never reclaimed by the task walk above.
-	d.pruneRepoWorktreesContext(ctx, root, stats)
 
 	// Reclaim per-issue Codex session stores idle past their TTL. These live
 	// under the shared ~/.codex home (outside WorkspacesRoot) so resume survives
@@ -166,6 +142,114 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"by_pattern", stats.byPattern,
 		)
 	}
+}
+
+// gcRoot identifies a single workspace root to scan during a GC pass.
+type gcRoot struct {
+	profile string
+	root    string
+}
+
+// gcWorkspaceRoots returns the workspace roots a single GC pass should walk:
+// the current profile's root plus every root left behind by a previous profile
+// whose daemon is no longer running. Roots owned by a live daemon are skipped
+// because isActiveEnvRoot is in-process memory: a daemon sweeping another
+// profile's root would not see that profile's live tasks and would delete
+// workdirs a different daemon is actively using (see #6962).
+func (d *Daemon) gcWorkspaceRoots() []gcRoot {
+	roots := []gcRoot{{profile: d.cfg.Profile, root: d.cfg.WorkspacesRoot}}
+
+	profilesDir, err := cli.ProfileDir("")
+	if err != nil {
+		return roots
+	}
+	profilesDir = filepath.Join(profilesDir, "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil {
+		// No profiles directory: there are no other roots to scan.
+		return roots
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		profile := entry.Name()
+		if profile == d.cfg.Profile {
+			continue
+		}
+		// Another daemon's active task set only exists in that daemon's
+		// process. Even though this daemon can see the root on disk, sweeping
+		// it would bypass isActiveEnvRoot and could delete in-flight workdirs.
+		if d.profileDaemonActive(profile) {
+			continue
+		}
+		root, err := ResolveWorkspacesRoot(profile, "")
+		if err != nil {
+			continue
+		}
+		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
+			continue
+		}
+		roots = append(roots, gcRoot{profile: profile, root: root})
+	}
+
+	return roots
+}
+
+// profileDaemonActive reports whether the daemon for the given profile appears
+// to be running. The pid file is only a pointer to the process: SIGKILL, OOM,
+// and host power loss can leave it behind, so its presence alone is not proof
+// of liveness. Unreadable or malformed files and inconclusive process probes
+// fail safe to active. PID reuse can also produce a false positive, but that
+// only postpones cleanup instead of risking another daemon's workdirs.
+func (d *Daemon) profileDaemonActive(profile string) bool {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return true
+	}
+	pidBytes, err := os.ReadFile(filepath.Join(profileDir, "daemon.pid"))
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidBytes)))
+	if err != nil || pid <= 0 {
+		return true
+	}
+	return processAlive(pid)
+}
+
+// gcRoot performs the per-root portion of a GC scan: walking workspace
+// directories and pruning repo worktree caches under a single root.
+func (d *Daemon) gcRoot(ctx context.Context, root string, stats *gcStats) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		d.logger.Warn("gc: read workspaces root failed", "error", err)
+		return
+	}
+
+	for _, wsEntry := range entries {
+		// Skip every daemon-internal dot directory, not just .repos. A
+		// workspace directory is always a UUID, so a dot-prefixed entry is one
+		// of our own caches. Walking .skill-cache as if it were a workspace
+		// made its `v1` directory look like a task dir with no .gc_meta.json,
+		// so the orphan path would delete the entire bundle cache once its
+		// mtime went 72h without a new bundle. That reclaimed a few hundred KB
+		// and cost a full re-download.
+		if !wsEntry.IsDir() || strings.HasPrefix(wsEntry.Name(), ".") {
+			continue
+		}
+		wsDir := filepath.Join(root, wsEntry.Name())
+		d.gcWorkspace(ctx, wsDir, stats)
+	}
+
+	// Prune stale worktree references from all bare repo caches, then evict the
+	// caches nothing needs anymore. These live outside any workspace directory
+	// and are never reclaimed by the task walk above.
+	d.pruneRepoWorktreesContext(ctx, root, stats)
 }
 
 // gcWorkspace scans task directories inside a single workspace directory.
