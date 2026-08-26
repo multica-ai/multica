@@ -281,7 +281,6 @@
       "pick_hint": "SKILL.md を含むフォルダ、またはパッケージ済みの .skill / .zip ファイルを選択してください。",
       "folder_label": "フォルダ",
       "archive_label": "アーカイブ",
-      "files_one": "{{count}} 個のファイル",
       "files_other": "{{count}} 個のファイル",
       "missing_skill_md": "このフォルダはスキルではありません。SKILL.md がありません。",
       "too_large": "このスキルは大きすぎてインポートできません。",

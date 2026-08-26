@@ -281,7 +281,6 @@
       "pick_hint": "SKILL.md가 있는 폴더, 또는 패키지된 .skill / .zip 파일을 선택하세요.",
       "folder_label": "폴더",
       "archive_label": "아카이브",
-      "files_one": "파일 {{count}}개",
       "files_other": "파일 {{count}}개",
       "missing_skill_md": "이 폴더는 스킬이 아닙니다. SKILL.md가 없습니다.",
       "too_large": "이 스킬은 너무 커서 가져올 수 없습니다.",

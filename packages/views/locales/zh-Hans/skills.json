@@ -281,7 +281,6 @@
       "pick_hint": "选择包含 SKILL.md 的文件夹，或打包好的 .skill / .zip 文件。",
       "folder_label": "文件夹",
       "archive_label": "压缩包",
-      "files_one": "{{count}} 个文件",
       "files_other": "{{count}} 个文件",
       "missing_skill_md": "这个文件夹不是 skill——里面没有 SKILL.md。",
       "too_large": "这个 skill 太大，无法导入。",
