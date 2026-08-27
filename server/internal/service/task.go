@@ -4709,8 +4709,17 @@ func startsWithAbsolutePath(s string) bool {
 // causing the new task to resume against a stale (or NULL) session.
 // durableWorkDir is terminal delivery metadata, not a resume pointer: it is
 // populated only after the daemon confirms a disposable worktree is gone.
-func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, help ...HelpSignal) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
+	// GAP-25: a completion may still carry an agent help signal (the agent
+	// finished but flagged it needs human attention/verification). It is
+	// persisted on the row and routed to attention; a completed task never
+	// enters the retry paths regardless.
+	var helpSignal HelpSignal
+	if len(help) > 0 {
+		helpSignal = help[0]
+	}
+	helpPresent := helpSignal.present()
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
 	// only after the transaction commits.
@@ -4733,6 +4742,18 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			return err
 		}
 		task = t
+		// GAP-25: persist the agent help signal (if any) atomically with the
+		// completion.
+		if helpPresent {
+			if blob, merr := json.Marshal(helpSignalToJSON(helpSignal)); merr == nil {
+				if serr := qtx.SetAgentTaskHelpSignal(ctx, db.SetAgentTaskHelpSignalParams{
+					ID:         taskID,
+					HelpSignal: blob,
+				}); serr != nil {
+					return fmt.Errorf("persist agent help signal: %w", serr)
+				}
+			}
+		}
 
 		if t.ChatSessionID.Valid {
 			// Pin the chat_session's runtime_id alongside the session_id so the
@@ -4936,6 +4957,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
+	// GAP-25: a completed task that still carries an agent help signal is
+	// routed to human attention via the inbox.
+	if helpPresent {
+		s.notifyAgentHelpRequested(ctx, task, helpSignal)
+	}
+
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
@@ -5133,6 +5160,39 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 	)
 }
 
+// HelpSignal is the structured agent "I'm stuck" signal captured on terminal
+// task payloads (GAP-25). It is agent-authored (never classifier-authored):
+// the agent reports a blocked_reason and/or a list of needs (what it requires
+// from a human) and an optional confidence the platform can use for triage
+// ordering. The server persists it as the task row's help_signal JSONB and
+// routes the task to human attention instead of the auto-retry machinery.
+type HelpSignal struct {
+	BlockedReason *string
+	Needs         []string
+	Confidence    *float64
+}
+
+// present reports whether the signal carries any agent-authored data.
+func (h HelpSignal) present() bool {
+	return h.BlockedReason != nil || len(h.Needs) > 0 || h.Confidence != nil
+}
+
+// helpSignalToJSON renders the signal into the JSONB shape stored on the task
+// row ({blocked_reason, needs, confidence}), omitting absent fields.
+func helpSignalToJSON(h HelpSignal) map[string]any {
+	m := map[string]any{}
+	if h.BlockedReason != nil {
+		m["blocked_reason"] = *h.BlockedReason
+	}
+	if len(h.Needs) > 0 {
+		m["needs"] = h.Needs
+	}
+	if h.Confidence != nil {
+		m["confidence"] = *h.Confidence
+	}
+	return m
+}
+
 // FailTask marks a task as failed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
 //
@@ -5151,7 +5211,7 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // coarse bucket. Daemon callers that already produced a refined reason
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, help ...HelpSignal) (*db.AgentTaskQueue, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -5178,6 +5238,22 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// is normalised too, and before the retry pre-compute below so the upgraded
 	// reason is what decides retry eligibility.
 	failureReason = taskfailure.NormalizeDaemonReason(failureReason, errMsg).String()
+
+	// GAP-25: an agent-authored help signal (blocked_reason / needs /
+	// confidence) always wins the failure_reason. It is a deliberate
+	// "I'm stuck" escalation that must route to human attention, never to the
+	// auto-retry / auto-rerun machinery. Because the reason is platform-side
+	// (not an agent_error.* value) it is already excluded from
+	// isModelFailureReason / retryableReasons below, so no retry child is ever
+	// spawned for it. See notifyAgentHelpRequested for the attention route.
+	var helpSignal HelpSignal
+	if len(help) > 0 {
+		helpSignal = help[0]
+	}
+	helpPresent := helpSignal.present()
+	if helpPresent {
+		failureReason = string(taskfailure.ReasonAgentRequestedHelp)
+	}
 
 	// Pre-compute the auto-retry so the retry child can be created inside the
 	// SAME transaction as the fail (MUL-4351). Doing it atomically closes the
@@ -5245,6 +5321,19 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+		// GAP-25: persist the agent help signal (if any) atomically with the
+		// terminal failure. agent_requested_help is excluded from the retry
+		// paths, so writing this here never races a retry child.
+		if helpPresent {
+			if blob, merr := json.Marshal(helpSignalToJSON(helpSignal)); merr == nil {
+				if serr := qtx.SetAgentTaskHelpSignal(ctx, db.SetAgentTaskHelpSignalParams{
+					ID:         taskID,
+					HelpSignal: blob,
+				}); serr != nil {
+					return fmt.Errorf("persist agent help signal: %w", serr)
+				}
+			}
+		}
 		// Model availability fallback: mark health unhealthy for model failures.
 		if isModelFailureReason(failureReason) {
 			c := t.ConcreteModel.String
@@ -5577,6 +5666,13 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+
+	// GAP-25: a task that ended with an agent help request is routed to human
+	// attention via the inbox instead of auto-retry (which it was excluded
+	// from above).
+	if helpPresent {
+		s.notifyAgentHelpRequested(ctx, task, helpSignal)
+	}
 
 	// The auto-retry child (if any) was created inside the transaction above so
 	// no newer chat task could jump ahead of it. Surface it now: broadcast
@@ -8006,6 +8102,69 @@ func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.Agent
 // issue. It points at the one safe next step instead — check before retrying,
 // so a retry cannot silently produce the duplicate the guard exists to prevent.
 const quickCreateUnconfirmedDetail = "Couldn't confirm whether the issue was created. Check your recent issues before retrying — creating it again may produce a duplicate."
+
+// notifyAgentHelpRequested routes an agent help request (GAP-25) to human
+// attention. A single action-required inbox item is written for the human
+// accountable for the run (task originator, else initiator). Best-effort: a
+// workspace that cannot be resolved (e.g. a system-sourced task with no human
+// in the chain) simply gets no inbox row — the help_signal JSONB on the task
+// row still records the signal. The GAP-2 digest inclusion of this inbox type
+// is an explicit follow-up and is intentionally NOT built here.
+func (s *TaskService) notifyAgentHelpRequested(ctx context.Context, task db.AgentTaskQueue, help HelpSignal) {
+	recipient := task.OriginatorUserID
+	if !recipient.Valid {
+		recipient = task.InitiatorUserID
+	}
+	if !recipient.Valid {
+		return
+	}
+	var wsID pgtype.UUID
+	switch {
+	case task.IssueID.Valid:
+		if iss, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+			wsID = iss.WorkspaceID
+		}
+	case task.ChatSessionID.Valid:
+		if cs, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
+			wsID = cs.WorkspaceID
+		}
+	}
+	if !wsID.Valid {
+		return
+	}
+	body := ""
+	if help.BlockedReason != nil {
+		body = *help.BlockedReason
+	}
+	details, err := json.Marshal(map[string]any{
+		"task_id":        util.UUIDToString(task.ID),
+		"agent_id":       util.UUIDToString(task.AgentID),
+		"blocked_reason": help.BlockedReason,
+		"needs":          help.Needs,
+		"confidence":     help.Confidence,
+	})
+	if err != nil {
+		slog.Warn("agent help request: encode details failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	if _, err := s.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   wsID,
+		RecipientType: "member",
+		RecipientID:   recipient,
+		Type:          "agent_help_requested",
+		Severity:      "action_required",
+		IssueID:       task.IssueID,
+		Title:         "Agent requested help",
+		Body:          pgtype.Text{String: body, Valid: body != ""},
+		ActorType:     pgtype.Text{String: "agent", Valid: true},
+		ActorID:       task.AgentID,
+		Details:       details,
+	}); err != nil {
+		slog.Warn("agent help request: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+	}
+}
+
 
 // notifyQuickCreateUnconfirmed writes a NEUTRAL terminal notification for a
 // quick-create run whose outcome is unverified. The task is already completed
