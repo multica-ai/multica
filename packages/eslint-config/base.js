@@ -1,5 +1,5 @@
 import eslint from "@eslint/js";
-import tseslint from "typescript-eslint";
+import tseslint from "./tseslint.js";
 import importPlugin from "eslint-plugin-import-x";
 
 /** @type {import("eslint").Linter.Config[]} */
@@ -15,6 +15,11 @@ export default [
       "@typescript-eslint/no-unused-vars": "off",
       // Allow explicit any where needed
       "@typescript-eslint/no-explicit-any": "off",
+      // `@ts-nocheck` is used in a few suites that follow a looser tsconfig.
+      "@typescript-eslint/ban-ts-comment": [
+        "error",
+        { "ts-nocheck": false },
+      ],
       // Prevent phantom dependencies — imports must be declared in package.json
       "import-x/no-extraneous-dependencies": ["error", {
         devDependencies: [

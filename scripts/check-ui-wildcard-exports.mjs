@@ -44,7 +44,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const uiRoot = join(repoRoot, "packages", "ui");

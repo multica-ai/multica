@@ -69,8 +69,8 @@
     // `@multica/web#test` and `@multica/desktop#test` byte-identical in hash,
     // so a cached pass would be replayed over changed code. `^cache-inputs`
     // closes that without side effects: `^typecheck` would also work but drags
-    // three real `tsc --noEmit` runs (~223 CPU-seconds) into the test job, and
-    // `^test` would serialise the suites behind each other.
+    // real `tsc --noEmit` runs into the test job, and `^test` would serialise
+    // the suites behind each other.
     "test": {
       "dependsOn": ["^cache-inputs"]
     },

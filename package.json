@@ -20,7 +20,7 @@
     "ios:mobile:device:prod": "pnpm -C apps/mobile ios:device:prod",
     "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
     "build": "turbo build --filter=!@multica/mobile",
-    "typecheck": "turbo typecheck --filter=!@multica/mobile",
+    "typecheck": "node scripts/assert-tsc-7.mjs && turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",
     "lint": "turbo lint --filter=!@multica/mobile",
     "knip": "knip",
@@ -38,6 +38,18 @@
       "esbuild",
       "electron"
     ],
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "typescript": ">=4.8.4 <8"
+      }
+    },
+    "packageExtensions": {
+      "knip": {
+        "dependencies": {
+          "typescript": "npm:@typescript/typescript6@^6.0.2"
+        }
+      }
+    },
     "overrides": {
       "@types/react": "catalog:",
       "@types/react-dom": "catalog:",
@@ -56,9 +68,10 @@
     "@playwright/test": "^1.58.2",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
-    "knip": "^6.32.2",
+    "@typescript/typescript6": "catalog:",
+    "knip": "^6.32.3",
     "pg": "^8.20.0",
-    "turbo": "^2.5.4",
+    "turbo": "^2.10.12",
     "typescript": "catalog:"
   }
 }

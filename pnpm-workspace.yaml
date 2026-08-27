@@ -35,9 +35,12 @@ catalog:
   remark-math: ^6.0.0
   tailwind-merge: ^3.4.0
   tailwindcss: ^4
-  typescript: ^5.9.3
+  # `typescript` is native 7+ (`tsc`, Next `useTypeScriptCli`, Cursor tsgo).
+  # The 6.x compiler API lives at `@typescript/typescript6` for eslint/knip.
+  typescript: ^7.0.2
+  '@typescript/typescript6': ^6.0.2
   unicode-animations: ^1.0.3
-  vitest: ^4.1.0
+  vitest: ^4.1.11
   yaml: ^2.6.0
   zod: ^4.1.5
   zustand: ^5.0.0

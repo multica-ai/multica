@@ -18,6 +18,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "noUncheckedIndexedAccess": true,
+    "noUncheckedSideEffectImports": false,
     "resolveJsonModule": true,
     "jsx": "react-jsx",
     "plugins": [
