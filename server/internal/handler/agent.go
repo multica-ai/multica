@@ -156,19 +156,14 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	}
 	maskGatewayToken(rc)
 
-	// Compute env metadata WITHOUT exposing the values. We unmarshal here
-	// only to count keys; the map never reaches the response. A coarse
+	// Compute env metadata WITHOUT exposing the values. We decrypt + unmarshal
+	// here only to count keys; the map never reaches the response. A coarse
 	// has_custom_env / key_count is what the UI gets — to read the values
 	// the caller must hit GET /api/agents/{id}/env (agent owner or
-	// workspace owner/admin, audited).
-	envKeyCount := 0
-	if a.CustomEnv != nil {
-		var customEnv map[string]string
-		if err := json.Unmarshal(a.CustomEnv, &customEnv); err != nil {
-			slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(a.ID), "error", err)
-		}
-		envKeyCount = len(customEnv)
-	}
+	// workspace owner/admin, audited). Decrypting keeps the count correct
+	// now that custom_env may be an encrypted envelope at rest (GAP-10).
+	customEnv := unmarshalCustomEnv(a)
+	envKeyCount := len(customEnv)
 
 	var customArgs []string
 	if a.CustomArgs != nil {
@@ -1331,6 +1326,13 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomEnv == nil {
 		ce = []byte("{}")
 	}
+	// Encrypt at rest (GAP-10 Phase 1). With MULTICA_ENV_ENC_KEY unset this
+	// degrades to storing the plaintext map unchanged.
+	encCE, err := encryptCustomEnv(ce)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encrypt env")
+		return
+	}
 
 	ca, _ := json.Marshal(req.CustomArgs)
 	if req.CustomArgs == nil {
@@ -1395,7 +1397,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		PermissionMode:           perm.mode,
 		MaxConcurrentTasks:       req.MaxConcurrentTasks,
 		OwnerID:                  parseUUID(ownerID),
-		CustomEnv:                ce,
+		CustomEnv:                encCE,
 		CustomArgs:               ca,
 		McpConfig:                mc,
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
