@@ -73,6 +73,8 @@ func TestOperationLedgerPinsSharedScopes(t *testing.T) {
 		http.MethodPatch + " " + PathIssue:        "issues:write",
 		http.MethodGet + " " + PathIssueComments:  "comments:read",
 		http.MethodPost + " " + PathIssueComments: "comments:write",
+		http.MethodGet + " " + PathTasks:          "tasks:read",
+		http.MethodGet + " " + PathAgents:         "agents:read",
 	}
 	for _, operation := range Operations {
 		if operation.Contract != ContractSharedResource {

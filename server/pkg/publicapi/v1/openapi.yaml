@@ -108,6 +108,55 @@ paths:
                 $ref: "#/components/schemas/Comment"
         default:
           $ref: "#/components/responses/Problem"
+  /tasks:
+    get:
+      operationId: listPluginWorkspaceTasks
+      summary: List the newest tasks in the caller's workspace
+      description: >-
+        Read-only dispatch-health view: where queued work stands, not what it
+        produced. Scoped to the caller's workspace by the installation, never
+        from a client header. A positive `limit` clamps how many of the newest
+        tasks are returned (default 200).
+      x-multica-contract: shared_resource
+      x-multica-scope: tasks:read
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Tasks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskListResponse"
+        default:
+          $ref: "#/components/responses/Problem"
+  /agents:
+    get:
+      operationId: listPluginWorkspaceAgents
+      summary: List the workspace's agents with live queue counters
+      description: >-
+        Read-only dispatch-health view. One row per visible, user-authored
+        agent with queued / running / waiting counts split out so a panel can
+        distinguish in-flight work from waiters blocked on a local-directory
+        mutex.
+      x-multica-contract: shared_resource
+      x-multica-scope: agents:read
+      responses:
+        "200":
+          description: Agents
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentListResponse"
+        default:
+          $ref: "#/components/responses/Problem"
   /storage/{scope}:
     get:
       operationId: listPluginStorageKeys
@@ -402,3 +451,55 @@ components:
       required: [value]
       properties:
         value: { type: string, maxLength: 102400 }
+    Task:
+      type: object
+      required: [id, agent_id, agent_name, status, created_at]
+      properties:
+        id: { type: string }
+        agent_id: { type: string }
+        agent_name: { type: string }
+        status: { type: string }
+        wait_reason: { type: string }
+        issue:
+          $ref: "#/components/schemas/TaskIssue"
+        created_at: { type: string, format: date-time }
+    TaskIssue:
+      type: object
+      required: [id, identifier]
+      properties:
+        id: { type: string }
+        identifier: { type: string }
+        title: { type: string }
+    TaskListResponse:
+      type: object
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/Task"
+    Agent:
+      type: object
+      required: [id, name, max_concurrent_tasks, queue]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        model: { type: string }
+        max_concurrent_tasks: { type: integer, format: int32, minimum: 1 }
+        queue:
+          $ref: "#/components/schemas/AgentQueueCounts"
+    AgentQueueCounts:
+      type: object
+      required: [queued, running, waiting]
+      properties:
+        queued: { type: integer, format: int32 }
+        running: { type: integer, format: int32 }
+        waiting: { type: integer, format: int32 }
+    AgentListResponse:
+      type: object
+      required: [agents]
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"

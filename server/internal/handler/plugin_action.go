@@ -628,6 +628,106 @@ const maxPluginCommentBytes = 64 * 1024
 // than a truncated beginning.
 const maxPluginCommentsPerRead = 200
 
+// maxPluginTasksPerRead bounds one /v1/tasks read. The query returns the newest
+// N across the workspace; a panel drills in per agent by calling again with a
+// smaller limit rather than paging through the whole backlog.
+const maxPluginTasksPerRead = 200
+
+// --- Tasks & agents ---
+
+// ListPluginTasks — GET /v1/tasks
+//
+// Workspace-scoped via the installation (caller.WorkspaceID), never from a
+// client header. An optional positive `limit` clamps how many of the newest
+// tasks are returned; a callback grant narrows to its own issue automatically
+// through caller.IssueScope.
+func (h *Handler) ListPluginTasks(w http.ResponseWriter, r *http.Request) {
+	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeTasksRead)
+	if !ok {
+		return
+	}
+	limit := int32(maxPluginTasksPerRead)
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 {
+			publicapiv1.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "limit must be a positive integer")
+			return
+		}
+		if n < maxPluginTasksPerRead {
+			limit = int32(n)
+		}
+	}
+	rows, err := h.Queries.ListPluginActionWorkspaceTasks(r.Context(), db.ListPluginActionWorkspaceTasksParams{
+		WorkspaceID: caller.WorkspaceID,
+		Limit:       limit,
+		IssueScope:  caller.IssueScope,
+	})
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list tasks")
+		return
+	}
+	tasks := make([]publicapiv1.Task, 0, len(rows))
+	for _, row := range rows {
+		tasks = append(tasks, publicPluginTask(row))
+	}
+	writeJSON(w, http.StatusOK, publicapiv1.TaskListResponse{Tasks: tasks})
+}
+
+func publicPluginTask(row db.ListPluginActionWorkspaceTasksRow) publicapiv1.Task {
+	out := publicapiv1.Task{
+		ID:        uuidToString(row.ID),
+		AgentID:   uuidToString(row.AgentID),
+		AgentName: row.AgentName,
+		Status:    row.Status,
+		CreatedAt: row.CreatedAt.Time.UTC().Format(timeFormatRFC3339),
+	}
+	if row.WaitReason.Valid {
+		out.WaitReason = row.WaitReason.String
+	}
+	if row.IssueID.Valid {
+		ref := &publicapiv1.TaskIssue{ID: uuidToString(row.IssueID)}
+		if row.IssueTitle.Valid {
+			ref.Title = row.IssueTitle.String
+		}
+		if row.IssueNumber.Valid && row.IssuePrefix.Valid && row.IssuePrefix.String != "" {
+			ref.Identifier = service.IssueIdentifier(row.IssuePrefix.String, row.IssueNumber.Int32)
+		}
+		out.Issue = ref
+	}
+	return out
+}
+
+// ListPluginAgents — GET /v1/agents
+func (h *Handler) ListPluginAgents(w http.ResponseWriter, r *http.Request) {
+	caller, _, ok := h.pluginCaller(w, r, plugincontract.ScopeAgentsRead)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListPluginActionWorkspaceAgents(r.Context(), caller.WorkspaceID)
+	if err != nil {
+		publicapiv1.WriteProblem(w, r, http.StatusInternalServerError, "internal_error", "failed to list agents")
+		return
+	}
+	agents := make([]publicapiv1.Agent, 0, len(rows))
+	for _, row := range rows {
+		agent := publicapiv1.Agent{
+			ID:                 uuidToString(row.ID),
+			Name:               row.Name,
+			MaxConcurrentTasks: row.MaxConcurrentTasks,
+			Queue: publicapiv1.AgentQueueCounts{
+				Queued:  row.QueuedTaskCount,
+				Running: row.RunningTaskCount,
+				Waiting: row.WaitingTaskCount,
+			},
+		}
+		if row.Model.Valid {
+			agent.Model = row.Model.String
+		}
+		agents = append(agents, agent)
+	}
+	writeJSON(w, http.StatusOK, publicapiv1.AgentListResponse{Agents: agents})
+}
+
 // --- Storage ---
 
 func (h *Handler) pluginStorageScope(w http.ResponseWriter, r *http.Request, caller service.PluginActionCaller, actor pluginActor) (string, pgtype.UUID, bool) {

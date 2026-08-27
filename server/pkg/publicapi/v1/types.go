@@ -101,3 +101,49 @@ type StorageValueResponse struct {
 type PutStorageValueRequest struct {
 	Value string `json:"value"`
 }
+
+// Task is a lightweight, read-only description of one queued piece of work for
+// a dispatch-health panel. It deliberately exposes where work stands, not what
+// it produced — the run output stays on the issue it belongs to.
+type Task struct {
+	ID         string     `json:"id"`
+	AgentID    string     `json:"agent_id"`
+	AgentName  string     `json:"agent_name"`
+	Status     string     `json:"status"`
+	WaitReason string     `json:"wait_reason,omitempty"`
+	Issue      *TaskIssue `json:"issue,omitempty"`
+	CreatedAt  string     `json:"created_at"`
+}
+
+// TaskIssue is the issue a task was created against, rendered only when one
+// exists: chat and quick-create tasks never had an issue.
+type TaskIssue struct {
+	ID         string `json:"id"`
+	Identifier string `json:"identifier"`
+	Title      string `json:"title,omitempty"`
+}
+
+type TaskListResponse struct {
+	Tasks []Task `json:"tasks"`
+}
+
+// Agent describes one workspace agent and its live queue load. The queue
+// counters split the capacity-bearing statuses so a panel can distinguish
+// in-flight work from waiters blocked on a local-directory mutex.
+type Agent struct {
+	ID                 string           `json:"id"`
+	Name               string           `json:"name"`
+	Model              string           `json:"model,omitempty"`
+	MaxConcurrentTasks int32            `json:"max_concurrent_tasks"`
+	Queue              AgentQueueCounts `json:"queue"`
+}
+
+type AgentQueueCounts struct {
+	Queued  int32 `json:"queued"`
+	Running int32 `json:"running"`
+	Waiting int32 `json:"waiting"`
+}
+
+type AgentListResponse struct {
+	Agents []Agent `json:"agents"`
+}

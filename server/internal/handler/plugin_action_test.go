@@ -415,3 +415,158 @@ func createIssueInForeignWorkspace(t *testing.T) string {
 	})
 	return issueID
 }
+
+func TestListPluginTasks_WorkspaceScopedWithIssueLink(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installationID := installPluginForAction(t, []string{"tasks:read"})
+	agentID := createHandlerTestAgent(t, "plugin-tasks-agent", []byte(`{}`))
+	issueID := createTestIssue(t, "Plugin tasks dispatch health", "todo", "none")
+
+	// One queued task bound to an issue (so the issue link renders), and one
+	// waiting_local_directory task with no issue (chat/quick-create shape) that
+	// also carries a wait_reason.
+	var queuedID, waitID string
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, priority)
+		 VALUES ($1, $2, $3, 'queued', 0) RETURNING id`, agentID, issueID, testRuntimeID).Scan(&queuedID); err != nil {
+		t.Fatalf("insert queued task: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(),
+		`INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, wait_reason)
+		 VALUES ($1, $2, 'waiting_local_directory', 0, 'local_directory:depot-mutex') RETURNING id`,
+		agentID, testRuntimeID).Scan(&waitID); err != nil {
+		t.Fatalf("insert waiting task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, queuedID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, waitID)
+	})
+
+	recorder := httptest.NewRecorder()
+	testHandler.ListPluginTasks(recorder, pluginActionRequest(http.MethodGet, "/v1/tasks?limit=50", installationID, nil, nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("ListPluginTasks status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var resp publicapiv1.TaskListResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode tasks: %v", err)
+	}
+
+	// Filter to our agent so leftover tasks from sibling tests don't pollute
+	// the assertions.
+	gotStatuses := map[string]bool{}
+	var queuedTask *publicapiv1.Task
+	for i := range resp.Tasks {
+		if resp.Tasks[i].AgentID != agentID {
+			continue
+		}
+		gotStatuses[resp.Tasks[i].Status] = true
+		if resp.Tasks[i].Status == "queued" {
+			task := resp.Tasks[i]
+			queuedTask = &task
+			if task.Issue == nil || task.Issue.ID != issueID {
+				t.Fatalf("queued task issue = %+v, want id %s", task.Issue, issueID)
+			}
+			if task.Issue.Title == "" {
+				t.Errorf("issue title not rendered for queued task")
+			}
+		}
+		if resp.Tasks[i].Status == "waiting_local_directory" {
+			if resp.Tasks[i].WaitReason == "" {
+				t.Errorf("wait_reason not rendered for waiting task")
+			}
+			if resp.Tasks[i].Issue != nil {
+				t.Errorf("chat/quick-create task should not carry an issue link, got %+v", resp.Tasks[i].Issue)
+			}
+		}
+	}
+	if !gotStatuses["queued"] || !gotStatuses["waiting_local_directory"] {
+		t.Fatalf("missing expected statuses: %v", gotStatuses)
+	}
+	_ = queuedTask
+
+	// Ownership: the workspace comes from the installation, so a limit that is
+	// not a positive integer is rejected rather than silently clamped.
+	bad := httptest.NewRecorder()
+	testHandler.ListPluginTasks(bad, pluginActionRequest(http.MethodGet, "/v1/tasks?limit=abc", installationID, nil, nil))
+	if bad.Code != http.StatusBadRequest {
+		t.Fatalf("invalid limit status=%d body=%s", bad.Code, bad.Body.String())
+	}
+}
+
+func TestListPluginAgents_QueueCounters(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	installationID := installPluginForAction(t, []string{"agents:read"})
+	agentID := createHandlerTestAgent(t, "plugin-agents-agent", []byte(`{}`))
+
+	statuses := []string{"queued", "dispatched", "waiting_local_directory"}
+	ids := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		var id string
+		if err := testPool.QueryRow(context.Background(),
+			`INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority) VALUES ($1, $2, $3, 0) RETURNING id`,
+			agentID, testRuntimeID, status).Scan(&id); err != nil {
+			t.Fatalf("insert %s task: %v", status, err)
+		}
+		ids = append(ids, id)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, id)
+		}
+	})
+
+	recorder := httptest.NewRecorder()
+	testHandler.ListPluginAgents(recorder, pluginActionRequest(http.MethodGet, "/v1/agents", installationID, nil, nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("ListPluginAgents status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var resp publicapiv1.AgentListResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode agents: %v", err)
+	}
+
+	var found *publicapiv1.Agent
+	for i := range resp.Agents {
+		if resp.Agents[i].ID == agentID {
+			found = &resp.Agents[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("agent %s not in response", agentID)
+	}
+	// dispatched + running both count as "running" capacity; we seeded one
+	// dispatched, so the split must be queued=1 running=1 waiting=1.
+	if found.Queue.Queued != 1 || found.Queue.Running != 1 || found.Queue.Waiting != 1 {
+		t.Fatalf("queue counts = %+v, want queued=1 running=1 waiting=1", found.Queue)
+	}
+	if found.MaxConcurrentTasks < 1 {
+		t.Fatalf("MaxConcurrentTasks = %d, want >= 1", found.MaxConcurrentTasks)
+	}
+}
+
+func TestListPluginTasks_RequiresTasksReadScope(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	// Installed without tasks:read — the endpoint must refuse before touching
+	// any data.
+	installationID := installPluginForAction(t, []string{"comments:read"})
+	recorder := httptest.NewRecorder()
+	testHandler.ListPluginTasks(recorder, pluginActionRequest(http.MethodGet, "/v1/tasks", installationID, nil, nil))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("ungranted tasks:read status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var problem publicapiv1.Problem
+	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
+		t.Fatalf("decode scope problem: %v", err)
+	}
+	if problem.Code != "forbidden" || !strings.Contains(problem.Detail, "tasks:read") {
+		t.Fatalf("unexpected scope problem: %+v", problem)
+	}
+}
