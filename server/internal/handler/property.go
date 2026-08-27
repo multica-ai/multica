@@ -1474,13 +1474,50 @@ func (h *Handler) propertySortExpr(r *http.Request, workspaceID string, sortValu
 	}
 	// uuidToString re-serializes the parsed UUID: hex and dashes only, safe
 	// to embed in the ORDER BY string.
+	//
+	// The literal token "::numeric" in the number and select branches is a
+	// contract, not a formatting choice: issueTableOrderBy sniffs it
+	// (strings.Contains) to give the keyset cursor a numeric cast instead of
+	// text. Writing e.g. "::integer" would silently break table pagination.
 	id := uuidToString(def.ID)
 	switch def.Type {
 	case "number":
 		return fmt.Sprintf("CASE WHEN jsonb_typeof(i.properties->'%s') = 'number' THEN (i.properties->>'%s')::numeric END", id, id), true, nil
-	case "date", "text", "url", "select":
+	case "select":
+		return selectPropertySortExpr(id, parsePropertyConfig(def.Config)), true, nil
+	case "date", "text", "url":
 		return fmt.Sprintf("NULLIF(i.properties->>'%s', '')", id), true, nil
 	default: // multi_select, checkbox, future types: no meaningful order
 		return "", true, nil
 	}
+}
+
+// selectPropertySortExpr ranks a select property's stored value by its
+// position in the definition's option list, so an ordinal scale (Low < Medium
+// < High) sorts by meaning rather than by the option-id string. A stored value
+// no longer in the config — and an issue without the property — yields NULL,
+// which the callers order last.
+//
+// Each CASE arm embeds the option id's ORIGINAL config spelling: explicit ids
+// are stored as supplied (validatePropertyConfig trims but does not
+// re-serialize), and issue values must equal that spelling exactly, so a
+// canonicalized form would never match. Embedding is inert because uuid.Parse
+// gates every arm and its accepted grammar (hex, dashes, braces, urn:uuid:
+// prefix) admits no quote or backslash. An empty or malformed config — the API
+// enforces at least one option, so only a corrupt row — degrades to "" and the
+// caller keeps position order, like an unknown definition.
+func selectPropertySortExpr(defID string, cfg PropertyConfig) string {
+	var b strings.Builder
+	rank := 0
+	for _, opt := range cfg.Options {
+		if _, err := uuid.Parse(opt.ID); err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, " WHEN '%s' THEN %d", opt.ID, rank)
+		rank++
+	}
+	if rank == 0 {
+		return ""
+	}
+	return fmt.Sprintf("(CASE i.properties->>'%s'%s END)::numeric", defID, b.String())
 }

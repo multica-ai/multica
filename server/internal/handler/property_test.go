@@ -641,6 +641,71 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	}
 }
 
+// TestListIssuesSelectPropertySortOptionOrder pins the ordinal semantic of a
+// select property sort: issues order by the OPTION ORDER of the definition
+// (Low < Medium < High), not by the stored option-id string. The explicit
+// option ids are chosen so their lexical order is the exact reverse of the
+// option order — sorting by the raw stored value (the pre-fix behavior) puts
+// High first and fails deterministically. The first id is deliberately
+// uppercase: config validation stores an explicit id's original spelling, so
+// the CASE arms must embed that spelling, not a re-serialized canonical form.
+func TestListIssuesSelectPropertySortOptionOrder(t *testing.T) {
+	const (
+		lowID    = "EEEEEEEE-EEEE-4EEE-8EEE-EEEEEEEEEEEE" // lexically last
+		mediumID = "99999999-9999-4999-8999-999999999999"
+		highID   = "11111111-1111-4111-8111-111111111111" // lexically first
+	)
+	sel := createTestProperty(t, map[string]any{
+		"name": "SO" + uuid.NewString()[:8], "type": "select",
+		"config": map[string]any{"options": []map[string]any{
+			{"id": lowID, "name": "Low", "color": "#6b7280"},
+			{"id": mediumID, "name": "Medium", "color": "#f59e0b"},
+			{"id": highID, "name": "High", "color": "#ef4444"},
+		}},
+	})
+
+	low := dbfx.Issue(t, "select sort low")
+	medium := dbfx.Issue(t, "select sort medium")
+	high := dbfx.Issue(t, "select sort high")
+	unset := dbfx.Issue(t, "select sort unset")
+	for issueID, optionID := range map[string]string{low: lowID, medium: mediumID, high: highID} {
+		if w := setIssuePropertyRaw(t, issueID, sel.ID, optionID); w.Code != http.StatusOK {
+			t.Fatalf("seed select value: %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	listIssues := func(query string) map[string]int {
+		t.Helper()
+		var resp struct {
+			Issues []IssueResponse `json:"issues"`
+		}
+		testutil.Call(t, testHandler.ListIssues, newRequest("GET", "/api/issues"+query, nil)).
+			Want(http.StatusOK).JSON(&resp)
+		out := make(map[string]int, len(resp.Issues))
+		for i, issue := range resp.Issues {
+			out[issue.ID] = i
+		}
+		return out
+	}
+
+	pos := listIssues("?limit=200&sort=property:" + sel.ID + "&direction=asc")
+	for _, id := range []string{low, medium, high, unset} {
+		if _, ok := pos[id]; !ok {
+			t.Fatalf("asc sorted list missing seeded issue %s", id)
+		}
+	}
+	if !(pos[low] < pos[medium] && pos[medium] < pos[high] && pos[high] < pos[unset]) {
+		t.Fatalf("asc select sort not in option order: low=%d medium=%d high=%d unset=%d",
+			pos[low], pos[medium], pos[high], pos[unset])
+	}
+
+	pos = listIssues("?limit=200&sort=property:" + sel.ID + "&direction=desc")
+	if !(pos[high] < pos[medium] && pos[medium] < pos[low] && pos[low] < pos[unset]) {
+		t.Fatalf("desc select sort not in reverse option order: high=%d medium=%d low=%d unset=%d",
+			pos[high], pos[medium], pos[low], pos[unset])
+	}
+}
+
 func TestParsePropertiesFilterNoValueUnit(t *testing.T) {
 	defID := uuid.NewString()
 	w := httptest.NewRecorder()
