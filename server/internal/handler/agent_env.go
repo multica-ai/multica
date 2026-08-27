@@ -210,6 +210,16 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to encode env")
 		return
 	}
+	// Encrypt at rest (GAP-10 Phase 1). With MULTICA_ENV_ENC_KEY unset this
+	// degrades to storing the plaintext map unchanged, so the behaviour
+	// matches a pre-encryption deploy.
+	encBytes, err := encryptCustomEnv(envBytes)
+	if err != nil {
+		slog.Error("agent_env update: encrypt failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to encrypt env")
+		return
+	}
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -223,7 +233,7 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := qtx.UpdateAgentCustomEnv(r.Context(), db.UpdateAgentCustomEnvParams{
 		ID:        agent.ID,
-		CustomEnv: envBytes,
+		CustomEnv: encBytes,
 	})
 	if err != nil {
 		slog.Warn("update agent custom_env failed",
@@ -350,13 +360,20 @@ func mergeAgentEnv(existing, request map[string]string) (map[string]string, envA
 
 // unmarshalCustomEnv decodes an agent's stored custom_env bytea into a
 // map, returning an empty (never nil) map so callers can iterate
-// safely.
+// safely. The stored value may be an encrypted envelope (GAP-10 Phase 1) or
+// a legacy plaintext JSON map; decryptCustomEnv transparently handles both
+// so existing rows keep working without a migration.
 func unmarshalCustomEnv(a db.Agent) map[string]string {
 	out := map[string]string{}
 	if len(a.CustomEnv) == 0 {
 		return out
 	}
-	if err := json.Unmarshal(a.CustomEnv, &out); err != nil {
+	plain, err := decryptCustomEnv(a.CustomEnv)
+	if err != nil {
+		slog.Warn("failed to decrypt agent custom_env; returning empty", "agent_id", uuidToString(a.ID), "error", err)
+		return map[string]string{}
+	}
+	if err := json.Unmarshal(plain, &out); err != nil {
 		slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(a.ID), "error", err)
 		return map[string]string{}
 	}
