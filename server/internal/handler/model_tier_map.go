@@ -11,6 +11,134 @@ import (
 // modelTierMapResponse is tier -> concrete.
 type modelTierMapResponse map[string]string
 
+// modelTierMapFallbackResponse is tier -> fallback concrete chain.
+type modelTierMapFallbackResponse map[string][]string
+
+func modelTierMapFallbackToResponse(rows []db.ModelTierMap) modelTierMapFallbackResponse {
+	m := make(modelTierMapFallbackResponse, len(rows))
+	for _, r := range rows {
+		m[r.Tier] = r.FallbackConcrete
+	}
+	return m
+}
+
+// GetModelMapFallback handles GET /api/model-map/fallback (global).
+func (h *Handler) GetModelMapFallback(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	rows, err := h.Queries.ListGlobalModelTierMap(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model map fallback")
+		return
+	}
+	writeJSON(w, http.StatusOK, modelTierMapFallbackToResponse(rows))
+}
+
+// PatchModelMapFallback handles PATCH /api/model-map/fallback. Body: {"cheap":["a","b"]}.
+// ponytail: keep existing concrete, overwrite the fallback chain.
+func (h *Handler) PatchModelMapFallback(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	var req map[string][]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req) == 0 {
+		writeError(w, http.StatusBadRequest, "empty model map fallback")
+		return
+	}
+	for tier, val := range req {
+		if tier == "" {
+			writeError(w, http.StatusBadRequest, "tier required")
+			return
+		}
+		existing, err := h.Queries.GetGlobalModelTier(r.Context(), tier)
+		existingConcrete := ""
+		if err == nil {
+			existingConcrete = existing.Concrete
+		}
+		if _, err := h.Queries.UpsertGlobalModelTier(r.Context(), db.UpsertGlobalModelTierParams{Tier: tier, Concrete: existingConcrete, FallbackConcrete: val}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to upsert model map fallback")
+			return
+		}
+	}
+	rows, err := h.Queries.ListGlobalModelTierMap(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list model map fallback")
+		return
+	}
+	writeJSON(w, http.StatusOK, modelTierMapFallbackToResponse(rows))
+}
+
+// GetWorkspaceModelMapFallback handles GET /api/workspaces/{id}/model-map/fallback.
+func (h *Handler) GetWorkspaceModelMapFallback(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if workspaceID == "" {
+		workspaceID = chi.URLParam(r, "workspaceId")
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	rows, err := h.Queries.ListWorkspaceModelTierMap(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workspace model map fallback")
+		return
+	}
+	writeJSON(w, http.StatusOK, modelTierMapFallbackToResponse(rows))
+}
+
+// PatchWorkspaceModelMapFallback handles PATCH /api/workspaces/{id}/model-map/fallback.
+func (h *Handler) PatchWorkspaceModelMapFallback(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if workspaceID == "" {
+		workspaceID = chi.URLParam(r, "workspaceId")
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	var req map[string][]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req) == 0 {
+		writeError(w, http.StatusBadRequest, "empty model map fallback")
+		return
+	}
+	for tier, val := range req {
+		if tier == "" {
+			writeError(w, http.StatusBadRequest, "tier required")
+			return
+		}
+		existing, err := h.Queries.GetWorkspaceModelTier(r.Context(), db.GetWorkspaceModelTierParams{WorkspaceID: wsUUID, Tier: tier})
+		existingConcrete := ""
+		if err == nil {
+			existingConcrete = existing.Concrete
+		}
+		if _, err := h.Queries.UpsertWorkspaceModelTier(r.Context(), db.UpsertWorkspaceModelTierParams{WorkspaceID: wsUUID, Tier: tier, Concrete: existingConcrete, FallbackConcrete: val}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to upsert workspace model map fallback")
+			return
+		}
+	}
+	rows, err := h.Queries.ListWorkspaceModelTierMap(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workspace model map fallback")
+		return
+	}
+	writeJSON(w, http.StatusOK, modelTierMapFallbackToResponse(rows))
+}
+
 func modelTierMapToResponse(rows []db.ModelTierMap) modelTierMapResponse {
 	m := make(modelTierMapResponse, len(rows))
 	for _, r := range rows {
