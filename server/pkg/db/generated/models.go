@@ -174,6 +174,7 @@ type AgentTaskQueue struct {
 	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
 	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
 	ConcreteModel             pgtype.Text `json:"concrete_model"`
+	RequestedConcreteModel    pgtype.Text `json:"requested_concrete_model"`
 }
 
 type AgentToLabel struct {
@@ -1016,10 +1017,31 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type ModelHealth struct {
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Concrete            string             `json:"concrete"`
+	Status              string             `json:"status"`
+	Reason              pgtype.Text        `json:"reason"`
+	ConsecutiveFailures int32              `json:"consecutive_failures"`
+	LastFailureReason   pgtype.Text        `json:"last_failure_reason"`
+	LastFailureAt       pgtype.Timestamptz `json:"last_failure_at"`
+	LastSuccessAt       pgtype.Timestamptz `json:"last_success_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelPricing struct {
+	Concrete                 string             `json:"concrete"`
+	InputUsdPerMtok          pgtype.Numeric     `json:"input_usd_per_mtok"`
+	OutputUsdPerMtok         pgtype.Numeric     `json:"output_usd_per_mtok"`
+	ThresholdInputUsdPerMtok pgtype.Numeric     `json:"threshold_input_usd_per_mtok"`
+	FetchedAt                pgtype.Timestamptz `json:"fetched_at"`
+}
+
 type ModelTierMap struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Tier        string      `json:"tier"`
-	Concrete    string      `json:"concrete"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	Tier             string      `json:"tier"`
+	Concrete         string      `json:"concrete"`
+	FallbackConcrete []string    `json:"fallback_concrete"`
 }
 
 type NotificationPreference struct {
