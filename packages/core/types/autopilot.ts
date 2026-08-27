@@ -139,7 +139,9 @@ export interface AutopilotQuotaUsage {
   action: "off" | "observe" | "enforce";
   used: number | null;
   reserved: number | null;
+  total: number | null;
   limit: number | null;
+  reached: boolean | null;
   period_start: string | null;
   period_end: string | null;
   reset_at: string | null;

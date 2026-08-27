@@ -727,6 +727,211 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 	return items, nil
 }
 
+const listCommentAncestorPath = `-- name: ListCommentAncestorPath :many
+WITH RECURSIVE ancestor_path AS (
+  SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, ARRAY[c.id]::uuid[] AS visited_ids, 1::integer AS depth, false AS cycle
+  FROM comment c
+  WHERE c.id = $1
+    AND c.workspace_id = $2
+    AND c.issue_id = $3
+
+  UNION ALL
+
+  SELECT parent.id, parent.issue_id, parent.author_type, parent.author_id, parent.content, parent.type, parent.created_at, parent.updated_at, parent.parent_id, parent.workspace_id, parent.resolved_at, parent.resolved_by_type, parent.resolved_by_id, parent.source_task_id, parent.quick_action_id, parent.via_plugin_id, parent.revision,
+         path.visited_ids || parent.id,
+         path.depth + 1,
+         parent.id = ANY(path.visited_ids)
+  FROM ancestor_path path
+  JOIN comment parent ON parent.id = path.parent_id
+  WHERE parent.workspace_id = $2
+    AND parent.issue_id = $3
+    AND path.depth <= 256
+    AND NOT path.cycle
+)
+SELECT id, issue_id, author_type, author_id, content, type, created_at,
+       updated_at, workspace_id, parent_id, resolved_at, resolved_by_type,
+       resolved_by_id, source_task_id, revision, quick_action_id, via_plugin_id,
+       depth, cycle
+FROM ancestor_path
+ORDER BY depth DESC
+`
+
+type ListCommentAncestorPathParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+type ListCommentAncestorPathRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	Revision       int64              `json:"revision"`
+	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
+	Depth          int32              `json:"depth"`
+	Cycle          bool               `json:"cycle"`
+}
+
+func (q *Queries) ListCommentAncestorPath(ctx context.Context, arg ListCommentAncestorPathParams) ([]ListCommentAncestorPathRow, error) {
+	rows, err := q.db.Query(ctx, listCommentAncestorPath, arg.CommentID, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommentAncestorPathRow{}
+	for rows.Next() {
+		var i ListCommentAncestorPathRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.WorkspaceID,
+			&i.ParentID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+			&i.Revision,
+			&i.QuickActionID,
+			&i.ViaPluginID,
+			&i.Depth,
+			&i.Cycle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCommentThreadHistory = `-- name: ListCommentThreadHistory :many
+WITH RECURSIVE thread_history AS (
+  SELECT root.id, root.issue_id, root.author_type, root.author_id, root.content, root.type, root.created_at, root.updated_at, root.parent_id, root.workspace_id, root.resolved_at, root.resolved_by_type, root.resolved_by_id, root.source_task_id, root.quick_action_id, root.via_plugin_id, root.revision
+  FROM comment root
+  WHERE root.id = $2
+    AND root.workspace_id = $3
+    AND root.issue_id = $4
+    AND root.parent_id IS NULL
+    AND (root.created_at, root.id) <= (
+      $5::timestamptz,
+      $6::uuid
+    )
+
+  UNION ALL
+
+  SELECT child.id, child.issue_id, child.author_type, child.author_id, child.content, child.type, child.created_at, child.updated_at, child.parent_id, child.workspace_id, child.resolved_at, child.resolved_by_type, child.resolved_by_id, child.source_task_id, child.quick_action_id, child.via_plugin_id, child.revision
+  FROM comment child
+  JOIN thread_history parent ON child.parent_id = parent.id
+  WHERE child.workspace_id = $3
+    AND child.issue_id = $4
+    AND (child.created_at, child.id) <= (
+      $5::timestamptz,
+      $6::uuid
+    )
+)
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
+FROM thread_history
+ORDER BY created_at, id
+LIMIT $1
+`
+
+type ListCommentThreadHistoryParams struct {
+	RowLimit        int32              `json:"row_limit"`
+	RootID          pgtype.UUID        `json:"root_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	AnchorCreatedAt pgtype.Timestamptz `json:"anchor_created_at"`
+	AnchorID        pgtype.UUID        `json:"anchor_id"`
+}
+
+type ListCommentThreadHistoryRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
+	Revision       int64              `json:"revision"`
+}
+
+// Capture the anchor comment's complete chronological thread through that
+// comment. Later replies are outside the immutable context boundary.
+// UUID is the stable tiebreaker used by the issue timeline when timestamps tie.
+func (q *Queries) ListCommentThreadHistory(ctx context.Context, arg ListCommentThreadHistoryParams) ([]ListCommentThreadHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listCommentThreadHistory,
+		arg.RowLimit,
+		arg.RootID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.AnchorCreatedAt,
+		arg.AnchorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCommentThreadHistoryRow{}
+	for rows.Next() {
+		var i ListCommentThreadHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+			&i.QuickActionID,
+			&i.ViaPluginID,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentsByIDsForIssue = `-- name: ListCommentsByIDsForIssue :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE id = ANY($1::uuid[])
@@ -1542,6 +1747,57 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockCommentAncestorPath = `-- name: LockCommentAncestorPath :many
+WITH RECURSIVE ancestor_ids AS (
+  SELECT c.id, c.parent_id, 1::integer AS depth, ARRAY[c.id]::uuid[] AS visited_ids
+  FROM comment c
+  WHERE c.id = $1
+    AND c.workspace_id = $2
+    AND c.issue_id = $3
+
+  UNION ALL
+
+  SELECT parent.id, parent.parent_id, path.depth + 1, path.visited_ids || parent.id
+  FROM ancestor_ids path
+  JOIN comment parent ON parent.id = path.parent_id
+  WHERE parent.workspace_id = $2
+    AND parent.issue_id = $3
+    AND path.depth <= 256
+    AND NOT parent.id = ANY(path.visited_ids)
+)
+SELECT c.id
+FROM comment c
+JOIN ancestor_ids path ON path.id = c.id
+ORDER BY c.id
+FOR UPDATE OF c
+`
+
+type LockCommentAncestorPathParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+func (q *Queries) LockCommentAncestorPath(ctx context.Context, arg LockCommentAncestorPathParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockCommentAncestorPath, arg.CommentID, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

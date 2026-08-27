@@ -62,4 +62,32 @@ describe("RevisionConflictCompare", () => {
     );
     expect(container.querySelector("[class*='line-clamp']")).toBeNull();
   });
+
+  it("puts each action in the column of the preview it applies to", () => {
+    const { container } = render(
+      <RevisionConflictCompare
+        title="Compare both versions"
+        serverLabel="Latest server version"
+        localLabel="Your local version"
+        serverValue="server"
+        localValue="local"
+        serverAction={<button type="button">Use the latest version</button>}
+        localAction={<button type="button">Keep my version</button>}
+      />,
+    );
+
+    // The mismatch reported in #7624 was "keep my version" sitting under the
+    // server preview, so assert the side each action lands on — not just that
+    // both rendered.
+    const actions = container.querySelector(
+      "[data-revision-conflict-actions]",
+    );
+    expect(actions).not.toBeNull();
+    const [serverCell, localCell] = Array.from(actions!.children);
+    expect(serverCell).toHaveTextContent("Use the latest version");
+    expect(localCell).toHaveTextContent("Keep my version");
+    // Same two-column grid as the labels and the diff rows, so the pairing
+    // survives every window width.
+    expect(actions).toHaveClass("grid", "grid-cols-2");
+  });
 });

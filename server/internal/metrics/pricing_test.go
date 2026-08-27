@@ -119,6 +119,14 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 		want  ModelPrice
 	}{
 		{
+			model: "grok-4.6",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "xai:grok-4.6",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
 			model: "grok-4.5",
 			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.3, CacheWritePerM: 2, OutputPerM: 6},
 		},
@@ -170,6 +178,8 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 	for _, model := range []string{
 		"grok-composer-2.5-fast",
 		"grok-composer-2.5",
+		"grok-4.6-fast",
+		"grok-4-6",
 		"grok-4.5-fast",
 		"grok-4-5",
 		"grok-4.20-0309",
@@ -208,5 +218,126 @@ func TestGrokPricingMatchesRecordedTurn(t *testing.T) {
 
 	if diff := got - wantUSD; diff > 1e-12 || diff < -1e-12 {
 		t.Fatalf("recomputed cost = %.10f, want %.10f (xAI costUsdTicks)", got, wantUSD)
+	}
+}
+
+// TestPriceForModelAliasAlibabaMoonshotVolcengine pins the pay-as-you-go
+// rates for the Chinese-model runtimes (Qwen / Kimi) added from models.dev,
+// and the transport spellings that reach them: `provider:model` (Hermes
+// custom providers), `provider/model` (opencode), and bare ids. Volcengine's
+// `ark-code-latest` rolling alias is covered as unmapped in
+// TestPriceForModelAliasNoFalseBorrowing.
+func TestPriceForModelAliasAlibabaMoonshotVolcengine(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "qwen3.7-plus",
+			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.7-plus", InputPerM: 0.40, CacheReadPerM: 0.04, CacheWritePerM: 0.50, OutputPerM: 1.60},
+		},
+		{
+			model: "alibaba-coding-plan:qwen3.7-plus",
+			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.7-plus", InputPerM: 0.40, CacheReadPerM: 0.04, CacheWritePerM: 0.50, OutputPerM: 1.60},
+		},
+		{
+			model: "qwen3.6-flash",
+			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.6-flash", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.3125, OutputPerM: 1.50},
+		},
+		{
+			model: "alibaba-coding-plan:qwen3.8-max",
+			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.8-max", InputPerM: 2.00, CacheReadPerM: 0.17, CacheWritePerM: 2.50, OutputPerM: 6.00},
+		},
+		{
+			model: "custom:qwen3.8-max-preview[1m]",
+			want:  ModelPrice{Provider: "alibaba", Model: "qwen3.8-max-preview", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
+		},
+		{
+			model: "kimi-coding:kimi-k3",
+			want:  ModelPrice{Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+		},
+		{
+			// Kimi Code CLI reports `kimi-code/k3`.
+			model: "kimi-code/k3",
+			want:  ModelPrice{Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+		},
+		{
+			// `custom:anthropic/claude-opus-4.7` (provider prefix + nested
+			// slash path) must still resolve to the anthropic Opus tier via
+			// substring matching, mirroring the frontend stripProvider
+			// regression case.
+			model: "custom:anthropic/claude-opus-4.7",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-4.7", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+}
+
+// TestPriceForModelAliasNoFalseBorrowing guards the anchored rules: a preview
+// SKU must not inherit the GA tier, a distinct CodeBuddy SKU must not inherit
+// Kimi K3, unknown suffixed variants must stay unmapped, empty bracket tags
+// (`qwen3.7-plus[]` etc.) must stay unmapped to match the frontend's
+// `\[[^\]]+\]$` tag stripping, and the Volcengine `ark-code-latest` rolling
+// alias must stay unmapped.
+func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
+	for _, model := range []string{
+		"qwen3.8-max-preview",
+		"qwen3.8-max-preview[1m]",
+		"kimi-k3-1",
+		"qwen3.8-max-extra",
+		"qwen3.8-max[",
+		"qwen3.8-max[1m]-extra",
+		"qwen3.8-max-preview[1m]-extra",
+	} {
+		got, ok := PriceForModelAlias(model)
+		if !ok {
+			continue
+		}
+		if got.Model == "qwen3.8-max" || got.Model == "kimi-k3" {
+			t.Fatalf("PriceForModelAlias(%q) borrowed %s; want the SKU's own tier or unmapped", model, got.Model)
+		}
+	}
+
+	// A distinct SKU that borrows nothing must resolve to its own row.
+	for _, tc := range []struct {
+		model     string
+		wantModel string
+	}{
+		{"qwen3.8-max-preview[1m]", "qwen3.8-max-preview"},
+		{"qwen3.8-max-preview[context]", "qwen3.8-max-preview"},
+		{"qwen3.8-max[1m]", "qwen3.8-max"},
+	} {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok || got.Model != tc.wantModel {
+			t.Fatalf("PriceForModelAlias(%q) = %+v (ok=%v); want %s", tc.model, got, ok, tc.wantModel)
+		}
+	}
+
+	for _, model := range []string{
+		"qwen3.8-max-extra",
+		"kimi-k3-1",
+		"qwen3.7-plus-extra",
+		"qwen3.6-flash-extra",
+		"qwen3.8-max-preview-extra",
+		"custom:ark-code-latest",
+		// Empty bracket tags: the frontend's `\[[^\]]+\]$` tag stripper
+		// leaves these unmapped, so the backend must too.
+		"qwen3.7-plus[]",
+		"qwen3.6-flash[]",
+		"qwen3.8-max[]",
+		"qwen3.8-max-preview[]",
+	} {
+		if _, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved", model)
+		}
 	}
 }

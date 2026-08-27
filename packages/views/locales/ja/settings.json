@@ -7,7 +7,6 @@
     "show_archived": "アーカイブ済みを表示（{{count}}）",
     "archived_badge": "アーカイブ済み",
     "archived_hint": "新規の割り当てには使えません。すでにこのステータスのタスクはそのままです。",
-    "flag_off": "このデプロイではカスタムステータスがまだ有効化されていません。下の組み込みステータスは通常どおり使えます。",
     "reorder_failed": "並び順を保存できませんでした。",
     "actions": {
       "open": "{{name}} の操作",
@@ -168,8 +167,12 @@
         "description": "優先するタスク作成フローを開きます。"
       },
       "toggleSidebar": {
-        "label": "サイドバーを切り替え",
-        "description": "メインサイドバーの表示を切り替えます。"
+        "label": "左サイドバーを切り替え",
+        "description": "左サイドバーの表示を切り替えます。"
+      },
+      "toggleRightSidebar": {
+        "label": "右サイドバーを切り替え",
+        "description": "現在のページに右サイドバーがある場合、その表示を切り替えます。"
       },
       "toggleChat": {
         "label": "チャットウィンドウを切り替え",
@@ -363,6 +366,19 @@
       "installed": "Plugin をインストールしました",
       "upgrade_from": " · v{{version}} からアップグレード",
       "new_scope": "新規"
+    },
+    "schedule": {
+      "title": "自動スケジュール",
+      "consent_title": "この Plugin はフックを自動実行します",
+      "consent_description": "インストールまたはアップグレードすると、次のスケジュールが有効になります。複数回分を逃した場合は、直近の実行だけを配信します。",
+      "next_run": "次回：{{time}}",
+      "activity_title": "最近の配信",
+      "activity_last": "{{status}} · 予定 {{planned}} · 送信 {{actual}} · 試行 {{attempt}}",
+      "activity_empty": "まだ配信されていません",
+      "frequency_minutes_other": "{{count}} 分ごと",
+      "frequency_hourly": "毎時 {{minute}} 分",
+      "frequency_daily": "毎日 {{hour}}:{{minute}}",
+      "frequency_custom": "カスタム繰り返しスケジュール"
     },
     "config": {
       "title": "設定",
@@ -1138,6 +1154,15 @@
     "inviting": "招待中...",
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",
+    "toast_seat_capacity_unavailable": "メンバー席を確認できませんでした。もう一度お試しください。",
+    "toast_seat_capacity_rate_limited": "席数のリクエストが集中しています。しばらくしてからもう一度お試しください。",
+    "seat_purchase_title": "席を追加して招待を送信しますか？",
+    "seat_purchase_description": "{{email}} に使用できる購入済みの席がありません。Stripe の見積もりを確認し、席の購入と招待をまとめて承認してください。",
+    "purchase_seat_and_invite": "1 席を購入して招待",
+    "retry_seat_purchase": "購入を再試行",
+    "seat_purchase_waiting": "Stripe による新しい席の確認を待っています。招待を自動送信するには、このページを開いたままにしてください。ページを離れても購入済みの席は保持され、後で再度招待できます。",
+    "seat_purchase_timeout": "席の購入は送信されましたが、確認に時間がかかっています。招待は送信されていません。請求画面に空き席が表示された後、もう一度招待してください。",
+    "seat_purchase_capacity_taken": "購入した席はすでに利用できないため、招待は送信されませんでした。現在の席を確認してから再試行してください。",
     "no_members": "メンバーが見つかりません。",
     "pending_title": "保留中の招待（{{count}}）",
     "pending_status": "保留中",

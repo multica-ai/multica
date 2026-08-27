@@ -7,7 +7,6 @@
     "show_archived": "显示已归档（{{count}}）",
     "archived_badge": "已归档",
     "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
-    "flag_off": "当前部署尚未开启自定义状态，下面的内置状态照常使用。",
     "reorder_failed": "排序保存失败。",
     "actions": {
       "open": "{{name}} 的操作",
@@ -168,8 +167,12 @@
         "description": "打开你常用的任务创建流程。"
       },
       "toggleSidebar": {
-        "label": "显示或隐藏侧边栏",
-        "description": "切换主侧边栏的显示状态。"
+        "label": "显示或隐藏左侧边栏",
+        "description": "切换左侧边栏的显示状态。"
+      },
+      "toggleRightSidebar": {
+        "label": "显示或隐藏右侧边栏",
+        "description": "当前页面有右侧边栏时，切换其显示状态。"
       },
       "toggleChat": {
         "label": "显示或隐藏聊天窗",
@@ -363,6 +366,19 @@
       "installed": "Plugin 已安装",
       "upgrade_from": " · 从 v{{version}} 升级",
       "new_scope": "新增"
+    },
+    "schedule": {
+      "title": "自动运行计划",
+      "consent_title": "该 Plugin 将自动运行 hook",
+      "consent_description": "安装或升级后会启用以下计划。错过多个时间点时，只补跑最近一次。",
+      "next_run": "下次：{{time}}",
+      "activity_title": "最近投递",
+      "activity_last": "{{status}} · 计划 {{planned}} · 发出 {{actual}} · 第 {{attempt}} 次尝试",
+      "activity_empty": "尚未投递",
+      "frequency_minutes_other": "每 {{count}} 分钟",
+      "frequency_hourly": "每小时第 {{minute}} 分钟",
+      "frequency_daily": "每天 {{hour}}:{{minute}}",
+      "frequency_custom": "自定义周期"
     },
     "config": {
       "title": "配置",
@@ -1138,6 +1154,15 @@
     "inviting": "邀请中...",
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",
+    "toast_seat_capacity_unavailable": "暂时无法核验成员席位，请稍后重试。",
+    "toast_seat_capacity_rate_limited": "席位请求过于频繁，请稍后重试。",
+    "seat_purchase_title": "增加一个席位并发送邀请？",
+    "seat_purchase_description": "当前没有可供 {{email}} 使用的已购席位。请核对 Stripe 报价，然后一次确认补购和邀请。",
+    "purchase_seat_and_invite": "购买 1 个席位并邀请",
+    "retry_seat_purchase": "重试购买",
+    "seat_purchase_waiting": "正在等待 Stripe 确认新席位。请保持当前页面打开，以便确认后自动发送邀请；如果离开页面，已购席位仍会保留，之后可重新邀请。",
+    "seat_purchase_timeout": "席位购买已提交，但确认时间超出预期。邀请尚未发送；请在“账单”显示有可用席位后重新邀请。",
+    "seat_purchase_capacity_taken": "新购买的席位已不可用，因此没有发送邀请。请检查当前席位后重试。",
     "no_members": "未找到成员。",
     "pending_title": "待处理邀请（{{count}}）",
     "pending_status": "待处理",

@@ -28,23 +28,41 @@ export interface StatusOption {
  * — a status offered in one and missing from the other is exactly how an issue
  * becomes unfindable.
  *
- * Archived statuses are excluded: archiving retires a status from future
- * assignment. Issues already on one keep it, and `useStatusLabel` still names
- * it, because the catalog query keeps archived rows.
+ * Archived statuses are excluded by default: archiving retires a status from
+ * future assignment. A read-only filter can opt specific current keys back in
+ * through `includeArchivedKeys`, so existing issues remain findable without a
+ * picker offering a retired value for assignment.
  */
-export function useStatusOptions(wsId: string): StatusOption[] {
-  const { activeStatuses } = useIssueStatuses(wsId);
+const NO_ARCHIVED_STATUS_KEYS: readonly IssueStatus[] = [];
+
+export function useStatusOptions(
+  wsId: string,
+  includeArchivedKeys: readonly IssueStatus[] = NO_ARCHIVED_STATUS_KEYS,
+): StatusOption[] {
+  const { statuses } = useIssueStatuses(wsId);
   const labelOf = useStatusLabel(wsId);
 
   return useMemo(
-    () =>
-      ALL_STATUSES.flatMap((category) => {
-        const entries = activeStatuses.filter((e) => e.category === category);
+    () => {
+      const includedArchived = new Set(includeArchivedKeys);
+      return ALL_STATUSES.flatMap((category) => {
+        const entries = statuses.filter(
+          (entry) =>
+            entry.category === category &&
+            (!entry.archived_at || includedArchived.has(entry.key)),
+        );
         // No catalog row for this category: the fetch is still in flight, or
         // this workspace predates the seed. Offer the built-in, whose key IS
         // the category, so a lifecycle step is never missing.
         if (entries.length === 0) {
-          return [{ key: category as IssueStatus, category, label: labelOf(category), color: null }];
+          return [
+            {
+              key: category as IssueStatus,
+              category,
+              label: labelOf(category),
+              color: null,
+            },
+          ];
         }
         return entries.map((e) => ({
           key: e.key as IssueStatus,
@@ -52,7 +70,8 @@ export function useStatusOptions(wsId: string): StatusOption[] {
           label: labelOf(e.key),
           color: issueStatusColor(e),
         }));
-      }),
-    [activeStatuses, labelOf],
+      });
+    },
+    [includeArchivedKeys, labelOf, statuses],
   );
 }

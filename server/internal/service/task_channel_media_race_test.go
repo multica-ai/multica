@@ -83,7 +83,8 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 	q := db.New(pool)
 	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
 
-	var chatSessionID, installationID, messageID string
+	var chatSessionID, installationID, bindingID, messageID string
+	var routeRevision int64
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
 		VALUES ($1, $2, $3) RETURNING id
@@ -98,12 +99,13 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 	`, workspaceID, agentID, userID).Scan(&installationID); err != nil {
 		t.Fatalf("seed channel installation: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
+	if err := pool.QueryRow(ctx, `
 		INSERT INTO channel_chat_session_binding (
 			chat_session_id, installation_id, channel_type, channel_chat_id,
 			chat_type, pending_fresh, context_revision
 		) VALUES ($1, $2, 'slack', $3, 'p2p', TRUE, 1)
-	`, chatSessionID, installationID, "rollback-"+chatSessionID); err != nil {
+		RETURNING id, route_revision
+	`, chatSessionID, installationID, "rollback-"+chatSessionID).Scan(&bindingID, &routeRevision); err != nil {
 		t.Fatalf("seed channel binding: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -143,7 +145,7 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 			}
 			_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
 				ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
-			}, util.MustParseUUID(userID), false, 1)
+			}, util.MustParseUUID(userID), false, 1, util.MustParseUUID(bindingID), routeRevision)
 			if !errors.Is(err, injectedErr) {
 				t.Fatalf("EnqueueChannelChatTask error = %v, want injected clear failure", err)
 			}
@@ -176,11 +178,18 @@ func TestEnqueueChannelChatTask_RejectsRetiredBinding(t *testing.T) {
 	q := db.New(pool)
 	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
 	chatSessionID := seedChannelChatSession(t, ctx, pool, workspaceID, agentID, userID)
+	if _, err := pool.Exec(ctx, `
+		UPDATE channel_chat_session_binding
+		SET retired_at = now()
+		WHERE chat_session_id = $1
+	`, chatSessionID); err != nil {
+		t.Fatalf("retire channel route: %v", err)
+	}
 
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
 		ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
-	}, util.MustParseUUID(userID), false, 1)
+	}, util.MustParseUUID(userID), false, 1, pgtype.UUID{}, 0)
 	if !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("EnqueueChannelChatTask error = %v, want missing binding", err)
 	}
@@ -191,6 +200,84 @@ func TestEnqueueChannelChatTask_RejectsRetiredBinding(t *testing.T) {
 	}
 	if taskCount != 0 {
 		t.Fatalf("tasks created after binding retirement = %d, want 0", taskCount)
+	}
+}
+
+func TestEnqueueChannelChatTask_RejectsMismatchedActiveRouteProof(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	chatSessionID := seedChannelChatSession(t, ctx, pool, workspaceID, agentID, userID)
+	appendChannelUserMessage(t, ctx, pool, chatSessionID, "must remain unowned")
+
+	var routeRevision int64
+	if err := pool.QueryRow(ctx, `
+		SELECT route_revision FROM channel_chat_session_binding WHERE chat_session_id = $1
+	`, chatSessionID).Scan(&routeRevision); err != nil {
+		t.Fatalf("load active route revision: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
+		ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false, 1, util.MustParseUUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), routeRevision)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("EnqueueChannelChatTask error = %v, want route mismatch", err)
+	}
+
+	var taskCount, ownedMessageCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1`, chatSessionID).Scan(&taskCount); err != nil {
+		t.Fatalf("count channel tasks: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat_message WHERE chat_session_id = $1 AND task_id IS NOT NULL`, chatSessionID).Scan(&ownedMessageCount); err != nil {
+		t.Fatalf("count owned channel messages: %v", err)
+	}
+	if taskCount != 0 || ownedMessageCount != 0 {
+		t.Fatalf("route mismatch task/owned messages = %d/%d, want 0/0", taskCount, ownedMessageCount)
+	}
+}
+
+func TestEnqueueChannelChatTask_AllowsMatchingRetiredRouteForPendingInput(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	chatSessionID := seedChannelChatSession(t, ctx, pool, workspaceID, agentID, userID)
+	messageID := appendChannelUserMessage(t, ctx, pool, chatSessionID, "queued before /new")
+
+	var bindingID string
+	var routeRevision int64
+	if err := pool.QueryRow(ctx, `
+		UPDATE channel_chat_session_binding
+		SET retired_at = now()
+		WHERE chat_session_id = $1
+		RETURNING id, route_revision
+	`, chatSessionID).Scan(&bindingID, &routeRevision); err != nil {
+		t.Fatalf("retire and load channel route: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
+		ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false, 1, util.MustParseUUID(bindingID), routeRevision)
+	if err != nil {
+		t.Fatalf("EnqueueChannelChatTask: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_task_delivery WHERE task_id = $1`, task.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+	})
+
+	var sealedTaskID, deliveryBindingID string
+	if err := pool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, messageID).Scan(&sealedTaskID); err != nil {
+		t.Fatalf("load sealed message owner: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT binding_id FROM channel_task_delivery WHERE task_id = $1`, task.ID).Scan(&deliveryBindingID); err != nil {
+		t.Fatalf("load frozen task delivery: %v", err)
+	}
+	if sealedTaskID != util.UUIDToString(task.ID) || deliveryBindingID != bindingID {
+		t.Fatalf("retired route enqueue sealed/delivery = %s/%s, want %s/%s", sealedTaskID, deliveryBindingID, util.UUIDToString(task.ID), bindingID)
 	}
 }
 
@@ -213,6 +300,7 @@ func TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue(t *testing.T)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
 	})
+	seedChannelTaskBinding(t, pool, chatSessionID)
 	// The message that armed this flush: plain text, no media marker.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_message (chat_session_id, role, content)
@@ -316,6 +404,7 @@ func TestEnqueueChatTaskLocksOutAConcurrentArchiveButNotInboundMessages(t *testi
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
 	})
+	seedChannelTaskBinding(t, pool, chatSessionID)
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
 		VALUES ($1, 'user', 'first', TRUE)`, chatSessionID); err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-var errVersionRegression = errors.New("entitlement policy version regression")
+var errVersionRegression = errors.New("entitlement subscription version regression")
 
 type policySnapshot struct {
 	policyRevision      int64
@@ -65,16 +65,13 @@ func (c *policyCache) put(workspaceID uuid.UUID, entry cacheEntry, receivedAt ti
 	defer c.mu.Unlock()
 	if elem, ok := c.entries[workspaceID]; ok {
 		current := elem.Value.(*cacheItem).entry
-		// The version guard prevents an out-of-order response from replacing a
-		// snapshot that is still usable for bounded stale observation. Once that
-		// window ends, accepting the current Cloud response lets an operator
-		// recover from an accidental revision rollback without a retry storm.
+		// The version guard prevents an out-of-order subscription response from
+		// replacing a snapshot that is still usable for bounded stale observation.
+		// Once that window ends, accepting the current Cloud response lets the
+		// service recover from a rollback without a retry storm.
 		guardVersions := current.hasPolicy && receivedAt.Before(current.staleUntil)
-		if guardVersions && entry.policy.policyRevision < current.policy.policyRevision {
-			return current, &revisionError{source: "policy"}
-		}
 		if guardVersions && entry.policy.subscriptionVersion < current.policy.subscriptionVersion {
-			return current, &revisionError{source: "subscription"}
+			return current, errVersionRegression
 		}
 		elem.Value.(*cacheItem).entry = entry
 		c.order.MoveToFront(elem)
@@ -114,10 +111,3 @@ func (c *policyCache) len() int {
 	defer c.mu.Unlock()
 	return len(c.entries)
 }
-
-type revisionError struct {
-	source string
-}
-
-func (e *revisionError) Error() string { return errVersionRegression.Error() }
-func (e *revisionError) Unwrap() error { return errVersionRegression }

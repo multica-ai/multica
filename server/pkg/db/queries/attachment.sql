@@ -1,11 +1,11 @@
 -- name: CreateAttachment :one
 WITH inserted AS (
   INSERT INTO attachment (
-    id, workspace_id, issue_id, comment_id, chat_session_id, task_id,
+    id, workspace_id, issue_id, comment_id, chat_session_id, task_id, source_context_id,
     uploader_type, uploader_id, filename, url, content_type, size_bytes
   )
   VALUES (
-    $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id),
+    $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id), sqlc.narg(source_context_id),
     $3, $4, $5, $6, $7, $8
   )
   RETURNING *
@@ -54,6 +54,27 @@ SELECT * FROM attachment
 WHERE comment_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListSourceContextIssueAttachments :many
+-- Source snapshots keep issue-owned attachments separate from comment-owned
+-- attachments. In this schema a comment attachment retains issue_id, so the
+-- generic ListAttachmentsByIssue query is intentionally too broad here.
+SELECT * FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id = sqlc.arg(issue_id)
+  AND comment_id IS NULL
+  AND source_context_id IS NULL
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListSourceContextCommentAttachments :many
+-- The issue predicate is a defense-in-depth owner guard for damaged rows; the
+-- comment ids were already derived from the guarded thread history.
+SELECT * FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id = sqlc.arg(issue_id)
+  AND comment_id = ANY(sqlc.arg(comment_ids)::uuid[])
+  AND source_context_id IS NULL
+ORDER BY created_at ASC, id ASC;
+
 -- name: ListAttachmentURLsByIssueOrComments :many
 SELECT a.url FROM attachment a
 WHERE a.issue_id = $1
@@ -68,6 +89,7 @@ UPDATE attachment
 SET comment_id = $1
 WHERE issue_id = $2
   AND comment_id IS NULL
+  AND source_context_id IS NULL
   AND id = ANY($3::uuid[]);
 
 -- name: ReplaceCommentAttachments :execrows
@@ -77,6 +99,7 @@ SET comment_id = CASE
   ELSE NULL
 END
 WHERE issue_id = $2
+  AND source_context_id IS NULL
   AND (
     (comment_id = $1 AND NOT id = ANY(sqlc.arg(attachment_ids)::uuid[]))
     OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
@@ -90,6 +113,7 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
   AND comment_id IS NULL
   AND chat_message_id IS NULL
+  AND source_context_id IS NULL
   AND (
     chat_session_id IS NULL
     OR chat_session_id = sqlc.arg(chat_session_id)
@@ -121,7 +145,8 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND task_id = sqlc.arg(task_id)
   AND issue_id IS NULL
   AND comment_id IS NULL
-  AND chat_message_id IS NULL;
+  AND chat_message_id IS NULL
+  AND source_context_id IS NULL;
 
 -- name: BindChatAttachmentsToMessage :many
 -- Bind a chat agent's task-scoped attachments to the assistant reply it just
@@ -135,6 +160,7 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
   AND comment_id IS NULL
   AND chat_message_id IS NULL
+  AND source_context_id IS NULL
 RETURNING id;
 
 -- name: ListAttachmentsByChatMessage :many
@@ -154,6 +180,7 @@ ORDER BY created_at ASC;
 SELECT id FROM attachment
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
+  AND source_context_id IS NULL
   AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
 ORDER BY id
 FOR UPDATE;
@@ -164,6 +191,7 @@ WITH linked AS (
   SET issue_id = sqlc.arg(issue_id)
   WHERE attachment.workspace_id = sqlc.arg(workspace_id)
     AND attachment.issue_id IS NULL
+    AND attachment.source_context_id IS NULL
     AND attachment.id = ANY(sqlc.arg(attachment_ids)::uuid[])
   RETURNING attachment.issue_id
 ), bumped_issue AS (
@@ -183,6 +211,7 @@ FROM linked;
 WITH deleted AS (
   DELETE FROM attachment
   WHERE attachment.id = $1 AND attachment.workspace_id = $2
+    AND attachment.source_context_id IS NULL
   RETURNING issue_id, comment_id
 ), bumped_issue AS (
   UPDATE issue
@@ -203,3 +232,37 @@ SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
 SELECT * FROM attachment
 WHERE id = ANY(sqlc.arg(attachment_ids)::uuid[]) AND workspace_id = sqlc.arg(workspace_id)
 ORDER BY created_at ASC;
+
+-- name: CreateSourceContextAttachment :one
+INSERT INTO attachment (
+  id, workspace_id, source_context_id, uploader_type, uploader_id,
+  filename, url, content_type, size_bytes
+) VALUES (
+  sqlc.arg(id), sqlc.arg(workspace_id), sqlc.arg(source_context_id),
+  sqlc.arg(uploader_type), sqlc.arg(uploader_id), sqlc.arg(filename),
+  sqlc.arg(url), sqlc.arg(content_type), sqlc.arg(size_bytes)
+)
+RETURNING *;
+
+-- name: ListAttachmentsBySourceContext :many
+SELECT * FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND source_context_id = sqlc.arg(source_context_id)
+ORDER BY created_at ASC, id ASC;
+
+-- name: DeleteAttachmentsBySourceContext :many
+DELETE FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND source_context_id = sqlc.arg(source_context_id)
+RETURNING *;
+
+-- name: ListSourceContextAttachmentURLsByWorkspace :many
+SELECT url FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND source_context_id IS NOT NULL
+ORDER BY id;
+
+-- name: DeleteSourceContextAttachmentsByWorkspace :exec
+DELETE FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND source_context_id IS NOT NULL;

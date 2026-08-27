@@ -256,7 +256,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `env get/set <agent-id>` | 사용자 지정 환경 변수 읽기/쓰기(owner와 admin만) | |
 | | `skills list/set/add <agent-id>` | 연결된 스킬 관리 | `--skill-ids`(`set`은 전체 교체, `add`는 증분 추가) |
 | | `mcp list/add/enable/disable/remove <agent-id>` | 워크스페이스 MCP 서버를 이 에이전트에 할당 | server id는 `workspace mcp list`에서 확인. 라이브러리 항목은 여기서 추가하기 전까지 동작하지 않으며, `disable`은 할당을 유지한 채 전달만 중단합니다 |
-| `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--agent`, `--mode`(모두 필수), `--priority`, `--project`, `--subscriber`(반복 가능) |
+| `autopilot` | `list/get/create/update/delete` | 자동화 관리 | `create`: `--title`, `--agent`, `--mode`(모두 필수), `--project`, `--subscriber`(반복 가능) |
 | | `trigger <id>` | 수동으로 한 번 트리거 | |
 | | `runs <id>` | 실행 기록 확인 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | 일정 및 webhook 트리거 관리 | |

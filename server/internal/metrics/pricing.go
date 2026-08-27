@@ -68,12 +68,39 @@ var modelPrices = map[string]ModelPrice{
 	// packages/views/runtimes/utils.ts; keep the two tables in sync.
 	// `grok-composer-*` ships in the Grok Build catalog but is absent from the
 	// price sheet, so it stays unmapped rather than inheriting a guessed rate.
+	"xai:grok-4.6":                     {Provider: "xai", Model: "grok-4.6", InputPerM: 2.00, CacheReadPerM: 0.50, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.5":                     {Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.3":                     {Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-build-0.1":               {Provider: "xai", Model: "grok-build-0.1", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 2.00},
 	"xai:grok-4.20-multi-agent-0309":   {Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-reasoning":     {Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-non-reasoning": {Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	// Alibaba Qwen (models.dev providers/alibaba, accessed 2026-08-13;
+	// sourced from alibabacloud.com model-pricing — International ≤256K
+	// input tier — and the qwencloud.com model pages). qwen3.7-plus and
+	// qwen3.6-flash carry the published International ≤256K rates;
+	// CacheWritePerM is the Explicit Cache Creation rate (1.25x input) and
+	// CacheReadPerM the Explicit Cache Read rate (0.1x input). qwen3.8-max
+	// is priced at the published pay-as-you-go rate from its
+	// qwencloud.com/models/qwen3.8-max page (the source models.dev cites);
+	// qwen3.8-max-preview is served through the Alibaba Token Plan
+	// subscription, which does not bill per token, so it stays at 0 (same
+	// convention as the free GLM flash tiers). Mirror
+	// packages/views/runtimes/utils.ts.
+	"alibaba:qwen3.7-plus":        {Provider: "alibaba", Model: "qwen3.7-plus", InputPerM: 0.40, CacheReadPerM: 0.04, CacheWritePerM: 0.50, OutputPerM: 1.60},
+	"alibaba:qwen3.6-flash":       {Provider: "alibaba", Model: "qwen3.6-flash", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.3125, OutputPerM: 1.50},
+	"alibaba:qwen3.8-max":         {Provider: "alibaba", Model: "qwen3.8-max", InputPerM: 2.00, CacheReadPerM: 0.17, CacheWritePerM: 2.50, OutputPerM: 6.00},
+	"alibaba:qwen3.8-max-preview": {Provider: "alibaba", Model: "qwen3.8-max-preview", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
+	// Moonshot Kimi K3 (platform.kimi.ai/docs/pricing/chat-k3 via models.dev
+	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
+	// cache write, so CacheWritePerM mirrors Input.
+	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
+	// rolling alias whose target can be switched in the Volcengine console
+	// (across model families), so it is not a stable model identity; the
+	// daemon reports the alias itself, never the resolved model. No rate is
+	// published for the alias, so it stays unmapped rather than inheriting
+	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
 
 var modelAliasRules = []struct {
@@ -117,12 +144,32 @@ var modelAliasRules = []struct {
 	// rows above. The frontend resolver does not dash-normalize non-Anthropic
 	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
 	// rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)grok-4\.6$`), "xai:grok-4.6"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.5$`), "xai:grok-4.5"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.3$`), "xai:grok-4.3"},
 	{regexp.MustCompile(`(^|/|:)grok-build-0\.1$`), "xai:grok-build-0.1"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-multi-agent-0309$`), "xai:grok-4.20-multi-agent-0309"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-reasoning$`), "xai:grok-4.20-0309-reasoning"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-non-reasoning$`), "xai:grok-4.20-0309-non-reasoning"},
+	// Alibaba Qwen. All rules are anchored so unknown suffixed variants
+	// (`qwen3.7-plus-extra`, `qwen3.8-max-preview-extra`) stay unmapped;
+	// an optional complete bracket tag `[…]` with at least one character
+	// inside is admitted to match the frontend's behavior of stripping the
+	// context tag (`\[[^\]]+\]$` in packages/views/runtimes/utils.ts), so
+	// empty tags like `qwen3.7-plus[]` stay unmapped on both sides.
+	// qwen3.8-max stays anchored so `qwen3.8-max-preview` (and its `[1m]`
+	// variant) never borrows the GA tier.
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]7-plus(\[[^\]]+\])?$`), "alibaba:qwen3.7-plus"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]6-flash(\[[^\]]+\])?$`), "alibaba:qwen3.6-flash"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max(\[[^\]]+\])?$`), "alibaba:qwen3.8-max"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max-preview(\[[^\]]+\])?$`), "alibaba:qwen3.8-max-preview"},
+	// Kimi K3. Anchored so the distinct CodeBuddy SKU `kimi-k3-1` stays
+	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
+	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
+	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
+	// console-switchable rolling alias across model families, not a stable
+	// model identity, so it stays unmapped.
 }
 
 func PriceForModelAlias(model string) (ModelPrice, bool) {

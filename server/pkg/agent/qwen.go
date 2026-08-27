@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
 // qwenBackend drives Qwen Code's native non-interactive JSONL protocol:
-// qwen -p <prompt> --output-format stream-json. The event schema is based on
-// Qwen Code 0.20.0 captures in testdata/qwen-code-0.20.0-stream-json.jsonl.
+// qwen --output-format stream-json, prompt on stdin. The event schema is based
+// on Qwen Code 0.20.0 captures in testdata/qwen-code-0.20.0-stream-json.jsonl.
 type qwenBackend struct {
 	cfg Config
 }
@@ -45,8 +47,20 @@ var qwenBlockedArgs = map[string]blockedArgMode{
 	"--core-tools":         blockedWithValue,
 }
 
-func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"-p", prompt, "--output-format", "stream-json"}
+// buildQwenArgs assembles the argv for a one-shot qwen invocation.
+//
+// The prompt is deliberately NOT part of argv. Qwen Code's headless mode
+// reads a non-interactive prompt from stdin when none is given via -p, and
+// putting the (arbitrarily large, user-influenced) prompt text on the command
+// line is not safe on Windows: even after routing qwen.cmd through
+// qwen.ps1 directly (qwen_invocation_windows.go), PowerShell's own argument
+// re-serialisation does not survive a value containing embedded double quotes
+// — the same class of failure cursor-agent hit before it moved its prompt to
+// stdin (#5649). This is that fix's qwen equivalent (#6082). Only fixed,
+// content-free flags remain in argv; --mcp-config's payload also goes through
+// a temp file for the same reason, not inline JSON.
+func buildQwenArgs(opts ExecOptions, logger *slog.Logger) []string {
+	args := []string{"--output-format", "stream-json"}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -64,16 +78,17 @@ func buildQwenArgs(prompt string, opts ExecOptions, logger *slog.Logger) []strin
 }
 
 func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	execPath := b.cfg.ExecutablePath
-	if execPath == "" {
-		execPath = "qwen"
+	execName := b.cfg.ExecutablePath
+	if execName == "" {
+		execName = "qwen"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
-		return nil, fmt.Errorf("qwen executable not found at %q: %w", execPath, err)
+	lookedUp, err := exec.LookPath(execName)
+	if err != nil {
+		return nil, fmt.Errorf("qwen executable not found at %q: %w", execName, err)
 	}
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
-	args := buildQwenArgs(prompt, opts, b.cfg.Logger)
+	args := buildQwenArgs(opts, b.cfg.Logger)
 
 	// Qwen Code 0.20.0 accepts a JSON string or a file path through
 	// --mcp-config. Materialise a managed config into a 0600 temp file so it
@@ -96,9 +111,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			mcpFileCleanup()
 		}
 	}()
-	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
+	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseQwenInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	// args contain the task prompt; the shared logger preserves only flag names.
 	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -111,15 +125,36 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("qwen stdout pipe: %w", err)
 	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("qwen stdin pipe: %w", err)
+	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[qwen:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
+		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start qwen: %w", err)
 	}
 	// cmd.Start succeeded; result goroutine now owns cleanup.
 	mcpFileCleanup = nil
 	b.cfg.Logger.Info("qwen started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+
+	// The prompt is delivered on stdin (see buildQwenArgs). Write it from its
+	// own goroutine so it cannot deadlock against the stdout reader below: a
+	// prompt larger than the OS pipe buffer blocks mid-write until the child
+	// drains it, and the child cannot drain while we are not yet reading its
+	// stdout. Closing stdin is what signals end-of-prompt — qwen reads to
+	// EOF — so we always close, on both the success and error paths.
+	writeErrCh := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(stdin, prompt)
+		closeStdin()
+		writeErrCh <- err
+	}()
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -135,6 +170,10 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		state := qwenStreamState{model: opts.Model, usage: make(map[string]TokenUsage)}
 		go func() {
 			<-runCtx.Done()
+			// Closing stdin releases a prompt write still blocked on a full pipe
+			// (e.g. the child died before draining it), so that goroutine cannot
+			// leak.
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -158,9 +197,15 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			_ = stdout.Close()
 		}
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(started)
 
-		status, output, errMsg := finalizeStreamResult("qwen", timeout, runCtx.Err(), nil, exitErr, state.sessionID, streamTerminalState{
+		// Wait has already closed the stdin pipe, so a prompt write still
+		// blocked on a full pipe has returned by now; the writer sends exactly
+		// once.
+		writeErr := <-writeErrCh
+
+		status, output, errMsg := finalizeStreamResult("qwen", timeout, runCtx.Err(), writeErr, exitErr, state.sessionID, streamTerminalState{
 			lastAssistantText: state.lastAssistantText,
 			finalResultText:   state.finalResultText,
 			sawResult:         state.sawResult,

@@ -34,6 +34,7 @@
     "queued": "待機中",
     "idle": "アイドル"
   },
+  "presence_status_aria": "ステータス: {{status}}",
   "archived": {
     "active_link": "アクティブなエージェント",
     "title": "アーカイブ済みエージェント"
@@ -210,6 +211,8 @@
     "model_managed_by_runtime": "ランタイムで管理",
     "model_search_placeholder": "モデル ID を検索または入力",
     "model_discovering": "モデルを検出中...",
+    "model_discovery_failed_title": "このランタイムのモデルを取得できませんでした。",
+    "model_discovery_failed_hint": "上の入力欄にモデル ID を直接入力して手動で指定できます。",
     "model_empty": "利用可能なモデルがありません",
     "model_empty_with_dot": "利用可能なモデルがありません。",
     "model_custom_tooltip": "\"{{value}}\" をカスタムモデル ID として使用",
@@ -323,6 +326,19 @@
       "select_image_toast": "画像ファイルを選択してください。",
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     }
+  },
+  "conversation_starters": {
+    "label": "会話の開始例",
+    "hint": "このエージェントで新しいチャットを開いたときに表示される例（最大3件）。選ぶと送信せずに入力欄へ入ります。",
+    "add": "候補を追加",
+    "item_label": "候補 {{number}} のラベル",
+    "prompt_label": "候補 {{number}} のプロンプト",
+    "label_placeholder": "プルリクエストをレビュー",
+    "prompt_placeholder": "開いているプルリクエストをレビューし、リスクと次の手順をまとめてください。",
+    "incomplete": "各候補を完成させるか削除してから保存してください。",
+    "remove": "候補 {{number}} を削除",
+    "preview_label": "新しいチャットのプレビュー",
+    "preview_defaults": "これは組み込みの初期値です。上で候補を1件追加すると3件すべて置き換わります。"
   },
   "tab_body": {
     "common": {
@@ -723,6 +739,7 @@
     "usage_chip_title": "この実行のトークンと推定費用",
     "details_branch": "ブランチ",
     "details_reason": "理由",
+    "details_diagnostics": "技術的な詳細",
     "copy_branch": "ブランチ名をコピー",
     "lane_model": "モデル",
     "lane_tool": "ツール",
@@ -752,11 +769,43 @@
     "tool_kind_misc": "その他"
   },
   "task_failure": {
-    "agent_error": "エージェント実行エラー",
-    "timeout": "作業がタイムアウトしました",
-    "runtime_offline": "デーモンがオフライン",
-    "runtime_recovery": "デーモンが再起動しました",
-    "manual": "ユーザーがキャンセルしました"
+    "cancelled_by_system": "システムによってキャンセルされました",
+    "reasons": {
+      "queued_expired": "キュー内で期限切れになりました",
+      "runtime_offline": "デーモンがオフライン",
+      "runtime_reconnect_timeout": "デーモンが時間内に再接続しませんでした",
+      "runtime_recovery": "デーモンが再起動しました",
+      "timeout": "作業がタイムアウトしました",
+      "iteration_limit": "反復回数の上限に達しました",
+      "agent_blocked": "人による入力を待機中",
+      "api_invalid_request": "モデル API に拒否されました",
+      "skill_bundle_unavailable": "エージェントのスキルをダウンロードできませんでした",
+      "runtime_cli_timeout": "ローカルランタイム CLI がタイムアウトしました",
+      "invalid_task_identity": "作業のエージェント情報が一致しません",
+      "agent_error_provider_auth_or_access": "プロバイダーの認証に失敗しました",
+      "agent_error_provider_quota_limit": "プロバイダーのクォータを使い切りました",
+      "agent_error_provider_capacity_or_rate_limit": "プロバイダーによるレート制限",
+      "agent_error_provider_server_error": "プロバイダーのサーバーエラー",
+      "agent_error_provider_network": "プロバイダーへの接続でネットワークエラー",
+      "agent_error_process_failure": "エージェントプロセスがクラッシュしました",
+      "agent_error_empty_or_unparseable_output": "エージェントから使用可能な出力がありません",
+      "agent_error_agent_timeout": "エージェントがタイムアウトしました",
+      "agent_error_context_overflow": "コンテキストウィンドウを超過しました",
+      "agent_error_missing_config": "API キーまたは設定がありません",
+      "agent_error_model_not_found_or_unavailable": "モデルを利用できません",
+      "agent_error_runtime_version_unsupported": "ランナー CLI のバージョンはサポートされていません",
+      "agent_error_runtime_missing_executable": "ランナー CLI がインストールされていません",
+      "agent_error_unknown": "エージェント実行エラー",
+      "agent_fallback_message": "エージェントがフォールバックメッセージを返しました",
+      "codex_resume_oversized": "セッションが大きすぎて再開できません",
+      "idle_watchdog": "エージェントが長時間応答しなかったため停止しました",
+      "local_directory_error": "ローカルディレクトリエラー",
+      "cancelled": "システムによってキャンセルされました",
+      "agent_error": "エージェント実行エラー",
+      "codex_semantic_inactivity": "Codex に進行がないままタイムアウトしました",
+      "manual": "ユーザーがキャンセルしました",
+      "user_cancelled": "ユーザーがキャンセルしました"
+    }
   },
   "runtime_filter": {
     "all": "すべてのランタイム",

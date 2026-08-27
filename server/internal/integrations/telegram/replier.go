@@ -23,12 +23,13 @@ import (
 //   - NeedsBinding: mint a single-use binding token, reply with the link to
 //     the in-product redeem page (/telegram/bind).
 //   - AgentOffline / AgentArchived: a status notice.
-//   - FreshPending / IssueUsage: command confirmation or corrective guidance.
+//   - FreshPending / ChatStarted / IssueUsage: command confirmation or corrective guidance.
 //   - Ingested with an /issue result: creation or duplicate confirmation.
 //   - Dropped addressed /issue commands: an authorization/status refusal.
 
 const (
 	msgFreshPending   = "✅ Fresh start ready. Your next chat message will run without previous context."
+	msgChatStarted    = "✅ Started a new Multica chat. Your next message will enter it."
 	msgIssueUsage     = "Please include an issue title. Use:\n\n/issue <title>\n[description] (optional)"
 	msgIssueNotMember = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
 	msgIssueDisabled  = "This Telegram bot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
@@ -114,6 +115,11 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	case engine.OutcomeFreshPending:
 		if err := r.post(ctx, inst, msg, msgFreshPending); err != nil {
 			r.logger.WarnContext(ctx, "telegram replier: fresh-start confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeChatStarted:
+		if err := r.post(ctx, inst, msg, msgChatStarted); err != nil {
+			r.logger.WarnContext(ctx, "telegram replier: new-chat confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIssueUsage:

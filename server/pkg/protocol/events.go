@@ -85,6 +85,7 @@ const (
 	// draft restore (#5219). Channel outbounds (Slack/Lark) deliberately do
 	// not subscribe to it — cancellation stays silent on external channels.
 	EventChatCancelFinalized = "chat:cancel_finalized"
+	EventChatSessionCreated  = "chat:session_created"
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"

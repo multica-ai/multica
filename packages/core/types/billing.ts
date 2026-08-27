@@ -195,6 +195,13 @@ export interface CreateBillingPortalSessionResponse {
 
 export type WorkspaceSubscriptionInterval = "month" | "year";
 
+export type WorkspaceEntitlementLimit =
+  | { mode: "limited"; limit: number }
+  | { mode: "unlimited"; limit: null };
+
+export type WorkspaceEntitlementLimitMode =
+  WorkspaceEntitlementLimit["mode"];
+
 export interface WorkspaceSubscriptionEntitlements {
   workspaceId: string;
   // Deliberately open strings: cloud may add plans and Stripe statuses without
@@ -202,8 +209,10 @@ export interface WorkspaceSubscriptionEntitlements {
   plan: string;
   status: string;
   seats: number;
-  issueWindow: number | null;
-  autopilotRuns: number | null;
+  limits: {
+    issueCount: WorkspaceEntitlementLimit;
+    autopilotRuns: WorkspaceEntitlementLimit;
+  };
   currentPeriodEnd: string | null;
   snapshotExpiresAt: string | null;
   version: number;
@@ -218,26 +227,38 @@ export interface WorkspaceSubscriptionSummary {
   entitlement: WorkspaceSubscriptionEntitlements;
   billingInterval: WorkspaceSubscriptionInterval | null;
   /** Authoritative current human-member count. Agents never take a seat. */
-  actualSeats: number;
-  /** Persisted Stripe seat high-water; null when no subscription exists yet. */
-  billedSeats: number | null;
-  /** A lower quantity already scheduled for the next period, if any. */
-  pendingSeatQuantity: number | null;
-  /** Confirmed human members consuming Cloud-owned commercial capacity. */
-  usedSeats: number;
-  /** Live pending invitations that reserve purchased capacity. */
-  reservedSeats: number;
-  /** Null when connected to a Cloud version that predates seat purchases. */
-  purchaseVersion: number | null;
-  activeSeatPurchase: WorkspaceSeatPurchaseSummary | null;
+  humanMembers: number;
+  /** Null when the workspace has no currently effective purchased capacity. */
+  seatCapacity: WorkspaceSeatCapacity | null;
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
-  /**
-   * Whether a local Stripe customer exists for this workspace. It is a fact,
-   * NOT a permission: Billing Portal still requires owner/admin, so a caller
-   * must gate that control on the member's role as well.
-   */
+  /** Whether a local Stripe customer exists; never use this as an action gate. */
   hasStripeCustomer: boolean;
+  /** Cloud-authorized actions for this exact caller and effective snapshot. */
+  availableActions: {
+    checkout: boolean;
+    portal: boolean;
+    purchaseSeats: boolean;
+  };
+}
+
+export interface IssueLimitUsage {
+  used: number;
+  limit: number;
+}
+
+export interface WorkspaceSeatCapacity {
+  purchased: number;
+  used: number;
+  reserved: number;
+  /** Server-computed purchased capacity not currently used or reserved. */
+  available: number;
+  /** Cloud-computed human-seat overcommit state. */
+  overcommitted: boolean;
+  version: number;
+  /** A lower quantity already scheduled for the next period, if any. */
+  pendingQuantity: number | null;
+  activePurchase: WorkspaceSeatPurchaseSummary | null;
 }
 
 export interface WorkspaceSeatPurchaseSummary {
@@ -264,7 +285,6 @@ export interface WorkspaceSubscriptionPrices {
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
   interval: WorkspaceSubscriptionInterval;
   idempotencyKey: string;
-  customerEmail?: string;
 }
 
 export interface CreateWorkspaceSubscriptionCheckoutResponse {
@@ -312,9 +332,8 @@ export interface PurchaseWorkspaceSeatsResponse {
 
 export interface WorkspaceSubscriptionSeatReconcileResult {
   workspaceId: string;
-  billedSeats: number;
-  actualSeats: number;
   action: string;
+  version: number;
 }
 
 export interface CreateWorkspaceSubscriptionPortalResponse {

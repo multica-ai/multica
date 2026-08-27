@@ -44,6 +44,12 @@ import (
 // outboundQueries is the slice of generated queries the WeCom outbound
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
+	// GetChannelChatSessionBindingBySession stays alongside the task-delivery
+	// snapshot: the answer path addresses by the snapshot (MUL-6661 pins a
+	// reply to the route its question was ingested under), while a round whose
+	// handle is gone falls back to the session binding in addressFromBinding —
+	// the one reader left that has no task to key a snapshot on.
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	// GetAgentTask serves two readers on this path. The origin gate reads the
 	// row to get at the channel_ingested stamp; the round matcher reads it to
@@ -167,23 +173,13 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// Issue / autopilot tasks carry no chat_session.
 		return nil
 	}
-	// Refuses a chat:done for a Slack, Lark or web-only session in one query
-	// instead of the two the origin gate below costs, and its row is the
-	// address an attachment falls back to when the answer itself had nothing to
-	// say. The row is read AGAIN in sendAsMessage, which is where a plain
-	// message needs it — that lookup sits past the take on purpose, and this
-	// one cannot stand in for it because a round can be taken and sealed
-	// without ever reaching a plain message.
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   channelTypeWecom,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil // not a wecom session (Slack / Lark / web-only)
-		}
-		return fmt.Errorf("wecom: lookup chat binding: %w", err)
-	}
+	// Since MUL-6661 the reply's address is the per-task delivery snapshot,
+	// resolved below once the task id is known — it both refuses foreign
+	// sessions and pins the reply to the route its question was ingested
+	// under, which the live session binding can no longer be trusted to do
+	// after a /new or a rebind. The cost is that a foreign session is refused
+	// two reads later than the old binding pre-gate refused it.
+	//
 	// An empty completion does NOT end the turn. Two things can still be owed:
 	// a file the agent produced and said nothing about, and — since the bubble
 	// — the seal on a spinner the asker is watching. deliverAnswer decides
@@ -218,6 +214,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if !ok {
 		return nil
 	}
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("wecom: lookup task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeWecom {
+		return nil
+	}
+	binding := wecomBindingFromTaskDelivery(delivery)
 	task, err := o.q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -762,6 +769,16 @@ func (o *Outbound) sendAsMessage(ctx context.Context, sessionID pgtype.UUID, con
 // belongs to — the same one the typing indicator's endings go through.
 func (o *Outbound) rounds() roundTaker {
 	return roundTaker{streams: o.streams, tasks: o.tasks, log: o.logger}
+}
+
+func wecomBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType:      delivery.ChatType,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
+		RouteRevision: delivery.RouteRevision, Config: delivery.Config,
+	}
 }
 
 // chatDoneTaskID recovers the task id an EventChatDone belongs to, as the row

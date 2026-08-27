@@ -26,6 +26,7 @@ import (
 // param mapping can be asserted without a database.
 type fakeSessionBinder struct {
 	ensureIn engine.EnsureSessionInput
+	startIn  engine.StartSessionInput
 	appendIn engine.AppendInput
 	bindIn   engine.BindMediaInput
 	binds    int
@@ -41,6 +42,10 @@ func (f *fakeSessionBinder) BindMediaRefs(_ context.Context, in engine.BindMedia
 func (f *fakeSessionBinder) EnsureSession(_ context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error) {
 	f.ensureIn = in
 	return f.sessID, nil
+}
+func (f *fakeSessionBinder) StartSession(_ context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error) {
+	f.startIn = in
+	return engine.StartSessionResult{SessionID: f.sessID}, nil
 }
 func (f *fakeSessionBinder) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (f *fakeSessionBinder) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
@@ -67,6 +72,41 @@ func TestSessionBinder_EnsureSessionMapsGroupKey(t *testing.T) {
 	}
 	if fb.ensureIn.ChatType != channel.ChatTypeGroup {
 		t.Errorf("ChatType = %v, want group", fb.ensureIn.ChatType)
+	}
+}
+
+func TestSessionBinder_StartSessionMapsWeComRouteAndFirstTurn(t *testing.T) {
+	t.Parallel()
+	fb := &fakeSessionBinder{sessID: mustTestUUID(t)}
+	b := &sessionBinder{session: fb}
+	inst := engine.ResolvedInstallation{ID: mustTestUUID(t), WorkspaceID: mustTestUUID(t), AgentID: mustTestUUID(t)}
+	sender := mustTestUUID(t)
+	creator := mustTestUUID(t)
+	claim := mustTestUUID(t)
+	result, err := b.StartSession(context.Background(), engine.StartSessionParams{
+		Installation: inst,
+		Creator:      creator,
+		Sender:       sender,
+		ClaimToken:   claim,
+		Message: channel.InboundMessage{
+			MessageID: "m1", Text: "first turn",
+			Source: channel.Source{ChatID: "GROUP_1", ChatType: channel.ChatTypeGroup},
+		},
+		MediaPendingSeconds: 45,
+		PersistMessage:      true,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if result.SessionID != fb.sessID {
+		t.Fatal("StartSession lost shared-session result")
+	}
+	got := fb.startIn
+	if got.BindingKey != "GROUP_1" || got.Body != "first turn" || got.MessageID != "m1" || got.ClaimToken != claim || got.MediaPendingSeconds != 45 || !got.PersistMessage {
+		t.Fatalf("start mapping wrong: %+v", got)
+	}
+	if got.Sender != creator || got.Initiator != sender {
+		t.Fatalf("creator/initiator mapping wrong: %+v", got)
 	}
 }
 
@@ -97,7 +137,7 @@ func TestSessionBinder_BindMediaReachesTheSessionStore(t *testing.T) {
 	refs := []channel.MediaRef{{StorageKey: "k", Filename: "photo.jpg"}}
 	issue := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
 
-	if err := b.BindMedia(context.Background(), engine.BindMediaParams{
+	if _, err := b.BindMedia(context.Background(), engine.BindMediaParams{
 		MediaRefs: refs,
 		IssueID:   issue,
 	}); err != nil {

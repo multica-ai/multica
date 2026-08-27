@@ -20,6 +20,8 @@ type fakeHistoryQueries struct {
 	instErr       error
 	messageIDs    []string
 	messageIDsErr error
+	outbound      []db.ChannelOutboundMessage
+	outboundErr   error
 }
 
 func (f *fakeHistoryQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -32,6 +34,10 @@ func (f *fakeHistoryQueries) GetChannelInstallation(context.Context, db.GetChann
 
 func (f *fakeHistoryQueries) ListChannelOutboundMessageIDsForContext(context.Context, db.ListChannelOutboundMessageIDsForContextParams) ([]string, error) {
 	return f.messageIDs, f.messageIDsErr
+}
+
+func (f *fakeHistoryQueries) ListChannelOutboundMessagesByIDs(context.Context, db.ListChannelOutboundMessagesByIDsParams) ([]db.ChannelOutboundMessage, error) {
+	return f.outbound, f.outboundErr
 }
 
 type fakeHistoryClient struct {
@@ -92,6 +98,7 @@ func groupBinding(threadRoot string) db.ChannelChatSessionBinding {
 
 func dmBinding() db.ChannelChatSessionBinding {
 	return db.ChannelChatSessionBinding{
+		ID:             uid(3),
 		InstallationID: uid(2),
 		ChannelChatID:  "D1",
 		ChatType:       string(channel.ChatTypeP2P),
@@ -159,7 +166,7 @@ func TestChannelOverviewScopesAndSanitizesFreshGeneration(t *testing.T) {
 	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
 	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
 		msg("U1", "new reply", "104.000000"),
-		msg("U1", "/new current question", "103.000000"),
+		msg("U1", "/clear current question", "103.000000"),
 		msg("U1", "old context", "102.000000"),
 	}}
 	h := newTestHistory(q, fc)
@@ -185,7 +192,7 @@ func TestChannelOverviewExcludesLateReplyFromPreviousGeneration(t *testing.T) {
 	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
 		msg("UBOT", "current generation answer", "104.000000"),
 		msg("UBOT", "late previous generation answer", "103.500000"),
-		msg("U1", "/new current question", "103.000000"),
+		msg("U1", "/clear current question", "103.000000"),
 	}}
 	h := newTestHistory(q, fc)
 	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
@@ -203,7 +210,7 @@ func TestChannelOverviewFailsClosedForUnknownOwnBotReply(t *testing.T) {
 	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
 	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
 		msg("UBOT", "unattributed answer", "104.000000"),
-		msg("U1", "/new current question", "103.000000"),
+		msg("U1", "/clear current question", "103.000000"),
 	}}
 	h := newTestHistory(q, fc)
 	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{

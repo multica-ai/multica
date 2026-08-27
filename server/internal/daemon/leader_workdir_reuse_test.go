@@ -32,6 +32,8 @@ func TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten(t *testing.T) {
 	defer cleanup()
 
 	first := leaderReuseTestTask("task-first")
+	first.WorkspaceSlug = "original-workspace"
+	first.IssueIdentifier = "MUL-6063"
 	firstResult, err := d.runTask(context.Background(), first, "claude", 0, d.logger)
 	if err != nil {
 		t.Fatalf("first runTask: %v", err)
@@ -47,6 +49,10 @@ func TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten(t *testing.T) {
 	}
 
 	second := leaderReuseTestTask("task-second")
+	// Labels are mutable display data. A renamed workspace or issue must keep
+	// reusing the recorded path rather than deriving a new root from the names.
+	second.WorkspaceSlug = "renamed-workspace"
+	second.IssueIdentifier = "NEW-6063"
 	second.PriorSessionID = firstResult.SessionID
 	second.PriorWorkDir = firstResult.WorkDir
 	secondResult, err := d.runTask(context.Background(), second, "claude", 0, d.logger)

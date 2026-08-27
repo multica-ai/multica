@@ -1025,7 +1025,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// scanner overflow during thread/resume otherwise leaked Codex
 	// processes indefinitely. configureProcessGroup is a no-op on
 	// Windows.
-	configureProcessGroup(cmd)
 	// Override the default exec.CommandContext cancel behaviour. The
 	// default sends SIGKILL only to cmd.Process (the leader); we instead
 	// signal the whole process group so descendants die too. Returning
@@ -2067,7 +2066,7 @@ func detectCodexVersionForDiagnostics(ctx context.Context, runtimeCmd Command, e
 
 	cmd := runtimeCmd.exec(versionCtx, "--version")
 	cmd.Env = env
-	data, err := cmd.Output()
+	data, err := outputOwned(cmd, logger)
 	if err != nil {
 		if logger != nil {
 			logger.Debug("codex version diagnostic failed", "error", err)
@@ -2170,8 +2169,7 @@ type codexClient struct {
 	onDiscardedNotification func(method string, params map[string]any)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
-	turnStarted          bool
-	completedTurnIDs     map[string]bool
+	turnCompleted        bool
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
@@ -2657,7 +2655,7 @@ func (c *codexClient) handleNotification(raw map[string]json.RawMessage) {
 	if c.notificationProtocol != "legacy" {
 		if c.notificationProtocol == "unknown" &&
 			(method == "turn/started" || method == "turn/completed" ||
-				method == "thread/started" || strings.HasPrefix(method, "item/")) {
+				method == "thread/started" || method == "error" || strings.HasPrefix(method, "item/")) {
 			c.notificationProtocol = "raw"
 		}
 
@@ -3016,7 +3014,6 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 
 	switch msgType {
 	case "task_started":
-		c.turnStarted = true
 		if c.onMessage != nil {
 			c.onMessage(Message{Type: MessageStatus, Status: "running", SessionID: c.threadID})
 		}
@@ -3111,7 +3108,6 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 
 	switch method {
 	case "turn/started":
-		c.turnStarted = true
 		if turnID := extractNestedString(params, "turn", "id"); turnID != "" {
 			c.turnID = turnID
 		}
@@ -3124,6 +3120,10 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		status := extractNestedString(params, "turn", "status")
 		threadID, _ := params["threadId"].(string)
 		c.cfg.Logger.Info("codex turn/completed received", "thread_id", threadID, "turn_id", turnID, "status", status)
+		if c.turnCompleted {
+			return
+		}
+		c.turnCompleted = true
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"
 
@@ -3135,16 +3135,6 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 				errMsg = "codex turn failed"
 			}
 			c.setTurnError(errMsg)
-		}
-
-		if c.completedTurnIDs == nil {
-			c.completedTurnIDs = map[string]bool{}
-		}
-		if turnID != "" {
-			if c.completedTurnIDs[turnID] {
-				return
-			}
-			c.completedTurnIDs[turnID] = true
 		}
 
 		// Extract usage from turn/completed if present (e.g. params.turn.usage).
@@ -3176,19 +3166,12 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 			}
 			if !willRetry {
 				c.setTurnError(errMsg)
-				if c.onTurnDone != nil {
-					c.onTurnDone(false)
-				}
 			}
 		}
 
 	case "thread/status/changed":
-		statusType := extractNestedString(params, "status", "type")
-		if statusType == "idle" && c.turnStarted {
-			if c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
-		}
+		// Status changes are informational. Only turn/completed carries the
+		// authoritative terminal state for a raw-protocol turn.
 
 	default:
 		if strings.HasPrefix(method, "item/") {
@@ -3287,8 +3270,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 		}
 		phase, _ := item["phase"].(string)
 		if phase == "final_answer" {
-			// Deliberately NOT gated on turnStarted, unlike onTurnDone below:
-			// the gate exists so a subagent or a replayed history turn cannot
+			// The gate exists so a subagent or a replayed history turn cannot
 			// end OUR turn early, and the thread guard at the top of this
 			// function already keeps foreign threads out. A final answer that
 			// arrives before we observed turn/started is still this thread's
@@ -3296,9 +3278,8 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 			if text != "" && c.onFinalAnswer != nil {
 				c.onFinalAnswer(text)
 			}
-			if c.turnStarted && c.onTurnDone != nil {
-				c.onTurnDone(false)
-			}
+			// Keep the stream open until turn/completed. A final answer is the
+			// deliverable, not the authoritative lifecycle boundary.
 		}
 	}
 }

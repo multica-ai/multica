@@ -26,11 +26,14 @@ func newAgentCopyTestCmd() *cobra.Command {
 // portable field populated, so copy tests can assert the whole whitelist.
 func fullSourceAgent() map[string]any {
 	return map[string]any{
-		"id":                   "agent-src",
-		"name":                 "Src",
-		"runtime_id":           "runtime-1",
-		"description":          "a description",
-		"instructions":         "some instructions",
+		"id":           "agent-src",
+		"name":         "Src",
+		"runtime_id":   "runtime-1",
+		"description":  "a description",
+		"instructions": "some instructions",
+		"conversation_starters": []any{
+			map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+		},
 		"avatar_url":           "https://img.example/a.png",
 		"custom_args":          []any{"--foo", "--bar"},
 		"max_concurrent_tasks": 9,
@@ -109,6 +112,11 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	}
 	if gotBody["instructions"] != "some instructions" {
 		t.Errorf("instructions = %v", gotBody["instructions"])
+	}
+	if !reflect.DeepEqual(gotBody["conversation_starters"], []any{
+		map[string]any{"label": "Review a PR", "prompt": "Review the open pull request."},
+	}) {
+		t.Errorf("conversation_starters = %v", gotBody["conversation_starters"])
 	}
 	if gotBody["avatar_url"] != "https://img.example/a.png" {
 		t.Errorf("avatar_url = %v", gotBody["avatar_url"])

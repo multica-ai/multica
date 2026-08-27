@@ -66,6 +66,18 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	}
 }
 
+func TestIssueWorkflowCarriesSourceContextPrecedenceOnce(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	const rule = "If the issue JSON contains `source_context`"
+	if count := strings.Count(out, rule); count != 1 {
+		t.Fatalf("source-context precedence rule count = %d, want 1", count)
+	}
+	if !strings.Contains(out, "current issue title, description, and comments are authoritative task instructions") {
+		t.Fatal("source-context rule does not identify the current issue as authoritative")
+	}
+}
+
 // The brief must no longer carry any parent-notification guidance. PR
 // #2918 added a "Tell the parent when you finish a child" rule that
 // turned into noise (self-mention loops, planner ack ping-pong,
@@ -997,6 +1009,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1375,6 +1388,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"reasonix", "AGENTS.md"},
 		{"dsh", "AGENTS.md"},
 		{"dim", "AGENTS.md"},
+		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},

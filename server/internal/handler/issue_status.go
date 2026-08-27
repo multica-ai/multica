@@ -10,7 +10,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -128,15 +127,6 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
 	if !ok {
-		return
-	}
-
-	// Rollout gate (see featureflags.CustomIssueStatuses). Creating the first
-	// custom status mints a value older pods cannot interpret, so it stays
-	// closed until the whole fleet is running code that resolves categories.
-	// Only creation is gated — reading and resolving are safe unconditionally.
-	if !featureflags.CustomIssueStatusesEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusForbidden, "custom issue statuses are not enabled for this deployment")
 		return
 	}
 

@@ -34,7 +34,7 @@ const (
 	labelOp           = "op"
 	labelGate         = "gate"
 	labelOutcome      = "outcome"
-	labelSurface      = "surface"
+	labelStage        = "stage"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -57,6 +57,9 @@ var businessMetricLabels = map[string][]string{
 	"multica_chat_claim_session_fallback_needed_total": {},
 	"multica_chat_claim_session_fallback_result_total": {labelResult},
 	"multica_chat_claim_resume_query_duration_seconds": {labelQuery},
+	"multica_runtime_sweeper_stage_duration_seconds":   {labelStage},
+	"multica_runtime_sweeper_candidate_rows_total":     {labelStage},
+	"multica_runtime_sweeper_rows_changed_total":       {labelStage},
 
 	// PR3 funnel / community / commercial.
 	"multica_signup_total":                             {labelSignupSource},
@@ -97,9 +100,8 @@ var businessMetricLabels = map[string][]string{
 	"multica_entitlement_refresh_total":                {labelOutcome},
 	"multica_entitlement_refresh_duration_seconds":     {labelOutcome},
 	"multica_entitlement_decision_total":               {labelGate, labelAction, labelReason},
-	"multica_entitlement_version_regression_total":     {labelSource},
+	"multica_entitlement_version_regression_total":     {},
 	"multica_autopilot_quota_decision_total":           {labelAction, labelSource, labelResult},
-	"multica_issue_window_decision_total":              {labelAction, labelSurface, labelResult},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{
@@ -151,6 +153,7 @@ var (
 		"reasonix":      "reasonix",
 		"dim":           "dim",
 		"mcode":         "mcode",
+		"zeroclaw":      "zeroclaw",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",

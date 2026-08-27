@@ -71,6 +71,12 @@ cleared_agent_label_assignments AS (
 cleared_skill_label_assignments AS (
     DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
+cleared_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message WHERE installation_id IN (SELECT id FROM ws_installations)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id

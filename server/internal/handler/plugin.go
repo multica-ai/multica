@@ -80,12 +80,19 @@ type pluginInstallationResponse struct {
 // pluginHookResponse omits input_schema: the settings page lists what a hook is
 // and who may call it, and the raw JSON Schema is noise there.
 type pluginHookResponse struct {
-	Key         string   `json:"key"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Triggers    []string `json:"triggers"`
-	Events      []string `json:"events,omitempty"`
-	Transport   string   `json:"transport"`
+	Key         string                      `json:"key"`
+	Name        string                      `json:"name"`
+	Description string                      `json:"description"`
+	Triggers    []string                    `json:"triggers"`
+	Events      []string                    `json:"events,omitempty"`
+	Transport   string                      `json:"transport"`
+	Schedule    *pluginHookScheduleResponse `json:"schedule,omitempty"`
+}
+
+type pluginHookScheduleResponse struct {
+	Cron      string `json:"cron"`
+	Timezone  string `json:"timezone"`
+	NextRunAt string `json:"next_run_at,omitempty"`
 }
 
 func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db.PluginInstallation) (pluginInstallationResponse, error) {
@@ -109,17 +116,35 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 	if granted == nil {
 		granted = []string{}
 	}
+	scheduleRows, err := h.Queries.ListPluginHookSchedulesByInstallation(ctx, installation.ID)
+	if err != nil {
+		return pluginInstallationResponse{}, err
+	}
+	schedules := make(map[string]db.PluginHookSchedule, len(scheduleRows))
+	for _, schedule := range scheduleRows {
+		schedules[schedule.HookKey] = schedule
+	}
 
 	hooks := make([]pluginHookResponse, 0, len(manifest.Contributes.Hooks))
 	for _, hook := range manifest.Contributes.Hooks {
-		hooks = append(hooks, pluginHookResponse{
+		response := pluginHookResponse{
 			Key:         hook.Key,
 			Name:        hook.Name,
 			Description: hook.Description,
 			Triggers:    hook.Triggers,
 			Events:      hook.Events,
 			Transport:   hook.Transport.Type,
-		})
+		}
+		if schedule, ok := schedules[hook.Key]; ok {
+			response.Schedule = &pluginHookScheduleResponse{
+				Cron:     schedule.CronExpression,
+				Timezone: schedule.Timezone,
+			}
+			if schedule.NextRunAt.Valid {
+				response.Schedule.NextRunAt = schedule.NextRunAt.Time.UTC().Format(timeFormatRFC3339)
+			}
+		}
+		hooks = append(hooks, response)
 	}
 	surfaces := manifest.Contributes.Surfaces
 	if surfaces == nil {

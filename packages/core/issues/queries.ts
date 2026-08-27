@@ -177,7 +177,21 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  sourceContextPreview: (wsId: string, anchorCommentId: string) =>
+    ["source-context", "preview", wsId, anchorCommentId] as const,
 };
+
+export function sourceContextPreviewOptions(
+  wsId: string,
+  anchorCommentId: string | null | undefined,
+) {
+  return queryOptions({
+    queryKey: issueKeys.sourceContextPreview(wsId, anchorCommentId ?? ""),
+    queryFn: () => api.getCommentSubIssuePreview(anchorCommentId!),
+    enabled: !!anchorCommentId,
+    staleTime: 0,
+  });
+}
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
@@ -461,21 +475,9 @@ export function childIssueProgressOptions(wsId: string) {
     queryKey: issueKeys.childProgress(wsId),
     queryFn: () => api.getChildIssueProgress(),
     select: (data) => {
-      const map = new Map<string, {
-        done: number;
-        total: number;
-        visibleDone: number;
-        visibleTotal: number;
-        hiddenTotal: number;
-      }>();
+      const map = new Map<string, { done: number; total: number }>();
       for (const entry of data.progress) {
-        map.set(entry.parent_issue_id, {
-          done: entry.done,
-          total: entry.total,
-          visibleDone: entry.visible_done ?? entry.done,
-          visibleTotal: entry.visible_total ?? entry.total,
-          hiddenTotal: entry.hidden_total ?? 0,
-        });
+        map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
       }
       return map;
     },

@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { inboxKeys } from "./queries";
-import type { InboxItem, IssueStatus } from "../types";
+import type { InboxItem, IssuePriority, IssueStatus } from "../types";
 
 export function onInboxNew(
   qc: QueryClient,
@@ -17,17 +17,45 @@ export function onInboxNew(
   qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
 }
 
+export function patchInboxIssueProjection(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  patch: { status?: IssueStatus; priority?: IssuePriority },
+) {
+  const project = (old: InboxItem[] | undefined) => {
+    if (!old) return old;
+    let changed = false;
+    const next = old.map((item) => {
+      if (item.issue_id !== issueId) return item;
+      changed = true;
+      return {
+        ...item,
+        ...(patch.status !== undefined
+          ? { issue_status: patch.status }
+          : {}),
+        // Do not manufacture the projection on data returned by an older
+        // backend. Capability detection relies on `undefined` continuing to
+        // mean "this endpoint version does not provide issue_priority".
+        ...(patch.priority !== undefined && item.issue_priority !== undefined
+          ? { issue_priority: patch.priority }
+          : {}),
+      };
+    });
+    return changed ? next : old;
+  };
+  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), project);
+  // Archived rows expose the same issue fields and filter controls.
+  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), project);
+}
+
 export function patchInboxIssueStatus(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   status: IssueStatus,
 ) {
-  const patch = (old: InboxItem[] | undefined) =>
-    old?.map((i) => (i.issue_id === issueId ? { ...i, issue_status: status } : i));
-  qc.setQueryData<InboxItem[]>(inboxKeys.list(wsId), patch);
-  // Archived rows render the same status icon, so they need the same patch.
-  qc.setQueryData<InboxItem[]>(inboxKeys.archived(wsId), patch);
+  patchInboxIssueProjection(qc, wsId, issueId, { status });
 }
 
 export function onInboxIssueStatusChanged(

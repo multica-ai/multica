@@ -1,9 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "../config";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
-import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_SCRIPT } from "./schemas";
+import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
+  configStore.getState().setAgentConversationStartersSupported(false);
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient agent conversation-starter compatibility", () => {
+  const prompt = {
+    label: "Review a PR",
+    prompt: "Review the open pull request.",
+  };
+
+  it("rejects create writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.createAgent({
+        name: "Reviewer",
+        runtime_id: "runtime-1",
+        conversation_starters: [prompt],
+      }),
+    ).rejects.toThrow(/server version does not support agent conversation starters/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects update writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.updateAgent("agent-1", { conversation_starters: [prompt] }),
+    ).rejects.toThrow(/server version does not support agent conversation starters/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows declared-capability create and update writes through", async () => {
+    configStore.getState().setAgentConversationStartersSupported(true);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "agent-1" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.createAgent({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      conversation_starters: [prompt],
+    });
+    await client.updateAgent("agent-1", {
+      conversation_starters: [prompt],
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      conversation_starters: [prompt],
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      conversation_starters: [prompt],
+    });
+  });
 });
 
 describe("ApiClient edit guards", () => {
@@ -157,25 +224,23 @@ describe("ApiClient Plugin preview response schema", () => {
     )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
   });
 
-  // A surface's code is what the host inlines into a sandboxed frame. A
-  // malformed response must fall back to an EMPTY script, which the frame
-  // renders as "could not load" — not to a partial one that runs.
-  it("falls back to an empty surface script when the response is malformed", async () => {
+  // A malformed launch must not become a partly trusted frame URL.
+  it("falls back to an empty surface launch when the response is malformed", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ code: 42 }), {
+        new Response(JSON.stringify({ url: 42, bridge_token: "proof" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       ),
     );
 
-    await expect(new ApiClient("https://api.example.test").getPluginSurfaceScript(
+    await expect(new ApiClient("https://api.example.test").getPluginSurfaceLaunch(
       "workspace-1",
       "installation-1",
       "hello",
-    )).resolves.toEqual(EMPTY_PLUGIN_SURFACE_SCRIPT);
+    )).resolves.toEqual(EMPTY_PLUGIN_SURFACE_LAUNCH);
   });
 
   it("falls back to an empty package list when the response is malformed", async () => {
@@ -191,6 +256,53 @@ describe("ApiClient Plugin preview response schema", () => {
 
     await expect(new ApiClient("https://api.example.test").listPluginPackages("workspace-1"))
       .resolves.toEqual(EMPTY_PLUGIN_PACKAGE_LIST);
+  });
+});
+
+describe("ApiClient Plugin surface bridge routes", () => {
+  it("relays Action API calls through the session-only bridge prefix", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").callPluginAction(
+      "installation-1",
+      { method: "GET", path: "/context", issueId: "MUL-42" },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/plugin-bridge/v1/context?issue_id=MUL-42",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "GET",
+      headers: expect.objectContaining({
+        "X-Multica-Plugin-Installation": "installation-1",
+      }),
+    });
+  });
+
+  it("invokes UI hooks through the session-only bridge prefix", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        status: "ok",
+        hook_key: "summarize",
+        trigger: "ui",
+        latency_ms: 1,
+        attempts: 1,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await new ApiClient("https://api.example.test").invokePluginHook(
+      "installation-1",
+      "summarize",
+      { trigger: "ui", issueId: "issue-1" },
+    );
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/plugin-bridge/v1/hooks/summarize",
+    );
   });
 });
 
@@ -725,6 +837,60 @@ describe("ApiClient notification preferences", () => {
       workspace_id: "",
       preferences: {},
     });
+  });
+});
+
+describe("ApiClient Inbox response schemas", () => {
+  const legacyRow = {
+    id: "inbox-1",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "member-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-1",
+    title: "Legacy Inbox row",
+    body: null,
+    read: false,
+    archived: false,
+    created_at: "2026-08-24T00:00:00Z",
+  };
+
+  it("schema-parses the main Inbox and preserves omitted legacy projections", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([legacyRow]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").listInbox();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty("issue_status");
+    expect(result[0]).not.toHaveProperty("issue_priority");
+  });
+
+  it("falls back safely when the main Inbox projection is wrong-typed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([{ ...legacyRow, issue_priority: 3 }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listInbox(),
+    ).resolves.toEqual([]);
   });
 });
 
@@ -2326,6 +2492,101 @@ describe("ApiClient workspace MCP servers", () => {
     [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("importSkillArchive", () => {
+  it("POSTs multipart form data without a JSON content-type", async () => {
+    const skill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "review-helper",
+      description: "Reviews code",
+      content: "# Review",
+      config: {},
+      files: [],
+      created_by: "user-1",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "created", skill }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill", { type: "application/zip" });
+    const result = await new ApiClient("https://api.example.test").importSkillArchive(
+      file,
+      "fail",
+    );
+
+    expect(result.id).toBe("skill-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/skills/import");
+    expect(init?.method).toBe("POST");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+    const body = init?.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get("on_conflict")).toBe("fail");
+    const uploaded = body.get("file");
+    expect(uploaded).toBeInstanceOf(File);
+    expect((uploaded as File).name).toBe("review-helper.skill");
+  });
+
+  it("falls back to Import failed when the archive envelope is malformed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ not_a_status: true, skill: 42 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow(/import failed/i);
+  });
+
+  it("keeps the server reason for a status this client does not know", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "quarantined", reason: "pending review" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow("pending review");
+  });
+
+  it("throws the structured reason on a name conflict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "conflict",
+          reason: "a skill with this name already exists",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toMatchObject({
+      message: "a skill with this name already exists",
+      status: 409,
+    });
   });
 });
 

@@ -7,7 +7,6 @@
     "show_archived": "Show archived ({{count}})",
     "archived_badge": "Archived",
     "archived_hint": "Retired from new assignments. Issues already on it keep it.",
-    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
     "reorder_failed": "Could not save the new order.",
     "actions": {
       "open": "Actions for {{name}}",
@@ -168,8 +167,12 @@
         "description": "Open your preferred issue creation flow."
       },
       "toggleSidebar": {
-        "label": "Toggle sidebar",
-        "description": "Show or hide the main sidebar."
+        "label": "Toggle left sidebar",
+        "description": "Show or hide the left sidebar."
+      },
+      "toggleRightSidebar": {
+        "label": "Toggle right sidebar",
+        "description": "Show or hide the right sidebar when the current page has one."
       },
       "toggleChat": {
         "label": "Toggle chat window",
@@ -363,6 +366,20 @@
       "installed": "Plugin installed",
       "upgrade_from": " · upgrading from v{{version}}",
       "new_scope": "New"
+    },
+    "schedule": {
+      "title": "Automatic schedules",
+      "consent_title": "This Plugin will run hooks automatically",
+      "consent_description": "Installing or upgrading enables these schedules. If several times are missed, only the latest due run is delivered.",
+      "next_run": "Next: {{time}}",
+      "activity_title": "Recent deliveries",
+      "activity_last": "{{status}} · planned {{planned}} · sent {{actual}} · attempt {{attempt}}",
+      "activity_empty": "Not delivered yet",
+      "frequency_minutes_one": "Every minute",
+      "frequency_minutes_other": "Every {{count}} minutes",
+      "frequency_hourly": "Every hour at minute {{minute}}",
+      "frequency_daily": "Every day at {{hour}}:{{minute}}",
+      "frequency_custom": "Custom recurring schedule"
     },
     "config": {
       "title": "Configuration",
@@ -1140,6 +1157,15 @@
     "inviting": "Inviting...",
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",
+    "toast_seat_capacity_unavailable": "Member capacity could not be verified. Please try again.",
+    "toast_seat_capacity_rate_limited": "Seat capacity is busy. Try again shortly.",
+    "seat_purchase_title": "Add a seat to send this invitation?",
+    "seat_purchase_description": "No purchased seat is available for {{email}}. Review Stripe's estimate, then approve the purchase and invitation together.",
+    "purchase_seat_and_invite": "Buy 1 seat and invite",
+    "retry_seat_purchase": "Retry purchase",
+    "seat_purchase_waiting": "Waiting for Stripe to confirm the new seat. Keep this page open so the invitation can be sent automatically; if you leave, the purchased seat remains and you can invite again later.",
+    "seat_purchase_timeout": "The seat purchase was submitted, but confirmation is taking longer than expected. No invitation was sent. Retry the invitation after Billing shows an available seat.",
+    "seat_purchase_capacity_taken": "The purchased seat is no longer available, so the invitation was not sent. Review current seats before trying again.",
     "no_members": "No members found.",
     "pending_title": "Pending invitations ({{count}})",
     "pending_status": "Pending",

@@ -78,6 +78,20 @@ multica squad activity <issue-id> action|no_action|failed --reason "<why>" --out
 `activity` is a write: it records the leader's evaluation decision on an issue.
 Use it only when acting as the squad leader after evaluating a trigger.
 
+Which issue it accepts: **the issue your current turn is running on**. The
+target issue does NOT need to be assigned to your squad — a `@squad` mention on
+an issue owned by an individual agent, or a leader task bound to a child issue,
+all record fine. What the server checks is your task row (`is_leader_task` plus
+a stamped `squad_id`), not the issue's assignee. A leader woken by a stage
+barrier runs on the PARENT issue, so record against the parent, not the child
+you just read; passing an unrelated issue id is rejected and the error names the
+issue you should have used.
+
+If the call fails, do not exit silently — the comment prohibition on `no_action`
+only applies once the recording succeeded. Post one short comment with the
+outcome instead, and only when this turn has not already commented: on the
+`action` path your delegation comment is already that record.
+
 Issue/comment commands often needed with squads:
 
 ```bash

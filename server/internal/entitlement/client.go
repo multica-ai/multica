@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,13 +18,11 @@ import (
 
 const (
 	defaultRequestTimeout = 3 * time.Second
-	maxRequestTimeout     = 3 * time.Second
 	defaultMaxEntries     = 10_000
 	defaultStaleGrace     = 15 * time.Minute
 	defaultFailureRetry   = 5 * time.Second
 	maxPolicyTTL          = 5 * time.Minute
 	maxResponseBodySize   = 64 << 10
-	minServiceTokenBytes  = 32
 )
 
 var (
@@ -33,43 +30,34 @@ var (
 	ErrInvalidPolicy = errors.New("entitlement: invalid policy response")
 )
 
-// Config has no environment-loading side effects. A zero Config is disabled,
-// so self-hosted deployments and existing server construction stay unchanged.
-// A future SaaS-only wiring change must explicitly set Enabled and provide the
-// independent service credential issued for the Cloud policy endpoint.
+// Config has no environment-loading side effects. A zero Config is disabled;
+// setting BaseURL connects the client to the internal Cloud policy endpoint.
 type Config struct {
-	Enabled      bool
-	BaseURL      string
-	ServiceToken string
-	Timeout      time.Duration
-	MaxEntries   int
-	StaleGrace   time.Duration
-	HTTPClient   *http.Client
-	Observer     Observer
-	Logger       *slog.Logger
+	BaseURL    string
+	HTTPClient *http.Client
+	Observer   Observer
+	Logger     *slog.Logger
 }
 
 // Client implements Provider with a bounded workspace cache and one in-flight
 // refresh per workspace. It has no goroutines or background lifecycle.
 type Client struct {
-	enabled      bool
-	baseURL      *url.URL
-	serviceToken string
-	timeout      time.Duration
-	staleGrace   time.Duration
-	httpClient   *http.Client
-	observer     Observer
-	logger       *slog.Logger
-	now          func() time.Time
-	cache        *policyCache
-	refreshes    singleflight.Group
-	emergencyOff atomic.Bool
+	enabled    bool
+	baseURL    *url.URL
+	timeout    time.Duration
+	staleGrace time.Duration
+	httpClient *http.Client
+	observer   Observer
+	logger     *slog.Logger
+	now        func() time.Time
+	cache      *policyCache
+	refreshes  singleflight.Group
 }
 
 var _ Provider = (*Client)(nil)
 
 func New(cfg Config) (*Client, error) {
-	if !cfg.Enabled {
+	if strings.TrimSpace(cfg.BaseURL) == "" {
 		return &Client{observer: cfg.Observer, now: time.Now}, nil
 	}
 
@@ -79,37 +67,12 @@ func New(cfg Config) (*Client, error) {
 		baseURL.User != nil || baseURL.RawQuery != "" || baseURL.Fragment != "" {
 		return nil, fmt.Errorf("%w: base URL must be an absolute URL without credentials, query, or fragment", ErrInvalidConfig)
 	}
-	if cfg.ServiceToken != strings.TrimSpace(cfg.ServiceToken) || strings.ContainsAny(cfg.ServiceToken, " \t\r\n") || len(cfg.ServiceToken) < minServiceTokenBytes {
-		return nil, fmt.Errorf("%w: service token must contain at least %d non-whitespace bytes", ErrInvalidConfig, minServiceTokenBytes)
-	}
-
-	timeout := cfg.Timeout
-	if timeout == 0 {
-		timeout = defaultRequestTimeout
-	}
-	if timeout < 0 || timeout > maxRequestTimeout {
-		return nil, fmt.Errorf("%w: timeout must be positive and at most %s", ErrInvalidConfig, maxRequestTimeout)
-	}
-	maxEntries := cfg.MaxEntries
-	if maxEntries == 0 {
-		maxEntries = defaultMaxEntries
-	}
-	if maxEntries < 0 {
-		return nil, fmt.Errorf("%w: max entries must be positive", ErrInvalidConfig)
-	}
-	staleGrace := cfg.StaleGrace
-	if staleGrace == 0 {
-		staleGrace = defaultStaleGrace
-	}
-	if staleGrace < 0 {
-		return nil, fmt.Errorf("%w: stale grace must not be negative", ErrInvalidConfig)
-	}
 	httpClient := &http.Client{}
 	if cfg.HTTPClient != nil {
 		clone := *cfg.HTTPClient
 		httpClient = &clone
 	}
-	// Never forward the independent service credential through an HTTP redirect.
+	// Internal Cloud calls must not follow a redirect to another origin.
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	logger := cfg.Logger
 	if logger == nil {
@@ -117,35 +80,23 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		enabled:      true,
-		baseURL:      baseURL,
-		serviceToken: cfg.ServiceToken,
-		timeout:      timeout,
-		staleGrace:   staleGrace,
-		httpClient:   httpClient,
-		observer:     cfg.Observer,
-		logger:       logger,
-		now:          time.Now,
-		cache:        newPolicyCache(maxEntries),
+		enabled:    true,
+		baseURL:    baseURL,
+		timeout:    defaultRequestTimeout,
+		staleGrace: defaultStaleGrace,
+		httpClient: httpClient,
+		observer:   cfg.Observer,
+		logger:     logger,
+		now:        time.Now,
+		cache:      newPolicyCache(defaultMaxEntries),
 	}, nil
 }
 
 func (c *Client) Enabled() bool { return c != nil && c.enabled }
 
-// SetEmergencyDisabled is a local, server-only down switch. It can suppress a
-// Cloud action immediately, but can never promote off or observe to enforce.
-func (c *Client) SetEmergencyDisabled(disabled bool) {
-	if c != nil {
-		c.emergencyOff.Store(disabled)
-	}
-}
-
 func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName) Decision {
 	if !c.Enabled() {
 		return c.recordDecision(name, offDecision(ReasonDisabled))
-	}
-	if c.emergencyOff.Load() {
-		return c.recordDecision(name, offDecision(ReasonEmergencyDisabled))
 	}
 	if workspaceID == uuid.Nil {
 		return c.recordDecision(name, offDecision(ReasonInvalidWorkspace))
@@ -175,9 +126,6 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 
 	entry, refreshed, err := c.refresh(ctx, workspaceID)
 	if err == nil {
-		if c.emergencyOff.Load() {
-			return c.recordDecision(name, offDecision(ReasonEmergencyDisabled))
-		}
 		reason := ReasonRefreshed
 		if !refreshed {
 			reason = ReasonCacheFresh
@@ -185,9 +133,6 @@ func (c *Client) Gate(ctx context.Context, workspaceID uuid.UUID, name GateName)
 		return c.recordDecision(name, decisionFromEntry(entry, name, reason, false))
 	}
 
-	if c.emergencyOff.Load() {
-		return c.recordDecision(name, offDecision(ReasonEmergencyDisabled))
-	}
 	// A stale policy is safe only after enforcement is downgraded to observe.
 	// Re-read the cache because another caller may have refreshed it while this
 	// call was waiting in singleflight.
@@ -246,17 +191,12 @@ func (c *Client) refresh(ctx context.Context, workspaceID uuid.UUID) (cacheEntry
 		stored, err := c.cache.put(workspaceID, entry, receivedAt)
 		if err != nil {
 			c.cache.markFailure(workspaceID, c.now().Add(defaultFailureRetry))
-			var regression *revisionError
-			source := "unknown"
-			if errors.As(err, &regression) {
-				source = regression.source
-				if c.observer != nil {
-					c.observer.RecordEntitlementVersionRegression(source)
-				}
+			if c.observer != nil {
+				c.observer.RecordEntitlementVersionRegression()
 			}
 			c.recordRefresh("version_regression", time.Since(started))
-			c.logger.WarnContext(refreshCtx, "entitlement policy revision regressed",
-				"workspace_id", workspaceID.String(), "source", source)
+			c.logger.WarnContext(refreshCtx, "entitlement subscription version regressed",
+				"workspace_id", workspaceID.String())
 			return nil, err
 		}
 		c.recordRefresh("ok", time.Since(started))
@@ -304,7 +244,6 @@ func (c *Client) fetch(ctx context.Context, workspaceID uuid.UUID) (fetchedPolic
 		return fetchedPolicy{}, &fetchError{outcome: "request"}
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.serviceToken)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -337,7 +276,7 @@ func normalizePolicy(wire wirePolicy) (fetchedPolicy, error) {
 		return fetchedPolicy{}, ErrInvalidPolicy
 	}
 	gates := make(map[GateName]Gate, 2)
-	for _, name := range []GateName{GateIssueWindow, GateAutopilotRuns} {
+	for _, name := range []GateName{GateIssueCount, GateAutopilotRuns} {
 		wireGate, ok := wire.Gates[string(name)]
 		if !ok {
 			return fetchedPolicy{}, ErrInvalidPolicy
@@ -364,7 +303,7 @@ func normalizeGate(name GateName, wire wireGate) (Gate, error) {
 	switch action {
 	case ActionOff:
 		return Gate{Action: ActionOff}, nil
-	case ActionObserve, ActionEnforce:
+	case ActionEnforce:
 	default:
 		return Gate{}, ErrInvalidPolicy
 	}

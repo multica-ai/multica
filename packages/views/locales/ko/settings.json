@@ -7,7 +7,6 @@
     "show_archived": "보관됨 표시 ({{count}})",
     "archived_badge": "보관됨",
     "archived_hint": "새로 지정할 수 없습니다. 이미 이 상태인 태스크는 그대로 유지됩니다.",
-    "flag_off": "이 배포에서는 사용자 지정 상태가 아직 활성화되지 않았습니다. 아래 기본 상태는 평소대로 동작합니다.",
     "reorder_failed": "새 순서를 저장하지 못했습니다.",
     "actions": {
       "open": "{{name}} 작업",
@@ -168,8 +167,12 @@
         "description": "선호하는 태스크 만들기 흐름을 엽니다."
       },
       "toggleSidebar": {
-        "label": "사이드바 전환",
-        "description": "기본 사이드바를 표시하거나 숨깁니다."
+        "label": "왼쪽 사이드바 전환",
+        "description": "왼쪽 사이드바를 표시하거나 숨깁니다."
+      },
+      "toggleRightSidebar": {
+        "label": "오른쪽 사이드바 전환",
+        "description": "현재 페이지에 오른쪽 사이드바가 있으면 표시하거나 숨깁니다."
       },
       "toggleChat": {
         "label": "채팅 창 전환",
@@ -363,6 +366,19 @@
       "installed": "Plugin을 설치했습니다",
       "upgrade_from": " · v{{version}}에서 업그레이드",
       "new_scope": "신규"
+    },
+    "schedule": {
+      "title": "자동 스케줄",
+      "consent_title": "이 Plugin은 훅을 자동 실행합니다",
+      "consent_description": "설치하거나 업그레이드하면 다음 스케줄이 활성화됩니다. 여러 실행 시점을 놓친 경우 가장 최근 실행만 전달합니다.",
+      "next_run": "다음 실행: {{time}}",
+      "activity_title": "최근 전달",
+      "activity_last": "{{status}} · 예정 {{planned}} · 전송 {{actual}} · 시도 {{attempt}}",
+      "activity_empty": "아직 전달되지 않음",
+      "frequency_minutes_other": "{{count}}분마다",
+      "frequency_hourly": "매시 {{minute}}분",
+      "frequency_daily": "매일 {{hour}}:{{minute}}",
+      "frequency_custom": "사용자 지정 반복 스케줄"
     },
     "config": {
       "title": "설정",
@@ -876,6 +892,15 @@
     "inviting": "초대하는 중...",
     "toast_invitation_sent": "초대를 보냈습니다",
     "toast_invitation_failed": "초대를 보내지 못했습니다",
+    "toast_seat_capacity_unavailable": "멤버 좌석을 확인할 수 없습니다. 다시 시도해 주세요.",
+    "toast_seat_capacity_rate_limited": "좌석 요청이 많습니다. 잠시 후 다시 시도해 주세요.",
+    "seat_purchase_title": "좌석을 추가하고 초대를 보내시겠어요?",
+    "seat_purchase_description": "{{email}}에 사용할 구매 좌석이 없습니다. Stripe 견적을 확인한 뒤 좌석 구매와 초대를 함께 승인하세요.",
+    "purchase_seat_and_invite": "좌석 1개 구매 후 초대",
+    "retry_seat_purchase": "구매 다시 시도",
+    "seat_purchase_waiting": "Stripe의 새 좌석 확인을 기다리는 중입니다. 초대가 자동으로 전송되도록 이 페이지를 열어 두세요. 페이지를 벗어나도 구매한 좌석은 유지되며 나중에 다시 초대할 수 있습니다.",
+    "seat_purchase_timeout": "좌석 구매가 제출되었지만 확인이 예상보다 오래 걸리고 있습니다. 초대는 전송되지 않았습니다. 결제 화면에 사용 가능한 좌석이 표시된 후 다시 초대하세요.",
+    "seat_purchase_capacity_taken": "구매한 좌석을 더 이상 사용할 수 없어 초대가 전송되지 않았습니다. 현재 좌석을 확인한 후 다시 시도하세요.",
     "no_members": "멤버를 찾을 수 없습니다.",
     "pending_title": "대기 중인 초대 ({{count}})",
     "pending_status": "대기 중",

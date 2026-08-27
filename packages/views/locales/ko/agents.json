@@ -34,6 +34,7 @@
     "queued": "대기 중",
     "idle": "유휴"
   },
+  "presence_status_aria": "상태: {{status}}",
   "archived": {
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
@@ -218,6 +219,8 @@
     "model_managed_by_runtime": "런타임에서 관리",
     "model_search_placeholder": "모델 ID 검색 또는 입력",
     "model_discovering": "모델 찾는 중...",
+    "model_discovery_failed_title": "이 런타임의 모델을 가져오지 못했습니다.",
+    "model_discovery_failed_hint": "위 입력란에 모델 ID를 직접 입력해 수동으로 지정할 수 있습니다.",
     "model_empty": "사용 가능한 모델이 없습니다",
     "model_empty_with_dot": "사용 가능한 모델이 없습니다.",
     "model_custom_tooltip": "\"{{value}}\"을(를) 사용자 지정 모델 ID로 사용",
@@ -331,6 +334,19 @@
       "select_image_toast": "이미지 파일을 선택하세요.",
       "upload_failed_toast": "아바타 업로드 실패"
     }
+  },
+  "conversation_starters": {
+    "label": "대화 시작 예시",
+    "hint": "이 에이전트로 새 채팅을 열 때 표시되는 예시입니다(최대 3개). 선택하면 전송하지 않고 입력창에 채웁니다.",
+    "add": "추천 추가",
+    "item_label": "추천 {{number}} 라벨",
+    "prompt_label": "추천 {{number}} 프롬프트",
+    "label_placeholder": "풀 리퀘스트 리뷰",
+    "prompt_placeholder": "열린 풀 리퀘스트를 리뷰하고 위험과 다음 단계를 요약해 주세요.",
+    "incomplete": "각 제안을 완성하거나 삭제한 후 저장하세요.",
+    "remove": "추천 {{number}} 삭제",
+    "preview_label": "새 채팅 미리보기",
+    "preview_defaults": "지금은 기본 예시입니다. 위에서 하나를 추가하면 세 개 모두 교체됩니다."
   },
   "tab_body": {
     "common": {
@@ -731,6 +747,7 @@
     "usage_chip_title": "이 실행의 토큰 및 예상 비용",
     "details_branch": "브랜치",
     "details_reason": "사유",
+    "details_diagnostics": "기술 세부 정보",
     "copy_branch": "브랜치 이름 복사",
     "lane_model": "모델",
     "lane_tool": "도구",
@@ -760,11 +777,43 @@
     "tool_kind_misc": "기타"
   },
   "task_failure": {
-    "agent_error": "에이전트 실행 오류",
-    "timeout": "작업 시간 초과",
-    "runtime_offline": "데몬 오프라인",
-    "runtime_recovery": "데몬 재시작됨",
-    "manual": "사용자가 취소함"
+    "cancelled_by_system": "시스템에서 취소함",
+    "reasons": {
+      "queued_expired": "대기열에서 만료됨",
+      "runtime_offline": "데몬 오프라인",
+      "runtime_reconnect_timeout": "데몬이 제시간에 다시 연결되지 않음",
+      "runtime_recovery": "데몬 재시작됨",
+      "timeout": "작업 시간 초과",
+      "iteration_limit": "반복 횟수 제한에 도달함",
+      "agent_blocked": "사용자 입력 대기 중",
+      "api_invalid_request": "모델 API에서 요청을 거부함",
+      "skill_bundle_unavailable": "에이전트 스킬을 다운로드할 수 없음",
+      "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
+      "invalid_task_identity": "작업 ID 정보가 일치하지 않음",
+      "agent_error_provider_auth_or_access": "공급자 인증 실패",
+      "agent_error_provider_quota_limit": "공급자 할당량 소진",
+      "agent_error_provider_capacity_or_rate_limit": "공급자 요청 한도에 도달함",
+      "agent_error_provider_server_error": "공급자 서버 오류",
+      "agent_error_provider_network": "공급자 연결 중 네트워크 오류",
+      "agent_error_process_failure": "에이전트 프로세스 충돌",
+      "agent_error_empty_or_unparseable_output": "에이전트가 사용 가능한 출력을 반환하지 않음",
+      "agent_error_agent_timeout": "에이전트 시간 초과",
+      "agent_error_context_overflow": "컨텍스트 창 한도 초과",
+      "agent_error_missing_config": "API 키 또는 설정 누락",
+      "agent_error_model_not_found_or_unavailable": "모델을 사용할 수 없음",
+      "agent_error_runtime_version_unsupported": "러너 CLI 버전이 지원되지 않음",
+      "agent_error_runtime_missing_executable": "러너 CLI가 설치되지 않음",
+      "agent_error_unknown": "에이전트 실행 오류",
+      "agent_fallback_message": "에이전트가 대체 메시지를 반환함",
+      "codex_resume_oversized": "세션이 너무 커서 재개할 수 없음",
+      "idle_watchdog": "에이전트가 장시간 응답하지 않아 중지됨",
+      "local_directory_error": "로컬 디렉터리 오류",
+      "cancelled": "시스템에서 취소함",
+      "agent_error": "에이전트 실행 오류",
+      "codex_semantic_inactivity": "Codex 의미 진행 없음 시간 초과",
+      "manual": "사용자가 취소함",
+      "user_cancelled": "사용자가 취소함"
+    }
   },
   "last_active": {
     "today": "오늘",

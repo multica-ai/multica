@@ -93,6 +93,16 @@ describe("keyboard shortcut definitions", () => {
     expect(action.allowInEditable).toBe(true);
   });
 
+  it("assigns distinct defaults to the left and right sidebar toggles", () => {
+    expect(SHORTCUT_ACTION_BY_ID.toggleSidebar.defaultShortcut).toEqual(
+      createShortcutChord("B", { primary: true }),
+    );
+    expect(SHORTCUT_ACTION_BY_ID.toggleRightSidebar.defaultShortcut).toEqual(
+      createShortcutChord("/", { primary: true }),
+    );
+    expect(SHORTCUT_ACTION_BY_ID.toggleRightSidebar.allowInEditable).toBe(false);
+  });
+
   it("keeps the inbox archive key out of editable controls", () => {
     const action = SHORTCUT_ACTION_BY_ID.archiveInboxItem;
     expect(action.defaultShortcut).toEqual(createShortcutChord("E"));

@@ -91,7 +91,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("kiro stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start kiro: %w", err)
 	}
@@ -222,6 +222,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

@@ -188,6 +188,35 @@ func TestBotNameResolverCachesSuccessfulIdentityAcrossGroups(t *testing.T) {
 	}
 }
 
+func TestBotNameResolverSharesCacheBetweenChannelCredentialsAndInstallation(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == accessTokenPath {
+			_, _ = w.Write([]byte(`{"accessToken":"tok","expireIn":7200}`))
+			return
+		}
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"chatbotInstanceVOList":[{"robotCode":"release","name":"Release Bot"}]}`))
+	}))
+	defer srv.Close()
+
+	resolver := NewBotNameResolver(NewClient(nil, srv.URL), nil)
+	name, err := resolver.resolveCredentials(context.Background(), credentials{
+		AppKey: "app", AppSecret: "secret", RobotCode: "release",
+	}, "group-a")
+	if err != nil || name != "Release Bot" {
+		t.Fatalf("channel credential resolution = %q, %v", name, err)
+	}
+	name, err = resolver.Resolve(context.Background(), botIdentityInstallation(t, "app", "release"), "group-b")
+	if err != nil || name != "Release Bot" {
+		t.Fatalf("installation resolution = %q, %v", name, err)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("shared resolver API calls = %d, want 1", got)
+	}
+}
+
 func TestBotNameResolverCachesTransientAndBrieflyCachesPermissionFailure(t *testing.T) {
 	groupCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

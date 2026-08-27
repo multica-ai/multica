@@ -34,6 +34,7 @@
     "queued": "排队中",
     "idle": "空闲"
   },
+  "presence_status_aria": "状态：{{status}}",
   "archived": {
     "active_link": "活跃智能体",
     "title": "已归档智能体"
@@ -218,6 +219,8 @@
     "model_managed_by_runtime": "由运行时管理",
     "model_search_placeholder": "搜索或输入模型 ID",
     "model_discovering": "正在发现模型...",
+    "model_discovery_failed_title": "无法列出该运行时的模型。",
+    "model_discovery_failed_hint": "可在上方输入框直接键入模型 ID 手动指定。",
     "model_empty": "暂无可用模型",
     "model_empty_with_dot": "暂无可用模型。",
     "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
@@ -430,6 +433,19 @@
       "select_image_toast": "请选择图片文件。",
       "upload_failed_toast": "头像上传失败"
     }
+  },
+  "conversation_starters": {
+    "label": "对话开场建议",
+    "hint": "最多三条示例，出现在别人与该智能体开始新对话时。选择后只会填入输入框，不会立即发送。",
+    "add": "添加建议",
+    "item_label": "建议 {{number}} 的标题",
+    "prompt_label": "建议 {{number}} 的提示词",
+    "label_placeholder": "审查拉取请求",
+    "prompt_placeholder": "审查当前拉取请求，总结风险并建议下一步。",
+    "incomplete": "请填写完整或移除每条建议后再保存。",
+    "remove": "移除建议 {{number}}",
+    "preview_label": "新对话预览",
+    "preview_defaults": "以上是内置的默认值。在上方添加一条建议即可整组替换。"
   },
   "tab_body": {
     "common": {
@@ -830,6 +846,7 @@
     "usage_chip_title": "这次运行消耗的 token 与估算费用",
     "details_branch": "分支",
     "details_reason": "原因",
+    "details_diagnostics": "原始诊断",
     "copy_branch": "复制分支名",
     "lane_model": "模型",
     "lane_tool": "工具",
@@ -859,11 +876,43 @@
     "tool_kind_misc": "其他"
   },
   "task_failure": {
-    "agent_error": "智能体执行出错",
-    "timeout": "task 超时",
-    "runtime_offline": "守护进程离线",
-    "runtime_recovery": "守护进程已重启",
-    "manual": "用户取消"
+    "cancelled_by_system": "系统已取消",
+    "reasons": {
+      "queued_expired": "排队已过期",
+      "runtime_offline": "守护进程离线",
+      "runtime_reconnect_timeout": "守护进程未及时重新连接",
+      "runtime_recovery": "守护进程已重启",
+      "timeout": "task 超时",
+      "iteration_limit": "达到迭代次数上限",
+      "agent_blocked": "等待人工输入",
+      "api_invalid_request": "模型 API 拒绝了请求",
+      "skill_bundle_unavailable": "无法下载智能体的 skill",
+      "runtime_cli_timeout": "本地运行时 CLI 超时",
+      "invalid_task_identity": "task 身份不匹配",
+      "agent_error_provider_auth_or_access": "提供商认证失败",
+      "agent_error_provider_quota_limit": "提供商配额已用尽",
+      "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",
+      "agent_error_provider_server_error": "提供商服务器出错",
+      "agent_error_provider_network": "连接提供商时网络出错",
+      "agent_error_process_failure": "智能体进程崩溃",
+      "agent_error_empty_or_unparseable_output": "智能体未返回可用输出",
+      "agent_error_agent_timeout": "智能体运行超时",
+      "agent_error_context_overflow": "上下文窗口已超限",
+      "agent_error_missing_config": "缺少 API 密钥或配置",
+      "agent_error_model_not_found_or_unavailable": "模型不可用",
+      "agent_error_runtime_version_unsupported": "运行器 CLI 版本不受支持",
+      "agent_error_runtime_missing_executable": "未安装运行器 CLI",
+      "agent_error_unknown": "智能体执行出错",
+      "agent_fallback_message": "智能体返回了兜底消息",
+      "codex_resume_oversized": "会话过大，无法恢复",
+      "idle_watchdog": "智能体长时间无活动，运行已停止",
+      "local_directory_error": "本地目录出错",
+      "cancelled": "系统已取消",
+      "agent_error": "智能体执行出错",
+      "codex_semantic_inactivity": "Codex 长时间没有语义进展",
+      "manual": "用户取消",
+      "user_cancelled": "用户取消"
+    }
   },
   "last_active": {
     "today": "今天",

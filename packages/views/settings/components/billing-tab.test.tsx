@@ -4,21 +4,26 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
+import type {
+  AutopilotQuotaUsage,
+  IssueLimitUsage,
+  WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionSummary,
+} from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   checkout: vi.fn(),
   portal: vi.fn(),
-  reconcile: vi.fn(),
   previewSeats: vi.fn(),
   purchaseSeats: vi.fn(),
   refetch: vi.fn(),
   refetchSummary: vi.fn(),
   refetchUsage: vi.fn(),
+  refetchIssueLimitUsage: vi.fn(),
   refetchPrices: vi.fn(),
   openExternal: vi.fn(),
-  role: "owner" as "owner" | "admin" | "member",
   workspaceId: "workspace-1",
   prices: null as {
     month: {
@@ -45,48 +50,64 @@ const mocks = vi.hoisted(() => ({
   usagePending: false,
   usageFetching: false,
   usageError: false,
-  entitlementsDataUpdatedAt: 0,
-  entitlementsFetchedAfterMount: false,
+  summaryDataUpdatedAt: 0,
+  summaryFetchedAfterMount: false,
   entitlements: {
     workspaceId: "workspace-1",
     plan: "free",
     status: "inactive",
     seats: 3,
-    issueWindow: 17,
-    autopilotRuns: 7,
+    limits: {
+      issueCount: { mode: "limited", limit: 17 },
+      autopilotRuns: { mode: "limited", limit: 7 },
+    },
     currentPeriodEnd: null as string | null,
     snapshotExpiresAt: null as string | null,
     version: 0,
-  },
+  } as WorkspaceSubscriptionEntitlements,
   summary: {
-    entitlement: null as never,
-    billingInterval: null as "month" | "year" | null,
-    actualSeats: 3,
-    billedSeats: null as number | null,
-    pendingSeatQuantity: null as number | null,
-    usedSeats: 3,
-    reservedSeats: 0,
-    purchaseVersion: null as number | null,
-    activeSeatPurchase: null as {
-      requestId: string;
-      targetSeats: number;
-      status: string;
-      expiresAt: string | null;
+    entitlement: null as unknown as WorkspaceSubscriptionEntitlements,
+    billingInterval: null,
+    humanMembers: 3,
+    seatCapacity: null as {
+      purchased: number;
+      used: number;
+      reserved: number;
+      available: number;
+      version: number;
+      pendingQuantity: number | null;
+      activePurchase: {
+        requestId: string;
+        targetSeats: number;
+        status: "pending" | "processing" | "submitted";
+        expiresAt: string | null;
+      } | null;
     } | null,
     cancelAtPeriodEnd: false,
     graceUntil: null as string | null,
     hasStripeCustomer: false,
-  },
+    availableActions: {
+      checkout: true,
+      portal: false,
+      purchaseSeats: false,
+    },
+  } as WorkspaceSubscriptionSummary,
+  issueLimitUsage: {
+    used: 11,
+    limit: 17,
+  } as IssueLimitUsage,
   usage: {
     action: "enforce" as "off" | "observe" | "enforce",
     used: 3 as number | null,
     reserved: 2 as number | null,
+    total: 5 as number | null,
     limit: 7 as number | null,
+    reached: false as boolean | null,
     period_start: "2030-01-01T00:00:00Z" as string | null,
     period_end: "2030-02-01T00:00:00Z" as string | null,
     reset_at: "2030-02-01T00:00:00Z" as string | null,
     blocked_counts: {} as Record<string, number> | null,
-  },
+  } as AutopilotQuotaUsage,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -94,14 +115,14 @@ vi.mock("@tanstack/react-query", () => ({
 }));
 
 vi.mock("@multica/core/billing", () => ({
-  workspaceSubscriptionEntitlementsOptions: (wsId: string) => ({
-    queryKey: ["workspace-subscriptions", wsId, "entitlements"],
-  }),
   workspaceSubscriptionPricesOptions: (wsId: string) => ({
     queryKey: ["workspace-subscriptions", wsId, "prices"],
   }),
   workspaceSubscriptionSummaryOptions: (wsId: string) => ({
     queryKey: ["workspace-subscriptions", wsId, "summary"],
+  }),
+  issueLimitUsageOptions: (wsId: string) => ({
+    queryKey: ["workspace-subscriptions", wsId, "issue-limit-usage"],
   }),
   useCreateWorkspaceSubscriptionCheckout: () => ({
     mutateAsync: mocks.checkout,
@@ -109,10 +130,6 @@ vi.mock("@multica/core/billing", () => ({
   }),
   useCreateWorkspaceSubscriptionPortal: () => ({
     mutateAsync: mocks.portal,
-    isPending: false,
-  }),
-  useReconcileWorkspaceSubscriptionSeats: () => ({
-    mutateAsync: mocks.reconcile,
     isPending: false,
   }),
   usePreviewWorkspaceSeatPurchase: () => ({
@@ -139,10 +156,6 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
-vi.mock("@multica/core/permissions", () => ({
-  useCurrentMember: () => ({ role: mocks.role, isLoading: false }),
-}));
-
 const navigationState = {
   search: "tab=billing",
   replace: vi.fn(),
@@ -162,11 +175,47 @@ vi.mock("../../platform", () => ({ openExternal: mocks.openExternal }));
 
 import { BillingTab, formatStripeMinorAmount } from "./billing-tab";
 
+function setSeatCapacity({
+  humanMembers = 4,
+  purchased = 5,
+  used = humanMembers,
+  reserved = 0,
+  available = Math.max(0, purchased - used - reserved),
+  version = 9,
+  pendingQuantity = null,
+  activePurchase = null,
+}: {
+  humanMembers?: number;
+  purchased?: number;
+  used?: number;
+  reserved?: number;
+  available?: number;
+  version?: number;
+  pendingQuantity?: number | null;
+  activePurchase?: NonNullable<typeof mocks.summary.seatCapacity>["activePurchase"];
+} = {}) {
+  mocks.summary.humanMembers = humanMembers;
+  mocks.summary.seatCapacity = {
+    purchased,
+    used,
+    reserved,
+    available,
+    overcommitted: used > purchased,
+    version,
+    pendingQuantity,
+    activePurchase,
+  };
+  Object.assign(mocks.summary.availableActions, {
+    checkout: false,
+    portal: true,
+    purchaseSeats: activePurchase === null,
+  });
+}
+
 describe("BillingTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     navigationState.search = "tab=billing";
-    mocks.role = "owner";
     mocks.workspaceId = "workspace-1";
     mocks.prices = {
       month: {
@@ -193,14 +242,16 @@ describe("BillingTab", () => {
     mocks.usagePending = false;
     mocks.usageFetching = false;
     mocks.usageError = false;
-    mocks.entitlementsDataUpdatedAt = 0;
-    mocks.entitlementsFetchedAfterMount = false;
+    mocks.summaryDataUpdatedAt = 0;
+    mocks.summaryFetchedAfterMount = false;
     Object.assign(mocks.entitlements, {
       plan: "free",
       status: "inactive",
       seats: 3,
-      issueWindow: 17,
-      autopilotRuns: 7,
+      limits: {
+        issueCount: { mode: "limited", limit: 17 },
+        autopilotRuns: { mode: "limited", limit: 7 },
+      },
       currentPeriodEnd: null,
       snapshotExpiresAt: null,
       version: 0,
@@ -208,22 +259,28 @@ describe("BillingTab", () => {
     Object.assign(mocks.summary, {
       entitlement: mocks.entitlements,
       billingInterval: null,
-      actualSeats: 3,
-      billedSeats: null,
-      pendingSeatQuantity: null,
-      usedSeats: 3,
-      reservedSeats: 0,
-      purchaseVersion: null,
-      activeSeatPurchase: null,
+      humanMembers: 3,
+      seatCapacity: null,
       cancelAtPeriodEnd: false,
       graceUntil: null,
       hasStripeCustomer: false,
+      availableActions: {
+        checkout: true,
+        portal: false,
+        purchaseSeats: false,
+      },
+    });
+    Object.assign(mocks.issueLimitUsage, {
+      used: 11,
+      limit: 17,
     });
     Object.assign(mocks.usage, {
       action: "enforce",
       used: 3,
       reserved: 2,
+      total: 5,
       limit: 7,
+      reached: false,
       period_start: "2030-01-01T00:00:00Z",
       period_end: "2030-02-01T00:00:00Z",
       reset_at: "2030-02-01T00:00:00Z",
@@ -250,7 +307,18 @@ describe("BillingTab", () => {
           isPending: mocks.summaryPending,
           isFetching: mocks.summaryFetching,
           isError: mocks.summaryError,
+          dataUpdatedAt: mocks.summaryDataUpdatedAt,
+          isFetchedAfterMount: mocks.summaryFetchedAfterMount,
           refetch: mocks.refetchSummary,
+        };
+      }
+      if (queryKey?.[queryKey.length - 1] === "issue-limit-usage") {
+        return {
+          data: mocks.issueLimitUsage,
+          isPending: false,
+          isFetching: false,
+          isError: false,
+          refetch: mocks.refetchIssueLimitUsage,
         };
       }
       if (queryKey?.[queryKey.length - 1] === "usage") {
@@ -259,13 +327,11 @@ describe("BillingTab", () => {
           isPending: mocks.usagePending,
           isFetching: mocks.usageFetching,
           isError: mocks.usageError,
-          refetch: mocks.refetchUsage,
-        };
-      }
+        refetch: mocks.refetchUsage,
+      };
+    }
       return {
         data: mocks.entitlements,
-        dataUpdatedAt: mocks.entitlementsDataUpdatedAt,
-        isFetchedAfterMount: mocks.entitlementsFetchedAfterMount,
         isPending: false,
         isError: false,
         refetch: mocks.refetch,
@@ -278,12 +344,6 @@ describe("BillingTab", () => {
     });
     mocks.portal.mockResolvedValue({
       url: "https://billing.stripe.com/test-session",
-    });
-    mocks.reconcile.mockResolvedValue({
-      workspaceId: "workspace-1",
-      billedSeats: 3,
-      actualSeats: 3,
-      action: "none",
     });
     mocks.refetchSummary.mockResolvedValue({ data: mocks.summary });
     mocks.previewSeats.mockResolvedValue({
@@ -325,13 +385,10 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(screen.getByRole("heading", { name: "Billing" })).toBeInTheDocument();
-    expect(screen.getByText("17")).toBeInTheDocument();
+    expect(screen.getByText("11 / 17")).toBeInTheDocument();
     expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(screen.getByText("3 completed · 2 in progress")).toBeInTheDocument();
     expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
-    expect(
-      screen.getByText("Estimated monthly total: $30.00"),
-    ).toBeInTheDocument();
     expect(mocks.useQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         queryKey: ["workspace-subscriptions", "workspace-1", "prices"],
@@ -341,12 +398,6 @@ describe("BillingTab", () => {
     await user.click(screen.getByRole("button", { name: "Yearly" }));
 
     expect(screen.getByText("$96.00 per human seat")).toBeInTheDocument();
-    expect(
-      screen.getByText("Estimated yearly total: $288.00"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Estimated monthly total: $30.00"),
-    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Retry" }),
     ).not.toBeInTheDocument();
@@ -451,27 +502,13 @@ describe("BillingTab", () => {
 
   it("shows the unit price without a zero estimated total when seats are unavailable", () => {
     mocks.entitlements.seats = 0;
-    mocks.summary.actualSeats = 0;
+    mocks.summary.humanMembers = 0;
 
     renderWithI18n(<BillingTab />);
 
     expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
     expect(screen.queryByText(/Estimated monthly total/)).not.toBeInTheDocument();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
-  });
-
-  it("does not display a price whose recurrence is not every one interval", () => {
-    if (mocks.prices) mocks.prices.month.intervalCount = 3;
-
-    renderWithI18n(<BillingTab />);
-
-    expect(screen.queryByText("$10.00 per human seat")).not.toBeInTheDocument();
-    expect(
-      screen.getByText(/Stripe Checkout shows the authoritative per-seat price/),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Retry" }),
-    ).not.toBeInTheDocument();
   });
 
   it("creates Checkout with a client idempotency key and opens Stripe externally", async () => {
@@ -588,9 +625,15 @@ describe("BillingTab", () => {
       expect(
         screen.getByText("Activating your subscription"),
       ).toBeInTheDocument();
-      expect(mocks.useQuery).toHaveBeenCalledWith(
-        expect.objectContaining({ refetchInterval: 2_000 }),
-      );
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .find(
+          (options) =>
+            options.queryKey?.[options.queryKey.length - 1] === "summary",
+        );
+      expect(
+        summaryOptions.refetchInterval({ state: { data: mocks.summary } }),
+      ).toBe(2_000);
       expect(navigationState.replace).toHaveBeenCalledWith(
         "/acme/settings?tab=billing",
       );
@@ -608,18 +651,16 @@ describe("BillingTab", () => {
     }
   });
 
-  it("keeps Checkout syncing until Pro is fetched after the return callback", () => {
+  it("keeps Checkout syncing while Cloud still exposes Checkout", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
     navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    mocks.entitlementsDataUpdatedAt = Date.now() - 1;
-    mocks.entitlementsFetchedAfterMount = true;
+    mocks.summaryDataUpdatedAt = Date.now() - 1;
+    mocks.summaryFetchedAfterMount = true;
     try {
       renderWithI18n(<BillingTab />);
 
@@ -628,59 +669,62 @@ describe("BillingTab", () => {
       ).toBeInTheDocument();
       expect(screen.queryByText("Pro is active")).not.toBeInTheDocument();
       expect(screen.queryByText("Unlimited")).not.toBeInTheDocument();
-      expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
+      expect(screen.getByText("11 / 17")).toBeInTheDocument();
       expect(screen.getByText("5 / 7")).toBeInTheDocument();
-      expect(mocks.useQuery).toHaveBeenCalledWith(
-        expect.objectContaining({ refetchInterval: 2_000 }),
-      );
+      const summaryOptions = mocks.useQuery.mock.calls
+        .map(([options]) => options)
+        .find(
+          (options) =>
+            options.queryKey?.[options.queryKey.length - 1] === "summary",
+        );
+      expect(
+        summaryOptions.refetchInterval({ state: { data: mocks.summary } }),
+      ).toBe(2_000);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("confirms Pro after an entitlement fetch newer than the return callback", () => {
+  it("confirms Checkout from refreshed Cloud actions and limit modes", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2030-01-01T00:00:00Z"));
     navigationState.search = "tab=billing&result=success&session_id=cs_test_1";
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
+      limits: {
+        issueCount: { mode: "unlimited", limit: null },
+        autopilotRuns: { mode: "unlimited", limit: null },
+      },
     });
-    Object.assign(mocks.usage, {
-      action: "off",
-      used: null,
-      reserved: null,
-      limit: null,
-      reset_at: null,
-    });
-    mocks.entitlementsDataUpdatedAt = Date.now() + 1;
-    mocks.entitlementsFetchedAfterMount = true;
+    mocks.summary.availableActions.checkout = false;
+    mocks.summaryDataUpdatedAt = Date.now() + 1;
+    mocks.summaryFetchedAfterMount = true;
     try {
       renderWithI18n(<BillingTab />);
 
       expect(screen.getByText("Pro is active")).toBeInTheDocument();
       expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+      expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("keeps plan facts visible but hides subscription mutations from members", () => {
-    mocks.role = "member";
+  it("keeps plan facts visible but hides mutations denied by Cloud", () => {
+    Object.assign(mocks.summary.availableActions, {
+      checkout: false,
+      portal: false,
+      purchaseSeats: false,
+    });
 
     renderWithI18n(<BillingTab />);
 
-    expect(screen.getByText("Read-only billing access")).toBeInTheDocument();
     expect(screen.getAllByText("3 members")).toHaveLength(1);
-    expect(screen.getByText("3 seats")).toBeInTheDocument();
-    expect(screen.getByText("$10.00 per human seat")).toBeInTheDocument();
+    expect(screen.queryByText("Purchased seats")).not.toBeInTheDocument();
+    expect(screen.queryByText("$10.00 per human seat")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Refresh seats" }),
     ).not.toBeInTheDocument();
   });
 
@@ -688,8 +732,6 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
       currentPeriodEnd: "2030-02-01T00:00:00Z",
     });
     Object.assign(mocks.usage, {
@@ -701,21 +743,24 @@ describe("BillingTab", () => {
     });
     Object.assign(mocks.summary, {
       billingInterval: "month",
-      actualSeats: 4,
-      usedSeats: 3,
-      billedSeats: 5,
-      pendingSeatQuantity: 4,
-      reservedSeats: 1,
-      purchaseVersion: 9,
       hasStripeCustomer: true,
+    });
+    setSeatCapacity({
+      humanMembers: 4,
+      purchased: 5,
+      used: 4,
+      reserved: 1,
+      available: 0,
+      pendingQuantity: 4,
     });
 
     renderWithI18n(<BillingTab />);
 
     expect(screen.getByText("Monthly")).toBeInTheDocument();
     expect(screen.getByText("5 seats")).toBeInTheDocument();
-    expect(screen.getByText("3 seats")).toBeInTheDocument();
-    expect(screen.getAllByText("1 seat")).toHaveLength(2);
+    expect(screen.getByText("4 seats")).toBeInTheDocument();
+    expect(screen.getByText("1 seat")).toBeInTheDocument();
+    expect(screen.getByText("0 seats")).toBeInTheDocument();
     expect(screen.getByText(/4 seats from Feb 1, 2030/)).toBeInTheDocument();
     expect(screen.getAllByText("4 members")).toHaveLength(1);
   });
@@ -725,17 +770,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      reservedSeats: 0,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.previewSeats.mockImplementation(
       ({ additionalSeats }: { additionalSeats: number }) =>
         Promise.resolve({
@@ -805,17 +842,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      reservedSeats: 0,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.refetchSummary.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveSummaryRefresh = resolve;
@@ -848,10 +877,7 @@ describe("BillingTab", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 
     await act(async () => {
-      Object.assign(mocks.summary, {
-        billedSeats: 4,
-        purchaseVersion: 10,
-      });
+      setSeatCapacity({ purchased: 4, version: 10 });
       resolveSummaryRefresh({ data: mocks.summary });
     });
 
@@ -872,17 +898,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      reservedSeats: 0,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.previewSeats.mockRejectedValueOnce(
       new ApiError("conflict", 409, "Conflict", {
         code: "seat_capacity_changed",
@@ -908,17 +926,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      reservedSeats: 0,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.refetchSummary.mockResolvedValueOnce({
       data: mocks.summary,
       isError: true,
@@ -953,22 +963,11 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      reservedSeats: 0,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.refetchSummary.mockImplementationOnce(async () => {
-      Object.assign(mocks.summary, {
-        billedSeats: 4,
-        purchaseVersion: 10,
-      });
+      setSeatCapacity({ purchased: 4, version: 10 });
       return { data: mocks.summary };
     });
     mocks.previewSeats.mockRejectedValue(
@@ -1005,16 +1004,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.purchaseSeats.mockRejectedValue(
       new ApiError("conflict", 409, "Conflict", { code }),
     );
@@ -1038,16 +1030,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
 
     const { rerender } = renderWithI18n(<BillingTab />);
     await user.click(screen.getByRole("button", { name: "Add seats" }));
@@ -1071,16 +1056,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.purchaseSeats.mockResolvedValue(null);
 
     renderWithI18n(<BillingTab />);
@@ -1110,16 +1088,9 @@ describe("BillingTab", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    Object.assign(mocks.summary, {
-      actualSeats: 4,
-      usedSeats: 4,
-      billedSeats: 5,
-      purchaseVersion: 9,
-      hasStripeCustomer: true,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity();
     mocks.purchaseSeats.mockRejectedValue(
       new ApiError("payment failed", 402, "Payment Required", {
         code: "seat_purchase_payment_failed",
@@ -1141,8 +1112,9 @@ describe("BillingTab", () => {
 
   it("stops seat purchase polling after two minutes", () => {
     vi.useFakeTimers();
-    Object.assign(mocks.summary, {
-      activeSeatPurchase: {
+    Object.assign(mocks.entitlements, { plan: "pro", status: "active" });
+    setSeatCapacity({
+      activePurchase: {
         requestId: "seat-request-pending",
         targetSeats: 7,
         status: "pending",
@@ -1164,7 +1136,7 @@ describe("BillingTab", () => {
       }).format(new Date("2030-01-01T00:15:00Z"));
       expect(
         screen.getByText(
-          `Automatic checking has stopped. If the attempt is still pending after ${formattedExpiry}, refresh seats to release it and request a new quote; contact support before starting another purchase.`,
+          `Automatic checking has stopped. If the attempt is still pending after ${formattedExpiry}, reload this page before requesting another quote; contact support if it remains pending.`,
         ),
       ).toBeInTheDocument();
       const summaryOptions = mocks.useQuery.mock.calls
@@ -1184,8 +1156,9 @@ describe("BillingTab", () => {
 
   it("does not promise an unlock time for a submitted seat purchase", () => {
     vi.useFakeTimers();
-    Object.assign(mocks.summary, {
-      activeSeatPurchase: {
+    Object.assign(mocks.entitlements, { plan: "pro", status: "active" });
+    setSeatCapacity({
+      activePurchase: {
         requestId: "seat-request-submitted",
         targetSeats: 7,
         status: "submitted",
@@ -1206,8 +1179,14 @@ describe("BillingTab", () => {
     }
   });
 
-  it("uses completed and reserved runs for the quota decision", () => {
-    Object.assign(mocks.usage, { used: 5, reserved: 2, limit: 7 });
+  it("renders Cloud's completed, reserved, total, and reached facts", () => {
+    Object.assign(mocks.usage, {
+      used: 5,
+      reserved: 2,
+      total: 7,
+      limit: 7,
+      reached: true,
+    });
 
     renderWithI18n(<BillingTab />);
 
@@ -1245,18 +1224,16 @@ describe("BillingTab", () => {
     ["request fails", true, false],
     ["response is malformed", false, true],
   ])(
-    "keeps plan facts visible when the subscription summary %s",
+    "fails closed when the authoritative subscription summary %s",
     (_case, isError, isMalformed) => {
       mocks.summaryError = isError;
       mocks.summaryMalformed = isMalformed;
 
       renderWithI18n(<BillingTab />);
 
-      expect(screen.getByText("Free")).toBeInTheDocument();
-      expect(
-        screen.getByText("Some seat details are unavailable"),
-      ).toBeInTheDocument();
-      expect(screen.getAllByText("Unavailable")).toHaveLength(4);
+      expect(screen.getByText("Billing is temporarily unavailable")).toBeInTheDocument();
+      expect(screen.queryByText("Free")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     },
   );
 
@@ -1286,6 +1263,7 @@ describe("BillingTab", () => {
       cancelAtPeriodEnd: true,
       hasStripeCustomer: true,
     });
+    setSeatCapacity();
 
     renderWithI18n(<BillingTab />);
 
@@ -1298,26 +1276,25 @@ describe("BillingTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("stops deriving Pro access after the summary grace deadline", () => {
+  it("renders Cloud-resolved Free access without deriving from past_due", () => {
     Object.assign(mocks.entitlements, {
-      plan: "pro",
+      plan: "free",
       status: "past_due",
-      issueWindow: null,
-      autopilotRuns: null,
     });
-    mocks.summary.graceUntil = "2000-01-01T00:00:00Z";
-    Object.assign(mocks.usage, {
-      action: "off",
-      used: null,
-      reserved: null,
-      limit: null,
-      reset_at: null,
+    Object.assign(mocks.summary, {
+      graceUntil: null,
+      availableActions: {
+        checkout: false,
+        portal: true,
+        purchaseSeats: false,
+      },
     });
 
     renderWithI18n(<BillingTab />);
 
     expect(screen.queryByText("Unlimited")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
+    expect(screen.getByText("11 / 17")).toBeInTheDocument();
+    expect(screen.getByText("5 / 7")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
@@ -1328,7 +1305,8 @@ describe("BillingTab", () => {
 
   it("keeps cancellation and pending-seat dates on one summary snapshot", () => {
     Object.assign(mocks.entitlements, {
-      plan: "free",
+      plan: "pro",
+      status: "active",
       currentPeriodEnd: "2030-03-01T00:00:00Z",
     });
     Object.assign(mocks.summary, {
@@ -1336,10 +1314,10 @@ describe("BillingTab", () => {
         ...mocks.entitlements,
         currentPeriodEnd: "2030-04-01T00:00:00Z",
       },
-      pendingSeatQuantity: 4,
       cancelAtPeriodEnd: true,
       hasStripeCustomer: true,
     });
+    setSeatCapacity({ pendingQuantity: 4 });
 
     renderWithI18n(<BillingTab />);
 
@@ -1355,22 +1333,19 @@ describe("BillingTab", () => {
     expect(screen.queryByText(/Pro remains available/)).not.toBeInTheDocument();
   });
 
-  it("shows Pro management and unlimited limits without a second Checkout", () => {
+  it("shows Cloud's explicit unlimited limits on a normal load", () => {
     Object.assign(mocks.entitlements, {
       plan: "pro",
       status: "active",
-      issueWindow: null,
-      autopilotRuns: null,
+      limits: {
+        issueCount: { mode: "unlimited", limit: null },
+        autopilotRuns: { mode: "unlimited", limit: null },
+      },
       currentPeriodEnd: "2026-09-13T00:00:00Z",
       version: 3,
     });
-    Object.assign(mocks.usage, {
-      action: "off",
-      used: null,
-      reserved: null,
-      limit: null,
-      reset_at: null,
-    });
+    mocks.summary.hasStripeCustomer = true;
+    setSeatCapacity({ humanMembers: 3, purchased: 3 });
 
     renderWithI18n(<BillingTab />);
 
@@ -1378,6 +1353,7 @@ describe("BillingTab", () => {
       screen.getByRole("button", { name: "Manage billing" }),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Unlimited")).toHaveLength(2);
+    expect(screen.queryByText("5 / 7")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Upgrade to Pro" }),
     ).not.toBeInTheDocument();
@@ -1387,6 +1363,39 @@ describe("BillingTab", () => {
         enabled: false,
       }),
     );
+  });
+
+  it("warns when actual members exceed purchased seats", () => {
+    Object.assign(mocks.entitlements, {
+      plan: "pro",
+      status: "active",
+      version: 3,
+    });
+    setSeatCapacity({ humanMembers: 5, purchased: 4, used: 5 });
+
+    renderWithI18n(<BillingTab />);
+
+    expect(screen.getByText("Members exceed purchased seats")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This workspace has 5 members but only 4 purchased seats. Add enough seats or remove members before sending more invitations.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not expose a transient used-seat ledger delay to customers", () => {
+    Object.assign(mocks.entitlements, {
+      plan: "pro",
+      status: "active",
+      version: 3,
+    });
+    setSeatCapacity({ humanMembers: 5, purchased: 5, used: 5 });
+
+    renderWithI18n(<BillingTab />);
+
+    expect(
+      screen.queryByText("Members exceed purchased seats"),
+    ).not.toBeInTheDocument();
   });
 
   it.each(["canceled", "incomplete_expired"])(
@@ -1399,8 +1408,13 @@ describe("BillingTab", () => {
         version: 4,
       });
       Object.assign(mocks.summary, {
-        billedSeats: 3,
+        seatCapacity: null,
         hasStripeCustomer: true,
+        availableActions: {
+          checkout: true,
+          portal: true,
+          purchaseSeats: false,
+        },
       });
 
       renderWithI18n(<BillingTab />);
@@ -1411,6 +1425,7 @@ describe("BillingTab", () => {
       expect(
         screen.getByRole("button", { name: "Upgrade to Pro" }),
       ).toBeInTheDocument();
+      expect(screen.queryByText("Purchased seats")).not.toBeInTheDocument();
       expect(mocks.useQuery).toHaveBeenCalledWith(
         expect.objectContaining({
           queryKey: ["workspace-subscriptions", "workspace-1", "prices"],
@@ -1427,7 +1442,15 @@ describe("BillingTab", () => {
       snapshotExpiresAt: null,
       version: 4,
     });
-    mocks.summary.graceUntil = "2000-01-01T00:00:00Z";
+    Object.assign(mocks.summary, {
+      graceUntil: null,
+      hasStripeCustomer: true,
+      availableActions: {
+        checkout: false,
+        portal: true,
+        purchaseSeats: false,
+      },
+    });
 
     renderWithI18n(<BillingTab />);
 

@@ -256,7 +256,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `env get/set <agent-id>` | カスタム環境変数の読み書き（owner と admin のみ） | |
 | | `skills list/set/add <agent-id>` | 紐付けられたスキルを管理 | `--skill-ids`（`set` は全置換、`add` は追加） |
 | | `mcp list/add/enable/disable/remove <agent-id>` | ワークスペース MCP サーバーをこのエージェントに割り当て | server id は `workspace mcp list` から取得。ライブラリの項目はここで追加するまで機能しません。`disable` は割り当てを残したまま送信を停止します |
-| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--agent`、`--mode`（いずれも必須）、`--priority`、`--project`、`--subscriber`（繰り返し可） |
+| `autopilot` | `list/get/create/update/delete` | オートパイロットを管理 | `create`: `--title`、`--agent`、`--mode`（いずれも必須）、`--project`、`--subscriber`（繰り返し可） |
 | | `trigger <id>` | 手動で 1 回トリガー | |
 | | `runs <id>` | 実行履歴を表示 | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | スケジュールと webhook のトリガーを管理 | |

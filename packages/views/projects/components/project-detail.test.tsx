@@ -240,6 +240,7 @@ vi.mock("../../layout/animated-right-sidebar", () => ({
   ),
   getAnimatedRightSidebarInitialOpen: () => true,
   rightSidebarPanelMotionProps: {},
+  useRightSidebarShortcut: vi.fn(),
   useAnimatedRightSidebarState: () => ({
     open: true,
     visualOpen: true,

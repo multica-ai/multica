@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -4026,8 +4027,9 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}()
 
 	// Root context: handleHeartbeatActions hands this ctx to the actual work
-	// (model discovery shells out to a CLI for up to ~15s), so it must outlive
-	// this function. Only the heartbeat request itself is time-bounded.
+	// (model discovery shells out to a CLI, for up to ~40s on the slowest
+	// provider — see agent.hermesDiscoveryTimeout), so it must outlive this
+	// function. Only the heartbeat request itself is time-bounded.
 	ctx := d.recoveryContext()
 	if ctx.Err() != nil {
 		return
@@ -4056,9 +4058,14 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 
 // handleModelList resolves the provider's supported models (via static
 // catalog or by shelling out to the agent CLI) and reports the result
-// back to the server. Model discovery failures are reported as empty
-// lists rather than errors so the UI can still render a creatable
-// dropdown.
+// back to the server.
+//
+// How a discovery failure is reported is the provider's decision, not this
+// function's. Providers with a safe static catalog swallow the error and return
+// the stand-in (marked Fallback); providers without one — hermes — return the
+// error, and it is forwarded as status=failed so the picker can show the reason
+// and keep manual entry (MUL-6606). Both outcomes leave the creatable dropdown
+// usable; only the second one tells the user why it is empty.
 func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
 	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
 
@@ -4232,9 +4239,9 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // runtimeReportBackoffs defines the retry schedule for delivering any
 // daemon→server async result (model list, local-skill list, local-skill
 // import). First attempt runs immediately, then we back off. The sum
-// (≈6.5s) stays well under the server-side running timeout (60s) so a
-// report that eventually lands still updates the request instead of
-// racing a timeout transition.
+// (≈6.5s) leaves most of the server-side running timeout (60s) available for
+// discovery and report attempts. Each HTTP attempt has its own client timeout,
+// so this schedule alone is not an end-to-end delivery deadline.
 //
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
@@ -5064,13 +5071,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
 	// is reference-counted, so the duplicate marks runTask installs are
 	// correctly nested within these.
-	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	if predictedEnvRoot != "" {
-		d.markActiveEnvRoot(predictedEnvRoot)
-		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
+	resolvedEnvRoot, resolveRootErr := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if resolveRootErr != nil {
+		taskLog.Error("resolve stable task env root", "error", resolveRootErr)
+	}
+	if resolvedEnvRoot != "" {
+		d.markActiveEnvRoot(resolvedEnvRoot)
+		defer d.unmarkActiveEnvRoot(resolvedEnvRoot)
 	}
 	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != resolvedEnvRoot {
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
@@ -5595,7 +5605,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 // internal task with no IDs at all). The caller skips writing a meta file
 // in that case so the directory falls back to mtime-based orphan cleanup.
 func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
-	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID}
+	meta := execenv.GCMeta{WorkspaceID: task.WorkspaceID, TaskID: task.ID}
 	switch {
 	case task.ChatSessionID != "":
 		meta.Kind = execenv.GCKindChat
@@ -5619,6 +5629,16 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	return meta, true
 }
 
+func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
+	return execenv.RootDirParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     task.WorkspaceID,
+		WorkspaceSlug:   task.WorkspaceSlug,
+		TaskID:          task.ID,
+		IssueIdentifier: task.IssueIdentifier,
+	}
+}
+
 // runtimeDisplayNameOverrides maps a provider key to the human-facing runtime
 // name when simple title-casing would read awkwardly. Providers not listed
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
@@ -5633,6 +5653,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
+	"zeroclaw":   "ZeroClaw",
 }
 
 func init() {
@@ -5784,7 +5805,7 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 // shouldReusePriorWorkdir keeps the local_directory lock and cross-agent
 // isolation invariants without forcing managed follow-ups onto a fresh
 // provider session. Every managed issue or chat task may reuse only directories
-// that resolve to the {workspace}/{task}/workdir shape, carry Prepare-time
+// that resolve to the two-segment managed root shape, carry Prepare-time
 // managed-env provenance for the same workspace/scope/agent, and carry a
 // matching daemon task-context marker. Other task kinds have no durable scope
 // with which to prove ownership and therefore start fresh.
@@ -5819,7 +5840,7 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		return "", false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] != "workdir" {
 		return "", false
 	}
 	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
@@ -5993,17 +6014,19 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	// one. (GitHub #4505 / MUL-3650)
 	for _, ref := range misses {
 		started := time.Now()
-		bundle, err := d.resolveSkillBundle(ctx, task, ref)
+		bundle, stats, err := d.resolveSkillBundle(ctx, task, ref)
 		if err != nil {
-			// Name the skill, its declared size, and how long we actually
-			// waited. The bare "resolve skill bundles: context deadline
-			// exceeded" this replaced was indistinguishable from a generic
-			// network fault, and cost a community thread three hours of
-			// guesswork (MUL-5370): size + elapsed separate "this bundle is
-			// too big for the link" from "the link is dead".
-			return fmt.Errorf("%w: skill %q (id=%s, %d bytes) after %s: %w",
-				errSkillBundleUnavailable, ref.Name, ref.ID, ref.SizeBytes,
-				time.Since(started).Round(time.Millisecond), err)
+			if isSkillBundleTransferFailure(err) {
+				// Only transport failures and incomplete 2xx bodies get the
+				// network diagnosis. HTTP error responses and invalid complete
+				// payloads retain their server semantics instead of being
+				// relabelled as connectivity problems (GitHub #7386).
+				return fmt.Errorf("%w: %s: %w",
+					errSkillBundleUnavailable,
+					describeSkillBundleFailure(ref, stats, time.Since(started)),
+					err)
+			}
+			return fmt.Errorf("%w: %w", errSkillBundleUnavailable, err)
 		}
 		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
 	}
@@ -6026,13 +6049,13 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 // timeout, so a large bundle on a slow link is given room to finish instead of
 // being cut off mid-body. Caching on success is what lets the resolve converge
 // across dispatches. (GitHub #4505 / MUL-3650)
-func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
+func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, TransferStats, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
 	defer cancel()
 
-	bundle, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
+	bundle, stats, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
 	if err != nil {
-		return SkillData{}, err
+		return SkillData{}, stats, err
 	}
 	// The resolve endpoint serves the agent's *current* bundle and hash, which
 	// may differ from the claim-time ref when the skill was edited between
@@ -6041,7 +6064,7 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 	// bundle for self-consistency against a ref derived from itself — pinning
 	// it to the possibly-stale requested hash would reject a legitimate update.
 	if bundle.Source != ref.Source || bundle.ID != ref.ID {
-		return SkillData{}, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
+		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
 	}
 	bundleRef := skillRefFromBundle(bundle)
 	validationRef := bundleRef
@@ -6049,7 +6072,7 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 		validationRef = ref
 	}
 	if !validateSkillBundle(validationRef, bundle) {
-		return SkillData{}, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
+		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
 	}
 	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
@@ -6064,7 +6087,87 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 			)
 		}
 	}
-	return bundle, nil
+	return bundle, stats, nil
+}
+
+// isSkillBundleTransferFailure identifies errors for which byte-level network
+// diagnostics are meaningful. A requestError is an explicit server response;
+// malformed but complete JSON and bundle-validation errors are server payload
+// problems. Neither should be presented as a slow or dead network link. In
+// particular, json.Decoder can synthesize io.ErrUnexpectedEOF after its source
+// ended with a clean EOF, so that decoder error alone is not transport proof.
+func isSkillBundleTransferFailure(err error) bool {
+	var reqErr *requestError
+	if errors.As(err, &reqErr) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
+}
+
+// describeSkillBundleFailure renders the diagnostic half of a failed bundle
+// download: what was being fetched, how many HTTP response-body bytes arrived,
+// the separately declared decoded content size, and whether this host has a
+// proxy at all.
+//
+// The three facts answer the three wrong turns the old text invited. "network
+// error downloading skill X" instead of "skill X unavailable" stops the reader
+// blaming the skill. The response byte count distinguishes a dead link from a
+// partial response without pretending JSON wire bytes and decoded skill-content
+// bytes form one progress ratio. The proxy note catches the case behind GitHub
+// #7386, where a daemon that inherited no proxy on a cross-border link never got
+// a byte through while the same host succeeded through a local proxy.
+func describeSkillBundleFailure(ref SkillRefData, stats TransferStats, elapsed time.Duration) string {
+	elapsed = elapsed.Round(time.Millisecond)
+	var transfer string
+	switch {
+	case !stats.ResponseStarted:
+		transfer = fmt.Sprintf("no successful response from server after %s overall", elapsed)
+	case stats.BytesRead == 0:
+		transfer = fmt.Sprintf("a successful response started but delivered no body bytes before failing after %s overall", elapsed)
+	default:
+		// BytesRead is a single-attempt high-water mark, while elapsed covers
+		// the logical call including retries and backoff. State both scopes
+		// rather than deriving a rate from mismatched measurements.
+		transfer = fmt.Sprintf("received up to %s of response body data in one attempt; failed after %s overall",
+			formatBytes(stats.BytesRead), elapsed)
+	}
+	return fmt.Sprintf("network error downloading skill %q (id=%s): %s; declared skill content size %s; %s; the skill content is not at fault",
+		ref.Name, ref.ID, transfer, formatBytes(ref.SizeBytes), proxyEnvSummary())
+}
+
+// proxyEnvSummary reports whether the daemon inherited any proxy setting. It
+// names the variable but never its value: proxy URLs routinely embed
+// credentials, and this string lands in task failure text the whole workspace
+// can read.
+//
+// Go's transport only consults these variables — it does not read the Windows
+// system proxy — and it reads them at process start, so a daemon that was
+// already running when they were set still shows none (GitHub #7386).
+func proxyEnvSummary() string {
+	for _, key := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"} {
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			return fmt.Sprintf("proxy configured (%s)", key)
+		}
+	}
+	return "no proxy configured (HTTPS_PROXY unset)"
+}
+
+// formatBytes renders a byte count for humans reading a failure message.
+func formatBytes(n int64) string {
+	switch {
+	case n < 0:
+		return "unknown size"
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.0f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.2f MB", float64(n)/(1024*1024))
+	}
 }
 
 const (
@@ -6630,14 +6733,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
-	// predicted root for a fresh Prepare and the prior root for Reuse — they
+	// stable root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
-	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
+	resolvedRoot, err := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, task))
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve stable task env root: %w", err)
+	}
+	d.markActiveEnvRoot(resolvedRoot)
+	defer d.unmarkActiveEnvRoot(resolvedRoot)
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
+		if priorRoot != resolvedRoot {
 			d.markActiveEnvRoot(priorRoot)
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
@@ -6652,7 +6758,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// *os.File cannot cross its JSON response back to us. Claiming there would
 	// leave the agent running with no protection at all — which is exactly the
 	// re-dispatch window this guards.
-	envClaim, err := execenv.ClaimEnvRoot(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	envClaim, err := execenv.ClaimEnvRoot(taskRootDirParams(d.cfg.WorkspacesRoot, task))
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("claim execution environment: %w", err)
 	}
@@ -6935,11 +7041,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot: d.cfg.WorkspacesRoot,
-			Profile:        d.cfg.Profile,
-			WorkspaceID:    task.WorkspaceID,
-			TaskID:         task.ID,
-			AgentName:      agentName,
+			WorkspacesRoot:  d.cfg.WorkspacesRoot,
+			Profile:         d.cfg.Profile,
+			WorkspaceID:     task.WorkspaceID,
+			WorkspaceSlug:   task.WorkspaceSlug,
+			TaskID:          task.ID,
+			IssueIdentifier: task.IssueIdentifier,
+			AgentName:       agentName,
 			// This run already holds the claim (envClaim above) and the reset
 			// it implies; preparation must not try to take it again.
 			EnvRootPreclaimed:     true,
@@ -7036,8 +7144,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 	}
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
+	// future changes diverge from ResolveRootDir.
+	if env.RootDir != resolvedRoot && env.RootDir != "" {
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}

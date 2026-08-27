@@ -106,6 +106,28 @@ func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Cont
 	}
 	return f.sessionBinding, f.sessionErr
 }
+
+// GetChannelTaskDelivery mirrors the binding double: the same row, as the
+// snapshot the answer path reads, honouring the same error and the same
+// atBinding hook so tests that time the lookup keep working on either path.
+func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUID) (db.ChannelTaskDelivery, error) {
+	f.mu.Lock()
+	at := f.atBinding
+	f.mu.Unlock()
+	if at != nil {
+		at()
+	}
+	if f.sessionErr != nil {
+		return db.ChannelTaskDelivery{}, f.sessionErr
+	}
+	return db.ChannelTaskDelivery{
+		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
+		ChannelType: channelTypeWecom, ChannelChatID: f.sessionBinding.ChannelChatID,
+		ChatType:         f.sessionBinding.ChatType,
+		ChannelMessageID: f.sessionBinding.LastMessageID, ChannelThreadID: f.sessionBinding.LastThreadID,
+		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,
+	}, nil
+}
 func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
