@@ -46,6 +46,7 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
@@ -201,6 +202,10 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("./use-issue-limit-upgrade-prompt", () => ({
+  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -1143,6 +1148,29 @@ describe("CreateIssueModal", () => {
     await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
     expect(mockToastError).toHaveBeenCalledWith("Backend says title is taken");
     expect(mockToastCustom).not.toHaveBeenCalled();
+  });
+
+  it("offers the Cloud-authorized upgrade recovery when manual create reaches the issue limit", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockCreateIssue.mockRejectedValue(
+      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
+        code: "issue_limit_reached",
+        limit: 1000,
+        policy_revision: 1,
+      }),
+    );
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+    await user.type(screen.getByPlaceholderText("Issue title"), "One more issue");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   // Non-409 errors with a real message: surface the backend reason rather

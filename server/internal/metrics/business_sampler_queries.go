@@ -13,7 +13,7 @@ import (
 //   - uses an explicit `LIMIT 100` belt-and-braces (the result set is
 //     already bounded by GROUP BY, but the LIMIT is the spec-mandated
 //     last-line-of-defense against an accidental high-cardinality output)
-//   - normalises raw column values (source / runtime_mode / provider)
+//   - normalises raw column values (source / runtime_mode)
 //     through the existing BusinessMetrics whitelists so the sampler
 //     cannot widen the metric label space.
 
@@ -223,100 +223,6 @@ LIMIT 100
 		snap.taskStuck[NormalizeTaskSource(rawSource)] += float64(n)
 	}
 	return rows.Err()
-}
-
-// queryRuntimeOnline counts agent_runtime rows whose last_seen_at is within
-// the online window, grouped by runtime_mode × provider. Both labels go
-// through the BusinessMetrics whitelists so a misbehaving runtime registering
-// itself with an exotic provider name cannot inflate the series space.
-func (c *BusinessSamplerCollector) queryRuntimeOnline(
-	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
-) error {
-	const stmt = `
-SELECT runtime_mode, provider, count(*) AS n
-FROM agent_runtime
-WHERE last_seen_at IS NOT NULL
-  AND last_seen_at > now() - ($1::int * interval '1 second')
-GROUP BY 1, 2
-LIMIT 100
-`
-	rows, err := tx.Query(ctx, stmt, runtimeOnlineWindowSeconds)
-	if err != nil {
-		return fmt.Errorf("runtime_online: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var rawMode, rawProvider string
-		var n int64
-		if err := rows.Scan(&rawMode, &rawProvider, &n); err != nil {
-			return fmt.Errorf("runtime_online scan: %w", err)
-		}
-		key := runtimeOnlineKey{
-			runtimeMode: NormalizeRuntimeMode(rawMode),
-			provider:    NormalizeRuntimeProvider(rawProvider),
-		}
-		snap.runtimeOnline[key] += float64(n)
-	}
-	return rows.Err()
-}
-
-// queryRuntimeHeartbeatAge fills the heartbeat-age histogram per runtime_mode.
-// We pull at most 100 rows and bucketise in Go because Postgres does not
-// return histogram-shaped output. Rows older than 15 minutes are dropped —
-// they are clearly offline and would just smear the tail of the histogram.
-func (c *BusinessSamplerCollector) queryRuntimeHeartbeatAge(
-	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
-) error {
-	const stmt = `
-SELECT runtime_mode, EXTRACT(EPOCH FROM (now() - last_seen_at))::float8 AS age
-FROM agent_runtime
-WHERE last_seen_at IS NOT NULL
-  AND last_seen_at > now() - interval '15 minutes'
-ORDER BY last_seen_at DESC
-LIMIT 100
-`
-	rows, err := tx.Query(ctx, stmt)
-	if err != nil {
-		return fmt.Errorf("runtime_heartbeat_age: %w", err)
-	}
-	defer rows.Close()
-
-	perMode := map[string][]float64{}
-	for rows.Next() {
-		var rawMode string
-		var age float64
-		if err := rows.Scan(&rawMode, &age); err != nil {
-			return fmt.Errorf("runtime_heartbeat_age scan: %w", err)
-		}
-		if age < 0 {
-			age = 0
-		}
-		mode := NormalizeRuntimeMode(rawMode)
-		perMode[mode] = append(perMode[mode], age)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-
-	for mode, ages := range perMode {
-		hist := samplerHistogram{
-			buckets: make(map[float64]uint64, len(heartbeatAgeBuckets)),
-		}
-		for _, b := range heartbeatAgeBuckets {
-			hist.buckets[b] = 0
-		}
-		for _, age := range ages {
-			hist.count++
-			hist.sum += age
-			for _, b := range heartbeatAgeBuckets {
-				if age <= b {
-					hist.buckets[b]++
-				}
-			}
-		}
-		snap.heartbeatAge[mode] = hist
-	}
-	return nil
 }
 
 // queryWorkspaceTotal exposes a lifetime workspace count. Single integer,

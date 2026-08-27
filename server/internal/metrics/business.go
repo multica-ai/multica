@@ -49,7 +49,6 @@ type BusinessMetrics struct {
 	entitlementDecision               *prometheus.CounterVec
 	entitlementVersionRegression      prometheus.Counter
 	autopilotQuotaDecision            *prometheus.CounterVec
-	issueWindowDecision               *prometheus.CounterVec
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -233,10 +232,6 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
 			Help: "Total autopilot quota admission outcomes.",
 		}, metricLabels("multica_autopilot_quota_decision_total")),
-		issueWindowDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "issue_window", Name: "decision_total",
-			Help: "Total recently-created issue window outcomes by request surface.",
-		}, metricLabels("multica_issue_window_decision_total")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -276,7 +271,6 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.entitlementDecision,
 		m.entitlementVersionRegression,
 		m.autopilotQuotaDecision,
-		m.issueWindowDecision,
 	}, m.events.collectors()...)
 }
 
@@ -322,18 +316,6 @@ func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result st
 		source = "other"
 	}
 	m.autopilotQuotaDecision.WithLabelValues(action, source, result).Inc()
-}
-
-func (m *BusinessMetrics) RecordIssueWindowDecision(action, surface, result string) {
-	if m == nil {
-		return
-	}
-	switch surface {
-	case "direct", "list", "search", "grouped", "table", "children", "plugin", "inbox", "agent_context":
-	default:
-		surface = "other"
-	}
-	m.issueWindowDecision.WithLabelValues(action, surface, result).Inc()
 }
 
 func (m *BusinessMetrics) RecordRuntimeGCDeleted() {

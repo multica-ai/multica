@@ -84,6 +84,7 @@
     "run_blocked_attribution": "未触发——无法确定本次运行的负责成员",
     "run_blocked_already_active": "未触发——最近已有一次运行覆盖了本次",
     "run_blocked_quota_exceeded": "未触发——本周期的运行额度已用尽",
+    "run_blocked_issue_limit_reached": "未触发——工作区任务总数已达到上限",
     "run_blocked_generic": "未触发——本次运行已被拦截",
     "section_properties": "属性",
     "section_triggers": "触发器",

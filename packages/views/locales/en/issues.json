@@ -689,9 +689,7 @@
   },
   "card": {
     "update_failed": "Failed to update issue",
-    "updated_ago": "Updated {{time}}",
-    "child_progress_restricted_one": "{{count}} restricted",
-    "child_progress_restricted_other": "{{count}} restricted"
+    "updated_ago": "Updated {{time}}"
   },
   "actions": {
     "status": "Status",

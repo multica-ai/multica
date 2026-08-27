@@ -293,6 +293,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
 	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
 	"391_drop_agent_task_queue_dispatched_prepare_index":    "idx_agent_task_queue_dispatched_prepare",
+	"437_drop_agent_runtime_last_seen_at_index":             "idx_agent_runtime_last_seen_at",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

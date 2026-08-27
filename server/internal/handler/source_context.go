@@ -492,6 +492,17 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "mode must be manual or agent")
 		return
 	}
+	// Reject a full workspace before cloning source attachments. This early
+	// check avoids expensive work; the TaskService enqueue preflight and final
+	// transactional issue admission remain necessary because this is not a
+	// capacity reservation.
+	if err := service.CheckIssueCreateCapacity(r.Context(), h.Queries, h.Entitlements, wsUUID); err != nil {
+		if !writeIssueLimitReached(w, err) {
+			slog.Warn("source context issue-capacity preflight failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to check issue capacity")
+		}
+		return
+	}
 
 	contextID := dbid.NewV7()
 	capture, objectKeys, err := h.cloneSourceContext(r.Context(), wsUUID, userUUID, contextID, build)
@@ -833,6 +844,9 @@ func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limits service.SourceContextLimitUsage) {
+	if writeIssueLimitReached(w, err) {
+		return
+	}
 	status := http.StatusInternalServerError
 	code := "source_context_capture_failed"
 	message := "failed to capture source context"

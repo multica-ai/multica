@@ -643,6 +643,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	if err != nil {
 		return fmt.Errorf("resolve leader: %w", err)
 	}
+	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, ap.WorkspaceID)
 
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -674,9 +675,16 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
 	}
 
-	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
+	issueNumber, err := AllocateIssueNumber(ctx, qtx, ap.WorkspaceID, issueCountPolicy)
 	if err != nil {
-		return fmt.Errorf("increment issue counter: %w", err)
+		var limitErr *IssueLimitReachedError
+		if errors.As(err, &limitErr) {
+			return &errDispatchSkipped{
+				reason: "workspace has reached its issue limit",
+				code:   dispatch.ReasonIssueLimitReached,
+			}
+		}
+		return fmt.Errorf("allocate issue number: %w", err)
 	}
 
 	newPosition, err := issueposition.NextTopPosition(ctx, tx, ap.WorkspaceID, "todo")

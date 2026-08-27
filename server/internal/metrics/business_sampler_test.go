@@ -52,42 +52,13 @@ func filledSnapshot(now time.Time) *samplerSnapshot {
 
 	snap.taskStuck["issue"] = 1
 
-	snap.runtimeOnline[runtimeOnlineKey{runtimeMode: "local", provider: "claude"}] = 4
-	snap.runtimeOnline[runtimeOnlineKey{runtimeMode: "cloud", provider: "kiro"}] = 2
-
-	snap.heartbeatAge["local"] = samplerHistogram{
-		count:   3,
-		sum:     45,
-		buckets: bucketsFor([]float64{5, 15, 30}),
-	}
-	snap.heartbeatAge["cloud"] = samplerHistogram{
-		count:   1,
-		sum:     2,
-		buckets: bucketsFor([]float64{2}),
-	}
-
 	snap.workspaceTotal = 250
 	snap.workspaceTotalKnown = true
 	return snap
 }
 
-func bucketsFor(observations []float64) map[float64]uint64 {
-	buckets := make(map[float64]uint64, len(heartbeatAgeBuckets))
-	for _, b := range heartbeatAgeBuckets {
-		buckets[b] = 0
-	}
-	for _, o := range observations {
-		for _, b := range heartbeatAgeBuckets {
-			if o <= b {
-				buckets[b]++
-			}
-		}
-	}
-	return buckets
-}
-
-// TestBusinessSamplerCollectorEmitsExpectedMetrics asserts every metric
-// family from the PR4 spec is present on /metrics with the expected
+// TestBusinessSamplerCollectorEmitsExpectedMetrics asserts every current
+// sampler metric family is present on /metrics with the expected
 // values, AND that we always emit a known-source/runtime-mode zero series
 // so dashboards don't show "no data" right after a restart.
 func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
@@ -115,10 +86,6 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 		`multica_agent_task_running{runtime_mode="cloud",source="chat"} 3`,
 		`multica_agent_task_running{runtime_mode="local",source="issue"} 1`,
 		`multica_agent_task_stuck_total{source="issue"} 1`,
-		`multica_runtime_online{provider="claude",runtime_mode="local"} 4`,
-		`multica_runtime_online{provider="kiro",runtime_mode="cloud"} 2`,
-		`multica_runtime_heartbeat_age_seconds_count{runtime_mode="local"} 3`,
-		`multica_runtime_heartbeat_age_seconds_sum{runtime_mode="local"} 45`,
 		`multica_workspace_total 250`,
 	}
 	for _, want := range wantSubstrings {
@@ -131,9 +98,11 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 		`multica_active_users{window="24h"}`,
 		`multica_active_workspaces{window="1h"}`,
 		`multica_active_workspaces{window="24h"}`,
+		`multica_runtime_online`,
+		`multica_runtime_heartbeat_age_seconds`,
 	} {
 		if strings.Contains(body, removed) {
-			t.Errorf("metrics body still exposes removed long DB window %q\nbody:\n%s", removed, body)
+			t.Errorf("metrics body still exposes removed series %q\nbody:\n%s", removed, body)
 		}
 	}
 }
@@ -211,9 +180,9 @@ func TestBusinessSamplerCollectorBoundedCardinality(t *testing.T) {
 			snap.taskQueued[NormalizeTaskSource("provider-from-user-input-"+string(rune('A'+i%26)))] += 1
 		}
 		for i := 0; i < 50; i++ {
-			snap.runtimeOnline[runtimeOnlineKey{
+			snap.taskRunning[taskRunningKey{
+				source:      NormalizeTaskSource("source-from-user-input-" + string(rune('A'+i%26))),
 				runtimeMode: NormalizeRuntimeMode("rogue-mode"),
-				provider:    NormalizeRuntimeProvider("attacker-provider"),
 			}] += 1
 		}
 		return snap
@@ -230,8 +199,17 @@ func TestBusinessSamplerCollectorBoundedCardinality(t *testing.T) {
 	if got := testutil.CollectAndCount(c, "multica_agent_task_running"); got != expectedRunning {
 		t.Fatalf("agent_task_running series = %d, want %d", got, expectedRunning)
 	}
-	if got := testutil.CollectAndCount(c, "multica_runtime_online"); got != 1 {
-		t.Fatalf("runtime_online series = %d, want 1 (collapsed by normalizers)", got)
+
+	rec := httptest.NewRecorder()
+	NewHandler(registry).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := rec.Body.String()
+	for _, want := range []string{
+		`multica_agent_task_queued{source="other"} 50`,
+		`multica_agent_task_running{runtime_mode="unknown",source="other"} 50`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("normalized sampler series missing %q\nbody:\n%s", want, body)
+		}
 	}
 }
 
@@ -249,7 +227,7 @@ func TestBusinessSamplerCollectorDisabledWithoutOptions(t *testing.T) {
 	for _, forbidden := range []string{
 		"multica_active_users",
 		"multica_agent_task_queued",
-		"multica_runtime_online",
+		"multica_agent_task_running",
 		"multica_business_sampler_query_seconds",
 	} {
 		if strings.Contains(body, forbidden) {
@@ -313,20 +291,5 @@ func TestNewBusinessSamplerCollectorNilPool(t *testing.T) {
 	}
 	if c := NewBusinessSamplerCollector(&BusinessSamplerOptions{}); c != nil {
 		t.Fatalf("NewBusinessSamplerCollector with nil Pool = %p, want nil", c)
-	}
-}
-
-// TestSamplerHistogramBucketing exercises the in-memory bucketing logic so
-// a regression in heartbeat-age accounting is caught before it ships to
-// dashboards.
-func TestSamplerHistogramBucketing(t *testing.T) {
-	buckets := bucketsFor([]float64{0.5, 5, 30, 75})
-	expectations := map[float64]uint64{
-		1: 1, 5: 2, 15: 2, 30: 3, 60: 3, 120: 4, 300: 4, 600: 4,
-	}
-	for b, want := range expectations {
-		if got := buckets[b]; got != want {
-			t.Errorf("bucket le=%g count = %d, want %d", b, got, want)
-		}
 	}
 }

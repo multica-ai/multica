@@ -790,7 +790,6 @@
       "skill_bundle_unavailable": "에이전트 스킬을 다운로드할 수 없음",
       "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
       "invalid_task_identity": "작업 ID 정보가 일치하지 않음",
-      "issue_window_restricted": "워크스페이스 제한으로 태스크를 사용할 수 없음",
       "agent_error_provider_auth_or_access": "공급자 인증 실패",
       "agent_error_provider_quota_limit": "공급자 할당량 소진",
       "agent_error_provider_capacity_or_rate_limit": "공급자 요청 한도에 도달함",

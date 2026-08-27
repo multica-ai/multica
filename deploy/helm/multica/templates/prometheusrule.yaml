@@ -1,5 +1,5 @@
 {{- if .Values.monitoring.prometheusRule.enabled }}
-{{- $samplerQueryNames := "active_users|active_workspaces|task_queued|task_running|task_stuck|runtime_online|runtime_heartbeat_age|workspace_total" -}}
+{{- $samplerQueryNames := "active_users|active_workspaces|task_queued|task_running|task_stuck|workspace_total" -}}
 {{- $samplerErrorNames := printf "acquire|%s" $samplerQueryNames -}}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule

@@ -14,7 +14,7 @@ export function useCreateWorkspaceSubscriptionCheckout(wsId: string) {
       api.createWorkspaceSubscriptionCheckout(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: workspaceSubscriptionKeys.entitlements(wsId),
+        queryKey: workspaceSubscriptionKeys.summary(wsId),
       });
     },
   });
@@ -26,7 +26,7 @@ export function useReconcileWorkspaceSubscriptionSeats(wsId: string) {
     mutationFn: () => api.reconcileWorkspaceSubscriptionSeats(),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: workspaceSubscriptionKeys.entitlements(wsId),
+        queryKey: workspaceSubscriptionKeys.summary(wsId),
       });
     },
   });
@@ -46,9 +46,6 @@ export function usePurchaseWorkspaceSeats(wsId: string) {
       api.purchaseWorkspaceSeats(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: workspaceSubscriptionKeys.entitlements(wsId),
-      });
-      void queryClient.invalidateQueries({
         queryKey: workspaceSubscriptionKeys.summary(wsId),
       });
     },
@@ -62,7 +59,7 @@ export function useCreateWorkspaceSubscriptionPortal(wsId: string) {
       api.createWorkspaceSubscriptionPortal(idempotencyKey),
     onSuccess: () => {
       void queryClient.invalidateQueries({
-        queryKey: workspaceSubscriptionKeys.entitlements(wsId),
+        queryKey: workspaceSubscriptionKeys.summary(wsId),
       });
     },
   });

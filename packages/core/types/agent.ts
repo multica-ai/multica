@@ -863,6 +863,19 @@ export interface CreateSkillRequest {
   files?: { path: string; content: string }[];
 }
 
+/** Structured body of POST /api/skills/import when uploading an archive. */
+export interface SkillImportResult {
+  status: "created" | "updated" | "conflict" | "skipped" | "failed";
+  reason?: string;
+  skill?: Skill;
+  existing_skill?: {
+    id: string;
+    name: string;
+    created_by?: string;
+    can_overwrite?: boolean;
+  };
+}
+
 export interface UpdateSkillRequest {
   name?: string;
   description?: string;

@@ -257,9 +257,8 @@ func TestCloudWorkspaceSubscriptionsDisabledByDefault(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, false)
 
 	reads := map[string]func(http.ResponseWriter, *http.Request){
-		"/api/cloud-subscriptions/entitlements": testHandler.GetCloudWorkspaceEntitlements,
-		"/api/cloud-subscriptions/summary":      testHandler.GetCloudWorkspaceSubscriptionSummary,
-		"/api/cloud-subscriptions/prices":       testHandler.GetCloudWorkspaceSubscriptionPrices,
+		"/api/cloud-subscriptions/summary": testHandler.GetCloudWorkspaceSubscriptionSummary,
+		"/api/cloud-subscriptions/prices":  testHandler.GetCloudWorkspaceSubscriptionPrices,
 	}
 	for path, invoke := range reads {
 		t.Run(path, func(t *testing.T) {
@@ -292,15 +291,6 @@ func TestCloudWorkspaceSubscriptionReadAndWritesUseScopedPaths(t *testing.T) {
 		wantPath   string
 		invoke     func(http.ResponseWriter, *http.Request)
 	}{
-		{
-			name:       "member reads entitlements",
-			method:     http.MethodGet,
-			path:       "/api/cloud-subscriptions/entitlements",
-			role:       "member",
-			wantStatus: http.StatusOK,
-			wantPath:   "/api/v1/entitlements/" + testWorkspaceID,
-			invoke:     testHandler.GetCloudWorkspaceEntitlements,
-		},
 		{
 			name:       "member reads billing summary",
 			method:     http.MethodGet,
@@ -561,7 +551,7 @@ func TestCloudWorkspaceSeatPurchasePreviewUsesAuthoritativePath(t *testing.T) {
 	proxy := &fakeCloudRuntimeProxy{enabled: true, resp: &cloudruntime.Response{StatusCode: http.StatusOK, Body: []byte(`{"resulting_seats":7}`)}}
 	useCloudRuntimeProxy(t, proxy)
 	req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/seats/purchase-preview", map[string]any{
-		"additional_seats": 2, "workspace_id": "00000000-0000-0000-0000-000000000002", "target_seats": 999,
+		"additional_seats": 10_001, "workspace_id": "00000000-0000-0000-0000-000000000002", "target_seats": 999,
 	}), "owner")
 	w := httptest.NewRecorder()
 	testHandler.PreviewCloudWorkspaceSubscriptionSeatPurchase(w, req)
@@ -569,12 +559,12 @@ func TestCloudWorkspaceSeatPurchasePreviewUsesAuthoritativePath(t *testing.T) {
 	if w.Code != http.StatusOK || proxy.req.Path != "/api/v1/subscriptions/"+testWorkspaceID+"/seats/purchase-preview" {
 		t.Fatalf("status=%d path=%s body=%s", w.Code, proxy.req.Path, w.Body.String())
 	}
-	if string(proxy.req.Body) != `{"additional_seats":2}` {
+	if string(proxy.req.Body) != `{"additional_seats":10001}` {
 		t.Fatalf("upstream body=%s", proxy.req.Body)
 	}
 }
 
-func TestCloudWorkspaceSeatPurchaseRejectsInvalidOrUnauthorizedRequests(t *testing.T) {
+func TestCloudWorkspaceSeatPurchaseRejectsInvalidRequests(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	tests := []struct {
 		name   string
@@ -582,8 +572,8 @@ func TestCloudWorkspaceSeatPurchaseRejectsInvalidOrUnauthorizedRequests(t *testi
 		body   map[string]any
 		header string
 	}{
-		{name: "member", role: "member", body: map[string]any{"additional_seats": 1}},
-		{name: "absolute overflow", role: "owner", body: map[string]any{"additional_seats": 2, "expected_current_seats": 9999, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "usd", "idempotency_key": "key"}},
+		{name: "missing confirmation fields", role: "owner", body: map[string]any{"additional_seats": 1}},
+		{name: "non-positive current seats", role: "owner", body: map[string]any{"additional_seats": 2, "expected_current_seats": 0, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "usd", "idempotency_key": "key"}},
 		{name: "bad currency", role: "owner", body: map[string]any{"additional_seats": 1, "expected_current_seats": 5, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "u$d", "idempotency_key": "key"}},
 		{name: "long key", role: "owner", body: map[string]any{"additional_seats": 1, "expected_current_seats": 5, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "usd"}, header: strings.Repeat("a", 201)},
 	}
@@ -597,10 +587,7 @@ func TestCloudWorkspaceSeatPurchaseRejectsInvalidOrUnauthorizedRequests(t *testi
 			}
 			w := httptest.NewRecorder()
 			testHandler.PurchaseCloudWorkspaceSubscriptionSeats(w, req)
-			if tc.role == "member" && w.Code != http.StatusForbidden {
-				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-			}
-			if tc.role != "member" && w.Code != http.StatusBadRequest {
+			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
 			if proxy.called {

@@ -712,6 +712,17 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("getChildIssueProgress", () => {
+    it("validates the response before query selectors iterate it", async () => {
+      stubFetchJson({ progress: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getChildIssueProgress()).resolves.toEqual({
+        progress: [],
+      });
+    });
+  });
+
   describe("listAutopilotDeliveries", () => {
     it("falls back to an empty list when the body is null", async () => {
       stubFetchJson(null);
@@ -947,56 +958,6 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("parses workspace entitlements into camelCase without fabricating Free", async () => {
-      stubFetchJson({
-        workspace_id: "workspace-1",
-        plan: "pro",
-        status: "active",
-        seats: 4,
-        issue_window: null,
-        autopilot_runs: null,
-        current_period_end: "2026-09-13T00:00:00Z",
-        snapshot_expires_at: null,
-        version: 7,
-      });
-      const client = new ApiClient("https://api.example.test");
-
-      await expect(
-        client.getWorkspaceSubscriptionEntitlements(),
-      ).resolves.toEqual({
-        workspaceId: "workspace-1",
-        plan: "pro",
-        status: "active",
-        seats: 4,
-        issueWindow: null,
-        autopilotRuns: null,
-        currentPeriodEnd: "2026-09-13T00:00:00Z",
-        snapshotExpiresAt: null,
-        version: 7,
-      });
-
-      stubFetchJson({ plan: "free", seats: "unknown" });
-      await expect(client.getWorkspaceSubscriptionEntitlements()).resolves.toBeNull();
-    });
-
-    it("accepts an empty workspace entitlement snapshot", async () => {
-      stubFetchJson({
-        workspace_id: "workspace-1",
-        plan: "free",
-        status: "inactive",
-        seats: 0,
-        issue_window: 1000,
-        autopilot_runs: 100,
-        snapshot_expires_at: null,
-        version: 0,
-      });
-      const client = new ApiClient("https://api.example.test");
-
-      await expect(
-        client.getWorkspaceSubscriptionEntitlements(),
-      ).resolves.toMatchObject({ seats: 0, plan: "free" });
-    });
-
     it("sends the Checkout idempotency key in the header and body", async () => {
       stubFetchJson(
         {
@@ -1109,12 +1070,36 @@ describe("workspace subscription contract", () => {
     plan: "pro",
     status: "active",
     seats: 3,
-    issue_window: null,
-    autopilot_runs: null,
+    limits: {
+      issue_count: { mode: "unlimited" },
+      autopilot_runs: { mode: "unlimited" },
+    },
     current_period_end: "2026-09-01T00:00:00Z",
     snapshot_expires_at: null,
     version: 7,
   };
+
+  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
+    stubFetchJson({
+      used: 11,
+      limit: 17,
+    });
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getIssueLimitUsage()).resolves.toEqual({
+      used: 11,
+      limit: 17,
+    });
+
+    stubFetchJson({ used: 11 });
+    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+    );
+    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
+  });
 
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({
@@ -1126,6 +1111,7 @@ describe("workspace subscription contract", () => {
         used: 3,
         reserved: 2,
         available: 0,
+        overcommitted: false,
         version: 11,
         pending_quantity: 3,
         active_purchase: {
@@ -1137,6 +1123,11 @@ describe("workspace subscription contract", () => {
       cancel_at_period_end: true,
       grace_until: "2026-09-08T00:00:00Z",
       has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+      },
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -1161,6 +1152,11 @@ describe("workspace subscription contract", () => {
     expect(summary?.cancelAtPeriodEnd).toBe(true);
     expect(summary?.graceUntil).toBe("2026-09-08T00:00:00Z");
     expect(summary?.hasStripeCustomer).toBe(true);
+    expect(summary?.availableActions).toEqual({
+      checkout: false,
+      portal: true,
+      purchaseSeats: false,
+    });
   });
 
   it("represents canceled subscriptions without current seat capacity", async () => {
@@ -1172,6 +1168,11 @@ describe("workspace subscription contract", () => {
       cancel_at_period_end: false,
       grace_until: null,
       has_stripe_customer: true,
+      available_actions: {
+        checkout: true,
+        portal: true,
+        purchase_seats: false,
+      },
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -1192,6 +1193,11 @@ describe("workspace subscription contract", () => {
       cancel_at_period_end: false,
       grace_until: null,
       has_stripe_customer: false,
+      available_actions: {
+        checkout: false,
+        portal: false,
+        purchase_seats: false,
+      },
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -1235,6 +1241,11 @@ describe("workspace subscription contract", () => {
       cancel_at_period_end: false,
       grace_until: null,
       has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+      },
       future_field: { nested: true },
     });
     const client = new ApiClient("https://api.example.test");

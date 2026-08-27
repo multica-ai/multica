@@ -889,7 +889,6 @@
       "skill_bundle_unavailable": "无法下载智能体的 skill",
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "invalid_task_identity": "task 身份不匹配",
-      "issue_window_restricted": "任务超出工作区可用范围",
       "agent_error_provider_auth_or_access": "提供商认证失败",
       "agent_error_provider_quota_limit": "提供商配额已用尽",
       "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",

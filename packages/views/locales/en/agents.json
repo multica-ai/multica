@@ -907,7 +907,6 @@
       "skill_bundle_unavailable": "Couldn't download the agent's skills",
       "runtime_cli_timeout": "Local runtime CLI timed out",
       "invalid_task_identity": "Task identity mismatch",
-      "issue_window_restricted": "Issue unavailable under workspace limits",
       "agent_error_provider_auth_or_access": "Provider auth failed",
       "agent_error_provider_quota_limit": "Provider quota exhausted",
       "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",

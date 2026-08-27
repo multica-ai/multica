@@ -658,8 +658,7 @@
   },
   "card": {
     "update_failed": "태스크를 업데이트하지 못했습니다",
-    "updated_ago": "{{time}} 수정됨",
-    "child_progress_restricted_other": "하위 태스크 {{count}}개 제한됨"
+    "updated_ago": "{{time}} 수정됨"
   },
   "actions": {
     "status": "상태",

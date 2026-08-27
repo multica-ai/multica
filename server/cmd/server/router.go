@@ -429,6 +429,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		opts.BusinessMetrics.RecordEntitlementConfigError()
 	} else if entitlementClient.Enabled() {
 		h.Entitlements = entitlementClient
+		h.TaskService.Entitlements = entitlementClient
+		h.IssueService.Entitlements = entitlementClient
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
 	}
@@ -1771,17 +1773,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		// Workspace subscriptions use the same cloud transport and Stripe
 		// webhook as the existing owner-credit billing surface, but every request
-		// is workspace-scoped. Entitlements, summary and prices are
-		// member-readable; Checkout, seat reconcile, and Portal mutations require
-		// owner/admin. The handlers also enforce
-		// billing_workspace_subscriptions so a route refactor cannot
+		// is workspace-scoped. Summary and prices are member-readable. Local role
+		// checks cheaply reject unauthorized writes; Cloud remains the final
+		// authority and validates every mutation before external writes. Handlers
+		// also enforce billing_workspace_subscriptions so a route refactor cannot
 		// accidentally bypass the rollout flag.
 		r.Route("/api/cloud-subscriptions", func(r chi.Router) {
 			r.Use(handler.RequireHumanActor)
-
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireWorkspaceMember(queries))
-				r.Get("/entitlements", h.GetCloudWorkspaceEntitlements)
 				r.Get("/summary", h.GetCloudWorkspaceSubscriptionSummary)
 				r.Get("/prices", h.GetCloudWorkspaceSubscriptionPrices)
 			})
@@ -1804,7 +1804,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
-				r.Get("/window-usage", h.GetIssueWindowUsage)
+				r.Get("/limit-usage", h.GetIssueLimitUsage)
 				r.Post("/table/groups", h.ListIssueTableGroups)
 				r.Post("/table/rows", h.ListIssueTableRows)
 				r.Post("/table/facets", h.ListIssueTableFacets)

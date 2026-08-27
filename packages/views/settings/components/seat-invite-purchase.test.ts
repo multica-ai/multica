@@ -30,8 +30,10 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       plan: "pro",
       status: "active",
       seats: purchased,
-      issueWindow: null,
-      autopilotRuns: null,
+      limits: {
+        issueCount: { mode: "unlimited", limit: null },
+        autopilotRuns: { mode: "unlimited", limit: null },
+      },
       currentPeriodEnd: null,
       snapshotExpiresAt: null,
       version: 1,
@@ -43,6 +45,7 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
       used: 4,
       reserved: purchased - 4 - available,
       available,
+      overcommitted: false,
       version: 8,
       pendingQuantity: null,
       activePurchase: null,
@@ -50,6 +53,11 @@ function summary(purchased: number, available: number): WorkspaceSubscriptionSum
     cancelAtPeriodEnd: false,
     graceUntil: null,
     hasStripeCustomer: true,
+    availableActions: {
+      checkout: false,
+      portal: true,
+      purchaseSeats: true,
+    },
   };
 }
 

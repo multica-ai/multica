@@ -475,21 +475,9 @@ export function childIssueProgressOptions(wsId: string) {
     queryKey: issueKeys.childProgress(wsId),
     queryFn: () => api.getChildIssueProgress(),
     select: (data) => {
-      const map = new Map<string, {
-        done: number;
-        total: number;
-        visibleDone: number;
-        visibleTotal: number;
-        hiddenTotal: number;
-      }>();
+      const map = new Map<string, { done: number; total: number }>();
       for (const entry of data.progress) {
-        map.set(entry.parent_issue_id, {
-          done: entry.done,
-          total: entry.total,
-          visibleDone: entry.visible_done ?? entry.done,
-          visibleTotal: entry.visible_total ?? entry.total,
-          hiddenTotal: entry.hidden_total ?? 0,
-        });
+        map.set(entry.parent_issue_id, { done: entry.done, total: entry.total });
       }
       return map;
     },

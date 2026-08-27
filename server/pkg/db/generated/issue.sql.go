@@ -170,6 +170,31 @@ func (q *Queries) CountIssues(ctx context.Context, arg CountIssuesParams) (int64
 	return count, err
 }
 
+const countIssuesUpTo = `-- name: CountIssuesUpTo :one
+SELECT COUNT(*)::bigint
+FROM (
+    SELECT 1
+    FROM issue
+    WHERE workspace_id = $1
+    LIMIT $2::bigint
+) bounded_issues
+`
+
+type CountIssuesUpToParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Limit       int64       `json:"limit"`
+}
+
+// Bounded count for issue-limit admission and display. Callers pass only the
+// threshold needed for their decision, avoiding a full scan in an oversized
+// workspace.
+func (q *Queries) CountIssuesUpTo(ctx context.Context, arg CountIssuesUpToParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuesUpTo, arg.WorkspaceID, arg.Limit)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createIssue = `-- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
