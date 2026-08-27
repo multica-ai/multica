@@ -89,6 +89,7 @@ interface Scroller {
   distanceFromBottom(): number;
   grow(px: number): void;
   shrinkViewport(px: number): void;
+  readerScrollsUp(px: number): void;
   readerScrollsTo(fromBottom: number): void;
 }
 
@@ -129,6 +130,12 @@ function scroller(el: HTMLElement): Scroller {
     shrinkViewport(px) {
       state.viewportHeight -= px;
       resize();
+    },
+    readerScrollsUp(px) {
+      state.scrollTop -= px;
+      act(() => {
+        el.dispatchEvent(new Event("scroll"));
+      });
     },
     readerScrollsTo(fromBottom) {
       state.scrollTop = state.contentHeight - state.viewportHeight - fromBottom;
@@ -223,6 +230,21 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
     scroll.shrinkViewport(72);
 
     expect(scroll.scrollTop).toBe(parked);
+  });
+
+  it("releases the pin on incremental upward scrolling during a fast stream", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    for (let seq = 2; seq <= 5; seq++) {
+      scroll.readerScrollsUp(60);
+      streamChunk(seq);
+      scroll.grow(180);
+    }
+
+    expect(scroll.distanceFromBottom()).toBe(960);
   });
 
   it("re-engages when the reader scrolls back down to the live end", () => {

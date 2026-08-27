@@ -36,19 +36,27 @@ export function useStickToBottom(
 ): () => boolean {
   // The list initially opens at its last item.
   const pinned = useRef(true);
+  const lastTop = useRef(0);
 
   useEffect(() => {
     if (!scrollEl) return;
+    lastTop.current = scrollEl.scrollTop;
 
     const onScroll = () => {
-      pinned.current = isAtLiveEnd(scrollEl);
+      const top = scrollEl.scrollTop;
+      // The hook only scrolls down, so an upward move releases the pin.
+      pinned.current = top < lastTop.current ? false : isAtLiveEnd(scrollEl);
+      lastTop.current = top;
     };
     scrollEl.addEventListener("scroll", onScroll, { passive: true });
 
     const observer = new ResizeObserver(() => {
       if (!pinned.current) return;
       const target = bottomPinTarget(scrollEl);
-      if (target !== null) scrollEl.scrollTop = target;
+      if (target !== null) {
+        scrollEl.scrollTop = target;
+        lastTop.current = target;
+      }
     });
     observer.observe(scrollEl);
     if (contentEl) observer.observe(contentEl);

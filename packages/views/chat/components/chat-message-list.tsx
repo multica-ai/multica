@@ -333,8 +333,10 @@ export function ChatMessageList({
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
         atBottomThreshold={STICK_EDGE_THRESHOLD}
-        // Immediate scrolling avoids competing with resize-driven pinning.
-        followOutput={() => (!isFetchingOlderMessages && isPinned() ? "auto" : false)}
+        // Follow only when Virtuoso and resize-driven pinning both report the live end.
+        followOutput={(atBottom) =>
+          !isFetchingOlderMessages && atBottom && isPinned() ? "auto" : false
+        }
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
