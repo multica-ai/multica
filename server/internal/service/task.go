@@ -1541,6 +1541,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
 			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
 			FireAt:               fireAt,
+			ConcreteModel:        createParams.ConcreteModel,
 		})
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
