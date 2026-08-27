@@ -14,41 +14,83 @@ type ModelProfile struct {
 // ClassifyModelTier analyzes a model name/identifier and assigns its optimal complexity tier
 // based on capability, latency, and parameter tier heuristics.
 func ClassifyModelTier(modelID string) Tier {
-	lower := strings.ToLower(modelID)
+	lower := strings.ToLower(strings.TrimSpace(modelID))
+	if lower == "" {
+		return TierStandard
+	}
 
-	// Heavy indicators: High-parameter, advanced reasoning, architecture-capable
+	// Strip provider prefix (e.g. "opencode/", "anthropic/", "openai/") for model name matching.
+	baseName := lower
+	if idx := strings.LastIndex(lower, "/"); idx != -1 {
+		baseName = lower[idx+1:]
+	}
+
+	// 1. Simple indicators (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free", "x-preview-f-free").
+	// Note: "preview" alone is a release tag, not always a tier indicator (e.g. "o1-preview", "gemini-1.5-pro-preview").
+	simpleKeywords := []string{
+		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "lite", "x-preview",
+	}
+	for _, kw := range simpleKeywords {
+		if hasModelSegment(baseName, kw) {
+			return TierSimple
+		}
+	}
+
+	// 2. Heavy indicators: High-parameter, advanced reasoning, architecture-capable models.
 	heavyKeywords := []string{
-		"ultra", "opus", "pro", "pickle", "large", "max", "r1", "o1", "o3",
-		"reasoning", "nemotron-3-ultra", "claude-3-opus", "gpt-4",
+		"ultra", "opus", "pickle", "large", "max", "reasoning", "nemotron-3-ultra", "claude-3-opus",
+		"r1", "o1", "o3", "pro",
 	}
 	for _, kw := range heavyKeywords {
-		if strings.Contains(lower, kw) {
+		if hasModelSegment(baseName, kw) {
 			return TierHeavy
 		}
 	}
 
-	// Standard indicators: Balanced coding, 30B+ parameter, debugging, sonnet
+	// 3. Standard indicators: Balanced coding, 30B+ parameter, debugging, sonnet, general instruct models.
 	standardKeywords := []string{
-		"3.5", "nemotron-3.5", "sonnet", "coder", "instruct", "code", "standard",
+		"sonnet", "coder", "instruct", "lightning", "standard", "code", "starcoder", "deepseek-coder",
+		"gpt-4", "gpt-3.5", "nemotron-3.5", "3.5",
 	}
 	for _, kw := range standardKeywords {
-		if strings.Contains(lower, kw) {
+		if hasModelSegment(baseName, kw) {
 			return TierStandard
-		}
-	}
-
-	// Simple indicators: High-throughput, low-latency, lightweight
-	simpleKeywords := []string{
-		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "preview",
-	}
-	for _, kw := range simpleKeywords {
-		if strings.Contains(lower, kw) {
-			return TierSimple
 		}
 	}
 
 	// Default to Standard (balanced coding, debugging, refactoring)
 	return TierStandard
+}
+
+// hasModelSegment checks whether keyword exists in name bounded by delimiters (-_./ : or start/end).
+func hasModelSegment(name, keyword string) bool {
+	if keyword == "" {
+		return false
+	}
+	offset := 0
+	for {
+		idx := strings.Index(name[offset:], keyword)
+		if idx == -1 {
+			return false
+		}
+		absIdx := offset + idx
+		end := absIdx + len(keyword)
+
+		beforeOK := absIdx == 0 || isSegmentDelimiter(name[absIdx-1])
+		afterOK := end == len(name) || isSegmentDelimiter(name[end])
+
+		if beforeOK && afterOK {
+			return true
+		}
+		offset = absIdx + 1
+		if offset >= len(name) {
+			return false
+		}
+	}
+}
+
+func isSegmentDelimiter(b byte) bool {
+	return b == '-' || b == '_' || b == '.' || b == '/' || b == ':' || b == ' ' || b == '@'
 }
 
 // BuildTierMapFromCatalog scans a slice of discovered runtime models and dynamically selects

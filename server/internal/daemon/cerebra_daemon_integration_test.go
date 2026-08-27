@@ -70,11 +70,12 @@ func TestCLIRoutingSimulation(t *testing.T) {
 	fmt.Printf("%-35s | %-10s | %-38s | %-12s\n", "TEST SCENARIO", "TIER", "DYNAMICALLY SELECTED MODEL", "RULE")
 	fmt.Println("-----------------------------------------------------------------------------------------")
 
-	for _, tc := range testCases {
+	for i, tc := range testCases {
 		meta := cerebra.TaskMeta{
+			TaskID:          fmt.Sprintf("task-cli-test-%02d", i+1),
 			WillUseMCPTools: tc.WillUseMCPTools,
-			IssueID:         "issue-cli-test",
-			SessionID:       "session-cli-test",
+			IssueID:         fmt.Sprintf("issue-cli-test-%d", i+1),
+			SessionID:       fmt.Sprintf("session-cli-test-%d", i+1),
 		}
 
 		result := router.Route(ctx, tc.Prompt, meta, runtimes, "default-fallback-model")
@@ -90,4 +91,16 @@ func TestCLIRoutingSimulation(t *testing.T) {
 		}
 	}
 	fmt.Println("=========================================================================================")
+
+	// Test Codex catalog derivation
+	codexMap := deriveRuntimeTierMap("codex")
+	if codexMap[cerebra.TierSimple] == "" || codexMap[cerebra.TierStandard] == "" || codexMap[cerebra.TierHeavy] == "" {
+		t.Errorf("expected complete tier map for codex, got %v", codexMap)
+	}
+
+	// Test Claude catalog derivation
+	claudeMap := deriveRuntimeTierMap("claude")
+	if claudeMap[cerebra.TierSimple] != "claude-3-5-haiku" || claudeMap[cerebra.TierStandard] != "claude-3-5-sonnet" || claudeMap[cerebra.TierHeavy] != "claude-3-opus" {
+		t.Errorf("expected complete tier map for claude, got %v", claudeMap)
+	}
 }

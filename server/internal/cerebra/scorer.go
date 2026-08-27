@@ -18,6 +18,9 @@ const (
 
 // TaskMeta carries routing signals extracted from the task before classification.
 type TaskMeta struct {
+	// TaskID is the claimed task identifier, if any. Used for routing log attribution.
+	TaskID string
+
 	// WillUseMCPTools is true when the task is expected to invoke MCP/tool chains.
 	// Tool tasks are floored at TierStandard regardless of keyword/token score.
 	WillUseMCPTools bool

@@ -26,7 +26,14 @@ func TestSessionStore_TTL_And_Escalation(t *testing.T) {
 		t.Fatalf("expected escalated pin for opus, got %v", pin)
 	}
 
-	// 3. TTL expiry
+	// 3. Lower-tier request does not demote active escalated pin
+	store.Set(ctx, issueID, "", "rt-1", "claude-haiku-3-5", TierSimple)
+	pin = store.Get(ctx, issueID, "")
+	if pin == nil || pin.Model != "claude-opus-4-5" || pin.Tier != TierHeavy {
+		t.Fatalf("expected escalated pin to be retained, got %v", pin)
+	}
+
+	// 4. TTL expiry
 	time.Sleep(60 * time.Millisecond)
 	expiredPin := store.Get(ctx, issueID, "")
 	if expiredPin != nil {

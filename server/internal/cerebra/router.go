@@ -92,7 +92,7 @@ func (r *Router) Route(
 	// Step 2–4: filter candidates.
 	candidates := r.filterCandidates(ctx, runtimes, tier)
 
-	// Step 5: session affinity — reuse pinned model if still valid and same tier.
+	// Step 5: session affinity — reuse pinned model if still valid and same tier or higher (sticky escalation).
 	if pin := r.session.Get(ctx, meta.IssueID, meta.SessionID); pin != nil {
 		if pin.Tier == tier && r.candidateExists(candidates, pin.RuntimeID, pin.Model) {
 			r.session.Refresh(ctx, meta.IssueID, meta.SessionID)
@@ -106,6 +106,22 @@ func (r *Router) Route(
 			}
 			r.writeLog(ctx, result, meta)
 			return result
+		}
+		if tierRank(pin.Tier) > tierRank(tier) {
+			pinnedTierCandidates := r.filterCandidates(ctx, runtimes, pin.Tier)
+			if r.candidateExists(pinnedTierCandidates, pin.RuntimeID, pin.Model) {
+				r.session.Refresh(ctx, meta.IssueID, meta.SessionID)
+				result := RoutingResult{
+					RuntimeID:   pin.RuntimeID,
+					Model:       pin.Model,
+					Tier:        pin.Tier,
+					MatchedRule: matchedRule + "+session_pin_escalated",
+					LatencyMs:   time.Since(start).Milliseconds(),
+					Status:      "ok",
+				}
+				r.writeLog(ctx, result, meta)
+				return result
+			}
 		}
 	}
 
@@ -275,12 +291,16 @@ func (r *Router) fallback(_ context.Context, defaultModel, matchedRule string, s
 	}
 }
 
-func (r *Router) writeLog(ctx context.Context, result RoutingResult, meta TaskMeta) {
+func (r *Router) writeLog(_ context.Context, result RoutingResult, meta TaskMeta) {
 	if r.routingLogFn == nil {
 		return
 	}
+	taskID := meta.TaskID
+	if taskID == "" {
+		taskID = meta.IssueID
+	}
 	entry := RoutingLogEntry{
-		TaskID:            meta.IssueID, // reuse until task-id is threaded through
+		TaskID:            taskID,
 		IssueID:           meta.IssueID,
 		SessionID:         meta.SessionID,
 		RuntimeID:         result.RuntimeID,
@@ -293,14 +313,17 @@ func (r *Router) writeLog(ctx context.Context, result RoutingResult, meta TaskMe
 		Status:            result.Status,
 	}
 	// Fire-and-forget so routing evidence never adds latency to task dispatch.
+	// Use an independent timeout context so caller cancellation does not abort the write.
 	go func() {
+		logCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 		if err := func() (retErr error) {
 			defer func() {
 				if rec := recover(); rec != nil {
 					retErr = fmt.Errorf("routing log panic: %v", rec)
 				}
 			}()
-			r.routingLogFn(ctx, entry)
+			r.routingLogFn(logCtx, entry)
 			return nil
 		}(); err != nil {
 			r.logger.Warn("cerebra: routing log write failed", "error", err)

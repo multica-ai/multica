@@ -7564,8 +7564,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		for _, app := range task.ConnectedApps {
 			connectedAppNames = append(connectedAppNames, app.ServerName)
 		}
+		var mcpOverlayBytes []byte
+		if task.Agent != nil {
+			mcpOverlayBytes = task.Agent.McpConfig
+		}
 		meta := cerebra.TaskMeta{
-			WillUseMCPTools: detectMCPUsage(nil, connectedAppNames),
+			TaskID:          task.ID,
+			WillUseMCPTools: detectMCPUsage(mcpOverlayBytes, connectedAppNames, len(task.PluginHookTools), len(task.RemoteMCPConnections)),
 			IssueID:         task.IssueID,
 			SessionID:       task.ChatSessionID,
 		}
@@ -7996,6 +8001,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// annotation on the outside where a future edit is visibly a change to
 		// human-facing text rather than to classifier input.
 		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
+		if d.unavailStore != nil {
+			kind := cerebra.ParseFailure(errMsg)
+			if cerebra.ShouldMarkUnavailable(kind) {
+				d.unavailStore.MarkUnavailable(ctx, task.RuntimeID, model, 0)
+			}
+		}
 		return TaskResult{
 			Status:        "blocked",
 			Comment:       errMsg,

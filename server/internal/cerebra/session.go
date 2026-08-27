@@ -62,17 +62,19 @@ func (s *SessionStore) Get(_ context.Context, issueID, sessionID string) *Sessio
 	return pin
 }
 
-// Set pins a model to the session. If the session already has a higher-tier pin,
-// this call updates the pin (escalation). TTL is always refreshed on Set.
+// Set pins a model to the session. If the session already has an active higher-tier pin,
+// this call refreshes the TTL and preserves the higher-tier pin (sticky escalation).
+// If the requested tier is equal or higher, or the previous pin expired, it updates the pin.
 func (s *SessionStore) Set(_ context.Context, issueID, sessionID, runtimeID, model string, tier Tier) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	key := sessionKey(issueID, sessionID)
 	existing, ok := s.pins[key]
-	if ok && tierRank(existing.Tier) > tierRank(tier) {
-		// Existing pin is at a higher tier — escalate: keep tier but update model/runtime.
-		// (In practice the higher-tier path selected this model, so update unconditionally.)
+	if ok && time.Since(existing.UpdatedAt) <= s.ttl && tierRank(existing.Tier) > tierRank(tier) {
+		// Existing pin is at a higher tier — preserve the escalated tier and refresh TTL.
+		existing.UpdatedAt = time.Now()
+		return
 	}
 	s.pins[key] = &SessionPin{
 		RuntimeID: runtimeID,
