@@ -2553,6 +2553,21 @@ describe("importSkillArchive", () => {
     ).rejects.toThrow(/import failed/i);
   });
 
+  it("keeps the server reason for a status this client does not know", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "quarantined", reason: "pending review" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow("pending review");
+  });
+
   it("throws the structured reason on a name conflict", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

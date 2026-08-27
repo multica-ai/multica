@@ -3126,8 +3126,18 @@ export const SkillImportExistingSkillSchema = z.object({
   can_overwrite: z.boolean().optional(),
 }).loose();
 
+/**
+ * Envelope of POST /api/skills/import.
+ *
+ * `status` stays a plain string (not an enum) so a status added by a newer
+ * backend still parses and its `reason` survives to the user. `z.enum` here
+ * would fail the whole envelope on an unknown value, drop the server's reason
+ * and leave only a generic "Import failed" — the server field is a bare
+ * `string`, so it is free to grow. `skillFromImportResult` has the default
+ * branch: anything outside created/updated is treated as a failure.
+ */
 export const SkillImportResultSchema = z.object({
-  status: z.enum(["created", "updated", "conflict", "skipped", "failed"]),
+  status: z.string().default("failed"),
   reason: z.string().optional().default(""),
   skill: SkillSchema.optional(),
   existing_skill: SkillImportExistingSkillSchema.optional(),
