@@ -99,6 +99,16 @@ const (
 	// system error.
 	ReasonAgentBlocked Reason = "agent_blocked"
 
+	// ReasonAgentRequestedHelp: the agent intentionally surfaced a
+	// structured "I'm stuck / need human input" signal (GAP-25) via the
+	// terminal result's blocked_reason / needs / confidence fields rather
+	// than a free-text comment. Platform-side (not an agent_error.* value)
+	// so it is excluded from the auto-retry / auto-rerun paths — a human
+	// must act, the platform must not silently re-run it. IsAgentError
+	// returns false. Written by the /fail and /complete capture paths in
+	// internal/service/task.go when a help signal is present.
+	ReasonAgentRequestedHelp Reason = "agent_requested_help"
+
 	// ReasonAPIInvalidRequest: the upstream LLM API rejected the
 	// request body with a 400 invalid_request_error (oversized image,
 	// malformed payload, etc.). The conversation history itself is
@@ -243,6 +253,7 @@ var allReasons = []Reason{
 	ReasonTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
+	ReasonAgentRequestedHelp,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,
