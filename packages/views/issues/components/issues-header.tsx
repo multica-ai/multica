@@ -724,9 +724,8 @@ function PropertyFilterOptions({
   // Scalar value state lives at the top level so the hooks stay unconditional
   // (Rules of Hooks): it is only rendered for text / number / date / url, but
   // must be declared regardless of which branch runs. The draft syncs to the
-  // committed `scalarValue` only when that changes (e.g. an external clear) —
-  // during typing scalarValue is unchanged, so the draft survives long enough
-  // for an in-menu "No value" uncheck to restore it.
+  // committed `scalarValue` whenever that changes, so a filter cleared or
+  // rewritten elsewhere cannot be written back from a stale input.
   const scalarValue = selected.find((id) => id !== NO_PROPERTY_VALUE) ?? "";
   const hasNoValue = selected.includes(NO_PROPERTY_VALUE);
   const [draft, setDraft] = useState(scalarValue);
@@ -769,10 +768,11 @@ function PropertyFilterOptions({
     const commitValue = (raw: string) => {
       const value = raw.trim();
       // NO_PROPERTY_VALUE is the reserved "no value" sentinel — it cannot be
-      // filtered as a literal value. Setting a value also clears "No value":
-      // the two are mutually exclusive for a scalar.
+      // filtered as a literal value. The value and "No value" compose like
+      // every other property type: committing a value replaces only the value
+      // member and preserves "No value" membership.
       if (value === NO_PROPERTY_VALUE) return;
-      onSetValues(value ? [value] : []);
+      onSetValues(value ? [value, ...(hasNoValue ? [NO_PROPERTY_VALUE] : [])] : hasNoValue ? [NO_PROPERTY_VALUE] : []);
     };
     return (
       <>
@@ -817,12 +817,15 @@ function PropertyFilterOptions({
           checked={hasNoValue}
           disabled={locked}
           onCheckedChange={(checked) => {
-            if (checked) {
-              onSetValues([NO_PROPERTY_VALUE]);
-            } else {
-              // Unchecking "No value" restores the value still in the input.
-              onSetValues(draft.trim() ? [draft.trim()] : []);
-            }
+            // "No value" toggles membership in the same OR-set as the value —
+            // checking/unchecking never touches the committed value member, so
+            // unchecking restores it without any draft round-trip.
+            const valueMembers = selected.filter((id) => id !== NO_PROPERTY_VALUE);
+            onSetValues(
+              checked
+                ? [...valueMembers, NO_PROPERTY_VALUE]
+                : valueMembers,
+            );
           }}
           className={FILTER_ITEM_CLASS}
         >

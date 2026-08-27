@@ -508,6 +508,17 @@ describe("property filters", () => {
     expect(result.map((i) => i.id)).toEqual(["P7"]);
   });
 
+  it("a literal __none__ text value does not match a No-value filter", () => {
+    // The server's key-absence predicate excludes it; this path must agree.
+    const literalNone = makeIssue({ id: "P8", properties: { [textId]: NO_PROPERTY_VALUE } });
+    expect(
+      filterIssues([literalNone, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [textId]: [NO_PROPERTY_VALUE] },
+      }).map((i) => i.id),
+    ).toEqual(["P3"]);
+  });
+
   it("ANDs across definitions", () => {
     const result = filterIssues([critical, minor], {
       ...NO_FILTER,

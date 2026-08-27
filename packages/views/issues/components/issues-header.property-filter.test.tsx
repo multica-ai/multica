@@ -132,7 +132,9 @@ describe("IssueFilterMenu scalar property filter", () => {
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
   });
 
-  it("checking No value clears a committed value; unchecking restores the draft", async () => {
+  it("checking and unchecking No value preserves the committed value", async () => {
+    // Regression (review round 2): unchecking "No value" used to drop the
+    // committed value because the draft effect wiped it when the set changed.
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
@@ -140,28 +142,41 @@ describe("IssueFilterMenu scalar property filter", () => {
     await userEvent.type(input, "hello{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
 
-    // Checking "No value" clears the value (mutual exclusion).
+    // "No value" composes OR-style with the value, like every other type.
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello", "__none__"] });
+
+    // Unchecking removes only the membership — the committed value survives
+    // without any draft round-trip.
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
+  });
+
+  it("committing a value preserves an existing No-value membership", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["__none__"] });
 
-    // Re-type and uncheck: the value still in the input is committed.
-    await userEvent.type(screen.getByRole("textbox"), "world");
-    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
-    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["world"] });
+    await userEvent.type(screen.getByRole("textbox"), "abc{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
   });
 
-  it("unchecking No value restores a typed (uncommitted) value", async () => {
-    // Seed the filter with No value checked, then type before unchecking.
+  it("an uncommitted draft survives checking No value, then commits alongside it", async () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
-    store.getState().setPropertyFilterValues(PROP, ["__none__"]);
     await openPropertySubmenu("Note");
 
     await userEvent.type(screen.getByRole("textbox"), "abc");
     // Clicking the checkbox blurs the input first; the blur guard must skip the
     // premature commit so the checkbox reads the pre-blur state and the draft
-    // survives for the uncheck.
+    // stays uncommitted in the input.
     await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /No value/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["__none__"] });
+    expect(screen.getByRole("textbox")).toHaveValue("abc");
 
-    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc"] });
+    // Enter commits the draft as another member of the OR-set.
+    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
   });
 });
