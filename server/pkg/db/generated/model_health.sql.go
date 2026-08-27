@@ -87,6 +87,40 @@ func (q *Queries) MarkModelHealthy(ctx context.Context, arg MarkModelHealthyPara
 	return err
 }
 
+const upsertModelHealthPricingUnhealthy = `-- name: UpsertModelHealthPricingUnhealthy :one
+INSERT INTO model_health (workspace_id, concrete, status, reason, consecutive_failures, last_failure_reason, last_failure_at, updated_at)
+VALUES ($1::uuid, $2, 'unhealthy', 'pricing', 1, 'pricing', now() + interval '365 days', now())
+ON CONFLICT (workspace_id, concrete) DO UPDATE SET status = 'unhealthy', reason = 'pricing', consecutive_failures = model_health.consecutive_failures + 1, last_failure_reason = 'pricing', last_failure_at = now() + interval '365 days', updated_at = now()
+RETURNING workspace_id, concrete, status, reason, consecutive_failures, last_failure_reason, last_failure_at, last_success_at, updated_at
+`
+
+type UpsertModelHealthPricingUnhealthyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Concrete    string      `json:"concrete"`
+}
+
+// Pricing breach: mark the model unhealthy in a way that does NOT auto-recover
+// via the model_health TTL. isModelHealthyWithQueries treats an 'unhealthy' row
+// as healthy again once time.Since(last_failure_at) > modelHealthTTL (10m). By
+// pushing last_failure_at far into the future, the breach stays sticky until the
+// price recovers and MarkModelHealthy is called.
+func (q *Queries) UpsertModelHealthPricingUnhealthy(ctx context.Context, arg UpsertModelHealthPricingUnhealthyParams) (ModelHealth, error) {
+	row := q.db.QueryRow(ctx, upsertModelHealthPricingUnhealthy, arg.WorkspaceID, arg.Concrete)
+	var i ModelHealth
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Concrete,
+		&i.Status,
+		&i.Reason,
+		&i.ConsecutiveFailures,
+		&i.LastFailureReason,
+		&i.LastFailureAt,
+		&i.LastSuccessAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertModelHealthUnhealthy = `-- name: UpsertModelHealthUnhealthy :one
 INSERT INTO model_health (workspace_id, concrete, status, reason, consecutive_failures, last_failure_reason, last_failure_at, updated_at)
 VALUES ($1::uuid, $2, 'unhealthy', $3::text, 1, $3::text, now(), now())
