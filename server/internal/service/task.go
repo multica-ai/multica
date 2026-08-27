@@ -3398,7 +3398,10 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 		return true
 	}
 	lower := strings.ToLower(errorText)
-	return strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error")
+	return strings.Contains(lower, "400") && strings.Contains(lower, "invalid_request_error") ||
+		strings.Contains(lower, "param is invalid") ||
+		strings.Contains(lower, "invalid param") ||
+		(strings.Contains(lower, "code=-32603") && strings.Contains(lower, "valid param"))
 }
 
 // retryEligible reports whether a failed task qualifies for an automatic retry

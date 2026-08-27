@@ -168,7 +168,7 @@ func TestTraecliBlockedArgsFiltering(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	wantPrefix := []string{"acp", "serve", "--yolo"}
+	wantPrefix := []string{"-c", `permission_mode="bypass_permissions"`, "acp", "serve"}
 	if len(lines) < len(wantPrefix) {
 		t.Fatalf("expected at least %d args, got %d: %q", len(wantPrefix), len(lines), lines)
 	}
@@ -179,7 +179,7 @@ func TestTraecliBlockedArgsFiltering(t *testing.T) {
 	}
 	// The hardcoded prefix must appear exactly once each.
 	joined := strings.Join(lines, " ")
-	for _, once := range []string{"acp", "serve", "--yolo"} {
+	for _, once := range []string{"-c", `permission_mode="bypass_permissions"`, "acp", "serve"} {
 		if c := countTokens(lines, once); c != 1 {
 			t.Errorf("expected exactly one %q, got %d (full: %q)", once, c, joined)
 		}

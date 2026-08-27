@@ -2796,6 +2796,10 @@ WHERE (
       AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
       AND NOT (COALESCE(error, '') ILIKE '%image dimensions exceed max allowed size%' AND COALESCE(error, '') ILIKE '%image.source.base64.data%')
+      AND NOT (
+        COALESCE(error, '') ILIKE '%param is invalid%'
+        OR COALESCE(error, '') ILIKE '%invalid param%'
+      )
     )
   )
 ORDER BY terminal_at DESC

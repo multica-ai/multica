@@ -471,6 +471,65 @@ func traecliModelLabel(slug string) string {
 	return strings.Join(parts, "-")
 }
 
+var traecliModelAliases = map[string]string{
+	"deepseek-v4-flash":      "deepseek-v4-flash",
+	"deepseek-v4-pro":        "deepseek-v4-pro",
+	"gemini-3-flash-preview": "gemini-3-flash-preview",
+	"gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+	"gpt-5.2":                "gpt-5.2",
+	"gpt-5.3-codex":          "gpt-5.3-codex",
+	"gpt-5.4":                "gpt-5.4",
+	"gpt-5.4-mini":           "gpt-5.4-mini",
+	"gpt-5.5":                "gpt-5.5",
+	"gpt-5.6-luna":           "gpt-5.6-luna",
+	"gpt-5.6-sol":            "gpt-5.6-sol",
+	"gpt-5.6-terra":          "gpt-5.6-terra",
+	"seed-2.1-pro":           "seed-2.1-pro",
+	"seed-2.1-turbo":         "seed-2.1-turbo",
+	"seed-code":              "seed-code",
+	"seed-dogfooding-2.0":    "seed-dogfooding-2.0",
+	"seed-evolving":          "seed-evolving",
+}
+
+var traecliModelIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// NormalizeModelForProvider canonicalizes model IDs that are commonly entered
+// through UI display labels or copied from another runtime. It deliberately
+// avoids live CLI discovery so create/update handlers do not depend on daemon
+// liveness or a particular user's login state. Unknown but syntactically safe
+// model IDs pass through so newly released provider models are not blocked.
+func NormalizeModelForProvider(providerType, model string) (string, error) {
+	trimmed := strings.TrimSpace(model)
+	if trimmed == "" {
+		return "", nil
+	}
+	for _, r := range trimmed {
+		if r < 0x20 || r == 0x7f {
+			return "", fmt.Errorf("model contains invalid whitespace or control characters")
+		}
+	}
+	if providerType != "traecli" {
+		return trimmed, nil
+	}
+
+	key := strings.ToLower(trimmed)
+	if base, suffix, ok := strings.Cut(key, "/"); ok {
+		switch suffix {
+		case "low", "medium", "high", "xhigh", "max", "ultra":
+			key = base
+		default:
+			return "", fmt.Errorf("traecli model %q is not a valid model id; use the model slug from traecli debug models", trimmed)
+		}
+	}
+	if canonical, ok := traecliModelAliases[key]; ok {
+		return canonical, nil
+	}
+	if !traecliModelIDPattern.MatchString(key) {
+		return "", fmt.Errorf("traecli model %q is not a valid model id; use the model slug from traecli debug models", trimmed)
+	}
+	return key, nil
+}
+
 // cursorStaticModels is a minimal fallback used when
 // `cursor-agent --list-models` isn't available (binary missing,
 // offline, etc). The real catalog is fetched dynamically because

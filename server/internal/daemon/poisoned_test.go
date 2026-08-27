@@ -177,6 +177,15 @@ func TestClassifyPoisonedError(t *testing.T) {
 			wantOK: false,
 		},
 		{
+			// traecli wraps invalid provider parameters as -32603 and may include a
+			// stream-disconnect prefix. The session is not resume-safe because the
+			// same request/session payload will be replayed on follow-up turns.
+			name:       "traecli invalid param is poisoning",
+			errMsg:     `traecli session/prompt failed: session/prompt: Internal error (code=-32603, data={"message":"stream disconnected before completion: We're sorry, the param is invalid. Please try with a valid param.","codex_error_info":"other"})`,
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
 			// The dimension phrase alone (without the image-content
 			// marker) is too weak to classify as a poisoned history.
 			name:   "dimension phrase without image-content marker",

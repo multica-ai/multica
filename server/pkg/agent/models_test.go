@@ -205,6 +205,43 @@ func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelForProviderTraecli(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{name: "display label normalized to slug", in: "GPT-5.6-Terra", want: "gpt-5.6-terra"},
+		{name: "lowercase gpt slug stays slug", in: "gpt-5.6-terra", want: "gpt-5.6-terra"},
+		{name: "reasoning suffix stripped", in: "gpt-5.4/medium", want: "gpt-5.4"},
+		{name: "openrouter pass through", in: "openrouter-3o", want: "openrouter-3o"},
+		{name: "unknown safe future slug lowercased", in: "Future-Model-1", want: "future-model-1"},
+		{name: "bad suffix rejected", in: "gpt-5.4/not-a-tier", wantErr: true},
+		{name: "newline rejected", in: "GPT-5.4\n--flag", wantErr: true},
+		{name: "space rejected", in: "GPT 5.4", wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := NormalizeModelForProvider("traecli", tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("NormalizeModelForProvider() expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NormalizeModelForProvider() unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("NormalizeModelForProvider() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 	cases := []struct {
 		name     string

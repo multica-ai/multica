@@ -106,6 +106,19 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 		return "", false
 	}
 	lowered := strings.ToLower(errMsg)
+	// traecli surfaces provider-side request validation failures through ACP as
+	// JSON-RPC -32603 "Internal error" wrappers, sometimes prefixed with a
+	// transient-looking "stream disconnected before completion". Despite that
+	// prefix, "param is invalid" means the current request body/session state was
+	// rejected and resuming the same conversation deterministically replays the
+	// bad payload. Treat it like the existing 400 invalid_request_error shapes so
+	// GetLastTaskSession excludes the session instead of repeatedly poisoning
+	// follow-up turns.
+	if strings.Contains(lowered, "param is invalid") ||
+		strings.Contains(lowered, "invalid param") ||
+		(strings.Contains(lowered, "code=-32603") && strings.Contains(lowered, "valid param")) {
+		return FailureReasonAPIInvalidRequest, true
+	}
 	// Kiro/ACP replays images baked into a resumed conversation's history;
 	// one exceeding the provider's max pixel dimensions is rejected on every
 	// session/prompt and cannot be resumed away (GH #5975). The daemon's
