@@ -36,13 +36,35 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
-  it("disengages on accumulated user input beyond the threshold", () => {
+  it("disengages on accumulated user input once the surface's scroll confirms it", () => {
     const { follow } = makeFollow();
     follow.input(80);
+    follow.input(80); // cumulative 160 > threshold — but only staged so far
     expect(follow.isFollowing()).toBe(true);
-    follow.input(80); // cumulative 160 > threshold
+    expect(follow.onScroll(160)).toBe(false); // the surface moved: released, no pin
     expect(follow.isFollowing()).toBe(false);
     expect(follow.onScroll(400)).toBe(false); // no pinning once disengaged
+  });
+
+  it("input the surface never consumed does not release", () => {
+    // A wheel over a nested scroller (or a list too short to scroll) bubbles
+    // to the container without moving it: no scroll ever confirms it.
+    const { follow, tick } = makeFollow();
+    follow.input(300);
+    expect(follow.isFollowing()).toBe(true);
+    expect(follow.onResize(180)).toBe(false); // mid-gesture: pin deferred
+    tick(400); // gesture over
+    expect(follow.onResize(360)).toBe(true); // system growth pins again
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("a new gesture does not inherit unconsumed intent from an old one", () => {
+    const { follow, tick } = makeFollow();
+    follow.input(300); // never confirmed by a scroll
+    tick(1000);
+    follow.input(60); // fresh gesture, sub-threshold on its own
+    expect(follow.onScroll(60)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
   });
 
   it("upward input rolls the accumulator back instead of counting as intent", () => {
@@ -62,9 +84,10 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
-  it("re-engages when the viewport returns to the top zone", () => {
+  it("re-engages when the viewport returns to the live-end zone", () => {
     const { follow } = makeFollow();
     follow.input(FOLLOW_EDGE_THRESHOLD + 1);
+    follow.onScroll(FOLLOW_EDGE_THRESHOLD + 1);
     expect(follow.isFollowing()).toBe(false);
     follow.onAtEdgeChange(true);
     expect(follow.isFollowing()).toBe(true);

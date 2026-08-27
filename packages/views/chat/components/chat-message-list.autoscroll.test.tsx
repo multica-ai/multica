@@ -132,12 +132,21 @@ interface Scroller {
   readerScrollsUp(px: number): void;
   /** Reader wheel input landing `fromBottom` px above the live end. */
   readerScrollsTo(fromBottom: number): void;
+  /**
+   * Wheel input the list never consumed: it bubbles from a nested scroller
+   * (or hits a list with nothing to scroll), so no scroll event follows.
+   */
+  wheelWithoutScroll(px: number): void;
+  /** PageUp bubbling from a focused control inside a row. */
+  pageUpFromRowControl(): void;
+  /** The browser scrolls the list itself (answering a key), no input seen. */
+  browserScrollsListUp(px: number): void;
 }
 
-function scroller(el: HTMLElement): Scroller {
-  const state = { scrollTop: 0, contentHeight: 2000, viewportHeight: VIEWPORT };
+function scroller(el: HTMLElement, initialContent = 2000): Scroller {
+  const state = { scrollTop: 0, contentHeight: initialContent, viewportHeight: VIEWPORT };
   // Open at the bottom, matching Virtuoso's `initialTopMostItemIndex: LAST`.
-  state.scrollTop = state.contentHeight - state.viewportHeight;
+  state.scrollTop = Math.max(0, state.contentHeight - state.viewportHeight);
 
   Object.defineProperties(el, {
     scrollHeight: { configurable: true, get: () => state.contentHeight },
@@ -189,7 +198,7 @@ function scroller(el: HTMLElement): Scroller {
       return state.scrollTop;
     },
     distanceFromBottom() {
-      return state.contentHeight - state.scrollTop - state.viewportHeight;
+      return Math.max(0, state.contentHeight - state.scrollTop - state.viewportHeight);
     },
     grow(px) {
       state.contentHeight += px;
@@ -215,6 +224,24 @@ function scroller(el: HTMLElement): Scroller {
     readerScrollsTo(fromBottom) {
       wheelBy(fromBottom - this.distanceFromBottom());
     },
+    wheelWithoutScroll(px) {
+      const nested = document.createElement("pre");
+      el.appendChild(nested);
+      act(() => {
+        nested.dispatchEvent(new WheelEvent("wheel", { deltaY: -px, bubbles: true }));
+      });
+    },
+    pageUpFromRowControl() {
+      const control = document.createElement("button");
+      el.appendChild(control);
+      act(() => {
+        control.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
+      });
+    },
+    browserScrollsListUp(px) {
+      state.scrollTop -= px;
+      scrollEvent();
+    },
   };
 }
 
@@ -222,7 +249,7 @@ function taskMsg(seq: number, content: string): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type: "text", content } as TaskMessagePayload;
 }
 
-function renderStreamingChat() {
+function renderStreamingChat({ contentHeight = 2000 } = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
@@ -244,7 +271,7 @@ function renderStreamingChat() {
   return {
     qc,
     view,
-    scroll: scroller(el),
+    scroll: scroller(el, contentHeight),
     rowCount: () => view.container.querySelectorAll("[data-row-key]").length,
     followsAtBottom: () =>
       view.container
@@ -357,6 +384,51 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
     scroll.grow(500);
     scroll.shrinkViewport(72);
+
+    expect(scroll.scrollTop).toBe(parked);
+  });
+
+  // Wheel over a capped code block scrolls the block; the event bubbles to
+  // the list without moving it. Unconsumed input must not release the follow.
+  it("keeps following through wheel input the list never consumed", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.wheelWithoutScroll(200);
+    gestureSettles();
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("keeps following after a flick on a conversation too short to scroll", () => {
+    const { scroll, streamChunk } = renderStreamingChat({ contentHeight: 400 });
+
+    scroll.wheelWithoutScroll(200);
+    gestureSettles();
+
+    for (let seq = 1; seq <= 8; seq++) {
+      streamChunk(seq);
+      scroll.grow(180);
+    }
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  // Focus sits on a row control, the reader presses PageUp, and the browser
+  // scrolls the list. The scroll confirms the staged key intent: the reader
+  // is released, not pinned back over their own keypress.
+  it("honors keyboard paging from a focused row control", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.pageUpFromRowControl();
+    scroll.browserScrollsListUp(VIEWPORT);
+    const parked = scroll.scrollTop;
+    gestureSettles();
+
+    streamChunk(1);
+    scroll.grow(180);
 
     expect(scroll.scrollTop).toBe(parked);
   });

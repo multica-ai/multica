@@ -21,6 +21,16 @@ import {
 // after the composer collapses, scroll anchoring), so the latch judges intent
 // from accumulated input deltas and releases only past FOLLOW_EDGE_THRESHOLD —
 // the same forgiveness the list grants Virtuoso via `atBottomThreshold`.
+//
+// Input is staged, and only the list's own scroll promotes it: rows contain
+// nested scrollers (capped `overflow-auto` code blocks) whose wheel/touch
+// events bubble here without moving the list, and on a conversation shorter
+// than the viewport nothing scrolls at all. Unconsumed input must not release
+// the follow. The same rule works in reverse for keys: any scroll key from
+// anywhere in the container stages intent, and if the browser answers it by
+// scrolling the list (focus on a row control page-scrolls the nearest
+// scrollable ancestor), the scroll confirms it — the reader is never pinned
+// back over their own keypress.
 
 export interface ScrollMetrics {
   scrollTop: number;
@@ -66,13 +76,18 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
   }
   const follow = followRef.current;
 
-  const enforce = useCallback(() => {
+  const pin = useCallback(() => {
     if (!scrollEl) return;
-    if (follow.onScroll(distanceFromBottom(scrollEl))) {
-      const target = bottomPinTarget(scrollEl);
-      if (target !== null) scrollEl.scrollTop = target;
-    }
-  }, [scrollEl, follow]);
+    const target = bottomPinTarget(scrollEl);
+    if (target !== null) scrollEl.scrollTop = target;
+  }, [scrollEl]);
+
+  // Content grew or the viewport resized — displacement with no scroll event,
+  // so it can never promote staged reader input.
+  const onResize = useCallback(() => {
+    if (!scrollEl) return;
+    if (follow.onResize(distanceFromBottom(scrollEl))) pin();
+  }, [scrollEl, follow, pin]);
 
   useEffect(() => {
     if (!scrollEl) return;
@@ -95,15 +110,19 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
       if (lastTouchY !== null) follow.input(y - lastTouchY);
       lastTouchY = y;
     };
+    // No target guard: this container is not focusable, so scroll keys always
+    // arrive from a focused row control, and the browser answers them by
+    // scrolling the nearest scrollable ancestor — this list. Staging makes
+    // that safe in the other direction too: a key a control consumed (Space
+    // activating a button, Home in a text field) never scrolls the list, so
+    // the staged intent is never promoted.
     const onKeyDown = (e: KeyboardEvent) => {
-      // Only keys aimed at the scroller itself; Space/arrows bubbling from
-      // row controls are not scroll intent.
-      if (e.target !== scrollEl) return;
       if (e.key === "ArrowUp") follow.input(LINE_SCROLL_PX);
       else if (e.key === "ArrowDown") follow.input(-LINE_SCROLL_PX);
       else if (e.key === "PageUp") follow.input(scrollEl.clientHeight);
       else if (e.key === "PageDown" || e.key === " ") follow.input(-scrollEl.clientHeight);
-      else if (e.key === "Home") follow.disengage();
+      else if (e.key === "Home") follow.input(scrollEl.scrollHeight);
+      else if (e.key === "End") follow.input(-scrollEl.scrollHeight);
     };
     const onPointerDown = (e: MouseEvent) => {
       follow.pointerDown(e.target === scrollEl);
@@ -118,13 +137,14 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
         atEdge = nowAtEdge;
         follow.onAtEdgeChange(nowAtEdge);
       }
-      enforce();
+      // The list itself moved: this is what promotes staged input.
+      if (follow.onScroll(distanceFromBottom(scrollEl))) pin();
     };
 
     // The composer growing (or banners appearing) shrinks the container's box
     // without any scroll event; content growth arrives separately through
     // `onContentHeightChanged`.
-    const observer = new ResizeObserver(enforce);
+    const observer = new ResizeObserver(onResize);
     observer.observe(scrollEl);
     scrollEl.addEventListener("scroll", onScroll, { passive: true });
     scrollEl.addEventListener("wheel", onWheel, { passive: true });
@@ -147,13 +167,13 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
       // suppress pinning forever.
       follow.pointerUp();
     };
-  }, [scrollEl, follow, enforce]);
+  }, [scrollEl, follow, pin, onResize]);
 
   return useMemo(
     () => ({
       isFollowing: () => follow.isFollowing(),
-      onContentHeightChanged: enforce,
+      onContentHeightChanged: onResize,
     }),
-    [follow, enforce],
+    [follow, onResize],
   );
 }
