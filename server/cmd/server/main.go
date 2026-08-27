@@ -604,8 +604,12 @@ func main() {
 	// hold queued work behind long-running tasks — e.g. a runtime with low
 	// task concurrency — raise the built-in 2h queued expiry without losing
 	// work to queued_expired failures.
-	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
+	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
 		envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL))
+	// Seven-day runtime retention does not share the 30-second liveness tick:
+	// its bounded transactions run independently once per hour, so a slow GC
+	// round cannot delay offline detection or task recovery.
+	go runRuntimeGCSweeper(sweepCtx, pool, queries, taskSvc.Metrics, bus)
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)

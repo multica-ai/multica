@@ -34,6 +34,7 @@ const (
 	labelOp           = "op"
 	labelGate         = "gate"
 	labelOutcome      = "outcome"
+	labelStage        = "stage"
 )
 
 var businessMetricLabels = map[string][]string{
@@ -56,6 +57,9 @@ var businessMetricLabels = map[string][]string{
 	"multica_chat_claim_session_fallback_needed_total": {},
 	"multica_chat_claim_session_fallback_result_total": {labelResult},
 	"multica_chat_claim_resume_query_duration_seconds": {labelQuery},
+	"multica_runtime_sweeper_stage_duration_seconds":   {labelStage},
+	"multica_runtime_sweeper_candidate_rows_total":     {labelStage},
+	"multica_runtime_sweeper_rows_changed_total":       {labelStage},
 
 	// PR3 funnel / community / commercial.
 	"multica_signup_total":                             {labelSignupSource},

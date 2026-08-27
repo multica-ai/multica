@@ -2950,44 +2950,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               localLabel={t(($) => $.revision.local_version)}
               serverValue={issue.title}
               localValue={titleConflictDraft}
-              actions={(
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const draft = titleConflictDraft.trim();
-                      if (!draft) return;
-                      handleUpdateField(
-                        { title: draft, title_base: issue.title },
-                        {
-                          onSuccess: (serverIssue) => {
-                            setTitleConflictDraft(null);
-                            titleBaseRef.current = serverIssue.title;
-                          },
+              serverAction={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // Local-only: the server already holds this title, so
+                    // discarding writes nothing. The remount is what puts it
+                    // back into the editor (see titleResetToken).
+                    setTitleConflictDraft(null);
+                    titleBaseRef.current = issue.title;
+                    setTitleResetToken((token) => token + 1);
+                  }}
+                >
+                  {t(($) => $.revision.use_server)}
+                </Button>
+              )}
+              localAction={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const draft = titleConflictDraft.trim();
+                    if (!draft) return;
+                    handleUpdateField(
+                      { title: draft, title_base: issue.title },
+                      {
+                        onSuccess: (serverIssue) => {
+                          setTitleConflictDraft(null);
+                          titleBaseRef.current = serverIssue.title;
                         },
-                      );
-                    }}
-                  >
-                    {t(($) => $.revision.keep_local)}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      // Local-only: the server already holds this title, so
-                      // discarding writes nothing. The remount is what puts it
-                      // back into the editor (see titleResetToken).
-                      setTitleConflictDraft(null);
-                      titleBaseRef.current = issue.title;
-                      setTitleResetToken((token) => token + 1);
-                    }}
-                  >
-                    {t(($) => $.revision.use_server)}
-                  </Button>
-                </div>
+                      },
+                    );
+                  }}
+                >
+                  {t(($) => $.revision.keep_local)}
+                </Button>
               )}
             />
           ) : null}
@@ -3102,52 +3102,52 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 localLabel={t(($) => $.revision.local_version)}
                 serverValue={issue.description || ""}
                 localValue={descriptionConflictDraft}
-                actions={(
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        handleUpdateField(
-                          {
-                            description: descriptionConflictDraft,
-                            description_base: issue.description || "",
-                            attachment_ids:
-                              descriptionAttachmentIdsRef.current.length > 0
-                                ? descriptionAttachmentIdsRef.current
-                                : undefined,
+                serverAction={(
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // The editor is dirty — that is why this conflict
+                      // exists — so the `value` prop cannot land: ContentEditor
+                      // deliberately refuses to clobber unsaved bytes.
+                      // adoptContent is the explicit "take this content"
+                      // channel and applies without emitting an update, so
+                      // discarding never writes.
+                      descEditorRef.current?.adoptContent(issue.description || "");
+                      descriptionAttachmentIdsRef.current = [];
+                      pendingDescriptionSaveRef.current = null;
+                      setDescriptionConflictDraft(null);
+                    }}
+                  >
+                    {t(($) => $.revision.use_server)}
+                  </Button>
+                )}
+                localAction={(
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleUpdateField(
+                        {
+                          description: descriptionConflictDraft,
+                          description_base: issue.description || "",
+                          attachment_ids:
+                            descriptionAttachmentIdsRef.current.length > 0
+                              ? descriptionAttachmentIdsRef.current
+                              : undefined,
+                        },
+                        {
+                          onSuccess: () => {
+                            setDescriptionConflictDraft(null);
                           },
-                          {
-                            onSuccess: () => {
-                              setDescriptionConflictDraft(null);
-                            },
-                          },
-                        );
-                      }}
-                    >
-                      {t(($) => $.revision.keep_local)}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        // The editor is dirty — that is why this conflict
-                        // exists — so the `value` prop cannot land: ContentEditor
-                        // deliberately refuses to clobber unsaved bytes.
-                        // adoptContent is the explicit "take this content"
-                        // channel and applies without emitting an update, so
-                        // discarding never writes.
-                        descEditorRef.current?.adoptContent(issue.description || "");
-                        descriptionAttachmentIdsRef.current = [];
-                        pendingDescriptionSaveRef.current = null;
-                        setDescriptionConflictDraft(null);
-                      }}
-                    >
-                      {t(($) => $.revision.use_server)}
-                    </Button>
-                  </div>
+                        },
+                      );
+                    }}
+                  >
+                    {t(($) => $.revision.keep_local)}
+                  </Button>
                 )}
               />
             ) : null}
