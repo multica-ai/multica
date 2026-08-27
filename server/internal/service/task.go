@@ -5416,7 +5416,100 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 					"agent_id", util.UUIDToString(t.AgentID),
 				)
 			default:
-				return fmt.Errorf("create retry task: %w", cerr)
+			return fmt.Errorf("create retry task: %w", cerr)
+		}
+	}
+
+		// Auto-rerun on retry exhaustion for transient provider errors (self-heal).
+		//
+		// The in-tx auto-retry above (createRetry) already re-runs a model failure
+		// while the attempt budget remains; once that budget is spent (Attempt >=
+		// ceiling) a model failure would otherwise terminate for good and require a
+		// manual rerun. Here, on that exact exhaustion edge, we auto-schedule ONE
+		// final rerun so the now-unhealthy primary's fallback (or a recovered
+		// provider) gets a fresh chance without human intervention.
+		//
+		// Loop guard: only fire when the failing task has never been auto-rerun
+		// (auto_rerun_count < 1). The auto-rerun child inherits auto_rerun_count+1,
+		// so a persistently-failing task can never re-enter this branch — exactly
+		// one automatic rerun per terminal failure lineage, no infinite loop.
+		//
+		// Gated to mirror retryEligibleForSource: an issue/chat link (somewhere for
+		// the rerun to attach) and not a cron-sourced autopilot run. `createRetry`
+		// is already false here, so we only act on genuine exhaustion — the regular
+		// in-budget retry owns the earlier attempts.
+		if !createRetry && isModelFailureReason(failureReason) && t.AutoRerunCount < 1 &&
+			(t.IssueID.Valid || t.ChatSessionID.Valid) &&
+			t.MaxAttempts > 1 &&
+			t.Attempt >= retryAttemptCeiling(failureReason, t.MaxAttempts) {
+			autoRerun := true
+			if t.AutopilotRunID.Valid && s.autopilotRunRetrySource(ctx, t) == "cron" {
+				autoRerun = false
+			}
+			if autoRerun {
+				if successor, herr := hasRunnableSuccessor(ctx, qtx, t); herr != nil {
+					return fmt.Errorf("check runnable successor for auto-rerun: %w", herr)
+				} else if successor {
+					slog.Info("auto-rerun skipped: a successor is already pending",
+						"task_id", util.UUIDToString(taskID),
+						"issue_id", util.UUIDToString(t.IssueID),
+						"agent_id", util.UUIDToString(t.AgentID),
+					)
+					autoRerun = false
+				}
+			}
+			if autoRerun {
+				// Health-aware concrete: re-resolve the tier against the just-marked
+				// unhealthy state so the rerun skips to the fallback (same resolution
+				// the in-budget retry uses). Empty result falls through to the parent's
+				// concrete, leaving provider recovery as the rerun's path.
+				var rerunConcrete pgtype.Text
+				if ag, err := qtx.GetAgent(ctx, t.AgentID); err == nil {
+					tier := ""
+					if ag.ServiceTier.Valid {
+						tier = ag.ServiceTier.String
+					}
+					if tier != "" {
+						var ws pgtype.UUID
+						if t.IssueID.Valid {
+							if iss, err := qtx.GetIssue(ctx, t.IssueID); err == nil {
+								ws = iss.WorkspaceID
+							}
+						}
+						if !ws.Valid {
+							ws = ag.WorkspaceID
+						}
+						if cc := s.resolveConcreteModelWithQueries(ctx, qtx, ws, tier); cc != "" {
+							rerunConcrete = pgtype.Text{String: cc, Valid: true}
+						}
+					}
+				}
+				child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+					NewTaskID:      dbid.NewV7(),
+					ID:             taskID,
+					ConcreteModel:  rerunConcrete,
+					AutoRerunCount: pgtype.Int4{Int32: t.AutoRerunCount + 1, Valid: true},
+				})
+				switch {
+				case cerr == nil:
+					retried = &child
+					slog.Info("auto-rerun scheduled on retry exhaustion (transient provider error)",
+						"task_id", util.UUIDToString(taskID),
+						"rerun_task_id", util.UUIDToString(child.ID),
+						"failure_reason", failureReason,
+						"auto_rerun_count", child.AutoRerunCount,
+					)
+					if paErr := stampPriorAttemptContext(ctx, qtx, &child, t.Attempt, failureReason, errMsg); paErr != nil {
+						slog.Warn("auto-rerun: prior-attempt context stamp failed (non-fatal)",
+							"task_id", util.UUIDToString(child.ID), "error", paErr)
+					}
+				case errors.Is(cerr, pgx.ErrNoRows):
+					slog.Info("auto-rerun not created: no row written (slot taken by a concurrent rerun)",
+						"task_id", util.UUIDToString(taskID),
+					)
+				default:
+					return fmt.Errorf("auto-rerun create retry task: %w", cerr)
+				}
 			}
 		}
 

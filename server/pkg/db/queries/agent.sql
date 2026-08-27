@@ -605,7 +605,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, concrete_model, requested_concrete_model, id
+    channel_context_revision, concrete_model, requested_concrete_model, auto_rerun_count, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -626,6 +626,7 @@ SELECT
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
     p.channel_context_revision, COALESCE(sqlc.narg(concrete_model)::text, p.concrete_model), COALESCE(sqlc.narg(requested_concrete_model)::text, p.requested_concrete_model),
+    COALESCE(sqlc.narg(auto_rerun_count)::int, p.auto_rerun_count),
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p

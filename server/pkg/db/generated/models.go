@@ -175,6 +175,7 @@ type AgentTaskQueue struct {
 	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
 	ConcreteModel             pgtype.Text `json:"concrete_model"`
 	RequestedConcreteModel    pgtype.Text `json:"requested_concrete_model"`
+	AutoRerunCount            int32       `json:"auto_rerun_count"`
 }
 
 type AgentToLabel struct {

@@ -1,0 +1,1 @@
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS auto_rerun_count INT NOT NULL DEFAULT 0;
