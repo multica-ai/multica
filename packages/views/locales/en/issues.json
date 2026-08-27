@@ -612,7 +612,6 @@
     "trigger_autopilot": "Autopilot run",
     "trigger_comment": "Comment trigger",
     "trigger_initial": "Initial run",
-    "trigger_handoff_prefix": "Handoff: ",
     "included_comments_one": "Includes {{count}} comment",
     "included_comments_other": "Includes {{count}} comments",
     "status_queued": "Queued",

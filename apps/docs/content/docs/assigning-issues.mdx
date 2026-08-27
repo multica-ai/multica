@@ -13,12 +13,11 @@ When you only need the agent to handle one specific request without changing own
 
 1. Open an issue and click **Assignee**.
 2. Pick an agent or a squad.
-3. Review the agent about to start in the confirmation dialog.
-4. Add a handoff note if needed, then choose **Start**.
+3. Review the agent about to start in the confirmation dialog, then choose **Start**.
 
-![Assignment confirmation dialog: add a handoff note, or choose not to start yet](/images/docs/assign-confirm-dialog.webp)
+![Assignment confirmation dialog: confirm the assignment, or choose not to start yet](/images/docs/assign-confirm-dialog.webp)
 
-The handoff note applies to this run only — use it for scope, ordering, or what to focus on this time. Requirements that should hold long term belong in the issue, the project description, or the agent instructions.
+Everything the agent should know about this work belongs in the issue itself — its description, its discussion, or the project description and agent instructions.
 
 When you assign to a squad, the squad becomes the issue's assignee and the squad leader starts first. It decides whether to hand work to other members, following how the squad operates.
 
@@ -47,7 +46,7 @@ When the assignee is a [squad](/squads), the same rule applies: Multica enqueues
 
 `backlog` doesn't start a run on assignment either. Execution only follows after you move the issue out of `backlog`, or ask the assignee for something in a follow-up comment.
 
-When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog: that status change is what starts the run, so it offers the same handoff note and the same **Don't start yet**, which moves the issue without waking the agent. The dialog appears for every target outside the `backlog`, `done`, and `cancelled` categories.
+When the issue already has an agent or squad owner, moving it out of `backlog` opens the same dialog: that status change is what starts the run, so it offers the same **Don't start yet**, which moves the issue without waking the agent. The dialog appears for every target outside the `backlog`, `done`, and `cancelled` categories.
 
 Only the `backlog` category works this way, and a [custom status](/issues#custom-statuses) in that category behaves identically. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
 
