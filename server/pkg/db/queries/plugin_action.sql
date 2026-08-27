@@ -48,6 +48,6 @@ JOIN agent ag ON ag.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 LEFT JOIN workspace w ON w.id = i.workspace_id
 WHERE ag.workspace_id = $1
-  AND ($3::uuid IS NULL OR atq.issue_id = $3)
+  AND (@issue_scope::uuid IS NULL OR atq.issue_id = @issue_scope)
 ORDER BY atq.created_at DESC, atq.id DESC
 LIMIT $2;
