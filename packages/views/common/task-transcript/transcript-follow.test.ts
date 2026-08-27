@@ -21,18 +21,69 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
-  it("does not disengage when a prepend shift lands inside the input window after an in-zone nudge", () => {
+  it("a system shift inside the reader's gesture is pinned, not blamed on them", () => {
     // Regression: absolute-position heuristics dropped the latch here — the
     // user nudged 30px (still inside the zone), then a flush pushed the
-    // viewport past the threshold while their input was still fresh.
+    // viewport past the threshold while their input was still fresh. Only
+    // 30px of the movement is attributable to the reader; the rest is the
+    // system's and is corrected immediately.
     const { follow, tick } = makeFollow();
     tick(1000);
     follow.input(30);
     tick(200); // inside the intent window
-    expect(follow.onScroll(500)).toBe(false); // user mid-gesture: no pin either
+    expect(follow.onScroll(500)).toBe(true); // pin the system's 470px back
     expect(follow.isFollowing()).toBe(true);
-    tick(400); // gesture over
-    expect(follow.onScroll(500)).toBe(true); // now pin back
+  });
+
+  it("releases for wheel notches spaced past the intent window", () => {
+    // A discrete mouse wheel at reading pace: one notch per event, far more
+    // than the window apart. Attributed displacement accumulates across
+    // gestures, so pacing and device units cannot defeat the threshold.
+    const { follow, tick } = makeFollow();
+    follow.input(100);
+    expect(follow.onScroll(100)).toBe(false); // notch 1: 100px taken
+    tick(500);
+    follow.input(100);
+    expect(follow.onScroll(200)).toBe(false); // notch 2: 200px taken, released
+    expect(follow.isFollowing()).toBe(false);
+  });
+
+  it("accumulates displacement across pins during a fast stream", () => {
+    // Sub-threshold notches each answered by a chunk that pins the reader
+    // back: the taken displacement survives the pins, so persistence wins
+    // instead of losing every round.
+    const { follow, tick } = makeFollow();
+    follow.input(60);
+    expect(follow.onScroll(60)).toBe(false);
+    tick(400);
+    expect(follow.onResize(240)).toBe(true); // chunk pins back
+    follow.input(60);
+    expect(follow.onScroll(60)).toBe(false);
+    tick(400);
+    expect(follow.onResize(240)).toBe(true); // chunk pins back again
+    follow.input(60);
+    follow.onScroll(60); // 180px taken in total
+    expect(follow.isFollowing()).toBe(false);
+  });
+
+  it("pins displacement that lands inside the intent window", () => {
+    // The final chunk of a reply has a whole window to land in after any
+    // small nudge; the pin decision must not hide behind a timer, because
+    // no later event exists to re-evaluate it.
+    const { follow } = makeFollow();
+    follow.input(2);
+    expect(follow.onScroll(2)).toBe(false); // 2px nudge, confirmed
+    expect(follow.onResize(182)).toBe(true); // still inside the window: pin now
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("re-engages a reader who walks themselves back to the live end", () => {
+    const { follow } = makeFollow();
+    follow.input(200);
+    follow.onScroll(200); // released
+    expect(follow.isFollowing()).toBe(false);
+    follow.input(-200);
+    expect(follow.onScroll(0)).toBe(false);
     expect(follow.isFollowing()).toBe(true);
   });
 
@@ -46,15 +97,13 @@ describe("createLiveEndFollow", () => {
     expect(follow.onScroll(400)).toBe(false); // no pinning once disengaged
   });
 
-  it("input the surface never consumed does not release", () => {
+  it("input the surface never consumed does not release, and never blocks the pin", () => {
     // A wheel over a nested scroller (or a list too short to scroll) bubbles
-    // to the container without moving it: no scroll ever confirms it.
-    const { follow, tick } = makeFollow();
+    // to the container without moving it: no scroll ever attributes it.
+    const { follow } = makeFollow();
     follow.input(300);
     expect(follow.isFollowing()).toBe(true);
-    expect(follow.onResize(180)).toBe(false); // mid-gesture: pin deferred
-    tick(400); // gesture over
-    expect(follow.onResize(360)).toBe(true); // system growth pins again
+    expect(follow.onResize(180)).toBe(true); // growth pins straight away
     expect(follow.isFollowing()).toBe(true);
   });
 
@@ -67,19 +116,21 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
-  it("upward input rolls the accumulator back instead of counting as intent", () => {
+  it("a mixed-direction gesture counts its net movement, not its pushes", () => {
     const { follow } = makeFollow();
     follow.input(100);
     follow.input(-90);
-    follow.input(100); // net 110 <= threshold
+    follow.input(100);
+    // The surface only net-moved 110: attribution is capped by movement.
+    expect(follow.onScroll(110)).toBe(false);
     expect(follow.isFollowing()).toBe(true);
   });
 
-  it("a pin clears sub-threshold residue so old nudges cannot accumulate", () => {
+  it("a stale gesture's budget does not attribute a later system shift", () => {
     const { follow, tick } = makeFollow();
-    follow.input(100);
+    follow.input(100); // never confirmed
     tick(1000);
-    expect(follow.onScroll(300)).toBe(true); // pinned; residue cleared
+    expect(follow.onScroll(300)).toBe(true); // whole shift is the system's: pin
     follow.input(100); // fresh gesture: 100 <= threshold on its own
     expect(follow.isFollowing()).toBe(true);
   });

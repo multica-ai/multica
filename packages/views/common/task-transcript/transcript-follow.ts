@@ -7,18 +7,22 @@
 // live end right now" cannot distinguish a reader who scrolled away from a
 // viewport the system displaced. This latch keeps that distinction:
 //
-// - Input alone never releases: it is STAGED, and only the surface's own
-//   scroll promotes it. Input the surface never consumed — a wheel over a
-//   nested scroller, a flick on a list too short to scroll, a key a control
-//   swallowed — bubbles to the container without moving it, and must not
-//   count as leaving.
-// - Follow disengages only on staged USER displacement away from the live
-//   end (wheel/touch/key deltas, or a scrollbar drag) beyond the edge
-//   threshold, confirmed by a scroll. System displacement never counts, no
-//   matter how far it moves the viewport.
-// - While following, any non-user displacement is pinned straight back to
-//   the live end (`onScroll` / `onResize` return the verdict) — but never
-//   while the user is mid-gesture or holding the mouse down (text selection
+// - Input alone never releases: it only opens a BUDGET, and the surface's own
+//   scroll spends it. Each scroll attributes the displacement the surface
+//   actually took to the reader, capped by what they pushed — so input the
+//   surface never consumed (a wheel over a nested scroller, a flick on a list
+//   too short to scroll, a key a control swallowed) attributes nothing, and
+//   system displacement landing inside a gesture attributes at most the
+//   gesture's own size.
+// - Attributed displacement ACCUMULATES until the reader returns to the live
+//   end; it does not expire with the gesture and pins do not erase it. A
+//   trackpad flick and five discrete wheel notches at reading pace both cross
+//   the same threshold, and repeated sub-threshold attempts against a fast
+//   stream eventually win instead of being re-pinned forever.
+// - While following, displacement not attributed to the reader is pinned
+//   straight back to the live end (`onScroll` / `onResize` return the
+//   verdict) — immediately, with no intent-window timer for a final event to
+//   hide behind — but never while the mouse is held down (text selection
 //   autoscroll must not be fought).
 // - Arriving back within the edge zone re-engages the follow.
 //
@@ -34,9 +38,9 @@
 // `atBottomThreshold`, so both judges of "at the bottom" agree.
 export const FOLLOW_EDGE_THRESHOLD = 120;
 
-// How long after the last wheel/touch/key input the viewport is still treated
-// as user-controlled (suppresses pinning mid-gesture, including momentum) and
-// staged input is still promotable by a scroll.
+// How long after the last input its unspent budget is still attributable to
+// the same gesture. Only budgets expire with this window — attributed
+// displacement and pin decisions do not depend on it.
 const INPUT_INTENT_WINDOW_MS = 300;
 
 // WheelEvent.deltaMode 1 (lines) / 2 (pages) conversion.
@@ -51,8 +55,8 @@ export interface LiveEndFollow {
   /** Explicit navigation away from the live end (e.g. segment click). */
   disengage(): void;
   /**
-   * User scroll input in px; positive = away from the live end. Staged until
-   * the surface's own scroll confirms the input actually moved it.
+   * User scroll input in px; positive = away from the live end. Opens a
+   * budget the surface's own scroll can attribute displacement against.
    */
   input(delta: number): void;
   /** Mousedown inside the scroller; `onScroller` = on the element itself (scrollbar). */
@@ -60,13 +64,14 @@ export interface LiveEndFollow {
   pointerUp(): void;
   onAtEdgeChange(atEdge: boolean): void;
   /**
-   * The surface itself scrolled. Promotes staged input past the threshold
-   * into a release; returns whether to pin the viewport back to the live end.
+   * The surface itself scrolled. Attributes the observed displacement to the
+   * reader up to their input budget, releasing past the threshold; returns
+   * whether to pin the viewport back to the live end.
    */
   onScroll(distance: number): boolean;
   /**
    * The live end moved without a scroll (content grew, viewport resized).
-   * Never promotes staged input; returns whether to pin back.
+   * Never attributes displacement to the reader; returns whether to pin back.
    */
   onResize(distance: number): boolean;
 }
@@ -74,27 +79,24 @@ export interface LiveEndFollow {
 export function createLiveEndFollow(now: () => number = () => Date.now()): LiveEndFollow {
   let active = false;
   let following = true;
-  // Staged user displacement away from the live end. Compared against the
-  // edge threshold instead of absolute position: position mixes user and
-  // system displacement (a system shift can land inside the intent window
-  // and push the viewport past any threshold on its own).
-  let pendingAway = 0;
+  // Unspent input budgets for the current gesture, by direction. A budget is
+  // a claim, not displacement: it converts to `awayTaken` only as the
+  // surface's scrolls confirm movement, and expires with its gesture.
+  let awayBudget = 0;
+  let towardBudget = 0;
   let lastInputAt = -INPUT_INTENT_WINDOW_MS;
+  // Displacement the reader actually took, confirmed scroll by scroll. Does
+  // not expire and survives pins: repeated sub-threshold attempts against a
+  // fast stream accumulate into a release instead of losing every round.
+  let awayTaken = 0;
+  let lastDistance = 0;
   let mouseHeld = false;
   let scrollbarDrag = false;
 
   const inputFresh = () => now() - lastInputAt < INPUT_INTENT_WINDOW_MS;
-  const userControlsViewport = () => mouseHeld || scrollbarDrag || inputFresh();
 
-  const pinVerdict = (distance: number): boolean => {
-    if (following && !userControlsViewport() && distance > 0) {
-      // System displacement got corrected; drop any sub-threshold residue
-      // so old nudges don't accumulate into a spurious disengage later.
-      pendingAway = 0;
-      return true;
-    }
-    return false;
-  };
+  const pinVerdict = (distance: number): boolean =>
+    following && !mouseHeld && !scrollbarDrag && distance > 0;
 
   return {
     setActive(a: boolean) {
@@ -102,7 +104,10 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
     },
     reset() {
       following = true;
-      pendingAway = 0;
+      awayBudget = 0;
+      towardBudget = 0;
+      awayTaken = 0;
+      lastDistance = 0;
       mouseHeld = false;
       scrollbarDrag = false;
     },
@@ -112,11 +117,15 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
     },
     input(delta: number) {
       if (!active) return;
-      // A fresh gesture starts a fresh accumulation: intent the surface
-      // never consumed must not linger into a later gesture.
-      if (!inputFresh()) pendingAway = 0;
+      // A fresh gesture opens fresh budgets: a claim the surface never
+      // honored must not linger into a later gesture.
+      if (!inputFresh()) {
+        awayBudget = 0;
+        towardBudget = 0;
+      }
       lastInputAt = now();
-      pendingAway = Math.max(0, pendingAway + delta);
+      if (delta > 0) awayBudget += delta;
+      else towardBudget -= delta;
     },
     pointerDown(onScroller: boolean) {
       if (!active) return;
@@ -130,29 +139,60 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
     onAtEdgeChange(atEdge: boolean) {
       if (!active || !atEdge) return;
       following = true;
-      pendingAway = 0;
+      awayBudget = 0;
+      towardBudget = 0;
+      awayTaken = 0;
     },
     onScroll(distance: number): boolean {
       if (!active) return false;
+      const moved = distance - lastDistance;
+      lastDistance = distance;
       // A scrollbar drag is fully user-controlled: absolute position is the
       // user's displacement, so the plain threshold applies.
-      if (scrollbarDrag && distance > FOLLOW_EDGE_THRESHOLD) {
-        following = false;
+      if (scrollbarDrag) {
+        if (distance > FOLLOW_EDGE_THRESHOLD) following = false;
         return false;
       }
-      // The surface moved with fresh input behind it: the staged intent is
-      // confirmed consumed. The staged amount is what releases — never the
-      // observed distance, which a system shift inside the intent window
-      // could have inflated on its own.
-      if (following && inputFresh() && pendingAway > FOLLOW_EDGE_THRESHOLD && distance > 0) {
-        following = false;
+      if (moved > 0 && inputFresh() && awayBudget > 0) {
+        // The reader pushed and the surface moved: attribute the smaller of
+        // the two. A system shift landing inside the gesture (a transcript
+        // prepend) can inflate `moved` past any threshold, so the budget cap
+        // is what keeps it from ever counting as reader intent.
+        const attributed = Math.min(awayBudget, moved);
+        awayBudget -= attributed;
+        awayTaken += attributed;
+        if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) {
+          following = false;
+          return false;
+        }
+        // Wholly the reader's own move: leave them be. Any unattributed
+        // remainder is the system's and falls through to the pin.
+        if (attributed === moved) return false;
+      } else if (moved < 0 && inputFresh() && towardBudget > 0) {
+        const attributed = Math.min(towardBudget, -moved);
+        towardBudget -= attributed;
+        awayTaken = Math.max(0, awayTaken - attributed);
+        // The reader walked themselves all the way back to the live end.
+        if (distance === 0) {
+          following = true;
+          awayBudget = 0;
+          towardBudget = 0;
+          awayTaken = 0;
+        }
         return false;
       }
       return pinVerdict(distance);
     },
     onResize(distance: number): boolean {
       if (!active) return false;
-      return pinVerdict(distance);
+      if (pinVerdict(distance)) {
+        // The caller pins to the live end; record the destination so the
+        // pin's own scroll (or its absence under test) reads as no movement.
+        lastDistance = 0;
+        return true;
+      }
+      lastDistance = distance;
+      return false;
     },
   };
 }

@@ -363,7 +363,9 @@ export function AgentTranscriptDialog({
         if (e.target !== el) return;
         if (e.key === "ArrowDown") followCtl.input(LINE_SCROLL_PX);
         else if (e.key === "ArrowUp") followCtl.input(-LINE_SCROLL_PX);
-        else if (e.key === "PageDown" || e.key === " ") followCtl.input(el.clientHeight);
+        else if (e.key === "PageDown") followCtl.input(el.clientHeight);
+        // Shift+Space pages up — toward this list's live end.
+        else if (e.key === " ") followCtl.input(e.shiftKey ? -el.clientHeight : el.clientHeight);
         else if (e.key === "PageUp") followCtl.input(-el.clientHeight);
         else if (e.key === "End") followCtl.disengage();
       };

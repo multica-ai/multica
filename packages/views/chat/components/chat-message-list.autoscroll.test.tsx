@@ -139,6 +139,8 @@ interface Scroller {
   wheelWithoutScroll(px: number): void;
   /** PageUp bubbling from a focused control inside a row. */
   pageUpFromRowControl(): void;
+  /** Shift+Space (pages UP) bubbling from a focused control inside a row. */
+  shiftSpaceFromRowControl(): void;
   /** The browser scrolls the list itself (answering a key), no input seen. */
   browserScrollsListUp(px: number): void;
 }
@@ -236,6 +238,15 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
       el.appendChild(control);
       act(() => {
         control.dispatchEvent(new KeyboardEvent("keydown", { key: "PageUp", bubbles: true }));
+      });
+    },
+    shiftSpaceFromRowControl() {
+      const control = document.createElement("button");
+      el.appendChild(control);
+      act(() => {
+        control.dispatchEvent(
+          new KeyboardEvent("keydown", { key: " ", shiftKey: true, bubbles: true }),
+        );
       });
     },
     browserScrollsListUp(px) {
@@ -360,8 +371,10 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(1);
     scroll.grow(180);
 
-    // 60px wheel ticks, each under the edge threshold on its own; the latch
-    // accumulates them past it while suppressing pins mid-gesture.
+    // 60px wheel ticks, each under the edge threshold on its own and each
+    // answered by a chunk that pins the reader back — but the displacement
+    // they actually took accumulates across the pins, so the third tick
+    // crosses the threshold and releases.
     for (let seq = 2; seq <= 5; seq++) {
       scroll.readerScrollsUp(60);
       streamChunk(seq);
@@ -371,7 +384,50 @@ describe("ChatMessageList auto-scroll", () => {
     streamChunk(6);
     scroll.grow(180);
 
-    expect(scroll.distanceFromBottom()).toBe(1140);
+    expect(scroll.distanceFromBottom()).toBe(660);
+  });
+
+  // Discrete mouse wheel at reading pace: one notch per event, spaced past
+  // the intent window. Release must not require a single fast burst.
+  it("releases for wheel notches spaced past the intent window", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.readerScrollsUp(100);
+    gestureSettles();
+    scroll.readerScrollsUp(100);
+    gestureSettles();
+    const parked = scroll.scrollTop;
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.scrollTop).toBe(parked);
+  });
+
+  // A reply's final chunk always exists and has a whole intent window to land
+  // in after any small nudge; no later event will re-evaluate a declined pin.
+  it("pins a chunk that lands inside the reader's intent window", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.readerScrollsUp(2);
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("honors Shift+Space paging from a focused row control", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.shiftSpaceFromRowControl();
+    scroll.browserScrollsListUp(VIEWPORT);
+    const parked = scroll.scrollTop;
+    gestureSettles();
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.scrollTop).toBe(parked);
   });
 
   it("leaves the viewport alone once the reader scrolls up to read history", () => {

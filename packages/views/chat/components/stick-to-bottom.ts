@@ -120,7 +120,9 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
       if (e.key === "ArrowUp") follow.input(LINE_SCROLL_PX);
       else if (e.key === "ArrowDown") follow.input(-LINE_SCROLL_PX);
       else if (e.key === "PageUp") follow.input(scrollEl.clientHeight);
-      else if (e.key === "PageDown" || e.key === " ") follow.input(-scrollEl.clientHeight);
+      else if (e.key === "PageDown") follow.input(-scrollEl.clientHeight);
+      // Shift+Space pages UP — away from the live end.
+      else if (e.key === " ") follow.input(e.shiftKey ? scrollEl.clientHeight : -scrollEl.clientHeight);
       else if (e.key === "Home") follow.input(scrollEl.scrollHeight);
       else if (e.key === "End") follow.input(-scrollEl.scrollHeight);
     };
