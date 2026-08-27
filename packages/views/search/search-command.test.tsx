@@ -304,6 +304,15 @@ describe("SearchCommand", () => {
     });
   });
 
+  it("disables dialog animation in both open and closed states", () => {
+    renderSearch();
+
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "data-open:animate-none",
+      "data-closed:animate-none",
+    );
+  });
+
   it("closes on a single Escape press from the search input", async () => {
     const user = userEvent.setup();
 
