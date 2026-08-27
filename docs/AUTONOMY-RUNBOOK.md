@@ -54,6 +54,36 @@ Marking a model unhealthy makes the resolver skip it for that workspace (and
 globally for `NULL` workspace_id rows) on the next enqueue/retry. This is the
 fastest way to route around an outage without touching per-agent config.
 
+### Arm a drill fault without a session token
+
+If the admin PAT is expired (REST returns 401) you can inject the same fault
+directly in Postgres — the resolver reads `model_health` from the DB, so this is
+functionally identical to `PUT /api/model-health`. Make it **sticky** (push
+`last_failure_at` a year out) so the 10m stale-TTL can't auto-heal it during the
+drill.
+
+```bash
+WS=dc85f04e-b671-457f-808f-b9a666ac6063   # multica-dev
+docker exec multica-postgres-1 psql -U multica -d multica -c "
+UPDATE model_health SET last_failure_at = now() + interval '365 days',
+       status='unhealthy', reason='drill', consecutive_failures=1
+WHERE concrete='hy3-free'
+  AND (workspace_id IS NOT DISTINCT FROM '$WS'::uuid OR workspace_id IS NULL);
+"
+```
+
+Disarm (flip healthy again, workspace + global):
+
+```bash
+docker exec multica-postgres-1 psql -U multica -d multica -c "
+INSERT INTO model_health (workspace_id, concrete, status, reason, consecutive_failures, last_success_at, updated_at)
+VALUES (NULL,'hy3-free','healthy',NULL,0,now(),now())
+ON CONFLICT (workspace_id, concrete) DO UPDATE SET status='healthy', reason=NULL,
+  consecutive_failures=0, last_success_at=now(), updated_at=now();
+"
+# repeat with workspace_id = '$WS'::uuid for the workspace-scoped row
+```
+
 ## Set fallback chains
 
 ```bash
