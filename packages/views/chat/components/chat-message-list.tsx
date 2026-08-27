@@ -48,7 +48,8 @@ import { buildTimeline } from "../../common/task-transcript";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
-import { STICK_EDGE_THRESHOLD, useStickToBottom } from "./stick-to-bottom";
+import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
+import { useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -186,12 +187,11 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const isPinned = useStickToBottom(scrollContainerEl, contentEl);
+  const { isFollowing, onContentHeightChanged } = useStickToBottom(scrollContainerEl);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -315,8 +315,6 @@ export function ChatMessageList({
       // "near-viewport" against that element rather than the browser viewport —
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
-      {/* ResizeObserver cannot report scroll extent, so observe a content wrapper. */}
-      <div ref={setContentEl}>
       <Virtuoso
         customScrollParent={scrollContainerEl}
         data={renderItems}
@@ -332,11 +330,20 @@ export function ChatMessageList({
         // than the viewport, so switching sessions always shows the latest reply.
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        atBottomThreshold={STICK_EDGE_THRESHOLD}
-        // Follow only when Virtuoso and resize-driven pinning both report the live end.
+        atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+        // Follow rapid streamed output only while Virtuoso says the reader is
+        // at the live end. An in-flight smooth animation temporarily reports
+        // "not at bottom" on the next append and permanently drops the follow
+        // (#6697), so live growth must use an immediate scroll. `isFollowing`
+        // narrows this further: the reader may have scrolled away by input the
+        // 120px `atBottom` band forgives (see stick-to-bottom.ts).
         followOutput={(atBottom) =>
-          !isFetchingOlderMessages && atBottom && isPinned() ? "auto" : false
+          !isFetchingOlderMessages && atBottom && isFollowing() ? "auto" : false
         }
+        // `followOutput` never fires for a single row growing mid-stream, so
+        // content resizes route to the bottom-stick through Virtuoso's own
+        // height signal instead.
+        totalListHeightChanged={onContentHeightChanged}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
@@ -361,7 +368,6 @@ export function ChatMessageList({
           </div>
         )}
       />
-      </div>
       </RichContentScrollRootProvider>
       )}
     </div>

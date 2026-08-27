@@ -56,7 +56,7 @@ import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes"
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
 import {
-  createNewestFirstFollow,
+  createLiveEndFollow,
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
@@ -333,7 +333,7 @@ export function AgentTranscriptDialog({
   // controller (see transcript-follow.ts for the model); this component only
   // wires DOM events to it. A stable instance, never re-rendered by scroll
   // traffic.
-  const followCtl = useMemo(() => createNewestFirstFollow(), []);
+  const followCtl = useMemo(() => createLiveEndFollow(), []);
   const detachScrollerRef = useRef<(() => void) | null>(null);
 
   const handleScrollerRef = useCallback(
@@ -1204,7 +1204,7 @@ export function AgentTranscriptDialog({
                 }
                 atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
                 atTopThreshold={FOLLOW_EDGE_THRESHOLD}
-                atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
+                atTopStateChange={(atTop) => followCtl.onAtEdgeChange(atTop)}
                 scrollerRef={handleScrollerRef}
                 computeItemKey={(_, row) => row.seq}
                 components={LIST_COMPONENTS}

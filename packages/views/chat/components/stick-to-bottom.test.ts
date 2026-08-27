@@ -4,9 +4,9 @@ import {
   bottomPinTarget,
   distanceFromBottom,
   isAtLiveEnd,
-  STICK_EDGE_THRESHOLD,
   type ScrollMetrics,
 } from "./stick-to-bottom";
+import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 
 const VIEWPORT = 600;
 
@@ -30,8 +30,8 @@ describe("distanceFromBottom", () => {
 
 describe("isAtLiveEnd", () => {
   it("keeps following inside the edge threshold and releases past it", () => {
-    expect(isAtLiveEnd(at(4000, STICK_EDGE_THRESHOLD))).toBe(true);
-    expect(isAtLiveEnd(at(4000, STICK_EDGE_THRESHOLD + 1))).toBe(false);
+    expect(isAtLiveEnd(at(4000, FOLLOW_EDGE_THRESHOLD))).toBe(true);
+    expect(isAtLiveEnd(at(4000, FOLLOW_EDGE_THRESHOLD + 1))).toBe(false);
   });
 });
 

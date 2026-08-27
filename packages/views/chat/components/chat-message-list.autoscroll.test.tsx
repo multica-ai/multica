@@ -8,25 +8,49 @@ import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import { ChatMessageList } from "./chat-message-list";
 
-// Virtuoso cannot render rows in jsdom's zero-height viewport.
+// TIM-55 wiring: the list must keep the live end visible through streaming
+// growth and composer resizes, releasing only on real reader input. The latch
+// decision table is canonical in transcript-follow.test.ts and the scroll
+// geometry in stick-to-bottom.test.ts; this suite drives the real component
+// through the DOM signals those decisions are wired to. Reader gestures here
+// are wheel INPUT followed by the scroll it causes — position-only moves model
+// the browser (clamps), input-led moves model the reader.
+
+// Virtuoso cannot render rows in jsdom's zero-height viewport. The stub keeps
+// the row count visible, surfaces `followOutput` verdicts as attributes, and
+// captures `totalListHeightChanged` so the harness can report content growth
+// the way the real Virtuoso does.
+let reportContentHeightChanged: (() => void) | undefined;
+
 vi.mock("react-virtuoso", () => ({
   Virtuoso: ({
     data,
     itemContent,
     computeItemKey,
+    followOutput,
+    totalListHeightChanged,
   }: {
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
-  }) => (
-    <div data-testid="virtuoso-rows">
-      {data.map((item, i) => (
-        <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
-          {itemContent(i, item)}
-        </div>
-      ))}
-    </div>
-  ),
+    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
+    totalListHeightChanged?: () => void;
+  }) => {
+    reportContentHeightChanged = totalListHeightChanged;
+    return (
+      <div
+        data-testid="virtuoso-rows"
+        data-follow-at-bottom={String(followOutput?.(true))}
+        data-follow-away-from-bottom={String(followOutput?.(false))}
+      >
+        {data.map((item, i) => (
+          <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
+            {itemContent(i, item)}
+          </div>
+        ))}
+      </div>
+    );
+  },
 }));
 
 const TEST_RESOURCES = { en: { chat: enChat } };
@@ -45,14 +69,24 @@ function observedTargets(): Element[] {
   return observers.flatMap((o) => o.targets);
 }
 
-function resize() {
+function fireResizeObservers() {
   act(() => {
     for (const observer of observers) observer.fire();
   });
 }
 
+// The follow latch treats input within its intent window as an ongoing
+// gesture and defers pinning; tests control that clock directly.
+let now = 0;
+function gestureSettles() {
+  now += 301;
+}
+
 beforeEach(() => {
   observers = [];
+  reportContentHeightChanged = undefined;
+  now = 0;
+  vi.spyOn(Date, "now").mockImplementation(() => now);
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -79,36 +113,31 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 interface Scroller {
   el: HTMLElement;
   scrollTop: number;
-  contentHeight: number;
-  viewportHeight: number;
   distanceFromBottom(): number;
+  /** A streamed chunk grew the content; Virtuoso reports the new height. */
   grow(px: number): void;
+  /** Content shrank (a fold closing); the browser clamps scrollTop. */
   shrinkContent(px: number): void;
+  /** The composer collapsed, giving the list `px` back; scrollTop clamps. */
   growViewport(px: number): void;
+  /** The composer grew, taking `px` off the list's height. */
   shrinkViewport(px: number): void;
+  /** Reader wheel input scrolling up by `px`, and the scroll it causes. */
   readerScrollsUp(px: number): void;
+  /** Reader wheel input landing `fromBottom` px above the live end. */
   readerScrollsTo(fromBottom: number): void;
 }
 
 function scroller(el: HTMLElement): Scroller {
   const state = { scrollTop: 0, contentHeight: 2000, viewportHeight: VIEWPORT };
+  // Open at the bottom, matching Virtuoso's `initialTopMostItemIndex: LAST`.
   state.scrollTop = state.contentHeight - state.viewportHeight;
-
-  const clampAfterShrink = () => {
-    state.scrollTop = Math.min(
-      state.scrollTop,
-      Math.max(0, state.contentHeight - state.viewportHeight),
-    );
-    act(() => {
-      el.dispatchEvent(new Event("scroll"));
-    });
-    resize();
-  };
 
   Object.defineProperties(el, {
     scrollHeight: { configurable: true, get: () => state.contentHeight },
@@ -122,47 +151,69 @@ function scroller(el: HTMLElement): Scroller {
     },
   });
 
+  const scrollEvent = () => {
+    act(() => {
+      el.dispatchEvent(new Event("scroll"));
+    });
+  };
+
+  // Reader input: the wheel delta the hook judges intent from, then the
+  // scroll it produces. Wheel up is a negative deltaY.
+  const wheelBy = (px: number) => {
+    act(() => {
+      el.dispatchEvent(new WheelEvent("wheel", { deltaY: -px }));
+    });
+    state.scrollTop -= px;
+    scrollEvent();
+  };
+
+  // Browser clamp after the scrollable extent shrank: scrollTop drops to the
+  // new maximum and a scroll event fires, with no input anywhere.
+  const clampAfterShrink = () => {
+    state.scrollTop = Math.min(
+      state.scrollTop,
+      Math.max(0, state.contentHeight - state.viewportHeight),
+    );
+    scrollEvent();
+  };
+
+  const contentChanged = () => {
+    act(() => {
+      reportContentHeightChanged?.();
+    });
+  };
+
   return {
     el,
     get scrollTop() {
       return state.scrollTop;
-    },
-    get contentHeight() {
-      return state.contentHeight;
-    },
-    get viewportHeight() {
-      return state.viewportHeight;
     },
     distanceFromBottom() {
       return state.contentHeight - state.scrollTop - state.viewportHeight;
     },
     grow(px) {
       state.contentHeight += px;
-      resize();
+      contentChanged();
     },
     shrinkContent(px) {
       state.contentHeight -= px;
       clampAfterShrink();
+      contentChanged();
     },
     growViewport(px) {
       state.viewportHeight += px;
       clampAfterShrink();
+      fireResizeObservers();
     },
     shrinkViewport(px) {
       state.viewportHeight -= px;
-      resize();
+      fireResizeObservers();
     },
     readerScrollsUp(px) {
-      state.scrollTop -= px;
-      act(() => {
-        el.dispatchEvent(new Event("scroll"));
-      });
+      wheelBy(px);
     },
     readerScrollsTo(fromBottom) {
-      state.scrollTop = state.contentHeight - state.viewportHeight - fromBottom;
-      act(() => {
-        el.dispatchEvent(new Event("scroll"));
-      });
+      wheelBy(fromBottom - this.distanceFromBottom());
     },
   };
 }
@@ -195,6 +246,10 @@ function renderStreamingChat() {
     view,
     scroll: scroller(el),
     rowCount: () => view.container.querySelectorAll("[data-row-key]").length,
+    followsAtBottom: () =>
+      view.container
+        .querySelector("[data-follow-at-bottom]")
+        ?.getAttribute("data-follow-at-bottom"),
     streamChunk: (seq: number) => {
       act(() => {
         qc.setQueryData<TaskMessagePayload[]>(
@@ -206,19 +261,7 @@ function renderStreamingChat() {
   };
 }
 
-// Pure scroll geometry is covered in stick-to-bottom.test.ts.
 describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
-  it("measures both the viewport and the content, not just the viewport", () => {
-    const { scroll, view } = renderStreamingChat();
-
-    const targets = observedTargets();
-    expect(targets).toContain(scroll.el);
-    // ResizeObserver tracks element dimensions, not scroll extent.
-    expect(targets.some((t) => t !== scroll.el && scroll.el.contains(t))).toBe(true);
-
-    view.unmount();
-  });
-
   it("follows a streaming reply whose row count never changes", () => {
     const { scroll, streamChunk, rowCount } = renderStreamingChat();
 
@@ -270,10 +313,45 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
     expect(scroll.distanceFromBottom()).toBe(0);
   });
 
+  // The base behavior `atBottomThreshold` always granted: a trackpad nudge
+  // inside the edge zone is not the reader leaving.
+  it("keeps following after a small trackpad nudge near the live end", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.readerScrollsUp(2);
+    gestureSettles();
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("releases on incremental upward scrolling during a fast stream", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    // 60px wheel ticks, each under the edge threshold on its own; the latch
+    // accumulates them past it while suppressing pins mid-gesture.
+    for (let seq = 2; seq <= 5; seq++) {
+      scroll.readerScrollsUp(60);
+      streamChunk(seq);
+      scroll.grow(180);
+    }
+    gestureSettles();
+    streamChunk(6);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(1140);
+  });
+
   it("leaves the viewport alone once the reader scrolls up to read history", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
     scroll.readerScrollsTo(900);
+    gestureSettles();
     const parked = scroll.scrollTop;
 
     streamChunk(1);
@@ -283,31 +361,30 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
     expect(scroll.scrollTop).toBe(parked);
   });
 
-  it("releases the pin on incremental upward scrolling during a fast stream", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
-
-    streamChunk(1);
-    scroll.grow(180);
-
-    for (let seq = 2; seq <= 5; seq++) {
-      scroll.readerScrollsUp(60);
-      streamChunk(seq);
-      scroll.grow(180);
-    }
-
-    expect(scroll.distanceFromBottom()).toBe(960);
-  });
-
   it("re-engages when the reader scrolls back down to the live end", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
     scroll.readerScrollsTo(900);
     scroll.readerScrollsTo(0);
+    gestureSettles();
 
     streamChunk(1);
     scroll.grow(500);
 
     expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  // `followOutput` is `atBottom && isFollowing()`: a released follow must turn
+  // it off even while Virtuoso still reports the reader at the bottom.
+  it("turns followOutput off while released, even when Virtuoso reports atBottom", () => {
+    const { scroll, streamChunk, followsAtBottom } = renderStreamingChat();
+
+    expect(followsAtBottom()).toBe("auto");
+
+    scroll.readerScrollsTo(900);
+    streamChunk(1);
+
+    expect(followsAtBottom()).toBe("false");
   });
 
   it("stops measuring once the list unmounts", () => {

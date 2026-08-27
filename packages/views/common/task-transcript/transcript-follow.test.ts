@@ -1,10 +1,10 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { createNewestFirstFollow, FOLLOW_EDGE_THRESHOLD } from "./transcript-follow";
+import { createLiveEndFollow, FOLLOW_EDGE_THRESHOLD } from "./transcript-follow";
 
 function makeFollow(startAt = 0) {
   let t = startAt;
-  const follow = createNewestFirstFollow(() => t);
+  const follow = createLiveEndFollow(() => t);
   const tick = (ms: number) => {
     t += ms;
   };
@@ -12,7 +12,7 @@ function makeFollow(startAt = 0) {
   return { follow, tick };
 }
 
-describe("createNewestFirstFollow", () => {
+describe("createLiveEndFollow", () => {
   it("starts following and pins system displacement back to the live end", () => {
     const { follow, tick } = makeFollow();
     tick(1000);
@@ -66,7 +66,7 @@ describe("createNewestFirstFollow", () => {
     const { follow } = makeFollow();
     follow.input(FOLLOW_EDGE_THRESHOLD + 1);
     expect(follow.isFollowing()).toBe(false);
-    follow.onAtTopChange(true);
+    follow.onAtEdgeChange(true);
     expect(follow.isFollowing()).toBe(true);
   });
 
