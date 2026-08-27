@@ -13,6 +13,7 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
 | `JWT_SECRET` | **Required — no safe default.** Secret key for signing JWT tokens. A production backend refuses to boot if this is empty or a known placeholder. Generate with `openssl rand -hex 32`. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
+| `MULTICA_ENV_ENC_KEY` | Optional — 32-byte hex or base64 key that encrypts each agent's `custom_env` at rest (AES-256-GCM). Unset → secrets stored in plaintext (logged once). Supply via `.env`; it is gitignored. | `openssl rand -hex 32` |
 
 ### Database Pool Tuning (Optional)
 
@@ -650,6 +651,15 @@ docker compose -f docker-compose.selfhost.yml exec backend \
 docker compose -f docker-compose.selfhost.yml cp backend:/tmp/heap.pprof ./heap.pprof
 go tool pprof ./heap.pprof
 ```
+
+### Routine maintenance: daily Docker prune
+
+A host launchd job `com.scotthawes.docker-cleanup` runs `docker image prune` and
+`docker container prune` every day at 04:00, keeping the self-host host's disk
+from filling with dangling images/containers. It is host-side — not part of
+`docker-compose.selfhost.yml` — so install the plist with `launchctl load` and
+point `ProgramArguments` at your prune script. Logs land in
+`~/Library/Logs/docker-cleanup.log`.
 
 ## Upgrading
 
