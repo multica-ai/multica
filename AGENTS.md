@@ -47,7 +47,9 @@ Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared package
 ### Commands
 
 ```bash
-make dev              # Auto-setup + start everything
+make up               # Auto-setup + start (C=api,web,daemon,desktop)
+make db-from-k8s      # Copy home K8s Postgres into local Docker
+make dev-from-k8s     # Snapshot K8s data, then `make dev`
 pnpm typecheck        # TypeScript check
 pnpm test             # TS unit tests (Vitest)
 make test             # Go tests

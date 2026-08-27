@@ -52,8 +52,12 @@ fi
 # ---------- Database ----------
 bash scripts/ensure-postgres.sh "$ENV_FILE"
 
-echo "==> Running migrations..."
-(cd server && go run ./cmd/migrate up)
+if [ "${MULTICA_DB_FROM_K8S:-}" = "1" ]; then
+  bash scripts/db-from-k8s.sh "$ENV_FILE"
+else
+  echo "==> Running migrations..."
+  (cd server && go run ./cmd/migrate up)
+fi
 
 # ---------- Start services ----------
 echo ""

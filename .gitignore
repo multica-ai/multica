@@ -78,3 +78,5 @@ data/
 # Python (agent tooling)
 __pycache__/
 *.pyc
+
+.direnv

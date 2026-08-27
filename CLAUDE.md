@@ -81,6 +81,8 @@ make status           # what is running, with pid/commit proof it is yours
 make list             # every development environment on this machine
 make down             # stop the processes, keep the database
 make destroy          # stop, then drop the database and free the slot
+make db-from-k8s      # copy home K8s Postgres into local Docker
+make dev-from-k8s     # snapshot K8s data, then start with `make dev`
 make dev              # auto-setup and start the app in the foreground
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout

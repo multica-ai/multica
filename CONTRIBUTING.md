@@ -554,6 +554,17 @@ make db-reset
 make start
 ```
 
+To copy the home Kubernetes database into local Docker (overwrites
+`POSTGRES_DB`, does not change the cluster):
+
+```bash
+make db-from-k8s
+make up
+```
+
+Foreground alternative: `make dev-from-k8s`. Session cookies from
+the cluster site do not work on localhost; log in again.
+
 - only affects the current env's database; other worktree databases are untouched
 - refuses to run if `DATABASE_URL` points at a remote host
 - pass `ENV_FILE=.env.worktree` to target a specific worktree

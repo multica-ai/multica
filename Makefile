@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
+.PHONY: help makehelp dev dev-from-k8s server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset db-from-k8s selfhost selfhost-build selfhost-stop up down status list destroy gc env-exec api-dev web-dev desktop-dev
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -70,7 +70,7 @@ endef
 ##@ Help
 
 help: ## Show available make targets and common local workflows
-	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake up\033[0m           Start this checkout'"'"'s environment (C=api,web,daemon,desktop)\n  \033[36mmake status\033[0m       Show what is running, and prove it is yours\n  \033[36mmake down\033[0m         Stop it again, keeping the database\n  \033[36mmake check\033[0m        Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
+	@awk 'BEGIN {FS = ":.*## "; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nQuick start:\n  \033[36mmake db-from-k8s\033[0m Copy the home K8s database into local Docker\n  \033[36mmake up\033[0m           Start this checkout'"'"'s environment (C=api,web,daemon,desktop)\n  \033[36mmake status\033[0m       Show what is running, and prove it is yours\n  \033[36mmake down\033[0m         Stop it again, keeping the database\n  \033[36mmake check\033[0m        Run the full local verification pipeline\n\nCheckout modes:\n  Main checkout uses \033[36m.env\033[0m\n  Worktrees use \033[36m.env.worktree\033[0m (generate with \033[36mmake worktree-env\033[0m)\n\n"} \
 		/^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next} \
 		/^[a-zA-Z0-9_.-]+:.*## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -265,6 +265,10 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 	@echo ""
 	@echo "✓ Database '$(POSTGRES_DB)' reset. Run 'make start' to launch the app."
 
+db-from-k8s: ## Replace the local Docker database with a snapshot of the home K8s Postgres
+	$(REQUIRE_ENV)
+	@bash scripts/db-from-k8s.sh "$(ENV_FILE)"
+
 worktree-env: ## Generate .env.worktree with a unique DB name and app ports for this worktree
 	@bash scripts/init-worktree-env.sh .env.worktree
 
@@ -306,6 +310,9 @@ remove-worktree: ## Drop a linked worktree's database, then remove it (WORKTREE=
 
 dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, migrate, start services
 	@bash scripts/dev.sh
+
+dev-from-k8s: ## Snapshot the home K8s database into local Docker, then start like `make dev`
+	@MULTICA_DB_FROM_K8S=1 bash scripts/dev.sh
 
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)
