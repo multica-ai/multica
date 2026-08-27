@@ -104,6 +104,12 @@ func TestFailTask_HelpSignalWithoutExplicitReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
+	// FailTask only transitions a claimed task (running/dispatched/...); a
+	// freshly enqueued task is 'queued'. Mirror the sibling test and set the
+	// task running so FailAgentTask can mark it failed.
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status='running', started_at=now() WHERE id=$1`, task.ID); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
 
 	needs := []string{"a second opinion on the regex"}
 	help := HelpSignal{Needs: needs}
