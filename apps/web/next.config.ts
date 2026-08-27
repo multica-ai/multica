@@ -97,10 +97,10 @@ const nextConfig: NextConfig = {
   },
 };
 
-// fumadocs-mdx@12 is incompatible with Next 16's Turbopack: its loader fails to
-// dynamic-import `.source/source.config.mjs` under the Turbopack Node evaluator
-// (see fumadocs#2658). `dev`/`build` scripts pass `--webpack` to opt out.
-// Drop the flag once fumadocs-mdx ships a Turbopack-compatible loader.
+// fumadocs-mdx@12 registers both webpack and Turbopack loaders via createMDX().
+// Next 16 defaults to Turbopack; do not pass `--webpack` — first-compile of `/`
+// is ~90ms vs ~73s under webpack. Instant Navigations (cacheComponents /
+// partialPrefetching) is a separate route-by-route migration, not enabled here.
 const withMDX = createMDX() as (config: NextConfig) => NextConfig;
 
 export default withMDX(nextConfig);

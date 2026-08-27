@@ -45,6 +45,10 @@
     --color-secondary: var(--secondary);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
+    --color-primary-hover: var(--primary-hover);
+    --color-primary-pressed: var(--primary-pressed);
+    --color-brand-hover: var(--brand-hover);
+    --color-brand-pressed: var(--brand-pressed);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -121,19 +125,9 @@
     color-scheme: light;
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
-       for bounded content groups; raised surfaces are ephemeral overlays. */
-    --app-shell: oklch(0.964435 0.001327 286.375);
-    --page-canvas: oklch(0.988087 0 0);
-    --surface: oklch(1 0 0);
-    --surface-foreground: oklch(0.141 0.005 285.823);
-    --surface-raised: oklch(1 0 0);
-    --surface-hover: oklch(0.967 0.001 286.375);
-    --surface-selected: oklch(0.95 0.002 286.375);
-    --surface-selected-foreground: oklch(0.141 0.005 285.823);
-    --surface-border: oklch(0.92 0.004 286.32);
-    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
-    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
-
+       for bounded content groups; raised surfaces are ephemeral overlays.
+       Colour values below are generated from packages/ui/appearance. */
+    --radius: 0.625rem;
     /* The chat launcher is an overlay pinned to the dashboard's bottom-right
        corner on every workspace page, so that corner is not available to page
        content. Its geometry lives here rather than in the button so that the
@@ -145,145 +139,130 @@
     --chat-launcher-clearance: calc(
       var(--chat-launcher-size) + var(--chat-launcher-inset) * 2
     );
-    /* Menus (dropdown/context/select/popover) hover just above their trigger,
-       so they carry a lighter shadow than window-level overlays (dialogs,
-       sheets), which keep --floating-shadow. */
-    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
-    --background: var(--page-canvas);
-    --foreground: oklch(0.141 0.005 285.823);
-    --card: var(--surface);
-    --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: var(--surface-raised);
-    --popover-foreground: oklch(0.141 0.005 285.823);
-    --primary: oklch(0.21 0.006 285.885);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.967 0.001 286.375);
-    /* Lightness is pinned by WCAG AA, not by taste: muted text sits on every
-       light surface we have, and the darkest of them — --sidebar-accent, the
-       nav hover state — is the binding constraint. At the old 0.552 that pair
-       was 3.98:1; 0.505 clears 4.5:1 on all of app-shell / page-canvas /
-       sidebar / sidebar-accent / muted / surface-selected / surface, with the
-       worst case at 4.88:1. Raise it and the nav labels fail again. Hue and
-       chroma are unchanged so the neutral ramp keeps its cast. */
-    --muted-foreground: oklch(0.505 0.016 285.938);
-    /* The quiet step below muted, for marks that are not text: disclosure
-       chevrons, separator glyphs, the em dash standing in for an empty cell,
-       the large icon in an empty state. It exists because the alternative
-       people reached for was alpha — 152 call sites of
-       text-muted-foreground/30..80 — and alpha on light surfaces lands
-       between 1.5:1 and 3.8:1, which fails even the 3:1 floor for non-text.
-       0.606 is the lightest step that still clears 3:1 (WCAG 1.4.11) on every
-       surface, worst case --sidebar-accent at 3.19:1. Deliberately NOT valid
-       for text: text has one floor, --muted-foreground, and there is no room
-       for a third readable step (AA caps a lighter text tone at L 0.523 here,
-       0.018 away from muted — a difference no one can see). */
-    --faint-foreground: oklch(0.606 0.016 285.938);
-    --accent: oklch(0.967 0.001 286.375);
-    --accent-foreground: oklch(0.21 0.006 285.885);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.945 0.003 286.32);
-    --input: oklch(0.92 0.004 286.32);
-    --ring: oklch(0.705 0.015 286.067);
-    /* Brand-derived blue gradient (h=255 = brand hue). chart-1 equals brand
-       so the most important series visually anchors to the product colour;
-       chart-2..5 step lighter + less saturated so a stacked bar reads
-       "primary → secondary → tertiary" at a glance instead of fighting
-       for attention as five equally-weighted greys. */
-    --chart-1: oklch(0.55 0.16 255);
-    --chart-2: oklch(0.66 0.13 255);
-    --chart-3: oklch(0.76 0.10 255);
-    --chart-4: oklch(0.85 0.06 255);
-    --chart-5: oklch(0.92 0.03 255);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.964435 0.001327 286.375);
-    --sidebar-foreground: oklch(0.141 0.005 285.823);
-    --sidebar-primary: oklch(0.21 0.006 285.885);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.935 0.003 286.375);
-    --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
-    --sidebar-border: oklch(0.92 0.004 286.32);
-    --sidebar-ring: oklch(0.705 0.015 286.067);
-    --brand: oklch(0.55 0.16 255);
-    --brand-foreground: oklch(0.985 0 0);
-    --success: oklch(0.55 0.16 145);
-    --warning: oklch(0.75 0.16 85);
-    --info: oklch(0.55 0.18 250);
-    --scrollbar-thumb: oklch(0 0 0 / 10%);
-    --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
+    /* generated-light:start */
+    --app-shell: oklch(0.955227 0.00415 271.369);
+    --page-canvas: oklch(0.997025 0 0);
+    --surface: oklch(0.997025 0 0);
+    --surface-raised: oklch(0.997025 0 0);
+    --surface-hover: oklch(0.967434 0.001326 286.375);
+    --surface-selected: oklch(0.939625 0.018952 279.523);
+    --surface-border: oklch(0.930514 0.00173 247.84);
+    --background: oklch(0.997025 0 0);
+    --card: oklch(0.997025 0 0);
+    --popover: oklch(0.997025 0 0);
+    --muted: oklch(0.96067 0.001717 247.84);
+    --secondary: oklch(0.96067 0.001717 247.84);
+    --accent: oklch(0.967434 0.001326 286.375);
+    --sidebar: oklch(0.984625 0.001706 247.839);
+    --sidebar-accent: oklch(0.939871 0.002895 264.542);
+    --border: oklch(0.930514 0.00173 247.84);
+    --input: oklch(0.91259 0.002916 264.541);
+    --foreground: oklch(0.313132 0.028735 265.239);
+    --muted-foreground: oklch(0.524011 0.030046 266.378);
+    --faint-foreground: oklch(0.622951 0.028724 266.47);
+    --surface-foreground: oklch(0.313132 0.028735 265.239);
+    --surface-selected-foreground: oklch(0.313132 0.028735 265.239);
+    --card-foreground: oklch(0.313132 0.028735 265.239);
+    --popover-foreground: oklch(0.313132 0.028735 265.239);
+    --secondary-foreground: oklch(0.313132 0.028735 265.239);
+    --accent-foreground: oklch(0.313132 0.028735 265.239);
+    --sidebar-foreground: oklch(0.313132 0.028735 265.239);
+    --sidebar-primary: oklch(0.574574 0.159573 275.293);
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent-foreground: oklch(0.313132 0.028735 265.239);
+    --sidebar-border: oklch(0.930514 0.00173 247.84);
+    --sidebar-ring: oklch(0.574574 0.159573 275.293);
+    --primary: oklch(0.313132 0.028735 265.239);
+    --primary-foreground: oklch(1 0 0);
+    --primary-hover: oklch(0.26426 0.028236 263.908);
+    --primary-pressed: oklch(0.231737 0.028683 266.306);
+    --brand: oklch(0.574574 0.159573 275.293);
+    --brand-foreground: oklch(1 0 0);
+    --brand-hover: oklch(0.535221 0.159988 275.08);
+    --brand-pressed: oklch(0.504683 0.158512 274.979);
+    --destructive: oklch(0.546382 0.183864 27.535);
+    --success: oklch(0.621162 0.179736 148.011);
+    --warning: oklch(0.528846 0.111891 74.364);
+    --info: oklch(0.574574 0.159573 275.293);
+    --ring: oklch(0.804138 0.066563 280.033);
+    --chart-1: oklch(0.574574 0.159573 275.293);
+    --chart-2: oklch(0.654536 0.158944 275.118);
+    --chart-3: oklch(0.735484 0.137113 275.186);
+    --chart-4: oklch(0.814863 0.092997 275.406);
+    --chart-5: oklch(0.894043 0.051586 275.693);
+    --surface-shadow: 0 1px 2px rgb(42 49 64 / 0.04), 0 1px 1px rgb(42 49 64 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(42 49 64 / 0.14), 0 3px 10px rgb(42 49 64 / 0.08);
+    --menu-shadow: 0 8px 24px rgb(42 49 64 / 0.08), 0 2px 6px rgb(42 49 64 / 0.05);
+    --scrollbar-thumb: oklch(0 0 0 / 0.1);
+    --scrollbar-thumb-hover: oklch(0 0 0 / 0.18);
     --scrollbar-track: transparent;
-    /* In-page find (Cmd/Ctrl+F) match tints, painted via the CSS Custom
-       Highlight API. Bright fill + dark text so matches stay legible in
-       both themes; the active match steps to orange. */
-    --find-match: oklch(0.92 0.15 100);
-    --find-match-active: oklch(0.82 0.17 62);
-    --find-match-foreground: oklch(0.22 0.03 92);
+    --find-match: oklch(0.860034 0.139846 100.291);
+    --find-match-active: oklch(0.766736 0.127848 77.603);
+    --find-match-foreground: oklch(0.261471 0.034286 93.154);
+    /* generated-light:end */
 }
 
 .dark {
     color-scheme: dark;
-    --app-shell: oklch(0.155 0.005 285.823);
-    --page-canvas: oklch(0.18 0.005 285.823);
-    --surface: oklch(0.21 0.006 285.885);
-    --surface-foreground: oklch(0.985 0 0);
-    --surface-raised: oklch(0.235 0.007 285.885);
-    --surface-hover: oklch(0.274 0.006 286.033);
-    --surface-selected: oklch(0.3 0.006 286.033);
-    --surface-selected-foreground: oklch(0.985 0 0);
-    --surface-border: oklch(1 0 0 / 10%);
+    /* generated-dark:start */
+    --app-shell: oklch(0.191949 0.008216 274.469);
+    --page-canvas: oklch(0.210179 0.00997 276.557);
+    --surface: oklch(0.321069 0.009283 268.377);
+    --surface-raised: oklch(0.379046 0.008894 268.423);
+    --surface-hover: oklch(0.375253 0.008917 268.42);
+    --surface-selected: oklch(0.378757 0.046693 275.854);
+    --surface-border: oklch(0.427919 0.010201 271.174);
+    --background: oklch(0.210179 0.00997 276.557);
+    --card: oklch(0.321069 0.009283 268.377);
+    --popover: oklch(0.379046 0.008894 268.423);
+    --muted: oklch(0.39037 0.008827 268.43);
+    --secondary: oklch(0.39037 0.008827 268.43);
+    --accent: oklch(0.375253 0.008917 268.42);
+    --sidebar: oklch(0.253014 0.009501 276.713);
+    --sidebar-accent: oklch(0.336768 0.009169 268.391);
+    --border: oklch(0.427919 0.010201 271.174);
+    --input: oklch(0.452201 0.00899 260.727);
+    --foreground: oklch(0.933459 0.008714 264.521);
+    --muted-foreground: oklch(0.762685 0.007873 260.731);
+    --faint-foreground: oklch(0.653586 0.009152 271.275);
+    --surface-foreground: oklch(0.933459 0.008714 264.521);
+    --surface-selected-foreground: oklch(0.933459 0.008714 264.521);
+    --card-foreground: oklch(0.933459 0.008714 264.521);
+    --popover-foreground: oklch(0.933459 0.008714 264.521);
+    --secondary-foreground: oklch(0.933459 0.008714 264.521);
+    --accent-foreground: oklch(0.933459 0.008714 264.521);
+    --sidebar-foreground: oklch(0.933459 0.008714 264.521);
+    --sidebar-primary: oklch(0.610272 0.159359 275.377);
+    --sidebar-primary-foreground: oklch(0.210179 0.00997 276.557);
+    --sidebar-accent-foreground: oklch(0.933459 0.008714 264.521);
+    --sidebar-border: oklch(0.427919 0.010201 271.174);
+    --sidebar-ring: oklch(0.610272 0.159359 275.377);
+    --primary: oklch(0.933459 0.008714 264.521);
+    --primary-foreground: oklch(0.210179 0.00997 276.557);
+    --primary-hover: oklch(0.87245 0.008864 264.518);
+    --primary-pressed: oklch(0.832219 0.008971 264.515);
+    --brand: oklch(0.610272 0.159359 275.377);
+    --brand-foreground: oklch(0.210179 0.00997 276.557);
+    --brand-hover: oklch(0.660919 0.158626 275.186);
+    --brand-pressed: oklch(0.630235 0.159755 275.614);
+    --destructive: oklch(0.778471 0.129628 27.277);
+    --success: oklch(0.819477 0.098065 174.782);
+    --warning: oklch(0.762511 0.156425 94.447);
+    --info: oklch(0.610272 0.159359 275.377);
+    --ring: oklch(0.457836 0.097539 276.792);
+    --chart-1: oklch(0.709961 0.152054 275.628);
+    --chart-2: oklch(0.610272 0.159359 275.377);
+    --chart-3: oklch(0.529296 0.160086 275.371);
+    --chart-4: oklch(0.44982 0.158999 275.402);
+    --chart-5: oklch(0.369665 0.159369 275.703);
     --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);
-    --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
-    --menu-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
-    --background: var(--page-canvas);
-    --foreground: oklch(0.985 0 0);
-    --card: var(--surface);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: var(--surface-raised);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.92 0.004 286.32);
-    --primary-foreground: oklch(0.21 0.006 285.885);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.274 0.006 286.033);
-    --muted-foreground: oklch(0.705 0.015 286.067);
-    /* Same role as light mode, mirrored: fainter means darker here. 0.60 is
-       the darkest step still clearing 3:1 on every dark surface, worst case
-       --surface-selected at 3.45:1. The step away from muted (0.105 L) matches
-       light mode's, so a chevron reads equally quiet in both themes. */
-    --faint-foreground: oklch(0.60 0.015 286.067);
-    --accent: oklch(0.274 0.006 286.033);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 6%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.552 0.016 285.938);
-    /* Dark mode mirrors light mode's "primary → secondary" gradient on the
-       brand hue, but flips the lightness curve: the most important series
-       is the brightest (so it pops on the dark background) and trailing
-       series get progressively darker / less saturated. */
-    --chart-1: oklch(0.72 0.16 255);
-    --chart-2: oklch(0.62 0.13 255);
-    --chart-3: oklch(0.52 0.10 255);
-    --chart-4: oklch(0.42 0.06 255);
-    --chart-5: oklch(0.32 0.03 255);
-    --sidebar: oklch(0.21 0.006 285.885);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.274 0.006 286.033);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.552 0.016 285.938);
-    --brand: oklch(0.65 0.16 255);
-    --brand-foreground: oklch(0.985 0 0);
-    --success: oklch(0.65 0.15 145);
-    --warning: oklch(0.70 0.16 85);
-    --info: oklch(0.65 0.18 250);
-    --scrollbar-thumb: oklch(1 0 0 / 8%);
-    --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
+    --floating-shadow: 0 16px 40px rgb(0 0 0 / 0.46), 0 3px 10px rgb(0 0 0 / 0.28);
+    --menu-shadow: 0 8px 24px rgb(0 0 0 / 0.3), 0 2px 6px rgb(0 0 0 / 0.18);
+    --scrollbar-thumb: oklch(1 0 0 / 0.08);
+    --scrollbar-thumb-hover: oklch(1 0 0 / 0.18);
     --scrollbar-track: transparent;
-    --find-match: oklch(0.82 0.16 100);
-    --find-match-active: oklch(0.76 0.18 60);
-    --find-match-foreground: oklch(0.18 0.02 92);
+    --find-match: oklch(0.786417 0.131456 94.848);
+    --find-match-active: oklch(0.710167 0.138872 59.404);
+    --find-match-foreground: oklch(0.204293 0.020737 79.931);
+    /* generated-dark:end */
 }

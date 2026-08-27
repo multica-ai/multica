@@ -13,6 +13,7 @@ import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
 } from "@/config/runtime-urls";
+import { FIND_HIGHLIGHT_CSS } from "@multica/ui/styles/find-highlight";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -147,6 +148,8 @@ export default async function RootLayout({
       className={cn("antialiased font-sans h-full", inter.variable, geistMono.variable, sourceSerif.variable)}
     >
       <body className="h-full overflow-hidden">
+        {/* LightningCSS cannot parse ::highlight(); see FIND_HIGHLIGHT_CSS. */}
+        <style dangerouslySetInnerHTML={{ __html: FIND_HIGHLIGHT_CSS }} />
         {/*
           react-grab: dev-only element inspector. Hold ⌘C (Mac) / Ctrl+C and click
           any element to copy its source path + line + component stack for pasting

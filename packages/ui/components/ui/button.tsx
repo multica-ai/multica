@@ -10,36 +10,21 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        default:
+          "bg-primary text-primary-foreground hover:bg-primary-hover active:bg-primary-pressed aria-expanded:bg-primary-hover",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
-        // Brand-filled state for a control that is currently ON (an active
-        // filter, a selected toggle). Self-contained on purpose: passing
-        // brand classes through `className` on top of `outline` does NOT
-        // work — `outline` ships `dark:bg-input/30`, `hover:bg-muted` and
-        // `aria-expanded:bg-muted`, and those win the cascade (the `dark:`
-        // ones by specificity, since `dark` compiles to `&:is(.dark *)`),
-        // repainting the chip neutral. That is what silently killed the
-        // brand colour in dark mode — see MUL-4884.
-        //
-        // `brand` needs no `dark:` of its own: the --brand token already
-        // flips per theme, so one set of rules is correct in both.
-        // aria-expanded is pinned to the hover value so opening a popover
-        // reads as hover rather than as a colour change.
+          "border-border bg-background hover:bg-surface-hover hover:text-foreground active:bg-surface-selected aria-expanded:bg-surface-hover aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-surface-hover dark:active:bg-surface-selected",
+        // Filled ON state. Own tokens so outline dark: hover cannot wash it (MUL-4884).
         brand:
-          "border-brand bg-brand text-brand-foreground hover:bg-brand/90 hover:text-brand-foreground active:bg-brand/85 aria-expanded:bg-brand/90 aria-expanded:text-brand-foreground",
-        // Brand tint for "there is activity here" — present, but not
-        // claiming the loud filled state. Light and dark take their own
-        // opacity notches: the same alpha does not read equally against a
-        // white and a near-black surface, so dark runs one notch hotter.
+          "border-brand bg-brand text-brand-foreground hover:bg-brand-hover hover:text-brand-foreground active:bg-brand-pressed aria-expanded:bg-brand-hover aria-expanded:text-brand-foreground",
         brandSubtle:
           "border-brand/28 bg-brand/7 text-foreground hover:bg-brand/12 hover:text-foreground active:bg-brand/16 aria-expanded:bg-brand/12 aria-expanded:text-foreground dark:border-brand/45 dark:bg-brand/12 dark:hover:bg-brand/18 dark:active:bg-brand/24 dark:aria-expanded:bg-brand/18",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
+          "bg-secondary text-secondary-foreground hover:bg-surface-hover active:bg-surface-selected aria-expanded:bg-surface-hover aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "hover:bg-surface-hover hover:text-foreground active:bg-surface-selected aria-expanded:bg-surface-hover aria-expanded:text-foreground",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 active:bg-destructive/30 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:active:bg-destructive/40 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

@@ -16,49 +16,50 @@
     color-scheme: light;
 }
 .landing-light {
-    --app-shell: oklch(0.964435 0.001327 286.375);
-    --page-canvas: oklch(0.988087 0 0);
-    --surface: oklch(1 0 0);
-    --surface-foreground: oklch(0.141 0.005 285.823);
-    --surface-raised: oklch(1 0 0);
-    --surface-hover: oklch(0.967 0.001 286.375);
-    --surface-selected: oklch(0.95 0.002 286.375);
-    --surface-selected-foreground: oklch(0.141 0.005 285.823);
-    --surface-border: oklch(0.92 0.004 286.32);
-    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
-    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
-    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.141 0.005 285.823);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.141 0.005 285.823);
-    --primary: oklch(0.21 0.006 285.885);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.967 0.001 286.375);
-    /* Kept in lockstep with the light value in tokens.css — see the AA
-       reasoning there before changing this number. */
-    --muted-foreground: oklch(0.505 0.016 285.938);
-    /* Same lockstep rule. Without this line the landing chevrons would inherit
-       the .dark value of --faint-foreground while sitting on a white surface. */
-    --faint-foreground: oklch(0.606 0.016 285.938);
-    --accent: oklch(0.967 0.001 286.375);
-    --accent-foreground: oklch(0.21 0.006 285.885);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.004 286.32);
-    --input: oklch(0.92 0.004 286.32);
-    --ring: oklch(0.705 0.015 286.067);
-    --brand: oklch(0.55 0.16 255);
-    --brand-foreground: oklch(0.985 0 0);
-    --success: oklch(0.55 0.16 145);
-    --warning: oklch(0.75 0.16 85);
-    --info: oklch(0.55 0.18 250);
-    --scrollbar-thumb: oklch(0 0 0 / 10%);
-    --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
+    --app-shell: oklch(0.955227 0.00415 271.369);
+    --page-canvas: oklch(0.997025 0 0);
+    --surface: oklch(0.997025 0 0);
+    --surface-foreground: oklch(0.313132 0.028735 265.239);
+    --surface-raised: oklch(0.997025 0 0);
+    --surface-hover: oklch(0.967434 0.001326 286.375);
+    --surface-selected: oklch(0.939625 0.018952 279.523);
+    --surface-selected-foreground: oklch(0.313132 0.028735 265.239);
+    --surface-border: oklch(0.930514 0.00173 247.84);
+    --surface-shadow: 0 1px 2px rgb(42 49 64 / 0.04), 0 1px 1px rgb(42 49 64 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(42 49 64 / 0.14), 0 3px 10px rgb(42 49 64 / 0.08);
+    --menu-shadow: 0 8px 24px rgb(42 49 64 / 0.08), 0 2px 6px rgb(42 49 64 / 0.05);
+    --background: oklch(0.997025 0 0);
+    --foreground: oklch(0.313132 0.028735 265.239);
+    --card: oklch(0.997025 0 0);
+    --card-foreground: oklch(0.313132 0.028735 265.239);
+    --popover: oklch(0.997025 0 0);
+    --popover-foreground: oklch(0.313132 0.028735 265.239);
+    --primary: oklch(0.313132 0.028735 265.239);
+    --primary-foreground: oklch(1 0 0);
+    --primary-hover: oklch(0.26426 0.028236 263.908);
+    --primary-pressed: oklch(0.231737 0.028683 266.306);
+    --secondary: oklch(0.96067 0.001717 247.84);
+    --secondary-foreground: oklch(0.313132 0.028735 265.239);
+    --muted: oklch(0.96067 0.001717 247.84);
+    --muted-foreground: oklch(0.524011 0.030046 266.378);
+    --faint-foreground: oklch(0.622951 0.028724 266.47);
+    --accent: oklch(0.967434 0.001326 286.375);
+    --accent-foreground: oklch(0.313132 0.028735 265.239);
+    --destructive: oklch(0.546382 0.183864 27.535);
+    --border: oklch(0.930514 0.00173 247.84);
+    --input: oklch(0.91259 0.002916 264.541);
+    --ring: oklch(0.804138 0.066563 280.033);
+    --brand: oklch(0.574574 0.159573 275.293);
+    --brand-foreground: oklch(1 0 0);
+    --brand-hover: oklch(0.535221 0.159988 275.08);
+    --brand-pressed: oklch(0.504683 0.158512 274.979);
+    --success: oklch(0.621162 0.179736 148.011);
+    --warning: oklch(0.528846 0.111891 74.364);
+    --info: oklch(0.574574 0.159573 275.293);
+    --scrollbar-thumb: oklch(0 0 0 / 0.1);
+    --scrollbar-thumb-hover: oklch(0 0 0 / 0.18);
     --scrollbar-track: transparent;
+
 }
 
 /* -----------------------------------------------------------------------------

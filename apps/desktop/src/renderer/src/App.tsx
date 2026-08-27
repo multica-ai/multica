@@ -12,6 +12,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
+import { FIND_HIGHLIGHT_CSS } from "@multica/ui/styles/find-highlight";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
@@ -450,6 +451,8 @@ export default function App() {
 
   return (
     <ThemeProvider>
+      {/* LightningCSS cannot parse ::highlight(); see FIND_HIGHLIGHT_CSS. */}
+      <style dangerouslySetInnerHTML={{ __html: FIND_HIGHLIGHT_CSS }} />
       {runtimeConfigResult.ok ? (
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
