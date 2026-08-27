@@ -233,9 +233,7 @@ export function ManualCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt({
-    onNavigate: onClose,
-  });
+  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
