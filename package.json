@@ -27,7 +27,8 @@
     "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
-    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
+    "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs",
+    "generate:usage-pricing": "node scripts/generate-usage-pricing.mjs"
   },
   "engines": {
     "node": ">=22"

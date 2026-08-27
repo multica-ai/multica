@@ -1,0 +1,53 @@
+---
+title: Usage pricing protocol
+description: Canonical model rates, cost units, and uncosted-token semantics.
+---
+
+Multica exposes its versioned usage-pricing contract at `GET /api/usage/pricing`.
+The request uses the normal authenticated workspace context. The canonical
+source is `server/internal/handler/usage_pricing_v1.json`; the backend embeds
+that file and `pnpm generate:usage-pricing` derives the TypeScript catalog used
+by Multica clients from the same bytes.
+
+## Units
+
+- Every model rate is USD per one million tokens, split into `input`, `output`,
+  `cache_read`, and `cache_write`.
+- Provider-reported costs use integer `cost_usd_ticks`, where
+  `10,000,000,000` ticks equal one USD. Convert ticks to USD only at the
+  presentation boundary.
+- The catalog's `version` identifies the response schema. `published_at`
+  identifies the rate snapshot and changes whenever rates change.
+
+## Cost split
+
+Usage rows contain provider cost and token totals. Current rows also contain
+`uncosted_input_tokens`, `uncosted_output_tokens`,
+`uncosted_cache_read_tokens`, and `uncosted_cache_write_tokens`. These fields
+mean exactly “tokens from source rows that did not carry a provider-reported
+cost”; they do not mean that the model is absent from Multica's catalog.
+
+Calculate displayed cost as:
+
+```text
+provider cost_usd_ticks / 10,000,000,000
++ sum(uncosted token type × matching catalog rate) / 1,000,000
+```
+
+Only the `uncosted_*` split is estimated. Estimating all tokens would
+double-charge rows that already include provider cost. If a model is not in the
+catalog, preserve its provider cost and disclose its remaining unpriced token
+count instead of inventing a nearby model rate.
+
+For compatibility with a backend predating the split, absent `uncosted_*`
+fields mean all tokens need estimation only when provider cost is also absent.
+If provider cost exists and the split is absent, keep that provider cost alone.
+
+## Rate sources
+
+Rates are maintained from the provider price sheets cited beside the catalog in
+`packages/views/runtimes/utils.ts`: Anthropic, OpenAI, DeepSeek, Moonshot,
+Zhipu, Alibaba Qwen, xAI, and Cursor. Exact model keys are intentional; clients
+must not use prefix matching that lets an unknown SKU inherit another model's
+price. Provider routing prefixes, dated snapshots, Claude dot/dash spellings,
+and documented context tags may be normalized before exact lookup.

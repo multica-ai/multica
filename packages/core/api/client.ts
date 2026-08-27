@@ -69,6 +69,7 @@ import type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   DashboardUsageDaily,
+  UsagePricingCatalog,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
@@ -268,6 +269,7 @@ import {
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  UsagePricingCatalogSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
   EMPTY_CHAT_MESSAGE_LIST,
@@ -2156,6 +2158,22 @@ export class ApiClient {
       DashboardUsageDailyListSchema,
       [],
       { endpoint: "GET /api/dashboard/usage/daily" },
+    );
+  }
+
+  async getUsagePricingCatalog(): Promise<UsagePricingCatalog> {
+    const raw = await this.fetch<unknown>("/api/usage/pricing");
+    return parseWithFallback<UsagePricingCatalog>(
+      raw,
+      UsagePricingCatalogSchema,
+      {
+        version: "",
+        published_at: "",
+        units: { rates: "usd_per_million_tokens", cost_usd_ticks_per_usd: 10_000_000_000 },
+        uncosted_semantics: "tokens_without_provider_reported_cost",
+        models: {},
+      },
+      { endpoint: "GET /api/usage/pricing" },
     );
   }
 

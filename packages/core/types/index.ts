@@ -57,6 +57,8 @@ export type {
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
   DashboardUsageDaily,
+  UsageModelPricing,
+  UsagePricingCatalog,
   DashboardUsageByAgent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,

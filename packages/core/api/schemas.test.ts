@@ -24,6 +24,7 @@ import {
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  UsagePricingCatalogSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
@@ -965,6 +966,27 @@ describe("SquadListSchema member preview drift", () => {
 // that field to a sane default rather than dropping the WHOLE array to
 // the `[]` fallback — one drifted row must not blank the entire chart.
 describe("dashboard + runtime usage schema drift", () => {
+  it("parses the versioned usage pricing units and exact model rates", () => {
+    const parsed = UsagePricingCatalogSchema.parse({
+      version: "1",
+      published_at: "2026-08-27",
+      units: { rates: "usd_per_million_tokens", cost_usd_ticks_per_usd: 10_000_000_000 },
+      uncosted_semantics: "tokens_without_provider_reported_cost",
+      models: { "gpt-5.6-sol": { input: 5, output: 30, cache_read: 0.5, cache_write: 6.25 } },
+    });
+    expect(parsed.models["gpt-5.6-sol"]?.output).toBe(30);
+  });
+
+  it("rejects a pricing response whose units are not the v1 protocol units", () => {
+    expect(UsagePricingCatalogSchema.safeParse({
+      version: "1",
+      published_at: "2026-08-27",
+      units: { rates: "usd_per_token", cost_usd_ticks_per_usd: 1 },
+      uncosted_semantics: "tokens_without_provider_reported_cost",
+      models: {},
+    }).success).toBe(false);
+  });
+
   it("coerces a missing numeric field to 0 instead of dropping the array", () => {
     const parsed = DashboardUsageDailyListSchema.parse([
       { date: "2026-05-19", model: "claude-opus-4-7", input_tokens: 100 },

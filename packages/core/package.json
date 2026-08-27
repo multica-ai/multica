@@ -69,6 +69,7 @@
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
     "./runtimes/custom-pricing-store": "./runtimes/custom-pricing-store.ts",
+    "./runtimes/usage-pricing": "./runtimes/usage-pricing.ts",
     "./dashboard": "./dashboard/index.ts",
     "./dashboard/queries": "./dashboard/queries.ts",
     "./agents": "./agents/index.ts",

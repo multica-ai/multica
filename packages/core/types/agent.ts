@@ -996,6 +996,25 @@ export interface DashboardUsageDaily {
   task_count: number;
 }
 
+export interface UsageModelPricing {
+  input: number;
+  output: number;
+  cache_read: number;
+  cache_write: number;
+}
+
+/** Versioned canonical rates returned by GET /api/usage/pricing. */
+export interface UsagePricingCatalog {
+  version: string;
+  published_at: string;
+  units: {
+    rates: "usd_per_million_tokens";
+    cost_usd_ticks_per_usd: number;
+  };
+  uncosted_semantics: "tokens_without_provider_reported_cost";
+  models: Record<string, UsageModelPricing>;
+}
+
 // Per-(agent, model) token totals for the workspace dashboard. Identical
 // wire shape to RuntimeUsageByAgent — the client folds by agent_id and
 // sums cost.

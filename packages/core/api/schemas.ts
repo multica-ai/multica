@@ -1541,6 +1541,24 @@ const CostSplitShape = {
   uncosted_cache_write_tokens: z.number().optional(),
 };
 
+const UsageModelPricingSchema = z.object({
+  input: z.number(),
+  output: z.number(),
+  cache_read: z.number(),
+  cache_write: z.number(),
+});
+
+export const UsagePricingCatalogSchema = z.object({
+  version: z.string(),
+  published_at: z.string(),
+  units: z.object({
+    rates: z.literal("usd_per_million_tokens"),
+    cost_usd_ticks_per_usd: z.number().positive(),
+  }),
+  uncosted_semantics: z.literal("tokens_without_provider_reported_cost"),
+  models: z.record(z.string(), UsageModelPricingSchema),
+}).loose();
+
 const DashboardUsageDailySchema = z.object({
   date: z.string().default(""),
   provider: z.string().default(""),
