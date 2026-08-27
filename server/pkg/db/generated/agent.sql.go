@@ -5416,6 +5416,85 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 	return items, nil
 }
 
+const listAgentsWithRuntimeCLI = `-- name: ListAgentsWithRuntimeCLI :many
+SELECT a.id, a.workspace_id, a.name, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility, a.status, a.max_concurrent_tasks, a.owner_id, a.created_at, a.updated_at, a.description, a.runtime_id, a.instructions, a.archived_at, a.archived_by, a.custom_env, a.custom_args, a.mcp_config, a.model, a.thinking_level, a.composio_toolkit_allowlist, a.permission_mode, a.kind, a.system_key, a.disabled_runtime_skills, a.service_tier, a.conversation_starters,
+       CASE
+         WHEN jsonb_typeof(r.metadata->'cli_version') = 'string'
+           THEN r.metadata->>'cli_version'
+         ELSE ''
+       END::text AS runtime_cli_version
+FROM agent AS a
+LEFT JOIN agent_runtime AS r ON r.id = a.runtime_id
+WHERE a.workspace_id = $1
+  AND a.kind = 'user'
+  AND ($2::boolean OR a.archived_at IS NULL)
+ORDER BY a.created_at ASC
+`
+
+type ListAgentsWithRuntimeCLIParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	IncludeArchived bool        `json:"include_archived"`
+}
+
+type ListAgentsWithRuntimeCLIRow struct {
+	Agent             Agent  `json:"agent"`
+	RuntimeCliVersion string `json:"runtime_cli_version"`
+}
+
+// Quick Create needs only the bound runtime's CLI version, not the private
+// machine resource. Project that one non-secret compatibility signal onto the
+// visible agent in the same query so clients do not need runtime-list access.
+func (q *Queries) ListAgentsWithRuntimeCLI(ctx context.Context, arg ListAgentsWithRuntimeCLIParams) ([]ListAgentsWithRuntimeCLIRow, error) {
+	rows, err := q.db.Query(ctx, listAgentsWithRuntimeCLI, arg.WorkspaceID, arg.IncludeArchived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentsWithRuntimeCLIRow{}
+	for rows.Next() {
+		var i ListAgentsWithRuntimeCLIRow
+		if err := rows.Scan(
+			&i.Agent.ID,
+			&i.Agent.WorkspaceID,
+			&i.Agent.Name,
+			&i.Agent.AvatarUrl,
+			&i.Agent.RuntimeMode,
+			&i.Agent.RuntimeConfig,
+			&i.Agent.Visibility,
+			&i.Agent.Status,
+			&i.Agent.MaxConcurrentTasks,
+			&i.Agent.OwnerID,
+			&i.Agent.CreatedAt,
+			&i.Agent.UpdatedAt,
+			&i.Agent.Description,
+			&i.Agent.RuntimeID,
+			&i.Agent.Instructions,
+			&i.Agent.ArchivedAt,
+			&i.Agent.ArchivedBy,
+			&i.Agent.CustomEnv,
+			&i.Agent.CustomArgs,
+			&i.Agent.McpConfig,
+			&i.Agent.Model,
+			&i.Agent.ThinkingLevel,
+			&i.Agent.ComposioToolkitAllowlist,
+			&i.Agent.PermissionMode,
+			&i.Agent.Kind,
+			&i.Agent.SystemKey,
+			&i.Agent.DisabledRuntimeSkills,
+			&i.Agent.ServiceTier,
+			&i.Agent.ConversationStarters,
+			&i.RuntimeCliVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllAgents = `-- name: ListAllAgents :many
 SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters FROM agent
 WHERE workspace_id = $1 AND kind = 'user'

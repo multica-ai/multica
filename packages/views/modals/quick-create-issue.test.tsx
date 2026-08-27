@@ -119,6 +119,26 @@ const mockProjectsQuery = vi.hoisted(() => ({
   isSuccess: true,
 }));
 
+const mockAgentsData = vi.hoisted(() => ({
+  list: [{
+    id: "agent-1",
+    name: "Bohan",
+    archived_at: null,
+    runtime_id: "runtime-1",
+    runtime_cli_version: "1.2.3",
+  }] as Array<{
+    id: string;
+    name: string;
+    archived_at: string | null;
+    runtime_id: string;
+    runtime_cli_version?: string;
+  }>,
+}));
+
+const mockMembersData = vi.hoisted(() => ({
+  list: [{ user_id: "user-1", role: "admin" }],
+}));
+
 // Per-test override for the squads list so we can flip between "squads
 // exist and one's leader is reachable" and "no squads" cases without
 // re-mocking the whole module.
@@ -132,7 +152,7 @@ const mockSquadsData = vi.hoisted(
 let mockUploadIdSeq = 0;
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({ queryKey }: { queryKey: string[] }) => {
+  useQuery: ({ queryKey, enabled = true }: { queryKey: string[]; enabled?: boolean }) => {
     // Workspace-scoped query keys carry the wsId as `queryKey[1]`; the
     // discriminator is at `queryKey[2]` (e.g. ["workspaces", wsId, "squads"]).
     if (queryKey[0] === "workspaces" && queryKey[2] === "squads") {
@@ -140,13 +160,15 @@ vi.mock("@tanstack/react-query", () => ({
     }
     switch (queryKey[0]) {
       case "members":
-        return { data: [{ user_id: "user-1", role: "admin" }] };
+        return { data: mockMembersData.list };
       case "agents":
-        return {
-          data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
-        };
+        return { data: mockAgentsData.list };
       case "runtimes":
-        return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };
+        if (!enabled) return { data: undefined, isSuccess: false };
+        return {
+          data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }],
+          isSuccess: true,
+        };
       case "projects":
         return mockProjectsQuery;
       default:
@@ -244,8 +266,14 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-  checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
+  checkQuickCreateCliVersion: (version: string) =>
+    version
+      ? { state: "ok", min: "1.0.0" }
+      : { state: "missing", min: "1.0.0" },
+  checkQuickCreateFieldsCliVersion: (version: string) =>
+    version
+      ? { state: "ok", min: "1.0.0" }
+      : { state: "missing", min: "1.0.0" },
   readRuntimeCliVersion: () => "1.2.3",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
@@ -521,6 +549,14 @@ describe("AgentCreatePanel", () => {
     });
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
+    mockAgentsData.list = [{
+      id: "agent-1",
+      name: "Bohan",
+      archived_at: null,
+      runtime_id: "runtime-1",
+      runtime_cli_version: "1.2.3",
+    }];
+    mockMembersData.list = [{ user_id: "user-1", role: "admin" }];
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
@@ -649,6 +685,37 @@ describe("AgentCreatePanel", () => {
     expect(mockToastSuccess).not.toHaveBeenCalled();
     expect(mockClearDraft).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("uses the agent CLI projection when a regular member cannot list the private runtime", async () => {
+    const user = userEvent.setup();
+    mockMembersData.list = [{ user_id: "user-1", role: "member" }];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(expect.objectContaining({
+        agent_id: "agent-1",
+      }));
+    });
+  });
+
+  it("falls back to the runtime list for an older server without the agent projection", () => {
+    mockAgentsData.list = [{
+      id: "agent-1",
+      name: "Bohan",
+      archived_at: null,
+      runtime_id: "runtime-1",
+    }];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
   });
 
   it("reveals optional fields from the overflow and submits their values", async () => {

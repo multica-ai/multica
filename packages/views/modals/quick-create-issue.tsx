@@ -330,7 +330,17 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // New servers project the one safe compatibility signal Quick Create needs
+  // onto each visible agent. Fall back to the legacy runtime list only when an
+  // older server omits it; a regular member cannot see another owner's private
+  // runtime there, which is the misleading "CLI version missing" bug fixed by
+  // the projection.
+  const projectedRuntimeCliVersion = selectedAgent?.runtime_cli_version;
+  const hasAgentCLIVersionProjection = projectedRuntimeCliVersion !== undefined;
+  const { data: runtimes = [], isSuccess: runtimesLoaded } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !!selectedAgent && !hasAgentCLIVersionProjection,
+  });
   const selectedRuntime = useMemo(
     () =>
       selectedAgent?.runtime_id
@@ -338,7 +348,9 @@ export function AgentCreatePanel({
         : undefined,
     [runtimes, selectedAgent?.runtime_id],
   );
-  const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
+  const runtimeCliVersion = hasAgentCLIVersionProjection
+    ? projectedRuntimeCliVersion
+    : readRuntimeCliVersion(selectedRuntime?.metadata);
   const baseVersionCheck = useMemo(
     () => checkQuickCreateCliVersion(runtimeCliVersion),
     [runtimeCliVersion],
@@ -349,9 +361,11 @@ export function AgentCreatePanel({
   );
   const usesExplicitFields = priority !== "none" || dueDate !== null;
   const versionCheck = usesExplicitFields ? fieldVersionCheck : baseVersionCheck;
+  const runtimeVersionLoaded = hasAgentCLIVersionProjection || runtimesLoaded;
   const versionBlocked =
-    baseVersionCheck.state !== "ok" ||
-    (usesExplicitFields && fieldVersionCheck.state !== "ok");
+    runtimeVersionLoaded &&
+    (baseVersionCheck.state !== "ok" ||
+      (usesExplicitFields && fieldVersionCheck.state !== "ok"));
 
   const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at

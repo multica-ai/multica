@@ -472,6 +472,13 @@ export interface Agent {
   runtime_id: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
+  /**
+   * CLI version projected from the bound runtime for Quick Create
+   * compatibility checks. This is intentionally separate from runtime-list
+   * access: a member may invoke a shared agent without being allowed to view
+   * its owner's private machine. Older servers and non-list responses omit it.
+   */
+  runtime_cli_version?: string;
   name: string;
   description: string;
   /** What this agent's owner wrote. For a system agent this holds only the
