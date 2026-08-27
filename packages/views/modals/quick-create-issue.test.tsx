@@ -126,6 +126,16 @@ const mockSquadsData = vi.hoisted(
   () => ({ list: [] as Array<{ id: string; name: string; leader_id: string; archived_at: string | null }> }),
 );
 
+// Plain members cannot list another member's private runtime, even when they
+// may invoke the public agent bound to it. Keep the runtime list overridable so
+// the Quick Create gate covers that visibility boundary (GH #7633).
+const mockRuntimesData = vi.hoisted(() => ({
+  list: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as Array<{
+    id: string;
+    metadata: Record<string, unknown>;
+  }>,
+}));
+
 // The real handle mints an id when it inserts the placeholder and hands it to
 // the uploader, which adopts it as the draft `clientUploadId`. Mocks must do
 // the same or the two records drift apart only in tests.
@@ -146,7 +156,7 @@ vi.mock("@tanstack/react-query", () => ({
           data: [{ id: "agent-1", name: "Bohan", archived_at: null, runtime_id: "runtime-1" }],
         };
       case "runtimes":
-        return { data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] };
+        return { data: mockRuntimesData.list };
       case "projects":
         return mockProjectsQuery;
       default:
@@ -242,14 +252,15 @@ vi.mock("@multica/core/auth", () => ({
     (selector ? selector({ user: { id: "user-1" } }) : { user: { id: "user-1" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-  checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
-  readRuntimeCliVersion: () => "1.2.3",
-  MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
-}));
-
+vi.mock("@multica/core/runtimes", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/runtimes")>(
+    "@multica/core/runtimes",
+  );
+  return {
+    ...actual,
+    runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
+  };
+});
 
 vi.mock("../issues/components/pickers/assignee-picker", () => ({
   canAssignAgent: () => true,
@@ -522,6 +533,9 @@ describe("AgentCreatePanel", () => {
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
+    mockRuntimesData.list = [
+      { id: "runtime-1", metadata: { cli_version: "1.2.3" } },
+    ];
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
     mockApiUploadFile.mockResolvedValue({
@@ -554,6 +568,30 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("defers version validation when an invokable agent's private runtime is hidden", async () => {
+    mockRuntimesData.list = [];
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/i)).not.toBeInTheDocument();
+    const create = screen.getByRole("button", { name: /^Create$/i });
+    expect(create).toBeEnabled();
+
+    await user.click(create);
+
+    await waitFor(() => expect(mockQuickCreateIssue).toHaveBeenCalledTimes(1));
+  });
+
+  it("still blocks a visible runtime that does not report a CLI version", () => {
+    mockRuntimesData.list = [{ id: "runtime-1", metadata: {} }];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByText(/doesn't report a CLI version/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {
