@@ -147,9 +147,19 @@
     "chat_with_named": "{{name}}와 채팅"
   },
   "starter_prompts": {
-    "list_open": "열린 태스크를 우선순위별로 정리해 줘",
-    "summarize_today": "오늘 내가 한 일을 요약해 줘",
-    "plan_next": "다음에 할 일을 계획해 줘"
+    "aria_label": "추천 첫 작업",
+    "capabilities": {
+      "label": "어떤 일을 도와줄 수 있나요?",
+      "prompt": "가장 잘 도울 수 있는 일을 간단히 알려 주세요."
+    },
+    "first_task": {
+      "label": "첫 태스크 추천",
+      "prompt": "당신에게 맡길 수 있는 유용한 태스크 세 가지를 추천해 주세요."
+    },
+    "recommend": {
+      "label": "작업 추천",
+      "prompt": "내 워크스페이스에 대해 알고 있는 내용을 바탕으로 유용한 첫 작업을 추천해 주세요."
+    }
   },
   "onboarding_cards": {
     "aria_label": "시작 방법",

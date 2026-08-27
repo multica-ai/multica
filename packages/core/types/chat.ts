@@ -77,6 +77,12 @@ export interface ChatLastMessage {
   message_kind?: ChatMessageKind;
 }
 
+export interface ChatChannelSource {
+  channel_type: string;
+  installation_id: string;
+  route_revision: number;
+}
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -98,6 +104,11 @@ export interface ChatSession {
   /** True when the user has pinned this chat to the top of the list.
    *  Optional so older clients / non-list payloads stay valid. */
   pinned?: boolean;
+  /** Present for Chats created by an external Channel. Historical Chats keep
+   *  their source even after a newer route generation becomes current. */
+  channel_source?: ChatChannelSource;
+  /** Absent for first-party Chats. */
+  is_current_channel_route?: boolean;
   created_at: string;
   updated_at: string;
 }

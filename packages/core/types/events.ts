@@ -60,6 +60,7 @@ export type WSEventType =
   | "chat:done"
   | "chat:quick_actions"
   | "chat:cancel_finalized"
+  | "chat:session_created"
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
@@ -522,6 +523,20 @@ export interface InvitationRevokedPayload {
   invitee_email: string;
 }
 
+export interface ChatSessionCreatedPayload {
+  workspace_id: string;
+  chat_session_id: string;
+  agent_id: string;
+  creator_id: string;
+  title: string;
+  channel_source: {
+    channel_type: string;
+    installation_id: string;
+    route_revision: number;
+  };
+  is_current_channel_route: boolean;
+}
+
 /**
  * Maps every WSEventType to its payload interface. Events whose payload
  * shape isn't formally typed (server emits an object the client doesn't
@@ -586,6 +601,7 @@ export interface WSEventPayloadMap {
   "chat:done": ChatDonePayload;
   "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
+  "chat:session_created": ChatSessionCreatedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;

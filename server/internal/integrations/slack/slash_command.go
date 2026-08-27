@@ -15,8 +15,8 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// This file implements the Slack `/issue` SLASH COMMAND. It is deliberately
-// separate from the message-based `/issue` (engine ParseIssueCommand): on Slack
+// This file implements the Slack `/issue`, `/new`, and `/clear` SLASH COMMANDS. They are
+// deliberately separate from message-prefix commands: on Slack
 // a message whose first character is `/` is intercepted by the client as a
 // slash command and never delivered to the app, so the message-prefix form of
 // `/issue` cannot work here at all (MUL-3908). Registering `/issue` as a real
@@ -41,15 +41,21 @@ import (
 // are kept local so the proven inbound pipeline is untouched.
 
 const issueSlashCommand = "/issue"
+const newSlashCommand = "/new"
+const clearSlashCommand = "/clear"
 
 // User-facing ephemeral replies. Kept terse; only the invoker sees them.
 const (
-	slashUsageText           = "Tell me what to file, e.g. `/issue the login button does nothing on Safari`."
-	slashQueuedText          = "✅ On it — I'm turning that into an issue. You'll get a Multica notification when it's ready."
-	slashNotMemberText       = "You're not a member of this Multica workspace, so I can't file an issue for you."
-	slashLinkAccountFallback = "Link your Slack account to Multica first, then try `/issue` again."
-	slashInternalErrorText   = "⚠️ Something went wrong creating the issue. Please try again."
-	slashDisabledText        = "This Slack app isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	slashUsageText            = "Tell me what to file, e.g. `/issue the login button does nothing on Safari`."
+	slashQueuedText           = "✅ On it — I'm turning that into an issue. You'll get a Multica notification when it's ready."
+	slashNotMemberText        = "You're not a member of this Multica workspace, so I can't file an issue for you."
+	slashLinkAccountFallback  = "Link your Slack account to Multica first, then try `/issue` again."
+	slashInternalErrorText    = "⚠️ Something went wrong creating the issue. Please try again."
+	slashDisabledText         = "This Slack app isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	slashNewStartedText       = "✅ Started a new Multica chat."
+	slashNewThreadGuideText   = "In a channel, start the new chat from the target thread with `@Multica /new`."
+	slashClearStartedText     = "✅ Cleared the agent context in this Multica chat."
+	slashClearThreadGuideText = "In a channel, clear the target thread's context with `@Multica /clear`."
 )
 
 // slashQueries is the narrow slice of generated queries the slash-command
@@ -69,10 +75,16 @@ type quickCreateEnqueuer interface {
 	EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
-// SlashCommandProcessor handles the Slack `/issue` slash command end to end.
+type slashControlStarter interface {
+	StartSlackDMChat(ctx context.Context, inst engine.ResolvedInstallation, userID pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error
+	ClearSlackDMContext(ctx context.Context, inst engine.ResolvedInstallation, userID pgtype.UUID, cmd slack.SlashCommand, envelopeID string) error
+}
+
+// SlashCommandProcessor handles Slack `/issue`, `/new`, and `/clear` commands end to end.
 type SlashCommandProcessor struct {
 	q           slashQueries
 	tasks       quickCreateEnqueuer
+	control     slashControlStarter
 	binding     bindingMinter
 	appURL      string
 	bindingPath string
@@ -89,6 +101,7 @@ type SlashCommandProcessor struct {
 type SlashCommandConfig struct {
 	Queries     *db.Queries
 	Tasks       quickCreateEnqueuer
+	Control     slashControlStarter
 	Binding     bindingMinter
 	AppURL      string
 	BindingPath string // default "/slack/bind"
@@ -113,6 +126,7 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 	p := &SlashCommandProcessor{
 		q:           cfg.Queries,
 		tasks:       cfg.Tasks,
+		control:     cfg.Control,
 		binding:     cfg.Binding,
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
@@ -131,11 +145,21 @@ func NewSlashCommandProcessor(cfg SlashCommandConfig) *SlashCommandProcessor {
 // called from a detached goroutine (the socket receive loop has already ACKed),
 // so it never returns an error — every outcome is a user-facing message.
 func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashCommand) {
-	// Only /issue is registered in the manifest; ignore anything else defensively.
-	if !strings.EqualFold(strings.TrimSpace(cmd.Command), issueSlashCommand) {
+	p.HandleEnvelope(ctx, cmd, "")
+}
+
+// HandleEnvelope preserves Socket Mode's durable envelope id for control-command dedup.
+func (p *SlashCommandProcessor) HandleEnvelope(ctx context.Context, cmd slack.SlashCommand, envelopeID string) {
+	command := strings.TrimSpace(cmd.Command)
+	if !strings.EqualFold(command, issueSlashCommand) && command != newSlashCommand && command != clearSlashCommand {
 		return
 	}
-	text := p.process(ctx, cmd)
+	var text string
+	if command == newSlashCommand || command == clearSlashCommand {
+		text = p.processControl(ctx, cmd, envelopeID)
+	} else {
+		text = p.process(ctx, cmd)
+	}
 	if text == "" || cmd.ResponseURL == "" {
 		return
 	}
@@ -143,6 +167,67 @@ func (p *SlashCommandProcessor) Handle(ctx context.Context, cmd slack.SlashComma
 		p.logger.WarnContext(ctx, "slack slash command: response_url reply failed",
 			"app_id", cmd.APIAppID, "error", err)
 	}
+}
+
+func (p *SlashCommandProcessor) processControl(ctx context.Context, cmd slack.SlashCommand, envelopeID string) string {
+	inst, err := p.resolveInstallation(ctx, cmd.APIAppID, cmd.TeamID)
+	if err != nil {
+		if errors.Is(err, engine.ErrInstallationNotFound) {
+			return slashDisabledText
+		}
+		return slashInternalErrorText
+	}
+	if !inst.Active {
+		return slashDisabledText
+	}
+	userID, err := p.resolveUser(ctx, inst, cmd.UserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, engine.ErrSenderUnbound):
+			return p.bindingText(ctx, inst, cmd.UserID)
+		case errors.Is(err, engine.ErrSenderNotMember):
+			return slashNotMemberText
+		default:
+			return slashInternalErrorText
+		}
+	}
+	// Keep command availability and channel-routing guidance behind the same
+	// installation, account-binding, and workspace-membership checks as every
+	// other Slack entry point.
+	// Slash payloads do not carry thread_ts; rotating a channel-level guess
+	// would move an unrelated conversation. Channel users must use the mention
+	// form, which arrives through the ordinary Router with an exact thread root.
+	if !strings.HasPrefix(cmd.ChannelID, "D") {
+		if cmd.Command == clearSlashCommand {
+			return slashClearThreadGuideText
+		}
+		return slashNewThreadGuideText
+	}
+	if p.control == nil {
+		return slashInternalErrorText
+	}
+	var startErr error
+	if cmd.Command == clearSlashCommand {
+		startErr = p.control.ClearSlackDMContext(ctx, inst, userID, cmd, envelopeID)
+	} else {
+		startErr = p.control.StartSlackDMChat(ctx, inst, userID, cmd, envelopeID)
+	}
+	if startErr != nil {
+		if errors.Is(startErr, engine.ErrDuplicate) {
+			if cmd.Command == clearSlashCommand {
+				return slashClearStartedText
+			}
+			return slashNewStartedText
+		}
+		p.logger.WarnContext(ctx, "slack slash command: session control failed",
+			"outcome", "session_control_failed", "command", cmd.Command,
+			"channel_type", string(TypeSlack), "app_id", cmd.APIAppID, "error", startErr)
+		return slashInternalErrorText
+	}
+	if cmd.Command == clearSlashCommand {
+		return slashClearStartedText
+	}
+	return slashNewStartedText
 }
 
 // process runs the command and returns the ephemeral text to reply with.

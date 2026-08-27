@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
 // Tunables for the inbound dispatcher. Remote media resolution is detached by
@@ -42,14 +40,14 @@ const (
 // detached from the socket's run context: a gateway redial must not cancel an
 // in-flight append.
 type dispatcher struct {
-	handle func(ctx context.Context, msg channel.InboundMessage)
+	handle func(ctx context.Context, job inboundJob)
 	logger *slog.Logger
 	sem    chan struct{}
 	ctx    context.Context
 	cancel context.CancelFunc
 
 	mu         sync.Mutex
-	queues     map[string][]channel.InboundMessage
+	queues     map[string][]inboundJob
 	active     map[string]bool
 	closed     bool
 	pending    int
@@ -58,7 +56,7 @@ type dispatcher struct {
 	done       chan struct{}
 }
 
-func newDispatcher(handle func(ctx context.Context, msg channel.InboundMessage), logger *slog.Logger) *dispatcher {
+func newDispatcher(handle func(ctx context.Context, job inboundJob), logger *slog.Logger) *dispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -69,36 +67,36 @@ func newDispatcher(handle func(ctx context.Context, msg channel.InboundMessage),
 		sem:        make(chan struct{}, maxDispatchWorkers),
 		ctx:        ctx,
 		cancel:     cancel,
-		queues:     make(map[string][]channel.InboundMessage),
+		queues:     make(map[string][]inboundJob),
 		active:     make(map[string]bool),
 		maxPending: maxDispatchPending,
 		done:       make(chan struct{}),
 	}
 }
 
-// enqueue appends msg to its conversation's queue and starts a drain worker
+// enqueue appends a raw inbound job to its conversation's queue and starts a drain worker
 // for the conversation when none is running. Never blocks the caller.
-func (d *dispatcher) enqueue(convID string, msg channel.InboundMessage) {
+func (d *dispatcher) enqueue(convID string, job inboundJob) {
 	d.mu.Lock()
 	if d.closed {
 		d.mu.Unlock()
 		d.logger.Debug("dingtalk dispatch: dispatcher closed, dropping message",
-			"conversation_id", convID, "msg_id", msg.MessageID)
+			"conversation_id", convID, "msg_id", job.callback.MsgId)
 		return
 	}
 	if d.pending >= d.maxPending {
 		d.mu.Unlock()
 		d.logger.Warn("dingtalk dispatch: installation queue full, dropping message",
-			"conversation_id", convID, "msg_id", msg.MessageID)
+			"conversation_id", convID, "msg_id", job.callback.MsgId)
 		return
 	}
 	if len(d.queues[convID]) >= maxDispatchQueueDepth {
 		d.mu.Unlock()
 		d.logger.Warn("dingtalk dispatch: conversation queue full, dropping message",
-			"conversation_id", convID, "msg_id", msg.MessageID)
+			"conversation_id", convID, "msg_id", job.callback.MsgId)
 		return
 	}
-	d.queues[convID] = append(d.queues[convID], msg)
+	d.queues[convID] = append(d.queues[convID], job)
 	d.pending++
 	start := !d.active[convID]
 	if start {
@@ -133,7 +131,7 @@ func (d *dispatcher) drain(convID string) {
 			d.mu.Unlock()
 			return
 		}
-		msg := q[0]
+		job := q[0]
 		d.queues[convID] = q[1:]
 		d.mu.Unlock()
 
@@ -148,7 +146,7 @@ func (d *dispatcher) drain(convID string) {
 			return
 		}
 		ctx, cancel := context.WithTimeout(d.ctx, dispatchJobTimeout)
-		d.handle(ctx, msg)
+		d.handle(ctx, job)
 		cancel()
 		<-d.sem
 		d.mu.Lock()

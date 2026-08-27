@@ -218,18 +218,9 @@ export interface WorkspaceSubscriptionSummary {
   entitlement: WorkspaceSubscriptionEntitlements;
   billingInterval: WorkspaceSubscriptionInterval | null;
   /** Authoritative current human-member count. Agents never take a seat. */
-  actualSeats: number;
-  /** Persisted Stripe seat high-water; null when no subscription exists yet. */
-  billedSeats: number | null;
-  /** A lower quantity already scheduled for the next period, if any. */
-  pendingSeatQuantity: number | null;
-  /** Confirmed human members consuming Cloud-owned commercial capacity. */
-  usedSeats: number;
-  /** Live pending invitations that reserve purchased capacity. */
-  reservedSeats: number;
-  /** Null when connected to a Cloud version that predates seat purchases. */
-  purchaseVersion: number | null;
-  activeSeatPurchase: WorkspaceSeatPurchaseSummary | null;
+  humanMembers: number;
+  /** Null when the workspace has no currently effective purchased capacity. */
+  seatCapacity: WorkspaceSeatCapacity | null;
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   /**
@@ -238,6 +229,18 @@ export interface WorkspaceSubscriptionSummary {
    * must gate that control on the member's role as well.
    */
   hasStripeCustomer: boolean;
+}
+
+export interface WorkspaceSeatCapacity {
+  purchased: number;
+  used: number;
+  reserved: number;
+  /** Server-computed purchased capacity not currently used or reserved. */
+  available: number;
+  version: number;
+  /** A lower quantity already scheduled for the next period, if any. */
+  pendingQuantity: number | null;
+  activePurchase: WorkspaceSeatPurchaseSummary | null;
 }
 
 export interface WorkspaceSeatPurchaseSummary {
@@ -264,7 +267,6 @@ export interface WorkspaceSubscriptionPrices {
 export interface CreateWorkspaceSubscriptionCheckoutRequest {
   interval: WorkspaceSubscriptionInterval;
   idempotencyKey: string;
-  customerEmail?: string;
 }
 
 export interface CreateWorkspaceSubscriptionCheckoutResponse {
@@ -312,9 +314,8 @@ export interface PurchaseWorkspaceSeatsResponse {
 
 export interface WorkspaceSubscriptionSeatReconcileResult {
   workspaceId: string;
-  billedSeats: number;
-  actualSeats: number;
   action: string;
+  version: number;
 }
 
 export interface CreateWorkspaceSubscriptionPortalResponse {

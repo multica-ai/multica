@@ -17,6 +17,8 @@ Feishu/Lark, Slack, DingTalk, WeCom, and Telegram are supported today. They shar
 | DM the agent | Supported | Supported | Supported | Supported | Supported |
 | Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning or replying to the Bot |
 | Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is |
+| Start a new Chat | `/new [message]` | DM: `/new [message]`; channel/thread: `@Multica /new [message]` | `/new [message]` | `/new [message]` | `/new [message]` |
+| Clear the current Chat context | `/clear [message]` | DM: `/clear [message]`; channel/thread: `@Multica /clear [message]` | `/clear [message]` | `/clear [message]` | `/clear [message]` |
 | Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection | `getUpdates` long polling |
 
 New connections are currently open only for mainland-China Feishu; existing international Lark connections keep working and can still be managed.
@@ -47,6 +49,14 @@ Step-by-step guides:
 Channel messages that don't @-mention the Bot never trigger the agent and are not added to its conversation context.
 
 Ordinary messages follow this flow. `/issue` is a command, not a chat turn: Multica posts the result back to the originating platform but does not add the command to Multica Chat. Slack's native slash command continues through its separate asynchronous issue-creation flow.
+
+## Conversation controls
+
+`/new` creates a new Multica Chat and routes later messages from that external conversation to it. `/new <message>` creates the Chat and uses the message as its first turn. The previous Chat remains stored and usable in Multica.
+
+`/clear` stays in the current Multica Chat but starts a new agent-visible context. The full Chat history remains available in Multica, while the agent cannot retrieve messages from before the boundary. `/clear <message>` uses the message as the first turn in the new context; a bare `/clear` applies to the next real message.
+
+On Slack, `/new` and `/clear` are native slash commands in a DM. A native slash-command payload does not identify a channel thread, so use `@Multica /new [message]` or `@Multica /clear [message]` inside the target thread.
 
 ## Session isolation
 

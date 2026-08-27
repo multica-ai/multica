@@ -121,12 +121,14 @@ function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
   runtime: AgentRuntime | null = null,
+  currentUserId: string | null = "user-1",
 ) {
   const result = render(
     <TestShell>
       <McpConfigTab
         agent={{ ...baseAgent, ...overrides }}
         runtime={runtime}
+        currentUserId={currentUserId}
         onSave={onSave}
       />
     </TestShell>,
@@ -330,6 +332,17 @@ describe("McpConfigTab", () => {
         "You don't have permission to view this runtime's MCP servers.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("does not discover MCP servers for another member's private runtime", async () => {
+    renderTab({}, undefined, { ...onlineRuntime, owner_id: "user-2" }, "admin-1");
+
+    expect(
+      await screen.findByText(
+        "You don't have permission to view this runtime's MCP servers.",
+      ),
+    ).toBeInTheDocument();
+    expect(mockRuntimeCapabilities).not.toHaveBeenCalled();
   });
 
   it("shows a retry notice when capability discovery fails", async () => {

@@ -427,6 +427,7 @@ export function ActiveTaskRow({
 
 function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
+  const { t: tAgents } = useT("agents");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
   const label = useStatusLabel(task.status);
@@ -437,12 +438,16 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // delivery) — a user-initiated cancel stays a plain "Cancelled".
   const failureLabel =
     task.status === "failed"
-      ? failureReasonLabel(task.failure_reason)
-      : cancelReasonLabel(task);
-  // Hovering the status mark reveals the actionable text ("upgrade the daemon
-  // on that machine", "work preserved at …"), not just the reason bucket.
-  const statusTitle =
-    failureLabel && task.error ? `${failureLabel}: ${task.error}` : (failureLabel ?? label);
+      ? failureReasonLabel(task.failure_reason, tAgents)
+      : cancelReasonLabel(task, tAgents);
+  // Hovering the status mark reveals the localized reason, never the raw
+  // `task.error`. That field is operator-facing English prose the daemon and
+  // server write for classification and logs (#7411) — pasting it into a
+  // tooltip made every non-English workspace read English at the exact moment
+  // something broke, and dragged absolute worktree paths and machine names
+  // into hover text and screenshots. The full diagnostic stays one click away
+  // in the transcript's Run details.
+  const statusTitle = failureLabel ?? label;
 
   // What this run cost, in the slot the relative timestamp used to hold.
   //

@@ -53,30 +53,30 @@ func TestInboundFromCallback_GroupAddressing(t *testing.T) {
 
 func TestInboundFromCallback_LeavesFreshCommandForSharedRouter(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
-	cb.Text.Content = "  /new start over  "
+	cb.Text.Content = "  /clear start over  "
 	msg, ok := inboundFromCallback(cb, "appkey-A")
 	if !ok {
-		t.Fatal("expected /new message")
+		t.Fatal("expected /clear message")
 	}
-	if msg.Text != "/new start over" || msg.CommandText != msg.Text || msg.ForceFresh {
-		t.Fatalf("DingTalk must leave /new classification to the shared Router: %+v", msg)
+	if msg.Text != "/clear start over" || msg.CommandText != msg.Text || msg.ForceFresh {
+		t.Fatalf("DingTalk must leave /clear classification to the shared Router: %+v", msg)
 	}
 }
 
 func TestInboundFromCallback_BareFreshStaysForSharedPendingPath(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
-	cb.Text.Content = " /new "
+	cb.Text.Content = " /clear "
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || msg.Text != "/new" || msg.CommandText != "/new" || msg.ForceFresh {
-		t.Fatalf("bare /new must remain visible to the shared Router: ok=%v msg=%+v", ok, msg)
+	if !ok || msg.Text != "/clear" || msg.CommandText != "/clear" || msg.ForceFresh {
+		t.Fatalf("bare /clear must remain visible to the shared Router: ok=%v msg=%+v", ok, msg)
 	}
 }
 
 func TestInboundFromCallback_DoesNotPrivatelyComposeFreshAndIssue(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
-	cb.Text.Content = "/new /issue calculate 1+2"
+	cb.Text.Content = "/clear /issue calculate 1+2"
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || msg.ForceFresh || msg.Text != "/new /issue calculate 1+2" || msg.CommandText != msg.Text {
+	if !ok || msg.ForceFresh || msg.Text != "/clear /issue calculate 1+2" || msg.CommandText != msg.Text {
 		t.Fatalf("combined commands must remain untouched for shared classification: ok=%v msg=%+v", ok, msg)
 	}
 }
@@ -124,14 +124,14 @@ func TestInboundFromCallback_RichTextTracksGeneratedMarkersPastUserPlaceholders(
 	cb := textCallback(convTypeP2P, false)
 	cb.Msgtype = "richText"
 	cb.Content = json.RawMessage(`{"richText":[
-		{"text":"/new Use [Image] literally"},
+		{"text":"/clear Use [Image] literally"},
 		{"type":"picture","downloadCode":"dl-1"},
 		{"text":" and another [Image] literally"},
 		{"type":"picture","downloadCode":"dl-2"}
 	]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || !msg.ForceFresh || strings.Contains(msg.Text, "/new") {
-		t.Fatalf("expected normalized richText /new message: ok=%v msg=%+v", ok, msg)
+	if !ok || !msg.ForceFresh || strings.Contains(msg.Text, "/clear") {
+		t.Fatalf("expected normalized richText /clear message: ok=%v msg=%+v", ok, msg)
 	}
 	raw, err := decodeDingTalkRaw(msg)
 	if err != nil || len(raw.Media) != 2 {
@@ -147,23 +147,161 @@ func TestInboundFromCallback_RichTextDoesNotPrivatelyComposeFreshAndIssue(t *tes
 	cb.Msgtype = "richText"
 	cb.Content = json.RawMessage(`{"richText":[
 		{"type":"picture","downloadCode":"dl-1"},
-		{"text":"/new /issue inspect image"}
+		{"text":"/clear /issue inspect image"}
 	]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || !msg.ForceFresh || msg.CommandText != "/new /issue inspect image" {
+	if !ok || !msg.ForceFresh || msg.CommandText != "/clear /issue inspect image" {
 		t.Fatalf("rich-text combined commands must remain untouched: %+v, ok=%v", msg, ok)
 	}
-	if !strings.Contains(msg.Text, "[Image]") || strings.Contains(msg.Text, "/new") || !strings.Contains(msg.Text, "/issue inspect image") {
-		t.Fatalf("rich-text visible body lost media or /new layout stripping: %q", msg.Text)
+	if !strings.Contains(msg.Text, "[Image]") || strings.Contains(msg.Text, "/clear") || !strings.Contains(msg.Text, "/issue inspect image") {
+		t.Fatalf("rich-text visible body lost media or /clear layout stripping: %q", msg.Text)
+	}
+}
+
+func TestInboundFromCallback_GroupRichTextBotMentionControlWithMedia(t *testing.T) {
+	for _, tc := range []struct {
+		command         string
+		content         string
+		atUsers         []botCallbackAtUser
+		wantCommandText string
+		wantText        string
+		wantFresh       bool
+	}{
+		{
+			command: "/clear", content: `{"richText":[
+				{"text":"@YYClaw /clear"},
+				{"type":"picture","downloadCode":"dl-1"}
+			]}`, wantCommandText: "[Image]", wantText: "[Image]", wantFresh: true,
+		},
+		{
+			command: "/new image after", content: `{"richText":[
+				{"text":"@YYClaw /new 测试图片在后"},
+				{"type":"picture","downloadCode":"dl-1"}
+			]}`, wantCommandText: "/new 测试图片在后", wantText: "测试图片在后\n[Image]", wantFresh: false,
+		},
+		{
+			command: "/new image before", content: `{"richText":[
+				{"text":"@YYClaw "},
+				{"type":"picture","downloadCode":"dl-1"},
+				{"text":"/new 测试图片在前"}
+			]}`,
+			atUsers: []botCallbackAtUser{
+				{DingtalkId: "$:someone-else"},
+				{DingtalkId: "$:LW]bot-user"},
+			},
+			wantCommandText: "/new 测试图片在前", wantText: "[Image]\n测试图片在前", wantFresh: false,
+		},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			cb := textCallback(convTypeGroup, true)
+			cb.Msgtype = "richText"
+			// DingTalk's isInAtList is authoritative. atUsers may be absent or
+			// contain opaque ids that cannot be compared with chatbotUserId.
+			cb.ChatbotUserId = "$:LWCP_v1:bot-user"
+			cb.AtUsers = tc.atUsers
+			cb.Content = json.RawMessage(tc.content)
+			msg, ok := inboundFromCallbackWithBotName(cb, "appkey-A", "YYClaw")
+			if !ok {
+				t.Fatal("expected group richText message")
+			}
+			if msg.CommandText != tc.wantCommandText {
+				t.Fatalf("bot addressing must be removed before shared command parsing: %q", msg.CommandText)
+			}
+			if msg.Text != tc.wantText {
+				t.Fatalf("visible body must remove bot mention and %s while preserving media: got %q want %q", tc.command, msg.Text, tc.wantText)
+			}
+			if msg.ForceFresh != tc.wantFresh {
+				t.Fatalf("ForceFresh = %v, want %v", msg.ForceFresh, tc.wantFresh)
+			}
+		})
+	}
+}
+
+func TestInboundFromCallback_P2PRichTextChatAfterImageStripsDirective(t *testing.T) {
+	cb := textCallback(convTypeP2P, false)
+	cb.Msgtype = "richText"
+	cb.Content = json.RawMessage(`{"richText":[
+		{"type":"picture","downloadCode":"dl-1"},
+		{"text":"/new\n点评一下"}
+	]}`)
+	msg, ok := inboundFromCallback(cb, "appkey-A")
+	if !ok {
+		t.Fatal("expected p2p richText message")
+	}
+	if msg.CommandText != "/new\n点评一下" {
+		t.Fatalf("shared router must retain the original control source: %q", msg.CommandText)
+	}
+	if msg.Text != "[Image]\n点评一下" {
+		t.Fatalf("visible body must strip /new without moving the image: %q", msg.Text)
+	}
+	if msg.ForceFresh {
+		t.Fatal("/new must not be represented as /clear's ForceFresh semantic")
+	}
+}
+
+func TestInboundFromCallback_GroupTextBotMentionUsesSameControlNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name, content, want string
+	}{
+		{name: "before command", content: " @YYClaw /new start clean", want: "/new start clean"},
+		{name: "after command", content: "/new @YYClaw start clean", want: "/new start clean"},
+		{name: "after body", content: "/new start clean @YYClaw", want: "/new start clean"},
+		{name: "fresh command", content: "/clear @YYClaw start clean", want: "/clear start clean"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cb := textCallback(convTypeGroup, true)
+			cb.ChatbotUserId = "$:LWCP_v1:bot-user"
+			cb.AtUsers = []botCallbackAtUser{{DingtalkId: "$:LW]bot-user"}}
+			cb.Text.Content = tc.content
+			msg, ok := inboundFromCallbackWithBotName(cb, "appkey-A", "YYClaw")
+			if !ok || msg.Text != tc.want || msg.CommandText != tc.want {
+				t.Fatalf("%s group addressing normalization: ok=%v msg=%+v", tc.name, ok, msg)
+			}
+		})
+	}
+}
+
+func TestInboundFromCallback_DoesNotPromoteMidSentenceControlCommand(t *testing.T) {
+	cb := textCallback(convTypeGroup, true)
+	cb.ChatbotUserId = "$:bot-user"
+	cb.AtUsers = []botCallbackAtUser{{DingtalkId: "$:bot-user"}}
+	cb.Text.Content = "@YYClaw please /new later"
+	msg, ok := inboundFromCallbackWithBotName(cb, "appkey-A", "YYClaw")
+	if !ok || msg.Text != "please /new later" || msg.CommandText != msg.Text {
+		t.Fatalf("a mid-sentence command must remain prose: ok=%v msg=%+v", ok, msg)
+	}
+}
+
+func TestInboundFromCallback_DoesNotStripUnaddressedLeadingMention(t *testing.T) {
+	cb := textCallback(convTypeGroup, false)
+	cb.ChatbotUserId = "$:LWCP_v1:bot-user"
+	cb.AtUsers = []botCallbackAtUser{{DingtalkId: "$:someone-else"}}
+	cb.Text.Content = "@Alice /new discuss this"
+	msg, ok := inboundFromCallback(cb, "appkey-A")
+	if !ok || msg.Text != "@Alice /new discuss this" || msg.CommandText != msg.Text {
+		t.Fatalf("an unverified colleague mention must remain untouched: ok=%v msg=%+v", ok, msg)
+	}
+}
+
+func TestInboundFromCallback_DoesNotGuessAmongMultipleVisibleMentions(t *testing.T) {
+	cb := textCallback(convTypeGroup, true)
+	cb.AtUsers = []botCallbackAtUser{
+		{DingtalkId: "$:someone-else", StaffId: "alice"},
+		{DingtalkId: "$:LW]bot-user"},
+	}
+	cb.Text.Content = "/new @Alice discuss this with @YYClaw"
+	msg, ok := inboundFromCallback(cb, "appkey-A")
+	if !ok || msg.Text != cb.Text.Content || msg.CommandText != msg.Text {
+		t.Fatalf("ambiguous visible mentions must remain untouched: ok=%v msg=%+v", ok, msg)
 	}
 }
 
 func TestInboundFromCallback_RichTextBareFreshWithoutMediaStaysForSharedPendingPath(t *testing.T) {
 	cb := textCallback(convTypeP2P, false)
 	cb.Msgtype = "richText"
-	cb.Content = json.RawMessage(`{"richText":[{"text":" /new "}]}`)
+	cb.Content = json.RawMessage(`{"richText":[{"text":" /clear "}]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || msg.ForceFresh || msg.Text != "/new" || msg.CommandText != "/new" {
+	if !ok || msg.ForceFresh || msg.Text != "/clear" || msg.CommandText != "/clear" {
 		t.Fatalf("text-only bare fresh = %+v, ok=%v", msg, ok)
 	}
 }
@@ -172,7 +310,7 @@ func TestInboundFromCallback_RichTextBareFreshWithMediaPreservesMediaTurn(t *tes
 	cb := textCallback(convTypeP2P, false)
 	cb.Msgtype = "richText"
 	cb.Content = json.RawMessage(`{"richText":[
-		{"text":"/new"},
+		{"text":"/clear"},
 		{"type":"picture","downloadCode":"dl-1"}
 	]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
@@ -185,11 +323,11 @@ func TestInboundFromCallback_RichTextRunsDoNotCreatePrivateCommandComposition(t 
 	cb := textCallback(convTypeP2P, false)
 	cb.Msgtype = "richText"
 	cb.Content = json.RawMessage(`{"richText":[
-		{"text":"/new"},
+		{"text":"/clear"},
 		{"text":"/issue split title"}
 	]}`)
 	msg, ok := inboundFromCallback(cb, "appkey-A")
-	if !ok || msg.ForceFresh || msg.Text != "/new/issue split title" || msg.CommandText != msg.Text {
+	if !ok || msg.ForceFresh || msg.Text != "/clear/issue split title" || msg.CommandText != msg.Text {
 		t.Fatalf("split rich-text runs must remain ordinary text: %+v, ok=%v", msg, ok)
 	}
 }

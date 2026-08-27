@@ -147,9 +147,19 @@
     "chat_with_named": "{{name}} とチャット"
   },
   "starter_prompts": {
-    "list_open": "オープンなタスクを優先度順にまとめて",
-    "summarize_today": "今日やったことを要約して",
-    "plan_next": "次に取り組むことを計画して"
+    "aria_label": "おすすめの最初のアクション",
+    "capabilities": {
+      "label": "何を手伝えますか？",
+      "prompt": "あなたが得意な支援を簡潔に教えてください。"
+    },
+    "first_task": {
+      "label": "最初のタスクを提案",
+      "prompt": "あなたに任せられる実用的なタスクを3つ提案してください。"
+    },
+    "recommend": {
+      "label": "アクションを提案",
+      "prompt": "私のワークスペースについて知っていることを踏まえ、最初に役立つアクションを提案してください。"
+    }
   },
   "onboarding_cards": {
     "aria_label": "はじめ方",

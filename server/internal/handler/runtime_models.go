@@ -44,9 +44,13 @@ const (
 
 // ModelListRequest represents a pending or completed model list request.
 // Supported is false when the provider ignores per-agent model
-// selection entirely (currently: hermes). The UI uses this to
-// disable its dropdown rather than silently accepting a value the
-// backend will drop.
+// selection entirely — agent.ModelSelectionSupported is the single
+// source of truth, and it names qwenpaw and mcode. Hermes is NOT in
+// that set: it honours opts.Model through the ACP `session/set_model`
+// RPC, so do not "align" this list by adding it (MUL-6606 — an earlier
+// version of this comment said hermes, which would have cost Hermes its
+// model picker outright). The UI uses this to disable its dropdown
+// rather than silently accepting a value the backend will drop.
 //
 // RunStartedAt is set when PopPending claims the request. It is
 // `json:"-"` because it's a server-side bookkeeping field — the UI only
@@ -313,17 +317,8 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 // HeartbeatInterval away.
 func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
 	if !ok {
-		return
-	}
-
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "runtime not found")
-		return
-	}
-	if _, ok := h.requireWorkspaceMember(w, r, uuidToString(rt.WorkspaceID), "runtime not found"); !ok {
 		return
 	}
 	if rt.Status != "online" {
@@ -432,6 +427,12 @@ func (h *Handler) requestDaemonPendingWork(runtimeID, kind string) {
 
 // GetModelListRequest returns the status of a model list request.
 func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	rt, _, ok := h.requireRuntimeReadAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+
 	requestID := chi.URLParam(r, "requestId")
 
 	req, err := h.ModelListStore.Get(r.Context(), requestID)
@@ -439,7 +440,7 @@ func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
 		return
 	}
-	if req == nil {
+	if req == nil || req.RuntimeID != uuidToString(rt.ID) {
 		writeError(w, http.StatusNotFound, "request not found")
 		return
 	}

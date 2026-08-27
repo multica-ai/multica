@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -41,6 +42,9 @@ type mcodeBackend struct {
 }
 
 var mcodeReaderDrainGrace = 2 * time.Second
+var mcodeSessionStartupReadyDelay = 100 * time.Millisecond
+
+var errMcodeProcessExited = errors.New("mcode process exited")
 
 type mcodeMessageStream struct {
 	ch     chan Message
@@ -91,7 +95,6 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	args = append(args, filterCustomArgs(opts.CustomArgs, mcodeBlockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			signalProcessGroup(cmd, syscall.SIGKILL)
@@ -183,7 +186,7 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				c.handleLine(line)
 			}
 		}
-		c.closeAllPending(fmt.Errorf("mcode process exited"))
+		c.closeAllPending(errMcodeProcessExited)
 	}()
 
 	go func() {
@@ -243,6 +246,16 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				}
 				return
 			}
+			if err := mcodeWaitForSessionStartup(runCtx); err != nil {
+				finalStatus, finalError = mcodeRequestFailure(runCtx, opts.Timeout, "session/load", err)
+				resCh <- Result{
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					ResumeRejected: resumeRejected,
+				}
+				return
+			}
 			result, loadErr := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
@@ -263,6 +276,11 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			}
 			sessionID, _ = resolveResumedSessionID(opts.ResumeSessionID, result)
 		} else {
+			if err := mcodeWaitForSessionStartup(runCtx); err != nil {
+				finalStatus, finalError = mcodeRequestFailure(runCtx, opts.Timeout, "session/new", err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 			result, newErr := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
 				"mcpServers": mcpServers,
@@ -357,6 +375,17 @@ func mcodeLoadSessionSupported(result json.RawMessage) bool {
 	return json.Unmarshal(result, &payload) == nil && payload.AgentCapabilities.LoadSession
 }
 
+func mcodeWaitForSessionStartup(ctx context.Context) error {
+	timer := time.NewTimer(mcodeSessionStartupReadyDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func mcodeRequestFailure(ctx context.Context, timeout time.Duration, operation string, err error) (string, string) {
 	if ctx.Err() == context.DeadlineExceeded {
 		return "timeout", fmt.Sprintf("mcode timed out during %s after %s", operation, timeout)
@@ -364,5 +393,20 @@ func mcodeRequestFailure(ctx context.Context, timeout time.Duration, operation s
 	if ctx.Err() == context.Canceled {
 		return "aborted", "execution cancelled"
 	}
+	if mcodeSessionStartupExited(operation, err) {
+		return "failed", "mcode session/new failed after initialize: MiniMax Code ACP exited before starting a session; retry agent creation, and if it persists upgrade MiniMax Code or verify `mcode acp` starts successfully"
+	}
 	return "failed", fmt.Sprintf("mcode %s failed: %v", operation, err)
+}
+
+func mcodeSessionStartupExited(operation string, err error) bool {
+	if operation != "session/new" {
+		return false
+	}
+	// Only trust transport-level signals. A still-running MCode reports
+	// session/new failures as a JSON-RPC error, and session/new is where
+	// mcpServers are launched, so text matching on "process exited" or
+	// "broken pipe" would rewrite a caller's real MCP startup error into
+	// an MCode-exited message and drop its root cause.
+	return errors.Is(err, errMcodeProcessExited) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, syscall.EPIPE)
 }

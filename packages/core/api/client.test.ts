@@ -1,9 +1,76 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "../config";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
+  configStore.getState().setAgentStarterPromptsSupported(false);
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient agent starter-prompt compatibility", () => {
+  const prompt = {
+    label: "Review a PR",
+    prompt: "Review the open pull request.",
+  };
+
+  it("rejects create writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.createAgent({
+        name: "Reviewer",
+        runtime_id: "runtime-1",
+        starter_prompts: [prompt],
+      }),
+    ).rejects.toThrow(/server version does not support agent starter prompts/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects update writes before an older backend can drop them", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.updateAgent("agent-1", { starter_prompts: [prompt] }),
+    ).rejects.toThrow(/server version does not support agent starter prompts/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows declared-capability create and update writes through", async () => {
+    configStore.getState().setAgentStarterPromptsSupported(true);
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ id: "agent-1" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await client.createAgent({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      starter_prompts: [prompt],
+    });
+    await client.updateAgent("agent-1", {
+      starter_prompts: [prompt],
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      name: "Reviewer",
+      runtime_id: "runtime-1",
+      starter_prompts: [prompt],
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      starter_prompts: [prompt],
+    });
+  });
 });
 
 describe("ApiClient edit guards", () => {
@@ -770,6 +837,60 @@ describe("ApiClient notification preferences", () => {
       workspace_id: "",
       preferences: {},
     });
+  });
+});
+
+describe("ApiClient Inbox response schemas", () => {
+  const legacyRow = {
+    id: "inbox-1",
+    workspace_id: "ws-1",
+    recipient_type: "member",
+    recipient_id: "member-1",
+    type: "new_comment",
+    severity: "info",
+    issue_id: "issue-1",
+    title: "Legacy Inbox row",
+    body: null,
+    read: false,
+    archived: false,
+    created_at: "2026-08-24T00:00:00Z",
+  };
+
+  it("schema-parses the main Inbox and preserves omitted legacy projections", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify([legacyRow]), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").listInbox();
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty("issue_status");
+    expect(result[0]).not.toHaveProperty("issue_priority");
+  });
+
+  it("falls back safely when the main Inbox projection is wrong-typed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify([{ ...legacyRow, issue_priority: 3 }]),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listInbox(),
+    ).resolves.toEqual([]);
   });
 });
 

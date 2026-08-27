@@ -36,8 +36,10 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 
 	var sessionID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		VALUES ($1, $2, $3, $4, 'active')
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title, status, explicitly_created_at
+		)
+		VALUES ($1, $2, $3, $4, 'active', now())
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID, "Handler Test Chat Session").Scan(&sessionID); err != nil {
 		t.Fatalf("failed to create handler test chat session: %v", err)
@@ -67,6 +69,14 @@ func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ strin
 	}
 	m.files[key] = append([]byte(nil), data...)
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
+}
+
+func (m *mockStorage) UploadStream(ctx context.Context, key string, reader io.Reader, _ int64, contentType string, filename string) (string, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return m.Upload(ctx, key, data, contentType, filename)
 }
 
 func (m *mockStorage) Delete(_ context.Context, key string) {

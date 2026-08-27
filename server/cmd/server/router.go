@@ -37,6 +37,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -215,6 +216,7 @@ type RouterOptions struct {
 	HTTPMetrics         *obsmetrics.HTTPMetrics
 	BusinessMetrics     *obsmetrics.BusinessMetrics
 	ChannelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	SeatCapacityMetrics *obsmetrics.SeatCapacityMetrics
 	// ChannelLeaseRedis is a dedicated non-blocking Redis client/pool. It is
 	// required only when CHANNEL_WS_LEASE_BACKEND=redis.
 	ChannelLeaseRedis *redis.Client
@@ -419,6 +421,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.AutopilotService.Entitlements = entitlementClient
 		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
 	}
+	// This is deployment wiring, not a business mode: when connected, admission
+	// and settlement both follow Cloud's single strict prepaid-seat policy.
+	capacityEnabled := envBool("MULTICA_SUBSCRIPTION_CAPACITY_ENABLED", false)
+	capacityClient, capacityErr := seatcapacity.New(seatcapacity.Config{
+		Enabled:      capacityEnabled,
+		BaseURL:      strings.TrimSpace(os.Getenv("MULTICA_SUBSCRIPTION_CAPACITY_URL")),
+		ServiceToken: os.Getenv("MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN"),
+		Timeout:      envDuration("MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT", 3*time.Second),
+	})
+	if capacityErr != nil {
+		// Explicit enablement with malformed config must not silently restore
+		// unlimited membership. The fail-closed executor returns 503 until the
+		// operator repairs the service URL or credential.
+		slog.Error("subscription seat capacity executor unavailable", "error", capacityErr)
+		h.SeatCapacity = seatcapacity.NewUnavailable(capacityErr)
+	} else {
+		h.SeatCapacity = capacityClient
+	}
+	capacityLocker := seatcapacity.NewWorkspaceLocker(pool)
+	h.SeatCapacityLocker = capacityLocker
+	if capacityEnabled && h.SeatCapacity.Enabled() {
+		h.SeatCapacityWorker = seatcapacity.NewWorker(queries, h.SeatCapacity, capacityLocker, seatcapacity.WorkerConfig{
+			Metrics: opts.SeatCapacityMetrics,
+		})
+	}
 	if opts.BusinessMetrics != nil {
 		// Wire the BusinessMetrics receiver into the cloud runtime client
 		// so every outbound Fleet/Gateway request feeds the
@@ -464,7 +491,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// connection of its own outside the per-installation supervisor. The Router
 	// is the single shared inbound handler injected into every Channel.
 	channelRegistry := channel.NewRegistry()
-	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{Logger: slog.Default()})
+	channelRouter := engine.NewRouter(h.IssueService, h.TaskService, queries, engine.RouterConfig{
+		Logger: slog.Default(), Lifecycle: h,
+	})
 	// Debounce the per-session run trigger so a burst of messages collapses
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
@@ -715,8 +744,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// The bind link (/slack/bind) is a web-app page, so it must use the
 				// app URL (MULTICA_APP_URL ?? FRONTEND_ORIGIN), NOT MULTICA_PUBLIC_URL
 				// (the backend/API URL). Mirrors the Lark replier (appURLFromEnv).
-				AppURL: appURLFromEnv(),
-				Logger: slog.Default(),
+				AppURL:  appURLFromEnv(),
+				Queries: queries,
+				Logger:  slog.Default(),
 			})
 			// Typing indicator (MUL-3874): a 👀 reaction on the user's message
 			// while the agent works, cleared when the run finishes or fails.
@@ -747,16 +777,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// agent asks, instead of force-assembling it on every inbound.
 			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
 
-			// `/issue` slash command (MUL-3908): a real Slack slash command,
-			// delivered over the same Socket Mode connection. It is a quick-create
-			// entry point — the invoker's natural-language description is enqueued as
-			// a quick-create task (no chat session or chat run) and the agent authors
-			// the well-formed issue in the background — reusing the shared TaskService
-			// + binding service. The invoker gets a private ephemeral acknowledgement
-			// and a Multica notification when the issue lands.
+			// `/issue`, `/new`, and `/clear` are real Slack slash commands delivered
+			// over the same Socket Mode connection. `/issue` enqueues quick-create;
+			// the two session controls reuse the shared route/context and task
+			// services. Every outcome receives a private ephemeral acknowledgement.
 			slackSlash := slack.NewSlashCommandProcessor(slack.SlashCommandConfig{
 				Queries: queries,
 				Tasks:   h.TaskService,
+				Control: slack.NewSlackDMControlStarter(queries, pool, h.TaskService, h),
 				Binding: slackBindingSvc,
 				AppURL:  appURLFromEnv(),
 				Logger:  slog.Default(),
@@ -816,9 +844,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			channelRouter.Register(dingtalk.TypeDingTalk, dingtalk.NewDingTalkResolverSet(queries, pool, replier, ack, media, botNames))
 			dingtalk.NewOutbound(queries, box.Open, dingtalkClient, slog.Default()).Register(bus)
 			dingtalk.RegisterDingTalk(channelRegistry, dingtalk.ChannelDeps{
-				Decrypt: box.Open,
-				Client:  dingtalkClient,
-				Logger:  slog.Default(),
+				Decrypt:  box.Open,
+				Client:   dingtalkClient,
+				BotNames: botNames,
+				Logger:   slog.Default(),
 			})
 			installSvc, installErr := dingtalk.NewInstallService(queries, pool, box, slog.Default())
 			if installErr != nil {
@@ -1845,6 +1874,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
+			r.With(handler.RequireHumanActor).Post("/api/tasks/{taskId}/retry-source-context", h.RetrySourceContextQuickCreate)
 
 			// Issue quick actions (definitions; running one lives under
 			// /api/issues/{id}/quick-actions/{quickActionId}/run)
@@ -1987,6 +2017,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
+				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
+				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
 				r.Delete("/", h.DeleteComment)
 				r.Post("/resolve", h.ResolveComment)

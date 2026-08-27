@@ -112,7 +112,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("qwenpaw stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start qwenpaw: %w", err)
 	}
@@ -179,6 +179,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

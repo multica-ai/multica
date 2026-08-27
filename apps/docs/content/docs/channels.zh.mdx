@@ -17,6 +17,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 |
 | 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 |
 | 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
+| 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
+| 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
 | 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
@@ -47,6 +49,14 @@ Telegram 目前只处理文字消息。不支持的媒体消息会收到一句�
 没有 @ Bot 的频道消息不会触发智能体，也不会被加入它的对话上下文。
 
 普通消息按上述流程处理。`/issue` 是命令，不是对话轮次：Multica 会在原平台返回处理结果，但不会把命令加入 Multica Chat。Slack 原生 slash 命令仍按独立的异步创建任务流程处理。
+
+## 控制对话上下文
+
+`/new` 会创建一个新的 Multica Chat，并把这条外部会话的后续消息路由到新 Chat。`/new <消息>` 会同时把消息作为第一轮。旧 Chat 仍保存在 Multica 中，可以继续使用。
+
+`/clear` 不会新建 Chat，只会在当前 Multica Chat 中开启一段新的智能体可见上下文。完整 Chat 历史仍保存在 Multica 中，但智能体无法读取边界之前的消息。`/clear <消息>` 会把消息作为新上下文的第一轮；裸 `/clear` 会把边界应用到下一条真实消息。
+
+在 Slack 私聊中，`/new` 和 `/clear` 都是原生 slash 命令。原生 slash command payload 无法标识频道里的目标 thread，因此需要在目标 thread 中发送 `@Multica /new [消息]` 或 `@Multica /clear [消息]`。
 
 ## 会话隔离
 

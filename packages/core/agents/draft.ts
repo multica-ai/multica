@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentInvocationTargetInput,
   AgentPermissionScope,
+  AgentStarterPrompt,
   CreateAgentRequest,
   RuntimeDevice,
 } from "../types";
@@ -25,6 +26,7 @@ export interface AgentDraft {
   name: string;
   description: string;
   instructions: string;
+  starterPrompts: AgentStarterPrompt[];
   avatarUrl: string | null;
   runtimeId: string;
   model: string;
@@ -43,6 +45,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   name: "",
   description: "",
   instructions: "",
+  starterPrompts: [],
   avatarUrl: null,
   runtimeId: "",
   model: "",
@@ -186,6 +189,7 @@ export function buildDuplicateDraft(
     name: `${source.name}${options.nameSuffix}`,
     description: source.description ?? "",
     instructions: source.instructions ?? "",
+    starterPrompts: (source.starter_prompts ?? []).map((item) => ({ ...item })),
     avatarUrl: source.avatar_url ?? null,
     runtimeId: keepsRuntime
       ? (source.runtime_id as string)
@@ -216,6 +220,14 @@ export function buildCreateAgentRequest(options: {
     name: draft.name.trim(),
     description: draft.description.trim(),
     instructions: draft.instructions.trim() || undefined,
+    ...(draft.starterPrompts.length > 0
+      ? {
+          starter_prompts: draft.starterPrompts.map((item) => ({
+            label: item.label.trim(),
+            prompt: item.prompt.trim(),
+          })),
+        }
+      : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
     model: draft.model.trim() || undefined,

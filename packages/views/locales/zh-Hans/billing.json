@@ -97,7 +97,6 @@
       "upgrade": "升级到 Pro",
       "manage": "管理账单",
       "add_seats": "添加席位",
-      "refresh_seats": "刷新席位",
       "cancel": "取消",
       "continue_to_stripe": "前往 Stripe"
     },
@@ -110,9 +109,7 @@
       "checkout_failed": "无法创建 Checkout，请稍后重试。",
       "portal_response": "服务端响应无法读取，无法打开 Billing Portal。",
       "portal_unavailable": "这个工作区暂时无法使用 Billing Portal，当前套餐已刷新。",
-      "portal_failed": "无法打开 Billing Portal，请稍后重试。",
-      "reconcile_response": "席位已刷新，但无法读取结果。请重新加载页面确认当前数量。",
-      "reconcile_failed": "无法刷新席位。成员变更已保存，定期对账仍会继续重试。"
+      "portal_failed": "无法打开 Billing Portal，请稍后重试。"
     },
     "return": {
       "cancel_title": "已取消 Checkout",
@@ -221,8 +218,10 @@
       "summary_loading": "正在加载订阅席位详情",
       "summary_unavailable_title": "部分席位详情不可用",
       "summary_unavailable_description": "当前套餐仍会显示，但暂时无法加载已购席位和待生效席位。",
-      "updated": "席位已刷新",
-      "reconciled": "当前成员：{{actual}} · 计费席位：{{billed}}"
+      "members_over_capacity_title": "成员数超过已购席位",
+      "members_over_capacity_description": "当前工作区有 {{actual}} 名成员，但只购买了 {{purchased}} 个席位。继续邀请前，请补足席位或移除成员。",
+      "occupancy_over_capacity_description": "当前工作区已占用 {{occupied}} 个席位，但只购买了 {{purchased}} 个（{{members}} 名成员和 {{reserved}} 个待接受邀请）。继续邀请前，请补足席位、移除成员或撤销待接受邀请。",
+      "updated": "席位购买已提交"
     },
     "seat_purchase": {
       "title": "添加席位",
@@ -247,7 +246,7 @@
       "pending_description_other": "Stripe 正在确认订阅更新至 {{count}} 个席位。",
       "delayed_title": "席位确认时间超出预期",
       "delayed_description": "自动检查已停止，购买仍可能完成。开始另一笔购买前，请稍后再查看或联系支持人员。",
-      "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请刷新席位以释放本次请求并重新获取报价；开始另一笔购买前也可联系支持人员。",
+      "delayed_description_with_expiry": "自动检查已停止。若到 {{date}} 仍在等待，请重新加载页面后再获取报价；若状态仍未更新，请联系支持人员。",
       "submitted_other": "购买 {{count}} 个席位的请求已提交。Stripe 确认后会显示新容量。",
       "error_title": "无法更新估算金额"
     },

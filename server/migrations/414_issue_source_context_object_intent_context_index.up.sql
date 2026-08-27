@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_issue_source_context_object_intent_context ON issue_source_context_object_intent (source_context_id);

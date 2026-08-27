@@ -487,6 +487,7 @@ func main() {
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	var seatCapacityMetrics *obsmetrics.SeatCapacityMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
@@ -517,6 +518,7 @@ func main() {
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
+		seatCapacityMetrics = metricsRegistry.SeatCapacity
 		wecomMetrics = metricsRegistry.Wecom
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
@@ -554,6 +556,7 @@ func main() {
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
 		ChannelLeaseMetrics: channelLeaseMetrics,
+		SeatCapacityMetrics: seatCapacityMetrics,
 		ChannelLeaseRedis:   channelLeaseRedis,
 		WecomMetrics:        wecomMetrics,
 		DaemonHub:           daemonHub,
@@ -604,6 +607,9 @@ func main() {
 	// work to queued_expired failures.
 	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
 		envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL))
+	// Source-context cleanup is object-store work, so it gets its own goroutine
+	// instead of a slot in the runtime sweep tick.
+	go runSourceContextSweeper(sweepCtx, taskSvc)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {
@@ -612,6 +618,9 @@ func main() {
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
+	if h.SeatCapacityWorker != nil {
+		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
 	if h.TelegramOutbound != nil {
 		h.TelegramOutbound.Start(sweepCtx)

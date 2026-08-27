@@ -74,6 +74,13 @@ var autopilotTriggerAddCmd = &cobra.Command{
 	RunE:  runAutopilotTriggerAdd,
 }
 
+var autopilotTriggerListCmd = &cobra.Command{
+	Use:   "trigger-list <autopilot-id>",
+	Short: "List an autopilot's triggers (ids for trigger-update/-delete/-rotate-url)",
+	Args:  exactArgs(1),
+	RunE:  runAutopilotTriggerList,
+}
+
 var autopilotTriggerUpdateCmd = &cobra.Command{
 	Use:   "trigger-update <autopilot-id> <trigger-id>",
 	Short: "Update an existing trigger",
@@ -104,6 +111,7 @@ func init() {
 	autopilotCmd.AddCommand(autopilotTriggerCmd)
 	autopilotCmd.AddCommand(autopilotRunsCmd)
 	autopilotCmd.AddCommand(autopilotTriggerAddCmd)
+	autopilotCmd.AddCommand(autopilotTriggerListCmd)
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
 	autopilotCmd.AddCommand(autopilotTriggerDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerRotateURLCmd)
@@ -159,6 +167,10 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
+	// trigger-list
+	autopilotTriggerListCmd.Flags().String("output", "table", "Output format: table or json")
+	autopilotTriggerListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
 	// trigger-rotate-url — webhook only
 	autopilotTriggerRotateURLCmd.Flags().String("output", "json", "Output format: table or json")
 	autopilotTriggerRotateURLCmd.Flags().BoolP("yes", "y", false, "Skip the interactive confirmation prompt")
@@ -207,7 +219,10 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	actors := loadActorDisplayLookup(ctx, client)
-	headers := []string{"ID", "TITLE", "STATUS", "MODE", "ASSIGNEE", "LAST_RUN"}
+	// NEXT_RUN is what distinguishes a scheduled autopilot from one with no
+	// trigger at all. The list payload has carried next_run_at all along, but
+	// the table dropped it, leaving the two indistinguishable here (MUL-6680).
+	headers := []string{"ID", "TITLE", "STATUS", "MODE", "ASSIGNEE", "NEXT_RUN", "LAST_RUN"}
 	rows := make([][]string, 0, len(resp.Autopilots))
 	for _, a := range resp.Autopilots {
 		rows = append(rows, []string{
@@ -216,7 +231,8 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "status"),
 			strVal(a, "execution_mode"),
 			actors.agent(strVal(a, "assignee_id")),
-			strVal(a, "last_run_at"),
+			relativeTimestamp(strVal(a, "next_run_at")),
+			relativeTimestamp(strVal(a, "last_run_at")),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -307,6 +323,51 @@ func redactAutopilotWebhookCredentials(resp map[string]any) {
 		trigger["webhook_path"] = nil
 		trigger["webhook_url"] = nil
 	}
+}
+
+// relativeTimestamp renders an RFC3339 timestamp as a short, fixed-width-ish
+// relative string ("in 2h", "3d ago", "—" when absent or unparseable). Table
+// columns use this instead of the raw timestamp so NEXT_RUN fits alongside the
+// existing columns on a narrow terminal, and so "never scheduled" reads as a
+// visibly different value rather than an empty cell (MUL-6680).
+func relativeTimestamp(ts string) string {
+	return relativeTimestampAt(ts, time.Now())
+}
+
+func relativeTimestampAt(ts string, now time.Time) string {
+	trimmed := strings.TrimSpace(ts)
+	if trimmed == "" {
+		return "—"
+	}
+	t, err := time.Parse(time.RFC3339, trimmed)
+	if err != nil {
+		return "—"
+	}
+
+	d := t.Sub(now)
+	suffix := " ago"
+	if d >= 0 {
+		suffix = ""
+	} else {
+		d = -d
+	}
+
+	var magnitude string
+	switch {
+	case d < time.Minute:
+		magnitude = fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		magnitude = fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		magnitude = fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		magnitude = fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+
+	if suffix == "" {
+		return "in " + magnitude
+	}
+	return magnitude + suffix
 }
 
 func webhookTokenHint(token string) string {
@@ -584,6 +645,68 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 			strVal(r, "issue_id"),
 			strVal(r, "triggered_at"),
 			strVal(r, "completed_at"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAutopilotTriggerList(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+
+	// The detail endpoint already returns triggers as a top-level sibling of
+	// "autopilot"; this command exists so the ids that trigger-update /
+	// trigger-delete / trigger-rotate-url require are discoverable without
+	// knowing that envelope shape (MUL-6680).
+	var resp map[string]any
+	if err := client.GetJSON(ctx, "/api/autopilots/"+autopilotRef.ID, &resp); err != nil {
+		return fmt.Errorf("get autopilot: %w", err)
+	}
+	redactAutopilotWebhookCredentials(resp)
+
+	triggersRaw, _ := resp["triggers"].([]any)
+	triggers := make([]map[string]any, 0, len(triggersRaw))
+	for _, raw := range triggersRaw {
+		if t, ok := raw.(map[string]any); ok {
+			triggers = append(triggers, t)
+		}
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{"triggers": triggers, "total": len(triggers)})
+	}
+
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	headers := []string{"ID", "KIND", "ENABLED", "SCHEDULE", "NEXT_RUN", "LABEL"}
+	rows := make([][]string, 0, len(triggers))
+	for _, t := range triggers {
+		enabled := "no"
+		if b, ok := t["enabled"].(bool); ok && b {
+			enabled = "yes"
+		}
+		schedule := strVal(t, "cron_expression")
+		if tz := strVal(t, "timezone"); schedule != "" && tz != "" {
+			schedule += " (" + tz + ")"
+		}
+		rows = append(rows, []string{
+			displayID(strVal(t, "id"), fullID),
+			strVal(t, "kind"),
+			enabled,
+			schedule,
+			relativeTimestamp(strVal(t, "next_run_at")),
+			strVal(t, "label"),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)

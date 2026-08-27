@@ -8,7 +8,7 @@ package wecom
 // 失败". The shared command parsers read the first non-empty line and want the
 // directive at the start of it, so with the mention still in front they see
 // "@Multica" and decide this is ordinary prose. Every slash command in every
-// group was silently dropped: no issue filed, no fresh session, and nothing
+// group was silently dropped: no issue filed, no context clear, and nothing
 // said to the person about it.
 //
 // Slack strips its mention token before classifying (slack/inbound.go
@@ -88,20 +88,20 @@ func TestAnIssueCommandAfterAMentionIsStillACommand(t *testing.T) {
 	}
 }
 
-// TestAFreshSessionCommandAfterAMentionIsStillACommand: /new is the other
+// TestAFreshSessionCommandAfterAMentionIsStillACommand: /clear is the other
 // shared directive. When it is dropped the agent keeps the previous thread and
 // answers with a conversation the person was trying to leave behind.
 func TestAFreshSessionCommandAfterAMentionIsStillACommand(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, body string }{
-		{"mention then command", "@Andrew /new 重新分析一下"},
-		{"two mentions then command", "@Andrew @Bowen /new 重新分析一下"},
-		{"mention, full-width space, command", "@Andrew　/new 重新分析一下"},
+		{"mention then command", "@Andrew /clear 重新分析一下"},
+		{"two mentions then command", "@Andrew @Bowen /clear 重新分析一下"},
+		{"mention, full-width space, command", "@Andrew　/clear 重新分析一下"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := dispatchGroupMessage(t, "", tc.body)
 			if _, ok := engine.ParseFreshSessionCommand(msg.CommandText); !ok {
-				t.Fatalf("the shared parser did not see /new in %q.\nCommandText = %q — the request for a "+
+				t.Fatalf("the shared parser did not see /clear in %q.\nCommandText = %q — the request for a "+
 					"fresh session is silently dropped and the agent answers with the old conversation "+
 					"still in hand.", tc.body, msg.CommandText)
 			}

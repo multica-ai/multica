@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Save } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import { useConfigStore } from "@multica/core/config";
+import type { Agent, AgentStarterPrompt } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../../i18n";
+
+import { StarterPromptsEditor } from "../starter-prompts-editor";
 
 export function InstructionsTab({
   agent,
@@ -13,14 +16,47 @@ export function InstructionsTab({
   onDirtyChange,
 }: {
   agent: Agent;
-  onSave: (instructions: string) => Promise<void>;
+  onSave: (updates: {
+    instructions: string;
+    starter_prompts?: AgentStarterPrompt[];
+  }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  const starterPromptsSupported = useConfigStore(
+    (state) => state.agentStarterPromptsSupported,
+  );
   const [value, setValue] = useState(agent.instructions ?? "");
+  const [starterPrompts, setStarterPrompts] = useState<AgentStarterPrompt[]>(
+    agent.starter_prompts ?? [],
+  );
   const [saving, setSaving] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
-  const isDirty = value !== (agent.instructions ?? "");
+  const persistedStarterPromptsKey = JSON.stringify(
+    agent.starter_prompts ?? [],
+  );
+  const persistedRef = useRef({
+    agentId: agent.id,
+    instructions: agent.instructions ?? "",
+    starterPromptsKey: persistedStarterPromptsKey,
+  });
+  const localRef = useRef({
+    instructions: value,
+    starterPromptsKey: JSON.stringify(starterPrompts),
+  });
+  localRef.current = {
+    instructions: value,
+    starterPromptsKey: JSON.stringify(starterPrompts),
+  };
+  const isDirty =
+    value !== (agent.instructions ?? "") ||
+    (starterPromptsSupported &&
+      JSON.stringify(starterPrompts) !== persistedStarterPromptsKey);
+  const starterPromptsValid =
+    !starterPromptsSupported ||
+    starterPrompts.every(
+      (item) => item.label.trim() && item.prompt.trim(),
+    );
 
   // A system agent's prompt has two halves: the product half ships with the
   // backend and updates on deploy, so it is shown read-only; the editable
@@ -29,10 +65,39 @@ export function InstructionsTab({
   const systemInstructions = agent.system_instructions?.trim() ?? "";
   const hasSystemLayer = systemInstructions.length > 0;
 
-  // Sync when switching between agents.
+  // Refetches replace nested arrays even when their contents are unchanged.
+  // Compare against the last persisted semantic snapshot so those refetches
+  // do not erase local edits. A real server change is adopted only when the
+  // local form was clean; switching agents always loads the selected agent.
   useEffect(() => {
-    setValue(agent.instructions ?? "");
-  }, [agent.id, agent.instructions]);
+    const previous = persistedRef.current;
+    const switchingAgents = previous.agentId !== agent.id;
+
+    // The parent publishes these fields optimistically while a save is in
+    // flight. Neither that snapshot nor a later rollback is confirmed server
+    // state, so keep the submitted values available for retry on failure.
+    if (!switchingAgents && saving) return;
+
+    const local = localRef.current;
+    const wasLocallyDirty =
+      local.instructions !== previous.instructions ||
+      local.starterPromptsKey !== previous.starterPromptsKey;
+    const persistedContentsChanged =
+      previous.instructions !== (agent.instructions ?? "") ||
+      previous.starterPromptsKey !== persistedStarterPromptsKey;
+
+    persistedRef.current = {
+      agentId: agent.id,
+      instructions: agent.instructions ?? "",
+      starterPromptsKey: persistedStarterPromptsKey,
+    };
+    if (switchingAgents || (!wasLocallyDirty && persistedContentsChanged)) {
+      setValue(agent.instructions ?? "");
+      setStarterPrompts(
+        JSON.parse(persistedStarterPromptsKey) as AgentStarterPrompt[],
+      );
+    }
+  }, [agent.id, agent.instructions, persistedStarterPromptsKey, saving]);
 
   // Report dirty state up so the parent can guard tab switches.
   useEffect(() => {
@@ -42,7 +107,12 @@ export function InstructionsTab({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(value);
+      await onSave({
+        instructions: value,
+        ...(starterPromptsSupported
+          ? { starter_prompts: starterPrompts }
+          : {}),
+      });
     } catch {
       // toast handled by parent
     } finally {
@@ -112,14 +182,23 @@ export function InstructionsTab({
         />
       </div>
 
+      {starterPromptsSupported ? (
+        <StarterPromptsEditor
+          value={starterPrompts}
+          onChange={setStarterPrompts}
+        />
+      ) : null}
+
       <div className="flex items-center justify-end gap-3">
         {isDirty && (
-          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.common.unsaved_changes)}
+          </span>
         )}
         <Button
           size="sm"
           onClick={handleSave}
-          disabled={!isDirty || saving}
+          disabled={!isDirty || !starterPromptsValid || saving}
         >
           {saving ? (
             <Loader2
