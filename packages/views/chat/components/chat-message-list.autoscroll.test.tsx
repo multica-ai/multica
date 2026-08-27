@@ -88,6 +88,8 @@ interface Scroller {
   viewportHeight: number;
   distanceFromBottom(): number;
   grow(px: number): void;
+  shrinkContent(px: number): void;
+  growViewport(px: number): void;
   shrinkViewport(px: number): void;
   readerScrollsUp(px: number): void;
   readerScrollsTo(fromBottom: number): void;
@@ -96,6 +98,17 @@ interface Scroller {
 function scroller(el: HTMLElement): Scroller {
   const state = { scrollTop: 0, contentHeight: 2000, viewportHeight: VIEWPORT };
   state.scrollTop = state.contentHeight - state.viewportHeight;
+
+  const clampAfterShrink = () => {
+    state.scrollTop = Math.min(
+      state.scrollTop,
+      Math.max(0, state.contentHeight - state.viewportHeight),
+    );
+    act(() => {
+      el.dispatchEvent(new Event("scroll"));
+    });
+    resize();
+  };
 
   Object.defineProperties(el, {
     scrollHeight: { configurable: true, get: () => state.contentHeight },
@@ -126,6 +139,14 @@ function scroller(el: HTMLElement): Scroller {
     grow(px) {
       state.contentHeight += px;
       resize();
+    },
+    shrinkContent(px) {
+      state.contentHeight -= px;
+      clampAfterShrink();
+    },
+    growViewport(px) {
+      state.viewportHeight += px;
+      clampAfterShrink();
     },
     shrinkViewport(px) {
       state.viewportHeight -= px;
@@ -215,6 +236,36 @@ describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
     const { scroll } = renderStreamingChat();
 
     scroll.shrinkViewport(72);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("stays pinned when the composer collapses", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    streamChunk(1);
+    scroll.grow(180);
+    scroll.growViewport(72);
+
+    for (let seq = 2; seq <= 3; seq++) {
+      streamChunk(seq);
+      scroll.grow(180);
+    }
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("stays pinned when content shrinks", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    streamChunk(1);
+    scroll.grow(180);
+    scroll.shrinkContent(400);
+
+    for (let seq = 2; seq <= 3; seq++) {
+      streamChunk(seq);
+      scroll.grow(180);
+    }
 
     expect(scroll.distanceFromBottom()).toBe(0);
   });

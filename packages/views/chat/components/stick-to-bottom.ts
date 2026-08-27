@@ -44,9 +44,12 @@ export function useStickToBottom(
 
     const onScroll = () => {
       const top = scrollEl.scrollTop;
-      // The hook only scrolls down, so an upward move releases the pin.
-      pinned.current = top < lastTop.current ? false : isAtLiveEnd(scrollEl);
+      const movedUp = top < lastTop.current;
       lastTop.current = top;
+      // A shrinking layout can clamp upward while remaining at the live end.
+      pinned.current = movedUp
+        ? distanceFromBottom(scrollEl) <= 1
+        : isAtLiveEnd(scrollEl);
     };
     scrollEl.addEventListener("scroll", onScroll, { passive: true });
 
