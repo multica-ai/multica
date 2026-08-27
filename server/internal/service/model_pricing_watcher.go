@@ -68,10 +68,13 @@ func (w *ModelPricingWatcher) CheckOnce(ctx context.Context) error {
 		// Pricing health is global (workspace NULL) – concrete is global concept.
 		ws := pgtype.UUID{}
 		if breach {
-			if _, err := w.Queries.UpsertModelHealthUnhealthy(ctx, db.UpsertModelHealthUnhealthyParams{
+			// Sticky downgrade: keep the model unhealthy until the price
+			// recovers. UpsertModelHealthPricingUnhealthy pushes
+			// last_failure_at far into the future so the 10m model_health
+			// TTL never flips it back to healthy on its own.
+			if _, err := w.Queries.UpsertModelHealthPricingUnhealthy(ctx, db.UpsertModelHealthPricingUnhealthyParams{
 				WorkspaceID: ws,
 				Concrete:    p.Concrete,
-				Reason:      pgtype.Text{String: "pricing", Valid: true},
 			}); err != nil {
 				w.logger().Warn("pricing breach: mark unhealthy failed", "concrete", p.Concrete, "error", err)
 				continue
