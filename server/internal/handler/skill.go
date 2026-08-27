@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -301,15 +302,22 @@ type AddAgentSkillsRequest struct {
 // --- Helpers ---
 
 // validateFilePath checks that a file path is safe (no traversal, no absolute paths).
+//
+// Separators are normalized to "/" first: filepath.IsAbs reports POSIX-style
+// absolute paths like "/etc/passwd" as relative when running on Windows,
+// which would let them through the check below.
 func validateFilePath(p string) bool {
 	if p == "" {
 		return false
 	}
-	if filepath.IsAbs(p) {
+	normalized := filepath.ToSlash(p)
+	if filepath.IsAbs(normalized) {
 		return false
 	}
-	cleaned := filepath.Clean(p)
-	if strings.HasPrefix(cleaned, "..") {
+	cleaned := filepath.Clean(normalized)
+	// On Windows Clean renders POSIX-absolute input with backslashes
+	// ("\etc\passwd"), so guard against both separators.
+	if strings.HasPrefix(cleaned, "..") || strings.HasPrefix(cleaned, "/") || strings.HasPrefix(cleaned, `\`) {
 		return false
 	}
 	return true
@@ -2501,6 +2509,250 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
+}
+
+// --- Batch upsert of supporting files (atomic, optimistic concurrency) ---
+
+// maxBatchUpsertFiles caps a single batch request. It exists so one caller
+// cannot force the server to build an unbounded transaction; real skill
+// packages ship far fewer files than this.
+const maxBatchUpsertFiles = 100
+
+// expectedSHA256Pattern accepts exactly a lowercase-or-uppercase hex SHA-256
+// digest. Values are normalized before this check runs.
+var expectedSHA256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+type CreateSkillFileBatchEntry struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	// ExpectedSHA256, when non-empty, is the SHA-256 hex digest the current
+	// content of Path must match for the batch to apply. An empty value means
+	// create-or-overwrite unconditionally.
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+}
+
+type UpsertSkillFilesBatchRequest struct {
+	Files []CreateSkillFileBatchEntry `json:"files"`
+	// ExpectedSkillSHA256, when non-empty, is the aggregate hash over ALL
+	// supporting files currently on the skill (see skillFilesAggregateHash).
+	ExpectedSkillSHA256 string `json:"expected_skill_sha256,omitempty"`
+	// IdempotencyKey is echoed back verbatim and kept as a reserved field.
+	// The batch is already all-or-nothing inside one transaction and the
+	// underlying UPSERT is naturally idempotent, so no server-side key store
+	// is needed today.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+}
+
+type UpsertSkillFilesBatchResponse struct {
+	Files            []SkillFileResponse `json:"files"`
+	SkillFilesSHA256 string              `json:"skill_files_sha256"`
+	IdempotencyKey   string              `json:"idempotency_key,omitempty"`
+}
+
+// skillFilesAggregateHash computes the deterministic aggregate digest over a
+// set of supporting files: every file ordered lexicographically by path,
+// contributing path + NUL + content + LF into one SHA-256 stream. Clients use
+// it as an optimistic-concurrency token for the whole file set via
+// expected_skill_sha256; the same definition must be used when recomputing
+// the post-write aggregate returned in the response.
+func skillFilesAggregateHash(files []db.SkillFile) string {
+	sorted := make([]db.SkillFile, len(files))
+	copy(sorted, files)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
+	digest := sha256.New()
+	for _, f := range sorted {
+		digest.Write([]byte(f.Path))
+		digest.Write([]byte{0x00})
+		digest.Write([]byte(f.Content))
+		digest.Write([]byte{0x0A})
+	}
+	return hex.EncodeToString(digest.Sum(nil))
+}
+
+// UpsertSkillFilesBatch applies several supporting-file writes as one atomic
+// partial update guarded by optimistic concurrency checks. Unlike PUT /files
+// per call there are no intermediate observable states, and unlike the full
+// replacement semantics of the skill update endpoint, supporting files that
+// are absent from the request are left untouched. Any failed precondition —
+// a stale per-file expected_sha256 or a stale expected_skill_sha256 — rejects
+// the whole batch with 409 Conflict and performs zero writes.
+func (h *Handler) UpsertSkillFilesBatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	skill, ok := h.loadSkillForUser(w, r, id)
+	if !ok {
+		return
+	}
+	if !h.canManageSkill(w, r, skill) {
+		return
+	}
+
+	var req UpsertSkillFilesBatchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Files) == 0 {
+		writeError(w, http.StatusBadRequest, "files must not be empty")
+		return
+	}
+	if len(req.Files) > maxBatchUpsertFiles {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("too many files in batch: %d (max %d)", len(req.Files), maxBatchUpsertFiles))
+		return
+	}
+	seenPaths := make(map[string]struct{}, len(req.Files))
+	for i := range req.Files {
+		f := &req.Files[i]
+		if !validateFilePath(f.Path) {
+			writeError(w, http.StatusBadRequest, "invalid file path: "+f.Path)
+			return
+		}
+		if skillpkg.IsReservedContentPath(f.Path) {
+			writeError(w, http.StatusBadRequest, "SKILL.md is reserved for the primary skill content")
+			return
+		}
+		if _, dup := seenPaths[f.Path]; dup {
+			writeError(w, http.StatusBadRequest, "duplicate file path in batch: "+f.Path)
+			return
+		}
+		seenPaths[f.Path] = struct{}{}
+		f.ExpectedSHA256 = strings.ToLower(strings.TrimSpace(f.ExpectedSHA256))
+		if f.ExpectedSHA256 != "" && !expectedSHA256Pattern.MatchString(f.ExpectedSHA256) {
+			writeError(w, http.StatusBadRequest,
+				"expected_sha256 for "+f.Path+" must be a 64-character hexadecimal SHA-256 digest")
+			return
+		}
+	}
+	req.ExpectedSkillSHA256 = strings.ToLower(strings.TrimSpace(req.ExpectedSkillSHA256))
+	if req.ExpectedSkillSHA256 != "" && !expectedSHA256Pattern.MatchString(req.ExpectedSkillSHA256) {
+		writeError(w, http.StatusBadRequest,
+			"expected_skill_sha256 must be a 64-character hexadecimal SHA-256 digest")
+		return
+	}
+	req.IdempotencyKey = strings.TrimSpace(req.IdempotencyKey)
+	if len(req.IdempotencyKey) > 128 {
+		writeError(w, http.StatusBadRequest, "idempotency_key must be at most 128 characters")
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Serialize concurrent batches against the same skill: without this row
+	// lock two batches could both pass their preconditions against the same
+	// snapshot and then interleave their writes, defeating the whole point of
+	// the expected-hash checks. Locking the parent skill row is the cheapest
+	// correct serialization point (same pattern as the FOR UPDATE locks in
+	// workspace_delete.sql).
+	//
+	// Scope note: this lock guarantees ordering between batch writes and any
+	// other path that also touches the parent skill row (e.g. UpdateSkill's
+	// UPDATE skill). It does NOT by itself lock supporting-file writers that
+	// never lock the parent — the single-file UpsertSkillFile path is
+	// serialized instead by Postgres' implicit FOR KEY SHARE row lock that the
+	// skill_file.skill_id foreign key takes on the referenced skill row, which
+	// conflicts with this FOR UPDATE. If that implicit lock ever changes (for
+	// example a foreign key is dropped), the optimistic checks here would stop
+	// protecting against concurrent single-file writes, so keep this comment in
+	// sync with the migration that defines that constraint.
+	tag, err := tx.Exec(r.Context(), "SELECT id FROM skill WHERE id = $1 FOR UPDATE", skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock skill for update")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		// The skill was deleted after loadSkillForUser validated it (while we
+		// waited for the row lock or in the gap before this transaction began).
+		// Without this guard the writes below would fail on the foreign key and
+		// surface as a misleading 500 instead of a clean 404.
+		writeError(w, http.StatusNotFound, "skill not found")
+		return
+	}
+
+	existing, err := qtx.ListSkillFiles(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list existing skill files")
+		return
+	}
+
+	// Aggregate precondition first: reject early when the file set as a whole
+	// has changed underneath the client.
+	if req.ExpectedSkillSHA256 != "" && skillFilesAggregateHash(existing) != req.ExpectedSkillSHA256 {
+		writeError(w, http.StatusConflict, "stale expected_skill_sha256: the skill's supporting files have changed")
+		return
+	}
+
+	existingByPath := make(map[string]db.SkillFile, len(existing))
+	for _, ef := range existing {
+		existingByPath[ef.Path] = ef
+	}
+	for i := range req.Files {
+		f := &req.Files[i]
+		if f.ExpectedSHA256 == "" {
+			continue // unconditional create-or-overwrite
+		}
+		cur, exists := existingByPath[f.Path]
+		if !exists || contentHash(cur.Content) != f.ExpectedSHA256 {
+			writeError(w, http.StatusConflict,
+				"stale expected_sha256 for "+f.Path+": current content does not match the provided digest")
+			return
+		}
+	}
+
+	fileResps := make([]SkillFileResponse, 0, len(req.Files))
+	for _, f := range req.Files {
+		content := sanitizeNullBytes(f.Content)
+		// Skip a no-op write: when the request already matches the stored
+		// content for this path, running the UPSERT would still refresh
+		// updated_at and emit a redundant write on identical replays. Skipping
+		// keeps idempotent retries free of side effects while the response
+		// still reports the file's current state.
+		if cur, ok := existingByPath[f.Path]; ok && cur.Content == content {
+			fileResps = append(fileResps, skillFileToResponse(cur))
+			continue
+		}
+		sf, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{
+			SkillID: skill.ID,
+			Path:    sanitizeNullBytes(f.Path),
+			Content: content,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to upsert skill file: "+err.Error())
+			return
+		}
+		fileResps = append(fileResps, skillFileToResponse(sf))
+	}
+
+	// Re-read within the same transaction so the returned aggregate reflects
+	// the post-write state clients can pass back as their next
+	// expected_skill_sha256.
+	finalFiles, err := qtx.ListSkillFiles(r.Context(), skill.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to re-read skill files")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit batch upsert")
+		return
+	}
+
+	resp := UpsertSkillFilesBatchResponse{
+		Files:            fileResps,
+		SkillFilesSHA256: skillFilesAggregateHash(finalFiles),
+		IdempotencyKey:   req.IdempotencyKey,
+	}
+	wsID := h.resolveWorkspaceID(r)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{
+		"skill": SkillWithFilesResponse{SkillResponse: skillToResponse(skill), Files: resp.Files},
+	})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
