@@ -2495,6 +2495,101 @@ describe("ApiClient workspace MCP servers", () => {
   });
 });
 
+describe("importSkillArchive", () => {
+  it("POSTs multipart form data without a JSON content-type", async () => {
+    const skill = {
+      id: "skill-1",
+      workspace_id: "ws-1",
+      name: "review-helper",
+      description: "Reviews code",
+      content: "# Review",
+      config: {},
+      files: [],
+      created_by: "user-1",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ status: "created", skill }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill", { type: "application/zip" });
+    const result = await new ApiClient("https://api.example.test").importSkillArchive(
+      file,
+      "fail",
+    );
+
+    expect(result.id).toBe("skill-1");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://api.example.test/api/skills/import");
+    expect(init?.method).toBe("POST");
+    const headers = init?.headers as Record<string, string>;
+    expect(headers["Content-Type"]).toBeUndefined();
+    const body = init?.body as FormData;
+    expect(body).toBeInstanceOf(FormData);
+    expect(body.get("on_conflict")).toBe("fail");
+    const uploaded = body.get("file");
+    expect(uploaded).toBeInstanceOf(File);
+    expect((uploaded as File).name).toBe("review-helper.skill");
+  });
+
+  it("falls back to Import failed when the archive envelope is malformed", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ not_a_status: true, skill: 42 }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow(/import failed/i);
+  });
+
+  it("keeps the server reason for a status this client does not know", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "quarantined", reason: "pending review" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toThrow("pending review");
+  });
+
+  it("throws the structured reason on a name conflict", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "conflict",
+          reason: "a skill with this name already exists",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const file = new File(["pk"], "review-helper.skill");
+    await expect(
+      new ApiClient("https://api.example.test").importSkillArchive(file),
+    ).rejects.toMatchObject({
+      message: "a skill with this name already exists",
+      status: 409,
+    });
+  });
+});
+
 describe("clientErrorMessage", () => {
   it("returns a 4xx message, which handlers write for the user", () => {
     expect(clientErrorMessage(new ApiError("autopilot is not active", 400, "Bad Request")))

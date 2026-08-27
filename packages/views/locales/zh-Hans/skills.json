@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "还没有 skill",
-      "description": "创建第一个 skill、从 URL 导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
+      "description": "创建第一个 skill、从 URL 或本地文件夹导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -36,7 +36,7 @@
     },
     "intro_banner": {
       "title": "在工作区内共享。",
-      "body": "任何成员都可以创建 skill、从 URL 导入、或从本地运行时复制——之后所有智能体都能用它。",
+      "body": "任何成员都可以创建 skill、从 URL 或本地文件夹导入、或从本地运行时复制——之后所有智能体都能用它。",
       "highlight": "本地运行时里的 skill 在你复制过来之前是私有的。"
     },
     "list_error": {
@@ -239,6 +239,10 @@
         "title": "手动创建",
         "desc": "从空白 SKILL.md 开始写。"
       },
+      "local": {
+        "title": "从本地导入",
+        "desc": "在这台电脑上选择一个 skill 文件夹，文件会打包后上传。"
+      },
       "url": {
         "title": "从 URL 导入",
         "desc": "通过 URL 拉取已发布的 skill，文件由服务端拉取。"
@@ -251,6 +255,8 @@
     "method_card": {
       "manual_title": "手动创建",
       "manual_desc": "从空白 SKILL.md 开始，自己写指令。",
+      "local_title": "从本地导入",
+      "local_desc": "选择包含 SKILL.md 的文件夹，或一个 .skill / .zip 压缩包。",
       "url_title": "从 URL 导入",
       "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
       "runtime_title": "从运行时复制",
@@ -268,6 +274,24 @@
       "submit": "创建 skill",
       "submitting": "创建中...",
       "toast_created": "已创建 skill"
+    },
+    "local": {
+      "choose_folder": "选择文件夹",
+      "choose_archive": "选择 .skill / .zip",
+      "pick_hint": "选择包含 SKILL.md 的文件夹，或打包好的 .skill / .zip 文件。",
+      "folder_label": "文件夹",
+      "archive_label": "压缩包",
+      "files_other": "{{count}} 个文件",
+      "missing_skill_md": "这个文件夹不是 skill——里面没有 SKILL.md。",
+      "too_large": "这个 skill 太大，无法导入。",
+      "empty": "文件夹是空的。",
+      "too_many_files": "这个 skill 的文件太多，无法导入。",
+      "name_conflict_hint": "导入的 skill 名称已存在——请先删除已有的再重试。",
+      "fallback_error": "导入失败",
+      "cancel": "取消",
+      "import": "导入",
+      "importing": "导入中...",
+      "toast_imported": "已导入 skill"
     },
     "url": {
       "url_label": "Skill URL",
