@@ -8,7 +8,7 @@ import {
   type LiveEndFollow,
 } from "../../common/task-transcript/transcript-follow";
 
-// Bottom-stick for the chat list (TIM-55).
+// Bottom-stick for the chat list.
 //
 // Virtuoso's `followOutput` only fires when the ITEM COUNT changes. A
 // streaming assistant reply is ONE row that keeps growing, and a growing

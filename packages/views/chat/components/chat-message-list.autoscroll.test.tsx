@@ -8,7 +8,7 @@ import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import { ChatMessageList } from "./chat-message-list";
 
-// TIM-55 wiring: the list must keep the live end visible through streaming
+// Auto-scroll wiring: the list must keep the live end visible through streaming
 // growth and composer resizes, releasing only on real reader input. The latch
 // decision table is canonical in transcript-follow.test.ts and the scroll
 // geometry in stick-to-bottom.test.ts; this suite drives the real component
@@ -261,7 +261,7 @@ function renderStreamingChat() {
   };
 }
 
-describe("ChatMessageList auto-scroll (TIM-55 regression)", () => {
+describe("ChatMessageList auto-scroll", () => {
   it("follows a streaming reply whose row count never changes", () => {
     const { scroll, streamChunk, rowCount } = renderStreamingChat();
 

@@ -1,5 +1,5 @@
 // Live-end follow latch, shared by the newest-first transcript (#5921) and the
-// bottom-anchored chat list (TIM-55 — chat/components/stick-to-bottom.ts).
+// bottom-anchored chat list (chat/components/stick-to-bottom.ts).
 //
 // Both surfaces have the same problem: the system moves the viewport on its
 // own (prepend anchoring in the transcript; streaming growth, composer
