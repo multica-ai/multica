@@ -96,9 +96,11 @@ import {
   resolveDetailItem,
 } from "./inbox-display";
 import { useT } from "../../i18n";
+import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
 
 export function InboxPage() {
   const { t } = useT("inbox");
+  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const urlView: InboxView =
@@ -736,6 +738,13 @@ export function InboxPage() {
                   await retrySourceContextMutation.mutateAsync(detailItem.details!.task_id!);
                   toast.success(t(($) => $.toasts.source_context_retry_started));
                 } catch (error) {
+                  if (
+                    error instanceof ApiError &&
+                    errorCode(error) === "issue_limit_reached"
+                  ) {
+                    showIssueLimitUpgradePrompt();
+                    return;
+                  }
                   toast.error(
                     error instanceof ApiError &&
                       errorCode(error) === "source_context_retry_unavailable"

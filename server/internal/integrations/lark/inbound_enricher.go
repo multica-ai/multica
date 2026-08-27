@@ -470,9 +470,17 @@ func classifyRecentContextFetchError(err error) recentContextFetchClassification
 	if errors.Is(err, errRecentContextChannelUnbound) {
 		return recentContextFetchClassification{category: recentContextFailureChannelUnbound}
 	}
-	var apiErr *APIError
-	if errors.As(err, &apiErr) {
-		return classifyRecentContextAPIError(apiErr.Code, apiErr.Msg)
+	// A Lark business code names the failure exactly, so prefer it over
+	// the text heuristics below — read through larkErrorCodeMsg it is
+	// found in either shape that carries one: the 2xx envelope a call
+	// site rejected (*APIError) and the non-2xx reply the HTTP client
+	// returns. Only a code that resolves to a real category short-
+	// circuits; anything else falls through, so a status-only signal
+	// like "http 403" still classifies on the error text.
+	if code, msg, ok := larkErrorCodeMsg(err); ok {
+		if cls := classifyRecentContextAPIError(code, msg); cls.category != recentContextFailureUnknown {
+			return cls
+		}
 	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) ||

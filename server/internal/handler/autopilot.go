@@ -83,7 +83,9 @@ type AutopilotQuotaUsageResponse struct {
 	Action        string           `json:"action"`
 	Used          *int64           `json:"used"`
 	Reserved      *int64           `json:"reserved"`
+	Total         *int64           `json:"total"`
 	Limit         *int64           `json:"limit"`
+	Reached       *bool            `json:"reached"`
 	PeriodStart   *string          `json:"period_start"`
 	PeriodEnd     *string          `json:"period_end"`
 	ResetAt       *string          `json:"reset_at"`
@@ -2246,7 +2248,8 @@ func (h *Handler) GetAutopilotQuotaUsage(w http.ResponseWriter, r *http.Request)
 	resp := AutopilotQuotaUsageResponse{Action: "off"}
 	if usage.Enabled {
 		resp.Action = usage.Action
-		resp.Used, resp.Reserved, resp.Limit = usage.Used, usage.Reserved, usage.Limit
+		resp.Used, resp.Reserved, resp.Total = usage.Used, usage.Reserved, usage.Total
+		resp.Limit, resp.Reached = usage.Limit, usage.Reached
 		resp.BlockedCounts = usage.BlockedCounts
 		if usage.PeriodStart != nil {
 			v := usage.PeriodStart.UTC().Format(time.RFC3339)

@@ -271,6 +271,8 @@ var concurrentIndexCleanups = map[string]string{
 	"428_channel_task_delivery_binding_index":                   "idx_channel_task_delivery_binding",
 	"429_channel_task_delivery_installation_index":              "idx_channel_task_delivery_installation",
 	"430_channel_outbound_message_binding_index":                "idx_channel_outbound_message_binding_route",
+	"438_agent_runtime_online_last_seen_index":                  "idx_agent_runtime_online_last_seen",
+	"439_agent_runtime_offline_last_seen_index":                 "idx_agent_runtime_offline_last_seen",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -293,6 +295,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
 	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
 	"391_drop_agent_task_queue_dispatched_prepare_index":    "idx_agent_task_queue_dispatched_prepare",
+	"437_drop_agent_runtime_last_seen_at_index":             "idx_agent_runtime_last_seen_at",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

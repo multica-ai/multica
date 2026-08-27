@@ -282,7 +282,7 @@ func TestAutopilotQuotaObserveToEnforceAndOffFinalization(t *testing.T) {
 		runs = append(runs, run)
 	}
 	usage, err := fixture.service.AutopilotQuotaUsage(ctx, fixture.workspaceID)
-	if err != nil || usage.Action != string(entitlement.ActionObserve) || *usage.Reserved != 2 {
+	if err != nil || usage.Action != string(entitlement.ActionObserve) || *usage.Reserved != 2 || usage.Reached != nil {
 		t.Fatalf("observe usage = %+v, %v; want two reservations", usage, err)
 	}
 	if got := metrics.count("observe", "api", "would_block"); got != 1 {

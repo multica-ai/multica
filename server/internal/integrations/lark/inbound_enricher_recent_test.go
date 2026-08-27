@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -675,12 +676,13 @@ func TestEnrichRecentContextRateLimitedDoesNotRetry(t *testing.T) {
 }
 
 // TestEnrichRecentContextProductionErrorShapes covers the classifier on
-// the real error shape ListChatMessages returns: a plain wrapped error
-// string ("...: code=%d msg=%q"), NOT an *APIError. The typed-APIError
-// tests above exercise classifyRecentContextAPIError, but production
-// traffic only ever reaches the string path, so pin that too — including
-// that token errors DO retry (client refreshes the token) while permission
-// and deleted errors do not.
+// the error shapes ListChatMessages returns in production: a wrapped
+// "...: code=%d msg=%q" string for a 2xx envelope, and the typed non-2xx
+// reply for everything Lark answers with a status code — including the
+// HTTP 400 it uses for a rejected tenant_access_token. The typed-APIError
+// tests above exercise classifyRecentContextAPIError directly; this pins
+// what actually arrives, including that token errors DO retry (the client
+// refreshes the token) while permission and deleted errors do not.
 func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -706,6 +708,33 @@ func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
 			err:       errors.New(`lark http client: list chat messages: code=99991663 msg="access token expired"`),
 			wantLine:  "[Recent Lark context temporarily unavailable; continuing with the latest message.]",
 			wantCalls: 2,
+		},
+		{
+			// The shape Lark actually sends for a rejected token: HTTP
+			// 400 with the code in the body. Its text carries `"code":`
+			// (JSON), not the `code=` the string heuristics look for, so
+			// only reading the typed code classifies it.
+			name: "token_expired_http_400_retries_then_degrades",
+			err: fmt.Errorf("lark http client: list chat messages: %w", &larkAPIStatusError{
+				StatusCode: 400,
+				Code:       codeTenantTokenInvalid,
+				Msg:        "Invalid access token for authorization.",
+				Raw:        `{"code":99991663,"msg":"Invalid access token for authorization."}`,
+			}),
+			wantLine:  "[Recent Lark context temporarily unavailable; continuing with the latest message.]",
+			wantCalls: 2,
+		},
+		{
+			// A code the classifier does not know must fall through to
+			// the text heuristics rather than swallow the status signal.
+			name: "unknown_code_falls_through_to_http_status",
+			err: fmt.Errorf("lark http client: list chat messages: %w", &larkAPIStatusError{
+				StatusCode: 403,
+				Code:       99991672,
+				Raw:        `{"code":99991672,"msg":""}`,
+			}),
+			wantLine:  "[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]",
+			wantCalls: 1,
 		},
 	}
 	for _, tc := range cases {

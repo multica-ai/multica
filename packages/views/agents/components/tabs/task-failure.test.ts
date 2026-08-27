@@ -111,9 +111,6 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel("invalid_task_identity", enT)).toBe(
       "Task identity mismatch",
     );
-    expect(failureReasonLabel("issue_window_restricted", enT)).toBe(
-      "Issue unavailable under workspace limits",
-    );
   });
 
   it("covers operational reasons emitted outside the canonical taxonomy", () => {

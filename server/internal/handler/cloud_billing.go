@@ -49,7 +49,6 @@ const stripeSignatureHeader = "Stripe-Signature"
 const idempotencyKeyHeader = "Idempotency-Key"
 const maxCloudSubscriptionIdempotencyKeyLength = 255
 const maxCloudSubscriptionSeatPurchaseIdempotencyKeyLength = 200
-const maxCloudSubscriptionSeats = 10_000
 
 type cloudSubscriptionCheckoutRequest struct {
 	Interval       string `json:"interval"`
@@ -79,9 +78,9 @@ type cloudSubscriptionSeatPurchaseRequest struct {
 }
 
 // requireCloudSubscriptionWorkspace is the handler-level backstop behind the
-// router's RequireWorkspaceMember / RequireWorkspaceRole middleware. Keeping
-// the check here makes a future route refactor fail closed instead of exposing
-// a workspace billing write without its tenant/role guard.
+// router's membership and role middleware. Local roles are a cheap
+// defense-in-depth guard; Cloud still performs the authoritative authorization
+// before every billing mutation.
 func (h *Handler) requireCloudSubscriptionWorkspace(w http.ResponseWriter, r *http.Request, roles ...string) (string, string, bool) {
 	if isMachineCredentialActor(r) {
 		writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
@@ -157,18 +156,6 @@ func requireCloudSubscriptionIdempotencyKey(w http.ResponseWriter, r *http.Reque
 		return "", false
 	}
 	return key, true
-}
-
-// GetCloudWorkspaceEntitlements forwards the active workspace to cloud's
-// resolved entitlement endpoint. Any workspace member may read this snapshot;
-// cloud independently verifies the stamped X-User-ID against its read-only
-// product database.
-func (h *Handler) GetCloudWorkspaceEntitlements(w http.ResponseWriter, r *http.Request) {
-	workspaceID, userID, ok := h.requireCloudSubscriptionWorkspace(w, r)
-	if !ok {
-		return
-	}
-	h.proxyCloudSubscription(w, r, http.MethodGet, "/api/v1/entitlements/"+workspaceID, userID, nil, nil)
 }
 
 // GetCloudWorkspaceSubscriptionSummary forwards cloud's Billing-page read:
@@ -284,8 +271,8 @@ func (h *Handler) PreviewCloudWorkspaceSubscriptionSeatPurchase(w http.ResponseW
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if in.AdditionalSeats < 1 || in.AdditionalSeats > maxCloudSubscriptionSeats {
-		writeError(w, http.StatusBadRequest, "additional_seats must be within 1..10000")
+	if in.AdditionalSeats < 1 {
+		writeError(w, http.StatusBadRequest, "additional_seats must be positive")
 		return
 	}
 	upstreamBody, err := json.Marshal(in)
@@ -315,8 +302,6 @@ func (h *Handler) PurchaseCloudWorkspaceSubscriptionSeats(w http.ResponseWriter,
 		return
 	}
 	if in.AdditionalSeats < 1 || in.ExpectedCurrentSeats < 1 ||
-		in.AdditionalSeats > maxCloudSubscriptionSeats ||
-		in.ExpectedCurrentSeats > maxCloudSubscriptionSeats-in.AdditionalSeats ||
 		in.ExpectedPurchaseVersion < 1 || in.AcceptedProrationAmount < 0 || !isASCIICurrency(in.Currency) {
 		writeError(w, http.StatusBadRequest, "invalid seat purchase confirmation")
 		return

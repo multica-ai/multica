@@ -142,10 +142,6 @@
       "canceled_title": "订阅已取消",
       "canceled_description": "上方套餐徽标显示这个工作区当前实际生效的套餐。"
     },
-    "read_only": {
-      "title": "账单只读权限",
-      "description": "你可以查看工作区套餐和限额。只有 owner 和 admin 可以购买或管理订阅。"
-    },
     "current": {
       "title": "当前套餐",
       "plan": "工作区套餐",
@@ -167,8 +163,6 @@
       "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
       "price_loading": "正在加载订阅价格",
       "unit_price": "每个成员席位 {{price}}",
-      "estimated_monthly_total": "预计月付总额：{{price}}",
-      "estimated_yearly_total": "预计年付总额：{{price}}",
       "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
     },
     "management": {
@@ -180,13 +174,12 @@
     },
     "limits": {
       "title": "用量与限额",
-      "description": "限额来自当前 entitlement，自动化用量来自服务端额度统计。",
-      "issues": "最近活跃的任务",
-      "issues_description": "Free 可访问最近活跃的任务；Pro 没有窗口限制。",
-      "autopilots": "成功的自动化执行",
-      "autopilots_description": "Free 限额按 UTC 自然月重置；Pro 不限次数。",
+      "description": "限额和用量来自服务端当前 entitlement 与额度统计。",
+      "issues": "任务数量",
+      "issues_description": "当前任务用量和服务端返回的生效限额。",
+      "autopilots": "自动化执行",
+      "autopilots_description": "当前自动化用量和服务端返回的重置时间。",
       "unlimited": "不限",
-      "unavailable": "暂不可用",
       "per_month": "每月 {{count}} 次",
       "usage_loading": "正在加载自动化用量",
       "usage_label": "自动化额度用量",

@@ -558,3 +558,15 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- name: CountIssuesUpTo :one
+-- Bounded count for issue-limit admission and display. Callers pass only the
+-- threshold needed for their decision, avoiding a full scan in an oversized
+-- workspace.
+SELECT COUNT(*)::bigint
+FROM (
+    SELECT 1
+    FROM issue
+    WHERE workspace_id = $1
+    LIMIT sqlc.arg('limit')::bigint
+) bounded_issues;

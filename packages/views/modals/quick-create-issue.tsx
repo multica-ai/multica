@@ -84,6 +84,7 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
+import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -135,6 +136,9 @@ export function AgentCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
+  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt({
+    onNavigate: onClose,
+  });
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -465,6 +469,10 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
+          if (body.code === "issue_limit_reached") {
+            showIssueLimitUpgradePrompt();
+            return false;
+          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;

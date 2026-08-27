@@ -84,6 +84,7 @@
     "run_blocked_attribution": "실행되지 않음 — 실행의 책임 구성원을 확인할 수 없습니다",
     "run_blocked_already_active": "실행되지 않음 — 최근 실행이 이미 이 건을 처리했습니다",
     "run_blocked_quota_exceeded": "실행되지 않음 — 이 기간의 실행 한도에 도달했습니다",
+    "run_blocked_issue_limit_reached": "실행되지 않음 — 워크스페이스가 태스크 수 한도에 도달했습니다",
     "run_blocked_generic": "실행되지 않음 — 실행이 차단되었습니다",
     "section_properties": "속성",
     "section_triggers": "트리거",

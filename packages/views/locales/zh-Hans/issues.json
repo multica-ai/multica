@@ -658,8 +658,7 @@
   },
   "card": {
     "update_failed": "更新任务失败",
-    "updated_ago": "更新于 {{time}}",
-    "child_progress_restricted_other": "{{count}} 个子任务受限"
+    "updated_ago": "更新于 {{time}}"
   },
   "actions": {
     "status": "状态",
