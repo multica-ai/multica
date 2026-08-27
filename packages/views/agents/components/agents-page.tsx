@@ -798,7 +798,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const [search, setSearch] = useState("");
 
   const rawScope = useAgentsViewStore((s) => s.scope);
-  const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
+  const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "all";
   const setScope = useAgentsViewStore((s) => s.setScope);
   const sortField = useAgentsViewStore((s) => s.sortField);
   const sortDirection = useAgentsViewStore((s) => s.sortDirection);

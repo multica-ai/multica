@@ -16,7 +16,7 @@ import type { AccessScope } from "../effective-access";
 
 // Scope mixes the ownership lens (mine/all) with the archived lifecycle
 // stage. Impure on paper, but the three are mutually exclusive in practice
-// and "mine" is the historical product default; the archived view ignores
+// and "all" is the product default; the archived view ignores
 // the ownership lens entirely (showing only *my* archived agents would hide
 // other people's archived agents with no UI to explain why).
 export type AgentsScope = "mine" | "all" | "archived";
@@ -102,9 +102,9 @@ export interface AgentsViewState {
 }
 
 const DEFAULTS = {
-  // "mine" is the historical default — most members care about their own
-  // agents first; admins flip to "all".
-  scope: "mine" as AgentsScope,
+  // Agents can be provisioned by bots, so a new workspace starts on "all"
+  // to avoid hiding agents that the current user does not own.
+  scope: "all" as AgentsScope,
   sortField: "lastActive" as AgentSortField,
   sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
   hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
