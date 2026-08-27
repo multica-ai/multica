@@ -5481,17 +5481,28 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
                 ConcreteModel:        retryConcrete,
             })
 			switch {
-			case cerr == nil:
-				retried = &child
-				// GAP-23: hand the child the failure digest so its run starts
-				// from "attempt N failed because X" instead of blind
-				// rediscovery. Same transaction as the insert; child still
-				// unclaimed, no concurrent writer. Best-effort: a digest
-				// write failure must not abort the parent's failed status.
-				if paErr := stampPriorAttemptContext(ctx, qtx, &child, t.Attempt, failureReason, errMsg); paErr != nil {
-					slog.Warn("fail task auto-retry: prior-attempt context stamp failed (non-fatal)",
-						"task_id", util.UUIDToString(child.ID), "error", paErr)
-				}
+		case cerr == nil:
+			retried = &child
+			// GAP-23: hand the child the failure digest so its run starts
+			// from "attempt N failed because X" instead of blind
+			// rediscovery. Same transaction as the insert; child still
+			// unclaimed, no concurrent writer. Best-effort: a digest
+			// write failure must not abort the parent's failed status.
+			if paErr := stampPriorAttemptContext(ctx, qtx, &child, t.Attempt, failureReason, errMsg); paErr != nil {
+				slog.Warn("fail task auto-retry: prior-attempt context stamp failed (non-fatal)",
+					"task_id", util.UUIDToString(child.ID), "error", paErr)
+			}
+			// Mirror MaybeRetryFailedTask: a channel-sourced parent must hand
+			// its delivery routing to the retry child so the retry surfaces on
+			// the same channel (slack/p2p binding). Same transaction as the
+			// insert; best-effort so a copy failure never aborts the parent's
+			// failed status.
+			if cErr := qtx.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
+				ChildTaskID: child.ID, ParentTaskID: t.ID,
+			}); cErr != nil {
+				slog.Warn("fail task auto-retry: channel delivery copy failed (non-fatal)",
+					"task_id", util.UUIDToString(child.ID), "error", cErr)
+			}
 			case errors.Is(cerr, pgx.ErrNoRows):
 				// The statement wrote nothing: either the owning workspace was
 				// torn down mid-flight, or a rerun took the pending slot after
@@ -5716,15 +5727,16 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
-	// daemon hiccup. Delegated failures keep this existing failed-issue comment
-	// in addition to the coordinator recovery signal, preserving visibility on
+	// daemon hiccup. Delegated failures keep this failed-issue comment in
+	// addition to the coordinator recovery signal, preserving visibility on
 	// both sides of a cross-issue handoff.
-	if errMsg != "" && task.IssueID.Valid && retried == nil {
-		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
-	}
-
+	//
 	// GAP-27: terminal failure with no retry enqueued gets a structured
-	// case file on the issue so human triage starts from facts.
+	// dead-letter case file on the issue so human triage starts from facts.
+	// It is the ONE system comment we leave on the issue: it supersedes the
+	// bare error text rather than duplicating it (the two-write path was
+	// GAP-27's double-comment regression — the worker issue must keep a
+	// single failed-issue comment, not two).
 	if errMsg != "" && task.IssueID.Valid && retried == nil { // ponytail: comment-only dead-letter; full file/write to workdir if volume grows
 		var b strings.Builder
 		fmt.Fprintf(&b, "🗃️ **Dead-letter case file: retries exhausted**\n\n- task: `%s`\n- reason: `%s`\n- attempt: %d / %d",
