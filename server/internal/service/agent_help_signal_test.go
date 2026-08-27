@@ -33,7 +33,7 @@ func TestFailTask_AgentRequestedHelpSignal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	if _, err := pool.Exec(ctx, ` + '`UPDATE agent_task_queue SET status=\'running\', started_at=now(), attempt=3, max_attempts=3 WHERE id=$1`' + `, task.ID); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET status='running', started_at=now(), attempt=3, max_attempts=3 WHERE id=$1`, task.ID); err != nil {
 		t.Fatalf("set running/exhausted: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestFailTask_AgentRequestedHelpSignal(t *testing.T) {
 	}
 
 	var children int
-	if err := pool.QueryRow(ctx, ` + '`SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1`' + `, task.ID).Scan(&children); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE parent_task_id=$1`, task.ID).Scan(&children); err != nil {
 		t.Fatalf("count children: %v", err)
 	}
 	if children != 0 {
