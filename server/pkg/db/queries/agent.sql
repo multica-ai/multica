@@ -1317,7 +1317,8 @@ WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_dir
 RETURNING *;
 
 -- name: FailStaleTasks :many
--- Fails tasks stuck in dispatched/running beyond the given thresholds.
+-- Fails tasks stuck in dispatched/running/waiting_local_directory beyond the
+-- given thresholds.
 --
 -- Each branch pairs a wall-clock deadline with a task-appropriate liveness
 -- signal, so the sweeper only kills tasks whose owning daemon is no longer
@@ -1336,6 +1337,16 @@ RETURNING *;
 --     grace, even when its own wall-clock timeout elapsed earlier. This keeps
 --     healthy multi-hour work alive through a network partition.
 --
+--   * waiting_local_directory: the daemon refreshes the same prepare lease
+--     while blocked on the path mutex. A live lease means a live waiter and
+--     must not be killed — a legitimate queue ahead of this task can exceed
+--     the dispatch / running timeouts without being "stuck". An expired (or
+--     absent) lease may fail immediately on a healthy runtime, or after the
+--     runtime has missed the full reconnect grace. Reclaiming those rows is
+--     what stops #7427's capacity leak (waiters forever in
+--     waiting_local_directory after their holder was force-stopped) without
+--     burning retries during a transient daemon disconnect.
+--
 -- The daemon-dead case is recovered immediately when that daemon restarts via
 -- RecoverOrphanedTasksForRuntime. Until then, this query and
 -- FailTasksForOfflineRuntimes share the same bounded reconnect grace.
@@ -1343,15 +1354,19 @@ RETURNING *;
 -- runtime_id IS NULL: a running row with no runtime is by definition not
 -- proving liveness, so the wall clock is allowed to fire — same shape as
 -- the legacy pure-wall-clock behavior for that (rare / historical) case.
---
--- waiting_local_directory rows are intentionally excluded: the daemon owns
--- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
--- of this task can exceed the dispatch / running timeouts without being
--- "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
--- those rows at restart.
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
+SET status = 'failed', completed_at = now(),
+    error = CASE
+      WHEN status = 'waiting_local_directory'
+        THEN 'local_directory wait abandoned (prepare lease expired)'
+      ELSE 'task timed out'
+    END,
+    failure_reason = CASE
+      WHEN status = 'waiting_local_directory'
+        THEN 'waiting_local_directory_abandoned'
+      ELSE 'timeout'
+    END,
+    wait_reason = NULL,
     prepare_lease_expires_at = NULL
 WHERE (
     status = 'dispatched'
@@ -1388,6 +1403,30 @@ WHERE (
         WHERE r.id = agent_task_queue.runtime_id
           AND COALESCE(r.last_seen_at, r.updated_at) >=
               now() - make_interval(secs => @runtime_reconnect_grace_secs::double precision)
+      )
+    )
+  )
+   OR (
+    status = 'waiting_local_directory'
+    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+    AND (
+      runtime_id IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+          AND (
+            (
+              r.status = 'online'
+              AND COALESCE(r.last_seen_at, r.updated_at) >=
+                  now() - make_interval(secs => @runtime_stale_secs::double precision)
+            )
+            OR COALESCE(r.last_seen_at, r.updated_at) <
+               now() - make_interval(secs => @runtime_reconnect_grace_secs::double precision)
+          )
       )
     )
   )

@@ -425,12 +425,14 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   // Backend uses empty string ("") as the "not failed" sentinel (Go
   // `omitempty` on a custom string-typed enum). Normalize that to `undefined`
   // so downstream truthy checks (`if (task.failure_reason)`) don't have to
-  // special-case both null/undefined AND "".
+  // special-case null/undefined/"". Preserve arbitrary strings so a newer
+  // backend reason can still reach the UI's fallback copy.
   failure_reason: z
-    .enum(["agent_error", "timeout", "runtime_offline", "runtime_recovery", "manual", ""])
+    .string()
+    .nullable()
     .optional()
     .catch("")
-    .transform((v) => (v === "" ? undefined : v)),
+    .transform((v) => (v ? v : undefined)),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
   autopilot_run_id: z.string().optional(),

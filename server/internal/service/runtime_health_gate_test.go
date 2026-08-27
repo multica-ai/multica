@@ -3,10 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -155,5 +158,85 @@ func TestRuntimeHealthGatesClaimsAndStaleDispatchRecovery(t *testing.T) {
 	}
 	if len(batch) != 1 || util.UUIDToString(batch[0].ID) != taskID {
 		t.Fatalf("batch reclaimed %d tasks, want task %s", len(batch), taskID)
+	}
+}
+
+func TestFailStaleTasksWaitingLocalDirectoryRespectsReconnectGrace(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	fixture := testutil.New(pool, "", "")
+	suffix := time.Now().UnixNano()
+	userID := fixture.User(t, "Waiter Grace", fmt.Sprintf("waiter-grace-%d@multica.test", suffix))
+	workspaceID := fixture.Workspace(t, "waiter grace", fmt.Sprintf("waiter-grace-%d", suffix))
+	fixture = testutil.New(pool, workspaceID, userID)
+	fixture.Member(t, workspaceID, userID, "owner")
+
+	recentRuntimeID := fixture.Runtime(t, "recent offline", testutil.Cols{
+		"status":       "offline",
+		"last_seen_at": testutil.Raw("now() - interval '10 minutes'"),
+		"updated_at":   testutil.Raw("now() - interval '10 minutes'"),
+	})
+	staleRuntimeID := fixture.Runtime(t, "stale offline", testutil.Cols{
+		"status":       "offline",
+		"last_seen_at": testutil.Raw("now() - interval '4 hours'"),
+		"updated_at":   testutil.Raw("now() - interval '4 hours'"),
+	})
+	recentAgentID := fixture.Agent(t, "recent waiter", recentRuntimeID)
+	staleAgentID := fixture.Agent(t, "stale waiter", staleRuntimeID)
+	recentIssueID := fixture.Issue(t, "recent waiter issue", testutil.Cols{
+		"assignee_type": "agent",
+		"assignee_id":   recentAgentID,
+	})
+	staleIssueID := fixture.Issue(t, "stale waiter issue", testutil.Cols{
+		"assignee_type": "agent",
+		"assignee_id":   staleAgentID,
+	})
+	recentTaskID := fixture.Task(t, recentAgentID, testutil.Cols{
+		"runtime_id":               recentRuntimeID,
+		"issue_id":                 recentIssueID,
+		"status":                   "waiting_local_directory",
+		"prepare_lease_expires_at": testutil.Raw("now() - interval '1 minute'"),
+		"wait_reason":              "local_directory",
+		"max_attempts":             2,
+	})
+	staleTaskID := fixture.Task(t, staleAgentID, testutil.Cols{
+		"runtime_id":               staleRuntimeID,
+		"issue_id":                 staleIssueID,
+		"status":                   "waiting_local_directory",
+		"prepare_lease_expires_at": testutil.Raw("now() - interval '1 minute'"),
+		"wait_reason":              "local_directory",
+		"max_attempts":             2,
+	})
+
+	failed, err := q.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs:       60,
+		RuntimeStaleSecs:          RuntimeClaimFreshnessSeconds,
+		RuntimeReconnectGraceSecs: float64((3 * time.Hour).Seconds()),
+		RunningTimeoutSecs:        float64((2 * time.Hour).Seconds()),
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks: %v", err)
+	}
+	var staleFailed db.AgentTaskQueue
+	foundStale := false
+	for _, task := range failed {
+		if util.UUIDToString(task.ID) == staleTaskID {
+			staleFailed = task
+			foundStale = true
+			break
+		}
+	}
+	if !foundStale {
+		t.Fatalf("stale waiter %s was not failed; failed %d task(s)", staleTaskID, len(failed))
+	}
+	if staleFailed.FailureReason.String != "waiting_local_directory_abandoned" {
+		t.Fatalf("failure_reason = %q, want waiting_local_directory_abandoned", staleFailed.FailureReason.String)
+	}
+
+	var recentStatus string
+	fixture.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, recentTaskID).Scan(&recentStatus)
+	if recentStatus != "waiting_local_directory" {
+		t.Fatalf("recently offline waiter status = %q, want waiting_local_directory", recentStatus)
 	}
 }

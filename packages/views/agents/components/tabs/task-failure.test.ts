@@ -114,6 +114,9 @@ describe("failureReasonLabel", () => {
     expect(failureReasonLabel("issue_window_restricted", enT)).toBe(
       "Issue unavailable under workspace limits",
     );
+    expect(failureReasonLabel("waiting_local_directory_abandoned", enT)).toBe(
+      "Local directory wait abandoned",
+    );
   });
 
   it("covers operational reasons emitted outside the canonical taxonomy", () => {

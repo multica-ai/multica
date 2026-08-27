@@ -34,7 +34,6 @@
     "queued": "排队中",
     "idle": "空闲"
   },
-  "presence_status_aria": "状态：{{status}}",
   "archived": {
     "active_link": "活跃智能体",
     "title": "已归档智能体"
@@ -219,8 +218,6 @@
     "model_managed_by_runtime": "由运行时管理",
     "model_search_placeholder": "搜索或输入模型 ID",
     "model_discovering": "正在发现模型...",
-    "model_discovery_failed_title": "无法列出该运行时的模型。",
-    "model_discovery_failed_hint": "可在上方输入框直接键入模型 ID 手动指定。",
     "model_empty": "暂无可用模型",
     "model_empty_with_dot": "暂无可用模型。",
     "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
@@ -846,7 +843,6 @@
     "usage_chip_title": "这次运行消耗的 token 与估算费用",
     "details_branch": "分支",
     "details_reason": "原因",
-    "details_diagnostics": "原始诊断",
     "copy_branch": "复制分支名",
     "lane_model": "模型",
     "lane_tool": "工具",
@@ -890,6 +886,7 @@
       "runtime_cli_timeout": "本地运行时 CLI 超时",
       "invalid_task_identity": "task 身份不匹配",
       "issue_window_restricted": "任务超出工作区可用范围",
+      "waiting_local_directory_abandoned": "本地目录等待已放弃",
       "agent_error_provider_auth_or_access": "提供商认证失败",
       "agent_error_provider_quota_limit": "提供商配额已用尽",
       "agent_error_provider_capacity_or_rate_limit": "受到提供商速率限制",

@@ -34,7 +34,6 @@
     "queued": "대기 중",
     "idle": "유휴"
   },
-  "presence_status_aria": "상태: {{status}}",
   "archived": {
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
@@ -219,8 +218,6 @@
     "model_managed_by_runtime": "런타임에서 관리",
     "model_search_placeholder": "모델 ID 검색 또는 입력",
     "model_discovering": "모델 찾는 중...",
-    "model_discovery_failed_title": "이 런타임의 모델을 가져오지 못했습니다.",
-    "model_discovery_failed_hint": "위 입력란에 모델 ID를 직접 입력해 수동으로 지정할 수 있습니다.",
     "model_empty": "사용 가능한 모델이 없습니다",
     "model_empty_with_dot": "사용 가능한 모델이 없습니다.",
     "model_custom_tooltip": "\"{{value}}\"을(를) 사용자 지정 모델 ID로 사용",
@@ -747,7 +744,6 @@
     "usage_chip_title": "이 실행의 토큰 및 예상 비용",
     "details_branch": "브랜치",
     "details_reason": "사유",
-    "details_diagnostics": "기술 세부 정보",
     "copy_branch": "브랜치 이름 복사",
     "lane_model": "모델",
     "lane_tool": "도구",
@@ -791,6 +787,7 @@
       "runtime_cli_timeout": "로컬 런타임 CLI 시간 초과",
       "invalid_task_identity": "작업 ID 정보가 일치하지 않음",
       "issue_window_restricted": "워크스페이스 제한으로 태스크를 사용할 수 없음",
+      "waiting_local_directory_abandoned": "로컬 디렉터리 대기가 중단됨",
       "agent_error_provider_auth_or_access": "공급자 인증 실패",
       "agent_error_provider_quota_limit": "공급자 할당량 소진",
       "agent_error_provider_capacity_or_rate_limit": "공급자 요청 한도에 도달함",

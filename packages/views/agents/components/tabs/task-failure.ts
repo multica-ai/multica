@@ -20,6 +20,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   runtime_cli_timeout: "runtime_cli_timeout",
   invalid_task_identity: "invalid_task_identity",
   issue_window_restricted: "issue_window_restricted",
+  waiting_local_directory_abandoned: "waiting_local_directory_abandoned",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access":

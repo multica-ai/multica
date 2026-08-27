@@ -34,7 +34,6 @@
     "queued": "Queued",
     "idle": "Idle"
   },
-  "presence_status_aria": "Status: {{status}}",
   "archived": {
     "active_link": "Active agents",
     "title": "Archived agents"
@@ -228,8 +227,6 @@
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
     "model_discovering": "Discovering models…",
-    "model_discovery_failed_title": "Could not list this runtime's models.",
-    "model_discovery_failed_hint": "Type a model ID above to enter one manually.",
     "model_empty": "No models available",
     "model_empty_with_dot": "No models available.",
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
@@ -860,7 +857,6 @@
     "usage_chip_title": "Tokens and estimated cost for this run",
     "details_branch": "Branch",
     "details_reason": "Reason",
-    "details_diagnostics": "Technical details",
     "copy_branch": "Copy branch name",
     "lane_model": "Model",
     "lane_tool": "Tools",
@@ -908,6 +904,7 @@
       "runtime_cli_timeout": "Local runtime CLI timed out",
       "invalid_task_identity": "Task identity mismatch",
       "issue_window_restricted": "Issue unavailable under workspace limits",
+      "waiting_local_directory_abandoned": "Local directory wait abandoned",
       "agent_error_provider_auth_or_access": "Provider auth failed",
       "agent_error_provider_quota_limit": "Provider quota exhausted",
       "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",
