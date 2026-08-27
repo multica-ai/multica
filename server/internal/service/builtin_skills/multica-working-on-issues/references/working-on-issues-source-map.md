@@ -204,6 +204,10 @@ about the issue — there is no assignee gate (MUL-6417).
 |---|---|
 | `multica property list/get/create/update/archive/unarchive` | `server/cmd/multica/cmd_property.go` |
 | `multica issue property list/set/unset` (name→id translation) | `server/cmd/multica/cmd_property.go` (`encodeIssuePropertyValue`) |
+| `issue list --property "Name=Value"` filter (OR within a definition, AND across; `__none__` unset sentinel; scalar values sent in their stored spelling) | `server/cmd/multica/cmd_property.go` (`buildPropertiesFilterQueryParam`, `resolvePropertyFilterValue`, `propertyNoValueSentinel`) |
+| `issue list --sort property:<name-or-id>` (archived + orderless types rejected up front) | `server/cmd/multica/cmd_property.go` (`resolveSortableProperty`, `issueSortablePropertyTypes`); `server/cmd/multica/cmd_issue.go` (`runIssueList`) |
+| Server `properties=` filter contract the CLI forwards to | `server/internal/handler/property.go` (`parsePropertiesFilterParam`, `noPropertyValue`) |
+| Select sort follows option order (ordinal scales sort by meaning) | `server/internal/handler/property.go` (`propertySortExpr`, `selectPropertySortExpr`) |
 | Definition CRUD, admin gate, agent-actor rejection | `server/internal/handler/property.go` (`requirePropertyAdmin`) |
 | Optional catalog icon field and allowlist validation | `server/internal/handler/property.go` (`PropertyResponse`, `validatePropertyIcon`) |
 | Per-type value validation (self-correcting errors) | `server/internal/handler/property.go` (`validatePropertyValue`) |
