@@ -151,6 +151,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "robots.txt",
   "sitemap.xml",
   "manifest.json",
+  "sw.js",
   ".well-known",
 ]);
 

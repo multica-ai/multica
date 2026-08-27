@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Inter, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
+import { StaticAssetSW } from "@/components/static-asset-sw";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { WebProviders } from "@/components/web-providers";
@@ -181,6 +182,7 @@ export default async function RootLayout({
           </WebProviders>
           <Toaster />
         </ThemeProvider>
+        <StaticAssetSW />
       </body>
     </html>
   );

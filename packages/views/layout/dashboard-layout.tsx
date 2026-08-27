@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import {
   SidebarProvider,
   SidebarInset,
@@ -14,8 +14,14 @@ import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
-import { TabBar } from "./tab-bar";
 import { useSessionTabsEnabled } from "./session-tabs";
+
+// Compact web never renders session tabs (see useSessionTabsEnabled). Keep
+// the strip off the dashboard module graph so a phone does not download
+// dnd-kit / the tab context menu to learn that.
+const TabBar = lazy(() =>
+  import("./tab-bar").then((m) => ({ default: m.TabBar })),
+);
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -84,7 +90,9 @@ export function DashboardLayout({
         {sessionTabs ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             <div className="relative z-10 h-12 shrink-0">
-              <TabBar />
+              <Suspense fallback={null}>
+                <TabBar />
+              </Suspense>
             </div>
             <SessionCanvas>{canvas}</SessionCanvas>
           </div>
