@@ -173,6 +173,34 @@ func (o *Outbound) attachmentDropped(ctx context.Context, reason dropReason, err
 	o.logger.WarnContext(ctx, "wecom outbound: attachment not delivered", attrs...)
 }
 
+// attachmentShed records one delivery attempt refused admission before the
+// lookup. Not a file count: nothing knows yet whether a file exists.
+func (o *Outbound) attachmentShed() { o.mx().RecordAttachmentDeliveryShed() }
+
+// worseDropReason is the aggregation rule for a reply whose files failed for
+// more than one reason. Precedence: a stated refusal beats a local transport
+// failure beats a verdict that never came — ordered by how specific a fact
+// each is about why the content did not arrive. Stable and documented so the
+// multi-file reply reason is a rule, not an accident of loop order.
+func worseDropReason(a, b dropReason) dropReason {
+	rank := func(r dropReason) int {
+		switch r {
+		case dropPlatformRefused:
+			return 3
+		case dropTransport:
+			return 2
+		case dropAckTimeout:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
+
 // delivered records one reply that reached the user. Without it the drop
 // counters have no denominator, and "no drops today" cannot be told apart from
 // "no traffic today" — which is the same silence #7215 was reported as.

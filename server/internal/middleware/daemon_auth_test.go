@@ -285,7 +285,6 @@ func TestDaemonAuth_MCN_FleetUnreachable(t *testing.T) {
 	}
 }
 
-
 // TestDaemonAuth_MCN_OwnerNotInLocalDB pins the new owner-existence
 // guard end-to-end through the middleware. Cloud verifies the token
 // successfully and returns an owner_id that does not exist in our

@@ -105,11 +105,11 @@ func TestPostHogClient_DropsWhenFull(t *testing.T) {
 
 func TestEmailDomain(t *testing.T) {
 	cases := map[string]string{
-		"a@example.com":       "example.com",
-		"user@Company.co.uk":  "company.co.uk",
-		"":                    "",
-		"no-at":               "",
-		"trailing@":           "",
+		"a@example.com":      "example.com",
+		"user@Company.co.uk": "company.co.uk",
+		"":                   "",
+		"no-at":              "",
+		"trailing@":          "",
 	}
 	for in, want := range cases {
 		if got := emailDomain(in); got != want {

@@ -54,6 +54,7 @@ type WecomMetrics struct {
 	OutboundSkipped      *prometheus.CounterVec
 	AttachmentDelivered  prometheus.Counter
 	AttachmentDropped    *prometheus.CounterVec
+	AttachmentSheds      prometheus.Counter
 }
 
 func NewWecomMetrics() *WecomMetrics {
@@ -75,7 +76,7 @@ func NewWecomMetrics() *WecomMetrics {
 			"Agent replies this adapter put in front of a WeCom user. The denominator the drop breakdown is read against."),
 		OutboundDropped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_dropped_total",
-			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Not an error total: origin_not_channel is ordinary (a question typed in Multica on a WeCom-bound session), while no_live_connection, platform_refused, ack_timeout and transport_error each mean somebody in WeCom is waiting on an answer that is not coming.",
+			Help: "Agent replies the adapter owed a WeCom user and did not deliver, by reason. Every reason here means somebody in WeCom is waiting on an answer that is not coming; the completions the adapter was never going to deliver are counted apart, in outbound_skipped_total.",
 		}, []string{"reason"}),
 		OutboundSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_skipped_total",
@@ -87,6 +88,8 @@ func NewWecomMetrics() *WecomMetrics {
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_attachment_dropped_total",
 			Help: "Files an agent produced that did not reach the WeCom user, by reason. Separate from the reply counters because a reply whose words arrived and whose file did not is a delivered reply with a failed attachment, and one number cannot say both.",
 		}, []string{"reason"}),
+		AttachmentSheds: counter("outbound_attachment_delivery_shed_total",
+			"Attachment delivery attempts refused admission before the lookup ran. Counts SCHEDULING decisions, not files: at that point nothing knows whether the turn carries zero files or five, so a per-file count from this gate would fabricate cardinality."),
 	}
 }
 
@@ -95,7 +98,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 		m.ConnectFailures, m.AuthFailures,
 		m.CallbacksQueued, m.CallbackQueueBlocked,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
-		m.AttachmentDelivered, m.AttachmentDropped,
+		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 	}
 }
 
@@ -116,3 +119,4 @@ func (m *WecomMetrics) RecordAttachmentDelivered() { m.AttachmentDelivered.Inc()
 func (m *WecomMetrics) RecordAttachmentDropped(reason string) {
 	m.AttachmentDropped.WithLabelValues(reason).Inc()
 }
+func (m *WecomMetrics) RecordAttachmentDeliveryShed() { m.AttachmentSheds.Inc() }

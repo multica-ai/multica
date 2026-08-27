@@ -177,6 +177,7 @@ func TestWecomOutboundMetricsAreExported(t *testing.T) {
 	m.RecordOutboundSkipped("origin_not_channel")
 	m.RecordAttachmentDelivered()
 	m.RecordAttachmentDropped("platform_refused")
+	m.RecordAttachmentDeliveryShed()
 
 	got, err := reg.Gather()
 	if err != nil {
@@ -198,6 +199,7 @@ func TestWecomOutboundMetricsAreExported(t *testing.T) {
 		"multica_wecom_outbound_skipped_total",
 		"multica_wecom_outbound_attachment_delivered_total",
 		"multica_wecom_outbound_attachment_dropped_total",
+		"multica_wecom_outbound_attachment_delivery_shed_total",
 	} {
 		if !seen[want] {
 			t.Errorf("%s was not exported", want)

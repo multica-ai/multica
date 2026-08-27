@@ -11,9 +11,9 @@ import (
 // arrived. Lark splits large event payloads across multiple binary
 // Frames with the headers:
 //
-//   sum        — total number of chunks (>=2 means multi-frame)
-//   seq        — 0-based index of THIS chunk within the message
-//   message_id — common key across the N chunks
+//	sum        — total number of chunks (>=2 means multi-frame)
+//	seq        — 0-based index of THIS chunk within the message
+//	message_id — common key across the N chunks
 //
 // The SDK reference (larksuite/oapi-sdk-go/v3/ws/client.go combine())
 // uses a 5-second TTL on partial state — anything older than that is

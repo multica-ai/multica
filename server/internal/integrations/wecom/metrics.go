@@ -77,6 +77,12 @@ type Metrics interface {
 	// one number can only lie in one direction or the other.
 	RecordAttachmentDelivered()
 	RecordAttachmentDropped(reason string)
+
+	// RecordAttachmentDeliveryShed counts a SCHEDULING decision: one delivery
+	// attempt refused admission before the lookup ran. Its own unit because at
+	// that point nothing knows whether the turn carries zero files or five —
+	// counting it as file drops fabricates cardinality in both directions.
+	RecordAttachmentDeliveryShed()
 }
 
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
@@ -92,6 +98,7 @@ func (nopMetrics) RecordOutboundDropped(string)   {}
 func (nopMetrics) RecordOutboundSkipped(string)   {}
 func (nopMetrics) RecordAttachmentDelivered()     {}
 func (nopMetrics) RecordAttachmentDropped(string) {}
+func (nopMetrics) RecordAttachmentDeliveryShed()  {}
 
 // orNopMetrics turns an unset sink into one that is safe to call.
 func orNopMetrics(m Metrics) Metrics {

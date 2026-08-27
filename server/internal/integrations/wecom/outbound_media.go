@@ -197,7 +197,13 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget, carri
 	// have carried none is the false alarm the post-lookup gate exists to
 	// avoid.
 	if !o.admitAttachmentDelivery() {
-		o.attachmentDropped(context.Background(), dropAttachmentNotAdmitted, nil)
+		// A scheduling refusal, counted under its own unit. NOT a file drop:
+		// the comment above is literal — nothing here knows whether this turn
+		// carries zero files or five, and a per-file counter fed from this
+		// branch fabricates cardinality both ways. The reply outcome is still
+		// owed when the files were the reply, because that unit is "one
+		// reply" regardless of how many files it turns out to hold.
+		o.attachmentShed()
 		if carriesTheReply {
 			o.dropped(context.Background(), e, dropAttachmentNotAdmitted, nil)
 		}
@@ -262,6 +268,13 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	// wait for it, and unlike admission it can name what was dropped, so the
 	// user hears about it.
 	if !o.claimAttachmentSlot() {
+		// Unlike admission, the rows are known here, so the accounting can be
+		// exact: one drop per file that will not be sent, and — when the files
+		// were the reply — the reply's own outcome.
+		for range rows {
+			o.attachmentDropped(ctx, dropAttachmentNotAdmitted, nil)
+		}
+		replyFailed(dropAttachmentNotAdmitted, nil)
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
 			"installation_id", uuidStringPub(to.InstallationID),
 			"attachments", len(rows),
@@ -302,18 +315,26 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		return
 	}
 	failed, unknown := 0, 0
+	// replyReason aggregates the per-file reasons for the reply's own outcome,
+	// under worseDropReason's precedence — so a single refused file surfaces as
+	// platform_refused on the reply too, not as a generic transport_error.
+	var replyReason dropReason
 	for _, row := range rows {
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
 		case deliveryDefinitelyFailed:
 			failed++
-			o.attachmentDropped(ctx, classifyDrop(err), err)
+			r := classifyDrop(err)
+			o.attachmentDropped(ctx, r, err)
+			replyReason = worseDropReason(replyReason, r)
 		case deliveryUnknown:
 			unknown++
 			// Unknown is not a failure: the frame may well have arrived, and
 			// the reason set says so. Counted apart from a stated refusal for
 			// the same reason ack_timeout is.
-			o.attachmentDropped(ctx, classifyDrop(err), err)
+			r := classifyDrop(err)
+			o.attachmentDropped(ctx, r, err)
+			replyReason = worseDropReason(replyReason, r)
 		default:
 			o.attachmentDelivered()
 		}
@@ -334,7 +355,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		if failed+unknown < len(rows) {
 			o.delivered()
 		} else {
-			o.droppedFor(ctx, to.SessionID, "chat:done", dropTransport, nil)
+			o.droppedFor(ctx, to.SessionID, "chat:done", replyReason, nil)
 		}
 	}
 	// The answer is already on the user's screen and it may well refer to a

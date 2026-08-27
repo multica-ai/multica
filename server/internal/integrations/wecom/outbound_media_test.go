@@ -877,3 +877,164 @@ func TestDeliverAttachments_IgnoresATurnItCannotAddress(t *testing.T) {
 		t.Errorf("upload init frames = %d, want 0", n)
 	}
 }
+
+// ---- outcome accounting on the shed and failure paths --------------------
+//
+// These are control-flow tests, deliberately: the exported-contract test in
+// internal/metrics proves the collector names and labels, but says nothing
+// about which branches feed them — which is exactly how three accounting bugs
+// passed a green CI.
+
+// newMediaRigWithMetrics is newOutboundWithMedia plus a counting sink.
+func newMediaRigWithMetrics(t *testing.T, q outboundQueries, objects mediaObjectStore) (*Outbound, pgtype.UUID, *mediaConn, *countingMetrics) {
+	t.Helper()
+	reg := newSendersRegistry()
+	instID := mustTestUUID(t)
+	conn := newMediaConn()
+	reg.set(instID, conn.newSender())
+	mx := newCountingMetrics()
+	opts := []OutboundOption{WithOutboundMetrics(mx)}
+	if objects != nil {
+		opts = append(opts, WithAttachments(objects))
+	}
+	o := NewOutbound(q, reg, slog.Default(), opts...)
+	o.spawn = func(f func()) { f() }
+	return o, instID, conn, mx
+}
+
+// Admission is refused before the lookup, so nothing knows how many files the
+// turn holds — zero here, in fact. The old accounting recorded one file drop
+// anyway; the truthful record is one SHED delivery, no file drops, and no
+// reply outcome for a reply whose words already landed.
+func TestAdmissionShed_CountsASchedulingDecisionNotFiles(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.pdf", Url: "u"})
+	q.attachments = nil // the turn turns out to carry no file at all
+	o, instID, _, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	for i := 0; i < maxAdmittedAttachmentDeliveries; i++ {
+		if !o.admitAttachmentDelivery() {
+			t.Fatalf("admission %d refused before the cap", i)
+		}
+	}
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("Words landed.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_shed"); got != 1 {
+		t.Errorf("attachment_shed = %d, want 1", got)
+	}
+	if got := mx.get("attachment_dropped"); got != 0 {
+		t.Errorf("attachment_dropped = %d, want 0 — no file is known to exist here", got)
+	}
+	if got := mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — the words were delivered", got)
+	}
+	if got := mx.get("outbound_delivered"); got != 1 {
+		t.Errorf("outbound_delivered = %d, want 1", got)
+	}
+}
+
+// The pending cap is refused after the lookup: one known file, and for a
+// file-only reply the whole reply. Before this round the branch recorded
+// neither.
+func TestPendingShed_SettlesTheFilesAndTheReply(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "a.pdf", Url: "https://cdn.example/obj/a", SizeBytes: 1,
+	})
+	o, instID, _, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/a", data: []byte("x")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	for i := 0; i < maxPendingAttachmentDeliveries; i++ {
+		if !o.claimAttachmentSlot() {
+			t.Fatalf("slot %d refused before the cap", i)
+		}
+	}
+
+	// An empty completion: the file IS the reply.
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_dropped:attachment_not_admitted"); got != 1 {
+		t.Errorf("attachment_dropped:attachment_not_admitted = %d, want 1", got)
+	}
+	if got := mx.get("outbound_dropped:attachment_not_admitted"); got != 1 {
+		t.Errorf("outbound_dropped:attachment_not_admitted = %d, want 1 — the file was the reply", got)
+	}
+	if got := mx.get("outbound_delivered"); got != 0 {
+		t.Errorf("outbound_delivered = %d, want 0", got)
+	}
+}
+
+// A file-only reply whose single file the platform refused: the reply's own
+// reason must be the file's reason, not a generic transport_error.
+func TestRefusedFileOnlyReply_KeepsThePlatformsReason(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin",
+	})
+	o, instID, conn, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/bin", data: []byte("DATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	conn.refuse[cmdUploadMediaInit] = 40058
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_dropped:platform_refused"); got != 1 {
+		t.Errorf("attachment_dropped:platform_refused = %d, want 1", got)
+	}
+	if got := mx.get("outbound_dropped:platform_refused"); got != 1 {
+		t.Errorf("outbound_dropped:platform_refused = %d, want 1 — the reply's reason is its file's reason", got)
+	}
+	if got := mx.get("outbound_dropped:transport_error"); got != 0 {
+		t.Errorf("outbound_dropped:transport_error = %d, want 0 — the classified reason was discarded", got)
+	}
+}
+
+// Three files, all refused: three file drops, ONE reply outcome. The two units
+// must not leak into each other in either direction.
+func TestMultiFileFailure_CountsFilesPerFileAndTheReplyOnce(t *testing.T) {
+	t.Parallel()
+	rows := []db.Attachment{
+		{ID: mustTestUUID(t), Filename: "a.bin", Url: "https://cdn.example/obj/a"},
+		{ID: mustTestUUID(t), Filename: "b.bin", Url: "https://cdn.example/obj/b"},
+		{ID: mustTestUUID(t), Filename: "c.bin", Url: "https://cdn.example/obj/c"},
+	}
+	q := oneAttachmentQueries(t, rows[0])
+	q.attachments = rows
+	o, instID, conn, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/a", data: []byte("D")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	conn.refuse[cmdUploadMediaInit] = 40058
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_dropped:platform_refused"); got != 3 {
+		t.Errorf("attachment_dropped:platform_refused = %d, want 3 — files count per file", got)
+	}
+	if got := mx.get("outbound_dropped"); got != 1 {
+		t.Errorf("outbound_dropped = %d, want exactly 1 — a reply settles once", got)
+	}
+}
+
+// worseDropReason is the multi-file aggregation rule; pin it so the reply
+// reason stays a rule and never becomes an accident of loop order.
+func TestWorseDropReason_PrecedenceIsStable(t *testing.T) {
+	t.Parallel()
+	if got := worseDropReason(dropAckTimeout, dropPlatformRefused); got != dropPlatformRefused {
+		t.Errorf("refusal must outrank a missing verdict, got %s", got)
+	}
+	if got := worseDropReason(dropPlatformRefused, dropTransport); got != dropPlatformRefused {
+		t.Errorf("refusal must outrank a transport failure, got %s", got)
+	}
+	if got := worseDropReason(dropTransport, dropAckTimeout); got != dropTransport {
+		t.Errorf("a definite local failure must outrank a maybe-delivered, got %s", got)
+	}
+	if got := worseDropReason("", dropAckTimeout); got != dropAckTimeout {
+		t.Errorf("anything outranks the zero value, got %s", got)
+	}
+}

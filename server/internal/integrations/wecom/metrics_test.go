@@ -62,6 +62,7 @@ func (m *countingMetrics) RecordAttachmentDropped(reason string) {
 	m.bump("attachment_dropped")
 	m.bump("attachment_dropped:" + reason)
 }
+func (m *countingMetrics) RecordAttachmentDeliveryShed() { m.bump("attachment_shed") }
 
 var _ Metrics = (*countingMetrics)(nil)
 
