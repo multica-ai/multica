@@ -3,6 +3,7 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": ".",
+    "tsBuildInfoFile": "tsconfig.tsbuildinfo",
     "paths": {
       "@/lib/utils": ["./lib/utils.ts"],
       "@/hooks/*": ["./hooks/*"],

@@ -9,6 +9,8 @@
   ],
   "compilerOptions": {
     "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": "tsconfig.web.tsbuildinfo",
     "noImplicitAny": true,
     "jsx": "react-jsx",
     "noUncheckedSideEffectImports": false,

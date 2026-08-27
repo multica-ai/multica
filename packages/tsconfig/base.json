@@ -14,6 +14,9 @@
     "noImplicitReturns": true,
     "noUncheckedIndexedAccess": true,
     "noUncheckedSideEffectImports": false,
+    // tsBuildInfoFile must be set on each package tsconfig. A path here
+    // resolves relative to this file and every extender would collide.
+    "incremental": true,
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true

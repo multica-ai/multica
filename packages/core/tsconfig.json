@@ -2,7 +2,8 @@
   "extends": "@multica/tsconfig/react-library.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": ".",
+    "tsBuildInfoFile": "tsconfig.tsbuildinfo"
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules", "dist"]

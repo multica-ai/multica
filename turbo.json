@@ -52,8 +52,14 @@
       "cache": false,
       "persistent": true
     },
+    // Packages export raw `.ts`, so each `tsc --noEmit` already walks
+    // workspace imports. `^typecheck` would serialise that work (views,
+    // then web/desktop on top). `^cache-inputs` still puts dependency
+    // sources in the hash — a core edit busts web's cache — without
+    // waiting for core's tsc to finish.
     "typecheck": {
-      "dependsOn": ["^typecheck", "mdx"]
+      "dependsOn": ["^cache-inputs", "mdx"],
+      "outputs": ["*.tsbuildinfo"]
     },
     // Hash-only transit task. No package implements a `cache-inputs` script,
     // so every node resolves to <NONEXISTENT> and nothing is ever executed --

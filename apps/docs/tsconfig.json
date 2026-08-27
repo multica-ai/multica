@@ -33,7 +33,8 @@
     },
     "noEmit": true,
     "allowJs": true,
-    "incremental": true
+    "incremental": true,
+    "tsBuildInfoFile": "tsconfig.tsbuildinfo"
   },
   "include": [
     "next-env.d.ts",

@@ -3,6 +3,8 @@
   "include": ["electron.vite.config.*", "src/main/**/*", "src/preload/**/*"],
   "compilerOptions": {
     "composite": true,
+    "incremental": true,
+    "tsBuildInfoFile": "tsconfig.node.tsbuildinfo",
     "types": ["electron-vite/node"]
   }
 }
