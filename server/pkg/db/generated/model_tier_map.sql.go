@@ -35,18 +35,23 @@ func (q *Queries) DeleteWorkspaceModelTier(ctx context.Context, arg DeleteWorksp
 }
 
 const getGlobalModelTier = `-- name: GetGlobalModelTier :one
-SELECT workspace_id, tier, concrete FROM model_tier_map WHERE workspace_id IS NULL AND tier = $1
+SELECT workspace_id, tier, concrete, fallback_concrete FROM model_tier_map WHERE workspace_id IS NULL AND tier = $1
 `
 
 func (q *Queries) GetGlobalModelTier(ctx context.Context, tier string) (ModelTierMap, error) {
 	row := q.db.QueryRow(ctx, getGlobalModelTier, tier)
 	var i ModelTierMap
-	err := row.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete)
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Tier,
+		&i.Concrete,
+		&i.FallbackConcrete,
+	)
 	return i, err
 }
 
 const getWorkspaceModelTier = `-- name: GetWorkspaceModelTier :one
-SELECT workspace_id, tier, concrete FROM model_tier_map WHERE workspace_id = $1 AND tier = $2
+SELECT workspace_id, tier, concrete, fallback_concrete FROM model_tier_map WHERE workspace_id = $1 AND tier = $2
 `
 
 type GetWorkspaceModelTierParams struct {
@@ -57,12 +62,17 @@ type GetWorkspaceModelTierParams struct {
 func (q *Queries) GetWorkspaceModelTier(ctx context.Context, arg GetWorkspaceModelTierParams) (ModelTierMap, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceModelTier, arg.WorkspaceID, arg.Tier)
 	var i ModelTierMap
-	err := row.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete)
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Tier,
+		&i.Concrete,
+		&i.FallbackConcrete,
+	)
 	return i, err
 }
 
 const listGlobalModelTierMap = `-- name: ListGlobalModelTierMap :many
-SELECT workspace_id, tier, concrete FROM model_tier_map WHERE workspace_id IS NULL
+SELECT workspace_id, tier, concrete, fallback_concrete FROM model_tier_map WHERE workspace_id IS NULL
 `
 
 func (q *Queries) ListGlobalModelTierMap(ctx context.Context) ([]ModelTierMap, error) {
@@ -74,7 +84,12 @@ func (q *Queries) ListGlobalModelTierMap(ctx context.Context) ([]ModelTierMap, e
 	items := []ModelTierMap{}
 	for rows.Next() {
 		var i ModelTierMap
-		if err := rows.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete); err != nil {
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.Tier,
+			&i.Concrete,
+			&i.FallbackConcrete,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -86,7 +101,7 @@ func (q *Queries) ListGlobalModelTierMap(ctx context.Context) ([]ModelTierMap, e
 }
 
 const listWorkspaceModelTierMap = `-- name: ListWorkspaceModelTierMap :many
-SELECT workspace_id, tier, concrete FROM model_tier_map WHERE workspace_id = $1
+SELECT workspace_id, tier, concrete, fallback_concrete FROM model_tier_map WHERE workspace_id = $1
 `
 
 func (q *Queries) ListWorkspaceModelTierMap(ctx context.Context, workspaceID pgtype.UUID) ([]ModelTierMap, error) {
@@ -98,7 +113,12 @@ func (q *Queries) ListWorkspaceModelTierMap(ctx context.Context, workspaceID pgt
 	items := []ModelTierMap{}
 	for rows.Next() {
 		var i ModelTierMap
-		if err := rows.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete); err != nil {
+		if err := rows.Scan(
+			&i.WorkspaceID,
+			&i.Tier,
+			&i.Concrete,
+			&i.FallbackConcrete,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -110,38 +130,55 @@ func (q *Queries) ListWorkspaceModelTierMap(ctx context.Context, workspaceID pgt
 }
 
 const upsertGlobalModelTier = `-- name: UpsertGlobalModelTier :one
-INSERT INTO model_tier_map (workspace_id, tier, concrete) VALUES (NULL, $1, $2)
-ON CONFLICT (workspace_id, tier) DO UPDATE SET concrete = EXCLUDED.concrete
-RETURNING workspace_id, tier, concrete
+INSERT INTO model_tier_map (workspace_id, tier, concrete, fallback_concrete) VALUES (NULL, $1, $2, COALESCE($3::text[], '{}'::text[]))
+ON CONFLICT (workspace_id, tier) DO UPDATE SET concrete = EXCLUDED.concrete, fallback_concrete = COALESCE($3::text[], model_tier_map.fallback_concrete)
+RETURNING workspace_id, tier, concrete, fallback_concrete
 `
 
 type UpsertGlobalModelTierParams struct {
-	Tier     string `json:"tier"`
-	Concrete string `json:"concrete"`
+	Tier             string   `json:"tier"`
+	Concrete         string   `json:"concrete"`
+	FallbackConcrete []string `json:"fallback_concrete"`
 }
 
 func (q *Queries) UpsertGlobalModelTier(ctx context.Context, arg UpsertGlobalModelTierParams) (ModelTierMap, error) {
-	row := q.db.QueryRow(ctx, upsertGlobalModelTier, arg.Tier, arg.Concrete)
+	row := q.db.QueryRow(ctx, upsertGlobalModelTier, arg.Tier, arg.Concrete, arg.FallbackConcrete)
 	var i ModelTierMap
-	err := row.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete)
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Tier,
+		&i.Concrete,
+		&i.FallbackConcrete,
+	)
 	return i, err
 }
 
 const upsertWorkspaceModelTier = `-- name: UpsertWorkspaceModelTier :one
-INSERT INTO model_tier_map (workspace_id, tier, concrete) VALUES ($1, $2, $3)
-ON CONFLICT (workspace_id, tier) DO UPDATE SET concrete = EXCLUDED.concrete
-RETURNING workspace_id, tier, concrete
+INSERT INTO model_tier_map (workspace_id, tier, concrete, fallback_concrete) VALUES ($1, $2, $3, COALESCE($4::text[], '{}'::text[]))
+ON CONFLICT (workspace_id, tier) DO UPDATE SET concrete = EXCLUDED.concrete, fallback_concrete = COALESCE($4::text[], model_tier_map.fallback_concrete)
+RETURNING workspace_id, tier, concrete, fallback_concrete
 `
 
 type UpsertWorkspaceModelTierParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Tier        string      `json:"tier"`
-	Concrete    string      `json:"concrete"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	Tier             string      `json:"tier"`
+	Concrete         string      `json:"concrete"`
+	FallbackConcrete []string    `json:"fallback_concrete"`
 }
 
 func (q *Queries) UpsertWorkspaceModelTier(ctx context.Context, arg UpsertWorkspaceModelTierParams) (ModelTierMap, error) {
-	row := q.db.QueryRow(ctx, upsertWorkspaceModelTier, arg.WorkspaceID, arg.Tier, arg.Concrete)
+	row := q.db.QueryRow(ctx, upsertWorkspaceModelTier,
+		arg.WorkspaceID,
+		arg.Tier,
+		arg.Concrete,
+		arg.FallbackConcrete,
+	)
 	var i ModelTierMap
-	err := row.Scan(&i.WorkspaceID, &i.Tier, &i.Concrete)
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.Tier,
+		&i.Concrete,
+		&i.FallbackConcrete,
+	)
 	return i, err
 }
