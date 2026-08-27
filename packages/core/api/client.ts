@@ -1993,6 +1993,51 @@ export class ApiClient {
     });
   }
 
+  // Confirmed variant of `updateRuntime({ visibility: "private" })` (MUL-6704).
+  //
+  // The PATCH stays a pure field write: when making the runtime private would
+  // affect agents that are not the owner's, it refuses with
+  // `code: "runtime_visibility_has_foreign_agents"` and the impact plan
+  // (`active_agents`, `archived_agent_count`, `retained_agent_count`,
+  // `mika_affected`) instead of tearing anything down. The confirmation lands
+  // here with the snapshot the user actually saw; if the affected set moved in
+  // between, the server refuses with `runtime_visibility_plan_changed` and the
+  // fresh plan, having written nothing.
+  //
+  // Deliberately NOT folded into the PATCH body: an older client that cannot
+  // send the confirmation would then 409 forever with no way through, which is
+  // the trap the delete endpoint documents.
+  async revokeRuntimeAndMakePrivate(
+    runtimeId: string,
+    confirmed: {
+      expectedActiveAgentIds: string[];
+      /**
+       * The archived / retained counts the user was shown. They are part of the
+       * confirmed plan because they are part of the impact, and the server's id
+       * comparison cannot see them — omitting them would let an archived agent or
+       * a builder session that appeared while the dialog was open be torn down
+       * without ever being confirmed.
+       */
+      expectedArchivedAgentCount: number;
+      expectedRetainedAgentCount: number;
+    },
+  ): Promise<{
+    status: string;
+    agents_unbound: number;
+    tasks_cancelled: number;
+    autopilots_paused: number;
+    agents_retained: number;
+  }> {
+    return this.fetch(`/api/runtimes/${runtimeId}/revoke-and-make-private`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_active_agent_ids: confirmed.expectedActiveAgentIds,
+        expected_archived_agent_count: confirmed.expectedArchivedAgentCount,
+        expected_retained_agent_count: confirmed.expectedRetainedAgentCount,
+      }),
+    });
+  }
+
   async updateRuntime(
     runtimeId: string,
     patch: {

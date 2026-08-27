@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRuntime } from "../types";
-import { isRuntimeUsableForUser } from "./access";
+import {
+  isRuntimeUsableForAgentOwner,
+  isRuntimeUsableForUser,
+} from "./access";
 
 const OWNER = "user-owner";
 const OTHER = "user-other";
@@ -62,5 +65,32 @@ describe("isRuntimeUsableForUser", () => {
 
   it("allows everything while the viewer is unknown, so a loading session never hides the user's own runtime", () => {
     expect(isRuntimeUsableForUser(makeRuntime(), null)).toBe(true);
+  });
+});
+
+// The agent-owner half of the same contract (MUL-6704). The server checks it in
+// service.RuntimeAllowsAgentOwner, in the SQL claim fence and again after the
+// claim, so a picker offering a target this rejects would bind an agent whose
+// every task is then refused.
+describe("isRuntimeUsableForAgentOwner", () => {
+  it.each([
+    ["private runtime runs its own owner's agent", {}, OWNER, true],
+    // The case that differs from isRuntimeUsableForUser: the runtime owner may
+    // operate here, but the machine may not run the other member's agent.
+    ["private runtime refuses another member's agent", {}, OTHER, false],
+    ["public runtime runs any owner's agent", { visibility: "public" }, OTHER, true],
+    ["ownerless runtime runs nothing", { owner_id: null }, OWNER, false],
+    // `undefined` = not known yet (create surface, or a list still loading):
+    // permissive, like isRuntimeUsableForUser's unknown viewer.
+    ["unknown agent owner is allowed while loading", {}, undefined, true],
+    // `null` = the agent genuinely has no owner. The server refuses that on a
+    // private runtime (no task token to mint), so the picker must too, or it
+    // offers a choice that 403s on submit.
+    ["an ownerless AGENT cannot use a private runtime", {}, null, false],
+    ["an ownerless agent can still use a public runtime", { visibility: "public" }, null, true],
+  ] as const)("%s", (_name, overrides, agentOwnerId, want) => {
+    expect(
+      isRuntimeUsableForAgentOwner(makeRuntime(overrides), agentOwnerId),
+    ).toBe(want);
   });
 });

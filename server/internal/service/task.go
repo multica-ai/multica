@@ -1746,6 +1746,49 @@ var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 // path returns a task row, not this error.
 var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 
+// ErrChatTaskRuntimeAccessRevoked signals that the agent is still bound to a
+// runtime, but that runtime no longer permits this agent's owner — its owner took
+// the machine back to `private` (MUL-6704).
+//
+// Distinct from ErrChatTaskAgentNoRuntime: the binding is intact, so "no runtime
+// configured" would be the wrong thing to tell the user. Nothing can claim work
+// for this agent here, so the send is refused instead of enqueued; the
+// `runtime_access_revoked` vocabulary is the same one admission and the cancelled
+// task rows use.
+var ErrChatTaskRuntimeAccessRevoked = errors.New("chat task: runtime access revoked")
+
+// ensureAgentRuntimeAccessTx re-reads the agent's bound runtime INSIDE the
+// caller's transaction and refuses the write when that runtime may no longer run
+// the agent.
+//
+// It exists because the pre-flight readiness check runs outside the write
+// transaction, so a revoke committing in between left the send enqueuing a task
+// nothing would ever claim — exactly the silent-queue failure MUL-6704 removes,
+// re-entered through the one agent kind the teardown deliberately leaves bound
+// (the Agent Builder carrier).
+//
+// Callers must already hold the agent row (GetAgentForClaimUpdate). Given that
+// lock, a plain read is enough and a runtime lock would be actively wrong: the
+// revoke takes runtime → agents, so locking the runtime after the agent row would
+// invert that order and risk a deadlock. With the agent row held, either the
+// revoke waits for us and then cancels the task we just wrote (it cancels every
+// non-terminal task of a retained carrier), or it committed first and this read
+// sees `private` and refuses. Both ends are correct; neither can leave an
+// unclaimable row behind.
+func ensureAgentRuntimeAccessTx(ctx context.Context, qtx *db.Queries, agent db.Agent) error {
+	if !agent.RuntimeID.Valid {
+		return ErrChatTaskAgentNoRuntime
+	}
+	rt, err := qtx.GetAgentRuntime(ctx, agent.RuntimeID)
+	if err != nil {
+		return fmt.Errorf("reload agent runtime: %w", err)
+	}
+	if !RuntimeAllowsAgentOwner(rt, agent.OwnerID) {
+		return ErrChatTaskRuntimeAccessRevoked
+	}
+	return nil
+}
+
 // ErrChatQuickActionsNoTurn signals that a quick-actions regeneration was asked
 // for a session with no eligible assistant turn to resume from (empty session,
 // or the latest turn is a no_response / failure with nothing to suggest from).
@@ -1940,8 +1983,10 @@ func (s *TaskService) enqueueChatTaskTx(
 	if agent.ArchivedAt.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
 	}
-	if !agent.RuntimeID.Valid {
-		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	// Runtime access, re-read under the agent row lock we now hold: the
+	// pre-flight readiness check ran outside this transaction (MUL-6704).
+	if err := ensureAgentRuntimeAccessTx(ctx, qtx, agent); err != nil {
+		return db.AgentTaskQueue{}, err
 	}
 
 	binding, bindingErr := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
@@ -2286,8 +2331,12 @@ func (s *TaskService) SendDirectChatMessage(
 		if carrier.ArchivedAt.Valid {
 			return ErrChatTaskAgentArchived
 		}
-		if !carrier.RuntimeID.Valid {
-			return ErrChatTaskAgentNoRuntime
+		// Runtime access, re-read under the carrier row lock we now hold: the
+		// pre-flight readiness check ran outside this transaction, so a revoke
+		// committing in between would otherwise write a task nothing can claim
+		// (MUL-6704).
+		if err := ensureAgentRuntimeAccessTx(ctx, qtx, carrier); err != nil {
+			return err
 		}
 
 		// The database status of every newly-created task is "queued" until a

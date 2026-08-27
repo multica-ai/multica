@@ -132,11 +132,20 @@ func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, s
 	}
 
 	var runtimeID string
+	// visibility='public' on purpose (MUL-6704). This is the suite's shared
+	// machine, and fixtures across the suite bind agents owned by OTHER users to
+	// it to exercise attribution, squad and invocation-permission paths. Since a
+	// private runtime only runs its own owner's agents — enforced at claim time
+	// by #7571 and at admission by service.RuntimeAllowsAgentOwner — leaving this
+	// row at the column default ('private') would make those fixtures describe a
+	// configuration that can never run, and their subject is not runtime
+	// ownership. Tests that need a private runtime create their own (dbfx.Runtime
+	// defaults to private, owned by the suite user).
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at, visibility
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now(), 'public')
 		RETURNING id
 	`, workspaceID, "Handler Test Runtime", "handler_test_runtime", "Handler test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err

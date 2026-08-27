@@ -965,7 +965,11 @@ func (r *Router) flushChatRun(
 		// not stick on the user's message.
 		r.clearTyping(ctx, set, sessionID)
 		switch {
-		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
+		case errors.Is(err, service.ErrChatTaskAgentNoRuntime),
+			errors.Is(err, service.ErrChatTaskRuntimeAccessRevoked):
+			// Both mean "nothing will pick this up until someone acts": no runtime
+			// bound, or bound to a machine whose owner reclaimed it (MUL-6704).
+			// The channel surface has one user-visible outcome for that.
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, bindingID, routeRevision, OutcomeAgentOffline)
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, bindingID, routeRevision, OutcomeAgentArchived)

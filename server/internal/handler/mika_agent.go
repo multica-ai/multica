@@ -176,6 +176,20 @@ func (h *Handler) resolveMikaAgent(w http.ResponseWriter, r *http.Request, works
 		return db.Agent{}, false, false
 	}
 
+	// Re-read the runtime under the FK lock: the canUseRuntimeForAgent check at
+	// the top of this handler ran outside the transaction, and a public → private
+	// revoke can commit in between (MUL-6704). Mika's owner is the caller, so
+	// this covers the owner-eligibility half too.
+	if _, bindErr := revalidateRuntimeForBind(r.Context(), qtx, member, runtime.ID, parseUUID(userID)); bindErr != nil {
+		if errors.Is(bindErr, errRuntimeBindMissing) || errors.Is(bindErr, errRuntimeBindForbidden) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
+		} else {
+			slog.Warn("create mika agent: re-validate runtime failed", append(logger.RequestAttrs(r), "error", bindErr, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate runtime")
+		}
+		return db.Agent{}, false, false
+	}
+
 	created, err := qtx.CreateSystemUserAgent(r.Context(), db.CreateSystemUserAgentParams{
 		WorkspaceID:        wsUUID,
 		Name:               service.MikaDefaultName,

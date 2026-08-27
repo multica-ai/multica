@@ -144,6 +144,23 @@ const (
 	// workspace policy changes.
 	ReasonIssueWindowRestricted Reason = "issue_window_restricted"
 
+	// Runtime ACCESS rather than liveness (MUL-6704), all three written on
+	// cancelled rows as well as failed ones because a reclaimed machine settles
+	// work by cancelling it:
+	//
+	//   - ReasonAgentRuntimeRequired: no runtime bound at all (deleted, or unbound
+	//     by a revoke). Nothing will ever claim it; bind a runtime. Mirrors
+	//     dispatch.ReasonAgentRuntimeRequired.
+	//   - ReasonRuntimeAccessRevoked: still bound, but the machine no longer
+	//     permits this agent's owner. Waiting changes nothing — only its owner can
+	//     share it again, or the agent must move.
+	//   - ReasonAgentRuntimeChanged: pinned to the runtime the agent was on when
+	//     enqueued, and the agent has since moved, so since #7571 neither machine
+	//     can claim it. Retrying runs it on the agent's current runtime.
+	ReasonAgentRuntimeRequired Reason = "agent_runtime_required"
+	ReasonRuntimeAccessRevoked Reason = "runtime_access_revoked"
+	ReasonAgentRuntimeChanged  Reason = "agent_runtime_changed"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -242,6 +259,9 @@ var allReasons = []Reason{
 	ReasonRuntimeCLITimeout,
 	ReasonInvalidTaskIdentity,
 	ReasonIssueWindowRestricted,
+	ReasonAgentRuntimeRequired,
+	ReasonRuntimeAccessRevoked,
+	ReasonAgentRuntimeChanged,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

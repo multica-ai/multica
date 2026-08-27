@@ -481,7 +481,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	profileID := uuidToString(profileUUID)
 	userID := uuidToString(member.UserID)
 	for _, teardown := range teardowns {
-		h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
+		h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID, "delete")
 	}
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
 	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{

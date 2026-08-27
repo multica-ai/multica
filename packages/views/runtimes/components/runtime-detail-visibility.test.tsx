@@ -15,6 +15,22 @@ const TEST_RESOURCES = {
 };
 
 const mockUpdateRuntime = vi.hoisted(() => vi.fn());
+const mockRevokeRuntime = vi.hoisted(() => vi.fn());
+// When set, the useUpdateRuntime stub rejects the next PATCH with this error so
+// the test can drive the server's 409 impact-plan refusal (MUL-6704).
+const mockUpdateRuntimeError = vi.hoisted(() => ({ current: null as unknown }));
+const MockApiError = vi.hoisted(
+  () =>
+    class MockApiError extends Error {
+      status: number;
+      body: unknown;
+      constructor(status: number, body: unknown) {
+        super("conflict");
+        this.status = status;
+        this.body = body;
+      }
+    },
+);
 const mockDeleteRuntimeProfile = vi.hoisted(() => vi.fn());
 const mockQueryData = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
@@ -33,7 +49,7 @@ vi.mock("@multica/core/api", () => ({
     deleteRuntimeProfile: (...args: unknown[]) =>
       mockDeleteRuntimeProfile(...args),
   },
-  ApiError: class ApiError extends Error {},
+  ApiError: MockApiError,
 }));
 
 vi.mock("sonner", () => ({
@@ -86,6 +102,8 @@ vi.mock("@multica/core/runtimes", async () => ({
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
+  runtimeDisplayLabel: (rt: { name: string; custom_name?: string | null }) =>
+    rt.custom_name?.trim() || rt.name,
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
   }),
@@ -112,11 +130,19 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
   useUpdateRuntime: () => ({
     mutate: (
       args: { runtimeId: string; patch: Record<string, unknown> },
-      opts?: { onSuccess?: () => void; onError?: () => void },
+      opts?: { onSuccess?: () => void; onError?: (err: unknown) => void },
     ) => {
       mockUpdateRuntime(args.runtimeId, args.patch);
+      if (mockUpdateRuntimeError.current) {
+        opts?.onError?.(mockUpdateRuntimeError.current);
+        return;
+      }
       opts?.onSuccess?.();
     },
+    isPending: false,
+  }),
+  useRevokeRuntimeAndMakePrivate: () => ({
+    mutateAsync: (...args: unknown[]) => mockRevokeRuntime(...args),
     isPending: false,
   }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
@@ -208,6 +234,14 @@ describe("RuntimeDetail visibility section", () => {
     mockQueryData.members = [];
     mockQueryData.profiles = [];
     mockDeleteRuntimeProfile.mockResolvedValue(undefined);
+    mockUpdateRuntimeError.current = null;
+    mockRevokeRuntime.mockResolvedValue({
+      status: "ok",
+      agents_unbound: 1,
+      tasks_cancelled: 1,
+      autopilots_paused: 0,
+      agents_retained: 0,
+    });
   });
 
   it("shows owner-editable visibility choices when the caller owns the runtime", () => {
@@ -268,6 +302,49 @@ describe("RuntimeDetail visibility section", () => {
     await waitFor(() =>
       expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", { visibility: "public" }),
     );
+  });
+
+  // MUL-6704: private is not the symmetric twin of public. When other members'
+  // agents are running on this machine, the PATCH refuses with the impact plan
+  // and the editor must turn that refusal into a confirmation — not an error
+  // toast, and never a silent teardown.
+  it("opens the impact confirmation when making it private would affect other members' agents", async () => {
+    mockUpdateRuntimeError.current = new MockApiError(409, {
+      code: "runtime_visibility_has_foreign_agents",
+      active_agents: [{ id: "agent-1", name: "Teammate Agent" }],
+      archived_agent_count: 0,
+      retained_agent_count: 0,
+      mika_affected: false,
+    });
+
+    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "public" }));
+    fireEvent.click(screen.getByText("Private"));
+
+    await waitFor(() =>
+      expect(screen.getByText("Teammate Agent")).toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "Make private" }));
+
+    await waitFor(() =>
+      expect(mockRevokeRuntime).toHaveBeenCalledWith({
+        runtimeId: "rt-1",
+        expectedActiveAgentIds: ["agent-1"],
+        expectedArchivedAgentCount: 0,
+        expectedRetainedAgentCount: 0,
+      }),
+    );
+  });
+
+  it("still flips straight to private when nothing else is bound to the runtime", async () => {
+    renderDetail(makeRuntime({ owner_id: "user-me", visibility: "public" }));
+    fireEvent.click(screen.getByText("Private"));
+    await waitFor(() =>
+      expect(mockUpdateRuntime).toHaveBeenCalledWith("rt-1", {
+        visibility: "private",
+      }),
+    );
+    expect(mockRevokeRuntime).not.toHaveBeenCalled();
   });
 
   it("renders a read-only visibility chip when the caller cannot edit", () => {

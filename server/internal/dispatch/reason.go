@@ -47,6 +47,19 @@ const (
 	// collapse the two send the user looking for an offline computer that does
 	// not exist.
 	ReasonAgentRuntimeRequired ReasonCode = "agent_runtime_required"
+	// ReasonRuntimeAccessRevoked: the target is bound to a runtime that exists
+	// and may even be online, but that runtime is `private` and belongs to
+	// someone other than the agent's owner, so nothing on it is allowed to run
+	// this agent (MUL-6704). Distinct from agent_runtime_required (the binding
+	// is intact, so "bind a runtime" is not the instruction) and from
+	// runtime_offline (waiting changes nothing — the machine is fine, the
+	// permission is gone). The fix is the machine's owner sharing it again, or
+	// moving the agent to a runtime it may use.
+	//
+	// Load-bearing for the revoke teardown: without an admission-side verdict,
+	// every new trigger for such an agent would still enqueue, be refused by
+	// the claim fence, and die hours later as `queued_expired`.
+	ReasonRuntimeAccessRevoked ReasonCode = "runtime_access_revoked"
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"

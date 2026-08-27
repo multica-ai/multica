@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -117,7 +118,44 @@ func AgentReadiness(ctx context.Context, q *db.Queries, agent db.Agent) (AgentVe
 	if err != nil {
 		return AgentVerdict{}, err
 	}
+	// Access before liveness: a runtime the agent may not use is not "offline",
+	// and telling the user to wake a machine that would refuse the work anyway
+	// is the misdiagnosis MUL-6704 exists to remove.
+	if !RuntimeAllowsAgentOwner(rt, agent.OwnerID) {
+		return AgentVerdict{
+			Availability: AgentBlocked,
+			Reason:       dispatch.ReasonRuntimeAccessRevoked,
+			Detail:       "agent runtime is private and does not permit this agent's owner",
+		}, nil
+	}
 	return runtimeVerdict(rt), nil
+}
+
+// RuntimeAllowsAgentOwner reports whether a runtime is allowed to EXECUTE an
+// agent owned by ownerID. This is the authorization half of runtime access, and
+// it is deliberately separate from the operator-facing question "may this member
+// bind an agent here" (handler.canUseRuntimeForAgent): a workspace admin acting
+// on someone else's agent is a permission question, whereas whose credentials
+// and files a private machine spends is a property of the AGENT'S OWNER.
+//
+// Keep this in sync with three other copies of the same fence, which is why it
+// lives here as one exported predicate:
+//   - the SQL claim fence (ClaimAgentTask and the stale-reclaim variants),
+//   - the post-claim recheck in handler.buildClaimedTaskResponse,
+//   - the client-side picker (packages/core/runtimes/access.ts).
+//
+// A public runtime executes any owner's agent — that is what sharing a machine
+// means. A private one executes only its owner's agents. An ownerless agent on a
+// private runtime is refused: the SQL fence lets that row through only so the
+// claim handler can settle it explicitly, so admission must not pretend it is
+// runnable. An ownerless RUNTIME is left to runtimeVerdict / the claim path,
+// which already cancel for want of a token minter (MUL-3292); widening this
+// predicate to cover it would relabel that established failure.
+func RuntimeAllowsAgentOwner(rt db.AgentRuntime, ownerID pgtype.UUID) bool {
+	if rt.Visibility != "private" || !rt.OwnerID.Valid {
+		return true
+	}
+	return ownerID.Valid && ownerID == rt.OwnerID
 }
 
 // runtimeVerdict is the half of the decision that depends only on the runtime

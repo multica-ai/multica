@@ -360,6 +360,38 @@ SELECT
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
+  -- Runtime access, at write time (MUL-6704). Admission (service.AgentReadiness)
+  -- runs before this statement and outside its transaction, so a revoke committing
+  -- in between would otherwise write a row nothing can ever claim: the claim fence
+  -- from #7571 requires agent.runtime_id to equal the task's runtime and a private
+  -- runtime to belong to the agent's owner, and a row failing either sits queued
+  -- until the TTL reports the misleading `queued_expired`.
+  --
+  -- One predicate here rather than one per enqueue caller, and it needs no new
+  -- lock: lock_task_owner_rows already took FOR KEY SHARE on both the agent and
+  -- the runtime, which conflicts with the revoke's FOR UPDATE. Either the revoke
+  -- waits for this insert and then cancels the row with a real reason, or it
+  -- committed first and this predicate sees the new state and writes nothing.
+  --
+  -- Scoped to the ACCESS question only. Liveness is not checked (an offline
+  -- runtime is a legitimate queue-and-wait) and neither is the binding match:
+  -- agent.runtime_id vs the task's runtime is the rebind case, which UpdateAgent
+  -- settles synchronously, and asserting it here would also refuse the deliberately
+  -- cross-referenced combinations the MUL-5999 workspace-fence tests use to prove
+  -- this statement locks all three owner rows. NULL owners pass exactly as they do
+  -- in the claim fence, so the claim handler keeps settling those explicitly.
+  AND EXISTS (
+      SELECT 1
+      FROM agent a
+      JOIN agent_runtime r ON r.id = $2
+      WHERE a.id = $1
+        AND (
+            r.visibility <> 'private'
+            OR r.owner_id IS NULL
+            OR a.owner_id IS NULL
+            OR r.owner_id = a.owner_id
+        )
+  )
 RETURNING *;
 
 -- name: CreateDeferredChannelIssueTask :one

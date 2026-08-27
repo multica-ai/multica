@@ -9,7 +9,10 @@ import {
   Lock,
   Monitor,
 } from "lucide-react";
-import { isRuntimeUsableForUser } from "@multica/core/runtimes";
+import {
+  isRuntimeUsableForAgentOwner,
+  isRuntimeUsableForUser,
+} from "@multica/core/runtimes";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -45,6 +48,7 @@ export function RuntimePicker({
   runtimes,
   members,
   currentUserId,
+  agentOwnerId,
   canEdit = true,
   variant = "chip",
   showLabel = true,
@@ -54,6 +58,14 @@ export function RuntimePicker({
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
+  /**
+   * Owner of the agent being bound, when it is not the current user — an admin
+   * or runtime owner editing a teammate's agent (MUL-6704). A private machine
+   * only runs its OWNER's agents, so leaving this out made the picker offer
+   * targets the API then refused with a 403 on submit. Omit it on create-style
+   * surfaces, where the new agent's owner is the current user.
+   */
+  agentOwnerId?: string | null;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
   variant?: "chip" | "field";
@@ -70,11 +82,26 @@ export function RuntimePicker({
 
   const selected = runtimes.find((r) => r.id === value) ?? null;
 
-  // Same predicate the create / duplicate / builder surfaces use, so a
-  // runtime this picker locks is exactly the one the API and CLI refuse
-  // (MUL-6126) — no workspace-role exception on either side.
+  // Both server gates, so a runtime this picker leaves selectable is one the API
+  // will actually accept (MUL-6126, MUL-6704):
+  //   - isRuntimeUsableForUser: may the CALLER bind agents to this machine;
+  //   - isRuntimeUsableForAgentOwner: may the machine RUN an agent owned by that
+  //     user. These differ exactly when the operator is not the agent's owner —
+  //     an admin, or the machine's owner, editing a teammate's agent — and
+  //     without the second one the picker offered its own private runtimes for
+  //     someone else's agent and only failed on submit.
+  // Contract for agentOwnerId:
+  //   omitted / undefined → a create surface, where the new agent's owner is the
+  //     caller, so the caller's id is substituted;
+  //   an id              → that agent's owner (admin editing a teammate's agent);
+  //   explicit null      → a genuinely ownerless agent, passed straight through so
+  //     the predicate refuses private runtimes, matching the server.
   const isDisabled = (r: AgentRuntime): boolean =>
-    !isRuntimeUsableForUser(r, currentUserId);
+    !isRuntimeUsableForUser(r, currentUserId) ||
+    !isRuntimeUsableForAgentOwner(
+      r,
+      agentOwnerId === undefined ? currentUserId : agentOwnerId,
+    );
 
   // Machine grouping over the unfiltered list — resolves the selected
   // runtime's machine for the trigger label regardless of the Mine/All

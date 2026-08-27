@@ -80,6 +80,9 @@ func TestIsAgentError(t *testing.T) {
 		ReasonRuntimeCLITimeout,
 		ReasonInvalidTaskIdentity,
 		ReasonIssueWindowRestricted,
+		ReasonAgentRuntimeRequired,
+		ReasonRuntimeAccessRevoked,
+		ReasonAgentRuntimeChanged,
 	}
 	for _, r := range platformSide {
 		if r.IsAgentError() {
@@ -120,8 +123,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 26 {
-		t.Fatalf("AllReasons() returned %d entries, want 26", len(got))
+	if len(got) != 29 {
+		t.Fatalf("AllReasons() returned %d entries, want 29", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -138,8 +141,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 12 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 12", platformCount)
+	if platformCount != 15 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 15", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
@@ -155,6 +158,8 @@ func TestAllReasonsContents(t *testing.T) {
 		ReasonTimeout, ReasonIterationLimit, ReasonAgentBlocked,
 		ReasonAPIInvalidRequest, ReasonSkillBundleUnavailable,
 		ReasonRuntimeCLITimeout, ReasonInvalidTaskIdentity, ReasonIssueWindowRestricted,
+		// MUL-6704: runtime access, not runtime liveness.
+		ReasonAgentRuntimeRequired, ReasonRuntimeAccessRevoked, ReasonAgentRuntimeChanged,
 		ReasonAgentProviderAuthOrAccess, ReasonAgentProviderQuotaLimit,
 		ReasonAgentProviderCapacityOrRateLimit, ReasonAgentProviderServerError,
 		ReasonAgentProviderNetwork, ReasonAgentProcessFailure,

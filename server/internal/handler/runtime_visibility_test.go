@@ -238,6 +238,17 @@ func TestListAgentRuntimes_HidesOtherMembersPrivateRuntimes(t *testing.T) {
 
 	privateRuntimeID, _, plainMemberID := runtimeVisibilityFixture(t)
 
+	// Restore whatever the shared runtime's visibility WAS, not a hardcoded
+	// 'private' (MUL-6704): the suite fixture is public, and leaking a private
+	// value into the rest of the suite makes every later cross-owner agent
+	// fixture unrunnable — a private runtime only runs its own owner's agents,
+	// so admission refuses them.
+	var previousVisibility string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT visibility FROM agent_runtime WHERE id = $1`, testRuntimeID,
+	).Scan(&previousVisibility); err != nil {
+		t.Fatalf("read fixture runtime visibility: %v", err)
+	}
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, testRuntimeID,
 	); err != nil {
@@ -245,7 +256,7 @@ func TestListAgentRuntimes_HidesOtherMembersPrivateRuntimes(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(),
-			`UPDATE agent_runtime SET visibility = 'private' WHERE id = $1`, testRuntimeID)
+			`UPDATE agent_runtime SET visibility = $1 WHERE id = $2`, previousVisibility, testRuntimeID)
 	})
 
 	w := testutil.Call(t, testHandler.ListAgentRuntimes,

@@ -2126,6 +2126,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the strict DELETE refused with
 					// `runtime_has_active_agents` and the user confirmed.
 					r.Post("/unbind-agents-and-delete", h.UnbindAgentsAndDeleteRuntime)
+					// Confirmed variant of PATCH {visibility:"private"}: unbind
+					// the agents this machine may no longer run (its owner's own
+					// agents stay), cancel their work, pause their Autopilots,
+					// and flip the visibility — one transaction (MUL-6704). The
+					// PATCH refuses with `runtime_visibility_has_foreign_agents`
+					// and the impact plan; this is where the user's confirmation
+					// lands.
+					r.Post("/revoke-and-make-private", h.RevokeAndMakePrivateRuntime)
 					// Legacy path for installed clients built against the
 					// archive-and-delete contract (MUL-5559 renamed the
 					// behaviour, not just the route). Same handler.

@@ -70,6 +70,15 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // fix is on the host running the daemon — a faster CLI or a raised timeout —
   // not with the model provider, which was never contacted.
   runtime_cli_timeout: "runtime",
+  // Runtime ACCESS rather than liveness (MUL-6704): the agent lost its runtime
+  // (deleted, or a shared machine reclaimed as private), the machine no longer
+  // permits its owner, or the task was pinned to a runtime the agent has since
+  // left. All three are Multica-side execution-substrate problems an operator
+  // resolves by fixing a binding or re-sharing a machine — never by looking at
+  // the model provider — so they share the runtime class.
+  agent_runtime_required: "runtime",
+  runtime_access_revoked: "runtime",
+  agent_runtime_changed: "runtime",
 
   // The agent process itself produced the failure.
   "agent_error.process_failure": "agent",

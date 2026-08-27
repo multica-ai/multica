@@ -46,6 +46,11 @@ import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import {
+  RevokeVisibilityDialog,
+  parseRuntimeRevokeConflict,
+  type RuntimeRevokePlan,
+} from "./revoke-visibility-dialog";
 import { runtimeRowLabel } from "./runtime-machines";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -567,11 +572,17 @@ function VisibilityReadout({ runtime }: { runtime: AgentRuntime }) {
 // this is a UI gate, not a security boundary. Per-choice description text lives in the hover
 // tooltip so the two buttons stay a tight icon+label pair instead of the
 // previous two-line block that competed with the surrounding cards.
+//
+// public → private is not a symmetric field write (MUL-6704): it revokes access
+// other members' agents are currently relying on. The PATCH refuses with the
+// impact plan when that is the case, and this component turns that refusal into
+// the confirmation dialog rather than swallowing it as an error toast.
 function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const updateRuntime = useUpdateRuntime(wsId);
   const current = runtime.visibility === "public" ? "public" : "private";
+  const [revokePlan, setRevokePlan] = useState<RuntimeRevokePlan | null>(null);
 
   const flip = (next: "private" | "public") => {
     if (next === current) return;
@@ -584,12 +595,18 @@ function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
               visibility: t(($) => $.detail.visibility_label[next]),
             }),
           ),
-        onError: (err) =>
+        onError: (err) => {
+          const conflict = parseRuntimeRevokeConflict(err);
+          if (conflict?.code === "runtime_visibility_has_foreign_agents") {
+            setRevokePlan(conflict.plan);
+            return;
+          }
           toast.error(
             err instanceof Error && err.message
               ? err.message
               : t(($) => $.detail.visibility_toast_failed),
-          ),
+          );
+        },
       },
     );
   };
@@ -612,6 +629,25 @@ function VisibilityEditor({ runtime }: { runtime: AgentRuntime }) {
         disabled={updateRuntime.isPending}
         onClick={() => flip("public")}
       />
+      {revokePlan && (
+        <RevokeVisibilityDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setRevokePlan(null);
+          }}
+          runtime={runtime}
+          wsId={wsId}
+          plan={revokePlan}
+          onRevoked={() => {
+            setRevokePlan(null);
+            toast.success(
+              t(($) => $.detail.visibility_toast_updated, {
+                visibility: t(($) => $.detail.visibility_label.private),
+              }),
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -176,6 +176,23 @@
         }
       }
     },
+    "revoke_visibility_dialog": {
+      "title_other": "收回为 private 并解绑 {{count}} 个智能体？",
+      "title_zero": "把这台运行环境收回为 private？",
+      "description": "“{{name}}”之后只会运行你自己的智能体。下面这些智能体属于其他成员：它们会被保留（指令、会话和历史任务都不会丢失），但会被解绑，需要重新绑定到其他运行环境后才能继续工作。",
+      "warning": "它们排队中和正在运行的任务会被取消，进行中的 Autopilot 会被暂停，直到这些智能体重新绑定运行环境。",
+      "mika_warning": "其中包含工作区助手 Mika。每个工作区只有一个 Mika，收回后她会对所有人停止工作，直到重新绑定运行环境。",
+      "agent_action_unbind": "将被解绑",
+      "archived_note_other": "另有 {{count}} 个已归档智能体会一并解绑，数据全部保留。",
+      "retained_note_other": "{{count}} 个隐藏的智能体构建会话仍然绑定在这台运行环境上，但已无法在上面运行。它们当前的任务会被取消；在构建器里切换运行环境即可继续。",
+      "notice_plan_changed": "弹窗打开期间受影响的智能体发生了变化。请重新确认新的影响范围。",
+      "checkbox_zero": "我明白这台运行环境之后只会运行我自己的智能体。",
+      "checkbox_other": "我明白这些智能体会被解绑，排队和运行中的任务会被取消，Autopilot 会被暂停。",
+      "cancel": "取消",
+      "confirm": "收回为 private",
+      "submitting": "正在收回...",
+      "failed_toast": "收回为 private 失败"
+    },
     "toast_deleted": "已删除运行时",
     "toast_delete_failed": "删除运行时失败",
     "running_chip_other": "· {{count}} 个进行中",

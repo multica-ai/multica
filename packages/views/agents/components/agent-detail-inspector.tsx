@@ -253,6 +253,10 @@ export function AgentDetailInspector({
               runtimes={runtimes}
               members={members}
               currentUserId={currentUserId}
+              // An admin (or the machine's owner) editing a teammate's agent
+              // must not be offered their own private runtimes: a private
+              // machine only runs its owner's agents (MUL-6704).
+              agentOwnerId={agent.owner_id ?? null}
               canEdit={canEdit}
               // Model, thinking level, and service tier are runtime/model
               // native. Clear them together so the new runtime resolves its

@@ -2311,6 +2311,38 @@ SELECT
     $22,
     COALESCE($23::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
+  -- Runtime access, at write time (MUL-6704). Admission (service.AgentReadiness)
+  -- runs before this statement and outside its transaction, so a revoke committing
+  -- in between would otherwise write a row nothing can ever claim: the claim fence
+  -- from #7571 requires agent.runtime_id to equal the task's runtime and a private
+  -- runtime to belong to the agent's owner, and a row failing either sits queued
+  -- until the TTL reports the misleading ` + "`" + `queued_expired` + "`" + `.
+  --
+  -- One predicate here rather than one per enqueue caller, and it needs no new
+  -- lock: lock_task_owner_rows already took FOR KEY SHARE on both the agent and
+  -- the runtime, which conflicts with the revoke's FOR UPDATE. Either the revoke
+  -- waits for this insert and then cancels the row with a real reason, or it
+  -- committed first and this predicate sees the new state and writes nothing.
+  --
+  -- Scoped to the ACCESS question only. Liveness is not checked (an offline
+  -- runtime is a legitimate queue-and-wait) and neither is the binding match:
+  -- agent.runtime_id vs the task's runtime is the rebind case, which UpdateAgent
+  -- settles synchronously, and asserting it here would also refuse the deliberately
+  -- cross-referenced combinations the MUL-5999 workspace-fence tests use to prove
+  -- this statement locks all three owner rows. NULL owners pass exactly as they do
+  -- in the claim fence, so the claim handler keeps settling those explicitly.
+  AND EXISTS (
+      SELECT 1
+      FROM agent a
+      JOIN agent_runtime r ON r.id = $2
+      WHERE a.id = $1
+        AND (
+            r.visibility <> 'private'
+            OR r.owner_id IS NULL
+            OR a.owner_id IS NULL
+            OR r.owner_id = a.owner_id
+        )
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 

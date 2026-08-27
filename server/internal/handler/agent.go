@@ -27,6 +27,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -1401,6 +1402,25 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
+	// Re-read the target runtime under the FK lock before inserting. The check
+	// above ran outside any transaction, so a public → private revoke can commit
+	// between it and this write; the insert would then block on the revoke's
+	// runtime lock and afterwards create an agent on a machine that had just
+	// been reclaimed (MUL-6704). The new agent's owner is the caller, so this
+	// covers both halves of the gate.
+	if _, bindErr := revalidateRuntimeForBind(r.Context(), qtx, member, runtime.ID, parseUUID(ownerID)); bindErr != nil {
+		switch {
+		case errors.Is(bindErr, errRuntimeBindMissing):
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		case errors.Is(bindErr, errRuntimeBindForbidden):
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+		default:
+			slog.Error("create agent: re-validate runtime failed", append(logger.RequestAttrs(r), "error", bindErr)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate runtime")
+		}
+		return
+	}
+
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
@@ -1799,6 +1819,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
+	// The acting member, resolved when a rebind is requested and reused for the
+	// post-lock recheck inside the transaction below.
+	var actingMember db.Member
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1812,15 +1835,29 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid runtime_id")
 			return
 		}
-		// Same gate as CreateAgent — prevents UpdateAgent from being used to
-		// re-bind an agent onto someone else's private runtime, which would
-		// otherwise be a quiet end-run around the CreateAgent check.
-		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
-		if !ok {
+		// Two separate gates (MUL-6704). canUseRuntimeForAgent asks whether the
+		// CALLER may bind agents to this machine — the same check CreateAgent
+		// makes, so UpdateAgent cannot be a quiet end-run around it.
+		// RuntimeAllowsAgentOwner asks whether the machine may RUN an agent
+		// owned by this agent's owner, which is what the claim fence enforces:
+		// a runtime owner binding a teammate's agent onto their private machine
+		// used to pass and then have every task refused at claim time.
+		//
+		// This is the fast pre-flight; both gates are re-run against the locked
+		// row inside the transaction (revalidateRuntimeForBind), because either
+		// can go stale while the request queues for that lock.
+		var memberOK bool
+		actingMember, memberOK = h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !memberOK {
 			return
 		}
+		member := actingMember
 		if !canUseRuntimeForAgent(member, runtime) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			return
+		}
+		if !service.RuntimeAllowsAgentOwner(runtime, existing.OwnerID) {
+			writeError(w, http.StatusForbidden, runtimeBindForbiddenMessage(uuidToString(existing.OwnerID) == requestUserID(r)))
 			return
 		}
 		params.RuntimeID = runtime.ID
@@ -2043,7 +2080,45 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.Queries.UpdateAgent(r.Context(), params)
+	// MUL-6704: the row write, the transactional re-authorization of the target
+	// runtime, and the cleanup of the tasks a rebind orphans all belong to one
+	// transaction. Before this, a rebind wrote agent.runtime_id and stopped
+	// there: agent_task_queue.runtime_id kept pointing at the previous machine,
+	// and since #7571 the claim fence requires the two to agree, so every row
+	// already queued became unclaimable from both sides and sat until the 2h
+	// queue TTL failed it as a misleading `queued_expired`.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent update transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	rebinding := false
+	if req.RuntimeID != nil {
+		// Re-read the runtime under the FK lock: an up-front check can be
+		// overtaken by a public → private revoke that commits while we wait.
+		fresh, bindErr := revalidateRuntimeForBind(r.Context(), qtx, actingMember, params.RuntimeID, existing.OwnerID)
+		switch {
+		case errors.Is(bindErr, errRuntimeBindMissing):
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		case errors.Is(bindErr, errRuntimeBindForbidden):
+			writeError(w, http.StatusForbidden, runtimeBindForbiddenMessage(uuidToString(existing.OwnerID) == requestUserID(r)))
+			return
+		case bindErr != nil:
+			slog.Error("update agent: re-validate runtime failed", append(logger.RequestAttrs(r), "error", bindErr, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to validate runtime")
+			return
+		}
+		// A no-op resubmit of the current runtime is not a rebind and must not
+		// cancel anything.
+		rebinding = uuidToString(existing.RuntimeID) != uuidToString(fresh.ID)
+		params.RuntimeMode = pgtype.Text{String: fresh.RuntimeMode, Valid: true}
+	}
+
+	updated, err := qtx.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
 		// return a clear conflict instead of a 500 that leaks the raw
@@ -2069,7 +2144,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
@@ -2077,7 +2152,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentThinkingLevel(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
@@ -2085,7 +2160,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentServiceTier(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
@@ -2093,11 +2168,50 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
+		updated, err = qtx.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
 			return
+		}
+	}
+
+	// Rebind cleanup (MUL-6704). Only the pre-claim statuses: a `dispatched` or
+	// `running` task is already executing on the previous machine and still
+	// completes correctly there (CompleteAgentTask does not check the binding),
+	// so cancelling it would throw away work the user never asked to stop by
+	// editing an agent. A dispatched row whose daemon never starts it is left to
+	// the existing stale-task backstop (FailStaleTasks), which fails it once the
+	// dispatch timeout passes with no live prepare lease.
+	var rebindCancelled []db.AgentTaskQueue
+	if rebinding {
+		rebindCancelled, err = qtx.CancelPreClaimTasksOnOtherRuntimes(r.Context(), db.CancelPreClaimTasksOnOtherRuntimesParams{
+			AgentID:       updated.ID,
+			RuntimeID:     updated.RuntimeID,
+			Error:         pgtype.Text{String: RebindStrandedTaskError, Valid: true},
+			FailureReason: pgtype.Text{String: string(taskfailure.ReasonAgentRuntimeChanged), Valid: true},
+		})
+		if err != nil {
+			slog.Warn("update agent: cancel tasks stranded by rebind failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clean up tasks pinned to the previous runtime")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("update agent: commit failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to commit agent update")
+		return
+	}
+
+	// Post-commit fan-out, in the same order every revocation path uses:
+	// task:cancelled first (BroadcastCancelledTasks also revokes each task's
+	// token), then the agent row further down.
+	if len(rebindCancelled) > 0 {
+		slog.Info("agent rebind cancelled tasks pinned to the previous runtime",
+			append(logger.RequestAttrs(r), "agent_id", id, "count", len(rebindCancelled))...)
+		if h.TaskService != nil {
+			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(updated.WorkspaceID), rebindCancelled)
 		}
 	}
 

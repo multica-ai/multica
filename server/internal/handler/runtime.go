@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -549,17 +550,49 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	changed := false
 
 	if needVisibility {
-		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
-			ID:         runtimeUUID,
-			Visibility: newVisibility,
-		})
-		if err != nil {
-			slog.Error("UpdateAgentRuntimeVisibility failed", "error", err, "runtime_id", runtimeID)
-			writeError(w, http.StatusInternalServerError, "failed to update runtime")
-			return
+		// public → private is a revocation, not a field write: agents this
+		// machine may no longer execute have to be unbound and their work
+		// settled (MUL-6704). Refuse here with the plan and let the user confirm
+		// it through POST /runtimes/:id/revoke-and-make-private, exactly as the
+		// runtime delete refuses and defers to unbind-agents-and-delete.
+		//
+		// The confirmation set deliberately stays OUT of this PATCH: an older
+		// client that cannot send it would otherwise 409 forever with no way
+		// through, which is the compatibility trap runtime delete documents.
+		//
+		// Even the "nothing to tear down" case goes through the locked helper —
+		// see makeRuntimePrivateIfUnaffected for the bind race an unlocked
+		// read-then-update leaves open.
+		if newVisibility == "private" {
+			updated, plan, err := h.makeRuntimePrivateIfUnaffected(r.Context(), member, rt)
+			if err != nil {
+				if errors.Is(err, errRuntimeRevokeNeedsConfirmation) {
+					writeJSON(w, http.StatusConflict, h.runtimeRevokePlanResponse(plan, runtimeVisibilityHasForeignAgentsCode))
+					return
+				}
+				if errors.Is(err, errRuntimeVisibilityOwnerChanged) {
+					writeError(w, http.StatusForbidden, "only the runtime owner can change its visibility")
+					return
+				}
+				slog.Error("make runtime private failed", "error", err, "runtime_id", runtimeID)
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			rt = updated
+			changed = true
+		} else {
+			updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
+				ID:         runtimeUUID,
+				Visibility: newVisibility,
+			})
+			if err != nil {
+				slog.Error("UpdateAgentRuntimeVisibility failed", "error", err, "runtime_id", runtimeID)
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			rt = updated
+			changed = true
 		}
-		rt = updated
-		changed = true
 	}
 
 	if req.CustomName != nil {
@@ -710,6 +743,58 @@ func canUseRuntimeForAgent(member db.Member, rt db.AgentRuntime) bool {
 // credentials out.
 func canSetRuntimeVisibility(member db.Member, rt db.AgentRuntime) bool {
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
+}
+
+// Sentinels returned by revalidateRuntimeForBind so each caller can map them to
+// the status code its own API already uses for these cases.
+var (
+	errRuntimeBindMissing   = errors.New("runtime not found")
+	errRuntimeBindForbidden = errors.New("runtime does not permit this agent's owner")
+)
+
+// revalidateRuntimeForBind re-reads the target runtime inside the caller's
+// transaction and re-runs BOTH runtime gates before the write. Every path that
+// writes agent.runtime_id calls it immediately before that write (MUL-6704).
+//
+// The two gates are different questions and both can go stale during the lock
+// wait, so both are re-run here rather than trusted from the pre-flight:
+//
+//   - canUseRuntimeForAgent(member, rt) — may this MEMBER bind an agent here.
+//     A machine flipping public → private while this request queues for the lock
+//     revokes exactly this permission; checking it only up-front let an admin's
+//     in-flight rebind land on a machine that had just been reclaimed.
+//   - service.RuntimeAllowsAgentOwner(rt, agent.owner_id) — may this runtime RUN
+//     an agent owned by that user. Also enforced by the SQL claim fence, the
+//     post-claim recheck and AgentReadiness. A runtime owner binding someone
+//     ELSE'S agent onto their private machine passes the first gate and fails
+//     this one; before #7571 that was allowed and every task it produced was
+//     then refused, so the agent looked bound but could never run.
+//
+// The transactional re-read is what closes the revoke race; see
+// LockAgentRuntimeForBind for why the lock mode matters.
+func revalidateRuntimeForBind(ctx context.Context, qtx *db.Queries, member db.Member, runtimeID, agentOwnerID pgtype.UUID) (db.AgentRuntime, error) {
+	rt, err := qtx.LockAgentRuntimeForBind(ctx, runtimeID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.AgentRuntime{}, errRuntimeBindMissing
+		}
+		return db.AgentRuntime{}, err
+	}
+	if !canUseRuntimeForAgent(member, rt) || !service.RuntimeAllowsAgentOwner(rt, agentOwnerID) {
+		return db.AgentRuntime{}, errRuntimeBindForbidden
+	}
+	return rt, nil
+}
+
+// runtimeBindForbiddenMessage is the 403 body for a rebind refused because the
+// target machine is private and belongs to someone else. It names the owner
+// mismatch rather than only "private" so an admin who IS allowed to edit the
+// agent understands why the machine still refuses it.
+func runtimeBindForbiddenMessage(agentOwnedByCaller bool) string {
+	if agentOwnedByCaller {
+		return "this runtime is private; only its owner can move agents onto it"
+	}
+	return "this runtime is private and can only run its own owner's agents"
 }
 
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
@@ -887,7 +972,13 @@ func unbindRuntimeForDelete(ctx context.Context, qtx *db.Queries, runtimeID pgty
 // publishRuntimeTeardown fans out a committed teardown. Ordering matches the
 // other revocation paths: task:cancelled, then per-agent and Autopilot updates,
 // then the runtime-list refresh.
-func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardownResult, wsID, userID string) {
+//
+// runtimeAction names what happened to the runtime ROW so the trailing
+// daemon:register event tells the truth: "delete" for the delete/GC paths,
+// "update" for the visibility revoke (MUL-6704), which keeps the machine and
+// only changes who may use it. Sending "delete" there would tell every client
+// the runtime is gone.
+func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardownResult, wsID, userID, runtimeAction string) {
 	if h.TaskService != nil && len(res.CancelledTasks) > 0 {
 		// The teardown deletes the runtime's system agents, and a system agent's
 		// chat sessions go with it, so the workspace of a cancelled chat task is
@@ -908,7 +999,7 @@ func (h *Handler) publishRuntimeTeardown(ctx context.Context, res runtimeTeardow
 		})
 	}
 	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
-		"action": "delete",
+		"action": runtimeAction,
 	})
 }
 
@@ -1042,7 +1133,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		"autopilots_paused", len(teardown.PausedAutopilots),
 	)
 
-	h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
+	h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID, "delete")
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -1247,7 +1338,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
+	h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID, "delete")
 
 	slog.Info("runtime deleted, agents unbound",
 		"runtime_id", uuidToString(rt.ID),

@@ -184,6 +184,27 @@
         }
       }
     },
+    "revoke_visibility_dialog": {
+      "title_one": "Make private and unbind {{count}} agent?",
+      "title_other": "Make private and unbind {{count}} agents?",
+      "title_zero": "Make this runtime private?",
+      "description": "\"{{name}}\" will only run your own agents again. The agents below belong to other members: they are kept — instructions, chats and task history stay intact — but they will be unbound and cannot run until they are bound to another runtime.",
+      "warning": "Their queued and running tasks will be cancelled, and their active Autopilots will be paused until the agents are bound to a runtime again.",
+      "mika_warning": "This includes Mika, your workspace assistant. There is one Mika per workspace, so unbinding her stops her for everyone until she is bound to another runtime.",
+      "agent_action_unbind": "Will be unbound",
+      "archived_note_one": "{{count}} archived agent is also unbound. It keeps all of its data.",
+      "archived_note_other": "{{count}} archived agents are also unbound. They keep all of their data.",
+      "retained_note_one": "{{count}} hidden Agent Builder session stays attached to this runtime but can no longer run on it. Its current task is cancelled; switch its runtime from the builder to continue.",
+      "retained_note_other": "{{count}} hidden Agent Builder sessions stay attached to this runtime but can no longer run on it. Their current tasks are cancelled; switch their runtime from the builder to continue.",
+      "notice_plan_changed": "The affected agent set changed while this dialog was open. Review the new plan and confirm.",
+      "checkbox_zero": "I understand this runtime will only run my own agents from now on.",
+      "checkbox_one": "I understand this agent will be unbound, its queued and running tasks cancelled, and its Autopilots paused.",
+      "checkbox_other": "I understand these agents will be unbound, their queued and running tasks cancelled, and their Autopilots paused.",
+      "cancel": "Cancel",
+      "confirm": "Make private",
+      "submitting": "Making private...",
+      "failed_toast": "Failed to make this runtime private"
+    },
     "toast_deleted": "Runtime deleted",
     "toast_delete_failed": "Failed to delete runtime",
     "running_chip_one": "· {{count}} running",

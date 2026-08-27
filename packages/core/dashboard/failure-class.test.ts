@@ -18,6 +18,12 @@ describe("failureClassOf", () => {
     // MUL-5370: the run never reached the model provider, so this belongs
     // with the substrate failures an operator fixes by checking the daemon.
     expect(failureClassOf("skill_bundle_unavailable")).toBe("runtime");
+    // MUL-6704: runtime ACCESS, not liveness. Still substrate — the operator
+    // fixes a binding or re-shares a machine — so it belongs in the runtime
+    // class rather than falling through to "other".
+    expect(failureClassOf("agent_runtime_required")).toBe("runtime");
+    expect(failureClassOf("runtime_access_revoked")).toBe("runtime");
+    expect(failureClassOf("agent_runtime_changed")).toBe("runtime");
     expect(failureClassOf("agent_error.process_failure")).toBe("agent");
     // MUL-5722: the daemon and the provider are both healthy — codex could
     // not hand its own stored thread back — so this reads as an agent-side

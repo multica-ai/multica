@@ -76,7 +76,7 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	runtime, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "start")
+	runtime, member, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "start")
 	if !ok {
 		return
 	}
@@ -101,6 +101,18 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
+
+	// Re-read the runtime under the FK lock before the carrier row is inserted:
+	// resolveBuilderRuntime ran outside this transaction and a public → private
+	// revoke can commit in between (MUL-6704). The carrier's owner is the caller.
+	if _, bindErr := revalidateRuntimeForBind(r.Context(), qtx, member, runtime.ID, ownerUUID); bindErr != nil {
+		if errors.Is(bindErr, errRuntimeBindMissing) || errors.Is(bindErr, errRuntimeBindForbidden) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to validate runtime")
+		}
 		return
 	}
 
@@ -345,10 +357,14 @@ func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) 
 // this member may use it (private runtimes stay owner/admin-only), and it is
 // online. verb names the attempted action in the offline error so the two call
 // sites read naturally.
-func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, verb string) (db.AgentRuntime, bool) {
+//
+// The resolved member is returned so the caller can re-run the operator gate
+// against the locked row inside its own transaction (MUL-6704) — this pre-flight
+// can be overtaken by a public → private revoke.
+func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, verb string) (db.AgentRuntime, db.Member, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
-		return db.AgentRuntime{}, false
+		return db.AgentRuntime{}, db.Member{}, false
 	}
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          runtimeUUID,
@@ -356,21 +372,21 @@ func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, 
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return db.AgentRuntime{}, false
+		return db.AgentRuntime{}, db.Member{}, false
 	}
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
-		return db.AgentRuntime{}, false
+		return db.AgentRuntime{}, db.Member{}, false
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
-		return db.AgentRuntime{}, false
+		return db.AgentRuntime{}, db.Member{}, false
 	}
 	if runtime.Status != "online" {
 		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s an agent builder session", verb))
-		return db.AgentRuntime{}, false
+		return db.AgentRuntime{}, db.Member{}, false
 	}
-	return runtime, true
+	return runtime, member, true
 }
 
 type SwitchAgentBuilderRuntimeRequest struct {
@@ -443,7 +459,7 @@ func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	runtime, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "switch")
+	runtime, member, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "switch")
 	if !ok {
 		return
 	}
@@ -473,6 +489,19 @@ func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Reque
 		return
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to check pending builder task")
+		return
+	}
+
+	// Same transactional re-check as session create (MUL-6704): the carrier must
+	// not land on a runtime that stopped permitting its owner while this request
+	// was in flight. This is also the repair path a builder session stranded by a
+	// revoke uses, so it has to be authoritative about the new target.
+	if _, bindErr := revalidateRuntimeForBind(r.Context(), qtx, member, runtime.ID, agent.OwnerID); bindErr != nil {
+		if errors.Is(bindErr, errRuntimeBindMissing) || errors.Is(bindErr, errRuntimeBindForbidden) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to validate runtime")
+		}
 		return
 	}
 

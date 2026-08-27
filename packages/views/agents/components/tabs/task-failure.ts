@@ -20,6 +20,12 @@ export const FAILURE_REASON_I18N_KEYS = {
   runtime_cli_timeout: "runtime_cli_timeout",
   invalid_task_identity: "invalid_task_identity",
   issue_window_restricted: "issue_window_restricted",
+  // Runtime ACCESS, as opposed to runtime liveness (MUL-6704). These three are
+  // written on cancelled rows as well as failed ones — cancelReasonLabel reads
+  // the same map — because a reclaimed machine settles work by cancelling it.
+  agent_runtime_required: "agent_runtime_required",
+  runtime_access_revoked: "runtime_access_revoked",
+  agent_runtime_changed: "agent_runtime_changed",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access":

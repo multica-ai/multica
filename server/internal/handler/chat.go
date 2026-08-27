@@ -943,6 +943,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "chat agent is archived")
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			writeError(w, http.StatusConflict, "chat agent has no runtime")
+		case errors.Is(err, service.ErrChatTaskRuntimeAccessRevoked):
+			// Structured so the client can explain the recoverable condition: the
+			// machine's owner took it back, so this agent needs access again or a
+			// different runtime. Same code the cancelled task rows carry.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error": "this agent's runtime was made private by its owner and no longer permits it. Ask the owner to share it again, or move the agent to another runtime.",
+				"code":  "runtime_access_revoked",
+			})
 		default:
 			writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
 		}
