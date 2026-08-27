@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -472,4 +473,108 @@ func TestRequestedConcreteModel_Observable(t *testing.T) {
 		t.Fatalf("healthy requested/concrete should both be primary, got req=%q conc=%q", req2.String, conc2.String)
 	}
 	_ = time.Now()
+}
+
+// upsertModelHealthRaw inserts/updates a model_health row with an explicit
+// last_failure_at SQL expression (e.g. `now() + interval '365 days'`). This
+// lets us pin the row to a "sticky" future timestamp or a "stale" past one to
+// exercise the 10m TTL branch of isModelHealthy directly.
+func upsertModelHealthRaw(t *testing.T, pool *pgxpool.Pool, ws pgtype.UUID, concrete, status, reason, lastFailureAtExpr string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO model_health (workspace_id, concrete, status, reason, consecutive_failures, last_failure_at, updated_at)
+		VALUES ($1, $2, $3, $4, 1, `+lastFailureAtExpr+`, now())
+		ON CONFLICT (workspace_id, concrete) DO UPDATE SET
+			status = EXCLUDED.status,
+			reason = EXCLUDED.reason,
+			consecutive_failures = EXCLUDED.consecutive_failures,
+			last_failure_at = EXCLUDED.last_failure_at,
+			updated_at = now()
+	`, ws, concrete, status, reason); err != nil {
+		t.Fatalf("upsert model_health %s/%v: %v", concrete, util.UUIDToString(ws), err)
+	}
+}
+
+// TestResolveConcreteModel_StickyUnhealthyFallsBack locks in the drill where the
+// primary (hy3-free) is marked sticky-unhealthy in BOTH the workspace-scoped and
+// global health rows (last_failure_at pinned 365 days in the future, so it never
+// goes stale within the 10m TTL). The resolver must skip the primary and return
+// the first healthy fallback (mimo-v2.5-free) regardless of whether it is called
+// for a real workspace or the global (NULL) workspace.
+func TestResolveConcreteModel_StickyUnhealthyFallsBack(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, _, _, _ := seedAttributionFixture(t, pool)
+	wsUUID := util.MustParseUUID(workspaceID)
+
+	// Global tier map: balanced -> hy3-free with two fallbacks.
+	if _, err := q.UpsertGlobalModelTier(ctx, db.UpsertGlobalModelTierParams{
+		Tier:             "balanced",
+		Concrete:         "hy3-free",
+		FallbackConcrete: []string{"mimo-v2.5-free", "deepseek-v4-flash-free"},
+	}); err != nil {
+		t.Fatalf("upsert global tier: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM model_tier_map WHERE tier='balanced' AND workspace_id IS NULL`)
+		pool.Exec(context.Background(), `DELETE FROM model_health WHERE concrete IN ('hy3-free','mimo-v2.5-free','deepseek-v4-flash-free')`)
+	})
+
+	// Sticky (future-dated) unhealthy for BOTH the workspace row and the global row.
+	upsertModelHealthRaw(t, pool, wsUUID, "hy3-free", "unhealthy", "drill", "now() + interval '365 days'")
+	upsertModelHealthRaw(t, pool, pgtype.UUID{}, "hy3-free", "unhealthy", "drill", "now() + interval '365 days'")
+
+	svc := &TaskService{Queries: q}
+	// Workspace-scoped call: primary skipped, first healthy fallback chosen.
+	got := svc.resolveConcreteModel(ctx, wsUUID, "balanced")
+	if got != "mimo-v2.5-free" {
+		t.Fatalf("workspace call: sticky-unhealthy primary should fall back to mimo-v2.5-free, got %q", got)
+	}
+	// Global (NULL workspace) call: same fallback behavior.
+	got = svc.resolveConcreteModel(ctx, pgtype.UUID{}, "balanced")
+	if got != "mimo-v2.5-free" {
+		t.Fatalf("global call: sticky-unhealthy primary should fall back to mimo-v2.5-free, got %q", got)
+	}
+}
+
+// TestResolveConcreteModel_StaleUnhealthyRecovers locks in the stale-recovery
+// branch: an unhealthy row whose last_failure_at is older than the 10m TTL must
+// be treated as healthy again, so the resolver returns the primary (hy3-free).
+// We set the workspace-scoped row stale (11 minutes ago) to exercise the
+// workspace health branch of isModelHealthy specifically.
+func TestResolveConcreteModel_StaleUnhealthyRecovers(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, _, _, _ := seedAttributionFixture(t, pool)
+	wsUUID := util.MustParseUUID(workspaceID)
+
+	if _, err := q.UpsertGlobalModelTier(ctx, db.UpsertGlobalModelTierParams{
+		Tier:             "balanced",
+		Concrete:         "hy3-free",
+		FallbackConcrete: []string{"mimo-v2.5-free", "deepseek-v4-flash-free"},
+	}); err != nil {
+		t.Fatalf("upsert global tier: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM model_tier_map WHERE tier='balanced' AND workspace_id IS NULL`)
+		pool.Exec(context.Background(), `DELETE FROM model_health WHERE concrete IN ('hy3-free','mimo-v2.5-free','deepseek-v4-flash-free')`)
+	})
+
+	// Stale (past-dated) unhealthy for the workspace-scoped row.
+	upsertModelHealthRaw(t, pool, wsUUID, "hy3-free", "unhealthy", "drill", "now() - interval '11 minutes'")
+
+	svc := &TaskService{Queries: q}
+	// Workspace-scoped call: stale unhealthy primary must be treated as healthy.
+	got := svc.resolveConcreteModel(ctx, wsUUID, "balanced")
+	if got != "hy3-free" {
+		t.Fatalf("workspace call: stale-unhealthy primary should recover to hy3-free, got %q", got)
+	}
+	// Global (NULL workspace) call: no workspace row here, but global must also recover.
+	upsertModelHealthRaw(t, pool, pgtype.UUID{}, "hy3-free", "unhealthy", "drill", "now() - interval '11 minutes'")
+	got = svc.resolveConcreteModel(ctx, pgtype.UUID{}, "balanced")
+	if got != "hy3-free" {
+		t.Fatalf("global call: stale-unhealthy primary should recover to hy3-free, got %q", got)
+	}
 }
