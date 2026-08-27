@@ -1,9 +1,80 @@
 package scheduler
 
 import (
+	"context"
 	"testing"
 	"time"
 )
+
+func TestAutopilotScheduleSingleFlightWhileRunning(t *testing.T) {
+	cache := newAutopilotScheduleCache()
+	created := time.Date(2026, 8, 23, 10, 0, 0, 0, time.UTC)
+	scope := Scope{Kind: ScopeKindAutopilotTrigger, ID: "trigger-single-flight"}
+	cache.replace(map[string]autopilotTriggerConfig{
+		scope.ID: {
+			TriggerID:      scope.ID,
+			CronExpression: "*/5 * * * *",
+			Timezone:       "UTC",
+			CreatedAt:      created,
+		},
+	})
+	plans := autopilotPlansForScope(cache)
+	now := created.Add(16 * time.Minute)
+
+	got, err := plans(context.Background(), scope, now, LatestPlanInfo{
+		Found:    true,
+		PlanTime: created.Add(15 * time.Minute),
+		Status:   "RUNNING",
+	})
+	if err != nil {
+		t.Fatalf("plan while running: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a running trigger must not overlap a newer cron occurrence, got %v", got)
+	}
+
+	// A failed occurrence with retry budget is serial too. Before its
+	// backoff expires, the scheduler must not skip ahead to a newer
+	// occurrence and strand the retry.
+	failed := LatestPlanInfo{
+		Found:       true,
+		PlanTime:    created.Add(10 * time.Minute),
+		Status:      "FAILED",
+		Attempt:     1,
+		MaxAttempts: 3,
+		NextRetryAt: now.Add(time.Minute),
+	}
+	got, err = plans(context.Background(), scope, now, failed)
+	if err != nil {
+		t.Fatalf("plan during retry backoff: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a failed trigger with retry budget must wait for backoff, got %v", got)
+	}
+
+	failed.NextRetryAt = now.Add(-time.Second)
+	got, err = plans(context.Background(), scope, now, failed)
+	if err != nil {
+		t.Fatalf("plan when retry is due: %v", err)
+	}
+	if len(got) != 1 || !got[0].Equal(failed.PlanTime) {
+		t.Fatalf("retry must reuse the failed plan_time %s, got %v", failed.PlanTime, got)
+	}
+
+	// Terminal rows release the single-flight gate. The next occurrence
+	// remains due and is returned normally.
+	got, err = plans(context.Background(), scope, now, LatestPlanInfo{
+		Found:    true,
+		PlanTime: created.Add(10 * time.Minute),
+		Status:   "SUCCESS",
+	})
+	if err != nil {
+		t.Fatalf("plan after terminal run: %v", err)
+	}
+	if len(got) != 1 || !got[0].Equal(created.Add(15*time.Minute)) {
+		t.Fatalf("terminal trigger should return the next occurrence, got %v", got)
+	}
+}
 
 // TestAdvancedNextRunStrictlyAfterPlanTime is the regression guard for
 // MUL-3749's boundary case: the post-dispatch next_run_at write-back must

@@ -224,6 +224,13 @@ func autopilotScopes(
 // missed slot; the lateness guard prevents a paused / newly eligible
 // trigger from firing hours after its configured time.
 //
+// A trigger is also single-flight: while its latest execution lease is
+// RUNNING, no newer occurrence is planned. This matters for run_only
+// autopilots whose work can outlive a short cron cadence; without the guard,
+// every tick creates another downstream task even though the prior task is
+// still active. The stale-lease sweep in manager.runJob runs before this hook,
+// so an abandoned lease is converted to FAILED and remains retry-eligible.
+//
 // Retry-eligible state is handled specially: when the most recent
 // stored plan_time is a FAILED row with attempts remaining and
 // next_retry_at <= now, the hook returns THAT plan_time unchanged so
@@ -254,8 +261,24 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 		// MUST surface it here — moving forward to a newer occurrence
 		// would strand the FAILED row at attempt < max_attempts
 		// forever and leak the missed dispatch.
-		if latest.RetryEligible(now) {
-			return []time.Time{latest.PlanTime}, nil
+		if latest.Found {
+			switch latest.Status {
+			case "RUNNING":
+				// The prior task is still live and must not be
+				// overlapped by a newer cron occurrence.
+				return nil, nil
+			case "FAILED":
+				// Keep a failed occurrence serial while it still owns
+				// retry budget. Before backoff expires, suppress newer
+				// cron occurrences; once due, return the original
+				// plan_time so tryClaim can take its retry path.
+				if latest.Attempt < latest.MaxAttempts {
+					if latest.RetryEligible(now) {
+						return []time.Time{latest.PlanTime}, nil
+					}
+					return nil, nil
+				}
+			}
 		}
 
 		// Anchor selection — three cases, in order:
