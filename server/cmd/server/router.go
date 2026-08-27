@@ -1509,6 +1509,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// 404 model_tier_map global
 		r.Get("/api/model-map", h.GetModelMap)
 		r.Patch("/api/model-map", h.PatchModelMap)
+		r.Get("/api/model-map/fallback", h.GetModelMapFallback)
+		r.Patch("/api/model-map/fallback", h.PatchModelMapFallback)
+		r.Get("/api/model-health", h.GetModelHealthList)
+		r.Put("/api/model-health", h.PutModelHealth)
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
@@ -1551,6 +1555,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// 404 model_tier_map per-workspace
 					r.Get("/model-map", h.GetWorkspaceModelMap)
 					r.Patch("/model-map", h.PatchWorkspaceModelMap)
+					r.Get("/model-map/fallback", h.GetWorkspaceModelMapFallback)
+					r.Patch("/model-map/fallback", h.PatchWorkspaceModelMapFallback)
 					r.Get("/settings", h.GetWorkspaceModelMap)
 					r.Patch("/settings", h.PatchWorkspaceModelMap)
 				})
