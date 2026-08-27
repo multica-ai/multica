@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -50,6 +51,7 @@ type outboundQueries interface {
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetIssueStatusEntryByKey(ctx context.Context, arg db.GetIssueStatusEntryByKeyParams) (db.IssueStatus, error)
 	ListAttachmentsByChatMessage(ctx context.Context, arg db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error)
 }
 
@@ -350,6 +352,28 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 	slug := ""
 	if ws, err := o.q.GetWorkspace(ctx, workspaceID); err == nil {
 		slug = ws.Slug
+	}
+	if inboxItemBody(item) == "" {
+		if body := inboxStatusTransitionBody(item, func(key string) string {
+			if label, ok := inboxStatusLabels[key]; ok {
+				return label
+			}
+			entry, err := o.q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{
+				WorkspaceID: workspaceID,
+				Key:         key,
+			})
+			if err == nil && strings.TrimSpace(entry.Name) != "" {
+				return entry.Name
+			}
+			return key
+		}); body != "" {
+			copy := make(map[string]any, len(item)+1)
+			for key, value := range item {
+				copy[key] = value
+			}
+			item = copy
+			item["body"] = body
+		}
 	}
 	content := buildInboxMarkdown(item, workspaceIDStr, slug)
 	if content == "" {
