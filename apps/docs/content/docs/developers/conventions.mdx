@@ -24,6 +24,10 @@ Hyphenated word groups at the root collide with user-chosen workspace slugs and 
 
 Always live under `/{slug}/{section}` — `/{slug}/issues`, `/{slug}/agents`, `/{slug}/settings`. Never duplicate workspace routing logic; use `useNavigation().push()` from shared code, never framework-specific link APIs.
 
+### Session tabs
+
+Web and desktop share **session tabs** (in-app document tabs, one mounted session per workspace group). The store lives in `@multica/core/tabs`; the strip lives in `@multica/views/layout`. Below the compact breakpoint (1024px) the strip is hidden and modifier-clicks are browser tabs. Do not call this "mobile" — that word is reserved for the Expo app, which does not host session tabs. See `docs/adr/0001-web-session-tabs.md`.
+
 ### Packages and modules
 
 The monorepo enforces strict package boundaries:

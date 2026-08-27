@@ -29,7 +29,7 @@ vi.mock("@multica/core/auth", () => ({
 
 import { DesktopNavigationProvider, routeContentLinkPath } from "./navigation";
 import { currentPath, useNavigation } from "@multica/views/navigation";
-import { useTabStore, getActiveTab } from "@/stores/tab-store";
+import { useTabStore, getActiveTab } from "@multica/core/tabs";
 
 beforeEach(() => {
   overlay.open.mockReset();

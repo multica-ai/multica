@@ -1,9 +1,18 @@
+"use client";
+
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { arrayMove } from "@dnd-kit/sortable";
-import { createPersistStorage, defaultStorage } from "@multica/core/platform";
-import { createSafeId } from "@multica/core/utils";
-import { isReservedSlug } from "@multica/core/paths";
+import { createPersistStorage, defaultStorage } from "../platform";
+import { createSafeId } from "../utils";
+import { isReservedSlug } from "../paths";
+
+function arrayMove<T>(items: T[], from: number, to: number): T[] {
+  const next = items.slice();
+  const [moved] = next.splice(from, 1);
+  if (moved === undefined) return items;
+  next.splice(to, 0, moved);
+  return next;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -11,11 +20,9 @@ import { isReservedSlug } from "@multica/core/paths";
 //
 // MUL-4741 Phase 2: tabs are *sessions*, not routers. A TabSession is pure
 // serializable state — URL, identity, virtual history, and a memento of
-// restorable view state. The single app router is a projection of the active
-// session, driven exclusively by the tab Coordinator (src/platform/
-// tab-coordinator.ts) which subscribes to this store and reconciles the
-// router to `activeSession.url` with a navigation token. Nothing in this
-// file touches react-router.
+// restorable view state. Each platform's Coordinator (desktop MemoryRouter,
+// web App Router) is a projection of the active session. Nothing in this
+// file touches a router.
 
 /**
  * One captured scroll position.
@@ -386,7 +393,7 @@ function makeSession(url: string, title: string): TabSession {
 /** Index of the first unpinned tab in a group (== pinned count). */
 function pinnedBoundary(tabs: TabSession[]): number {
   let i = 0;
-  while (i < tabs.length && tabs[i].pinned) i++;
+  while (i < tabs.length && tabs[i]!.pinned) i++;
   return i;
 }
 
@@ -398,6 +405,14 @@ function defaultPathFor(slug: string): string {
 function defaultTabFor(slug: string): TabSession {
   const path = defaultPathFor(slug);
   return makeSession(path, "Issues");
+}
+
+function tabAt(tabs: TabSession[], index: number): TabSession {
+  const tab = tabs[index];
+  if (!tab) {
+    throw new Error(`invariant: no tab at index ${index}`);
+  }
+  return tab;
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +463,7 @@ function nextActiveAfterClose(
   const survivors = new Set(nextTabs.map((t) => t.id));
   const recent = group.recentTabIds.find((id) => survivors.has(id));
   if (recent) return recent;
-  return nextTabs[Math.min(closedIndex, nextTabs.length - 1)].id;
+  return nextTabs[Math.min(closedIndex, nextTabs.length - 1)]!.id;
 }
 
 function findTabLocation(
@@ -457,6 +472,7 @@ function findTabLocation(
 ): { slug: string; group: WorkspaceTabGroup; index: number } | null {
   for (const slug of Object.keys(byWorkspace)) {
     const group = byWorkspace[slug];
+    if (!group) continue;
     const index = group.tabs.findIndex((t) => t.id === tabId);
     if (index >= 0) return { slug, group, index };
   }
@@ -699,7 +715,7 @@ export const useTabStore = create<TabStore>()(
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
-        const current = group.tabs[index];
+        const current = tabAt(group.tabs, index);
         const next: TabSession = { ...current, ...patch };
         if (next.title === current.title) {
           return;
@@ -727,7 +743,7 @@ export const useTabStore = create<TabStore>()(
         // pushes go through switchWorkspace at the adapter layer.
         if (extractWorkspaceSlug(clean) !== activeWorkspaceSlug) return;
 
-        const current = group.tabs[index];
+        const current = tabAt(group.tabs, index);
         if (current.url === clean) return;
 
         const replace = opts?.replace === true;
@@ -771,7 +787,7 @@ export const useTabStore = create<TabStore>()(
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
-        const current = group.tabs[index];
+        const current = tabAt(group.tabs, index);
 
         const prefix = `${routeKey}::`;
         const nextScroll: TabMemento["scroll"] = {};
@@ -794,6 +810,7 @@ export const useTabStore = create<TabStore>()(
             const next = nextScroll[k];
             return (
               prev !== undefined &&
+              next !== undefined &&
               prev.top === next.top &&
               prev.height === next.height &&
               prev.contentKey === next.contentKey
@@ -819,7 +836,7 @@ export const useTabStore = create<TabStore>()(
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
-        const current = group.tabs[index];
+        const current = tabAt(group.tabs, index);
 
         const key = scrollMementoKey(routeKey, entryKey);
         // Skip the write when nothing changed (covers clearing an absent
@@ -836,7 +853,8 @@ export const useTabStore = create<TabStore>()(
           nextView[key] = value;
           const keys = Object.keys(nextView);
           for (let i = 0; i < keys.length - VIEW_MEMENTO_MAX_ENTRIES; i++) {
-            delete nextView[keys[i]];
+            const stale = keys[i];
+            if (stale) delete nextView[stale];
           }
         }
 
@@ -882,7 +900,7 @@ export const useTabStore = create<TabStore>()(
         // unpinned) so the "pinned tabs first" invariant survives drag-reorder.
         // Pinned zone is [0, boundary); unpinned zone is [boundary, length).
         const boundary = pinnedBoundary(group.tabs);
-        const source = group.tabs[fromIndex];
+        const source = tabAt(group.tabs, fromIndex);
         let clampedTo: number;
         if (source.pinned) {
           // boundary is exclusive upper bound for pinned-zone indices.
@@ -907,7 +925,7 @@ export const useTabStore = create<TabStore>()(
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
-        const current = group.tabs[index];
+        const current = tabAt(group.tabs, index);
         const nextTab: TabSession = { ...current, pinned: !current.pinned };
 
         // Remove from current position, then insert at the new zone boundary:
@@ -939,7 +957,7 @@ export const useTabStore = create<TabStore>()(
         const nextByWorkspace: Record<string, WorkspaceTabGroup> = {};
         for (const slug of Object.keys(byWorkspace)) {
           if (validSlugs.has(slug)) {
-            nextByWorkspace[slug] = byWorkspace[slug];
+            nextByWorkspace[slug] = byWorkspace[slug]!;
           } else {
             changed = true;
           }
@@ -1111,7 +1129,7 @@ export function mergePersistedTabs<T extends PersistedTabState>(
     tabs.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
     const activeTabId = tabs.some((t) => t.id === pGroup.activeTabId)
       ? pGroup.activeTabId
-      : tabs[0].id;
+      : tabs[0]!.id;
     // reconcileGroup filters the persisted MRU order down to live tab ids
     // (tabs dropped just above), drops the active tab from it, and dedupes.
     byWorkspace[slug] = reconcileGroup(
@@ -1146,10 +1164,11 @@ function stepHistory(
   if (!group) return;
   const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
   if (index < 0) return;
-  const current = group.tabs[index];
+  const current = tabAt(group.tabs, index);
   const nextIndex = current.history.index + delta;
   if (nextIndex < 0 || nextIndex >= current.history.stack.length) return;
   const url = current.history.stack[nextIndex];
+  if (!url) return;
   const next: TabSession = {
     ...current,
     url,
@@ -1298,7 +1317,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
     const slug = extractWorkspaceSlug(tab.path);
     if (!slug) continue; // drop root / global-path tabs
     if (!byWorkspace[slug]) byWorkspace[slug] = { tabs: [], activeTabId: "" };
-    byWorkspace[slug].tabs.push({
+    byWorkspace[slug]!.tabs.push({
       id: tab.id,
       path: tab.path,
       title: tab.title,
@@ -1310,10 +1329,12 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   // landed in this group; otherwise fall back to the first tab.
   for (const slug of Object.keys(byWorkspace)) {
     const group = byWorkspace[slug];
+    if (!group) continue;
     const hasOldActive = group.tabs.some((t) => t.id === v1.activeTabId);
+    const first = group.tabs[0];
     group.activeTabId = hasOldActive
       ? (v1.activeTabId as string)
-      : group.tabs[0].id;
+      : (first?.id ?? "");
   }
 
   // Active workspace: whichever group inherited the v1 activeTab, falling
@@ -1321,7 +1342,7 @@ export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   // Object.keys iteration order on string keys).
   let activeWorkspaceSlug: string | null = null;
   for (const slug of Object.keys(byWorkspace)) {
-    if (byWorkspace[slug].activeTabId === v1.activeTabId) {
+    if (byWorkspace[slug]?.activeTabId === v1.activeTabId) {
       activeWorkspaceSlug = slug;
       break;
     }

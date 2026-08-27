@@ -1,3 +1,5 @@
+// @vitest-environment jsdom
+// @ts-nocheck — originally typechecked under desktop's renderer tsconfig.
 import { afterAll, describe, expect, it, vi, beforeEach } from "vitest";
 import {
   render,
@@ -37,7 +39,7 @@ const state = vi.hoisted(() => ({
   openIssueWindow: vi.fn(),
 }));
 
-vi.mock("@/stores/tab-store", () => {
+vi.mock("@multica/core/tabs", () => {
   const store = {
     get activeWorkspaceSlug() {
       return state.activeWorkspaceSlug;
@@ -82,7 +84,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
 // fallback); a test can set `pres.title` to simulate a resolved title that
 // differs, to exercise the active-tab persist effect.
 const pres = vi.hoisted(() => ({ title: null as string | null }));
-vi.mock("@multica/views/layout", () => ({
+vi.mock("./tab-presentation", () => ({
   useTabPresentation: (_url: string, fallbackTitle?: string) => ({
     visual: { kind: "icon", icon: "ListTodo" },
     title: pres.title ?? fallbackTitle ?? "",
@@ -93,6 +95,24 @@ vi.mock("@multica/views/layout", () => ({
 }));
 
 import { TabBar } from "./tab-bar";
+
+function issueWindow() {
+  return {
+    pathFromUrl: (url: string) => {
+      try {
+        const parsed = new URL(url, "https://example.invalid");
+        const segments = parsed.pathname.split("/");
+        if (segments.length !== 4 || segments[2] !== "issues") return null;
+        return url;
+      } catch {
+        return null;
+      }
+    },
+    open: (path: string, title: string) => {
+      state.openIssueWindow({ path, title });
+    },
+  };
+}
 
 function reset() {
   state.activeWorkspaceSlug = "acme";
@@ -136,9 +156,6 @@ beforeEach(() => {
       disconnect() {}
     },
   );
-  vi.stubGlobal("desktopAPI", {
-    openIssueWindow: state.openIssueWindow,
-  });
 });
 
 afterAll(() => vi.unstubAllGlobals());
@@ -539,7 +556,9 @@ describe("TabBar context menu", () => {
       },
     ];
 
-    const { findByText, getByLabelText } = render(<TabBar />);
+    const { findByText, getByLabelText } = render(
+      <TabBar issueWindow={issueWindow()} />,
+    );
     fireEvent.contextMenu(getByLabelText("MUL-1: Fix tabs"));
     fireEvent.click(await findByText("Open as new window"));
 
@@ -559,7 +578,9 @@ describe("TabBar context menu", () => {
       },
     ];
 
-    const { findByText, getByLabelText, queryByText } = render(<TabBar />);
+    const { findByText, getByLabelText, queryByText } = render(
+      <TabBar issueWindow={issueWindow()} />,
+    );
     fireEvent.contextMenu(getByLabelText("Issues"));
     await findByText("Pin tab");
 

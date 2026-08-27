@@ -13,7 +13,7 @@ import { useWorkspaceSeen } from "@multica/views/workspace/use-workspace-seen";
 import { WelcomeAfterOnboarding } from "@multica/views/workspace/welcome-after-onboarding";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
 import { SourceBackfillModal } from "@multica/views/onboarding";
-import { useTabStore } from "@/stores/tab-store";
+import { useTabStore } from "@multica/core/tabs";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
 /**

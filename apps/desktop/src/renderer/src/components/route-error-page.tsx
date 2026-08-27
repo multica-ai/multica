@@ -4,7 +4,7 @@ import { AlertTriangle, Compass, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import type { DesktopRouteErrorFeedbackContext } from "@multica/core/feedback";
 import { useModalStore } from "@multica/core/modals";
-import { useTabStore } from "@/stores/tab-store";
+import { useTabStore } from "@multica/core/tabs";
 
 export function createRouteErrorFeedbackContext({
   error,

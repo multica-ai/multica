@@ -108,7 +108,7 @@ vi.mock("@multica/views/onboarding", () => ({
   },
 }));
 
-vi.mock("@/stores/tab-store", () => ({
+vi.mock("@multica/core/tabs", () => ({
   useTabStore: Object.assign(() => null, {
     getState: () => ({ validateWorkspaceSlugs: vi.fn() }),
   }),

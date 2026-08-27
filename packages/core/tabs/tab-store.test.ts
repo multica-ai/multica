@@ -1,3 +1,5 @@
+// @vitest-environment node
+// @ts-nocheck — originally typechecked under desktop's tsconfig, which does not enable noUncheckedIndexedAccess.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import {

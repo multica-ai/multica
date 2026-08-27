@@ -1,31 +1,50 @@
 "use client";
 
-import { Suspense, useEffect, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useMemo, useSyncExternalStore } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   NavigationProvider,
+  type LinkClickIntent,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+import { useSessionTabsEnabled } from "@multica/views/layout/session-tabs";
+import {
+  extractWorkspaceSlug,
+  getActiveTab,
+  navigateSessionPush,
+  navigateSessionReplace,
+  openSessionTab,
+  routeContentLinkPath,
+  splitTabUrl,
+  useActiveTabUrl,
+  useTabStore,
+} from "@multica/core/tabs";
 import { canGoBackInApp } from "./in-app-history";
+import { WebTabCoordinator } from "./tab-coordinator";
+
+function isTransitionPath(path: string): boolean {
+  return extractWorkspaceSlug(path) === null;
+}
 
 /**
- * Web half of the `multica:navigate` bridge — the event shared content
- * (comments, chat, issue descriptions) fires when a link resolves to an in-app
- * destination. A plain click ("push") is a router push in place. A modifier
- * click normally never reaches here on web — real anchors leave it to the
- * browser — but the editor must intercept every click (contenteditable
- * anchors don't navigate natively), and for those `window.open` is the
- * closest the web can get: JS cannot open a background tab, so both tab
- * dispositions land as a foreground browser tab.
+ * Web half of the `multica:navigate` bridge. Wide viewports route through
+ * session tabs. Compact viewports keep today's Next/browser behaviour.
  */
-function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
+function useInternalLinkHandler(
+  router: ReturnType<typeof useRouter>,
+  sessionTabs: boolean,
+) {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (
-        e as CustomEvent<{ path?: string; disposition?: string }>
+        e as CustomEvent<{ path?: string; disposition?: LinkClickIntent }>
       ).detail;
       const path = detail?.path;
       if (!path) return;
+      if (sessionTabs && !isTransitionPath(path)) {
+        routeContentLinkPath(path, detail?.disposition ?? "push");
+        return;
+      }
       if (
         detail?.disposition === "background-tab" ||
         detail?.disposition === "foreground-tab"
@@ -41,7 +60,7 @@ function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
     };
     window.addEventListener("multica:navigate", handler);
     return () => window.removeEventListener("multica:navigate", handler);
-  }, [router]);
+  }, [router, sessionTabs]);
 }
 
 /**
@@ -68,31 +87,94 @@ function NavigationProviderInner({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const hash = useSyncExternalStore(
+  const sessionTabs = useSessionTabsEnabled();
+  const activeUrl = useActiveTabUrl();
+  const windowHash = useSyncExternalStore(
     subscribeToHash,
     () => window.location.hash,
     () => "",
   );
-  useInternalLinkHandler(router);
+  useInternalLinkHandler(router, sessionTabs);
 
-  const adapter: NavigationAdapter = {
-    push: router.push,
-    replace: router.replace,
-    back: router.back,
-    forward: router.forward,
-    canGoBack: canGoBackInApp,
-    pathname,
-    searchParams: new URLSearchParams(searchParams.toString()),
-    hash,
-    getShareableUrl: (path: string) =>
-      typeof window === "undefined" ? path : window.location.origin + path,
-    // router.prefetch is a no-op in dev mode by Next.js design; in production
-    // it warms the RSC payload + route chunk so the next push() commits with
-    // no network round-trip. Safe to call repeatedly — Next dedupes internally.
-    prefetch: (path: string) => {
-      router.prefetch(path);
-    },
-  };
+  const location = useMemo(() => {
+    if (sessionTabs && activeUrl) {
+      const { pathname: sessionPath, suffix } = splitTabUrl(activeUrl);
+      const hashIdx = suffix.indexOf("#");
+      const search = hashIdx === -1 ? suffix : suffix.slice(0, hashIdx);
+      const hash = hashIdx === -1 ? "" : suffix.slice(hashIdx);
+      return { pathname: sessionPath, search, hash };
+    }
+    return {
+      pathname,
+      search: `?${searchParams.toString()}`.replace(/^\?$/, ""),
+      hash: windowHash,
+    };
+  }, [sessionTabs, activeUrl, pathname, searchParams, windowHash]);
+
+  const adapter: NavigationAdapter = useMemo(() => {
+    const nextAdapter: NavigationAdapter = {
+      push: (path: string) => {
+        if (!sessionTabs || isTransitionPath(path)) {
+          router.push(path);
+          return;
+        }
+        navigateSessionPush(path);
+      },
+      replace: (path: string) => {
+        if (!sessionTabs || isTransitionPath(path)) {
+          router.replace(path);
+          return;
+        }
+        navigateSessionReplace(path);
+      },
+      back: () => {
+        if (sessionTabs) {
+          useTabStore.getState().goBack();
+          return;
+        }
+        router.back();
+      },
+      forward: () => {
+        if (sessionTabs) {
+          useTabStore.getState().goForward();
+          return;
+        }
+        router.forward();
+      },
+      canGoBack: sessionTabs
+        ? () => {
+            const active = getActiveTab(useTabStore.getState());
+            return (active?.history.index ?? 0) > 0;
+          }
+        : canGoBackInApp,
+      pathname: location.pathname,
+      searchParams: new URLSearchParams(
+        location.search.startsWith("?")
+          ? location.search.slice(1)
+          : location.search,
+      ),
+      hash: location.hash,
+      getShareableUrl: (path: string) =>
+        typeof window === "undefined" ? path : window.location.origin + path,
+      prefetch: (path: string) => {
+        router.prefetch(path);
+      },
+    };
+    if (sessionTabs) {
+      nextAdapter.openInNewTab = (path, title, opts) => {
+        if (isTransitionPath(path)) {
+          window.open(
+            window.location.origin + path,
+            "_blank",
+            "noopener,noreferrer",
+          );
+          return;
+        }
+        openSessionTab(path, title, opts);
+      };
+    }
+    return nextAdapter;
+  }, [router, sessionTabs, location]);
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
 }
@@ -104,6 +186,7 @@ export function WebNavigationProvider({
 }) {
   return (
     <Suspense>
+      <WebTabCoordinator />
       <NavigationProviderInner>{children}</NavigationProviderInner>
     </Suspense>
   );

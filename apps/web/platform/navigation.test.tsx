@@ -9,11 +9,18 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 
+const sessionTabs = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("@multica/views/layout/session-tabs", () => ({
+  useSessionTabsEnabled: () => sessionTabs.enabled,
+}));
+
 const router = vi.hoisted(() => ({
   push: vi.fn(),
   replace: vi.fn(),
   back: vi.fn(),
   prefetch: vi.fn(),
+  forward: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -47,6 +54,7 @@ function renderAdapter(): () => NavigationAdapter {
 
 beforeEach(() => {
   router.push.mockReset();
+  sessionTabs.enabled = false;
 });
 
 describe("WebNavigationProvider internal link bridge", () => {
@@ -155,5 +163,36 @@ describe("WebNavigationProvider hash", () => {
     });
 
     expect(adapter().hash).toBe("#comment-c2");
+  });
+});
+
+describe("WebNavigationProvider session tabs", () => {
+  beforeEach(async () => {
+    sessionTabs.enabled = true;
+    const { useTabStore } = await import("@multica/core/tabs");
+    useTabStore.getState().reset();
+    useTabStore.getState().switchWorkspace("acme", "/acme/issues");
+  });
+
+  it("opens a content link as a session navigation instead of a router push", async () => {
+    render(<WebNavigationProvider>{null}</WebNavigationProvider>);
+    navigate("/acme/projects");
+
+    const { getActiveTab, useTabStore } = await import("@multica/core/tabs");
+    expect(router.push).not.toHaveBeenCalled();
+    expect(getActiveTab(useTabStore.getState())?.url).toBe("/acme/projects");
+  });
+
+  it("exposes openInNewTab", () => {
+    expect(typeof renderAdapter()().openInNewTab).toBe("function");
+  });
+
+  it("reports the fragment from the active session URL", async () => {
+    const { useTabStore } = await import("@multica/core/tabs");
+    useTabStore
+      .getState()
+      .navigateActiveSession("/acme/issues/MUL-1#comment-c1");
+
+    expect(renderAdapter()().hash).toBe("#comment-c1");
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
+import { useTabStore, useActiveTabHistory } from "@multica/core/tabs";
 
 /**
  * Shell back/forward for the active tab (MUL-4741 session architecture).

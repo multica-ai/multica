@@ -9,9 +9,10 @@
  *
  * Shift alone is deliberately NOT a modifier: browsers disagree about it
  * (Chrome/Firefox open a new window, Safari adds to Reading List), so it maps
- * to "push". On web, surfaces that render a real anchor should leave any
- * modified click to the browser instead of consulting this function — native
- * handling is the only way to get a true background tab there.
+ * to "push". On compact web (no session tabs), surfaces that render a real
+ * anchor should leave any modified click to the browser — native handling is
+ * the only way to get a true background *browser* tab there. Wide web and
+ * desktop implement `openInNewTab` and consume this function.
  */
 export type LinkClickIntent = "push" | "background-tab" | "foreground-tab";
 

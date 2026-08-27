@@ -28,7 +28,7 @@ vi.mock("@/stores/window-overlay-store", () => ({
     selector(overlayState),
 }));
 
-vi.mock("@/stores/tab-store", () => ({
+vi.mock("@multica/core/tabs", () => ({
   useActiveTabIdentity: () => ({ slug: tabState.slug, tabId: tabState.tabId }),
   useActiveTabUrl: () => tabState.url,
 }));

@@ -11,7 +11,7 @@ import {
   getActiveTab,
   splitTabUrl,
   scrollMementoKey,
-} from "@/stores/tab-store";
+} from "@multica/core/tabs";
 
 /**
  * Tab Coordinator (MUL-4741 Phase 2) — the ONLY writer of the single app

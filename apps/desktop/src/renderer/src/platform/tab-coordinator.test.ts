@@ -5,7 +5,7 @@ import {
   initTabCoordinator,
   registerActiveHostElement,
 } from "./tab-coordinator";
-import { getActiveTab, useTabStore } from "@/stores/tab-store";
+import { getActiveTab, useTabStore } from "@multica/core/tabs";
 
 describe("tab-coordinator external scroll sources", () => {
   beforeEach(() => {

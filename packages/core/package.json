@@ -133,6 +133,7 @@
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",
     "./navigation": "./navigation/index.ts",
+    "./tabs": "./tabs/index.ts",
     "./modals": "./modals/index.ts",
     "./onboarding": "./onboarding/index.ts",
     "./paths": "./paths/index.ts",

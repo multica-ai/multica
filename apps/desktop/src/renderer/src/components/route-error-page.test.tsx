@@ -15,7 +15,7 @@ vi.mock("@multica/core/modals", () => ({
   },
 }));
 
-vi.mock("@/stores/tab-store", () => {
+vi.mock("@multica/core/tabs", () => {
   const state = () => ({
     reloadActiveTab,
     closeActiveTab,

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { ScrollRestorationProvider } from "@multica/views/platform";
-import { useActiveGroup, useTabStore } from "@/stores/tab-store";
+import { useActiveGroup, useTabStore } from "@multica/core/tabs";
 import {
   createScrollRestorationAdapter,
   getAppRouter,

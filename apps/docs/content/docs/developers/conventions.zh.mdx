@@ -24,6 +24,10 @@ description: 代码命名规范、i18n 翻译术语表、中文风格指南的�
 
 永远用 `/{slug}/{section}` —— `/{slug}/issues`、`/{slug}/agents`、`/{slug}/settings`。共享代码不要复制路由逻辑，统一走 `useNavigation().push()`，不要直接用框架的 link API。
 
+### Session tab
+
+Web 和桌面共用 **session tab**（应用内文档 Tab，每个 workspace 一组，只挂载当前 session）。状态在 `@multica/core/tabs`，条子在 `@multica/views/layout`。小于 compact 断点（1024px）不画条子，修饰键点击走浏览器 Tab。不要把这叫「mobile」——那个词留给 Expo App，原生 App 不做 session tab。见 `docs/adr/0001-web-session-tabs.md`。
+
 ### 包与模块
 
 monorepo 的包边界是硬约束：
