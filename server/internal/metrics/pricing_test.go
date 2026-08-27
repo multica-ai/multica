@@ -77,6 +77,19 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 			model: "openai/gpt-5.6-luna",
 			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1, CacheReadPerM: 0.1, CacheWritePerM: 1.25, OutputPerM: 6},
 		},
+		// Cursor agent appends thinking/speed suffixes to the same SKU.
+		{
+			model: "gpt-5.6-sol-medium",
+			want:  ModelPrice{Provider: "cursor", Model: "gpt-5.6-sol", InputPerM: 4, CacheReadPerM: 0.4, CacheWritePerM: 5, OutputPerM: 20},
+		},
+		{
+			model: "gpt-5.6-sol-medium-fast",
+			want:  ModelPrice{Provider: "cursor", Model: "gpt-5.6-sol-fast", InputPerM: 8, CacheReadPerM: 0.8, CacheWritePerM: 10, OutputPerM: 40},
+		},
+		{
+			model: "gpt-5.6-terra-high",
+			want:  ModelPrice{Provider: "cursor", Model: "gpt-5.6-terra", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 12},
+		},
 	}
 
 	for _, tc := range cases {
@@ -89,15 +102,13 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 		}
 	}
 
-	// Unknown suffixed variants must NOT borrow a 5.6 tier — the alias is an
-	// anchored exact match, mirroring the frontend's exact-match resolver.
-	// The dash-normalized ids (`gpt-5-6-luna`) must also miss: the real Codex
-	// slug is always dotted and the frontend does not dash-normalize, so both
-	// sides surface these as unmapped instead of silently pricing them.
+	// Unknown suffixed variants must NOT borrow a 5.6 tier — Cursor thinking
+	// suffixes (`-high` / `-medium` / `-low` with optional `-fast`) are the
+	// only admitted extras, matching the frontend resolver. `gpt-5.6-luna-pro`
+	// and dash-normalized ids still miss.
 	for _, model := range []string{
 		"gpt-5.6-luna-pro",
 		"gpt-5.6-luna/unknown",
-		"gpt-5.6-sol-high",
 		"gpt-5.6-mini",
 		"gpt-5-6-luna",
 		"gpt-5-6-sol",
@@ -125,6 +136,14 @@ func TestPriceForModelAliasGrok(t *testing.T) {
 		{
 			model: "xai:grok-4.6",
 			want:  ModelPrice{Provider: "xai", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "cursor-grok-4.6-high-fast",
+			want:  ModelPrice{Provider: "cursor", Model: "grok-4.6-fast", InputPerM: 4, CacheReadPerM: 1, CacheWritePerM: 0, OutputPerM: 12},
+		},
+		{
+			model: "cursor-grok-4.6-high",
+			want:  ModelPrice{Provider: "cursor", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 0, OutputPerM: 6},
 		},
 		{
 			model: "grok-4.5",

@@ -347,17 +347,20 @@ const MODEL_PRICING: Record<
   "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
-  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
-  //    cursor.com/docs/models/cursor-composer-2,
-  //    cursor.com/docs/models/cursor-composer-2-5).
-  //    Cursor's model ids are all unprefixed generic names (`auto`,
-  //    `composer-*`) that collide with other providers (another provider
-  //    could also report `auto`), so they are provider-qualified under `cursor/`.
-  //    See the `provider-qualified keys` note above. Cursor result events
-  //    often omit `model`, so the daemon falls back to the configured
-  //    runtime model or the legacy key `cursor`. Cursor does not publish a
-  //    cache-write rate for these rows; keep it at 0 so reported
-  //    cache_write_tokens don't invent spend from input pricing.
+  // -- Cursor list prices (cursor.com/docs/models-and-pricing).
+  //    Cursor agent rows must use this sheet, not the underlying vendor
+  //    API row: Grok Fast is 2× standard, Grok 4.5 Fast output is $18 not
+  //    2× $6, and GPT-5.6 Sol/Terra/Luna are on Cursor's promotional
+  //    Other-Models rates (through 2026-11-21), which differ from
+  //    OpenAI's announcement numbers used by the `gpt-5.6-*` rows above.
+  //    Thinking suffixes (`-high` / `-medium` / `-low` / `-xhigh`) are
+  //    stripped before lookup; `-fast` is a priced speed tier and stays.
+  //    Generic ids (`auto`, `composer-*`) are provider-qualified; vendor
+  //    SKUs (`grok-4.6-fast`, `gpt-5.6-sol`) are also qualified under
+  //    `cursor/` so a Codex/Grok daemon reporting the same bare id keeps
+  //    the vendor row. Cursor omits cache-write on Grok/Composer (`-` in
+  //    the table); those rows keep cacheWrite at 0. GPT-5.6 cache writes
+  //    are billed at 1.25× input, matching the published sheet.
   "cursor/auto":              { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
   "cursor/composer-2.5-fast": { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
   "cursor/composer-2.5":      { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
@@ -365,6 +368,17 @@ const MODEL_PRICING: Record<
   "cursor/composer-2":        { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
   "cursor/composer-1.5":      { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
   "cursor/composer-1":        { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
+  "cursor/grok-4.6":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.6-fast":     { input: 4,    output: 12,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/grok-4.5":          { input: 2,    output: 6,    cacheRead: 0.5,    cacheWrite: 0 },
+  "cursor/grok-4.5-fast":     { input: 4,    output: 18,   cacheRead: 1,      cacheWrite: 0 },
+  "cursor/gpt-5.6-sol":       { input: 4,    output: 20,   cacheRead: 0.4,    cacheWrite: 5 },
+  "cursor/gpt-5.6-sol-fast":  { input: 8,    output: 40,   cacheRead: 0.8,    cacheWrite: 10 },
+  "cursor/gpt-5.6-terra":     { input: 2,    output: 12,   cacheRead: 0.2,    cacheWrite: 2.5 },
+  "cursor/gpt-5.6-terra-fast":{ input: 4,    output: 24,   cacheRead: 0.4,    cacheWrite: 5 },
+  "cursor/gpt-5.6-luna":      { input: 0.2,  output: 1.2,  cacheRead: 0.02,   cacheWrite: 0.25 },
+  "cursor/gpt-5.6-luna-fast": { input: 0.4,  output: 2.4,  cacheRead: 0.04,   cacheWrite: 0.5 },
+  "cursor/claude-opus-5-fast":{ input: 10,   output: 50,   cacheRead: 1,      cacheWrite: 12.5 },
   // Legacy fallback bucket when neither the result event nor the runtime
   // model is known — the daemon emits the literal `cursor`. This key equals
   // the provider name itself, so it can't collide across providers and stays
@@ -372,7 +386,7 @@ const MODEL_PRICING: Record<
   "cursor":                   { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
 };
 
-// Resolve a model string to its pricing tier. Exact match, with four
+// Resolve a model string to its pricing tier. Exact match, with six
 // tolerances applied in order:
 //
 //  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
@@ -392,6 +406,16 @@ const MODEL_PRICING: Record<
 //     usage rows don't carry per-request prompt sizes, so we price the
 //     bracketed variant at the standard tier. Slight under-estimate
 //     beats the previous behaviour of dropping the row entirely.
+//  5. Cursor hyphen routing (`cursor-grok-4.6-high-fast`) — Cursor's
+//     stream-json emits `cursor-<sku>` for some routed models. That is
+//     not a `cursor/…` provider prefix, so (1) leaves it. Peel `cursor-`
+//     so the remaining SKU can hit a `cursor/…` row (Fast Grok is not
+//     the same rate as xAI `grok-4.6`).
+//  6. Cursor thinking suffix (`claude-fable-5-high`,
+//     `gpt-5.6-sol-medium-fast`) — effort flags, not priced SKUs. Peel
+//     `-(xhigh|high|medium|low)` and leave a trailing `-fast`: Fast is
+//     a separate Cursor speed tier (usually 2×, Grok 4.5 Fast output is
+//     $18). A lone `-fast` on Composer is its own SKU and is not peeled.
 //
 // Anything still unmapped falls back to the user-supplied custom pricing
 // store. No startsWith fallback: variants like `gpt-5.5-mini` must have
@@ -528,6 +552,14 @@ function canonicalCandidates(model: string): string[] {
   // pricing trade-off.
   const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
 
+  // Cursor agent appends a thinking suffix to the catalog SKU. Peel
+  // `-(xhigh|high|medium|low)` only — leave `-fast`, which is a priced
+  // speed tier. `composer-2.5-fast` has no thinking token, so it stays.
+  const stripCursorThinking = (s: string) =>
+    s.replace(/-(xhigh|high|medium|low)(?=-fast$|$)/, "");
+  // Hyphen routing (`cursor-grok-4.6`), distinct from `cursor/composer-*`.
+  const stripCursorHyphen = (s: string) => s.replace(/^cursor-/, "");
+
   const raw = model;
   const noProvider = stripProvider(raw);
   const dashed = canonAnthropic(noProvider);
@@ -541,6 +573,12 @@ function canonicalCandidates(model: string): string[] {
   push(stripDate(noProvider));
   push(stripDate(dashed));
   push(stripDate(noTag));
+  for (const c of [...out]) {
+    push(stripCursorHyphen(c));
+    push(stripCursorThinking(c));
+    push(stripCursorThinking(stripCursorHyphen(c)));
+    push(stripDate(stripCursorThinking(stripCursorHyphen(c))));
+  }
   canonicalCandidatesCache.set(model, out);
   return out;
 }

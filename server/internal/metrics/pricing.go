@@ -75,6 +75,21 @@ var modelPrices = map[string]ModelPrice{
 	"xai:grok-4.20-multi-agent-0309":   {Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-reasoning":     {Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-non-reasoning": {Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	// Cursor list prices (cursor.com/docs/models-and-pricing). Fast Grok is
+	// 2× standard; GPT-5.6 uses Cursor's promotional Other-Models rates,
+	// not OpenAI's announcement numbers. Thinking suffixes are stripped in
+	// the alias rules; `-fast` selects these rows.
+	"cursor:grok-4.6":           {Provider: "cursor", Model: "grok-4.6", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 0, OutputPerM: 6},
+	"cursor:grok-4.6-fast":      {Provider: "cursor", Model: "grok-4.6-fast", InputPerM: 4, CacheReadPerM: 1, CacheWritePerM: 0, OutputPerM: 12},
+	"cursor:grok-4.5":           {Provider: "cursor", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.5, CacheWritePerM: 0, OutputPerM: 6},
+	"cursor:grok-4.5-fast":      {Provider: "cursor", Model: "grok-4.5-fast", InputPerM: 4, CacheReadPerM: 1, CacheWritePerM: 0, OutputPerM: 18},
+	"cursor:gpt-5.6-sol":        {Provider: "cursor", Model: "gpt-5.6-sol", InputPerM: 4, CacheReadPerM: 0.4, CacheWritePerM: 5, OutputPerM: 20},
+	"cursor:gpt-5.6-sol-fast":   {Provider: "cursor", Model: "gpt-5.6-sol-fast", InputPerM: 8, CacheReadPerM: 0.8, CacheWritePerM: 10, OutputPerM: 40},
+	"cursor:gpt-5.6-terra":      {Provider: "cursor", Model: "gpt-5.6-terra", InputPerM: 2, CacheReadPerM: 0.2, CacheWritePerM: 2.5, OutputPerM: 12},
+	"cursor:gpt-5.6-terra-fast": {Provider: "cursor", Model: "gpt-5.6-terra-fast", InputPerM: 4, CacheReadPerM: 0.4, CacheWritePerM: 5, OutputPerM: 24},
+	"cursor:gpt-5.6-luna":       {Provider: "cursor", Model: "gpt-5.6-luna", InputPerM: 0.2, CacheReadPerM: 0.02, CacheWritePerM: 0.25, OutputPerM: 1.2},
+	"cursor:gpt-5.6-luna-fast":  {Provider: "cursor", Model: "gpt-5.6-luna-fast", InputPerM: 0.4, CacheReadPerM: 0.04, CacheWritePerM: 0.5, OutputPerM: 2.4},
+	"cursor:claude-opus-5-fast": {Provider: "cursor", Model: "claude-opus-5-fast", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50},
 	// Alibaba Qwen (models.dev providers/alibaba, accessed 2026-08-13;
 	// sourced from alibabacloud.com model-pricing — International ≤256K
 	// input tier — and the qwencloud.com model pages). qwen3.7-plus and
@@ -107,15 +122,19 @@ var modelAliasRules = []struct {
 	re       *regexp.Regexp
 	priceKey string
 }{
-	// Anchored exact-match: the effort is carried in a separate field, so the
-	// model id is the bare slug. Anchoring to `$` keeps unknown variants
-	// (`gpt-5.6-luna-pro`, `gpt-5.6-luna/x`) out of these rows. The `.` is a
-	// LITERAL dot, not the `[.-]` class the older rows use — the real Codex
-	// slug is always dotted (`gpt-5.6-luna`), and the frontend resolver in
-	// utils.ts does NOT dash-normalize, so a dashed `gpt-5-6-luna` must surface
-	// as unmapped on both sides rather than silently borrowing a tier here.
+	// Cursor thinking suffixes (`-xhigh` / `-high` / `-medium` / `-low`)
+	// are effort flags. `-fast` is a priced speed tier (usually 2×).
+	// `gpt-5.6-sol` with no effort/speed suffix is Codex and stays on
+	// OpenAI announcement rates; the effort/speed forms are Cursor ids
+	// and use Cursor's promotional Other-Models sheet.
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol(-(xhigh|high|medium|low))?-fast$`), "cursor:gpt-5.6-sol-fast"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol-(xhigh|high|medium|low)$`), "cursor:gpt-5.6-sol"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-sol$`), "openai:gpt-5.6-sol"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra(-(xhigh|high|medium|low))?-fast$`), "cursor:gpt-5.6-terra-fast"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra-(xhigh|high|medium|low)$`), "cursor:gpt-5.6-terra"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-terra$`), "openai:gpt-5.6-terra"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna(-(xhigh|high|medium|low))?-fast$`), "cursor:gpt-5.6-luna-fast"},
+	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna-(xhigh|high|medium|low)$`), "cursor:gpt-5.6-luna"},
 	{regexp.MustCompile(`(^|/|:)gpt-5\.6-luna$`), "openai:gpt-5.6-luna"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]5$|^gpt-5-5$`), "openai:gpt-5.5"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]4($|-2026-03-05|-xhigh)`), "openai:gpt-5.4"},
@@ -124,6 +143,7 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
 	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
 	{regexp.MustCompile(`claude-fable-5`), "anthropic:claude-fable-5"},
+	{regexp.MustCompile(`claude-opus-5-fast`), "cursor:claude-opus-5-fast"},
 	{regexp.MustCompile(`claude-opus-5`), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},
@@ -144,7 +164,13 @@ var modelAliasRules = []struct {
 	// rows above. The frontend resolver does not dash-normalize non-Anthropic
 	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
 	// rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)cursor-grok-4\.6(-(xhigh|high|medium|low))?-fast$`), "cursor:grok-4.6-fast"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.6-(xhigh|high|medium|low)-fast$`), "cursor:grok-4.6-fast"},
+	{regexp.MustCompile(`(^|/|:)cursor-grok-4\.6(-(xhigh|high|medium|low))?$`), "cursor:grok-4.6"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.6$`), "xai:grok-4.6"},
+	{regexp.MustCompile(`(^|/|:)cursor-grok-4\.5(-(xhigh|high|medium|low))?-fast$`), "cursor:grok-4.5-fast"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.5-(xhigh|high|medium|low)-fast$`), "cursor:grok-4.5-fast"},
+	{regexp.MustCompile(`(^|/|:)cursor-grok-4\.5(-(xhigh|high|medium|low))?$`), "cursor:grok-4.5"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.5$`), "xai:grok-4.5"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.3$`), "xai:grok-4.3"},
 	{regexp.MustCompile(`(^|/|:)grok-build-0\.1$`), "xai:grok-build-0.1"},

@@ -483,6 +483,64 @@ describe("estimateCost", () => {
     expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
   });
 
+  it("prices Cursor thinking suffixes at Cursor list rates, keeping Fast as its own tier", () => {
+    // cursor-agent stream-json appends effort (`-high` / `-medium` / `-xhigh`)
+    // and sometimes a `cursor-` hyphen prefix. Effort is not a priced SKU.
+    // Fast is: Cursor Grok 4.6 Fast is 2× standard, GPT-5.6 Fast is 2× the
+    // Cursor Other-Models promotional rate (not OpenAI's announcement rate).
+    const cursor = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      });
+
+    expect(cursor("claude-fable-5-high")).toBeCloseTo(10 + 50 + 1, 5);
+    expect(cursor("claude-fable-5-medium")).toBeCloseTo(10 + 50 + 1, 5);
+    expect(cursor("claude-opus-5-medium")).toBeCloseTo(5 + 25 + 0.5, 5);
+    expect(cursor("claude-opus-5-fast")).toBeCloseTo(10 + 50 + 1, 5);
+    expect(cursor("gpt-5.6-sol-medium")).toBeCloseTo(4 + 20 + 0.4, 5);
+    expect(cursor("gpt-5.6-sol-medium-fast")).toBeCloseTo(8 + 40 + 0.8, 5);
+    expect(cursor("gpt-5.6-terra-high")).toBeCloseTo(2 + 12 + 0.2, 5);
+    expect(cursor("gpt-5.6-terra-high-fast")).toBeCloseTo(4 + 24 + 0.4, 5);
+    expect(cursor("cursor-grok-4.6-high")).toBeCloseTo(2 + 6 + 0.5, 5);
+    expect(cursor("cursor-grok-4.6-high-fast")).toBeCloseTo(4 + 12 + 1, 5);
+    expect(cursor("cursor-grok-4.6-xhigh-fast")).toBeCloseTo(4 + 12 + 1, 5);
+    expect(isModelPriced("cursor-grok-4.6-high-fast", "cursor")).toBe(true);
+    expect(isModelPriced("gpt-5.6-sol-medium-fast", "cursor")).toBe(true);
+  });
+
+  it("keeps Codex GPT-5.6 on OpenAI announcement rates, not Cursor's promotional sheet", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "codex",
+        model: "gpt-5.6-sol",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(5 + 30 + 0.5, 5);
+  });
+
+  it("does not let a lone Cursor -fast suffix inherit a cheaper Composer row", () => {
+    // `composer-2.5-fast` is a distinct SKU ($3/$15). Stripping a lone
+    // `-fast` would silently bill it as `composer-2.5` ($0.5/$2.5).
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model: "composer-2.5-fast",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
   it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
     const auto = (provider?: string) =>
       estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });
