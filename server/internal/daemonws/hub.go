@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -17,6 +18,9 @@ const (
 	writeWait  = 10 * time.Second
 	pongWait   = 60 * time.Second
 	pingPeriod = (pongWait * 9) / 10
+
+	// ponytail: soft-drop N msgs before evict; tune threshold when drop metrics appear
+	softDropLimit = 5
 )
 
 // ClientIdentity captures the already-authenticated daemon connection scope.
@@ -110,6 +114,9 @@ type client struct {
 
 	// rpcSem bounds concurrent RPC handlers for this connection.
 	rpcSem chan struct{}
+
+	// consecutive soft-drops since last successful send; reset on delivery.
+	drops atomic.Int64
 }
 
 // trySend delivers frame to the write pump without blocking and without ever
@@ -158,8 +165,9 @@ func (c *client) markSeen(eventID string) bool {
 // HeartbeatHandler processes a daemon:heartbeat frame. It must verify that
 // runtimeID is one of identity.RuntimeIDs (the connection's authenticated
 // scope) and return the ack payload to send back. Returning an error skips
-// the ack and is logged at debug level.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
+// the ack and is logged at debug level. diskFreePct is optional telemetry
+// from the frame (nil = absent or old daemon).
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, diskFreePct *float64) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -465,9 +473,16 @@ func (h *Hub) notifyFrame(runtimeID string, data []byte, eventID string) (delive
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -493,9 +508,16 @@ func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID stri
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -521,9 +543,16 @@ func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (deliv
 		}
 		select {
 		case c.send <- data:
+			c.drops.Store(0)
 			delivered = true
 		default:
-			slow = append(slow, c)
+			M.SoftDropsTotal.Add(1)
+			if c.drops.Add(1) >= softDropLimit {
+				slow = append(slow, c)
+			} else if c.drops.Load() == 1 {
+				slog.Warn("daemon websocket slow client, soft-dropping until limit",
+					"daemon_id", c.identity.DaemonID, "limit", softDropLimit)
+			}
 		}
 	}
 	h.mu.RUnlock()
@@ -864,7 +893,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.DiskFreePercent)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +60,9 @@ type TaskService struct {
 	// stale dispatched task. It removes the unconditional reclaim UPDATE from
 	// idle claim polls while missing/error states preserve the DB fallback.
 	ReclaimCheck *ReclaimCheckCache
+	// NotifySinks is the opt-in outbound notification sink list (GAP-6 #9),
+	// parsed from MULTICA_NOTIFY_SINKS. Empty = disabled.
+	NotifySinks []string
 	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
 	// epic, MUL-3721) — the integration's "current user's connected apps
 	// → MCP session URL" hook called from each Enqueue* path. Optional: a
@@ -399,6 +403,24 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 		data.ConnectedApps = raw
 	}
 	return data
+}
+
+// resolveConcreteModel maps logical tier to concrete model via 404 model_tier_map.
+// concrete = workspace_map[tier] ?? global_map[tier] ?? tier, with fallback.
+// ponytail: no cache, direct DB reads; nil Queries or empty tier returns tier.
+func (s *TaskService) resolveConcreteModel(ctx context.Context, workspaceID pgtype.UUID, tier string) string {
+	if tier == "" || s == nil || s.Queries == nil {
+		return tier
+	}
+	if workspaceID.Valid {
+		if m, err := s.Queries.GetWorkspaceModelTier(ctx, db.GetWorkspaceModelTierParams{WorkspaceID: workspaceID, Tier: tier}); err == nil && m.Concrete != "" {
+			return m.Concrete
+		}
+	}
+	if m, err := s.Queries.GetGlobalModelTier(ctx, tier); err == nil && m.Concrete != "" {
+		return m.Concrete
+	}
+	return tier
 }
 
 // resolveOriginatorFromTriggerComment returns the top-of-chain HUMAN user
@@ -760,11 +782,294 @@ func (s *TaskService) captureTaskStarted(ctx context.Context, task db.AgentTaskQ
 	}
 }
 
+// VerificationContextType marks a task as a post-completion verification run
+// (GAP-24). Stored under context.verification at insert; checked here to stop
+// verifier runs from recursively scheduling more verifiers.
+const VerificationContextType = "verification"
+
+// VerificationContextData is the context JSONB payload carried by a verifier
+// task: what to verify and where the deliverable lives.
+type VerificationContextData struct {
+	Type         string `json:"type"`           // always VerificationContextType
+	TargetTaskID string `json:"target_task_id"` // completed task under verification
+	BranchName   string `json:"branch_name"`    // branch the work agent delivered
+}
+
+// maybeEnqueueVerifier enqueues the opt-in verification pass for a completed
+// issue task that produced a branch (GAP-24). No-op unless the completing
+// agent has verify_agent_id set, the target is valid, and this task is not
+// itself a verification run (loop guard). Every failure mode logs and returns:
+// verification must never block or fail a completion.
+func (s *TaskService) maybeEnqueueVerifier(ctx context.Context, completed db.AgentTaskQueue, branchName string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("verifier enqueue panicked (non-fatal)", "task_id", util.UUIDToString(completed.ID), "panic", r)
+		}
+	}()
+
+	if !completed.IssueID.Valid {
+		return // chat / autopilot-only tasks have no thread to report into
+	}
+	// Loop guard: never verify a verification run.
+	if completed.Context != nil {
+		var wrapper struct {
+			Verification *VerificationContextData `json:"verification"`
+		}
+		if json.Unmarshal(completed.Context, &wrapper) == nil && wrapper.Verification != nil {
+			return
+		}
+	}
+
+	completingAgent, err := s.Queries.GetAgent(ctx, completed.AgentID)
+	if err != nil {
+		slog.Warn("verifier enqueue: load completing agent failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	if !completingAgent.VerifyAgentID.Valid {
+		return // feature off for this agent — the default
+	}
+	if completingAgent.VerifyAgentID == completingAgent.ID {
+		return // self-verify would recurse through one agent; treat as misconfig
+	}
+
+	verifier, err := s.Queries.GetAgent(ctx, completingAgent.VerifyAgentID)
+	if err != nil {
+		slog.Warn("verifier enqueue: verifier agent not found; skipping",
+			"task_id", util.UUIDToString(completed.ID),
+			"verify_agent_id", util.UUIDToString(completingAgent.VerifyAgentID), "error", err)
+		return
+	}
+	if verifier.ArchivedAt.Valid {
+		slog.Info("verifier enqueue skipped: verifier archived", "task_id", util.UUIDToString(completed.ID))
+		return
+	}
+	if !verifier.RuntimeID.Valid {
+		slog.Warn("verifier enqueue skipped: verifier has no runtime", "task_id", util.UUIDToString(completed.ID))
+		return
+	}
+	if verifier.WorkspaceID != completingAgent.WorkspaceID {
+		slog.Warn("verifier enqueue skipped: verifier in different workspace",
+			"task_id", util.UUIDToString(completed.ID),
+			"verifier_workspace", util.UUIDToString(verifier.WorkspaceID),
+			"agent_workspace", util.UUIDToString(completingAgent.WorkspaceID))
+		return
+	}
+
+	issue, err := s.Queries.GetIssue(ctx, completed.IssueID)
+	if err != nil {
+		slog.Warn("verifier enqueue: load issue failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+
+	ctxData, err := json.Marshal(VerificationContextData{
+		Type:         VerificationContextType,
+		TargetTaskID: util.UUIDToString(completed.ID),
+		BranchName:   branchName,
+	})
+	if err != nil {
+		slog.Warn("verifier enqueue: marshal context failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	handoff := fmt.Sprintf(
+		"Verification run for task %s on this issue. The delivering agent pushed branch %q. Check out that branch, run this repo's tests/lint (or the checks your instructions define), and report PASS or FAIL with concrete evidence as a comment. Do not fix code yourself — report only.",
+		util.UUIDToString(completed.ID), branchName)
+
+	vt, err := s.Queries.CreateVerifierTask(ctx, db.CreateVerifierTaskParams{
+		AgentID:              verifier.ID,
+		RuntimeID:            verifier.RuntimeID,
+		IssueID:              completed.IssueID,
+		Priority:             priorityToInt(issue.Priority),
+		TriggerSummary:       pgtype.Text{String: "Verification of task " + util.UUIDToString(completed.ID), Valid: true},
+		ForceFreshSession:    pgtype.Bool{Bool: true, Valid: true},
+		HandoffNote:          pgtype.Text{String: handoff, Valid: true},
+		Context:              ctxData,
+		OriginatorUserID:     completed.OriginatorUserID,
+		AccountableUserID:    completed.AccountableUserID,
+		DelegatedFromTaskID:  completed.ID,
+		TriggerEvidenceRefID: completed.ID,
+	})
+	switch {
+	case err == nil:
+		slog.Info("verifier task enqueued",
+			"verifier_task_id", util.UUIDToString(vt.ID),
+			"target_task_id", util.UUIDToString(completed.ID),
+			"branch", branchName,
+			"issue_id", util.UUIDToString(completed.IssueID))
+	case errors.Is(err, pgx.ErrNoRows):
+		// Workspace torn down mid-flight or pending-slot conflict — same fence
+		// semantics as CreateRetryTask. Completion stands; no verifier.
+		slog.Info("verifier task not created: no row written", "task_id", util.UUIDToString(completed.ID))
+	default:
+		slog.Warn("verifier task enqueue failed (completion unaffected)",
+			"task_id", util.UUIDToString(completed.ID), "error", err)
+	}
+}
+
+// maybeEnqueueEventTriggers fires GAP-31 event triggers on task completion.
+// ponytail: list triggers where event_filters @> task.completed, enqueue via CreateAutopilotRun→CreateAutopilotTask→UpdateRun→NotifyTaskEnqueued; minimal, no quota, squad leader fallback.
+func (s *TaskService) maybeEnqueueEventTriggers(ctx context.Context, completed db.AgentTaskQueue) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("event trigger enqueue panicked (non-fatal)", "task_id", util.UUIDToString(completed.ID), "panic", r)
+		}
+	}()
+	filter := []byte(`[{"event":"task.completed"}]`)
+	triggers, err := s.Queries.ListEventAutopilotTriggersForTask(ctx, db.ListEventAutopilotTriggersForTaskParams{ID: completed.AgentID, Column2: filter})
+	if err != nil {
+		slog.Warn("event trigger list failed", "task_id", util.UUIDToString(completed.ID), "error", err)
+		return
+	}
+	if len(triggers) == 0 {
+		return
+	}
+	slog.Info("event triggers matched", "task_id", util.UUIDToString(completed.ID), "matched", len(triggers))
+	for _, tr := range triggers {
+		ap, err := s.Queries.GetAutopilot(ctx, tr.AutopilotID)
+		if err != nil {
+			slog.Warn("event trigger: get autopilot failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		var agent db.Agent
+		if ap.AssigneeType == "squad" {
+			sq, err := s.Queries.GetSquad(ctx, ap.AssigneeID)
+			if err != nil {
+				slog.Warn("event trigger: get squad failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+				continue
+			}
+			agent, err = s.Queries.GetAgent(ctx, sq.LeaderID)
+		} else {
+			agent, err = s.Queries.GetAgent(ctx, ap.AssigneeID)
+		}
+		if err != nil {
+			slog.Warn("event trigger: resolve agent failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		payload, _ := json.Marshal(map[string]string{"event": "task.completed", "task_id": util.UUIDToString(completed.ID)})
+		run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{ID: dbid.NewV7(), AutopilotID: ap.ID, Source: "event", Status: "running", TriggerID: tr.ID, TriggerPayload: payload})
+		if err != nil {
+			slog.Warn("event trigger: create run failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{ID: dbid.NewV7(), AgentID: agent.ID, RuntimeID: agent.RuntimeID, AutopilotRunID: run.ID})
+		if err != nil {
+			slog.Warn("event trigger: create task failed", "trigger_id", util.UUIDToString(tr.ID), "error", err)
+			continue
+		}
+		if u, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{ID: run.ID, TaskID: task.ID}); err == nil {
+			_ = u
+		}
+		s.NotifyTaskEnqueued(ctx, task)
+		slog.Info("event trigger dispatched", "trigger_id", util.UUIDToString(tr.ID), "run_id", util.UUIDToString(run.ID), "task_id", util.UUIDToString(task.ID))
+	}
+}
+
 func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTaskQueue) {
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
 	}
+}
+
+// autoSyncIssueStatusOnCompletion flips the linked issue to done when its task
+// completes, then reactivates any dependent issues the now-done issue was
+// blocking. Previously this only fired on a branch push and only advanced the
+// issue to in_review, so issues with no PR (or a branch that never flipped to
+// done) left their blocked_by dependents stranded in cancelled/queued.
+// ponytail: minimal, no migration, uses existing UpdateIssueStatus; Done (not
+// InReview) so the ClaimAgentTask blocked_by gate (issue.status NOT IN
+// ('done','cancelled')) clears; best-effort, never fails completion.
+func (s *TaskService) autoSyncIssueStatusOnCompletion(ctx context.Context, task db.AgentTaskQueue, branchName string, result []byte) {
+	if !task.IssueID.Valid {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
+	switch effective {
+	case issuestatus.Done, issuestatus.Cancelled:
+		// Already terminal: re-evaluate dependents in case an earlier pass
+		// missed them, then stop.
+		s.maybeUnblockDependents(ctx, issue.ID)
+		return
+	case issuestatus.Blocked:
+		return
+	default: // Backlog, Todo, InProgress, InReview
+	}
+	target := issuestatus.Done
+	if _, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: target, WorkspaceID: issue.WorkspaceID}); err != nil {
+		slog.Warn("auto issue status sync failed", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "error", err)
+		return
+	}
+	slog.Info("auto issue status sync", "issue_id", util.UUIDToString(issue.ID), "from", effective, "to", target, "branch", branchName)
+	s.maybeUnblockDependents(ctx, issue.ID)
+}
+
+// maybeUnblockDependents reactivates work on issues that were blocked_by the
+// given (now-terminal) issue. For each dependent whose blockers are all done, it
+// revives the dependent's cancelled task (un-cancel) or, if no task exists,
+// enqueues a fresh one — so the ClaimAgentTask blocked_by gate lets it run.
+// ponytail: no migration; reuses ListIssueDependencyDependents/CountOpenBlockers/
+// ListCancelledTasksForIssue/RequeueCancelledAgentTask + EnqueueTaskForIssue;
+// best-effort, never fails completion.
+func (s *TaskService) maybeUnblockDependents(ctx context.Context, blockerIssueID pgtype.UUID) {
+	deps, err := s.Queries.ListIssueDependencyDependents(ctx, blockerIssueID)
+	if err != nil {
+		slog.Warn("unblock dependents: list failed", "blocker", util.UUIDToString(blockerIssueID), "error", err)
+		return
+	}
+	for _, dep := range deps {
+		open, err := s.Queries.CountOpenBlockersForIssue(ctx, dep.IssueID)
+		if err != nil {
+			slog.Warn("unblock dependents: count blockers failed", "issue", util.UUIDToString(dep.IssueID), "error", err)
+			continue
+		}
+		if open > 0 {
+			continue
+		}
+		s.unblockDependentIssue(ctx, dep.IssueID)
+	}
+}
+
+func (s *TaskService) unblockDependentIssue(ctx context.Context, issueID pgtype.UUID) {
+	tasks, err := s.Queries.ListCancelledTasksForIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: list cancelled tasks failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if len(tasks) > 0 {
+		task, err := s.Queries.RequeueCancelledAgentTask(ctx, tasks[0].ID)
+		if err != nil {
+			slog.Warn("unblock: requeue failed", "task", util.UUIDToString(tasks[0].ID), "error", err)
+			return
+		}
+		s.NotifyTaskEnqueued(ctx, task)
+		slog.Info("dependent task un-cancelled", "task", util.UUIDToString(task.ID), "issue", util.UUIDToString(issueID))
+		return
+	}
+	has, err := s.Queries.HasActiveTaskForIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: active task check failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if has {
+		return
+	}
+	issue, err := s.Queries.GetIssue(ctx, issueID)
+	if err != nil {
+		slog.Warn("unblock: get issue failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	if !issue.AssigneeID.Valid {
+		return
+	}
+	task, err := s.EnqueueTaskForIssue(ctx, issue)
+	if err != nil {
+		slog.Warn("unblock: enqueue failed", "issue", util.UUIDToString(issueID), "error", err)
+		return
+	}
+	slog.Info("dependent task created", "task", util.UUIDToString(task.ID), "issue", util.UUIDToString(issueID))
 }
 
 func (s *TaskService) captureTaskFailed(ctx context.Context, task db.AgentTaskQueue) {
@@ -1186,6 +1491,12 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	// 404 model_tier_map: concrete = workspace_map[tier] ?? global_map[tier] ?? tier
+	tier := ""
+	if agent.ServiceTier.Valid {
+		tier = agent.ServiceTier.String
+	}
+	concrete := s.resolveConcreteModel(ctx, issue.WorkspaceID, tier)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1207,6 +1518,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		ConcreteModel:        pgtype.Text{String: concrete, Valid: concrete != ""},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1238,6 +1550,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			TriggerEvidenceKind:  createParams.TriggerEvidenceKind,
 			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
 			FireAt:               fireAt,
+			ConcreteModel:        createParams.ConcreteModel,
 		})
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
@@ -3814,8 +4127,18 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		return claimed, nil
 	}
 
-	// 4. One candidate SELECT across the non-empty set.
-	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
+	// 4. One candidate SELECT across the non-empty set. Bounded by the
+	// remaining claim capacity: the loop below stops at maxTasks anyway, so
+	// fetching more candidates than that only pays scan+sort cost (the LIMIT
+	// keeps exactly the priority/FIFO head — see the query comment).
+	remaining := maxTasks - len(claimed)
+	if remaining <= 0 {
+		return claimed, nil
+	}
+	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, db.ListQueuedClaimCandidatesByRuntimesParams{
+		RuntimeIds: nonEmpty,
+		MaxPerPoll: int32(remaining),
+	})
 	if err != nil {
 		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
 		// so `claimed` may already hold tasks dispatched server-side. Dropping
@@ -4153,7 +4476,7 @@ func startsWithAbsolutePath(s string) bool {
 }
 
 // CompleteTask marks a task as completed.
-// Issue status is NOT changed here — the agent manages it via the CLI.
+// ponytail: auto-syncs issue status when branch pushed (backlog/todo/in_progress -> in_review, trivial done -> done) to unblock blocked_by gate; uses existing UpdateIssueStatus, no migration, best-effort after captureTaskCompleted before verifier
 //
 // For chat tasks, CompleteAgentTask and the chat_session resume-pointer
 // update run in a single transaction. This closes a race where the next
@@ -4269,6 +4592,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.autoSyncIssueStatusOnCompletion(ctx, task, branchName, result)
+
+	// GAP-24: opt-in verification pass. When the completing agent declares a
+	// verifier and the run produced a branch, enqueue a follow-up task for the
+	// verifier agent on the same issue. Best-effort: verification is an
+	// enhancement, never a completion blocker.
+	if branchName != "" {
+		s.maybeEnqueueVerifier(ctx, task, branchName)
+	}
+	s.maybeEnqueueEventTriggers(ctx, task)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -4287,6 +4620,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				"agent_id", util.UUIDToString(task.AgentID),
 				"error", err,
 			)
+		}
+		// GAP-29: hollow completion flag. A completed issue task with no branch
+		// produced nothing reviewable; leave a visible marker for human review.
+		// ponytail: hollow = no branch; zero-commits check needs daemon commit count — add BranchCommitCount when false positives appear
+		if !suppressNoActionComment && task.Status == "completed" && !task.BranchName.Valid {
+			s.createAgentComment(ctx, task.IssueID, task.AgentID,
+				"⚠️ Hollow completion: this task was marked completed but produced no branch. Flagged for human review.",
+				"system", pgtype.UUID{}, task.ID)
 		}
 		agentCommented, _ := s.Queries.HasAgentCommentedSince(ctx, db.HasAgentCommentedSinceParams{
 			IssueID:  task.IssueID,
@@ -4616,7 +4957,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligibleForSource(failureReason, parent, s.autopilotRunRetrySource(ctx, parent)) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -4766,25 +5107,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			})
 			switch {
 			case cerr == nil:
-				transferErr := transferPendingSourceContextToRetry(ctx, qtx, t, child)
-				if errors.Is(transferErr, pgx.ErrNoRows) {
-					deleted, deleteErr := qtx.DeleteUnstartedQuickCreateRetryTask(ctx, child.ID)
-					if deleteErr != nil || deleted != 1 {
-						return fmt.Errorf("discard source context retry without attach authority: changed=%d: %w", deleted, deleteErr)
-					}
-					slog.Info("fail task auto-retry skipped: source context already transferred or attached",
-						"task_id", util.UUIDToString(taskID),
-						"source_context_retry_id", util.UUIDToString(child.ID),
-					)
-				} else if transferErr != nil {
-					return fmt.Errorf("transfer pending source context to retry: %w", transferErr)
-				} else {
-					if err := qtx.CopyChannelTaskDelivery(ctx, db.CopyChannelTaskDeliveryParams{
-						ChildTaskID: child.ID, ParentTaskID: taskID,
-					}); err != nil {
-						return fmt.Errorf("copy retry channel delivery: %w", err)
-					}
-					retried = &child
+				retried = &child
+				// GAP-23: hand the child the failure digest so its run starts
+				// from "attempt N failed because X" instead of blind
+				// rediscovery. Same transaction as the insert; child still
+				// unclaimed, no concurrent writer. Best-effort: a digest
+				// write failure must not abort the parent's failed status.
+				if paErr := stampPriorAttemptContext(ctx, qtx, &child, t.Attempt, failureReason, errMsg); paErr != nil {
+					slog.Warn("fail task auto-retry: prior-attempt context stamp failed (non-fatal)",
+						"task_id", util.UUIDToString(child.ID), "error", paErr)
 				}
 			case errors.Is(cerr, pgx.ErrNoRows):
 				// The statement wrote nothing: either the owning workspace was
@@ -4917,6 +5248,19 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(errMsg), "system", task.TriggerCommentID, task.ID)
 	}
 
+	// GAP-27: terminal failure with no retry enqueued gets a structured
+	// case file on the issue so human triage starts from facts.
+	if errMsg != "" && task.IssueID.Valid && retried == nil { // ponytail: comment-only dead-letter; full file/write to workdir if volume grows
+		var b strings.Builder
+		fmt.Fprintf(&b, "🗃️ **Dead-letter case file: retries exhausted**\n\n- task: `%s`\n- reason: `%s`\n- attempt: %d / %d",
+			util.UUIDToString(task.ID), failureReason, task.Attempt, task.MaxAttempts)
+		if task.BranchName.Valid {
+			fmt.Fprintf(&b, "\n- branch: `%s`", task.BranchName.String)
+		}
+		fmt.Fprintf(&b, "\n- last error tail:\n\n```\n%s\n```\n\nCheck verifier/hollow flags on the task row before re-running.", priorAttemptErrorTail(redact.Text(errMsg)))
+		s.createAgentComment(ctx, task.IssueID, task.AgentID, b.String(), "system", task.TriggerCommentID, task.ID)
+	}
+
 	// Quick-create tasks: push a failure inbox notification to the
 	// requester so they can either retry or fall back to the advanced form
 	// without losing their original prompt. Skipped when an auto-retry is
@@ -5019,18 +5363,76 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // retryDelayForAttempt reports how long to defer the NEXT attempt after a
 // failure at failedAttempt. runtime_offline always gets a positive fire_at so
 // it waits for the health-gated promotion path. provider_network's final
-// attempt is deferred ~5s; every other retry remains immediate (zero delay →
-// the child is created 'queued', claimable at once). Callers pass the returned
-// delay to CreateRetryTask via fire_at.
+// attempt is deferred ~5s with ±20% jitter; every other retry remains
+// immediate (zero delay → the child is created 'queued', claimable at once).
+// Callers pass the returned delay to CreateRetryTask via fire_at. The jitter
+// keeps tasks that failed against the same provider blip from re-queuing in
+// lockstep onto the recovering upstream.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
 	if reason == string(taskfailure.ReasonRuntimeOffline) {
 		return runtimeOfflineRetryDeferral
 	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
-		return providerNetworkFinalRetryWait
+		base := providerNetworkFinalRetryWait
+		if span := base / 5; span > 0 {
+			base += time.Duration(rand.Int63n(int64(2*span))) - span
+		}
+		return base
 	}
 	return 0
+}
+
+// PriorAttemptContextKey is the context-JSONB key carrying the failure digest
+// stamped onto retry children (GAP-23). The claim mapper lifts it into the
+// daemon payload; the daemon renders it into issue_context.md as
+// "## Prior Attempt".
+const PriorAttemptContextKey = "prior_attempt"
+
+// priorAttemptErrorTailMax caps the raw error text carried in the digest. The
+// value lands verbatim in the next run's prompt: unbounded, a runaway stack
+// trace or giant provider payload would bloat every subsequent attempt's
+// context. The tail (not head) keeps the final error line, which is usually
+// the diagnosis.
+const priorAttemptErrorTailMax = 2000
+
+// PriorAttemptContextData is the JSON shape stored under
+// PriorAttemptContextKey and surfaced to the daemon on claim.
+type PriorAttemptContextData struct {
+	Attempt       int32  `json:"attempt"`              // parent's attempt number that failed
+	FailureReason string `json:"failure_reason"`       // classified reason (taskfailure taxonomy)
+	ErrorText     string `json:"error_text,omitempty"` // redacted tail of the raw error message
+	FailedAt      string `json:"failed_at"`            // RFC3339, when the parent was marked failed
+}
+
+// priorAttemptErrorTail caps raw error text to its final
+// priorAttemptErrorTailMax bytes, marked with a leading ellipsis. The tail (not
+// head) keeps the final error line, which is usually the diagnosis.
+func priorAttemptErrorTail(errMsg string) string {
+	if len(errMsg) <= priorAttemptErrorTailMax {
+		return errMsg
+	}
+	return "…" + errMsg[len(errMsg)-priorAttemptErrorTailMax:]
+}
+
+// stampPriorAttemptContext writes the failure digest onto a just-created
+// retry child. failedAttempt = the parent's attempt number that just failed
+// (the child row already carries attempt+1). Caller runs inside the FailTask
+// transaction.
+func stampPriorAttemptContext(ctx context.Context, qtx *db.Queries, child *db.AgentTaskQueue, failedAttempt int32, failureReason, errMsg string) error {
+	digest, err := json.Marshal(PriorAttemptContextData{
+		Attempt:       failedAttempt,
+		FailureReason: failureReason,
+		ErrorText:     priorAttemptErrorTail(errMsg),
+		FailedAt:      time.Now().UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal prior-attempt digest: %w", err)
+	}
+	return qtx.SetTaskPriorAttemptContext(ctx, db.SetTaskPriorAttemptContextParams{
+		ID:           child.ID,
+		PriorAttempt: digest,
+	})
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -5100,20 +5502,24 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
-	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
+	return retryEligibleForSource(failureReason, t, "")
 }
 
-func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
-	if len(task.Context) == 0 || task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+// retryEligibleForSource is retryEligible with the autopilot run's trigger
+// source resolved ("" = not an autopilot run). Cron-sourced runs stay excluded:
+// the scheduler owns their re-fire cadence and a retry would double-fire the
+// schedule. Webhook- and event-sourced runs ARE eligible — nothing re-fires
+// them (the external poster / bus subscription is gone at failure time), the
+// trigger payload persists on the run row, and without this a transient
+// runtime_offline/provider_network blip kills the run permanently.
+func retryEligibleForSource(failureReason string, t db.AgentTaskQueue, autopilotRunSource string) bool {
+	if t.AutopilotRunID.Valid && autopilotRunSource != "webhook" && autopilotRunSource != "event" {
 		return false
 	}
-	var quickCreate QuickCreateContext
-	return json.Unmarshal(task.Context, &quickCreate) == nil &&
-		quickCreate.Type == QuickCreateContextType && quickCreate.SourceContextID != ""
-}
+	return retryableReasons[failureReason] &&
+		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+		(t.IssueID.Valid || t.ChatSessionID.Valid)
+	}
 
 // hasRunnableSuccessor reports whether another not-yet-started task already
 // occupies the single queued/dispatched slot that
@@ -5141,6 +5547,22 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 	})
 }
 
+// autopilotRunRetrySource resolves the trigger source of an autopilot-run
+// task, or "" when the task is not an autopilot run / the row cannot be read
+// (fail closed to the legacy no-autopilot-retry behavior).
+func (s *TaskService) autopilotRunRetrySource(ctx context.Context, t db.AgentTaskQueue) string {
+	if !t.AutopilotRunID.Valid {
+		return ""
+	}
+	run, err := s.Queries.GetAutopilotRun(ctx, t.AutopilotRunID)
+	if err != nil {
+		slog.Warn("task auto-retry: load autopilot run failed; treating as cron (no retry)",
+			"task_id", util.UUIDToString(t.ID), "error", err)
+		return "cron"
+	}
+	return run.Source
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -5149,8 +5571,10 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // the agent can resume the conversation when the backend supports it. Returns
 // the new task, or nil when no retry was created.
 //
-// Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
+// Cron-sourced autopilot tasks are NOT auto-retried here; the autopilot
+// scheduler owns its own re-run cadence and we don't want to double-fire it.
+// Webhook-sourced runs are eligible — nothing else re-fires them (see
+// retryEligibleForSource).
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -5176,10 +5600,12 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		)
 		return nil, nil
 	}
-	// Autopilot has its own retry semantics (don't double-trigger) and a task
-	// with no issue/chat link has nowhere to report its retry — retryEligible
-	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	// Autopilot cron runs have their own retry semantics (don't double-trigger)
+	// and a task with no issue/chat link has nowhere to report its retry —
+	// retryEligibleForSource covers both, keeping this sweeper path in sync
+	// with FailTask's in-tx retry. Webhook-sourced runs opt in (nothing else
+	// re-fires them); see retryEligibleForSource.
+	if !retryEligibleForSource(reason, parent, s.autopilotRunRetrySource(ctx, parent)) {
 		return nil, nil
 	}
 
@@ -6485,12 +6911,20 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	if len(s.NotifySinks) > 0 {
+		s.dispatchNotifySinks(task)
+	}
 }
 
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
 func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+	if len(s.NotifySinks) > 0 {
+		for _, t := range tasks {
+			s.dispatchNotifySinks(t)
+		}
+	}
 	seen := make(map[string]struct{}, len(tasks))
 	for _, task := range tasks {
 		if !task.RuntimeID.Valid {

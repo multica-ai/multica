@@ -362,6 +362,11 @@ type Daemon struct {
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
 
+	// outbox durably journals terminal reports whose send failed, replaying
+	// them on the next healthy heartbeat (GAP-14). Nil-safe: every use goes
+	// through methods that tolerate a disabled outbox.
+	outbox *reportOutbox
+
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
@@ -376,6 +381,12 @@ type Daemon struct {
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
+
+	// providerRunning tracks in-flight task counts per provider for
+	// cfg.ProviderCeilings enforcement (GAP-21, issue #29). Guarded by its own
+	// mutex; lazily initialized so Daemon literals without it still work.
+	providerRunningMu sync.Mutex
+	providerRunning   map[string]int
 
 	// registerSerial holds one mutex per workspace (workspace_id ->
 	// *sync.Mutex), serializing the "send Register, record what it carried"
@@ -647,6 +658,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
+		outbox:                    newReportOutbox(cfg.Profile, logger),
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
@@ -2100,6 +2112,81 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 		return &rt
 	}
 	return nil
+}
+
+// providerFor resolves the provider serving runtimeID ("" if unknown).
+func (d *Daemon) providerFor(runtimeID string) string {
+	if rt := d.findRuntime(runtimeID); rt != nil {
+		return rt.Provider
+	}
+	return ""
+}
+
+// providerRunningCount returns in-flight tasks for provider (GAP-21, #29).
+func (d *Daemon) providerRunningCount(provider string) int {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	return d.providerRunning[provider]
+}
+
+// providerRunningInc/Dec adjust the per-provider in-flight counter.
+func (d *Daemon) providerRunningInc(provider string) {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	if d.providerRunning == nil {
+		d.providerRunning = make(map[string]int)
+	}
+	d.providerRunning[provider]++
+}
+
+func (d *Daemon) providerRunningDec(provider string) {
+	d.providerRunningMu.Lock()
+	defer d.providerRunningMu.Unlock()
+	if n := d.providerRunning[provider]; n <= 1 {
+		delete(d.providerRunning, provider)
+	} else {
+		d.providerRunning[provider] = n - 1
+	}
+}
+
+// claimGroup is one claim request: which runtimes to ask and how many tasks.
+type claimGroup struct {
+	runtimeIDs []string
+	maxTasks   int
+}
+
+// claimGroups splits runtimes into claim batches honoring
+// cfg.ProviderCeilings (GAP-21, issue #29): providers with headroom get their
+// own capped batch; everything else pools into one uncapped batch. With no
+// ceilings configured this returns a single group covering all runtimes —
+// byte-identical behavior to the pre-ceiling single claim.
+func (d *Daemon) claimGroups(runtimeIDs []string, freeSlots int) []claimGroup {
+	if len(d.cfg.ProviderCeilings) == 0 {
+		return []claimGroup{{runtimeIDs: runtimeIDs, maxTasks: freeSlots}}
+	}
+	var open []string
+	byProvider := make(map[string][]string)
+	for _, id := range runtimeIDs {
+		p := d.providerFor(id)
+		if p != "" {
+			if _, limited := d.cfg.ProviderCeilings[p]; limited {
+				byProvider[p] = append(byProvider[p], id)
+				continue
+			}
+		}
+		open = append(open, id)
+	}
+	var groups []claimGroup
+	if len(open) > 0 {
+		groups = append(groups, claimGroup{runtimeIDs: open, maxTasks: freeSlots})
+	}
+	for p, ids := range byProvider {
+		headroom := min(d.cfg.ProviderCeilings[p]-d.providerRunningCount(p), freeSlots)
+		if headroom > 0 {
+			groups = append(groups, claimGroup{runtimeIDs: ids, maxTasks: headroom})
+		}
+	}
+	return groups
 }
 
 // recordProfileLaunch remembers the absolute executable path and fixed launch
@@ -3749,8 +3836,16 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
 		for _, rid := range runtimeIDs {
-			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
-				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
+			// ponytail: 3x retry with backoff; persistent queue if still failing
+			var rerr error
+			for attempt := 0; attempt < 3; attempt++ {
+				if rerr = d.client.RecoverOrphans(ctx, rid); rerr == nil {
+					break
+				}
+				time.Sleep(500 * time.Millisecond << attempt)
+			}
+			if rerr != nil {
+				d.logger.Warn("recover-orphans failed after retries", "runtime_id", rid, "error", rerr)
 			}
 		}
 
@@ -3889,10 +3984,11 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	// relies on.
 	if d.wsHeartbeatRecentlyAcked(rid) {
 		d.logger.Debug("heartbeat: skipping HTTP tick, WS recently acked", "runtime_id", rid)
+		d.maybeDrainOutbox()
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	resp, err := d.client.SendHeartbeat(ctx, rid, diskFreePercent(d.cfg.WorkspacesRoot))
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -3916,7 +4012,18 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.handleHeartbeatActions(ctx, rid, resp)
+	d.maybeDrainOutbox()
 	return false
+}
+
+// maybeDrainOutbox replays journaled terminal reports when a heartbeat proves
+// the server is reachable. Non-blocking: the actual drain runs single-flight
+// in its own goroutine and no-ops on an empty journal.
+func (d *Daemon) maybeDrainOutbox() {
+	if d.outbox == nil || !d.outbox.pending() {
+		return
+	}
+	go d.outbox.drain(d.sendTerminalReport)
 }
 
 // handleHeartbeatActions dispatches the pending-action set returned by either
@@ -4035,7 +4142,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID)
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, diskFreePercent(d.cfg.WorkspacesRoot))
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -4731,6 +4838,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		}
 	}
 
+pollerCycle:
 	for {
 		if pollerCtx.Err() != nil {
 			return
@@ -4771,17 +4879,30 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			continue
 		}
 
-		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
-		if err != nil {
-			d.exitClaim()
-			releaseSlots(slots)
-			if pollerCtx.Err() == nil {
-				d.logger.Warn("batch claim failed", "error", err)
+		// GAP-21 (issue #29): split the claim by provider when ceilings are
+		// configured so a batch can never over-claim a capped provider. With
+		// no ceilings this is one group — the pre-ceiling behavior.
+		var tasks []*Task
+		for _, g := range d.claimGroups(runtimeIDs, len(slots)) {
+			if g.maxTasks <= 0 || len(g.runtimeIDs) == 0 {
+				continue
 			}
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
+			got, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, g.runtimeIDs, g.maxTasks)
+			if err != nil {
+				d.exitClaim()
+				releaseSlots(slots)
+				if pollerCtx.Err() == nil {
+					d.logger.Warn("batch claim failed", "error", err)
+				}
+				if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+					return
+				}
+				continue pollerCycle
 			}
-			continue
+			tasks = append(tasks, got...)
+			if len(tasks) >= len(slots) {
+				break
+			}
 		}
 
 		// Dispatch each claimed task into a slot. activeTasks is incremented for
@@ -4801,6 +4922,10 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
+			// Track per-provider in-flight count for ProviderCeilings (GAP-21,
+			// issue #29); unknown providers get "" and are never capped.
+			prov := d.providerFor(t.RuntimeID)
+			d.providerRunningInc(prov)
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
 				// A task can reuse an existing worktree and never enter the
 				// checkout path that normally preempts repository maintenance.
@@ -4811,6 +4936,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
+				defer d.providerRunningDec(prov)
 				defer func() {
 					// Release local capacity before waking the poller. The task's
 					// terminal callback and local cleanup have both finished at this
@@ -5090,6 +5216,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
+	// GAP-28 (issue #23): opt-in wall-clock cap. Wrapping the cancel context
+	// keeps the server-side cancellation watcher live underneath it; on
+	// deadline the run unwinds like any cancelled run and the sentinel below
+	// relabels it agent_error.budget_exceeded instead of a provider/network
+	// misclassification. 0 = off (default).
+	budget := budgetForTask(&task)
+	if budget.wallClock > 0 {
+		var clockCancel context.CancelFunc
+		runCtx, clockCancel = context.WithTimeout(runCtx, budget.wallClock)
+		defer clockCancel()
+	}
+
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
 	// doesn't panic time.NewTicker.
@@ -5106,7 +5244,36 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 	}()
 
-	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+	// GAP-5 (issue #4): opt-in provider failover. Primary first, then any
+	// MULTICA_PROVIDER_FAILOVER fallbacks, walking the chain only when the
+	// attempt died on a transient transport error (provider_network / 429).
+	// Unset chain = single run, identical to pre-failover behavior. Usage from
+	// every attempt accumulates so billing stays complete across failovers.
+	var result TaskResult
+	var err error
+	var usage []TaskUsageEntry
+	chain := append([]string{provider}, d.cfg.ProviderFailover[provider]...)
+	for i, tryProvider := range chain {
+		result, err = d.runner.run(runCtx, task, tryProvider, slot, taskLog)
+		usage = append(usage, result.Usage...)
+		// GAP-28: cost/token caps checked on every attempt boundary (usage
+		// accumulates across the chain); the wall-clock cap bounds burn inside
+		// one attempt. Overrun stops the chain immediately — a failover would
+		// only spend more against an exhausted budget.
+		if over := overBudget(budget, usage); over != "" {
+			err = fmt.Errorf("%w: %s", errBudgetExceeded, over)
+			break
+		}
+		if budget.wallClock > 0 && errors.Is(runCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: wall clock %s elapsed", errBudgetExceeded, budget.wallClock)
+			break
+		}
+		if err == nil || !isProviderNetworkError(err) || i == len(chain)-1 || runCtx.Err() != nil {
+			break
+		}
+		taskLog.Warn("provider failover", "from", tryProvider, "to", chain[i+1], "error", err)
+	}
+	result.Usage = usage
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll
@@ -5222,6 +5389,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
+				// One immediate retry: a dir that silently loses its meta
+				// falls to the 72h orphan-by-mtime path instead of
+				// parent-driven cleanup, pinning disk for days.
+				if retryErr := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); retryErr != nil {
+					taskLog.Error("write gc meta retry failed; dir will age out via mtime TTL", "error", retryErr)
+				}
 			}
 		}
 	}
@@ -5240,6 +5413,12 @@ func (e *worktreePreservedError) Unwrap() error { return e.err }
 func taskRunFailureReason(err error) string {
 	if errors.Is(err, errInvalidTaskIdentity) {
 		return taskfailure.ReasonInvalidTaskIdentity.String()
+	}
+	// GAP-28: a MULTICA_BUDGET_* cap stop must not fall through to Classify,
+	// which reads "context deadline exceeded" as provider_network and would
+	// both mislabel the failure and invite a pointless auto-retry.
+	if errors.Is(err, errBudgetExceeded) {
+		return taskfailure.ReasonAgentBudgetExceeded.String()
 	}
 	if errors.Is(err, errTaskPrepareTimeout) {
 		return taskfailure.ReasonTimeout.String()
@@ -5262,6 +5441,24 @@ func taskRunFailureReason(err error) string {
 		return taskfailure.ReasonRuntimeCLITimeout.String()
 	}
 	return taskfailure.Classify(err.Error()).String()
+}
+
+// isProviderNetworkError reports whether err is a transient transport-layer
+// provider failure — the only class worth walking the GAP-5 failover chain
+// for. Provider network cuts and 429 capacity errors qualify; auth, quota,
+// context overflow, timeouts with their own terminal status etc. fail fast on
+// the current provider.
+func isProviderNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch taskfailure.Classify(err.Error()) {
+	case taskfailure.ReasonAgentProviderNetwork,
+		taskfailure.ReasonAgentProviderCapacityOrRateLimit: // 429/529
+		return true
+	default:
+		return false
+	}
 }
 
 // acquireLocalDirectoryLockIfNeeded inspects the task's project resources for
@@ -5579,10 +5776,30 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 // parent deadlines: daemon shutdown cancels the root context before pollLoop's
 // 30-second drain, but terminal callbacks must still use that remaining window.
 // The explicit timeout keeps this detached work bounded during normal runs.
+//
+// On delivery failure the report is journaled in the outbox (GAP-14) and
+// replayed on the next healthy heartbeat — without it, exhausted retries
+// leave the task row `running` forever on a heartbeating runtime.
 func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTaskReport) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(parentCtx), terminalTaskReportTimeout)
 	defer cancel()
 
+	err := d.sendTerminalReport(ctx, report)
+	if err != nil {
+		if enqErr := d.outbox.enqueue(report.kind, report); enqErr != nil {
+			d.logger.Error("terminal report AND outbox journal write failed; result at risk",
+				"task_id", report.taskID, "report_error", err, "journal_error", enqErr)
+		} else {
+			d.logger.Warn("terminal report failed; queued in outbox for replay",
+				"task_id", report.taskID, "error", err)
+		}
+	}
+	return err
+}
+
+// sendTerminalReport performs one terminal callback against the server. Used
+// both by the live report path and by outbox replay.
+func (d *Daemon) sendTerminalReport(ctx context.Context, report terminalTaskReport) error {
 	switch report.kind {
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
@@ -6671,6 +6888,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	//
+	// GAP-11 (fork issue #12): the env root is deterministic before Prepare
+	// runs, so repos flagged additional_checkout can have their sibling
+	// checkout path (<envRoot>/extra/<name>) named in the brief up front;
+	// the daemon materialises them in prepareExtraCheckouts below.
+	extraCheckoutRoot := filepath.Join(execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID), "extra")
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
@@ -6689,7 +6912,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
-		Repos:                            convertReposForEnv(task.Repos),
+		Repos:                            convertReposForEnv(task.Repos, extraCheckoutRoot),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -6705,6 +6928,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		HandoffNote:                      task.HandoffNote,
+		PriorAttempt:                     convertPriorAttemptForEnv(task.PriorAttempt),
 		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
@@ -7131,6 +7355,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.markActiveEnvRoot(env.RootDir)
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
+	// GAP-11 (fork issue #12): materialise opt-in sibling checkouts before the
+	// agent starts. Runs for both fresh Prepare and Reuse — CreateWorktree
+	// updates a checkout that already exists at the target path.
+	if err := d.prepareExtraCheckouts(task.Repos, task.WorkspaceID, env.RootDir, agentName, task.ID, taskLog); err != nil {
+		return TaskResult{}, fmt.Errorf("additional checkouts: %w", err)
+	}
 	// Finalize the worktree on EVERY exit path, success or failure: commit
 	// whatever the agent left uncommitted, then unregister the worktree from
 	// the user's repo. Deferred against the named return so a task that fails
@@ -7289,6 +7519,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease()
 	prepareComplete = true
 	cancelPrepare()
+	// GAP-15: mark this run live in the workdir so a crash mid-task leaves a
+	// marker the next Reuse declines. Only managed workdirs are marked —
+	// local_directory and worktree tasks never go through PriorWorkDir reuse,
+	// and a marker there would pollute the user's tree or the delivered branch.
+	if localAssignment == nil {
+		if err := execenv.MarkWriterAlive(env.WorkDir); err != nil {
+			taskLog.Warn("writer-liveness marker not written; reuse protection off for this run", "error", err)
+		}
+	}
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
@@ -7381,6 +7620,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CursorDataDir != "" {
 		agentEnv["CURSOR_DATA_DIR"] = env.CursorDataDir
 	}
+	// GAP-1: per-task opencode data isolation. opencode resolves its data
+	// root as $XDG_DATA_HOME/opencode; redirecting it into the env root stops
+	// concurrent tasks from contending on one shared SQLite db. Exported
+	// before custom_env so a user-set XDG_DATA_HOME still wins.
+	if env.OpenCodeDataDir != "" {
+		agentEnv["XDG_DATA_HOME"] = env.OpenCodeDataDir
+	}
 	// Point OpenClaw at the per-task synthesized config. The config pins
 	// agents.defaults.workspace (and any agents.list[].workspace) to the
 	// task workdir, so the CLI's native skill scanner picks up the per-task
@@ -7439,6 +7685,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
 			profileFixedArgs, rawCustomArgs, d.logger)
+	}
+	// GAP-3 (fork issue #2): official agent-wrapper hook. When
+	// MULTICA_AGENT_WRAPPER is set and non-empty, every agent launch runs
+	// `<wrapper...> <agent-binary> <agent args...>` instead of the bare
+	// agent. Wrapper string is whitespace-split (strings.Fields). Unset =
+	// byte-identical direct spawn.
+	if ws := strings.Fields(os.Getenv("MULTICA_AGENT_WRAPPER")); len(ws) > 0 {
+		bin := entry.Path
+		entry.Path = ws[0]
+		profileFixedArgs = append(append(append([]string{}, ws[1:]...), bin), profileFixedArgs...)
 	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
@@ -7799,6 +8055,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
 			Usage:     usageEntries,
+		}
+		// GAP-15: clean completion — drop the marker so the next task on this
+		// issue may reuse the workdir. Failure/blocked/cancel paths keep it.
+		if localAssignment == nil {
+			execenv.ClearWriterAlive(env.WorkDir)
 		}
 		return taskResult, nil
 	case "timeout":
@@ -8612,13 +8873,78 @@ func convertIssueStatusesForEnv(statuses []IssueStatusData) []execenv.IssueStatu
 	return result
 }
 
-func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
-	if len(repos) == 0 {
+// convertPriorAttemptForEnv maps the claim payload's failure digest into the
+// execenv context type (GAP-23). Nil-safe: fresh tasks and old servers carry
+// no digest.
+func convertPriorAttemptForEnv(pa *PriorAttemptData) *execenv.PriorAttemptData {
+	if pa == nil {
+		return nil
+	}
+	return &execenv.PriorAttemptData{
+		Attempt:       pa.Attempt,
+		FailureReason: pa.FailureReason,
+		ErrorText:     pa.ErrorText,
+		FailedAt:      pa.FailedAt,
+	}
+}
+
+// prepareExtraCheckouts materialises opt-in sibling checkouts (GAP-11, fork
+// issue #12) under <envRoot>/extra/<name> for workspace repos flagged
+// additional_checkout. Reuses the bare-repo cache: sync-on-miss, then
+// CreateWorktree (which also updates a checkout left by a reused env).
+// No-op when nothing is flagged — the default single-repo path is untouched.
+//
+// ponytail: linked worktrees keep gitdir under the shared cache; if Codex's
+// sandbox ever refuses writes to these out-of-workdir siblings, switch them
+// to IsolatedGitMetadata like codex workdir checkouts.
+func (d *Daemon) prepareExtraCheckouts(repos []RepoData, workspaceID, envRoot, agentName, taskID string, log *slog.Logger) error {
+	var flagged []RepoData
+	for _, r := range repos {
+		if r.AdditionalCheckout {
+			flagged = append(flagged, r)
+		}
+	}
+	if len(flagged) == 0 || d.repoCache == nil {
+		return nil
+	}
+	extraDir := filepath.Join(envRoot, "extra")
+	if err := os.MkdirAll(extraDir, 0o755); err != nil {
+		return fmt.Errorf("create %s: %w", extraDir, err)
+	}
+	for _, r := range flagged {
+		if d.repoCache.Lookup(workspaceID, r.URL) == "" {
+			if err := d.repoCache.Sync(workspaceID, []repocache.RepoInfo{{URL: r.URL}}); err != nil {
+				return fmt.Errorf("sync %s into repo cache: %w", r.URL, err)
+			}
+		}
+		res, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
+			WorkspaceID: workspaceID,
+			RepoURL:     r.URL,
+			WorkDir:     extraDir,
+			Ref:         r.Ref,
+			AgentName:   agentName,
+			TaskID:      taskID,
+		})
+		if err != nil {
+			return fmt.Errorf("checkout %s: %w", r.URL, err)
+		}
+		log.Info("additional checkout ready", "url", r.URL, "path", res.Path, "branch", res.BranchName)
+	}
+	return nil
+}
+
+func convertReposForEnv(repos []RepoData, extraCheckoutRoot string) []execenv.RepoContextForEnv {	if len(repos) == 0 {
 		return nil
 	}
 	result := make([]execenv.RepoContextForEnv, len(repos))
 	for i, r := range repos {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
+		// GAP-11: name the sibling checkout path in the brief. The daemon
+		// creates it in prepareExtraCheckouts; same repoNameFromURL the
+		// cache uses, so brief and disk agree (fork issue #12).
+		if r.AdditionalCheckout && extraCheckoutRoot != "" {
+			result[i].ExtraCheckoutPath = filepath.Join(extraCheckoutRoot, repocache.RepoNameFromURL(r.URL))
+		}
 	}
 	return result
 }

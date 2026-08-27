@@ -40,6 +40,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentProcessFailure, "agent_error.process_failure"},
 		{ReasonAgentEmptyOrUnparseableOutput, "agent_error.empty_or_unparseable_output"},
 		{ReasonAgentTimeout, "agent_error.agent_timeout"},
+		{ReasonAgentBudgetExceeded, "agent_error.budget_exceeded"},
 		{ReasonAgentContextOverflow, "agent_error.context_overflow"},
 		{ReasonAgentMissingConfig, "agent_error.missing_config"},
 		{ReasonAgentModelNotFoundOrUnavailable, "agent_error.model_not_found_or_unavailable"},
@@ -48,7 +49,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 26; got != want {
+	if got, want := len(cases), 27; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -120,8 +121,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 26 {
-		t.Fatalf("AllReasons() returned %d entries, want 26", len(got))
+	if len(got) != 27 {
+		t.Fatalf("AllReasons() returned %d entries, want 27", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -141,8 +142,8 @@ func TestAllReasonsContents(t *testing.T) {
 	if platformCount != 12 {
 		t.Errorf("AllReasons(): platform-side count = %d, want 12", platformCount)
 	}
-	if agentCount != 14 {
-		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
+	if agentCount != 15 {
+		t.Errorf("AllReasons(): agent-side count = %d, want 15", agentCount)
 	}
 
 	// Sanity-check that every constant declared at package level
@@ -159,6 +160,7 @@ func TestAllReasonsContents(t *testing.T) {
 		ReasonAgentProviderCapacityOrRateLimit, ReasonAgentProviderServerError,
 		ReasonAgentProviderNetwork, ReasonAgentProcessFailure,
 		ReasonAgentEmptyOrUnparseableOutput, ReasonAgentTimeout,
+		ReasonAgentBudgetExceeded,
 		ReasonAgentContextOverflow, ReasonAgentMissingConfig,
 		ReasonAgentModelNotFoundOrUnavailable,
 		ReasonAgentRuntimeVersionUnsupported,

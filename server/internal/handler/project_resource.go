@@ -992,11 +992,16 @@ func projectResourcesForClaim(rows []db.ProjectResource) ([]ProjectResourceData,
 		})
 		if row.ResourceType == "github_repo" {
 			var payload struct {
-				URL string `json:"url"`
-				Ref string `json:"ref,omitempty"`
+				URL                string `json:"url"`
+				Ref                string `json:"ref,omitempty"`
+				AdditionalCheckout bool   `json:"additional_checkout,omitempty"` // GAP-11, fork issue #12
 			}
 			if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-				repos = append(repos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+				repos = append(repos, RepoData{
+					URL:                payload.URL,
+					Ref:                strings.TrimSpace(payload.Ref),
+					AdditionalCheckout: payload.AdditionalCheckout,
+				})
 			}
 		}
 	}

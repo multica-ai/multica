@@ -18,9 +18,14 @@ import (
 
 // RepoContextForEnv describes a workspace repo available for checkout.
 type RepoContextForEnv struct {
-	URL         string // remote URL
-	Description string // optional repo description
-	Ref         string // optional default checkout ref for this task
+	URL         string `json:"url"`         // remote URL
+	Description string `json:"description,omitempty"` // optional repo description
+	Ref         string `json:"ref,omitempty"`         // optional default checkout ref for this task
+	// ExtraCheckoutPath, when set (GAP-11), is the sibling path under the
+	// env root the daemon pre-checks this repo into before the agent starts.
+	// Rendered into the Repositories section so the agent works there
+	// directly instead of running `multica repo checkout`.
+	ExtraCheckoutPath string `json:"extra_checkout_path,omitempty"`
 }
 
 // ProjectResourceForEnv describes a single resource attached to the issue's
@@ -194,7 +199,18 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
+	// PriorAttempt is the failure digest of the attempt this retry follows
+	// (GAP-23). Rendered as "## Prior Attempt" in issue_context.md. Nil on
+	// fresh tasks.
+	PriorAttempt *PriorAttemptData
+	// PriorRunDigest is the GAP-2 handoff summary of the reused workdir's git
+	// state (current branch, commits ahead of the default branch, last three
+	// commit subjects), collected by writeContextFiles when
+	// PriorSessionResumed is set. Rendered ONLY into issue_context.md (a
+	// per-run sidecar rewritten every task); it must never reach the runtime
+	// brief, which stays byte-identical across runs (MUL-5377).
+	PriorRunDigest string
+	IsSquadLeader bool // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -313,6 +329,11 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
+	// OpenCodeDataDir is the per-task XDG_DATA_HOME root for opencode tasks
+	// (GAP-1): opencode resolves its data dir (session/auth SQLite state) as
+	// $XDG_DATA_HOME/opencode, so concurrent tasks stop contending on one
+	// shared ~/.local/share/opencode/opencode.db. Empty = shared default.
+	OpenCodeDataDir string
 	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
 	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
@@ -642,6 +663,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CursorDataDir = cursorDataDir
 	}
 
+	// For opencode, isolate the per-task data dir (GAP-1). Degraded, not
+	// fatal: on mkdir failure the task falls back to the shared default
+	// rather than blocking dispatch.
+	if params.Provider == "opencode" {
+		if dir, err := prepareOpenCodeDataDir(envRoot); err != nil {
+			logger.Warn("execenv: prepare opencode data dir failed; using shared default", "error", err)
+		} else {
+			env.OpenCodeDataDir = dir
+		}
+	}
+
 	if err := writeSidecarManifest(envRoot, manifest); err != nil {
 		// In place the manifest is the ONLY record of what we wrote into the
 		// user's own directory, so losing it strands the sidecar tree there
@@ -746,6 +778,15 @@ type ReuseParams struct {
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
+		return nil
+	}
+	// GAP-15: a leftover writer-liveness marker means the prior run never
+	// completed cleanly — the workdir may hold half-finished state. Decline so
+	// the caller falls back to a fresh Prepare (which resets the env root).
+	if WriterAliveMarkerPresent(params.WorkDir) {
+		if logger != nil {
+			logger.Warn("execenv: stale writer-liveness marker on reused workdir; forcing fresh prepare", "workdir", params.WorkDir)
+		}
 		return nil
 	}
 
@@ -931,6 +972,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		env.CursorDataDir = cursorDataDir
 	}
 
+	// Refresh opencode's per-task data dir on reuse (GAP-1). Same fallback
+	// contract as fresh prepare: failure keeps the shared default.
+	if params.Provider == "opencode" && env.RootDir != "" {
+		dir, err := prepareOpenCodeDataDir(env.RootDir)
+		if err != nil {
+			logger.Warn("execenv: refresh opencode data dir failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.OpenCodeDataDir = dir
+	}
+
 	if env.RootDir != "" {
 		if err := writeSidecarManifest(env.RootDir, manifest); err != nil {
 			logger.Warn("execenv: refresh sidecar manifest failed", "error", err)
@@ -1011,6 +1063,16 @@ const (
 	GCKindQuickCreate  GCMetaKind = "quick_create"
 )
 
+// PriorAttemptData mirrors daemon.PriorAttemptData (GAP-23): the failure
+// digest of the attempt a retry child follows. Kept as a local type because
+// execenv cannot import the daemon package (reverse dependency).
+type PriorAttemptData struct {
+	Attempt       int32  `json:"attempt"`
+	FailureReason string `json:"failure_reason"`
+	ErrorText     string `json:"error_text,omitempty"`
+	FailedAt      string `json:"failed_at"`
+}
+
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
 // can decide whether the directory is reclaimable. It is a discriminated
 // union keyed on Kind: only the ID field matching Kind is meaningful.
@@ -1057,7 +1119,9 @@ func WriteGCMeta(envRoot string, meta GCMeta, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("marshal gc meta: %w", err)
 	}
-	return os.WriteFile(filepath.Join(envRoot, gcMetaFile), data, 0o644)
+	// Atomic tmp+rename: a torn .gc_meta.json unmarshal-errors on read and is
+	// treated as "no meta", dropping the dir into the 72h orphan-by-mtime path.
+	return writeFileAtomic(filepath.Join(envRoot, gcMetaFile), data, 0o644)
 }
 
 // ReadGCMeta reads GC metadata from a task directory root. Pre-v2 meta files
@@ -1120,7 +1184,9 @@ func WriteManagedEnvProvenance(envRoot string, p ManagedEnvProvenance) error {
 	if err != nil {
 		return fmt.Errorf("marshal managed env provenance: %w", err)
 	}
-	return os.WriteFile(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
+	// Atomic tmp+rename: a torn provenance file fails closed on read (no
+	// reuse), silently dropping session continuity — the MUL-4886 bug class.
+	return writeFileAtomic(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
 }
 
 // ReadManagedEnvProvenance reads the Prepare-time reuse-eligibility marker from

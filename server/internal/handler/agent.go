@@ -122,15 +122,19 @@ type AgentResponse struct {
 	// members infer another member's integration footprint. Redacted to
 	// `nil` + `composio_toolkit_allowlist_redacted=true` for non-owners,
 	// mirroring the existing mcp_config redaction contract.
-	ComposioToolkitAllowlist         []string               `json:"composio_toolkit_allowlist,omitempty"`
-	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
-	OwnerID                          *string                `json:"owner_id"`
-	Skills                           []AgentSkillSummary    `json:"skills"`
-	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
-	CreatedAt                        string                 `json:"created_at"`
-	UpdatedAt                        string                 `json:"updated_at"`
-	ArchivedAt                       *string                `json:"archived_at"`
-	ArchivedBy                       *string                `json:"archived_by"`
+	ComposioToolkitAllowlist         []string `json:"composio_toolkit_allowlist,omitempty"`
+	ComposioToolkitAllowlistRedacted bool     `json:"composio_toolkit_allowlist_redacted,omitempty"`
+	// VerifyAgentID (GAP-24): agent that runs a verification pass whenever
+	// this agent completes an issue task that produced a branch. Empty =
+	// verification disabled.
+	VerifyAgentID         string                 `json:"verify_agent_id,omitempty"`
+	OwnerID               *string                `json:"owner_id"`
+	Skills                []AgentSkillSummary    `json:"skills"`
+	DisabledRuntimeSkills []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
+	CreatedAt             string                 `json:"created_at"`
+	UpdatedAt             string                 `json:"updated_at"`
+	ArchivedAt            *string                `json:"archived_at"`
+	ArchivedBy            *string                `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -225,6 +229,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
 		ComposioToolkitAllowlist: composioAllowlist,
+		VerifyAgentID:            uuidToString(a.VerifyAgentID),
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
 		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
@@ -297,6 +302,10 @@ type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
 	Ref         string `json:"ref,omitempty"`
+	// AdditionalCheckout opts the repo into a sibling checkout under the
+	// task env root at task start (GAP-11, fork issue #12). Mirrored in
+	// internal/daemon/types.go, same JSON name.
+	AdditionalCheckout bool `json:"additional_checkout,omitempty"`
 }
 
 // ProjectResourceData is the wire shape for a project resource included in a
@@ -475,10 +484,15 @@ type AgentTaskResponse struct {
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage        `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
-	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string                 `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string                 `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	// PriorAttempt carries the failure digest stamped onto retry children
+	// (GAP-23): attempt number, classified reason, redacted error tail. Lifted
+	// from context JSONB at claim time so the daemon renders "## Prior Attempt"
+	// into issue_context.md. Nil for fresh tasks and old servers.
+	PriorAttempt          *service.PriorAttemptContextData `json:"prior_attempt,omitempty"`
+	SquadID               string                           `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName             string                           `json:"squad_name,omitempty"`              // display name for the picker squad
+	ParentIssueID         string                           `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier string                           `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -1495,6 +1509,12 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
+	// VerifyAgentID (GAP-24) tri-state, same pattern: omitted preserves,
+	// null clears (ClearAgentVerifyAgent), non-empty sets — validated to be
+	// an existing non-archived agent in the SAME workspace that is not the
+	// agent itself. The named agent runs a verification pass whenever this
+	// agent completes an issue task that produced a branch.
+	VerifyAgentID *string `json:"verify_agent_id"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -1988,6 +2008,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// keeps working — same "silent ignore" stance the issue calls out, and
 	// the same one mcp_config takes for the broader admin pattern.
 	shouldClearComposioAllowlist := false
+	shouldClearVerifyAgent := false
 	if _, hasAllowlist := rawFields["composio_toolkit_allowlist"]; hasAllowlist {
 		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
 		if !h.composioMCPAppsEnabled(r.Context()) {
@@ -2007,6 +2028,41 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			// either way, but the column tells UX whether to show a primed
 			// vs empty picker).
 			params.ComposioToolkitAllowlist = normaliseComposioToolkitAllowlist(*req.ComposioToolkitAllowlist)
+		}
+	}
+
+	// verify_agent_id (GAP-24). Tri-state: omitted → preserve, null → clear,
+	// non-empty → validate + set. Manager-level write (canManageAgent already
+	// passed) — verification is an operational setting, not an ownership one.
+	if rawVerify, hasVerify := rawFields["verify_agent_id"]; hasVerify {
+		if bytes.Equal(bytes.TrimSpace(rawVerify), []byte("null")) {
+			shouldClearVerifyAgent = true
+		} else if req.VerifyAgentID != nil && *req.VerifyAgentID != "" {
+			targetID, parseErr := util.ParseUUID(*req.VerifyAgentID)
+			if parseErr != nil {
+				writeError(w, http.StatusBadRequest, "invalid verify_agent_id")
+				return
+			}
+			if targetID == existing.ID {
+				writeError(w, http.StatusBadRequest, "an agent cannot verify its own work")
+				return
+			}
+			target, err := h.Queries.GetAgent(r.Context(), targetID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "verify_agent_id does not reference a known agent")
+				return
+			}
+			if target.WorkspaceID != existing.WorkspaceID {
+				writeError(w, http.StatusBadRequest, "verify_agent_id must be an agent in the same workspace")
+				return
+			}
+			if target.ArchivedAt.Valid {
+				writeError(w, http.StatusBadRequest, "verify_agent_id references an archived agent")
+				return
+			}
+			params.VerifyAgentID = targetID
+		} else if req.VerifyAgentID != nil && *req.VerifyAgentID == "" {
+			shouldClearVerifyAgent = true // explicit "" treated as clear, friendlier than null-only
 		}
 	}
 
@@ -2064,6 +2120,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist: "+err.Error())
+			return
+		}
+	}
+	if shouldClearVerifyAgent {
+		updated, err = h.Queries.ClearAgentVerifyAgent(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent verify_agent_id failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear verify_agent_id: "+err.Error())
 			return
 		}
 	}

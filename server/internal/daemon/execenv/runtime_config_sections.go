@@ -406,6 +406,11 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		} else {
 			fmt.Fprintf(b, "- %s\n", repo.URL)
 		}
+		if repo.ExtraCheckoutPath != "" {
+			// GAP-11: pre-checked-out sibling at task start — no checkout
+			// needed, work and commit there directly.
+			fmt.Fprintf(b, "  - already checked out at `%s` on a dedicated branch; work there directly, no checkout needed\n", repo.ExtraCheckoutPath)
+		}
 	}
 	b.WriteString("\n")
 }

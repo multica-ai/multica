@@ -52,6 +52,7 @@ type Agent struct {
 	SystemKey             pgtype.Text `json:"system_key"`
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
+	VerifyAgentID         pgtype.UUID `json:"verify_agent_id"`
 	StarterPrompts        []byte      `json:"starter_prompts"`
 }
 
@@ -172,6 +173,7 @@ type AgentTaskQueue struct {
 	BranchName                pgtype.Text `json:"branch_name"`
 	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
 	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
+	ConcreteModel             pgtype.Text `json:"concrete_model"`
 }
 
 type AgentToLabel struct {
@@ -1012,6 +1014,12 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ModelTierMap struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Tier        string      `json:"tier"`
+	Concrete    string      `json:"concrete"`
 }
 
 type NotificationPreference struct {

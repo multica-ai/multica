@@ -144,7 +144,16 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     starter_prompts = COALESCE(sqlc.narg('starter_prompts'), starter_prompts),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    verify_agent_id = COALESCE(sqlc.narg('verify_agent_id'), verify_agent_id),
     updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentVerifyAgent :one
+-- Explicit NULL-clear for verify_agent_id (GAP-24). The COALESCE-based
+-- UpdateAgent cannot set the column back to NULL — same two-query pattern as
+-- thinking_level / mcp_config / composio_toolkit_allowlist.
+UPDATE agent SET verify_agent_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -333,6 +342,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
+    concrete_model,
     id
 )
 SELECT
@@ -358,6 +368,7 @@ SELECT
     sqlc.narg(rerun_of_task_id),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(concrete_model),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -375,7 +386,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
-    trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
+    trigger_evidence_kind, trigger_evidence_ref_id, fire_at, concrete_model,
     id
 )
 SELECT
@@ -401,6 +412,7 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     @fire_at,
+    sqlc.narg(concrete_model),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -591,7 +603,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, id
+    channel_context_revision, concrete_model, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -611,7 +623,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
-    p.channel_context_revision,
+    p.channel_context_revision, p.concrete_model,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -777,6 +789,11 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
 -- otherwise a user mashing the create button could fire concurrent quick-creates
 -- whose completion lookup would race over "most recent issue by this agent".
+-- GAP-13: an issue task with a 'blocked_by' issue_dependency edge whose blocker
+-- is not yet terminal (done/cancelled) stays queued. Opt-in: no dependency rows
+-- means the NOT EXISTS is trivially true and dispatch is unchanged. Raw-status
+-- check covers built-in statuses; a custom status in the done/cancelled category
+-- does not unblock (safe direction — work stays queued).
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
@@ -809,6 +826,17 @@ WHERE id = (
                 AND active.autopilot_run_id IS NULL
               )
             )
+      )
+      AND (
+          atq.issue_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1
+              FROM issue_dependency dep
+              JOIN issue blocker ON blocker.id = dep.depends_on_issue_id
+              WHERE dep.issue_id = atq.issue_id
+                AND dep.type = 'blocked_by'
+                AND blocker.status NOT IN ('done', 'cancelled')
+          )
       )
     ORDER BY atq.priority DESC, atq.created_at ASC, atq.id ASC
     LIMIT 1
@@ -1707,6 +1735,33 @@ WHERE issue_id = @issue_id
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
   );
 
+-- name: CountOpenBlockersForIssue :one
+-- GAP-13 companion: number of issue_dependency 'blocked_by' edges whose blocker
+-- issue has NOT reached a terminal status (done/cancelled). Zero means the issue
+-- is fully unblocked and its queued task may dispatch. Mirrors the NOT EXISTS
+-- guard in ClaimAgentTask so this count and the claim gate never disagree.
+SELECT count(*) FROM issue_dependency dep
+JOIN issue blocker ON blocker.id = dep.depends_on_issue_id
+WHERE dep.issue_id = $1 AND dep.type = 'blocked_by'
+  AND blocker.status NOT IN ('done', 'cancelled');
+
+-- name: ListCancelledTasksForIssue :many
+-- Tasks on an issue parked in 'cancelled' (e.g. cancelled while the issue was
+-- blocked). Used to reactivate a dependent's work once all blockers clear.
+-- Most-recent first so we revive the newest plan.
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1 AND status = 'cancelled'
+ORDER BY created_at DESC;
+
+-- name: RequeueCancelledAgentTask :one
+-- Revive a cancelled dependent task once its blockers clear. Resets the
+-- terminal fields the cancel set so the claim sweep picks it up like a fresh
+-- enqueue. Idempotent: only matches status='cancelled'.
+UPDATE agent_task_queue
+SET status = 'queued', completed_at = NULL, prepare_lease_expires_at = NULL, fire_at = NULL
+WHERE id = $1 AND status = 'cancelled'
+RETURNING *;
+
 -- name: MergeCommentIntoPendingTask :one
 -- MUL-4195: fold a newly-arrived comment into an existing task for (issue,
 -- agent) that has NOT yet been claimed, instead of letting the
@@ -2135,11 +2190,59 @@ RETURNING *;
 -- runtime_id filter is served by the partial index
 -- idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
 -- a sort step (each runtime's slice is index-ordered, but merging several
--- runtimes' rows into one priority/FIFO order is not). The per-machine
--- candidate set is small, so this is cheap in practice.
+-- runtimes' rows into one priority/FIFO order is not).
+--
+-- LIMIT is a scan bound, not a fairness knob: the claim loop consumes at most
+-- max_per_poll candidates (the daemon's maxTasks), and the ORDER BY guarantees
+-- the highest-priority FIFO head is exactly what the limit keeps. Without it a
+-- large backlog (historically 87k+ doomed rows) forces a full scan+sort on
+-- every non-empty daemon poll.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+ORDER BY priority DESC, created_at ASC
+LIMIT @max_per_poll;
+
+-- name: SetTaskPriorAttemptContext :exec
+-- Stamps the prior-attempt failure digest into a retry child's context JSONB
+-- (key "prior_attempt") so the next run's issue_context.md can tell the agent
+-- what already failed and why, instead of rediscovering it. Called inside the
+-- FailTask transaction right after CreateRetryTask; the child is still
+-- unclaimed, so no concurrent writer races the jsonb_set.
+UPDATE agent_task_queue
+SET context = jsonb_set(COALESCE(context, '{}'::jsonb), '{prior_attempt}', @prior_attempt::jsonb)
+WHERE id = @id;
+
+-- name: CreateVerifierTask :one
+-- Enqueues the post-completion verification pass (GAP-24): a task for the
+-- verify_agent that re-checks the branch a work agent just delivered. Runs on
+-- the SAME issue (comments land in the thread) with the completing run's
+-- attribution inherited — the verifier acts on behalf of the same originator.
+-- context carries the verification marker so the claim payload can tell the
+-- daemon (and future guard rails) this is a verifier run; handoff_note carries
+-- the human-readable brief. Fenced by lock_task_owner_rows like every insert.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority,
+    trigger_summary, force_fresh_session, handoff_note, context,
+    originator_user_id, accountable_user_id,
+    originator_source, delegated_from_task_id,
+    trigger_evidence_kind, trigger_evidence_ref_id,
+    id
+)
+SELECT
+    $1, $2, $3, 'queued', $4,
+    sqlc.narg(trigger_summary),
+    COALESCE(sqlc.narg('force_fresh_session')::boolean, TRUE),
+    sqlc.narg(handoff_note),
+    @context::jsonb,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    'system',
+    sqlc.narg(delegated_from_task_id),
+    'task_completion',
+    $5,
+    gen_random_uuid()
+WHERE lock_task_owner_rows($1, $3, $2)
+RETURNING *;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all

@@ -426,6 +426,53 @@ func TestCreateAutopilotTrigger_RejectsEventFiltersOnSchedule(t *testing.T) {
 	}
 }
 
+func TestCreateAutopilotTrigger_EventKind(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "EventKind Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	post := func(body map[string]any) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", body)
+		req = withURLParam(req, "id", apID)
+		testHandler.CreateAutopilotTrigger(w, req)
+		return w
+	}
+
+	// No filters → 400: the filter set is the only fire contract an event
+	// trigger has.
+	if w := post(map[string]any{"kind": "event"}); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for event trigger without filters, got %d body=%s", w.Code, w.Body.String())
+	}
+	// Timezone meaningless on demand-fired kinds.
+	if w := post(map[string]any{"kind": "event", "timezone": "UTC", "event_filters": []map[string]any{{"event": "issue_updated"}}}); w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for event trigger with timezone, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	w := post(map[string]any{
+		"kind":          "event",
+		"label":         "bus subscription",
+		"event_filters": []map[string]any{{"event": "issue_updated"}},
+	})
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for event trigger, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		ID           string  `json:"id"`
+		Kind         string  `json:"kind"`
+		CronExpr     *string `json:"cron_expression"`
+		WebhookToken *string `json:"webhook_token"`
+		EventFilters []struct {
+			Event string `json:"event"`
+		} `json:"event_filters"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Kind != "event" || resp.CronExpr != nil || resp.WebhookToken != nil || len(resp.EventFilters) != 1 || resp.EventFilters[0].Event != "issue_updated" {
+		t.Fatalf("event trigger round-trip mismatch: %#v", resp)
+	}
+}
+
 func postWebhook(t *testing.T, token string, body any, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	var buf bytes.Buffer

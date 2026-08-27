@@ -187,6 +187,12 @@ const (
 	// platform-side sweeper timeout.
 	ReasonAgentTimeout Reason = "agent_error.agent_timeout"
 
+	// ReasonAgentBudgetExceeded: a daemon-side MULTICA_BUDGET_* cap (cost,
+	// tokens, wall clock — GAP-28) stopped the run. Multica-imposed budget,
+	// not an external API rejection; deliberately off retryableReasons, so
+	// FailTask posts the failure comment and the GAP-27 dead-letter case file.
+	ReasonAgentBudgetExceeded Reason = "agent_error.budget_exceeded"
+
 	// ReasonAgentContextOverflow: prompt or context window exceeded
 	// the model's limit. Not retryable on the same session; needs
 	// compaction or a fresh session.
@@ -254,6 +260,7 @@ var allReasons = []Reason{
 	ReasonAgentProcessFailure,
 	ReasonAgentEmptyOrUnparseableOutput,
 	ReasonAgentTimeout,
+	ReasonAgentBudgetExceeded,
 	ReasonAgentContextOverflow,
 	ReasonAgentMissingConfig,
 	ReasonAgentModelNotFoundOrUnavailable,

@@ -249,16 +249,16 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 			hint := signingSecretHint(t.SigningSecret.String)
 			resp.SigningSecretHint = &hint
 		}
-		if len(t.EventFilters) > 0 {
-			var filters []WebhookEventFilter
-			if err := json.Unmarshal(t.EventFilters, &filters); err == nil {
-				resp.EventFilters = filters
-			}
-			// On unmarshal error we deliberately drop the field instead of
-			// surfacing raw bytes or 500ing — strict write-time validation
-			// is supposed to make this branch unreachable, and the matcher
-			// fails closed if a corrupt row ever slips through.
+	}
+	if (t.Kind == "webhook" || t.Kind == "event") && len(t.EventFilters) > 0 {
+		var filters []WebhookEventFilter
+		if err := json.Unmarshal(t.EventFilters, &filters); err == nil {
+			resp.EventFilters = filters
 		}
+		// On unmarshal error we deliberately drop the field instead of
+		// surfacing raw bytes or 500ing — strict write-time validation
+		// is supposed to make this branch unreachable, and the matcher
+		// fails closed if a corrupt row ever slips through.
 	}
 	return resp
 }
@@ -1374,27 +1374,33 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "kind is required")
 		return
 	}
-	if req.Kind != "schedule" && req.Kind != "webhook" {
+	if req.Kind != "schedule" && req.Kind != "webhook" && req.Kind != "event" {
 		// "api" kind is deprecated: it was reserved-but-inert (no scheduler,
 		// no ingress route), and the only way to actually fire one was via
 		// the manual /trigger endpoint — which already works regardless of
 		// trigger kind. Surface stragglers with 400 so callers move to
 		// schedule or webhook.
-		writeError(w, http.StatusBadRequest, "kind must be schedule or webhook")
+		writeError(w, http.StatusBadRequest, "kind must be schedule, webhook, or event")
 		return
 	}
 	if req.Kind == "schedule" && (req.CronExpression == nil || *req.CronExpression == "") {
 		writeError(w, http.StatusBadRequest, "cron_expression is required for schedule triggers")
 		return
 	}
-	if req.Kind == "webhook" && req.Timezone != nil && *req.Timezone != "" {
-		// Webhook triggers fire on demand from external POSTs — they have no
-		// next_run_at to compute, so a timezone is meaningless. Reject loudly
-		// instead of silently dropping the field.
-		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
+	if (req.Kind == "webhook" || req.Kind == "event") && req.Timezone != nil && *req.Timezone != "" {
+		// Webhook and event triggers fire on demand — they have no next_run_at
+		// to compute, so a timezone is meaningless. Reject loudly instead of
+		// silently dropping the field.
+		writeError(w, http.StatusBadRequest, "timezone is not valid for this trigger kind")
 		return
 	}
-	if req.Kind != "webhook" && len(req.EventFilters) > 0 {
+	if req.Kind == "event" && len(req.EventFilters) == 0 {
+		// event triggers have no cron and no ingress URL — the filter set IS
+		// the subscription contract, so an empty one could never fire.
+		writeError(w, http.StatusBadRequest, "event_filters is required for event triggers")
+		return
+	}
+	if req.Kind != "webhook" && req.Kind != "event" && len(req.EventFilters) > 0 {
 		// event_filters narrows webhook ingress — it has no meaning for a
 		// schedule trigger and would otherwise be silently dropped.
 		writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
@@ -1766,8 +1772,8 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	// filters (encoded as the JSONB literal `[]` so COALESCE replaces
 	// rather than preserves), a populated slice replaces.
 	if req.EventFilters != nil {
-		if prev.Kind != "webhook" {
-			writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook triggers")
+		if prev.Kind != "webhook" && prev.Kind != "event" {
+			writeError(w, http.StatusBadRequest, "event_filters is only valid for webhook or event triggers")
 			return
 		}
 		if err := validateWebhookEventFilters(*req.EventFilters); err != nil {

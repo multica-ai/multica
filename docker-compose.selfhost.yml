@@ -62,7 +62,7 @@ services:
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable&pool_max_conns=8&pool_min_conns=2
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
@@ -164,6 +164,15 @@ services:
       MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
       MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
+      # Agent autonomy caps. Budget/ceiling/failover are daemon-side knobs
+      # (host daemon reads its own env — see launchd plist); the backend
+      # container consumes MULTICA_NOTIFY_SINKS for server-side notify fanout.
+      MULTICA_BUDGET_MAX_COST_USD: ${MULTICA_BUDGET_MAX_COST_USD:-}
+      MULTICA_BUDGET_MAX_TOKENS: ${MULTICA_BUDGET_MAX_TOKENS:-}
+      MULTICA_BUDGET_MAX_WALL_CLOCK: ${MULTICA_BUDGET_MAX_WALL_CLOCK:-}
+      MULTICA_PROVIDER_CEILING: ${MULTICA_PROVIDER_CEILING:-}
+      MULTICA_PROVIDER_FAILOVER: ${MULTICA_PROVIDER_FAILOVER:-}
+      MULTICA_NOTIFY_SINKS: ${MULTICA_NOTIFY_SINKS:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so

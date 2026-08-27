@@ -294,16 +294,26 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
-		// Build usage map. OpenCode doesn't report model per-step, so we
-		// attribute all usage to the configured model (or "unknown").
-		var usage map[string]TokenUsage
-		u := scanResult.usage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
+		// Build the usage map. Steps whose stream events carry a model
+		// (modelID/providerID, or a nested model block) are attributed to that
+		// model; steps without one fall back to the configured model (GAP-4).
+		usage := make(map[string]TokenUsage, len(scanResult.usageByModel))
+		for model, u := range scanResult.usageByModel {
+			if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+				continue
+			}
+			if model == "" {
+				model = opts.Model
+			}
 			if model == "" {
 				model = "unknown"
 			}
-			usage = map[string]TokenUsage{model: u}
+			tot := usage[model]
+			tot.InputTokens += u.InputTokens
+			tot.OutputTokens += u.OutputTokens
+			tot.CacheReadTokens += u.CacheReadTokens
+			tot.CacheWriteTokens += u.CacheWriteTokens
+			usage[model] = tot
 		}
 
 		resCh <- Result{
@@ -327,8 +337,11 @@ type eventResult struct {
 	errMsg           string
 	output           string
 	sessionID        string
-	usage            TokenUsage // accumulated token usage across all steps
-	noTerminalSignal bool       // guard fired: the stream ended without evidence the run actually finished
+	// usageByModel accumulates step_finish token usage keyed by the model the
+	// step reported ("" when the stream named no model — resolved to the
+	// configured model by Execute). GAP-4 per-step model attribution.
+	usageByModel     map[string]TokenUsage
+	noTerminalSignal bool // guard fired: the stream ended without evidence the run actually finished
 	// sawTerminalSignal is positive evidence that the run actually finished: a
 	// step_finish closed the last step with no continuation pending and with
 	// something to show for it. It is NOT the negation of noTerminalSignal — a
@@ -344,7 +357,13 @@ type eventResult struct {
 func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventResult {
 	var output strings.Builder
 	var sessionID string
-	var usage TokenUsage
+	usageByModel := make(map[string]TokenUsage)
+	// stepModel is the model named by the current step's stream events (GAP-4).
+	// The run stream puts no model fields on parts today; when a version
+	// starts carrying them (modelID/providerID or a nested model block), each
+	// step is attributed to the model its own events name, and a step naming
+	// none falls back to the configured model in Execute.
+	stepModel := ""
 	finalStatus := "completed"
 	var finalError string
 
@@ -422,6 +441,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			stepHasContinuationTool = false
 			awaitingContinuation = false
 			stepProducedOutput = false
+			stepModel = "" // per-step attribution: a step names its own model or none (GAP-4)
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
@@ -434,17 +454,25 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			// counts as proof the provider round-trip happened, which is what
 			// keeps a productive step out of the void-step guard below.
 			if t := event.Part.Tokens; t != nil {
-				usage.InputTokens += t.Input
-				usage.OutputTokens += t.Output
+				tot := usageByModel[stepModel]
+				tot.InputTokens += t.Input
+				tot.OutputTokens += t.Output
 				if t.Cache != nil {
-					usage.CacheReadTokens += t.Cache.Read
-					usage.CacheWriteTokens += t.Cache.Write
+					tot.CacheReadTokens += t.Cache.Read
+					tot.CacheWriteTokens += t.Cache.Write
 				}
+				usageByModel[stepModel] = tot
 			}
 			if stepReportedUsage(&event.Part) {
 				stepProducedOutput = true
 			}
 			lastStepVoid = !stepProducedOutput
+		}
+
+		// Capture after dispatch so a step_start that both resets and names a
+		// model keeps the name it carries (GAP-4).
+		if m := partModel(&event.Part); m != "" {
+			stepModel = m
 		}
 	}
 
@@ -486,7 +514,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		errMsg:            finalError,
 		output:            output.String(),
 		sessionID:         sessionID,
-		usage:             usage,
+		usageByModel:      usageByModel,
 		noTerminalSignal:  noTerminalSignal,
 		sawTerminalSignal: sawStepFinish && !noTerminalSignal,
 	}
@@ -519,6 +547,29 @@ func stepReportedUsage(part *opencodeEventPart) bool {
 		return true
 	}
 	return t.Cache != nil && (t.Cache.Read > 0 || t.Cache.Write > 0)
+}
+
+// partModel extracts the model a stream event names, as "provider/model"
+// when both halves are present, the bare model ID otherwise, and "" when
+// the event names no model (GAP-4). Read-only over events already flowing.
+func partModel(part *opencodeEventPart) string {
+	provider, id := part.ProviderID, part.ModelID
+	if part.Model != nil {
+		if provider == "" {
+			provider = part.Model.ProviderID
+		}
+		if id == "" {
+			id = part.Model.ModelID
+		}
+	}
+	switch {
+	case provider != "" && id != "":
+		return provider + "/" + id
+	case id != "":
+		return id
+	default:
+		return ""
+	}
 }
 
 func (b *opencodeBackend) handleTextEvent(event opencodeEvent, ch chan<- Message, output *strings.Builder) {
@@ -698,6 +749,22 @@ type opencodeEventPart struct {
 	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
 	// older opencode versions whose step-finish parts predate the field.
 	Reason string `json:"reason,omitempty"`
+
+	// Per-step model attribution (GAP-4). Not emitted by opencode's run
+	// stream today; parsed so a version that starts naming the model per
+	// step — flat providerID/modelID or a nested message-style model block —
+	// is attributed correctly instead of collapsing into the configured
+	// model.
+	ModelID    string              `json:"modelID,omitempty"`
+	ProviderID string              `json:"providerID,omitempty"`
+	Model      *opencodeModelStamp `json:"model,omitempty"`
+}
+
+// opencodeModelStamp mirrors the nested {providerID, modelID} block assistant
+// messages carry elsewhere in opencode's protocol.
+type opencodeModelStamp struct {
+	ProviderID string `json:"providerID,omitempty"`
+	ModelID    string `json:"modelID,omitempty"`
 }
 
 type opencodePartMetadata struct {

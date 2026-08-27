@@ -1291,6 +1291,14 @@ func (d *Daemon) pruneWorktreeLocked(ctx context.Context, barePath string) {
 		if _, ok := activeBranches[branch]; ok {
 			continue
 		}
+		// ponytail: guard unreported branch delete; full lineage check if false skip grows
+		if d.unreportedWork(branch) {
+			d.logger.Info("gc: skip agent branch delete: task dir still present (work never reported)",
+				"repo", barePath,
+				"branch", branch,
+			)
+			continue
+		}
 		if out, err := runGitGCCommandContext(ctx, barePath, "branch", "-D", "--", branch); err != nil {
 			if ctx.Err() != nil {
 				return
@@ -1523,4 +1531,31 @@ func isBareRepo(path string) bool {
 		return false
 	}
 	return true
+}
+
+// unreportedWork reports whether an `agent/<name>/<taskKey>` branch still has
+// its matching task dir (`<WorkspacesRoot>/<workspaceID>/<taskKey>`, the same
+// taskKey used to name the branch). A crash between worktree finalize and the
+// terminal report leaves that branch as the only copy of committed work — GC
+// must not reap it while the dir survives. Parse or stat failure deletes as
+// before (the pre-guard behavior).
+func (d *Daemon) unreportedWork(branch string) bool {
+	slash := strings.LastIndex(branch, "/")
+	if slash <= 0 || d.cfg.WorkspacesRoot == "" {
+		return false
+	}
+	key := branch[slash+1:]
+	wsEntries, err := os.ReadDir(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return false
+	}
+	for _, ws := range wsEntries {
+		if !ws.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(d.cfg.WorkspacesRoot, ws.Name(), key)); err == nil {
+			return true
+		}
+	}
+	return false
 }

@@ -680,6 +680,12 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
+	// GAP-9 (issue #11): opt-in retention sweep for append-only tables
+	// (terminal cron executions, delivered webhook deliveries, read inbox
+	// items). Inert unless MULTICA_RETENTION_DAYS is set.
+	if err := schedulerMgr.Register(scheduler.RetentionSweepJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register retention_sweep job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

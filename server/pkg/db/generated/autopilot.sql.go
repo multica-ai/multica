@@ -300,7 +300,7 @@ SELECT
     $11,
     COALESCE($12::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, concrete_model
 `
 
 type CreateAutopilotTaskParams struct {
@@ -408,6 +408,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.BranchName,
 		&i.DurableWorkDir,
 		&i.ChannelContextRevision,
+		&i.ConcreteModel,
 	)
 	return i, err
 }
@@ -925,7 +926,7 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 }
 
 const getAutopilotTaskByRun = `-- name: GetAutopilotTaskByRun :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, concrete_model FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1
@@ -991,6 +992,7 @@ func (q *Queries) GetAutopilotTaskByRun(ctx context.Context, autopilotRunID pgty
 		&i.BranchName,
 		&i.DurableWorkDir,
 		&i.ChannelContextRevision,
+		&i.ConcreteModel,
 	)
 	return i, err
 }
@@ -1434,6 +1436,89 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.TriggerKinds,
 			&i.NextRunAt,
 			&i.LastRunStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventAutopilotTriggersForTask = `-- name: ListEventAutopilotTriggersForTask :many
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, a.workspace_id AS autopilot_workspace_id
+FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.kind = 'event'
+  AND t.enabled = TRUE
+  AND a.status = 'active'
+  AND a.workspace_id = (SELECT ag.workspace_id FROM agent ag WHERE ag.id = $1)
+  AND t.event_filters @> $2::jsonb
+ORDER BY t.id
+`
+
+type ListEventAutopilotTriggersForTaskParams struct {
+	ID      pgtype.UUID `json:"id"`
+	Column2 []byte      `json:"column_2"`
+}
+
+type ListEventAutopilotTriggersForTaskRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	AutopilotID          pgtype.UUID        `json:"autopilot_id"`
+	Kind                 string             `json:"kind"`
+	Enabled              bool               `json:"enabled"`
+	CronExpression       pgtype.Text        `json:"cron_expression"`
+	Timezone             pgtype.Text        `json:"timezone"`
+	NextRunAt            pgtype.Timestamptz `json:"next_run_at"`
+	WebhookToken         pgtype.Text        `json:"webhook_token"`
+	Label                pgtype.Text        `json:"label"`
+	LastFiredAt          pgtype.Timestamptz `json:"last_fired_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	Provider             string             `json:"provider"`
+	SigningSecret        pgtype.Text        `json:"signing_secret"`
+	EventFilters         []byte             `json:"event_filters"`
+	PublishedByType      pgtype.Text        `json:"published_by_type"`
+	PublishedByID        pgtype.UUID        `json:"published_by_id"`
+	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
+}
+
+// GAP-31: event-kind triggers eligible to fire for a task completion in the
+// completing agent's workspace. $1 is the completing task's agent id (resolves
+// the workspace via scalar subquery — agent_task_queue has no workspace_id).
+// $2 is a jsonb array like '[{"event":"task.completed"}]'; containment matches
+// any trigger whose event_filters include that event regardless of declared
+// actions (action narrowing is a webhook-ingress concept, not applied here).
+func (q *Queries) ListEventAutopilotTriggersForTask(ctx context.Context, arg ListEventAutopilotTriggersForTaskParams) ([]ListEventAutopilotTriggersForTaskRow, error) {
+	rows, err := q.db.Query(ctx, listEventAutopilotTriggersForTask, arg.ID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListEventAutopilotTriggersForTaskRow{}
+	for rows.Next() {
+		var i ListEventAutopilotTriggersForTaskRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AutopilotID,
+			&i.Kind,
+			&i.Enabled,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.NextRunAt,
+			&i.WebhookToken,
+			&i.Label,
+			&i.LastFiredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Provider,
+			&i.SigningSecret,
+			&i.EventFilters,
+			&i.PublishedByType,
+			&i.PublishedByID,
+			&i.AutopilotWorkspaceID,
 		); err != nil {
 			return nil, err
 		}

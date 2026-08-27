@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -157,6 +158,13 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		return fmt.Errorf("create .agent_context dir: %w", err)
 	}
 
+	// Prior-run digest (GAP-2, issue #1): a resumed session re-pays discovery
+	// tokens relearning where the last run left the repo. Collect the git
+	// state of the reused workdir now — it is the cheapest durable digest we
+	// have without persisting anything server-side.
+	if ctx.PriorSessionResumed {
+		ctx.PriorRunDigest = collectPriorRunDigest(workDir)
+	}
 	content := renderIssueContext(provider, ctx)
 	path := filepath.Join(contextDir, "issue_context.md")
 	if err := recordWriteFile(path, []byte(content), 0o644, manifest); err != nil {
@@ -1003,6 +1011,42 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 	return nil
 }
 
+// collectPriorRunDigest summarizes the reused workdir's git state for a
+// resumed session (GAP-2, issue #1): current branch, commits ahead of the
+// default branch, and the last three commit subjects. Best-effort — any git
+// failure yields "" and the section is omitted. Capped at 1KB so a noisy
+// history cannot bloat the sidecar.
+func collectPriorRunDigest(workDir string) string {
+	run := func(args ...string) string {
+		out, err := exec.Command("git", append([]string{"-C", workDir}, args...)...).Output()
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(out))
+	}
+	branch := run("branch", "--show-current")
+	if branch == "" {
+		return "" // not a repo, detached HEAD, or git missing — no digest
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "**Branch:** `%s`\n\n", branch)
+	// ponytail: probe main/master for ahead-count; monorepo default branches beyond these need config plumbing first
+	for _, base := range []string{"main", "master"} {
+		if n := run("rev-list", "--count", base+"..HEAD"); n != "" && n != "0" {
+			fmt.Fprintf(&b, "**Commits ahead of %s:** %s\n\n", base, n)
+			break
+		}
+	}
+	if log := run("log", "--oneline", "-3"); log != "" {
+		b.WriteString("**Recent commits:**\n\n```\n" + log + "\n```")
+	}
+	digest := b.String()
+	if len(digest) > 1024 {
+		digest = digest[:1024] + "\n…(truncated)"
+	}
+	return digest
+}
+
 // renderIssueContext builds the markdown content for issue_context.md.
 func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.AutopilotRunID != "" {
@@ -1030,6 +1074,33 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Handoff Note\n\n")
 		b.WriteString("The person who assigned this issue left this instruction for the run. Treat it as scope guidance and follow it before doing anything broader:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", ctx.HandoffNote)
+	}
+
+	// Prior-attempt failure digest (GAP-23): this run is an automatic retry of
+	// a failed attempt. Lead with the diagnosis so the agent fixes the root
+	// cause instead of replaying the same approach.
+	if ctx.PriorAttempt != nil {
+		pa := ctx.PriorAttempt
+		b.WriteString("## Prior Attempt\n\n")
+		fmt.Fprintf(&b, "This task is **automatic retry #%d**. The previous attempt (attempt %d) failed at %s.\n\n",
+			pa.Attempt+1, pa.Attempt, pa.FailedAt)
+		fmt.Fprintf(&b, "**Classified failure reason:** `%s`\n\n", pa.FailureReason)
+		if pa.ErrorText != "" {
+			b.WriteString("**Raw error (tail):**\n\n```\n")
+			b.WriteString(pa.ErrorText)
+			b.WriteString("\n```\n\n")
+		}
+		b.WriteString("Before repeating what the last attempt did, form a hypothesis about WHY it failed and address that cause directly. If the failure was environmental (network, provider capacity), verify the condition has cleared before proceeding.\n\n")
+	}
+
+	// Prior-run digest (GAP-2): this run resumes the provider session; show
+	// where the previous run left the repository so the agent does not have
+	// to rediscover it.
+	if ctx.PriorRunDigest != "" {
+		b.WriteString("## Prior Run Digest\n\n")
+		b.WriteString("This run resumes your previous session. Here is where that work left the repository:\n\n")
+		b.WriteString(ctx.PriorRunDigest)
+		b.WriteString("\n\n")
 	}
 
 	b.WriteString("## Quick Start\n\n")
