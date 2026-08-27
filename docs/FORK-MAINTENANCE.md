@@ -4,6 +4,10 @@ This fork is **isolated by design**. We do not send PRs upstream. All custom
 work lives on `my-fixes`; occasionally we pull changes from `origin`
 (multica-ai/multica) and re-apply ours on top.
 
+The `my-fixes` autonomy / model-control series has been merged to `main`, which
+now tracks `mine/main` (deploy from `main`). `my-fixes` remains the development
+branch for the next patch series.
+
 ## Remotes
 
 | remote | points at | role |
@@ -77,7 +81,7 @@ health-gated retry + hasRunnableSuccessor slot guard).
 
 22. docs(cli): webhook autopilot triggers are CLI-exposed + documented — `multica autopilot trigger-add <id> --kind webhook` (upstream MUL-5421 code, docs lagged); CLI_AND_DAEMON.md no longer claims webhook/api unimplemented; documents event_filters scoping via POST /api/autopilots/<id>/triggers and trigger-rotate-url signing-secret rotation; api kind still server-less (GAP-12, issue #7)
 
-23. skip GAP-10 encrypt agent custom_env at rest — deferred (secretbox wiring bigger than ponytail slot, opt-in default plaintext unchanged). Retry when provider stable.
+23. feat(security): encrypt agent custom_env at rest (GAP-10, Phase 1, Closes #6) — AES-256-GCM envelope `{"enc":"v1","n":...,"c":...}` in `agent.custom_env` JSONB; `MULTICA_ENV_ENC_KEY` (32-byte hex/base64) set on the server, passed to the daemon which decrypts on claim. Key unset → plaintext degrade (one warning, no migration). Supersedes the earlier "deferred" note.
 
 24. fix(daemon): per-task opencode data-dir isolation — execenv prepares `<envRoot>/opencode-data` (mkdir 0700) for provider=opencode on fresh prepare and reuse, daemon exports it as `XDG_DATA_HOME` before agent start (before custom_env so a user-set XDG_DATA_HOME still wins); mkdir failure falls back to the shared `~/.local/share/opencode` default instead of blocking dispatch; dir is GC'd with the env root. Kills the SQLite lock-collision failure class when concurrent opencode tasks share one db (GAP-1, issue #5)
 
@@ -142,6 +146,44 @@ Dogfooding: run Multica on itself for `my-fixes` development.
 3. Autopilots: `Handoff` `48cd5804-b8b3-4d1e-bc38-ef738bb6f0fb` (`event` trigger `a21c48ec-88f3-4e7c-953a-05b303c08bea` `[{"event":"task.completed"}]`) → `GAP-31` `maybeEnqueueEventTriggers`; `Retention Sweep` `ce954b98-d0d0-4642-bce6-46f4f5dd95bf` (`schedule` `658c3771-595f-4fbf-959d-7d2f2040099a` `0 2 * * *` nightly, `GAP-9`).
 4. Enable `MULTICA_AGENT_WRAPPER` sandbox + `custom_env` encryption `GAP-10` when secrets move.
 5. Wire `.env` `MULTICA_BUDGET_MAX_*` `5/500k/60m` + `PROVIDER_CEILING/FAILOVER` already `42249` live — reuse for `multica-dev` tasks.
+
+### Model fallback / retry / pricing / encrypt / help-signal (2026-08-27, main @ 035f46887)
+
+Merged from `my-fixes` to `main` (which now tracks `mine/main`) via PRs
+#39, #42, #44, #45, #46, #47. Migrations **432–435** and **437** (there is no
+436 — `model_pricing` lives in 434):
+
+- **432** `model_tier_map` — global + per-workspace tier→concrete map.
+- **433** `agent_task_queue.concrete_model` — the resolver-chosen concrete model.
+- **434** `model_tier_map.fallback_concrete` (ordered chain) + new `model_health`
+  and `model_pricing` tables.
+- **435** `agent_task_queue.auto_rerun_count` — one auto-rerun on retry exhaustion
+  for transient provider errors (gated by `isModelFailureReason`).
+- **437** `agent_task_queue.help_signal` JSONB + `agent_requested_help` reason +
+  `agent_help_requested` inbox item (GAP-25); excluded from auto-retry/auto-rerun.
+
+Behavior:
+- Resolver `resolveConcreteModel` picks a known-healthy candidate (primary →
+  fallback) up front; `FailTask` on a model failure marks `model_health`
+  unhealthy, `CompleteTask` marks it healthy; `model_pricing_watcher` (15m poll)
+  flips a price-breach model `unhealthy`/`pricing` with a **sticky downgrade**
+  (`last_failure_at` pushed 365d ahead) until the price recovers.
+- Auto-rerun: after retry exhaustion on a transient model failure, exactly one
+  auto-rerun fires instead of dead-ending.
+- Help signal: agents emit `blocked_reason` / `needs` / `confidence` on `/fail` or
+  `/complete`; the platform routes it to a human inbox item, never the retry loop.
+
+CLI/API surface: `multica model-map get|set|get-fallback|set-fallback`,
+`multica model-health get|set`, `GET|PATCH /api/model-map[/fallback]`,
+`GET|PUT /api/model-health`. See `docs/model-availability-fallback-design.md`
+and `docs/AUTONOMY-RUNBOOK.md`.
+
+Notes:
+- `MULTICA_ENV_ENC_KEY` (GAP-10, Phase 1) is wired in `docker-compose.selfhost.yml`
+  and read from `.env`, which is **gitignored** — never commit the key.
+- Daily host disk hygiene: a launchd job `com.scotthawes.docker-cleanup` runs
+  `docker image prune` + `docker container prune` at 04:00 daily. It is host-side,
+  not part of the compose stack.
 
 ### Missing AI tools (next gaps)
 

@@ -239,6 +239,51 @@ You need at least one installed. The daemon registers each detected CLI as an av
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+### Help signal (GAP-25)
+
+Agents can escalate an "I'm stuck" signal instead of failing silently. On the
+terminal `/fail` or `/complete` capture path, an agent includes a `help_signal`
+object:
+
+```json
+{ "blocked_reason": "string|null", "needs": ["string"], "confidence": 0.0-1.0|null }
+```
+
+The server persists it to the task row's `help_signal` JSONB, sets the task's
+`failure_reason` to `agent_requested_help`, and writes an `agent_help_requested`
+inbox item (severity `action_required`) for the task originator (falling back to
+the initiator). Because that reason is platform-side — not an `agent_error.*`
+value — the task is **excluded from auto-retry and auto-rerun**: it waits for a
+human instead of looping.
+
+Emit this only when genuinely blocked (missing credentials, an unrecoverable
+external dependency, ambiguous requirements). Use `blocked_reason` for a one-line
+summary, `needs` for the concrete things a human must provide, and `confidence`
+(0–1) to help triage. Legacy agents that send no help signal are unaffected.
+
+### Encrypted agent custom_env at rest (GAP-10, Phase 1)
+
+Agent `custom_env` secrets are encrypted at rest when `MULTICA_ENV_ENC_KEY` is
+set on the server (the daemon decrypts on claim). The key must be exactly 32
+bytes, supplied as a hex or base64 string.
+
+Envelope stored in the `agent.custom_env` JSONB column:
+
+```json
+{ "enc": "v1", "n": "<base64 nonce>", "c": "<base64 ciphertext (GCM tag appended)>" }
+```
+
+- Key **unset** → secrets are stored/returned in plaintext (logged once as a
+  warning): a clear, auditable degradation rather than a hard failure.
+- Key **set** → writes are AES-256-GCM sealed and reads decrypt transparently.
+  Plaintext rows (no `enc` marker) still read as-is, so no migration is needed.
+- Set it via `docker-compose.selfhost.yml` (`MULTICA_ENV_ENC_KEY` from `.env`);
+  `.env` is gitignored and must never be committed. Generate one with
+  `openssl rand -hex 32` (hex) or `openssl rand -base64 32` (base64).
+
+Set the key *before* agents store secrets. Rotating it requires re-saving each
+agent's `custom_env`, since old envelopes cannot be decrypted with a new key.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
@@ -813,6 +858,65 @@ multica config set workspace_id <workspace-id>
 ```
 
 `config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
+
+## Model Management
+
+An agent's `model` tier (`cheap` / `balanced` / `premium`) resolves to a concrete
+model through `model_tier_map`, with an ordered **fallback chain** and a
+per-`(workspace, concrete)` **health** table. Full design:
+`docs/model-availability-fallback-design.md`.
+
+### Model tier map + fallback chain
+
+```bash
+# Resolved tier→concrete map (global, or a single workspace)
+multica model-map get --global
+multica model-map get --workspace <ws-id>
+
+# Set tier concrete values
+multica model-map set --global --cheap mimo --balanced muse-spark --premium qwen
+multica model-map set --workspace <ws-id> --cheap other
+
+# View / set the ordered fallback chain tried after the primary
+multica model-map get-fallback --global
+multica model-map get-fallback --workspace <ws-id>
+multica model-map set-fallback --global --balanced qwen,muse-spark
+multica model-map set-fallback --workspace <ws-id> --premium claude,kimi-k2.6
+```
+
+`--global` writes `NULL` workspace_id rows; `--workspace` overrides one workspace.
+`get` / `set` / `get-fallback` / `set-fallback` all require `--global` or
+`--workspace`. `set-fallback` takes a comma-separated ordered list per tier.
+
+### Model health
+
+A model failure marks it `unhealthy`; the resolver then picks a known-healthy
+candidate (primary → fallback) **up front**, so retries launch on a working model
+instead of re-hitting the dead one. A success flips it back to `healthy`, and
+unhealthy rows auto-recover after a TTL (default 10m) — no probe needed. A
+pricing breach marks it `unhealthy`/`pricing` and stays sticky until the price
+drops.
+
+```bash
+# List health records (global, or current/selected workspace)
+multica model-health get --global
+multica model-health get --workspace <ws-id>
+
+# Mark a concrete model unhealthy/healthy for a workspace
+multica model-health set --workspace <ws-id> --model muse-spark --status unhealthy --reason pricing
+multica model-health set --model mimo --status healthy
+```
+
+For `model-health get`, omitting `--global` and `--workspace` uses the current
+workspace; for `set`, `--workspace` defaults to the current workspace. `--model`
+and `--status` are required.
+
+API equivalents for automation:
+
+- `GET /api/model-health[?workspace=...]` · `PUT /api/model-health` with body
+  `{"workspace_id":"...","concrete_model":"...","status":"healthy|unhealthy","reason":"..."}`
+- `GET /api/model-map` · `PATCH /api/model-map` (tier→concrete)
+- `GET|PATCH /api/model-map/fallback` (per-tier chain)
 
 ## Autopilot Commands
 

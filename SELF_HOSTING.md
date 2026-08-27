@@ -489,6 +489,17 @@ docker compose -f docker-compose.selfhost.yml pull
 docker compose -f docker-compose.selfhost.yml up -d
 ```
 
+> **Encrypting agent `custom_env` (optional):** set `MULTICA_ENV_ENC_KEY` in
+> `.env` (a 32-byte hex or base64 value, e.g. `openssl rand -hex 32`) to encrypt
+> each agent's `custom_env` secrets at rest. `.env` is gitignored — never commit
+> the key. Unset → secrets are stored in plaintext (one warning). See
+> [Advanced Configuration](SELF_HOSTING_ADVANCED.md).
+
+> **Daily host disk hygiene:** a launchd job (`com.scotthawes.docker-cleanup`) runs
+> `docker image prune` + `docker container prune` at 04:00 daily so the host disk
+> does not fill with dangling images/containers. It is host-side, not part of the
+> compose stack.
+
 ## Manual CLI Configuration
 
 If you prefer configuring the CLI step by step instead of `multica setup`:
