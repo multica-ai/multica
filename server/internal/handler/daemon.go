@@ -2087,12 +2087,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
-	var customEnv map[string]string
-	if agent.CustomEnv != nil {
-		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
-			slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
-		}
-	}
+	// Decrypt custom_env (GAP-10 Phase 1) so the daemon's claim payload
+	// keeps carrying a plaintext map — the claim shape is unchanged and the
+	// daemon spawn path needs no edits. Legacy plaintext rows pass through.
+	customEnv := unmarshalCustomEnv(agent)
 	var customArgs []string
 	if agent.CustomArgs != nil {
 		if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
