@@ -405,10 +405,55 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 	return data
 }
 
-// resolveConcreteModel maps logical tier to concrete model via 404 model_tier_map.
-// concrete = workspace_map[tier] ?? global_map[tier] ?? tier, with fallback.
+// resolveConcreteModel maps logical tier to concrete model via 404 model_tier_map
+// with health-aware fallback chain. Candidates = [primary] + fallback_concrete[].
+// Each candidate is checked against model_health (healthy or stale unhealthy TTL 10m).
+// Returns first healthy; if all unhealthy returns primary (best-effort, no deadlock).
 // ponytail: no cache, direct DB reads; nil Queries or empty tier returns tier.
+const modelHealthTTL = 10 * time.Minute
+
 func (s *TaskService) resolveConcreteModel(ctx context.Context, workspaceID pgtype.UUID, tier string) string {
+	if tier == "" || s == nil || s.Queries == nil {
+		return tier
+	}
+	var primary string
+	var fallbacks []string
+	if workspaceID.Valid {
+		if m, err := s.Queries.GetWorkspaceModelTier(ctx, db.GetWorkspaceModelTierParams{WorkspaceID: workspaceID, Tier: tier}); err == nil && m.Concrete != "" {
+			primary = m.Concrete
+			fallbacks = m.FallbackConcrete
+		}
+	}
+	if primary == "" {
+		if m, err := s.Queries.GetGlobalModelTier(ctx, tier); err == nil && m.Concrete != "" {
+			primary = m.Concrete
+			fallbacks = m.FallbackConcrete
+		} else if m.Concrete == "" {
+			return tier
+		}
+		if primary == "" {
+			return tier
+		}
+	}
+	candidates := make([]string, 0, 1+len(fallbacks))
+	candidates = append(candidates, primary)
+	candidates = append(candidates, fallbacks...)
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if s.isModelHealthy(ctx, workspaceID, c) {
+			if c != primary {
+				slog.Info("model fallback used", "tier", tier, "requested", primary, "used", c, "workspace", util.UUIDToString(workspaceID))
+			}
+			return c
+		}
+	}
+	return primary
+}
+
+// getPrimaryConcrete returns the tier's primary concrete without health check (for requested_concrete_model).
+func (s *TaskService) getPrimaryConcrete(ctx context.Context, workspaceID pgtype.UUID, tier string) string {
 	if tier == "" || s == nil || s.Queries == nil {
 		return tier
 	}
@@ -421,6 +466,168 @@ func (s *TaskService) resolveConcreteModel(ctx context.Context, workspaceID pgty
 		return m.Concrete
 	}
 	return tier
+}
+
+// isModelHealthy checks model_health for workspace and global. No row = healthy.
+// Unhealthy is treated as healthy if stale (>TTL since last_failure_at).
+func (s *TaskService) isModelHealthy(ctx context.Context, workspaceID pgtype.UUID, concrete string) bool {
+	if concrete == "" || s == nil || s.Queries == nil {
+		return true
+	}
+	// workspace-specific health first
+	if workspaceID.Valid {
+		if h, err := s.Queries.GetModelHealth(ctx, db.GetModelHealthParams{WorkspaceID: workspaceID, Concrete: concrete}); err == nil {
+			if h.Status != "unhealthy" {
+				return true
+			}
+			if h.LastFailureAt.Valid && time.Since(h.LastFailureAt.Time) > modelHealthTTL {
+				return true
+			}
+			return false
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("isModelHealthy: workspace health lookup failed", "concrete", concrete, "error", err)
+			return true
+		}
+	}
+	// global health (workspace_id NULL)
+	if h, err := s.Queries.GetModelHealth(ctx, db.GetModelHealthParams{WorkspaceID: pgtype.UUID{}, Concrete: concrete}); err == nil {
+		if h.Status != "unhealthy" {
+			return true
+		}
+		if h.LastFailureAt.Valid && time.Since(h.LastFailureAt.Time) > modelHealthTTL {
+			return true
+		}
+		return false
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("isModelHealthy: global health lookup failed", "concrete", concrete, "error", err)
+	}
+	return true
+}
+
+// markModelUnhealthy upserts unhealthy status for concrete in workspace.
+func (s *TaskService) markModelUnhealthy(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, concrete, reason string) {
+	if concrete == "" {
+		return
+	}
+	var ws pgtype.UUID
+	if workspaceID.Valid {
+		ws = workspaceID
+	}
+	if q == nil {
+		q = s.Queries
+	}
+	if q == nil {
+		return
+	}
+	_, err := q.UpsertModelHealthUnhealthy(ctx, db.UpsertModelHealthUnhealthyParams{WorkspaceID: ws, Concrete: concrete, Reason: pgtype.Text{String: reason, Valid: reason != ""}})
+	if err != nil {
+		slog.Warn("markModelUnhealthy failed", "concrete", concrete, "reason", reason, "error", err)
+	} else {
+		slog.Info("model health transition to unhealthy", "concrete", concrete, "reason", reason, "workspace", util.UUIDToString(ws))
+	}
+}
+
+// markModelHealthy upserts healthy status for concrete.
+func (s *TaskService) markModelHealthy(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, concrete string) {
+	if concrete == "" {
+		return
+	}
+	var ws pgtype.UUID
+	if workspaceID.Valid {
+		ws = workspaceID
+	}
+	if q == nil {
+		q = s.Queries
+	}
+	if q == nil {
+		return
+	}
+	if err := q.MarkModelHealthy(ctx, db.MarkModelHealthyParams{WorkspaceID: ws, Concrete: concrete}); err != nil {
+		slog.Warn("markModelHealthy failed", "concrete", concrete, "error", err)
+	} else {
+		slog.Info("model health transition to healthy", "concrete", concrete, "workspace", util.UUIDToString(ws))
+	}
+}
+
+func (s *TaskService) isModelHealthyWithQueries(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, concrete string) bool {
+	if concrete == "" || q == nil {
+		return true
+	}
+	if workspaceID.Valid {
+		if h, err := q.GetModelHealth(ctx, db.GetModelHealthParams{WorkspaceID: workspaceID, Concrete: concrete}); err == nil {
+			if h.Status != "unhealthy" {
+				return true
+			}
+			if h.LastFailureAt.Valid && time.Since(h.LastFailureAt.Time) > modelHealthTTL {
+				return true
+			}
+			return false
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("isModelHealthyWithQueries: workspace health lookup failed", "concrete", concrete, "error", err)
+			return true
+		}
+	}
+	if h, err := q.GetModelHealth(ctx, db.GetModelHealthParams{WorkspaceID: pgtype.UUID{}, Concrete: concrete}); err == nil {
+		if h.Status != "unhealthy" {
+			return true
+		}
+		if h.LastFailureAt.Valid && time.Since(h.LastFailureAt.Time) > modelHealthTTL {
+			return true
+		}
+		return false
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("isModelHealthyWithQueries: global health lookup failed", "concrete", concrete, "error", err)
+	}
+	return true
+}
+
+func (s *TaskService) resolveConcreteModelWithQueries(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, tier string) string {
+	if tier == "" || q == nil {
+		return tier
+	}
+	var primary string
+	var fallbacks []string
+	if workspaceID.Valid {
+		if m, err := q.GetWorkspaceModelTier(ctx, db.GetWorkspaceModelTierParams{WorkspaceID: workspaceID, Tier: tier}); err == nil && m.Concrete != "" {
+			primary = m.Concrete
+			fallbacks = m.FallbackConcrete
+		}
+	}
+	if primary == "" {
+		if m, err := q.GetGlobalModelTier(ctx, tier); err == nil && m.Concrete != "" {
+			primary = m.Concrete
+			fallbacks = m.FallbackConcrete
+		} else if m.Concrete == "" {
+			return tier
+		}
+		if primary == "" {
+			return tier
+		}
+	}
+	candidates := make([]string, 0, 1+len(fallbacks))
+	candidates = append(candidates, primary)
+	candidates = append(candidates, fallbacks...)
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		if s.isModelHealthyWithQueries(ctx, q, workspaceID, c) {
+			if c != primary {
+				slog.Info("model fallback used (tx)", "tier", tier, "requested", primary, "used", c, "workspace", util.UUIDToString(workspaceID))
+			}
+			return c
+		}
+	}
+	return primary
+}
+
+func isModelFailureReason(reason string) bool {
+	switch reason {
+	case string(taskfailure.ReasonAgentProviderNetwork), string(taskfailure.ReasonAgentProviderServerError), string(taskfailure.ReasonAgentProviderCapacityOrRateLimit), string(taskfailure.ReasonAgentModelNotFoundOrUnavailable):
+		return true
+	default:
+		return false
+	}
 }
 
 // resolveOriginatorFromTriggerComment returns the top-of-chain HUMAN user
@@ -1491,12 +1698,16 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	// 404 model_tier_map: concrete = workspace_map[tier] ?? global_map[tier] ?? tier
+	// 404 model_tier_map: concrete = health-aware pick from [primary + fallback_concrete]
 	tier := ""
 	if agent.ServiceTier.Valid {
 		tier = agent.ServiceTier.String
 	}
+	requested := s.getPrimaryConcrete(ctx, issue.WorkspaceID, tier)
 	concrete := s.resolveConcreteModel(ctx, issue.WorkspaceID, tier)
+	if concrete != requested && requested != "" {
+		slog.Info("model fallback used at enqueue", "tier", tier, "requested", requested, "concrete", concrete, "issue_id", util.UUIDToString(issue.ID))
+	}
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              issue.AssigneeID,
@@ -1519,6 +1730,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
 		ConcreteModel:        pgtype.Text{String: concrete, Valid: concrete != ""},
+		RequestedConcreteModel: pgtype.Text{String: requested, Valid: requested != ""},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -1551,6 +1763,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			TriggerEvidenceRefID: createParams.TriggerEvidenceRefID,
 			FireAt:               fireAt,
 			ConcreteModel:        createParams.ConcreteModel,
+			RequestedConcreteModel: createParams.RequestedConcreteModel,
 		})
 	} else {
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
@@ -1651,6 +1864,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	tier := ""
+	if agent.ServiceTier.Valid {
+		tier = agent.ServiceTier.String
+	}
+	requested := s.getPrimaryConcrete(ctx, issue.WorkspaceID, tier)
+	concrete := s.resolveConcreteModel(ctx, issue.WorkspaceID, tier)
+	if concrete != requested && requested != "" {
+		slog.Info("model fallback used at mention enqueue", "tier", tier, "requested", requested, "concrete", concrete, "issue_id", util.UUIDToString(issue.ID))
+	}
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
@@ -1674,6 +1896,8 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		DelegatedFromTaskID:  attrDelegatedFrom,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		ConcreteModel:        pgtype.Text{String: concrete, Valid: concrete != ""},
+		RequestedConcreteModel: pgtype.Text{String: requested, Valid: requested != ""},
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
@@ -4592,6 +4816,21 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	// Model health recovery: success clears unhealthy (if was marked)
+	if task.ConcreteModel.Valid && task.ConcreteModel.String != "" {
+		var ws pgtype.UUID
+		if task.IssueID.Valid {
+			if iss, err := s.Queries.GetIssue(ctx, task.IssueID); err == nil {
+				ws = iss.WorkspaceID
+			}
+		}
+		if !ws.Valid {
+			if ag, err := s.Queries.GetAgent(ctx, task.AgentID); err == nil {
+				ws = ag.WorkspaceID
+			}
+		}
+		s.markModelHealthy(ctx, s.Queries, ws, task.ConcreteModel.String)
+	}
 	s.autoSyncIssueStatusOnCompletion(ctx, task, branchName, result)
 
 	// GAP-24: opt-in verification pass. When the completing agent declares a
@@ -5006,6 +5245,27 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+		// Model availability fallback: mark health unhealthy for model failures.
+		if isModelFailureReason(failureReason) {
+			c := t.ConcreteModel.String
+			if !t.ConcreteModel.Valid || c == "" {
+				c = t.RequestedConcreteModel.String
+			}
+			if c != "" {
+				var ws pgtype.UUID
+				if t.IssueID.Valid {
+					if iss, err := qtx.GetIssue(ctx, t.IssueID); err == nil {
+						ws = iss.WorkspaceID
+					}
+				}
+				if !ws.Valid {
+					if ag, err := qtx.GetAgent(ctx, t.AgentID); err == nil {
+						ws = ag.WorkspaceID
+					}
+				}
+				s.markModelUnhealthy(ctx, qtx, ws, c, failureReason)
+			}
+		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -5096,15 +5356,41 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				createRetry = false
 			}
 		}
-		if createRetry {
-			child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
-				NewTaskID:            dbid.NewV7(),
-				ID:                   taskID,
-				FireAt:               retryFireAt,
-				MaxAttempts:          retryMaxAttempts,
-				RuntimeMcpOverlay:    retryOverlay.Overlay,
-				RuntimeConnectedApps: retryOverlay.ConnectedApps,
-			})
+        if createRetry {
+            // Health-aware retry concrete: re-resolve tier via health-marked state so child skips unhealthy primary.
+            var retryConcrete pgtype.Text
+            if ag, err := qtx.GetAgent(ctx, t.AgentID); err == nil {
+                tier := ""
+                if ag.ServiceTier.Valid {
+                    tier = ag.ServiceTier.String
+                }
+                if tier != "" {
+                    var ws pgtype.UUID
+                    if t.IssueID.Valid {
+                        if iss, err := qtx.GetIssue(ctx, t.IssueID); err == nil {
+                            ws = iss.WorkspaceID
+                        }
+                    }
+                    if !ws.Valid {
+                        ws = ag.WorkspaceID
+                    }
+                    if cc := s.resolveConcreteModelWithQueries(ctx, qtx, ws, tier); cc != "" {
+                        retryConcrete = pgtype.Text{String: cc, Valid: true}
+                        if cc != t.ConcreteModel.String {
+                            slog.Info("model fallback used for retry", "parent_task_id", util.UUIDToString(t.ID), "tier", tier, "requested", t.ConcreteModel.String, "retry_concrete", cc)
+                        }
+                    }
+                }
+            }
+            child, cerr := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
+                NewTaskID:            dbid.NewV7(),
+                ID:                   taskID,
+                FireAt:               retryFireAt,
+                MaxAttempts:          retryMaxAttempts,
+                RuntimeMcpOverlay:    retryOverlay.Overlay,
+                RuntimeConnectedApps: retryOverlay.ConnectedApps,
+                ConcreteModel:        retryConcrete,
+            })
 			switch {
 			case cerr == nil:
 				retried = &child
@@ -5313,12 +5599,15 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
-	string(taskfailure.ReasonTimeout):                true,
-	"codex_semantic_inactivity":                      true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonRuntimeOffline):                        true,
+	string(taskfailure.ReasonRuntimeRecovery):                       true,
+	string(taskfailure.ReasonTimeout):                               true,
+	"codex_semantic_inactivity":                                     true,
+	string(taskfailure.ReasonAgentProviderNetwork):                  true,
+	string(taskfailure.ReasonSkillBundleUnavailable):                true,
+	string(taskfailure.ReasonAgentProviderServerError):              true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit):      true,
+	string(taskfailure.ReasonAgentModelNotFoundOrUnavailable):       true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5654,6 +5943,28 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	// Health-aware retry concrete: re-resolve tier via health so orphan retry also skips unhealthy.
+	var retryConcrete pgtype.Text
+	if ag, err := qtx.GetAgent(ctx, parent.AgentID); err == nil {
+		tier := ""
+		if ag.ServiceTier.Valid {
+			tier = ag.ServiceTier.String
+		}
+		if tier != "" {
+			var ws pgtype.UUID
+			if parent.IssueID.Valid {
+				if iss, err := qtx.GetIssue(ctx, parent.IssueID); err == nil {
+					ws = iss.WorkspaceID
+				}
+			}
+			if !ws.Valid {
+				ws = ag.WorkspaceID
+			}
+			if cc := s.resolveConcreteModelWithQueries(ctx, qtx, ws, tier); cc != "" {
+				retryConcrete = pgtype.Text{String: cc, Valid: true}
+			}
+		}
+	}
 	child, err := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
@@ -5661,6 +5972,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		ConcreteModel:        retryConcrete,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Workspace torn down, or the pending slot was taken between the check
