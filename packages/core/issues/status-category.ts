@@ -1,5 +1,5 @@
 import type { Issue, IssueStatusCategory } from "../types";
-import { isIssueStatusCategory } from "../issue-statuses";
+import { isIssueStatusCategory } from "../issue-statuses/is-category";
 import type { IssueStatusCatalog } from "../issue-statuses";
 import { ALL_STATUSES } from "./config";
 

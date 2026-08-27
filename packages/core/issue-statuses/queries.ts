@@ -2,6 +2,9 @@ import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import { STATUS_CONFIG, STATUS_ORDER } from "../issues/config";
 import type { IssueStatusCategory, IssueStatusEntry } from "../types";
+import { isIssueStatusCategory } from "./is-category";
+
+export { isIssueStatusCategory } from "./is-category";
 
 /**
  * The workspace issue status catalog (MUL-6243).
@@ -115,8 +118,6 @@ export interface IssueStatusCatalog {
   hasCustomStatuses: boolean;
 }
 
-const BUILT_IN = new Set<string>(STATUS_ORDER);
-
 const CATEGORY_RANK = new Map<string, number>(STATUS_ORDER.map((c, i) => [c, i]));
 
 /**
@@ -133,10 +134,6 @@ export function compareIssueStatusEntries(a: IssueStatusEntry, b: IssueStatusEnt
   if (rank !== 0) return rank;
   if (a.position !== b.position) return a.position - b.position;
   return a.key.localeCompare(b.key);
-}
-
-export function isIssueStatusCategory(value: string): value is IssueStatusCategory {
-  return BUILT_IN.has(value);
 }
 
 /**

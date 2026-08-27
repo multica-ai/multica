@@ -1,8 +1,8 @@
+export { isIssueStatusCategory } from "./is-category";
 export {
   issueStatusKeys,
   issueStatusListOptions,
   buildIssueStatusCatalog,
-  isIssueStatusCategory,
   issueStatusColor,
   type IssueStatusCatalog,
 } from "./queries";

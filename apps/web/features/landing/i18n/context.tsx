@@ -4,6 +4,7 @@ import {
   createContext,
   use,
   useCallback,
+  useEffect,
   useMemo,
   useState,
   useTransition,
@@ -11,26 +12,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useConfigStore } from "@multica/core/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
-import { createEnDict } from "./en";
-import { createJaDict } from "./ja";
-import { createKoDict } from "./ko";
-import { createZhDict } from "./zh";
-import {
-  toLandingDictionaryLocale,
-  type LandingDict,
-  type LandingDictionaryLocale,
-  type Locale,
-} from "./types";
-
-const dictionaryFactories: Record<
-  LandingDictionaryLocale,
-  (allowSignup: boolean) => LandingDict
-> = {
-  en: createEnDict,
-  ja: createJaDict,
-  ko: createKoDict,
-  zh: createZhDict,
-};
+import { loadLandingDict } from "./load-dict";
+import type { LandingDict, Locale } from "./types";
 
 type LocaleContextValue = {
   locale: Locale;
@@ -43,19 +26,33 @@ const LocaleContext = createContext<LocaleContextValue | null>(null);
 export function LocaleProvider({
   children,
   initialLocale = "en",
+  initialDict,
 }: {
   children: React.ReactNode;
   initialLocale?: Locale;
+  initialDict: LandingDict;
 }) {
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
+  const [t, setT] = useState<LandingDict>(initialDict);
   const [, startTransition] = useTransition();
   const router = useRouter();
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);
   const allowSignup = useConfigStore((state) => state.allowSignup);
-  const t = useMemo(
-    () => dictionaryFactories[toLandingDictionaryLocale(locale)](allowSignup),
-    [allowSignup, locale],
-  );
+
+  useEffect(() => {
+    setT(initialDict);
+  }, [initialDict]);
+
+  useEffect(() => {
+    if (locale === initialLocale && allowSignup === true) return;
+    let cancelled = false;
+    void loadLandingDict(locale, allowSignup).then((next) => {
+      if (!cancelled) setT(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [allowSignup, initialLocale, locale]);
 
   const setLocale = useCallback(
     (l: Locale) => {
@@ -66,7 +63,7 @@ export function LocaleProvider({
         router.refresh();
       });
     },
-    [locale, localeAdapter, router, startTransition],
+    [locale, localeAdapter, router],
   );
 
   return (

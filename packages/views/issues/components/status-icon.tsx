@@ -1,6 +1,6 @@
-import { statusCategoryOfKey } from "@multica/core/issues";
+import { statusCategoryOfKey } from "@multica/core/issues/status-category";
 import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
+import { STATUS_CONFIG } from "@multica/core/issues/config/status";
 
 // ---------------------------------------------------------------------------
 // Geometry constants (viewBox 0 0 14 14, center 7,7)

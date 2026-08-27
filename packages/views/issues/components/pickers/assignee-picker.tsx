@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Lock, UserMinus } from "lucide-react";
-import type { Agent, IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
+import type { IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { isAgentRuntimeBound } from "@multica/core/agents";
@@ -22,23 +22,7 @@ import {
 import { useT } from "../../../i18n";
 import { matchesPinyin } from "../../../editor/extensions/pinyin-match";
 
-/**
- * Legacy boolean shape kept around for callers (e.g. `use-issue-actions.ts`)
- * that haven't migrated to the new `canAssignAgentToIssue` Decision API yet.
- * Internally redirects to the canonical rule so behaviour stays in sync.
- */
-export function canAssignAgent(
-  agent: Agent,
-  userId: string | undefined,
-  memberRole: string | undefined,
-): boolean {
-  return canAssignAgentToIssue(agent, {
-    userId: userId ?? null,
-    role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
-      ? memberRole
-      : null,
-  }).allowed;
-}
+export { canAssignAgent } from "./can-assign-agent";
 
 interface AssigneePickerProps {
   assigneeType: IssueAssigneeType | null;

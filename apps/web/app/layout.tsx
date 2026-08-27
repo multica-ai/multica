@@ -44,16 +44,18 @@ const inter = Inter({
 const geistMono = Geist_Mono({
   subsets: ["latin"],
   variable: "--font-mono",
+  preload: false,
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
 });
 // Editorial serif used for onboarding headlines. Italic support for h1 em
-// accents (e.g. "...on one shared board."). Only loaded on routes that
-// render the font; layout-shift-prevention handled by next/font's synthetic
-// fallback metrics, same as Inter.
+// accents (e.g. "...on one shared board."). Landing overrides `--font-serif`
+// with Instrument Serif and does not use this face — do not preload it on
+// every route (it would compete with LCP on `/`).
 const sourceSerif = Source_Serif_4({
   subsets: ["latin"],
   style: ["normal", "italic"],
   variable: "--font-serif",
+  preload: false,
   fallback: [
     "ui-serif",
     "Iowan Old Style",
