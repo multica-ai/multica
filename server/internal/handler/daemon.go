@@ -3665,6 +3665,12 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// BlockedReason / Needs / Confidence: agent-authored "I'm stuck" help
+	// signal (GAP-25). Optional; legacy daemons omit them and the capture path
+	// ignores an empty signal.
+	BlockedReason *string  `json:"blocked_reason,omitempty"`
+	Needs         []string `json:"needs,omitempty"`
+	Confidence    *float64 `json:"confidence,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -3746,6 +3752,9 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
+			BlockedReason:         req.BlockedReason,
+			Needs:                 req.Needs,
+			Confidence:            req.Confidence,
 		})
 		return
 	}
@@ -3755,7 +3764,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, toHelpSignal(req.BlockedReason, req.Needs, req.Confidence))
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -4416,6 +4425,12 @@ type TaskFailRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// BlockedReason / Needs / Confidence: agent-authored "I'm stuck" help
+	// signal (GAP-25). Optional; legacy daemons omit them and the capture path
+	// ignores an empty signal.
+	BlockedReason *string  `json:"blocked_reason,omitempty"`
+	Needs         []string `json:"needs,omitempty"`
+	Confidence    *float64 `json:"confidence,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -4441,6 +4456,18 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 }
 
 // failTask records a terminal failure and writes the response. Shared by the
+// toHelpSignal lifts the optional GAP-25 help fields into the
+// service.HelpSignal the capture path persists. A zero-value signal (all nil /
+// empty) is ignored by the service, so callers may always pass the result
+// through.
+func toHelpSignal(blocked *string, needs []string, conf *float64) service.HelpSignal {
+	return service.HelpSignal{
+		BlockedReason: blocked,
+		Needs:         needs,
+		Confidence:    conf,
+	}
+}
+
 // /fail endpoint and by CompleteTask's context-exhaustion normalization so a
 // run re-classified at the /complete boundary lands through exactly the same
 // transaction, token revocation and runtime wake-up as one the daemon reported
@@ -4451,7 +4478,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, toHelpSignal(req.BlockedReason, req.Needs, req.Confidence))
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the

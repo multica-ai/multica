@@ -340,6 +340,14 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	// HelpSignal carries an agent-authored "I'm stuck" signal on a terminal
+	// result (GAP-25). Optional and omitted by legacy agents. The server's
+	// /fail and /complete capture paths forward it into the task row's
+	// help_signal JSONB and route the task to human attention; it is never
+	// classifier-authored.
+	BlockedReason *string  `json:"blocked_reason,omitempty"`
+	Needs         []string `json:"needs,omitempty"`
+	Confidence    *float64 `json:"confidence,omitempty"`
 }
 
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.

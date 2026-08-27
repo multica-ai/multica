@@ -176,6 +176,7 @@ type AgentTaskQueue struct {
 	ConcreteModel             pgtype.Text `json:"concrete_model"`
 	RequestedConcreteModel    pgtype.Text `json:"requested_concrete_model"`
 	AutoRerunCount            int32       `json:"auto_rerun_count"`
+	HelpSignal                []byte      `json:"help_signal"`
 }
 
 type AgentToLabel struct {

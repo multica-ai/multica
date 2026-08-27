@@ -2588,3 +2588,13 @@ INSERT INTO agent (
     @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key
 )
 RETURNING *;
+
+
+-- name: SetAgentTaskHelpSignal :exec
+-- Persists the agent-authored "I'm stuck" help signal (GAP-25) on a terminal
+-- task row. help_signal is a JSONB blob shaped {blocked_reason, needs,
+-- confidence}. Written by the /fail and /complete capture paths in
+-- internal/service/task.go; the value is never classifier-authored.
+UPDATE agent_task_queue
+SET help_signal = $2
+WHERE id = $1;
