@@ -38,6 +38,14 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: LockAgentForUpdate :one
+-- UpdateAgent is assembled from a pre-transaction snapshot. Lock and compare
+-- that row before applying the patch so concurrent agent edits cannot silently
+-- overwrite a newer update.
+SELECT * FROM agent
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
+FOR UPDATE;
+
 -- name: LockAgentForAutopilotAssignment :one
 -- Serializes creating, retargeting, or resuming an active Autopilot with
 -- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it

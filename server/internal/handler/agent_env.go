@@ -202,15 +202,6 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 		req.CustomEnv = map[string]string{}
 	}
 
-	existing := unmarshalCustomEnv(agent)
-	merged, audit := mergeAgentEnv(existing, req.CustomEnv)
-
-	envBytes, err := json.Marshal(merged)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to encode env")
-		return
-	}
-
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		slog.Error("agent_env update: begin tx failed",
@@ -220,6 +211,29 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Serialize whole-map replacements with every other agent state update, then
+	// merge against the row protected by the lock rather than the authorization
+	// snapshot. This preserves keys added by a concurrent writer.
+	locked, err := qtx.LockAgentForUpdate(r.Context(), db.LockAgentForUpdateParams{
+		ID:          agent.ID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		slog.Warn("agent_env update: lock agent failed",
+			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to update env")
+		return
+	}
+	agent = locked
+	existing := unmarshalCustomEnv(agent)
+	merged, audit := mergeAgentEnv(existing, req.CustomEnv)
+
+	envBytes, err := json.Marshal(merged)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode env")
+		return
+	}
 
 	updated, err := qtx.UpdateAgentCustomEnv(r.Context(), db.UpdateAgentCustomEnvParams{
 		ID:        agent.ID,

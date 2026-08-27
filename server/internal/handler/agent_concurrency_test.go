@@ -7,8 +7,22 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
+
+type synchronizedTxStarter struct {
+	begin   func(context.Context) (pgx.Tx, error)
+	barrier *sync.WaitGroup
+}
+
+func (s synchronizedTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	s.barrier.Done()
+	s.barrier.Wait()
+	return s.begin(ctx)
+}
 
 func TestCreateAgent_MaxConcurrentTasksBoundsAndDefault(t *testing.T) {
 	if testHandler == nil || testPool == nil {
@@ -158,4 +172,67 @@ func TestUpdateAgent_MaxConcurrentTasksBoundsAndOmission(t *testing.T) {
 			t.Fatalf("null max_concurrent_tasks changed value to %d, want 50", got)
 		}
 	})
+}
+
+func TestUpdateAgent_ConcurrentStaleWritersConflict(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "concurrency-stale-writers", nil)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	originalStarter := testHandler.TxStarter
+	barrier := &sync.WaitGroup{}
+	barrier.Add(2)
+	testHandler.TxStarter = synchronizedTxStarter{
+		begin:   originalStarter.Begin,
+		barrier: barrier,
+	}
+	t.Cleanup(func() { testHandler.TxStarter = originalStarter })
+
+	type result struct {
+		status int
+		body   string
+	}
+	results := make(chan result, 2)
+	for _, instructions := range []string{"first stale writer", "second stale writer"} {
+		go func(instructions string) {
+			w := httptest.NewRecorder()
+			req := withURLParam(newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
+				"instructions": instructions,
+			}), "id", agentID)
+			testHandler.UpdateAgent(w, req)
+			results <- result{status: w.Code, body: w.Body.String()}
+		}(instructions)
+	}
+
+	var successes, conflicts int
+	for range 2 {
+		result := <-results
+		switch result.status {
+		case http.StatusOK:
+			successes++
+		case http.StatusConflict:
+			conflicts++
+			if !strings.Contains(result.body, `"code":"revision_conflict"`) {
+				t.Fatalf("conflict response missing stable code: %s", result.body)
+			}
+		default:
+			t.Fatalf("concurrent update status = %d: %s", result.status, result.body)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent updates: successes = %d, conflicts = %d, want one of each", successes, conflicts)
+	}
+
+	var instructions string
+	if err := testPool.QueryRow(context.Background(), `SELECT instructions FROM agent WHERE id = $1`, agentID).Scan(&instructions); err != nil {
+		t.Fatalf("read persisted instructions: %v", err)
+	}
+	if instructions != "first stale writer" && instructions != "second stale writer" {
+		t.Fatalf("persisted instructions = %q, want one successful writer", instructions)
+	}
 }
