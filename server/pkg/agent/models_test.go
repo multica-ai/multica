@@ -125,6 +125,120 @@ func TestParseKimiProviderThinking(t *testing.T) {
 	}
 }
 
+// TestParseKimiProviderThinkingCapabilities pins the capability-aware rule to
+// the option sets a real Kimi Code CLI (0.34.0) broadcasts for each
+// capabilities/support_efforts combination — see parseKimiProviderThinking's
+// doc comment for the observation table these fixtures reproduce.
+func TestParseKimiProviderThinkingCapabilities(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "models": {
+    "kimi-code/k3": {
+      "capabilities": ["thinking", "always_thinking", "image_in", "tool_use"],
+      "supportEfforts": ["low", "high", "max"],
+      "defaultEffort": "high"
+    },
+    "kimi-code/k3-openrouter": {
+      "capabilities": ["thinking"],
+      "supportEfforts": ["low", "high", "max"],
+      "defaultEffort": "high"
+    },
+    "kimi-code/kimi-for-coding": {
+      "capabilities": ["thinking", "always_thinking"]
+    },
+    "kimi-code/k2.7-code": {
+      "capabilities": ["thinking"]
+    },
+    "kimi-code/k2-instruct": {
+      "capabilities": ["tool_use"],
+      "supportEfforts": ["low", "high"]
+    },
+    "kimi-code/k2-empty-capabilities": {
+      "capabilities": [],
+      "supportEfforts": ["low", "high"]
+    },
+    "kimi-code/legacy-no-capabilities": {
+      "supportEfforts": ["low", "high"],
+      "defaultEffort": "low"
+    }
+  }
+}`)
+
+	got, err := parseKimiProviderThinking(raw)
+	if err != nil {
+		t.Fatalf("parseKimiProviderThinking: %v", err)
+	}
+
+	// always_thinking + efforts: the ramp as-is, no synthesized off.
+	k3 := got["kimi-code/k3"]
+	if k3 == nil {
+		t.Fatal("k3 thinking catalog is nil")
+	}
+	if values := thinkingValues(k3); !reflect.DeepEqual(values, []string{"low", "high", "max"}) {
+		t.Errorf("k3 levels = %v, want [low high max]", values)
+	}
+
+	// thinking without always_thinking + efforts: off leads the ramp, in the
+	// order the CLI itself broadcasts, and the default stays valid.
+	toggleable := got["kimi-code/k3-openrouter"]
+	if toggleable == nil {
+		t.Fatal("k3-openrouter thinking catalog is nil")
+	}
+	if values := thinkingValues(toggleable); !reflect.DeepEqual(values, []string{"off", "low", "high", "max"}) {
+		t.Errorf("k3-openrouter levels = %v, want [off low high max]", values)
+	}
+	if toggleable.DefaultLevel != "high" {
+		t.Errorf("k3-openrouter default = %q, want high", toggleable.DefaultLevel)
+	}
+	if label := toggleable.SupportedLevels[0].Label; label != "Off" {
+		t.Errorf("off label = %q, want Off", label)
+	}
+
+	// always_thinking without efforts broadcasts [on] alone — one option is
+	// not a choice, so no control.
+	if thinking, ok := got["kimi-code/kimi-for-coding"]; ok {
+		t.Fatalf("always_thinking model without efforts = %+v, want no entry", thinking)
+	}
+
+	// thinking without always_thinking and without efforts: the plain toggle.
+	toggle := got["kimi-code/k2.7-code"]
+	if toggle == nil {
+		t.Fatal("k2.7-code thinking catalog is nil")
+	}
+	if values := thinkingValues(toggle); !reflect.DeepEqual(values, []string{"off", "on"}) {
+		t.Errorf("k2.7-code levels = %v, want [off on]", values)
+	}
+	if labels := []string{toggle.SupportedLevels[0].Label, toggle.SupportedLevels[1].Label}; !reflect.DeepEqual(labels, []string{"Off", "On"}) {
+		t.Errorf("k2.7-code labels = %v, want [Off On]", labels)
+	}
+
+	// capabilities present but no thinking: sessions never broadcast a
+	// thinking option, whatever efforts the catalog claims.
+	if thinking, ok := got["kimi-code/k2-instruct"]; ok {
+		t.Fatalf("model without thinking capability = %+v, want no entry", thinking)
+	}
+
+	// An explicit empty capabilities list is a statement, not an omission:
+	// no capabilities means no thinking, so no control — the legacy
+	// fallback is reserved for catalogs that lack the field entirely.
+	if thinking, ok := got["kimi-code/k2-empty-capabilities"]; ok {
+		t.Fatalf("model with empty capabilities = %+v, want no entry", thinking)
+	}
+
+	// No capabilities field at all (older CLI, fork): exactly the
+	// pre-capabilities behavior — efforts only, nothing synthesized.
+	legacy := got["kimi-code/legacy-no-capabilities"]
+	if legacy == nil {
+		t.Fatal("legacy catalog entry is nil")
+	}
+	if values := thinkingValues(legacy); !reflect.DeepEqual(values, []string{"low", "high"}) {
+		t.Errorf("legacy levels = %v, want [low high]", values)
+	}
+	if legacy.DefaultLevel != "low" {
+		t.Errorf("legacy default = %q, want low", legacy.DefaultLevel)
+	}
+}
+
 func TestFindACPConfigOptionRequiresExactID(t *testing.T) {
 	t.Parallel()
 	raw := []byte(`{

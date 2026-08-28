@@ -1486,8 +1486,9 @@ func annotateHermesDiscoveryUnconfigured(err error) error {
 // response already carries it, so this costs no extra process.
 //
 // Above that, support is decided per model and nothing else: a model that
-// provider-list does not list, or lists without efforts, keeps Thinking nil,
-// which hides the control for that model alone.
+// provider-list does not list, or whose capability/effort data yields fewer
+// than two levels (see parseKimiProviderThinking), keeps Thinking nil, which
+// hides the control for that model alone.
 //
 // Failure modes (kimi missing, not logged in, config error) return an empty
 // list so the UI falls back to manual entry.
@@ -1539,6 +1540,11 @@ func discoverKimiModels(ctx context.Context, runtimeCmd Command) ([]Model, error
 // released 2026-07-22). Below it, `session/set_config_option` accepts
 // "low"/"high"/"max" without error and leaves the session on "on", so
 // advertising those levels would promise something the runtime cannot deliver.
+//
+// The synthesized off/on levels sit behind the same gate on purpose. 0.28.1's
+// toggle-only ACP might well honour them, but that has not been verified
+// against a real 0.28.1 the way the effort behaviour above was; relaxing the
+// gate for two tokens is a separate change once that evidence exists.
 const kimiMinThinkingEffortVersion = "0.29.0"
 
 // kimiSupportsThinkingEfforts reports whether an ACP-reported Kimi version can
@@ -1598,12 +1604,41 @@ func discoverKimiProviderThinking(ctx context.Context, runtimeCmd Command) (map[
 }
 
 type kimiProviderModel struct {
+	Capabilities        []string `json:"capabilities"`
 	SupportEfforts      []string `json:"supportEfforts"`
 	SupportEffortsSnake []string `json:"support_efforts"`
 	DefaultEffort       string   `json:"defaultEffort"`
 	DefaultEffortSnake  string   `json:"default_effort"`
 }
 
+// parseKimiProviderThinking derives each model's thinking-level catalog from
+// `kimi provider list --json`.
+//
+// Which levels a session actually accepts is decided by `capabilities` and
+// `supportEfforts` together, not by efforts alone. Verified against Kimi Code
+// CLI 0.34.0 by varying a model's capabilities/support_efforts in an isolated
+// config and reading both the options `session/new` broadcasts for the
+// `thinking` config id and whether `set_config_option("off")` is accepted:
+//
+//	capabilities                  support_efforts   session offers
+//	thinking + always_thinking    low/high/max      [low, high, max]
+//	thinking                      low/high/max      [off, low, high, max]
+//	thinking + always_thinking    (none)            [on]           (no choice)
+//	thinking                      (none)            [off, on]
+//	(no thinking)                 —                 (no thinking option)
+//
+// So `always_thinking` — not the absence of an effort ramp — is what decides
+// whether a model can be told "off". The rule below mirrors those observed
+// sets, including their order (off leads, matching the CLI's own broadcast).
+// A single-entry set is not a choice, so it keeps Thinking nil, which hides
+// the control for that model alone.
+//
+// Catalogs that omit `capabilities` entirely (older CLIs, forks) keep the
+// pre-capabilities behavior — efforts only, nothing synthesized — so the rule
+// only ever adds off/on on catalogs that state the model can honour them.
+// An explicit empty list is not the same thing: it states the model has no
+// capabilities, thinking included, so it hides the control. Only a missing
+// (or null) field falls back.
 func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 	var response struct {
 		Models map[string]kimiProviderModel `json:"models"`
@@ -1625,21 +1660,42 @@ func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 		if len(efforts) == 0 {
 			efforts = model.SupportEffortsSnake
 		}
-		seen := make(map[string]bool, len(efforts))
-		levels := make([]ThinkingLevel, 0, len(efforts))
-		for _, rawEffort := range efforts {
-			effort := strings.TrimSpace(rawEffort)
-			if effort == "" || seen[effort] || !isValidDynamicThinkingValue(effort) {
-				continue
+		seen := make(map[string]bool, len(efforts)+2)
+		levels := make([]ThinkingLevel, 0, len(efforts)+2)
+		appendLevel := func(rawValue string) {
+			value := strings.TrimSpace(rawValue)
+			if value == "" || seen[value] || !isValidDynamicThinkingValue(value) {
+				return
 			}
-			seen[effort] = true
+			seen[value] = true
 			levels = append(levels, ThinkingLevel{
-				Value: effort,
-				Label: kimiThinkingLabel(effort),
+				Value: value,
+				Label: kimiThinkingLabel(value),
 			})
 		}
-		if len(levels) == 0 {
-			continue
+		if model.Capabilities != nil {
+			if !kimiHasCapability(model.Capabilities, "thinking") {
+				continue
+			}
+			if !kimiHasCapability(model.Capabilities, "always_thinking") {
+				appendLevel("off")
+			}
+			for _, effort := range efforts {
+				appendLevel(effort)
+			}
+			if len(efforts) == 0 {
+				appendLevel("on")
+			}
+			if len(levels) < 2 {
+				continue
+			}
+		} else {
+			for _, effort := range efforts {
+				appendLevel(effort)
+			}
+			if len(levels) == 0 {
+				continue
+			}
 		}
 
 		defaultEffort := strings.TrimSpace(model.DefaultEffort)
@@ -1657,8 +1713,25 @@ func parseKimiProviderThinking(raw []byte) (map[string]*ModelThinking, error) {
 	return result, nil
 }
 
+// kimiHasCapability reports whether the provider catalog lists `want` for a
+// model. Exact match after trimming, mirroring findACPConfigOption: these are
+// protocol identifiers, so a case-folded or fuzzy hit would treat a token we
+// have never verified as one we have.
+func kimiHasCapability(capabilities []string, want string) bool {
+	for _, capability := range capabilities {
+		if strings.TrimSpace(capability) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func kimiThinkingLabel(value string) string {
 	switch value {
+	case "off":
+		return "Off"
+	case "on":
+		return "On"
 	case "low":
 		return "Low"
 	case "medium":
