@@ -4,7 +4,10 @@ import { forwardRef, useImperativeHandle, useRef } from "react";
 
 let storedDraftMessage = "saved draft";
 let liveEditorMarkdown = "";
-const feedbackMocks = vi.hoisted(() => ({ mutateAsync: vi.fn() }));
+const feedbackMocks = vi.hoisted(() => ({
+  getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
+  mutateAsync: vi.fn(),
+}));
 // Deferred controlling the mock editor's in-flight upload: `reset` arms a new
 // pending upload, `resolve` lands it so a test can watch the gate re-open.
 const pendingUpload = vi.hoisted(() => {
@@ -52,6 +55,13 @@ vi.mock("../i18n", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws1" }) }));
+vi.mock("../navigation", () => ({
+  useOptionalNavigation: () => ({
+    pathname: "/test-workspace/projects/project-1",
+    searchParams: new URLSearchParams("view=board"),
+    getShareableUrl: feedbackMocks.getShareableUrl,
+  }),
+}));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
@@ -131,6 +141,7 @@ describe("FeedbackModal", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     feedbackMocks.mutateAsync.mockReset().mockResolvedValue(undefined);
+    feedbackMocks.getShareableUrl.mockClear();
   });
 
   afterEach(() => {
@@ -166,6 +177,26 @@ describe("FeedbackModal", () => {
     await waitFor(() => {
       expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({ message: "fresh feedback" }),
+      );
+    });
+  });
+
+  it("submits the platform shareable URL instead of the renderer URL", async () => {
+    storedDraftMessage = "";
+    render(<FeedbackModal onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("feedback editor");
+    fireEvent.change(editor, { target: { value: "Desktop feedback" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(feedbackMocks.getShareableUrl).toHaveBeenCalledWith(
+        "/test-workspace/projects/project-1?view=board",
+      );
+      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://app.example/test-workspace/projects/project-1?view=board",
+        }),
       );
     });
   });

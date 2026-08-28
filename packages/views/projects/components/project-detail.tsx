@@ -508,7 +508,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    void copyText(window.location.href).then((ok) => {
+                    const search = router.searchParams.toString();
+                    const path = `${router.pathname}${search ? `?${search}` : ""}`;
+                    void copyText(router.getShareableUrl(path)).then((ok) => {
                       if (ok) toast.success(t(($) => $.detail.toast_link_copied));
                     });
                   }}>
