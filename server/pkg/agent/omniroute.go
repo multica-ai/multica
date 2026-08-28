@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -81,9 +83,11 @@ type omniRouteChoice struct {
 }
 
 type omniRouteDelta struct {
-	Role      string                   `json:"role"`
-	Content   string                   `json:"content"`
-	ToolCalls []omniRouteToolCallDelta `json:"tool_calls"`
+	Role             string                   `json:"role"`
+	Content          string                   `json:"content"`
+	Reasoning        string                   `json:"reasoning,omitempty"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	ToolCalls        []omniRouteToolCallDelta `json:"tool_calls"`
 }
 
 type omniRouteToolCallDelta struct {
@@ -173,6 +177,7 @@ func (b *omnirouteBackend) Execute(ctx context.Context, prompt string, opts Exec
 		if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
 			sessionID = headerSessionID
 		}
+		omniRouteTrySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		if err := consumeOmniRouteSSE(resp.Body, msgCh, &output, &result, &sessionID, request.Model); err != nil {
 			result.Status = statusForContext(runCtx, err)
 			result.Error = err.Error()
@@ -183,6 +188,7 @@ func (b *omnirouteBackend) Execute(ctx context.Context, prompt string, opts Exec
 		result.Output = output.String()
 		result.SessionID = sessionID
 		result.DurationMs = time.Since(start).Milliseconds()
+		omniRouteTrySend(msgCh, Message{Type: MessageStatus, Status: result.Status, SessionID: sessionID})
 		resultCh <- result
 	}()
 	return &Session{Messages: msgCh, Result: resultCh}, nil
@@ -198,7 +204,7 @@ type omniRouteTurn struct {
 
 func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteConfig, client *http.Client, prompt string, opts ExecOptions) (*Session, error) {
 	runCtx, cancel := runContext(ctx, opts.Timeout)
-	registry, err := buildOmniRouteToolRegistry(runCtx, opts.McpConfig, client, opts.AllowedTools, opts.AllowedToolsConfigured)
+	registry, err := buildOmniRouteToolRegistry(runCtx, opts.McpConfig, client, opts.Cwd, opts.AllowedTools, opts.AllowedToolsConfigured)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("omniroute: load MCP tools: %w", err)
@@ -217,6 +223,7 @@ func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteCo
 		start := time.Now()
 		result := Result{Status: "completed"}
 		sessionID := opts.ResumeSessionID
+		omniRouteTrySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 		maxTurns := opts.MaxTurns
 		if maxTurns <= 0 {
 			maxTurns = 32
@@ -228,13 +235,15 @@ func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteCo
 				result.Error = turnErr.Error()
 				break
 			}
+			previousSessionID := sessionID
 			sessionID = current.sessionID
+			if turn == 0 && sessionID != previousSessionID && sessionID != "" {
+				omniRouteTrySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+			}
 			for _, message := range current.messages {
-				trySend(msgCh, message)
+				omniRouteTrySend(msgCh, message)
 			}
-			for model, usage := range current.result.Usage {
-				result.Usage = map[string]TokenUsage{model: usage}
-			}
+			accumulateTokenUsage(&result.Usage, current.result.Usage)
 			request.Messages = append(request.Messages, omniRouteMessage{Role: "assistant", Content: current.output, ToolCalls: current.calls})
 			if len(current.calls) == 0 {
 				result.Output = current.output
@@ -255,9 +264,10 @@ func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteCo
 				}
 				toolOutput, callErr := binding.client.CallTool(runCtx, binding.name, args)
 				if callErr != nil {
+					omniRouteTrySend(msgCh, Message{Type: MessageError, Tool: call.Function.Name, CallID: call.ID, Content: callErr.Error()})
 					toolOutput = "MCP error: " + callErr.Error()
 				}
-				trySend(msgCh, Message{Type: MessageToolResult, Tool: call.Function.Name, CallID: call.ID, Output: toolOutput})
+				omniRouteTrySend(msgCh, Message{Type: MessageToolResult, Tool: call.Function.Name, CallID: call.ID, Output: toolOutput})
 				request.Messages = append(request.Messages, omniRouteMessage{Role: "tool", ToolCallID: call.ID, Name: call.Function.Name, Content: toolOutput})
 			}
 			if result.Status == "failed" {
@@ -272,6 +282,7 @@ func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteCo
 		}
 		result.SessionID = sessionID
 		result.DurationMs = time.Since(start).Milliseconds()
+		omniRouteTrySend(msgCh, Message{Type: MessageStatus, Status: result.Status, SessionID: sessionID})
 		resultCh <- result
 	}()
 	return &Session{Messages: msgCh, Result: resultCh}, nil
@@ -300,28 +311,21 @@ func (b *omnirouteBackend) runOmniRouteTurn(ctx context.Context, cfg omniRouteCo
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return omniRouteTurn{}, fmt.Errorf("omniroute: upstream HTTP %d: %s", resp.StatusCode, sanitizedHTTPError(resp.Body))
 	}
-	localMessages := make(chan Message, 128)
 	var output strings.Builder
 	result := Result{}
 	newSession := sessionID
+	var turnCalls []omniRouteToolCall
 	if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
 		newSession = headerSessionID
 	}
-	if err := consumeOmniRouteSSE(resp.Body, localMessages, &output, &result, &newSession, request.Model); err != nil {
+	var messages []Message
+	if err := consumeOmniRouteSSEWithCollectors(resp.Body, nil, &output, &result, &newSession, request.Model, &messages, &turnCalls); err != nil {
 		return omniRouteTurn{}, err
 	}
 	if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
 		newSession = headerSessionID
 	}
-	close(localMessages)
-	turn := omniRouteTurn{output: output.String(), result: result, sessionID: newSession}
-	for message := range localMessages {
-		turn.messages = append(turn.messages, message)
-		if message.Type == MessageToolUse {
-			args, _ := json.Marshal(message.Input)
-			turn.calls = append(turn.calls, omniRouteToolCall{ID: message.CallID, Type: "function", Function: omniRouteFunctionCall{Name: message.Tool, Arguments: string(args)}})
-		}
-	}
+	turn := omniRouteTurn{output: output.String(), result: result, sessionID: newSession, calls: turnCalls, messages: messages}
 	return turn, nil
 }
 
@@ -349,19 +353,43 @@ func resolveOmniRouteConfig(env map[string]string) (omniRouteConfig, error) {
 	return omniRouteConfig{BaseURL: baseURL, APIKey: apiKey}, nil
 }
 
-func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Builder, result *Result, sessionID *string, model string) error {
+func consumeOmniRouteSSE(r io.Reader, msgCh chan Message, output *strings.Builder, result *Result, sessionID *string, model string) error {
+	return consumeOmniRouteSSEWithCollectors(r, msgCh, output, result, sessionID, model, nil, nil)
+}
+
+func consumeOmniRouteSSEWithCollectors(r io.Reader, msgCh chan Message, output *strings.Builder, result *Result, sessionID *string, model string, messages *[]Message, calls *[]omniRouteToolCall) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 10*1024*1024)
 	pendingCalls := make(map[int]*omniRouteToolCall)
+	sawCompletionMarker := false
+	emit := func(message Message) {
+		if messages != nil {
+			*messages = append(*messages, message)
+		}
+		if msgCh != nil {
+			omniRouteTrySend(msgCh, message)
+		}
+	}
 	flushCalls := func() error {
-		for _, call := range pendingCalls {
+		indices := make([]int, 0, len(pendingCalls))
+		for index := range pendingCalls {
+			indices = append(indices, index)
+		}
+		sort.Ints(indices)
+		for _, index := range indices {
+			call := pendingCalls[index]
 			args := map[string]interface{}{}
 			if call.Function.Arguments != "" {
 				if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
 					return fmt.Errorf("omniroute: invalid tool arguments for %q: %w", call.Function.Name, err)
 				}
 			}
-			trySend(msgCh, Message{Type: MessageToolUse, Tool: call.Function.Name, CallID: call.ID, Input: args})
+			toolCall := omniRouteToolCall{ID: call.ID, Type: call.Type, Function: call.Function}
+			toolCall.Function.Arguments = string(mustJSON(args))
+			if calls != nil {
+				*calls = append(*calls, toolCall)
+			}
+			emit(Message{Type: MessageToolUse, Tool: call.Function.Name, CallID: call.ID, Input: args})
 		}
 		return nil
 	}
@@ -372,26 +400,31 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			sawCompletionMarker = true
 			return flushCalls()
 		}
 		var event omniRouteChatResponse
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			return fmt.Errorf("omniroute: decode SSE event: %w", err)
 		}
-		if event.ID != "" {
-			*sessionID = event.ID
-		}
 		if event.Model != "" {
 			model = event.Model
 		}
 		for _, choice := range event.Choices {
 			delta := choice.Delta
-			if delta.Content == "" && delta.Role == "" && len(delta.ToolCalls) == 0 {
+			if delta.Content == "" && delta.Role == "" && delta.Reasoning == "" && delta.ReasoningContent == "" && len(delta.ToolCalls) == 0 {
 				delta = choice.Message
 			}
 			if delta.Content != "" {
 				output.WriteString(delta.Content)
-				trySend(msgCh, Message{Type: MessageText, Content: delta.Content})
+				emit(Message{Type: MessageText, Content: delta.Content})
+			}
+			thinking := delta.ReasoningContent
+			if thinking == "" {
+				thinking = delta.Reasoning
+			}
+			if thinking != "" {
+				emit(Message{Type: MessageThinking, Content: thinking})
 			}
 			for _, fragment := range delta.ToolCalls {
 				call := pendingCalls[fragment.Index]
@@ -408,10 +441,13 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 				call.Function.Arguments += fragment.Function.Arguments
 			}
 			if choice.FinishReason == "tool_calls" {
+				sawCompletionMarker = true
 				if err := flushCalls(); err != nil {
 					return err
 				}
 				pendingCalls = make(map[int]*omniRouteToolCall)
+			} else if choice.FinishReason != "" {
+				sawCompletionMarker = true
 			}
 		}
 		if event.Usage != nil {
@@ -427,8 +463,69 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("omniroute: read SSE stream: %w", err)
 	}
-	return flushCalls()
+	if !sawCompletionMarker {
+		return fmt.Errorf("omniroute: stream ended before completion marker")
+	}
+	if err := flushCalls(); err != nil {
+		return err
+	}
+	return nil
 }
+
+// omniRouteTrySend preserves control-plane events when a caller chooses not
+// to drain the optional streaming channel. Reasoning and text deltas are
+// lossy by design, but dropping a tool call or terminal status would make the
+// execution transcript disagree with the work actually performed.
+func omniRouteTrySend(ch chan Message, message Message) {
+	select {
+	case ch <- message:
+		return
+	default:
+	}
+	if message.Type != MessageToolUse && message.Type != MessageToolResult && message.Type != MessageError && message.Type != MessageStatus {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- message:
+	default:
+	}
+}
+
+func mustJSON(value interface{}) []byte {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return []byte("{}")
+	}
+	return encoded
+}
+
+func accumulateTokenUsage(dst *map[string]TokenUsage, source map[string]TokenUsage) {
+	if len(source) == 0 {
+		return
+	}
+	if *dst == nil {
+		*dst = make(map[string]TokenUsage, len(source))
+	}
+	for model, usage := range source {
+		current := (*dst)[model]
+		current.InputTokens += usage.InputTokens
+		current.OutputTokens += usage.OutputTokens
+		current.CacheReadTokens += usage.CacheReadTokens
+		current.CacheWriteTokens += usage.CacheWriteTokens
+		(*dst)[model] = current
+	}
+}
+
+var (
+	omniRouteSafeBearerSecretPattern  = regexp.MustCompile(`(?i)(\bbearer\s+)[^\s,;}]+`)
+	omniRouteSafeAuthorizationPattern = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(?:bearer\s+)?[^\s,;}]+`)
+	omniRouteSafeHeaderSecretPattern  = regexp.MustCompile(`(?i)((?:x-)?api[-_ ]?key\s*[:=]\s*)[^\s,;}]+`)
+	omniRouteSafeJSONSecretPattern    = regexp.MustCompile(`(?i)("?(?:authorization|api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret)"?\s*:\s*)("[^"]*"|[^,}\s]+)`)
+)
 
 func sanitizedHTTPError(r io.Reader) string {
 	b, _ := io.ReadAll(io.LimitReader(r, 4096))
@@ -436,7 +533,10 @@ func sanitizedHTTPError(r io.Reader) string {
 	if message == "" {
 		return "empty upstream response"
 	}
-	return strings.ReplaceAll(message, "Bearer", "[auth]")
+	message = omniRouteSafeBearerSecretPattern.ReplaceAllString(message, "$1[redacted]")
+	message = omniRouteSafeAuthorizationPattern.ReplaceAllString(message, "$1[redacted]")
+	message = omniRouteSafeHeaderSecretPattern.ReplaceAllString(message, "$1[redacted]")
+	return omniRouteSafeJSONSecretPattern.ReplaceAllString(message, "$1\"[redacted]\"")
 }
 
 func statusForContext(ctx context.Context, err error) string {

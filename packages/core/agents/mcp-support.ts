@@ -14,6 +14,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "kiro",
   "opencode",
   "openclaw",
+  "omniroute",
   "traecli",
 ]);
 

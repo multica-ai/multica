@@ -78,7 +78,43 @@ func TestOmniRouteExecuteSendsAuthenticatedStreamingRequest(t *testing.T) {
 	if gotRequest.Model != "auto" || !gotRequest.Stream || len(gotRequest.Messages) != 2 || gotRequest.Messages[0].Role != "system" {
 		t.Fatalf("request = %#v", gotRequest)
 	}
-	if len(messages) != 1 || messages[0].Type != MessageText || messages[0].Content != "hello" {
+	if len(messages) != 3 || messages[0].Type != MessageStatus || messages[0].Status != "running" ||
+		messages[1].Type != MessageText || messages[1].Content != "hello" ||
+		messages[2].Type != MessageStatus || messages[2].Status != "completed" {
+		t.Fatalf("messages = %#v", messages)
+	}
+}
+
+func TestOmniRouteExecuteEmitsReasoningAndPreservesRequestedSessionWithoutHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"id\":\"completion-id\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"reasoning_content\":\"checking\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	b := &omnirouteBackend{cfg: Config{Env: map[string]string{
+		omniRouteBaseURLKey: server.URL + "/v1",
+		omniRouteAPIKeyKey:  "test-key",
+	}}}
+	session, err := b.Execute(context.Background(), "prompt", ExecOptions{
+		Model:           "auto",
+		ResumeSessionID: "requested-session",
+		Timeout:         time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var messages []Message
+	for message := range session.Messages {
+		messages = append(messages, message)
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "done" || result.SessionID != "requested-session" {
+		t.Fatalf("result = %#v", result)
+	}
+	if len(messages) != 4 || messages[1].Type != MessageThinking || messages[1].Content != "checking" {
 		t.Fatalf("messages = %#v", messages)
 	}
 }
@@ -111,6 +147,56 @@ func TestConsumeOmniRouteSSEBuffersToolCallArguments(t *testing.T) {
 	}
 }
 
+func TestConsumeOmniRouteSSERejectsUnexpectedEOF(t *testing.T) {
+	msgCh := make(chan Message, 2)
+	var output strings.Builder
+	result := Result{}
+	var sessionID string
+	err := consumeOmniRouteSSE(
+		strings.NewReader(`data: {"choices":[{"delta":{"content":"partial"}}]}`+"\n\n"),
+		msgCh,
+		&output,
+		&result,
+		&sessionID,
+		"auto",
+	)
+	if err == nil || !strings.Contains(err.Error(), "completion marker") {
+		t.Fatalf("expected unexpected EOF error, got %v", err)
+	}
+}
+
+func TestConsumeOmniRouteSSEDoesNotExposeToolCallOnUnexpectedEOF(t *testing.T) {
+	msgCh := make(chan Message, 2)
+	var output strings.Builder
+	result := Result{}
+	var sessionID string
+	err := consumeOmniRouteSSE(
+		strings.NewReader(`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"mutate","arguments":"{}"}}]}}]}`+"\n\n"),
+		msgCh,
+		&output,
+		&result,
+		&sessionID,
+		"auto",
+	)
+	if err == nil || !strings.Contains(err.Error(), "completion marker") {
+		t.Fatalf("expected unexpected EOF error, got %v", err)
+	}
+	select {
+	case message := <-msgCh:
+		t.Fatalf("unexpected message after truncated tool stream: %#v", message)
+	default:
+	}
+}
+
+func TestSanitizedHTTPErrorRedactsCredentialForms(t *testing.T) {
+	message := sanitizedHTTPError(strings.NewReader(`{"error":"Authorization: Bearer bearer-secret", "x-api-key":"header-secret", "api_key":"json-secret"}`))
+	for _, secret := range []string{"bearer-secret", "header-secret", "json-secret"} {
+		if strings.Contains(message, secret) {
+			t.Fatalf("sanitized error leaked %q: %s", secret, message)
+		}
+	}
+}
+
 func TestOmniRouteExecuteRejectsMissingCredentials(t *testing.T) {
 	t.Parallel()
 	for name, env := range map[string]string{
@@ -134,7 +220,7 @@ func TestOmniRouteExecuteRunsMCPToolLoop(t *testing.T) {
 		llmCalls++
 		w.Header().Set("Content-Type", "text/event-stream")
 		if llmCalls == 1 {
-			_, _ = io.WriteString(w, "data: {\"id\":\"turn-1\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"id\\\":\\\"1\\\"}\"}}]}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"id\":\"turn-1\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"mcp__crm__lookup\",\"arguments\":\"{\\\"id\\\":\\\"1\\\"}\"}}]}}]}\n\n")
 			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
 		} else {
 			_, _ = io.WriteString(w, "data: {\"id\":\"turn-2\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n")
@@ -177,7 +263,8 @@ func TestOmniRouteExecuteRunsMCPToolLoop(t *testing.T) {
 	if result.Status != "completed" || result.Output != "done" || llmCalls != 2 {
 		t.Fatalf("result=%#v calls=%d messages=%#v", result, llmCalls, messages)
 	}
-	if len(messages) != 3 || messages[0].Type != MessageToolUse || messages[1].Type != MessageToolResult || messages[2].Content != "done" {
+	if len(messages) != 5 || messages[1].Type != MessageToolUse || messages[2].Type != MessageToolResult || messages[3].Content != "done" ||
+		messages[0].Type != MessageStatus || messages[0].Status != "running" || messages[4].Type != MessageStatus || messages[4].Status != "completed" {
 		t.Fatalf("messages=%#v", messages)
 	}
 }

@@ -152,7 +152,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
 	case "omniroute":
-		return cachedDiscovery(providerType, func() ([]Model, error) {
+		// The endpoint is operator-configured and may change between daemon
+		// runs. Keep separate short-lived catalogs per base URL without ever
+		// including the API key in the cache key.
+		cacheKey := providerType + ":" + strings.TrimRight(strings.TrimSpace(os.Getenv(omniRouteBaseURLKey)), "/")
+		return cachedDiscovery(cacheKey, func() ([]Model, error) {
 			return discoverOmniRouteModels(ctx)
 		})
 	case "codebuddy":

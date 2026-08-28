@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -30,8 +32,8 @@ type omniRouteToolRegistry struct {
 	clients  map[string]*omniRouteMCPClient
 }
 
-func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpClient *http.Client, allowed []string, configured bool) (omniRouteToolRegistry, error) {
-	clients, err := newOmniRouteMCPClients(raw, httpClient)
+func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpClient *http.Client, cwd string, allowed []string, configured bool) (omniRouteToolRegistry, error) {
+	clients, err := newOmniRouteMCPClients(raw, httpClient, cwd)
 	if err != nil {
 		return omniRouteToolRegistry{}, err
 	}
@@ -39,18 +41,25 @@ func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpCl
 	for _, client := range clients {
 		tools, err := client.ListTools(ctx)
 		if err != nil {
+			registry.close()
 			return omniRouteToolRegistry{}, err
 		}
 		for _, tool := range tools {
-			name := tool.Function.Name
-			if name == "" || (configured && !omniRouteToolAllowed(name, allowed)) {
+			rawName := tool.Function.Name
+			if rawName == "" {
+				continue
+			}
+			name := omniRouteMCPToolName(client.serverName, rawName)
+			if configured && !omniRouteToolAllowed(name, allowed) && !omniRouteToolAllowed(rawName, allowed) {
 				continue
 			}
 			if _, exists := registry.bindings[name]; exists {
+				registry.close()
 				return omniRouteToolRegistry{}, fmt.Errorf("duplicate MCP tool name %q", name)
 			}
+			tool.Function.Name = name
 			registry.tools = append(registry.tools, tool)
-			registry.bindings[name] = omniRouteToolBinding{client: client, name: name}
+			registry.bindings[name] = omniRouteToolBinding{client: client, name: rawName}
 		}
 	}
 	return registry, nil
@@ -76,6 +85,7 @@ func omniRouteToolAllowed(name string, allowed []string) bool {
 }
 
 type omniRouteMCPServerConfig struct {
+	Type    string            `json:"type,omitempty"`
 	URL     string            `json:"url"`
 	Command string            `json:"command"`
 	Args    []string          `json:"args,omitempty"`
@@ -88,17 +98,20 @@ type omniRouteMCPConfig struct {
 }
 
 type omniRouteMCPClient struct {
-	serverURL string
-	command   []string
-	env       map[string]string
-	headers   map[string]string
-	http      *http.Client
-	seq       atomic.Int64
-	sessionID atomic.Value
-	stdioMu   sync.Mutex
-	stdioCmd  *exec.Cmd
-	stdioIn   io.WriteCloser
-	stdioOut  *json.Decoder
+	serverName  string
+	serverURL   string
+	command     []string
+	env         map[string]string
+	headers     map[string]string
+	cwd         string
+	http        *http.Client
+	seq         atomic.Int64
+	sessionID   atomic.Value
+	stdioMu     sync.Mutex
+	stdioCmd    *exec.Cmd
+	stdioIn     io.WriteCloser
+	stdioOut    *json.Decoder
+	initialized atomic.Bool
 }
 
 type omniRouteJSONRPCRequest struct {
@@ -126,7 +139,7 @@ type omniRouteMCPTool struct {
 	InputSchema map[string]interface{} `json:"inputSchema,omitempty"`
 }
 
-func newOmniRouteMCPClients(raw json.RawMessage, httpClient *http.Client) (map[string]*omniRouteMCPClient, error) {
+func newOmniRouteMCPClients(raw json.RawMessage, httpClient *http.Client, cwd string) (map[string]*omniRouteMCPClient, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil, nil
 	}
@@ -135,7 +148,13 @@ func newOmniRouteMCPClients(raw json.RawMessage, httpClient *http.Client) (map[s
 		return nil, fmt.Errorf("omniroute MCP: parse config: %w", err)
 	}
 	clients := make(map[string]*omniRouteMCPClient, len(config.MCPServers))
-	for name, server := range config.MCPServers {
+	names := make([]string, 0, len(config.MCPServers))
+	for name := range config.MCPServers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		server := config.MCPServers[name]
 		if httpClient == nil {
 			httpClient = http.DefaultClient
 		}
@@ -147,7 +166,7 @@ func newOmniRouteMCPClients(raw json.RawMessage, httpClient *http.Client) (map[s
 		if url != "" && command != "" {
 			return nil, fmt.Errorf("omniroute MCP server %q: url and command are mutually exclusive", name)
 		}
-		client := &omniRouteMCPClient{serverURL: strings.TrimRight(url, "/"), headers: server.Headers, http: httpClient}
+		client := &omniRouteMCPClient{serverName: name, serverURL: strings.TrimRight(url, "/"), headers: server.Headers, http: httpClient, cwd: cwd}
 		if command != "" {
 			client.command = append([]string{command}, server.Args...)
 			client.env = server.Env
@@ -189,7 +208,7 @@ func (c *omniRouteMCPClient) rpc(ctx context.Context, method string, params inte
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("%s HTTP %d: %s", method, resp.StatusCode, sanitizedHTTPError(resp.Body))
 	}
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+	responseBody, err := readOmniRouteMCPResponse(resp.Body, resp.Header.Get("Content-Type"))
 	if err != nil {
 		return nil, fmt.Errorf("read %s response: %w", method, err)
 	}
@@ -197,10 +216,35 @@ func (c *omniRouteMCPClient) rpc(ctx context.Context, method string, params inte
 	if err := json.Unmarshal(responseBody, &response); err != nil {
 		return nil, fmt.Errorf("decode %s response: %w", method, err)
 	}
+	if err := validateOmniRouteMCPResponse(response, id, method); err != nil {
+		return nil, err
+	}
 	if response.Error != nil {
 		return nil, fmt.Errorf("%s RPC %d: %s", method, response.Error.Code, response.Error.Message)
 	}
 	return response.Result, nil
+}
+
+func readOmniRouteMCPResponse(body io.Reader, contentType string) ([]byte, error) {
+	if !strings.Contains(strings.ToLower(contentType), "text/event-stream") {
+		return io.ReadAll(io.LimitReader(body, 10*1024*1024))
+	}
+	scanner := bufio.NewScanner(io.LimitReader(body, 10*1024*1024))
+	scanner.Buffer(make([]byte, 4096), 10*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data != "" {
+			return []byte(data), nil
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return nil, io.ErrUnexpectedEOF
 }
 
 func (c *omniRouteMCPClient) rpcStdio(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
@@ -242,6 +286,10 @@ func (c *omniRouteMCPClient) rpcStdio(ctx context.Context, method string, params
 			c.stopStdioLocked()
 			return nil, fmt.Errorf("decode %s response: %w", method, decoded.err)
 		}
+		if err := validateOmniRouteMCPResponse(decoded.response, id, method); err != nil {
+			c.stopStdioLocked()
+			return nil, err
+		}
 		if decoded.response.Error != nil {
 			return nil, fmt.Errorf("%s RPC %d: %s", method, decoded.response.Error.Code, decoded.response.Error.Message)
 		}
@@ -249,14 +297,25 @@ func (c *omniRouteMCPClient) rpcStdio(ctx context.Context, method string, params
 	}
 }
 
+func validateOmniRouteMCPResponse(response omniRouteJSONRPCResponse, id int64, method string) error {
+	if response.JSONRPC != "2.0" {
+		return fmt.Errorf("%s response used JSON-RPC version %q", method, response.JSONRPC)
+	}
+	var responseID int64
+	if err := json.Unmarshal(response.ID, &responseID); err != nil || responseID != id {
+		return fmt.Errorf("%s response id mismatch: got %s, want %d", method, strings.TrimSpace(string(response.ID)), id)
+	}
+	return nil
+}
+
 func (c *omniRouteMCPClient) startStdioLocked() error {
 	if c.stdioCmd != nil {
 		return nil
 	}
 	cmd := exec.Command(c.command[0], c.command[1:]...)
-	cmd.Env = os.Environ()
-	for key, value := range c.env {
-		cmd.Env = append(cmd.Env, key+"="+value)
+	cmd.Env = omniRouteChildEnv(c.env)
+	if c.cwd != "" {
+		cmd.Dir = c.cwd
 	}
 	cmd.Stderr = io.Discard
 	stdout, err := cmd.StdoutPipe()
@@ -286,6 +345,8 @@ func (c *omniRouteMCPClient) stopStdioLocked() {
 	c.stdioCmd = nil
 	c.stdioIn = nil
 	c.stdioOut = nil
+	c.initialized.Store(false)
+	c.sessionID.Store("")
 }
 
 func (c *omniRouteMCPClient) close() {
@@ -295,7 +356,7 @@ func (c *omniRouteMCPClient) close() {
 }
 
 func (c *omniRouteMCPClient) initialize(ctx context.Context) error {
-	if _, ok := c.sessionID.Load().(string); ok {
+	if c.initialized.Load() {
 		return nil
 	}
 	_, err := c.rpc(ctx, "initialize", map[string]interface{}{
@@ -306,9 +367,95 @@ func (c *omniRouteMCPClient) initialize(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// Notifications do not require a response. Servers that use a session
-	// should already have returned Mcp-Session-Id from initialize.
+	if err := c.notify(ctx, "notifications/initialized", nil); err != nil {
+		return err
+	}
+	c.initialized.Store(true)
 	return nil
+}
+
+func (c *omniRouteMCPClient) notify(ctx context.Context, method string, params interface{}) error {
+	body, err := json.Marshal(omniRouteJSONRPCRequest{JSONRPC: "2.0", Method: method, Params: params})
+	if err != nil {
+		return fmt.Errorf("encode %s notification: %w", method, err)
+	}
+	if len(c.command) > 0 {
+		c.stdioMu.Lock()
+		defer c.stdioMu.Unlock()
+		if err := c.startStdioLocked(); err != nil {
+			return err
+		}
+		if _, err := c.stdioIn.Write(append(body, '\n')); err != nil {
+			c.stopStdioLocked()
+			return fmt.Errorf("write %s notification: %w", method, err)
+		}
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.serverURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create %s request: %w", method, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for key, value := range c.headers {
+		req.Header.Set(key, value)
+	}
+	if sessionID, ok := c.sessionID.Load().(string); ok && sessionID != "" {
+		req.Header.Set("Mcp-Session-Id", sessionID)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("%s request: %w", method, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("%s HTTP %d: %s", method, resp.StatusCode, sanitizedHTTPError(resp.Body))
+	}
+	return nil
+}
+
+func omniRouteMCPToolName(serverName, toolName string) string {
+	serverName = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
+			return r
+		}
+		return '_'
+	}, serverName)
+	toolName = strings.Map(func(r rune) rune {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {
+			return r
+		}
+		return '_'
+	}, toolName)
+	return "mcp__" + serverName + "__" + toolName
+}
+
+func omniRouteChildEnv(overrides map[string]string) []string {
+	env := make([]string, 0)
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if omniRouteChildEnvBlocked(key) {
+				continue
+			}
+			env = append(env, entry)
+		}
+	}
+	for key, value := range overrides {
+		if omniRouteChildEnvBlocked(key) {
+			continue
+		}
+		env = append(env, key+"="+value)
+	}
+	return env
+}
+
+func omniRouteChildEnvBlocked(key string) bool {
+	switch strings.ToUpper(strings.TrimSpace(key)) {
+	case "OMNIROUTE_API_KEY", "MULTICA_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GITHUB_TOKEN":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *omniRouteMCPClient) ListTools(ctx context.Context) ([]omniRouteToolSpec, error) {

@@ -98,6 +98,8 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "cursor_data_dir", want: true},
 		{key: "OPENCLAW_CONFIG_PATH", want: true},
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
+		{key: "OMNIROUTE_BASE_URL", want: true},
+		{key: "OMNIROUTE_API_KEY", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
 	}
@@ -273,6 +275,7 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kiro", want: true},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
+		{provider: "omniroute", want: true},
 		{provider: "codex", want: false},
 		{provider: "claude", want: false},
 	}

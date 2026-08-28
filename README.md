@@ -144,6 +144,15 @@ multica daemon start
 
 The daemon discovers models from `GET /v1/models`, sends chat requests to `POST /v1/chat/completions`, preserves OmniRoute session affinity, and bridges configured remote HTTP or local stdio MCP servers into OpenAI-compatible tool calls. The endpoint must be reachable from the daemon host. For a local OmniRoute instance, use `http://localhost:20128/v1` instead. Multica does not silently switch endpoints, so configure the endpoint that should own the task.
 
+For a live, non-mutating end-to-end check, provide a read-only OmniRoute key and run the guarded integration fixture from the server package. It starts a temporary local MCP probe, verifies model streaming, and requires a real tool-use plus tool-result round trip:
+
+```bash
+cd server
+go test -tags=integration ./pkg/agent -run TestOmniRouteLive -count=1 -v
+```
+
+The fixture never stores or prints `OMNIROUTE_API_KEY`, and the temporary MCP process receives a sanitized environment.
+
 Before starting a daemon, verify the endpoint without exposing the key in output:
 
 ```bash
