@@ -639,7 +639,7 @@ func TestAnAnswerNoRouteEvenStartedIsNotWrittenOffAsPossiblyDelivered(t *testing
 			ReqID: "REQ-NO-ROUTE", StreamID: "S-1",
 			InstallationID: rig.instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt,
 		},
-	}, "42")
+	}, "42", attachmentTarget{InstallationID: rig.instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt})
 
 	if err == nil {
 		t.Fatal("a delivery on a context that was already gone reported success")

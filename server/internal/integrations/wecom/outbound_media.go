@@ -252,9 +252,13 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	case <-ctx.Done():
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery gave up waiting for a slot",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
-		// Deliberately on a fresh context: the one that expired is the reason
-		// we are here, and reusing it would drop the sentence too.
-		o.tellUser(context.WithoutCancel(ctx), to, mediaSendFailedText)
+		// Deliberately on a fresh context — the one that expired is the reason
+		// we are here — but a BOUNDED one: this failure notice runs while the
+		// admission and pending slots are still held, and an unbounded hang in
+		// the permission read or the send would hold a worker forever.
+		notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		o.tellUser(notifyCtx, to, mediaSendFailedText)
+		cancelNotify()
 		return
 	}
 
@@ -372,6 +376,10 @@ func (o *Outbound) tellUser(ctx context.Context, to attachmentTarget, text strin
 // sendAttachment carries one file from object storage into the chat, and
 // reports what is known about where it ended up. The error is for the log; the
 // state is what the user is told.
+// errMediaPermissionWithdrawn marks a delivery stopped because the
+// installation was revoked while the file work was in flight.
+var errMediaPermissionWithdrawn = errors.New("wecom: media delivery stopped, permission withdrawn")
+
 func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.Attachment, to attachmentTarget) (deliveryState, error) {
 	// The recorded size is checked before a single byte is fetched. An
 	// oversize attachment is refused either way — readObject re-checks what it
@@ -385,6 +393,16 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 	if err != nil {
 		return deliveryDefinitelyFailed, err
 	}
+	// Re-asked after the read, between chunks, and after the upload: a
+	// revocation is a person withdrawing the connection, and the object read
+	// or the upload can be minutes long — plenty of room for the withdrawal
+	// to land while the top-of-loop gate's answer goes stale. Each stage that
+	// is about to put bytes toward the chat asks again first; a file already
+	// uploaded but not yet sent is a media_id nobody receives, which is the
+	// cheap side of the asymmetry.
+	if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+		return deliveryDefinitelyFailed, fmt.Errorf("wecom: installation may no longer be written to (%s): %w", check, errMediaPermissionWithdrawn)
+	}
 	kind := wecomMediaKind(row.ContentType, row.Filename, len(data))
 	name := outboundMediaName(row.Filename, row.ContentType)
 
@@ -392,12 +410,21 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 		Kind:     kind,
 		Filename: name,
 		Data:     data,
+		BeforeChunk: func(hctx context.Context) error {
+			if check := o.mayStillWrite(hctx, to.InstallationID); check != installationOK {
+				return fmt.Errorf("wecom: installation may no longer be written to (%s): %w", check, errMediaPermissionWithdrawn)
+			}
+			return nil
+		},
 	})
 	if err != nil {
 		// A failed upload never produced a media_id, so no message was ever
 		// addressed to the chat — including when the failure was the finish
 		// step's own lost ack. The file is definitely not there.
 		return deliveryDefinitelyFailed, fmt.Errorf("upload %s: %w", kind, err)
+	}
+	if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+		return deliveryDefinitelyFailed, fmt.Errorf("wecom: installation may no longer be written to (%s): %w", check, errMediaPermissionWithdrawn)
 	}
 	// Video is the only kind with fields beyond the media_id, and both are
 	// required. The file's own name is what there is to say about it — the

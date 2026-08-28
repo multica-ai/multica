@@ -79,6 +79,11 @@ type Result struct {
 	// only thing a TypingNotifier may use to decide "same run as the last
 	// message or not".
 	runBatch RunBatchID
+	// startedTaskID is the task the /new transaction committed in-line, set
+	// only on that path. It rides the Result so the caller can hand the
+	// typing indicator its OnRunStarted binding in the same detached goroutine
+	// as OnIngested — the one place their order is enforceable.
+	startedTaskID pgtype.UUID
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router

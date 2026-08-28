@@ -360,7 +360,7 @@ func (o *Outbound) sayTheAnswer(ctx context.Context, e events.Event, sessionID p
 	delivered := false
 	_, err := o.rounds().sayEnding(ctx, sessionID, byTask(taskID), roundOver,
 		func(ctx context.Context, t roundTurn) (roundAddress, error) {
-			addr, err := o.deliverAnswer(ctx, sessionID, t, content)
+			addr, err := o.deliverAnswer(ctx, sessionID, t, content, fallback)
 			if err == nil {
 				deliveredTo, delivered = addr, true
 			}
@@ -605,7 +605,7 @@ func (o *Outbound) bookAnswerRetry(e events.Event, sessionID pgtype.UUID, taskID
 // this function to write without asking. That holds for a booked retry too:
 // every attempt descends from the one processEvent that gated this event, so a
 // later attempt inherits that decision rather than paying for it again.
-func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t roundTurn, content string) (roundAddress, error) {
+func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t roundTurn, content string, target attachmentTarget) (roundAddress, error) {
 	// What the closing frame did, kept until the end. A delivery made of two
 	// sends is accounted for by both of them: the second one's error alone can
 	// say "nothing reached the user" about an attempt whose first half is on the
@@ -677,7 +677,7 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 		}
 		return t.Addr, o.senders.sendTextCtx(ctx, t.Addr.InstallationID, t.Addr.ChatID, t.Addr.ChatType, streamCopyNoReply)
 	}
-	addr, err := o.sendAsMessage(ctx, sessionID, content)
+	addr, err := o.sendAsMessage(ctx, target, content)
 	if err != nil && errors.Is(streamErr, errWordsMayBeOnScreen) {
 		// The closing frame reached the wire and lost only its verdict, so the
 		// answer may be sealing the bubble this very moment. What the fallback
@@ -705,20 +705,20 @@ func (o *Outbound) deliverAnswer(ctx context.Context, sessionID pgtype.UUID, t r
 // reply it promised, which is why the ledger settles on the strength of it:
 // left owed, the promise would be claimed by the next repeat of this run's
 // failure and tell the user "这次没跑通" underneath the answer they just read.
-func (o *Outbound) sendAsMessage(ctx context.Context, sessionID pgtype.UUID, content string) (roundAddress, error) {
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   channelTypeWecom,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Not a wecom session (Slack / Lark / web-only).
-			return roundAddress{}, errNothingToSay
-		}
-		return roundAddress{}, fmt.Errorf("wecom: lookup chat binding: %w", err)
+// target is the task's delivery snapshot, carried down from processEvent
+// rather than re-read here: the LIVE session binding can point at a different
+// chat by the time a retried or guard-deferred answer lands — a /new advanced
+// the route, a rebind moved the bot — and an old answer delivered into the
+// CURRENT conversation is somebody else's context in the wrong room. MUL-6661
+// pinned a reply to the route its question was ingested under; this fallback
+// honours the same rule, and the permission check below runs against the
+// snapshot's installation for the same reason.
+func (o *Outbound) sendAsMessage(ctx context.Context, target attachmentTarget, content string) (roundAddress, error) {
+	if !target.InstallationID.Valid || target.ChatID == "" {
+		return roundAddress{}, errNothingToSay
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
-		ID:          binding.InstallationID,
+		ID:          target.InstallationID,
 		ChannelType: channelTypeWecom,
 	})
 	if err != nil {
@@ -759,8 +759,8 @@ func (o *Outbound) sendAsMessage(ctx context.Context, sessionID pgtype.UUID, con
 	}
 	addr := roundAddress{
 		InstallationID: inst.ID,
-		ChatID:         binding.ChannelChatID,
-		ChatType:       aibotChatTypeFromChannel(channel.ChatType(binding.ChatType)),
+		ChatID:         target.ChatID,
+		ChatType:       target.ChatType,
 	}
 	return addr, sender.sendTextCtx(ctx, addr.ChatID, addr.ChatType, content)
 }

@@ -954,3 +954,105 @@ func TestDeliverAttachments_IgnoresATurnItCannotAddress(t *testing.T) {
 		t.Errorf("upload init frames = %d, want 0", n)
 	}
 }
+
+// blockingObjectStore parks every read until released — the shape of a slow
+// object fetch, which is the window a revocation lands in.
+type blockingObjectStore struct {
+	key     string
+	data    []byte
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingObjectStore) KeyFromURL(string) string { return f.key }
+func (f *blockingObjectStore) GetReader(ctx context.Context, _ string) (io.ReadCloser, error) {
+	close(f.entered)
+	select {
+	case <-f.release:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return io.NopCloser(bytes.NewReader(f.data)), nil
+}
+
+// A revocation that lands while the object read is in flight must stop the
+// file: no upload frame, no media send, and no failure notice into the chat
+// that said no. The permission is re-asked after the read — the top-of-loop
+// gate's answer is stale by then.
+func TestSendAttachment_RevocationDuringObjectReadStopsTheFile(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "big.bin", Url: "https://cdn.example/obj/bin", SizeBytes: 4,
+	})
+	store := &blockingObjectStore{key: "obj/bin", data: []byte("DATA"),
+		entered: make(chan struct{}), release: make(chan struct{})}
+	o, instID, conn := newOutboundWithMedia(t, q, store)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	// The delivery runs inline (the rig's spawn), so processEvent returns only
+	// when it is done; the revocation lands from the side while the read is
+	// parked, which is the deterministic version of "during".
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-store.entered
+		q.mu.Lock()
+		q.installation.Status = "revoked" // the person withdrew the connection
+		q.mu.Unlock()
+		close(store.release)
+	}()
+	if err := o.processEvent(context.Background(), chatDoneEvent("See the file.")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	<-done
+
+	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 0 {
+		t.Fatalf("upload init frames = %d, want 0 — bytes went toward the chat after revocation", n)
+	}
+	if n := len(mediaSends(t, conn)); n != 0 {
+		t.Fatalf("media sends = %d, want 0", n)
+	}
+	// The words went out before the revocation; nothing AFTER it may — the
+	// aggregate failure notice is gated on the same permission, so the only
+	// markdown on the wire is the answer itself.
+	if got := markdownSends(t, conn); len(got) != 1 {
+		t.Fatalf("markdown sends = %v, want just the answer — a notice into a revoked chat is a write into a chat that said no", got)
+	}
+}
+
+// A revocation between the upload finishing and the send must stop the send:
+// an uploaded media_id nobody receives is the cheap side of the asymmetry.
+//
+// The flip is keyed on the wire, not on a read count: the moment the upload's
+// finish frame exists, the next permission read answers revoked — which puts
+// the withdrawal exactly between the upload and the send, whatever the
+// permission-read order upstream refactors settle on.
+func TestSendAttachment_RevocationAfterUploadStopsTheSend(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "a.png", Url: "https://cdn.example/obj/a",
+		ContentType: "image/png", SizeBytes: 7,
+	})
+	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	q.atInstallation = func(int) {
+		if len(conn.cmdFrames(cmdUploadMediaFinish)) > 0 {
+			q.installation.Status = "revoked"
+		}
+	}
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaInit)); n != 1 {
+		t.Fatalf("upload init frames = %d, want 1 — the upload itself was permitted", n)
+	}
+	if n := len(conn.cmdFrames(cmdUploadMediaFinish)); n != 1 {
+		t.Fatalf("upload finish frames = %d, want 1", n)
+	}
+	if n := len(mediaSends(t, conn)); n != 0 {
+		t.Fatalf("media sends = %d, want 0 — the send ran after the withdrawal", n)
+	}
+}

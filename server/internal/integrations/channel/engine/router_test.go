@@ -2216,3 +2216,44 @@ func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
 		t.Fatal("resolver did not run")
 	}
 }
+
+// The /new transaction commits its task in-line, skipping the debounced
+// scheduling that normally mints the batch and reports the task. Before the
+// fix that left the FIRST turn after /new with batch 0 — which a per-run
+// typing indicator rejects on ingest — and with no OnRunStarted at all, so the
+// user's opening message in a fresh conversation never got a progress bubble.
+// The order is part of the contract: the binding must not arrive before the
+// ingest that opens the round.
+func TestRouter_NewFirstTurnGetsANonzeroBatchAndItsTaskBinding(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/new /issue investigate deploy"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+
+	if !waitFor(time.Second, func() bool { return h.typing.calls() == 1 && len(h.typing.started()) == 1 }) {
+		t.Fatalf("typing calls=%d started=%v — the /new turn reported no run",
+			h.typing.calls(), h.typing.started())
+	}
+	ingested := h.typing.ingested()
+	started := h.typing.started()
+	if len(ingested) != 1 || ingested[0] == 0 {
+		t.Fatalf("ingest batches = %v, want one nonzero batch", ingested)
+	}
+	if started[0] != ingested[0] {
+		t.Fatalf("started batch %d != ingested batch %d — the binding belongs to the round the ingest opened",
+			started[0], ingested[0])
+	}
+	enqueued := h.tasks.enqueuedIDs()
+	if len(enqueued) != 1 {
+		t.Fatalf("enqueued tasks = %d, want 1", len(enqueued))
+	}
+	h.typing.mu.Lock()
+	bound := h.typing.boundTasks[started[0]]
+	h.typing.mu.Unlock()
+	if bound != enqueued[0] {
+		t.Fatalf("bound task %v != committed task %v", bound, enqueued[0])
+	}
+}

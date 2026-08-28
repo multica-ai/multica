@@ -281,10 +281,18 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	// blocks the connector ACK path.
 	if res.Outcome == OutcomeIngested && res.runScheduled && set.Typing != nil {
 		batch := res.runBatch
+		startedTaskID := res.startedTaskID
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
 			set.Typing.OnIngested(tctx, inst, msg, res.ChatSessionID, batch)
+			// The /new path committed its task before any flush could report
+			// it, so the binding is delivered here — after OnIngested, in the
+			// same goroutine, which is the only place that order is a fact
+			// rather than a race.
+			if startedTaskID.Valid {
+				set.Typing.OnRunStarted(tctx, res.ChatSessionID, batch, startedTaskID)
+			}
 		}()
 	}
 	r.scheduleReply(set, inst, msg, res)
@@ -645,6 +653,17 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    just quote the slash command back. The chat_message is still durable
 	//    and the OutboundReplier still fires — only the debounced run trigger
 	//    (and therefore the typing indicator) is suppressed.
+	if !msg.SkipAgentRun && startTaskCommitted {
+		// The /new transaction committed this turn's task in-line, so the
+		// debounced scheduling below — the path that normally mints the batch
+		// and later reports the task via bindTyping — never runs for it. The
+		// indicator still needs both: a zero batch is rejected on ingest
+		// (typing_indicator.go), which left the FIRST turn after /new with no
+		// bubble at all. Mint the authoritative batch here; the caller
+		// delivers OnIngested and then OnRunStarted with it in one goroutine.
+		res.runBatch = RunBatchID(r.batchSeq.Add(1))
+		res.startedTaskID = startedTask.ID
+	}
 	if !msg.SkipAgentRun && !startTaskCommitted {
 		pendingContexts := appendRes.PendingContexts
 		if len(pendingContexts) == 0 {

@@ -38,6 +38,12 @@ type fakeOutboundQueries struct {
 	// guarded by mu: an answer's retries read this row from their own timer
 	// goroutines, and a test that withdraws permission mid-delivery writes it
 	// from a third.
+	// taskDelivery, when set, is what GetChannelTaskDelivery answers — kept
+	// SEPARATE from sessionBinding so a test can model the one situation the
+	// two disagree in: the task's route snapshot pointing at the chat the
+	// question came from while the live binding has since moved on.
+	taskDelivery *db.ChannelTaskDelivery
+
 	installation   db.ChannelInstallation
 	installErr     error
 	installErrFor  int // 1-based read to fail; 0 fails none
@@ -69,6 +75,12 @@ type fakeOutboundQueries struct {
 	// a delivery with no bubble left has to make. It is where a test says "and
 	// by the time the delivery got here, the caller's budget was gone".
 	atBinding func()
+	// atInstallation runs at the top of each installation read, with the
+	// 1-based read count, BEFORE the answer is computed — so a hook that flips
+	// the row on some condition (a frame already on the wire, a read ordinal)
+	// decides what this very read sees. That is how a test lands a revocation
+	// exactly between two stages of a delivery.
+	atInstallation func(read int)
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -120,6 +132,9 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUI
 	if f.sessionErr != nil {
 		return db.ChannelTaskDelivery{}, f.sessionErr
 	}
+	if f.taskDelivery != nil {
+		return *f.taskDelivery, nil
+	}
 	return db.ChannelTaskDelivery{
 		BindingID: f.sessionBinding.ID, InstallationID: f.sessionBinding.InstallationID,
 		ChannelType: channelTypeWecom, ChannelChatID: f.sessionBinding.ChannelChatID,
@@ -137,6 +152,9 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 	f.installReads++
 	if n := f.installErrFor; n > 0 && f.installReads == n {
 		return db.ChannelInstallation{}, errors.New("wecom test: transient database error")
+	}
+	if f.atInstallation != nil {
+		f.atInstallation(f.installReads)
 	}
 	return f.installation, f.installErr
 }
@@ -595,5 +613,47 @@ func TestProcessEvent_FailsClosedWhenTheTaskIdIsMissing(t *testing.T) {
 	conn.mu.Unlock()
 	if n != 0 {
 		t.Fatalf("delivered a completion whose origin could not be established (%d frame(s))", n)
+	}
+}
+
+// The fallback delivery must honour the task's route snapshot, not the live
+// binding. A /new or a rebind moves the binding while a retried or deferred
+// answer is still in flight; delivering that old answer into the CURRENT chat
+// puts somebody else's context in the wrong room. MUL-6661 pinned the direct
+// path to the snapshot — this pins the fallback.
+func TestProcessEvent_FallbackDeliversToTheSnapshotChatNotTheLiveBinding(t *testing.T) {
+	t.Parallel()
+	q := &fakeOutboundQueries{
+		// The live binding has moved on to a new conversation…
+		sessionBinding:  db.ChannelChatSessionBinding{ChannelChatID: "NEW_CHAT", ChatType: "group"},
+		installation:    db.ChannelInstallation{Status: string(InstallationActive)},
+		channelIngested: askedOverWecom(),
+	}
+	q.fileTask(t, testTaskID)
+	o, instID, conn := newOutboundWithConn(t, q)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	// …while THIS task was asked, and answered, in the original one.
+	q.taskDelivery = &db.ChannelTaskDelivery{
+		InstallationID: instID, ChannelType: channelTypeWecom,
+		ChannelChatID: "ORIGINAL_CHAT", ChatType: "p2p",
+	}
+
+	err := o.processEvent(context.Background(), events.Event{
+		ChatSessionID: testSessionID,
+		Payload: protocol.ChatDonePayload{
+			Content: "the old answer",
+			TaskID:  testTaskID,
+		},
+	})
+	if err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	body := conn.sendBody(t, 0)
+	if body["chatid"] != "ORIGINAL_CHAT" {
+		t.Fatalf("chatid = %v — the answer followed the LIVE binding into a conversation that never asked it", body["chatid"])
+	}
+	if body["chat_type"] != float64(chatTypeSingleInt) {
+		t.Errorf("chat_type = %v, want the snapshot's p2p", body["chat_type"])
 	}
 }

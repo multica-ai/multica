@@ -150,6 +150,14 @@ type outboundMedia struct {
 	Filename string
 
 	Data []byte
+
+	// BeforeChunk, when set, is asked before EACH chunk is dispatched. A
+	// non-nil error stops the upload with no further frames. It exists for
+	// the one caller that must stop mid-file: an installation revoked while
+	// the upload is in flight is a person withdrawing the connection, and
+	// chunks sent after that are writes into a chat that said no. The ws
+	// layer only runs the hook — what it checks is the caller's policy.
+	BeforeChunk func(context.Context) error
 }
 
 func (m outboundMedia) validate() error {
@@ -210,7 +218,7 @@ func (s *wsSender) uploadMedia(ctx context.Context, m outboundMedia) (string, er
 	if err != nil {
 		return "", err
 	}
-	if err := s.uploadMediaChunks(ctx, uploadID, chunks); err != nil {
+	if err := s.uploadMediaChunks(ctx, uploadID, chunks, m.BeforeChunk); err != nil {
 		return "", err
 	}
 	return s.uploadMediaFinish(ctx, uploadID)
@@ -246,10 +254,20 @@ func (s *wsSender) uploadMediaInit(ctx context.Context, m outboundMedia, chunks 
 
 // uploadMediaChunks sends every slice, a few at a time. The first failure
 // cancels the rest: there is no partial upload worth finishing.
-func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunks [][]byte) error {
+func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunks [][]byte, beforeChunk func(context.Context) error) error {
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(mediaChunkParallelism(len(chunks)))
 	for i, chunk := range chunks {
+		// Asked before DISPATCH, not inside the goroutine: with the group's
+		// parallelism a chunk already in flight finishes, but nothing new is
+		// put on the wire once the hook says stop. Refusing here also cancels
+		// gctx via the group, which is what stops the in-flight retries.
+		if beforeChunk != nil {
+			if err := beforeChunk(gctx); err != nil {
+				_ = g.Wait()
+				return err
+			}
+		}
 		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk) })
 	}
 	return g.Wait()
