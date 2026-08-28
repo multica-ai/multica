@@ -21,6 +21,7 @@ export type WSEventType =
   | "comment:unresolved"
   | "agent:status"
   | "agent:created"
+  | "agent:updated"
   | "agent:archived"
   | "agent:restored"
   | "task:queued"
@@ -171,6 +172,10 @@ export interface AgentStatusPayload {
 }
 
 export interface AgentCreatedPayload {
+  agent: Agent;
+}
+
+export interface AgentUpdatedPayload {
   agent: Agent;
 }
 
@@ -571,6 +576,7 @@ export interface WSEventPayloadMap {
   "reaction:removed": ReactionRemovedPayload;
   "agent:status": AgentStatusPayload;
   "agent:created": AgentCreatedPayload;
+  "agent:updated": AgentUpdatedPayload;
   "agent:archived": AgentArchivedPayload;
   "agent:restored": AgentRestoredPayload;
   "task:queued": TaskQueuedPayload;
