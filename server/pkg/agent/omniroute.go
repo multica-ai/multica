@@ -170,9 +170,15 @@ func (b *omnirouteBackend) Execute(ctx context.Context, prompt string, opts Exec
 		result := Result{Status: "completed"}
 		var output strings.Builder
 		var sessionID = opts.ResumeSessionID
+		if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
+			sessionID = headerSessionID
+		}
 		if err := consumeOmniRouteSSE(resp.Body, msgCh, &output, &result, &sessionID, request.Model); err != nil {
 			result.Status = statusForContext(runCtx, err)
 			result.Error = err.Error()
+		}
+		if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
+			sessionID = headerSessionID
 		}
 		result.Output = output.String()
 		result.SessionID = sessionID
@@ -297,8 +303,14 @@ func (b *omnirouteBackend) runOmniRouteTurn(ctx context.Context, cfg omniRouteCo
 	var output strings.Builder
 	result := Result{}
 	newSession := sessionID
+	if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
+		newSession = headerSessionID
+	}
 	if err := consumeOmniRouteSSE(resp.Body, localMessages, &output, &result, &newSession, request.Model); err != nil {
 		return omniRouteTurn{}, err
+	}
+	if headerSessionID := omniRouteSessionHeader(resp); headerSessionID != "" {
+		newSession = headerSessionID
 	}
 	close(localMessages)
 	turn := omniRouteTurn{output: output.String(), result: result, sessionID: newSession}
@@ -310,6 +322,15 @@ func (b *omnirouteBackend) runOmniRouteTurn(ctx context.Context, cfg omniRouteCo
 		}
 	}
 	return turn, nil
+}
+
+func omniRouteSessionHeader(resp *http.Response) string {
+	for _, name := range []string{"X-OmniRoute-Session-Id", "X-Session-Id"} {
+		if value := strings.TrimSpace(resp.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func resolveOmniRouteConfig(env map[string]string) (omniRouteConfig, error) {

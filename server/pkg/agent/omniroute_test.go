@@ -44,6 +44,7 @@ func TestOmniRouteExecuteSendsAuthenticatedStreamingRequest(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		w.Header().Set("X-OmniRoute-Session-Id", "header-session")
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"id\":\"omni-1\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"}}]}\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
@@ -68,7 +69,7 @@ func TestOmniRouteExecuteSendsAuthenticatedStreamingRequest(t *testing.T) {
 		messages = append(messages, msg)
 	}
 	result := <-session.Result
-	if result.Status != "completed" || result.Output != "hello" || result.SessionID != "omni-1" {
+	if result.Status != "completed" || result.Output != "hello" || result.SessionID != "header-session" {
 		t.Fatalf("result = %#v", result)
 	}
 	if gotAuth != "Bearer secret-for-test" || gotSession != "prior-session" {

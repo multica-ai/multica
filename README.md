@@ -131,6 +131,19 @@ Go to **Settings → Agents** and click **New Agent**. Pick the runtime you just
 
 Create an issue from the board (or via `multica issue create`), then assign it to your new agent. The agent will automatically pick up the task, execute it on your runtime, and report progress — just like a human teammate.
 
+### Remote OmniRoute provider
+
+Multica can use a remote OmniRoute instance as a native OpenAI-compatible provider. This is useful when the model gateway runs on a separate VM, including a Tailscale-private host. Configure the daemon with the endpoint and an API key through your secret manager or shell environment:
+
+```bash
+export OMNIROUTE_BASE_URL="http://your-omniroute-host:20128/v1"
+export OMNIROUTE_API_KEY="<secret>"
+export MULTICA_OMNIROUTE_MODEL="<model-id>"
+multica daemon start
+```
+
+The daemon discovers models from `GET /v1/models`, sends chat requests to `POST /v1/chat/completions`, preserves OmniRoute session affinity, and can bridge configured remote MCP servers into OpenAI-compatible tool calls. The endpoint must be reachable from the daemon host. Do not commit the API key or place it in agent instructions, issue content, logs, or memory. Upstream model routes may differ in structured tool-call support, so select a route that advertises tool use when the agent needs MCP actions.
+
 ---
 
 ## CLI
