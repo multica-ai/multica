@@ -139,6 +139,15 @@ const mockMembersData = vi.hoisted(() => ({
   list: [{ user_id: "user-1", role: "admin" }],
 }));
 
+const mockRuntimesQuery = vi.hoisted(() => ({
+  data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }] as
+    | Array<{ id: string; metadata: Record<string, unknown> }>
+    | undefined,
+  isSuccess: true,
+  isPending: false,
+  isError: false,
+}));
+
 // Per-test override for the squads list so we can flip between "squads
 // exist and one's leader is reachable" and "no squads" cases without
 // re-mocking the whole module.
@@ -164,11 +173,15 @@ vi.mock("@tanstack/react-query", () => ({
       case "agents":
         return { data: mockAgentsData.list };
       case "runtimes":
-        if (!enabled) return { data: undefined, isSuccess: false };
-        return {
-          data: [{ id: "runtime-1", metadata: { cli_version: "1.2.3" } }],
-          isSuccess: true,
-        };
+        if (!enabled) {
+          return {
+            data: undefined,
+            isSuccess: false,
+            isPending: false,
+            isError: false,
+          };
+        }
+        return mockRuntimesQuery;
       case "projects":
         return mockProjectsQuery;
       default:
@@ -274,7 +287,8 @@ vi.mock("@multica/core/runtimes", () => ({
     version
       ? { state: "ok", min: "1.0.0" }
       : { state: "missing", min: "1.0.0" },
-  readRuntimeCliVersion: () => "1.2.3",
+  readRuntimeCliVersion: (metadata?: Record<string, unknown>) =>
+    typeof metadata?.cli_version === "string" ? metadata.cli_version : "",
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
 
@@ -557,6 +571,15 @@ describe("AgentCreatePanel", () => {
       runtime_cli_version: "1.2.3",
     }];
     mockMembersData.list = [{ user_id: "user-1", role: "admin" }];
+    mockRuntimesQuery.data = [
+      {
+        id: "runtime-1",
+        metadata: { cli_version: "1.2.3" },
+      },
+    ];
+    mockRuntimesQuery.isSuccess = true;
+    mockRuntimesQuery.isPending = false;
+    mockRuntimesQuery.isError = false;
     mockSquadsData.list = [];
     mockQuickCreateIssue.mockResolvedValue(undefined);
     mockCreateCommentSubIssue.mockResolvedValue({ task_id: "task-source-child" });
@@ -705,17 +728,57 @@ describe("AgentCreatePanel", () => {
   });
 
   it("falls back to the runtime list for an older server without the agent projection", () => {
+    mockAgentsData.list = [
+      {
+        id: "agent-1",
+        name: "Bohan",
+        archived_at: null,
+        runtime_id: "runtime-1",
+      },
+    ];
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(
+      screen.queryByText(/doesn't report a CLI version/),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+  });
+
+  it("keeps Create disabled while an older server's runtime fallback is loading", () => {
+    mockAgentsData.list = [
+      {
+        id: "agent-1",
+        name: "Bohan",
+        archived_at: null,
+        runtime_id: "runtime-1",
+      },
+    ];
+    mockRuntimesQuery.data = undefined;
+    mockRuntimesQuery.isSuccess = false;
+    mockRuntimesQuery.isPending = true;
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
+  });
+
+  it("fails closed when an older server's runtime fallback request fails", () => {
     mockAgentsData.list = [{
       id: "agent-1",
       name: "Bohan",
       archived_at: null,
       runtime_id: "runtime-1",
     }];
+    mockRuntimesQuery.data = undefined;
+    mockRuntimesQuery.isSuccess = false;
+    mockRuntimesQuery.isError = true;
 
     renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
 
-    expect(screen.queryByText(/doesn't report a CLI version/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Create$/i })).toBeEnabled();
+    expect(screen.getByText(/doesn't report a CLI version/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Create$/i })).toBeDisabled();
   });
 
   it("reveals optional fields from the overflow and submits their values", async () => {

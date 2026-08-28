@@ -337,9 +337,16 @@ export function AgentCreatePanel({
   // the projection.
   const projectedRuntimeCliVersion = selectedAgent?.runtime_cli_version;
   const hasAgentCLIVersionProjection = projectedRuntimeCliVersion !== undefined;
-  const { data: runtimes = [], isSuccess: runtimesLoaded } = useQuery({
+  const needsRuntimeListFallback =
+    !!selectedAgent && !hasAgentCLIVersionProjection;
+  const {
+    data: runtimes = [],
+    isSuccess: runtimesLoaded,
+    isPending: runtimesPending,
+    isError: runtimesError,
+  } = useQuery({
     ...runtimeListOptions(wsId),
-    enabled: !!selectedAgent && !hasAgentCLIVersionProjection,
+    enabled: needsRuntimeListFallback,
   });
   const selectedRuntime = useMemo(
     () =>
@@ -361,11 +368,16 @@ export function AgentCreatePanel({
   );
   const usesExplicitFields = priority !== "none" || dueDate !== null;
   const versionCheck = usesExplicitFields ? fieldVersionCheck : baseVersionCheck;
-  const runtimeVersionLoaded = hasAgentCLIVersionProjection || runtimesLoaded;
+  const runtimeVersionPending = needsRuntimeListFallback && runtimesPending;
+  const runtimeVersionError = needsRuntimeListFallback && runtimesError;
+  const runtimeVersionLoaded =
+    hasAgentCLIVersionProjection ||
+    (needsRuntimeListFallback && runtimesLoaded);
   const versionBlocked =
-    runtimeVersionLoaded &&
-    (baseVersionCheck.state !== "ok" ||
-      (usesExplicitFields && fieldVersionCheck.state !== "ok"));
+    runtimeVersionError ||
+    (runtimeVersionLoaded &&
+      (baseVersionCheck.state !== "ok" ||
+        (usesExplicitFields && fieldVersionCheck.state !== "ok")));
 
   const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at
@@ -422,9 +434,15 @@ export function AgentCreatePanel({
     editorRef,
     uploadGate: gate,
     onSubmit: async (md): Promise<boolean> => {
-      // The button already disables on !actor / versionBlocked, but the
-      // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
-      if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
+      // The button already disables on !actor / runtimeVersionPending /
+      // versionBlocked, but the ⌘+Enter path bypasses it — re-guard here and
+      // keep the draft in place.
+      if (
+        !actor ||
+        runtimeVersionPending ||
+        versionBlocked ||
+        (anchorCommentId && !sourcePreview)
+      ) return false;
       // Flush the prompt editor's pending debounce before snapshotting — see
       // ManualCreatePanel.
       const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
@@ -897,7 +915,15 @@ export function AgentCreatePanel({
           <Button
             size="sm"
             onClick={submit}
-            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
+            disabled={
+              !hasContent ||
+              !actor ||
+              submitting ||
+              runtimeVersionPending ||
+              versionBlocked ||
+              gate.uploading ||
+              (!!anchorCommentId && !sourcePreview)
+            }
             aria-disabled={gate.uploading || undefined}
             // Sending is a busy state too, not just uploading.
             aria-busy={gate.uploading || submitting || undefined}
