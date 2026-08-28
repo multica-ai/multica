@@ -132,7 +132,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli)
+	ExecutablePath string            // path to CLI binary, or empty for API providers
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
@@ -140,11 +140,11 @@ type Config struct {
 // SupportsToolAllowlist reports whether a backend has a native mechanism for
 // restricting the tools exposed to an execution.
 func SupportsToolAllowlist(agentType string) bool {
-	return agentType == "claude" || agentType == "codebuddy"
+	return agentType == "claude" || agentType == "codebuddy" || agentType == "omniroute"
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "omniroute".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -165,6 +165,7 @@ var SupportedTypes = []string{
 	"kimi",
 	"kiro",
 	"antigravity",
+	"omniroute",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -213,8 +214,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qoderBackend{cfg: cfg}, nil
 	case "traecli":
 		return &traecliBackend{cfg: cfg}, nil
+	case "omniroute":
+		return &omnirouteBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, omniroute)", agentType)
 	}
 }
 

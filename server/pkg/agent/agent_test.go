@@ -26,7 +26,7 @@ func TestNewReturnsClaudeBackend(t *testing.T) {
 func TestSupportsToolAllowlist(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"claude", "codebuddy"} {
+	for _, provider := range []string{"claude", "codebuddy", "omniroute"} {
 		if !SupportsToolAllowlist(provider) {
 			t.Errorf("SupportsToolAllowlist(%q) = false, want true", provider)
 		}
