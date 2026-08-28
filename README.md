@@ -142,7 +142,17 @@ export MULTICA_OMNIROUTE_MODEL="<model-id>"
 multica daemon start
 ```
 
-The daemon discovers models from `GET /v1/models`, sends chat requests to `POST /v1/chat/completions`, preserves OmniRoute session affinity, and bridges configured remote HTTP or local stdio MCP servers into OpenAI-compatible tool calls. The endpoint must be reachable from the daemon host. Do not commit the API key or place it in agent instructions, issue content, logs, or memory. Upstream model routes may differ in structured tool-call support, so select a route that advertises tool use when the agent needs MCP actions.
+The daemon discovers models from `GET /v1/models`, sends chat requests to `POST /v1/chat/completions`, preserves OmniRoute session affinity, and bridges configured remote HTTP or local stdio MCP servers into OpenAI-compatible tool calls. The endpoint must be reachable from the daemon host. For a local OmniRoute instance, use `http://localhost:20128/v1` instead. Multica does not silently switch endpoints, so configure the endpoint that should own the task.
+
+Before starting a daemon, verify the endpoint without exposing the key in output:
+
+```bash
+curl --fail-with-body --silent --show-error \
+  -H "Authorization: Bearer $OMNIROUTE_API_KEY" \
+  "$OMNIROUTE_BASE_URL/models" >/tmp/omniroute-models.json
+```
+
+Do not commit the API key or place it in agent instructions, issue content, logs, or memory. Upstream model routes may differ in structured tool-call support, so select a route that advertises tool use when the agent needs MCP actions.
 
 ---
 
