@@ -172,13 +172,37 @@ var modelAliasRules = []struct {
 	// model identity, so it stays unmapped.
 }
 
-func PriceForModelAlias(model string) (ModelPrice, bool) {
-	model = strings.ToLower(strings.TrimSpace(model))
+// contextTagRe matches a trailing context-window variant tag such as the
+// `[1m]` Claude Code appends to the model id. A complete bracket tag with at
+// least one character inside, anchored at the end — the same shape the
+// frontend's `stripContextTag` strips (`\[[^\]]+\]$` in
+// packages/views/runtimes/utils.ts), so empty tags (`model[]`) and non-tag
+// trailing brackets (`model[`) stay unmapped on both sides.
+var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
+
+func matchModelAlias(model string) (ModelPrice, bool) {
 	for _, rule := range modelAliasRules {
 		if rule.re.MatchString(model) {
 			price, ok := modelPrices[rule.priceKey]
 			return price, ok
 		}
+	}
+	return ModelPrice{}, false
+}
+
+func PriceForModelAlias(model string) (ModelPrice, bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if price, ok := matchModelAlias(model); ok {
+		return price, true
+	}
+	// The raw id did not resolve: a harness-appended context-window tag
+	// (`kimi-k3[1m]`, `grok-4.5[1m]`) is the same SKU at the same tier, so
+	// retry against the bare id. The anchored Codex / Grok / Kimi rules end at
+	// `$`, so without this a bracketed variant would take the unpriced branch
+	// in RecordLLMUsage. Only ever turns a miss into a hit — the raw form is
+	// tried first, so an explicit bracketed rule still wins.
+	if stripped := contextTagRe.ReplaceAllString(model, ""); stripped != model {
+		return matchModelAlias(stripped)
 	}
 	return ModelPrice{}, false
 }
