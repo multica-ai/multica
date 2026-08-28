@@ -219,6 +219,10 @@ type terminalTaskReport struct {
 	// run on the issue or chat can select it again, however many clean rows
 	// still reference it.
 	retiredSessionID string
+	// help is the agent-authored "I'm stuck" signal (GAP-25), forwarded to the
+	// server only when the terminal result actually carried one. Empty for every
+	// error-exit path, which never has a TaskResult to read it from.
+	help HelpSignal
 }
 
 type executionEnvironmentCommand func() ([]string, error)
@@ -5684,6 +5688,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			durableWorkDir:        result.DurableWorkDir,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			help:                  resultHelpSignal(result),
 		})
 		if err == nil {
 			return
@@ -5727,6 +5732,9 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			failureReason:         taskfailure.Classify(fallbackErrMsg).String(),
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			// The agent's help signal is independent of the delivery channel: a
+			// blocked-and-rejected complete still means a human is needed.
+			help: resultHelpSignal(result),
 		}); failErr != nil {
 			taskLog.Error("fail task fallback also failed", "error", failErr)
 		}
@@ -5765,9 +5773,25 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			failureReason:         failureReason,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
+			// This is the primary blocked path: a non-completed task with an
+			// agent-authored help signal must land as agent_requested_help,
+			// not an ordinary failure.
+			help: resultHelpSignal(result),
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
+	}
+}
+
+// resultHelpSignal lifts the optional GAP-25 help fields off a terminal
+// TaskResult into the daemon-side HelpSignal the report carries to the server.
+// A result that never set them yields an empty HelpSignal, which the client and
+// server both treat as "no help request" — so the legacy path is untouched.
+func resultHelpSignal(result TaskResult) HelpSignal {
+	return HelpSignal{
+		BlockedReason: result.BlockedReason,
+		Needs:         result.Needs,
+		Confidence:    result.Confidence,
 	}
 }
 
@@ -5802,9 +5826,9 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 func (d *Daemon) sendTerminalReport(ctx context.Context, report terminalTaskReport) error {
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.help)
 	case terminalTaskReportFail:
-		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir)
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.help)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
