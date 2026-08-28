@@ -32,12 +32,11 @@ type omniRouteChatRequest struct {
 }
 
 type omniRouteMessage struct {
-	Role       string                 `json:"role"`
-	Content    string                 `json:"content,omitempty"`
-	ToolCalls  []omniRouteToolCall    `json:"tool_calls,omitempty"`
-	ToolCallID string                 `json:"tool_call_id,omitempty"`
-	Name       string                 `json:"name,omitempty"`
-	Arguments  map[string]interface{} `json:"arguments,omitempty"`
+	Role       string              `json:"role"`
+	Content    string              `json:"content,omitempty"`
+	ToolCalls  []omniRouteToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
+	Name       string              `json:"name,omitempty"`
 }
 
 type omniRouteToolSpec struct {
@@ -116,6 +115,9 @@ func (b *omnirouteBackend) Execute(ctx context.Context, prompt string, opts Exec
 	if b.cfg.Logger == nil {
 		b.cfg.Logger = slog.Default()
 	}
+	if len(opts.McpConfig) > 0 {
+		return b.executeWithTools(ctx, cfg, client, prompt, opts)
+	}
 
 	request := omniRouteChatRequest{
 		Model: opts.Model,
@@ -178,6 +180,136 @@ func (b *omnirouteBackend) Execute(ctx context.Context, prompt string, opts Exec
 		resultCh <- result
 	}()
 	return &Session{Messages: msgCh, Result: resultCh}, nil
+}
+
+type omniRouteTurn struct {
+	output    string
+	result    Result
+	sessionID string
+	calls     []omniRouteToolCall
+	messages  []Message
+}
+
+func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteConfig, client *http.Client, prompt string, opts ExecOptions) (*Session, error) {
+	runCtx, cancel := runContext(ctx, opts.Timeout)
+	registry, err := buildOmniRouteToolRegistry(runCtx, opts.McpConfig, client, opts.AllowedTools, opts.AllowedToolsConfigured)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("omniroute: load MCP tools: %w", err)
+	}
+	request := omniRouteChatRequest{Model: opts.Model, Stream: true, Tools: registry.tools, Messages: []omniRouteMessage{{Role: "user", Content: prompt}}}
+	if strings.TrimSpace(opts.SystemPrompt) != "" {
+		request.Messages = append([]omniRouteMessage{{Role: "system", Content: opts.SystemPrompt}}, request.Messages...)
+	}
+	msgCh := make(chan Message, 128)
+	resultCh := make(chan Result, 1)
+	go func() {
+		defer cancel()
+		defer close(msgCh)
+		defer close(resultCh)
+		start := time.Now()
+		result := Result{Status: "completed"}
+		sessionID := opts.ResumeSessionID
+		maxTurns := opts.MaxTurns
+		if maxTurns <= 0 {
+			maxTurns = 32
+		}
+		for turn := 0; turn < maxTurns; turn++ {
+			current, turnErr := b.runOmniRouteTurn(runCtx, cfg, client, request, sessionID)
+			if turnErr != nil {
+				result.Status = statusForContext(runCtx, turnErr)
+				result.Error = turnErr.Error()
+				break
+			}
+			sessionID = current.sessionID
+			for _, message := range current.messages {
+				trySend(msgCh, message)
+			}
+			for model, usage := range current.result.Usage {
+				result.Usage = map[string]TokenUsage{model: usage}
+			}
+			request.Messages = append(request.Messages, omniRouteMessage{Role: "assistant", Content: current.output, ToolCalls: current.calls})
+			if len(current.calls) == 0 {
+				result.Output = current.output
+				break
+			}
+			for _, call := range current.calls {
+				binding, ok := registry.bindings[call.Function.Name]
+				args := map[string]interface{}{}
+				if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+					result.Status = "failed"
+					result.Error = fmt.Sprintf("omniroute: invalid arguments for %q: %v", call.Function.Name, err)
+					break
+				}
+				if !ok || !omniRouteToolAllowed(call.Function.Name, opts.AllowedTools) && opts.AllowedToolsConfigured {
+					result.Status = "failed"
+					result.Error = fmt.Sprintf("omniroute: tool %q is not allowed", call.Function.Name)
+					break
+				}
+				toolOutput, callErr := binding.client.CallTool(runCtx, binding.name, args)
+				if callErr != nil {
+					toolOutput = "MCP error: " + callErr.Error()
+				}
+				trySend(msgCh, Message{Type: MessageToolResult, Tool: call.Function.Name, CallID: call.ID, Output: toolOutput})
+				request.Messages = append(request.Messages, omniRouteMessage{Role: "tool", ToolCallID: call.ID, Name: call.Function.Name, Content: toolOutput})
+			}
+			if result.Status == "failed" {
+				break
+			}
+		}
+		if result.Status == "completed" && len(request.Messages) > 0 {
+			if last := request.Messages[len(request.Messages)-1]; last.Role == "tool" {
+				result.Status = "failed"
+				result.Error = "omniroute: tool loop exhausted"
+			}
+		}
+		result.SessionID = sessionID
+		result.DurationMs = time.Since(start).Milliseconds()
+		resultCh <- result
+	}()
+	return &Session{Messages: msgCh, Result: resultCh}, nil
+}
+
+func (b *omnirouteBackend) runOmniRouteTurn(ctx context.Context, cfg omniRouteConfig, client *http.Client, request omniRouteChatRequest, sessionID string) (omniRouteTurn, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return omniRouteTurn{}, fmt.Errorf("omniroute: encode request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, cfg.BaseURL+"/chat/completions", bytes.NewReader(body))
+	if err != nil {
+		return omniRouteTurn{}, fmt.Errorf("omniroute: create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+cfg.APIKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if sessionID != "" {
+		httpReq.Header.Set("X-Session-Id", sessionID)
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return omniRouteTurn{}, fmt.Errorf("omniroute: request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return omniRouteTurn{}, fmt.Errorf("omniroute: upstream HTTP %d: %s", resp.StatusCode, sanitizedHTTPError(resp.Body))
+	}
+	localMessages := make(chan Message, 128)
+	var output strings.Builder
+	result := Result{}
+	newSession := sessionID
+	if err := consumeOmniRouteSSE(resp.Body, localMessages, &output, &result, &newSession, request.Model); err != nil {
+		return omniRouteTurn{}, err
+	}
+	close(localMessages)
+	turn := omniRouteTurn{output: output.String(), result: result, sessionID: newSession}
+	for message := range localMessages {
+		turn.messages = append(turn.messages, message)
+		if message.Type == MessageToolUse {
+			args, _ := json.Marshal(message.Input)
+			turn.calls = append(turn.calls, omniRouteToolCall{ID: message.CallID, Type: "function", Function: omniRouteFunctionCall{Name: message.Tool, Arguments: string(args)}})
+		}
+	}
+	return turn, nil
 }
 
 func resolveOmniRouteConfig(env map[string]string) (omniRouteConfig, error) {

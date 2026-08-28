@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -123,5 +124,59 @@ func TestOmniRouteExecuteRejectsMissingCredentials(t *testing.T) {
 				t.Fatalf("error = %v", err)
 			}
 		})
+	}
+}
+
+func TestOmniRouteExecuteRunsMCPToolLoop(t *testing.T) {
+	var llmCalls int
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		llmCalls++
+		w.Header().Set("Content-Type", "text/event-stream")
+		if llmCalls == 1 {
+			_, _ = io.WriteString(w, "data: {\"id\":\"turn-1\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"id\\\":\\\"1\\\"}\"}}]}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n")
+		} else {
+			_, _ = io.WriteString(w, "data: {\"id\":\"turn-2\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer llm.Close()
+	mcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req omniRouteJSONRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method == "initialize" {
+			w.Header().Set("Mcp-Session-Id", "mcp-session")
+		}
+		result := map[string]interface{}{}
+		switch req.Method {
+		case "initialize":
+			result = map[string]interface{}{}
+		case "tools/list":
+			result = map[string]interface{}{"tools": []interface{}{map[string]interface{}{"name": "lookup", "inputSchema": map[string]interface{}{"type": "object"}}}}
+		case "tools/call":
+			result = map[string]interface{}{"content": []interface{}{map[string]interface{}{"type": "text", "text": "record"}}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	}))
+	defer mcp.Close()
+
+	config := json.RawMessage(fmt.Sprintf(`{"mcpServers":{"crm":{"url":%q}}}`, mcp.URL))
+	b := &omnirouteBackend{cfg: Config{Env: map[string]string{omniRouteBaseURLKey: llm.URL + "/v1", omniRouteAPIKeyKey: "test-key"}}}
+	session, err := b.Execute(context.Background(), "lookup the record", ExecOptions{McpConfig: config, MaxTurns: 3, Timeout: time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var messages []Message
+	for msg := range session.Messages {
+		messages = append(messages, msg)
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "done" || llmCalls != 2 {
+		t.Fatalf("result=%#v calls=%d messages=%#v", result, llmCalls, messages)
+	}
+	if len(messages) != 3 || messages[0].Type != MessageToolUse || messages[1].Type != MessageToolResult || messages[2].Content != "done" {
+		t.Fatalf("messages=%#v", messages)
 	}
 }
