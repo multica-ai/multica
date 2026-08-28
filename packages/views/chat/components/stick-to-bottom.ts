@@ -94,21 +94,44 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
 
     // Mirror of the transcript dialog's wiring with the live end at the
     // BOTTOM: away from it is up, so every input sign flips.
+    let inputFrame: number | null = null;
+    const stageInput = (delta: number) => {
+      follow.input(delta);
+      if (inputFrame !== null) cancelAnimationFrame(inputFrame);
+      inputFrame = requestAnimationFrame(() => {
+        inputFrame = null;
+        follow.endInputFrame();
+      });
+    };
     const onWheel = (e: WheelEvent) => {
       const scale =
         e.deltaMode === 1 ? LINE_SCROLL_PX : e.deltaMode === 2 ? scrollEl.clientHeight : 1;
-      follow.input(-e.deltaY * scale);
+      stageInput(-e.deltaY * scale);
     };
+    let touchId: number | null = null;
     let lastTouchY: number | null = null;
+    const trackedTouch = (touches: TouchList) =>
+      Array.from(touches).find((touch) => touch.identifier === touchId);
     const onTouchStart = (e: TouchEvent) => {
-      lastTouchY = e.touches[0]?.clientY ?? null;
+      if (touchId !== null) return;
+      const touch = e.changedTouches[0] ?? e.touches[0];
+      if (!touch) return;
+      touchId = touch.identifier;
+      lastTouchY = touch.clientY;
+      follow.touchStart();
     };
     const onTouchMove = (e: TouchEvent) => {
-      const y = e.touches[0]?.clientY;
-      if (y === undefined) return;
+      const touch = trackedTouch(e.touches);
+      if (!touch) return;
       // Finger moving down scrolls the content up (away from the live end).
-      if (lastTouchY !== null) follow.input(y - lastTouchY);
-      lastTouchY = y;
+      if (lastTouchY !== null) stageInput(touch.clientY - lastTouchY);
+      lastTouchY = touch.clientY;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (touchId === null || trackedTouch(e.touches)) return;
+      touchId = null;
+      lastTouchY = null;
+      follow.touchEnd();
     };
     // No target guard: this container is not focusable, so scroll keys always
     // arrive from a focused row control, and the browser answers them by
@@ -117,14 +140,15 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
     // activating a button, Home in a text field) never scrolls the list, so
     // the staged intent is never promoted.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowUp") follow.input(LINE_SCROLL_PX);
-      else if (e.key === "ArrowDown") follow.input(-LINE_SCROLL_PX);
-      else if (e.key === "PageUp") follow.input(scrollEl.clientHeight);
-      else if (e.key === "PageDown") follow.input(-scrollEl.clientHeight);
+      if (e.key === "ArrowUp") stageInput(LINE_SCROLL_PX);
+      else if (e.key === "ArrowDown") stageInput(-LINE_SCROLL_PX);
+      else if (e.key === "PageUp") stageInput(scrollEl.clientHeight);
+      else if (e.key === "PageDown") stageInput(-scrollEl.clientHeight);
       // Shift+Space pages UP — away from the live end.
-      else if (e.key === " ") follow.input(e.shiftKey ? scrollEl.clientHeight : -scrollEl.clientHeight);
-      else if (e.key === "Home") follow.input(scrollEl.scrollHeight);
-      else if (e.key === "End") follow.input(-scrollEl.scrollHeight);
+      else if (e.key === " ")
+        stageInput(e.shiftKey ? scrollEl.clientHeight : -scrollEl.clientHeight);
+      else if (e.key === "Home") stageInput(scrollEl.scrollHeight);
+      else if (e.key === "End") stageInput(-scrollEl.scrollHeight);
     };
     const onPointerDown = (e: MouseEvent) => {
       follow.pointerDown(e.target === scrollEl);
@@ -152,22 +176,29 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
     scrollEl.addEventListener("wheel", onWheel, { passive: true });
     scrollEl.addEventListener("touchstart", onTouchStart, { passive: true });
     scrollEl.addEventListener("touchmove", onTouchMove, { passive: true });
+    scrollEl.addEventListener("touchend", onTouchEnd, { passive: true });
+    scrollEl.addEventListener("touchcancel", onTouchEnd, { passive: true });
     scrollEl.addEventListener("keydown", onKeyDown);
     scrollEl.addEventListener("mousedown", onPointerDown);
     window.addEventListener("mouseup", onPointerUp, { capture: true });
 
     return () => {
+      if (inputFrame !== null) cancelAnimationFrame(inputFrame);
+      follow.endInputFrame();
       observer.disconnect();
       scrollEl.removeEventListener("scroll", onScroll);
       scrollEl.removeEventListener("wheel", onWheel);
       scrollEl.removeEventListener("touchstart", onTouchStart);
       scrollEl.removeEventListener("touchmove", onTouchMove);
+      scrollEl.removeEventListener("touchend", onTouchEnd);
+      scrollEl.removeEventListener("touchcancel", onTouchEnd);
       scrollEl.removeEventListener("keydown", onKeyDown);
       scrollEl.removeEventListener("mousedown", onPointerDown);
       window.removeEventListener("mouseup", onPointerUp, { capture: true });
       // The scroller can detach mid-drag; a stuck held-mouse flag would
       // suppress pinning forever.
       follow.pointerUp();
+      follow.touchEnd();
     };
   }, [scrollEl, follow, pin, onResize]);
 

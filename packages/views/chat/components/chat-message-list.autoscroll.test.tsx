@@ -64,6 +64,8 @@ interface FakeObserver {
 }
 
 let observers: FakeObserver[] = [];
+let animationFrames = new Map<number, FrameRequestCallback>();
+let nextAnimationFrameId = 1;
 
 function observedTargets(): Element[] {
   return observers.flatMap((o) => o.targets);
@@ -75,8 +77,14 @@ function fireResizeObservers() {
   });
 }
 
-// The follow latch treats input within its intent window as an ongoing
-// gesture and defers pinning; tests control that clock directly.
+function renderFrame() {
+  const callbacks = [...animationFrames.values()];
+  animationFrames.clear();
+  now += 16;
+  for (const callback of callbacks) callback(now);
+}
+
+// Confirmed motion gets a short settle window; tests control that clock.
 let now = 0;
 function gestureSettles() {
   now += 301;
@@ -84,9 +92,19 @@ function gestureSettles() {
 
 beforeEach(() => {
   observers = [];
+  animationFrames = new Map();
+  nextAnimationFrameId = 1;
   reportContentHeightChanged = undefined;
   now = 0;
   vi.spyOn(Date, "now").mockImplementation(() => now);
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    const id = nextAnimationFrameId++;
+    animationFrames.set(id, callback);
+    return id;
+  });
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+    animationFrames.delete(id);
+  });
   vi.stubGlobal(
     "ResizeObserver",
     class {
@@ -130,6 +148,13 @@ interface Scroller {
   shrinkViewport(px: number): void;
   /** Reader wheel input scrolling up by `px`, and the scroll it causes. */
   readerScrollsUp(px: number): void;
+  /** Starts a one-finger touch gesture at `clientY`. */
+  touchStart(clientY: number): void;
+  /** Moves that finger and then scrolls the list up by `scrollPx`. */
+  touchMove(clientY: number, scrollPx: number): void;
+  touchEnd(): void;
+  /** Touch momentum scrolls the list after the finger lifts. */
+  touchMomentumScrollsUp(px: number): void;
   /** Reader wheel input landing `fromBottom` px above the live end. */
   readerScrollsTo(fromBottom: number): void;
   /**
@@ -166,6 +191,19 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     act(() => {
       el.dispatchEvent(new Event("scroll"));
     });
+  };
+
+  const touchEvent = (type: string, clientY?: number) => {
+    const event = new Event(type, { bubbles: true }) as TouchEvent;
+    const points =
+      clientY === undefined
+        ? []
+        : [{ identifier: 1, clientY } satisfies Pick<Touch, "identifier" | "clientY">];
+    Object.defineProperty(event, "touches", {
+      value: points,
+    });
+    Object.defineProperty(event, "changedTouches", { value: points });
+    return event;
   };
 
   // Reader input: the wheel delta the hook judges intent from, then the
@@ -222,6 +260,27 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     },
     readerScrollsUp(px) {
       wheelBy(px);
+    },
+    touchStart(clientY) {
+      act(() => {
+        el.dispatchEvent(touchEvent("touchstart", clientY));
+      });
+    },
+    touchMove(clientY, scrollPx) {
+      act(() => {
+        el.dispatchEvent(touchEvent("touchmove", clientY));
+      });
+      state.scrollTop -= scrollPx;
+      scrollEvent();
+    },
+    touchEnd() {
+      act(() => {
+        el.dispatchEvent(touchEvent("touchend"));
+      });
+    },
+    touchMomentumScrollsUp(px) {
+      state.scrollTop -= px;
+      scrollEvent();
     },
     readerScrollsTo(fromBottom) {
       wheelBy(fromBottom - this.distanceFromBottom());
@@ -365,6 +424,46 @@ describe("ChatMessageList auto-scroll", () => {
     expect(scroll.distanceFromBottom()).toBe(0);
   });
 
+  it("releases when touch momentum carries a flick past the threshold", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.touchStart(100);
+    scroll.touchMove(180, 80);
+    scroll.touchEnd();
+    scroll.touchMomentumScrollsUp(80);
+    const parked = scroll.scrollTop;
+
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.scrollTop).toBe(parked);
+  });
+
+  it("leaves a fractional touch drag in progress", () => {
+    const { scroll, streamChunk, followsAtBottom } = renderStreamingChat();
+
+    scroll.touchStart(100);
+    scroll.touchMove(180, 80.5);
+    streamChunk(1);
+
+    expect(scroll.distanceFromBottom()).toBe(80.5);
+    expect(followsAtBottom()).toBe("auto");
+    scroll.touchEnd();
+  });
+
+  it("resumes pinning after a sub-threshold touch ends", () => {
+    const { scroll, streamChunk } = renderStreamingChat();
+
+    scroll.touchStart(100);
+    scroll.touchMove(180, 80);
+    scroll.touchEnd();
+    gestureSettles();
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
   it("releases on incremental upward scrolling during a fast stream", () => {
     const { scroll, streamChunk } = renderStreamingChat();
 
@@ -454,6 +553,16 @@ describe("ChatMessageList auto-scroll", () => {
 
     streamChunk(1);
     scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("pins a system shift after nested scrolling left input unconsumed", () => {
+    const { scroll } = renderStreamingChat();
+
+    scroll.wheelWithoutScroll(300);
+    renderFrame();
+    scroll.browserScrollsListUp(200);
 
     expect(scroll.distanceFromBottom()).toBe(0);
   });

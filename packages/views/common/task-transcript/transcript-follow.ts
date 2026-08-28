@@ -7,13 +7,13 @@
 // live end right now" cannot distinguish a reader who scrolled away from a
 // viewport the system displaced. This latch keeps that distinction:
 //
-// - Input alone never releases: it only opens a BUDGET, and the surface's own
-//   scroll spends it. Each scroll attributes the displacement the surface
-//   actually took to the reader, capped by what they pushed — so input the
-//   surface never consumed (a wheel over a nested scroller, a flick on a list
-//   too short to scroll, a key a control swallowed) attributes nothing, and
-//   system displacement landing inside a gesture attributes at most the
-//   gesture's own size.
+// - Input alone never releases. It opens a claim for the current rendering
+//   frame, and only the surface's own scroll can confirm reader-driven motion.
+//   The wiring discards unused claims after that frame, so a later system shift
+//   cannot inherit input consumed by a nested scroller.
+// - Confirmed motion uses the surface's displacement, not raw input magnitude.
+//   Continued same-direction movement inside the settle window remains reader
+//   motion, including touch momentum and fractional drag frames.
 // - Attributed displacement ACCUMULATES until the reader returns to the live
 //   end; it does not expire with the gesture and pins do not erase it. A
 //   trackpad flick and five discrete wheel notches at reading pace both cross
@@ -22,8 +22,8 @@
 // - While following, displacement not attributed to the reader is pinned
 //   straight back to the live end (`onScroll` / `onResize` return the
 //   verdict) — immediately, with no intent-window timer for a final event to
-//   hide behind — but never while the mouse is held down (text selection
-//   autoscroll must not be fought).
+//   hide behind — but never during an active touch or while the mouse is held
+//   down (text selection autoscroll must not be fought).
 // - Arriving back within the edge zone re-engages the follow.
 //
 // The state machine is direction-agnostic: callers feed it away-positive
@@ -38,10 +38,10 @@
 // `atBottomThreshold`, so both judges of "at the bottom" agree.
 export const FOLLOW_EDGE_THRESHOLD = 120;
 
-// How long after the last input its unspent budget is still attributable to
-// the same gesture. Only budgets expire with this window — attributed
-// displacement and pin decisions do not depend on it.
-const INPUT_INTENT_WINDOW_MS = 300;
+// Maximum gap between an input and its confirming scroll, or between scrolls
+// in confirmed motion. DOM wiring normally clears unconfirmed input sooner,
+// after the next animation frame.
+const MOTION_SETTLE_WINDOW_MS = 300;
 
 // WheelEvent.deltaMode 1 (lines) / 2 (pages) conversion.
 export const LINE_SCROLL_PX = 40;
@@ -59,14 +59,19 @@ export interface LiveEndFollow {
    * budget the surface's own scroll can attribute displacement against.
    */
   input(delta: number): void;
+  /** Discards input the surface did not consume during its rendering frame. */
+  endInputFrame(): void;
+  /** An active touch prevents pinning while drag displacement is confirmed. */
+  touchStart(): void;
+  /** Ends the held state; confirmed momentum may continue within the settle window. */
+  touchEnd(): void;
   /** Mousedown inside the scroller; `onScroller` = on the element itself (scrollbar). */
   pointerDown(onScroller: boolean): void;
   pointerUp(): void;
   onAtEdgeChange(atEdge: boolean): void;
   /**
-   * The surface itself scrolled. Attributes the observed displacement to the
-   * reader up to their input budget, releasing past the threshold; returns
-   * whether to pin the viewport back to the live end.
+   * The surface itself scrolled. Confirms staged input or continues recent
+   * reader motion; returns whether to pin the viewport back to the live end.
    */
   onScroll(distance: number): boolean;
   /**
@@ -79,12 +84,11 @@ export interface LiveEndFollow {
 export function createLiveEndFollow(now: () => number = () => Date.now()): LiveEndFollow {
   let active = false;
   let following = true;
-  // Unspent input budgets for the current gesture, by direction. A budget is
-  // a claim, not displacement: it converts to `awayTaken` only as the
-  // surface's scrolls confirm movement, and expires with its gesture.
+  // Unspent input claims for the current frame, split by direction. A claim
+  // becomes reader motion only when the surface confirms matching movement.
   let awayBudget = 0;
   let towardBudget = 0;
-  let lastInputAt = -INPUT_INTENT_WINDOW_MS;
+  let lastInputAt = -MOTION_SETTLE_WINDOW_MS;
   // Displacement the reader actually took, confirmed scroll by scroll. Does
   // not expire and survives pins: repeated sub-threshold attempts against a
   // fast stream accumulate into a release instead of losing every round.
@@ -92,11 +96,15 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   let lastDistance = 0;
   let mouseHeld = false;
   let scrollbarDrag = false;
+  let touchHeld = false;
+  let motionDirection: -1 | 0 | 1 = 0;
+  let lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
 
-  const inputFresh = () => now() - lastInputAt < INPUT_INTENT_WINDOW_MS;
+  const inputFresh = () => now() - lastInputAt < MOTION_SETTLE_WINDOW_MS;
+  const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
 
   const pinVerdict = (distance: number): boolean =>
-    following && !mouseHeld && !scrollbarDrag && distance > 0;
+    following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
 
   return {
     setActive(a: boolean) {
@@ -110,6 +118,9 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       lastDistance = 0;
       mouseHeld = false;
       scrollbarDrag = false;
+      touchHeld = false;
+      motionDirection = 0;
+      lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
     },
     isFollowing: () => active && following,
     disengage() {
@@ -127,6 +138,16 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       if (delta > 0) awayBudget += delta;
       else towardBudget -= delta;
     },
+    endInputFrame() {
+      awayBudget = 0;
+      towardBudget = 0;
+    },
+    touchStart() {
+      if (active) touchHeld = true;
+    },
+    touchEnd() {
+      touchHeld = false;
+    },
     pointerDown(onScroller: boolean) {
       if (!active) return;
       mouseHeld = true;
@@ -142,6 +163,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       awayBudget = 0;
       towardBudget = 0;
       awayTaken = 0;
+      motionDirection = 0;
     },
     onScroll(distance: number): boolean {
       if (!active) return false;
@@ -153,33 +175,51 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         if (distance > FOLLOW_EDGE_THRESHOLD) following = false;
         return false;
       }
-      if (moved > 0 && inputFresh() && awayBudget > 0) {
-        // The reader pushed and the surface moved: attribute the smaller of
-        // the two. A system shift landing inside the gesture (a transcript
-        // prepend) can inflate `moved` past any threshold, so the budget cap
-        // is what keeps it from ever counting as reader intent.
-        const attributed = Math.min(awayBudget, moved);
-        awayBudget -= attributed;
-        awayTaken += attributed;
-        if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) {
-          following = false;
-          return false;
-        }
-        // Wholly the reader's own move: leave them be. Any unattributed
-        // remainder is the system's and falls through to the pin.
-        if (attributed === moved) return false;
-      } else if (moved < 0 && inputFresh() && towardBudget > 0) {
-        const attributed = Math.min(towardBudget, -moved);
-        towardBudget -= attributed;
-        awayTaken = Math.max(0, awayTaken - attributed);
-        // The reader walked themselves all the way back to the live end.
+      if (moved > 0 && motionDirection === 1 && (touchHeld || motionFresh())) {
+        awayTaken += moved;
+        lastMotionAt = now();
+        if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
+        return false;
+      }
+      if (moved < 0 && motionDirection === -1 && (touchHeld || motionFresh())) {
+        awayTaken = Math.max(0, awayTaken + moved);
+        lastMotionAt = now();
         if (distance === 0) {
           following = true;
           awayBudget = 0;
           towardBudget = 0;
           awayTaken = 0;
+          motionDirection = 0;
         }
         return false;
+      }
+      if (moved > 0 && inputFresh() && awayBudget > 0) {
+        const attributed = Math.min(awayBudget, moved);
+        awayBudget -= attributed;
+        // Touch displacement need not match finger travel pixel-for-pixel.
+        if (touchHeld || attributed === moved) {
+          awayTaken += moved;
+          motionDirection = 1;
+          lastMotionAt = now();
+          if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
+          return false;
+        }
+      } else if (moved < 0 && inputFresh() && towardBudget > 0) {
+        const attributed = Math.min(towardBudget, -moved);
+        towardBudget -= attributed;
+        if (touchHeld || attributed === -moved) {
+          awayTaken = Math.max(0, awayTaken + moved);
+          motionDirection = -1;
+          lastMotionAt = now();
+          if (distance === 0) {
+            following = true;
+            awayBudget = 0;
+            towardBudget = 0;
+            awayTaken = 0;
+            motionDirection = 0;
+          }
+          return false;
+        }
       }
       return pinVerdict(distance);
     },

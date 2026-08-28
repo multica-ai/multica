@@ -35,6 +35,29 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
+  it("releases when touch momentum carries a confirmed flick past the threshold", () => {
+    const { follow } = makeFollow();
+    follow.touchStart();
+    follow.input(80);
+    expect(follow.onScroll(80)).toBe(false);
+    follow.touchEnd();
+
+    expect(follow.onScroll(160)).toBe(false);
+    expect(follow.isFollowing()).toBe(false);
+  });
+
+  it("counts the surface's fractional touch displacement", () => {
+    const { follow } = makeFollow();
+    follow.touchStart();
+    follow.input(80);
+    expect(follow.onScroll(80.5)).toBe(false);
+    expect(follow.isFollowing()).toBe(true);
+    follow.touchEnd();
+
+    expect(follow.onScroll(120.25)).toBe(false);
+    expect(follow.isFollowing()).toBe(false);
+  });
+
   it("releases for wheel notches spaced past the intent window", () => {
     // A discrete mouse wheel at reading pace: one notch per event, far more
     // than the window apart. Attributed displacement accumulates across
@@ -104,6 +127,16 @@ describe("createLiveEndFollow", () => {
     follow.input(300);
     expect(follow.isFollowing()).toBe(true);
     expect(follow.onResize(180)).toBe(true); // growth pins straight away
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("pins a system shift after the surface left input unconsumed", () => {
+    const { follow, tick } = makeFollow();
+    follow.input(300);
+    follow.endInputFrame();
+    tick(100);
+
+    expect(follow.onScroll(200)).toBe(true);
     expect(follow.isFollowing()).toBe(true);
   });
 
