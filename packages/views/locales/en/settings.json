@@ -21,6 +21,7 @@
       "name": "Name",
       "name_placeholder": "e.g. Code Review",
       "key_hint": "Referred to as {{key}} by the API and the CLI.",
+      "created": "Status created. The API and the CLI refer to it as {{key}}.",
       "category": "Category",
       "category_locked": "Category cannot be changed — issues already on this status depend on it.",
       "description": "Description",

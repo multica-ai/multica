@@ -233,34 +233,24 @@
     "method": {
       "chooser": {
         "title": "새 스킬",
-        "desc": "이 워크스페이스에 스킬을 추가할 방식을 선택하세요."
+        "desc": "스킬을 추가할 방식을 선택하세요."
       },
       "manual": {
         "title": "직접 만들기",
-        "desc": "새 SKILL.md를 처음부터 작성합니다."
+        "desc": "빈 SKILL.md에서 시작합니다."
       },
       "local": {
         "title": "로컬에서 가져오기",
-        "desc": "이 컴퓨터의 스킬 폴더를 선택합니다. 파일은 묶어서 업로드됩니다."
+        "desc": "SKILL.md가 있는 폴더 또는 .skill / .zip을 선택합니다."
       },
       "url": {
         "title": "URL에서 가져오기",
-        "desc": "공개된 스킬을 URL로 가져옵니다. 파일은 서버에서 가져옵니다."
+        "desc": "공개된 스킬을 URL로 가져옵니다."
       },
       "runtime": {
         "title": "런타임에서 복사",
-        "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
+        "desc": "로컬 런타임에 설치된 스킬을 워크스페이스로 가져옵니다."
       }
-    },
-    "method_card": {
-      "manual_title": "직접 만들기",
-      "manual_desc": "빈 SKILL.md에서 시작해 직접 지침을 작성합니다.",
-      "local_title": "로컬에서 가져오기",
-      "local_desc": "SKILL.md가 있는 폴더, 또는 .skill / .zip 아카이브를 선택합니다.",
-      "url_title": "URL에서 가져오기",
-      "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
-      "runtime_title": "런타임에서 복사",
-      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
     },
     "manual": {
       "name_label": "이름",
@@ -278,7 +268,6 @@
     "local": {
       "choose_folder": "폴더 선택",
       "choose_archive": ".skill / .zip 선택",
-      "pick_hint": "SKILL.md가 있는 폴더, 또는 패키지된 .skill / .zip 파일을 선택하세요.",
       "folder_label": "폴더",
       "archive_label": "아카이브",
       "files_other": "파일 {{count}}개",

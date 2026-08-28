@@ -202,6 +202,7 @@ describe("InstructionsTab conversation-starters deep link", () => {
     back: vi.fn(),
     pathname: "/acme/agents/agent-1",
     searchParams: new URLSearchParams(search),
+    hash: "",
     getShareableUrl: (path: string) => `https://app.test${path}`,
   });
 

@@ -42,7 +42,6 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 종료 신호를 받은 뒤 graceful shutdown을 시작하기 전 대기 시간 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 오프라인 런타임이 진행 중인 작업을 실패시키지 않고 재연결할 수 있는 유예 시간. `150s` 미만은 `150s`로 조정됨 |
-| `MULTICA_TASK_QUEUED_TTL` | `2h` | 태스크가 대기열에 점유되지 않고 머물 수 있는 최대 시간. 초과 시 `queued_expired`로 실패. 저 동시성 런타임이 긴 작업 뒤에 합리적으로 대기할 수 있으므로 이 경우 값을 키워야 함 |
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
@@ -227,10 +226,10 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | heartbeat 간격 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 태스크 상한 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 출력과 도구 실행이 모두 없을 때의 무응답 상한 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 단일 도구 호출이 계속 무응답인 시간 상한 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 전용 무응답 기준값 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 의미 활동 없음 기준값 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | Codex 의미 활동 없음 기준값. Codex 자체 타이머는 도구 실행 중인지 알 수 없으므로 별도의 짧은 상한 대신 idle / tool 예산 중 큰 값을 따릅니다 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 첫 턴 무진행 상한의 명시적 재정의; `0` 은 기본값 유지. 실제 첫 턴 대기는 여전히 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 및 전체 실행 타임아웃으로 제한됨 — `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 을 이 값보다 엄격히 크게(여유를 두고) 설정해야 하며, 그렇지 않으면 대기가 그 값으로 잘리고 모델 카탈로그 시작 재시도가 건너뛰어짐. 값이 같으면 충분하지 않음: 의미 타이머가 먼저 시작되므로 값이 같을 때도 재시도가 손실될 수 있음 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 시작 handshake 상한 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
@@ -272,7 +271,7 @@ multica config show
 | `poll_interval` | `30s` | 실행 태스크 polling 간격 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
-| `codex_semantic_inactivity_timeout` | `10m` | Codex 의미 활동 없음 기준값 |
+| `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |
 | `codex_handshake_timeout` | `30s` | Codex app-server handshake 상한 |
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |

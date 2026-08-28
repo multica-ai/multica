@@ -15,8 +15,8 @@ import (
 )
 
 // OpenClaw config discovery costs two serial CLI round-trips per task
-// preparation in the common case (`config file`, then
-// `config get agents.list --json`; see openclawMaxCLICallsPerPreparation for
+// preparation in the common case (`config validate --json`, then
+// `config get agents.list --json`; see openclawMaxCLIDeadlinesPerPreparation for
 // the worst case). On a fast host that is ~1s total; on the Intel Mac in #7112
 // it is ~12.7s, and it is paid again for every task — including every chat
 // message, because Reuse runs the same preparation path as Prepare. Raising

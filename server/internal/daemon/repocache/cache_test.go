@@ -120,6 +120,54 @@ func TestRunGitOutputTimesOut(t *testing.T) {
 	}
 }
 
+func TestNewGitCommandUsesStableWorkingDirectory(t *testing.T) {
+	cmd := newGitCommand("--version")
+	if cmd.Dir == "" {
+		t.Fatal("newGitCommand Dir is empty; Git would inherit the daemon working directory")
+	}
+	if !filepath.IsAbs(cmd.Dir) {
+		t.Fatalf("newGitCommand Dir = %q, want an absolute path", cmd.Dir)
+	}
+	if info, err := os.Stat(cmd.Dir); err != nil {
+		t.Fatalf("newGitCommand Dir = %q is unavailable: %v", cmd.Dir, err)
+	} else if !info.IsDir() {
+		t.Fatalf("newGitCommand Dir = %q is not a directory", cmd.Dir)
+	}
+}
+
+func TestSyncSurvivesDeletedProcessWorkingDirectory(t *testing.T) {
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	originalCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get original working directory: %v", err)
+	}
+	deletedRoot := t.TempDir()
+	deletedCWD := filepath.Join(deletedRoot, "worktree")
+	if err := os.Mkdir(deletedCWD, 0o755); err != nil {
+		t.Fatalf("create disposable working directory: %v", err)
+	}
+	if err := os.Chdir(deletedCWD); err != nil {
+		t.Fatalf("chdir to disposable working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalCWD); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	}()
+	if err := os.RemoveAll(deletedRoot); err != nil {
+		t.Skipf("platform does not allow removing the process working directory: %v", err)
+	}
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-deleted-cwd", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("Sync with deleted process working directory failed: %v", err)
+	}
+	if cachedPath := cache.Lookup("ws-deleted-cwd", sourceRepo); !isBareRepo(cachedPath) {
+		t.Fatalf("expected synced bare repo, got %q", cachedPath)
+	}
+}
+
 func TestRepoMaintenanceYieldsToForeground(t *testing.T) {
 	t.Parallel()
 
@@ -1057,14 +1105,14 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	}
 }
 
-// TestCreateWorktreeExcludesCodebuddySidecars is the regression guard for
+// TestCreateWorktreeExcludesAgentSidecars is the regression guard for
 // PR #5224's review feedback: once the daemon started writing
 // .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
 // reusing Claude's .claude/CLAUDE.md, which were already excluded), the
 // repo-cache worktree needed the new CodeBuddy sidecar paths added to
 // .git/info/exclude too — otherwise these daemon-injected files show up in
 // `git status` and risk being committed by the agent.
-func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
+func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
@@ -1092,6 +1140,11 @@ func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
 	}
 	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
 		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
+	}
+	for _, pattern := range []string{".pi\n", ".omp\n"} {
+		if !strings.Contains(exclude, pattern) {
+			t.Fatalf("expected .git/info/exclude to contain %q, got:\n%s", pattern, exclude)
+		}
 	}
 }
 

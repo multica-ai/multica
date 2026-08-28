@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -74,7 +75,7 @@ import type {
   IssueTableFacetsResponse,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { formatActorRef, isActorPropertyType } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -669,6 +670,7 @@ function PropertyFilterOptions({
   counts,
   selected,
   onToggle,
+  onSetValues,
   fixedIds,
   fixedTitle,
 }: {
@@ -676,6 +678,8 @@ function PropertyFilterOptions({
   counts: Map<string, number> | undefined;
   selected: string[];
   onToggle: (optionId: string) => void;
+  /** Replace the property's full filter value set (scalar types only). */
+  onSetValues: (optionIds: string[]) => void;
   fixedIds?: Set<string>;
   fixedTitle?: string;
 }) {
@@ -683,6 +687,9 @@ function PropertyFilterOptions({
   const wsId = useWorkspaceId();
   const currentUserId = useAuthStore((s) => s.user?.id);
   const actorProperty = isActorPropertyType(property.type);
+  // Scalar properties (text / number / date / url) have no option list — the
+  // filter menu shows a value input plus "No value".
+  const scalarProperty = isScalarPropertyType(property.type);
   const { data: actorMembers = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: actorProperty,
@@ -714,6 +721,15 @@ function PropertyFilterOptions({
     actorType: undefined as string | undefined,
     actorId: undefined as string | undefined,
   };
+  // Scalar value state lives at the top level so the hooks stay unconditional
+  // (Rules of Hooks): it is only rendered for text / number / date / url, but
+  // must be declared regardless of which branch runs. The draft syncs to the
+  // committed `scalarValue` whenever that changes, so a filter cleared or
+  // rewritten elsewhere cannot be written back from a stale input.
+  const scalarValue = selected.find((id) => id !== NO_PROPERTY_VALUE) ?? "";
+  const hasNoValue = selected.includes(NO_PROPERTY_VALUE);
+  const [draft, setDraft] = useState(scalarValue);
+  useEffect(() => setDraft(scalarValue), [scalarValue]);
   const options = [
     ...(actorProperty
       ? actorOptions.map((option) => ({
@@ -737,6 +753,91 @@ function PropertyFilterOptions({
           }))),
     noValueOption,
   ];
+
+  if (scalarProperty) {
+    const placeholder =
+      property.type === "url"
+        ? t(($) => $.pickers.custom_property.url_placeholder)
+        : property.type === "number"
+          ? t(($) => $.pickers.custom_property.number_placeholder)
+          : t(($) => $.pickers.custom_property.value_placeholder);
+    const noneCount = counts?.get(NO_PROPERTY_VALUE) ?? 0;
+    // A saved view locks this dimension: the scalar value AND "No value" are
+    // both part of the view's identity, so neither can be edited in place.
+    const locked = fixedIds !== undefined && fixedIds.size > 0;
+    const commitValue = (raw: string) => {
+      const value = raw.trim();
+      // NO_PROPERTY_VALUE is the reserved "no value" sentinel — it cannot be
+      // filtered as a literal value. The value and "No value" compose like
+      // every other property type: committing a value replaces only the value
+      // member and preserves "No value" membership.
+      if (value === NO_PROPERTY_VALUE) return;
+      onSetValues(value ? [value, ...(hasNoValue ? [NO_PROPERTY_VALUE] : [])] : hasNoValue ? [NO_PROPERTY_VALUE] : []);
+    };
+    return (
+      <>
+        <div className="px-2 py-1.5">
+          <Input
+            type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"}
+            step={property.type === "number" ? "any" : undefined}
+            inputMode={property.type === "number" ? "decimal" : undefined}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={(event) => {
+              // Clicking the "No value" menu item moves focus off the input,
+              // firing blur first. That premature commit would flip the
+              // checkbox's controlled state before its click handler reads it
+              // — so when focus moves into a menu item in this popup, skip the
+              // blur commit and let onCheckedChange decide from the pre-blur
+              // state.
+              const next = event.relatedTarget;
+              const movedToMenuItem =
+                next instanceof HTMLElement &&
+                next.closest('[role="menuitemcheckbox"]') !== null;
+              if (!movedToMenuItem) commitValue(draft);
+            }}
+            onKeyDown={(event) => {
+              // Base UI's menu popup merges typeahead + list-navigation handlers
+              // onto the role="menu" element and stopEvent()s every printable
+              // key — without stopping propagation, the input would swallow no
+              // characters at all (and arrow keys on number/date inputs would
+              // be hijacked). Escape/Tab are left for the menu to close/move
+              // focus; Enter commits and still needs stopPropagation so it does
+              // not bubble up and activate the highlighted "No value" item.
+              if (event.key === "Escape" || event.key === "Tab") return;
+              if (event.key === "Enter") commitValue(draft);
+              event.stopPropagation();
+            }}
+            disabled={locked}
+            placeholder={placeholder}
+            className="h-8"
+          />
+        </div>
+        <DropdownMenuCheckboxItem
+          checked={hasNoValue}
+          disabled={locked}
+          onCheckedChange={(checked) => {
+            // "No value" toggles membership in the same OR-set as the value —
+            // checking/unchecking never touches the committed value member, so
+            // unchecking restores it without any draft round-trip.
+            const valueMembers = selected.filter((id) => id !== NO_PROPERTY_VALUE);
+            onSetValues(
+              checked
+                ? [...valueMembers, NO_PROPERTY_VALUE]
+                : valueMembers,
+            );
+          }}
+          className={FILTER_ITEM_CLASS}
+        >
+          <HoverCheck checked={hasNoValue} />
+          <span className="truncate">{noValueOption.name}</span>
+          {noneCount > 0 && (
+            <span className="ml-auto text-caption text-muted-foreground">{noneCount}</span>
+          )}
+        </DropdownMenuCheckboxItem>
+      </>
+    );
+  }
 
   return (
     <>
@@ -1229,13 +1330,7 @@ export function IssueFilterMenu({
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter(
-        (p) =>
-          p.type === "select" ||
-          p.type === "multi_select" ||
-          p.type === "checkbox" ||
-          isActorPropertyType(p.type),
-      ),
+      workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
     [workspaceProperties],
   );
   const counts = useIssueCounts(
@@ -1569,6 +1664,7 @@ export function IssueFilterMenu({
                       counts={counts.property.get(property.id)}
                       selected={selected}
                       onToggle={(optionId) => act.togglePropertyFilter(property.id, optionId)}
+                      onSetValues={(optionIds) => act.setPropertyFilterValues(property.id, optionIds)}
                       fixedIds={viewBaseline?.property.get(property.id)}
                       fixedTitle={fixedTitle}
                     />
@@ -1667,13 +1763,7 @@ export function IssueDisplayControls({
   );
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter(
-        (p) =>
-          p.type === "select" ||
-          p.type === "multi_select" ||
-          p.type === "checkbox" ||
-          isActorPropertyType(p.type),
-      ),
+      workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
     [workspaceProperties],
   );
   const sortableProperties = useMemo(

@@ -21,6 +21,7 @@
       "name": "名称",
       "name_placeholder": "例如：Code Review",
       "key_hint": "API 和 CLI 中通过 {{key}} 引用。",
+      "created": "状态已创建。API 和 CLI 中通过 {{key}} 引用。",
       "category": "分类",
       "category_locked": "分类不可修改 —— 已经处于该状态的任务依赖它。",
       "description": "描述",

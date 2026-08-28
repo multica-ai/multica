@@ -21,6 +21,7 @@ const TEST_NAVIGATION: NavigationAdapter = {
   back: vi.fn(),
   pathname: "/acme/agents/new",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (path: string) => path,
 };
 

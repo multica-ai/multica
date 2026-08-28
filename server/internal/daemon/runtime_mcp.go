@@ -415,6 +415,17 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			path = filepath.Join(stateDir, "openclaw.json")
 		}
 		key, source, format = "mcp.servers", "User config", "json"
+	case "omp":
+		// Inventory scope: omp discovers servers from a multi-level precedence
+		// chain (.omp/mcp.json, .omp/.mcp.json, profile/user-level configs, and
+		// third-party tool configs such as .claude.json, .cursor/mcp.json,
+		// .vscode/mcp.json, and project-root mcp.json/.mcp.json). This inventory
+		// reads only ~/.omp/agent/mcp.json — the user-scope entry point — so a
+		// user who clears every server in the UI may still inherit servers from
+		// lower-precedence sources. This matches the simplification other
+		// providers already make and avoids sending full tool-chain state over
+		// the wire.
+		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
 	default:
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}

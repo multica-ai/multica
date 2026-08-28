@@ -118,6 +118,7 @@ function adapter(): NavigationAdapter {
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (path) => `${APP_ORIGIN}${path}`,
   };
 }

@@ -21,6 +21,7 @@
       "name": "名前",
       "name_placeholder": "例: Code Review",
       "key_hint": "API と CLI では {{key}} として参照されます。",
+      "created": "ステータスを作成しました。API と CLI では {{key}} として参照されます。",
       "category": "カテゴリ",
       "category_locked": "カテゴリは変更できません。すでにこのステータスのタスクが依存しています。",
       "description": "説明",
