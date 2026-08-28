@@ -99,6 +99,13 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   let touchHeld = false;
   let motionDirection: -1 | 0 | 1 = 0;
   let lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
+  // What set the current motion running, and how much of the claim behind it
+  // the surface has not spent yet. Touch coasts past its claim (momentum is
+  // not proportional to finger travel); everything else may only continue
+  // for what the reader actually asked for, so a system shift arriving inside
+  // the window has nothing to draw on.
+  let motionSource: "touch" | "input" | null = null;
+  let motionCarry = 0;
 
   const inputFresh = () => now() - lastInputAt < MOTION_SETTLE_WINDOW_MS;
   const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
@@ -120,6 +127,8 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       scrollbarDrag = false;
       touchHeld = false;
       motionDirection = 0;
+      motionSource = null;
+      motionCarry = 0;
       lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
     },
     isFollowing: () => active && following,
@@ -164,6 +173,8 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       towardBudget = 0;
       awayTaken = 0;
       motionDirection = 0;
+      motionSource = null;
+      motionCarry = 0;
     },
     onScroll(distance: number): boolean {
       if (!active) return false;
@@ -175,23 +186,35 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         if (distance > FOLLOW_EDGE_THRESHOLD) following = false;
         return false;
       }
+      // Motion already confirmed in this direction continues without a new
+      // claim. Touch coasts freely — momentum is not proportional to finger
+      // travel. Every other source is capped by the claim the surface has not
+      // spent yet, so a system shift landing inside the window (a transcript
+      // prepend) finds nothing to draw on and falls through to the pin.
       if (moved > 0 && motionDirection === 1 && (touchHeld || motionFresh())) {
-        awayTaken += moved;
-        lastMotionAt = now();
-        if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
-        return false;
-      }
-      if (moved < 0 && motionDirection === -1 && (touchHeld || motionFresh())) {
-        awayTaken = Math.max(0, awayTaken + moved);
-        lastMotionAt = now();
-        if (distance === 0) {
-          following = true;
-          awayBudget = 0;
-          towardBudget = 0;
-          awayTaken = 0;
-          motionDirection = 0;
+        if (motionSource === "touch" || moved <= motionCarry) {
+          if (motionSource !== "touch") motionCarry -= moved;
+          awayTaken += moved;
+          lastMotionAt = now();
+          if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
+          return false;
         }
-        return false;
+      } else if (moved < 0 && motionDirection === -1 && (touchHeld || motionFresh())) {
+        if (motionSource === "touch" || -moved <= motionCarry) {
+          if (motionSource !== "touch") motionCarry += moved;
+          awayTaken = Math.max(0, awayTaken + moved);
+          lastMotionAt = now();
+          if (distance === 0) {
+            following = true;
+            awayBudget = 0;
+            towardBudget = 0;
+            awayTaken = 0;
+            motionDirection = 0;
+            motionSource = null;
+            motionCarry = 0;
+          }
+          return false;
+        }
       }
       if (moved > 0 && inputFresh() && awayBudget > 0) {
         const attributed = Math.min(awayBudget, moved);
@@ -200,6 +223,10 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         if (touchHeld || attributed === moved) {
           awayTaken += moved;
           motionDirection = 1;
+          motionSource = touchHeld ? "touch" : "input";
+          // One notch can animate across several frames; the wiring drops the
+          // claim after the first, so carry its remainder into the motion.
+          motionCarry = awayBudget;
           lastMotionAt = now();
           if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
           return false;
@@ -210,6 +237,8 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
         if (touchHeld || attributed === -moved) {
           awayTaken = Math.max(0, awayTaken + moved);
           motionDirection = -1;
+          motionSource = touchHeld ? "touch" : "input";
+          motionCarry = towardBudget;
           lastMotionAt = now();
           if (distance === 0) {
             following = true;

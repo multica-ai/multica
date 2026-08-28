@@ -35,6 +35,38 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true);
   });
 
+  it("a system shift after a confirmed scroll is pinned, not treated as continued motion", () => {
+    // Regression: confirming a small scroll opened a motion window that any
+    // same-direction displacement could extend, so a prepend landing inside it
+    // was credited to the reader and released the follow — from 30px of real
+    // movement, still well inside the edge zone.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(30);
+    follow.onScroll(30); // the surface honours it: reader motion, confirmed
+    follow.endInputFrame();
+    tick(100); // still inside the settle window
+    expect(follow.onScroll(230)).toBe(true); // pin the system's 200px back
+    expect(follow.isFollowing()).toBe(true);
+  });
+
+  it("keeps following a notch whose scroll animates across several frames", () => {
+    // The wiring drops the claim after one frame, so a browser-animated wheel
+    // scroll spends the rest through the motion it already confirmed. Capping
+    // that at the unspent claim is what keeps the case above from counting.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(100);
+    tick(16);
+    expect(follow.onScroll(40)).toBe(false);
+    follow.endInputFrame();
+    tick(16);
+    expect(follow.onScroll(80)).toBe(false);
+    tick(16);
+    expect(follow.onScroll(100)).toBe(false);
+    expect(follow.isFollowing()).toBe(true); // 100px is inside the zone
+  });
+
   it("releases when touch momentum carries a confirmed flick past the threshold", () => {
     const { follow } = makeFollow();
     follow.touchStart();
