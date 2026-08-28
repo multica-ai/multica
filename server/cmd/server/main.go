@@ -686,6 +686,12 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.RetentionSweepJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register retention_sweep job", "error", err)
 	}
+	// GAP-2: aggregate open agent_help_requested inbox items into a single
+	// attention digest per (workspace, recipient) every 15m, so a burst of
+	// help requests becomes one human attention point instead of many.
+	if err := schedulerMgr.Register(scheduler.HelpDigestJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register help_digest job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()
