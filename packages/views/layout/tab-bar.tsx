@@ -58,6 +58,15 @@ const TabBarIssueWindowContext = createContext<TabBarIssueWindow | null>(null);
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
+// Pin / close stay hover-only on a mouse. iPad and phones have no hover, so
+// the same controls must paint without it — and the hit slop has to be bigger
+// than the 14px glyph or a finger cannot tap them. Desktop hides the slop
+// (`before:content-none`) so the title does not lose hover precision.
+const TAB_ACTION_CLASS =
+  "relative size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground before:absolute before:inset-[-10px] before:content-[''] [@media(hover:hover)_and_(pointer:fine)]:before:content-none";
+const TAB_ACTION_REVEAL_CLASS =
+  "flex [@media(hover:hover)_and_(pointer:fine)]:hidden [@media(hover:hover)_and_(pointer:fine)]:group-hover:flex [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:flex";
+
 // Chrome-style merged tab: the active tab shares the content surface's fill and
 // flares into it through concave bottom corners. Each flare is a small square
 // whose radial gradient carves a quarter-circle notch (transparent, so the
@@ -250,7 +259,7 @@ function SortableTabItem({
   // Pin is a secondary interaction state, not an identity: a pinned tab keeps
   // its resource visual (a project's icon, an issue's status, an actor's
   // avatar) rather than collapsing to a Pin glyph. Pinned-ness is conveyed by
-  // position, the suppressed close button, and the hover Pin/Unpin action.
+  // position, the suppressed close button, and the Pin/Unpin action.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -285,8 +294,8 @@ function SortableTabItem({
   // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only visual
   // differences vs. unpinned tabs are the suppressed X (closing requires
   // explicit Unpin) — the leading visual is the resource's own identity, same
-  // as an unpinned tab. Pin/Unpin is reachable via the hover action button
-  // below and the right-click menu.
+  // as an unpinned tab. Pin/Unpin is on the trailing action (hover on mouse,
+  // always on touch) and the context menu.
   const showCloseButton = !tab.pinned && !isOnly;
   const [isEntering, setIsEntering] = useState(isNew && !shouldReduceMotion);
   const [showAddedHighlight, setShowAddedHighlight] = useState(isNew);
@@ -340,7 +349,7 @@ function SortableTabItem({
         role="button"
         aria-label={tab.pinned ? "Unpin tab" : "Pin tab"}
         title={tab.pinned ? "Unpin tab" : "Pin tab"}
-        className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+        className={cn(TAB_ACTION_CLASS, TAB_ACTION_REVEAL_CLASS)}
       >
         {tab.pinned ? <PinOff className="size-2.5" /> : <Pin className="size-2.5" />}
       </span>
@@ -350,7 +359,10 @@ function SortableTabItem({
           onPointerDown={stopDragOnAction}
           role="button"
           aria-label="Close tab"
-          className="hidden size-3.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors group-hover:flex hover:bg-muted-foreground/20 hover:text-foreground"
+          className={cn(
+            TAB_ACTION_CLASS,
+            isActive ? "flex" : TAB_ACTION_REVEAL_CLASS,
+          )}
         >
           <X className="size-2.5" />
         </span>

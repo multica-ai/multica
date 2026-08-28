@@ -188,6 +188,24 @@ describe("TabBar hover action buttons", () => {
     expect(state.togglePin).toHaveBeenCalledWith("tA");
   });
 
+  it("keeps pin and close visible unless the pointer can hover", () => {
+    // iPadOS reports hover:hover even without a trackpad (first tap is a
+    // synthetic hover). Hide-until-hover is therefore gated on a fine
+    // pointer, not on hover:none — otherwise pin/close stay unreachable.
+    const { getAllByLabelText } = render(<TabBar />);
+    expect(getAllByLabelText("Pin tab")[0]?.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:hidden",
+    );
+    const closes = getAllByLabelText("Close tab");
+    expect(
+      closes.some((el) =>
+        el.className.includes(
+          "[@media(hover:hover)_and_(pointer:fine)]:hidden",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("hides the X close button on a pinned tab but keeps it on an unpinned tab", () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", url: "/acme/issues", title: "Issues", pinned: true },

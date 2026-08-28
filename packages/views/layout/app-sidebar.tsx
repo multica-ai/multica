@@ -244,7 +244,7 @@ function SortablePinItem({
         <Tooltip>
           <TooltipTrigger
             render={<span role="button" />}
-            className="hidden size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground group-hover/pin:flex hover:text-foreground"
+            className="relative flex size-2.5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground [@media(hover:hover)_and_(pointer:fine)]:hidden [@media(hover:hover)_and_(pointer:fine)]:group-hover/pin:flex [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/pin:flex before:absolute before:inset-[-10px] before:content-[''] [@media(hover:hover)_and_(pointer:fine)]:before:content-none"
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
