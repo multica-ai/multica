@@ -495,6 +495,8 @@ WHERE status = 'offline'
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
   )
   AND NOT EXISTS (
     SELECT 1
@@ -519,6 +521,8 @@ SELECT EXISTS (
       SELECT 1
       FROM agent
       WHERE agent.runtime_id = agent_runtime.id
+        AND agent.kind = 'user'
+        AND agent.archived_at IS NULL
     )
 ) AS eligible;
 
@@ -528,11 +532,10 @@ SELECT EXISTS (
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
 
 -- name: CountStaleOfflineRuntimesBlockedByTasks :one
--- Bounded observability sample of runtimes that are otherwise GC-eligible but
--- retain a non-terminal task. In particular, deferred tasks have no generic
--- TTL, so silently filtering them from the candidate batch would hide a
--- permanently-starved runtime. The count saturates at max_rows so this
--- recurring safety signal cannot become an unbounded backlog scan.
+-- Preserve the original blocked-runtimes signal for dashboard and alert
+-- compatibility. This deliberately counts only otherwise-unowned stale
+-- runtimes with a directly pinned non-terminal task; the broader reason
+-- inventory below is exposed under a separate backlog metric.
 SELECT count(*) FROM (
   SELECT 1 FROM agent_runtime
   WHERE status = 'offline'
@@ -550,3 +553,54 @@ SELECT count(*) FROM (
     )
   LIMIT @max_rows::int
 ) AS blocked_runtimes;
+
+-- name: CountStaleOfflineRuntimeGCBacklogByReason :many
+-- Classifies one bounded oldest-first cohort into mutually exclusive states.
+-- active_agent has priority because it already makes the runtime ineligible;
+-- archived cross-workspace bindings get their own diagnostic bucket. The task
+-- branch mirrors teardown's fail-closed predicate, including tasks owned by a
+-- bound user agent but pinned to another runtime after a historical move.
+WITH stale_runtimes AS MATERIALIZED (
+  SELECT id, workspace_id FROM agent_runtime
+  WHERE status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+  ORDER BY last_seen_at ASC, id ASC
+  LIMIT @max_rows::int
+), classified AS (
+  SELECT CASE
+    WHEN EXISTS (
+      SELECT 1 FROM agent
+      WHERE agent.runtime_id = stale_runtimes.id
+        AND agent.kind = 'user'
+        AND agent.archived_at IS NULL
+    ) THEN 'active_agent'::text
+    WHEN EXISTS (
+      SELECT 1 FROM agent
+      WHERE agent.runtime_id = stale_runtimes.id
+        AND agent.kind = 'user'
+        AND agent.workspace_id <> stale_runtimes.workspace_id
+    ) THEN 'workspace_mismatch'::text
+    WHEN EXISTS (
+      SELECT 1 FROM agent_task_queue AS task
+      WHERE task.runtime_id = stale_runtimes.id
+        AND task.completed_at IS NULL
+    ) OR EXISTS (
+      SELECT 1
+      FROM agent AS owner
+      WHERE owner.runtime_id = stale_runtimes.id
+        AND owner.kind = 'user'
+        AND EXISTS (
+          SELECT 1
+          FROM agent_task_queue AS task
+          WHERE task.agent_id = owner.id
+            AND task.completed_at IS NULL
+        )
+    ) THEN 'non_terminal_task'::text
+    ELSE 'eligible'::text
+  END AS reason
+  FROM stale_runtimes
+)
+SELECT reason, count(*)::bigint AS count
+FROM classified
+GROUP BY reason
+ORDER BY reason;

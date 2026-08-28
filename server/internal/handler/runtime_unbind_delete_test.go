@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -165,6 +166,45 @@ func TestDeleteAgentRuntime_StructuredConflict(t *testing.T) {
 	}
 	if len(body.ActiveAgents) != 1 || body.ActiveAgents[0].ID != agentID {
 		t.Fatalf("expected one active agent %s, got %+v", agentID, body.ActiveAgents)
+	}
+}
+
+func TestDeleteAgentRuntime_WorkspaceMismatchReturnsStructuredConflict(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "Runtime Workspace Mismatch")
+	agentID := createArchivedWorkspaceMismatchedAgent(t, runtimeID, "Runtime Workspace Mismatch Agent")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_delete_workspace_mismatch" {
+		t.Fatalf("code = %q, want runtime_delete_workspace_mismatch", body.Code)
+	}
+
+	var runtimeRows int
+	var boundRuntime string
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&boundRuntime); err != nil {
+		t.Fatalf("read mismatched agent binding: %v", err)
+	}
+	if runtimeRows != 1 || boundRuntime != runtimeID {
+		t.Fatalf("workspace mismatch mutated data: runtime rows=%d agent runtime=%q", runtimeRows, boundRuntime)
 	}
 }
 
@@ -575,4 +615,14 @@ func createCascadeFixtureAgent(t *testing.T, ctx context.Context, runtimeID, nam
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 	return agentID
+}
+
+func createArchivedWorkspaceMismatchedAgent(t *testing.T, runtimeID, name string) string {
+	t.Helper()
+	foreignWorkspaceID := dbfx.Workspace(t, name+" Workspace", "runtime-mismatch-"+runtimeID[:8])
+	return dbfx.Agent(t, name, runtimeID, testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+		"archived_at":  testutil.Raw("now()"),
+		"owner_id":     nil,
+	})
 }

@@ -82,6 +82,8 @@ var businessMetricLabels = map[string][]string{
 	"multica_runtime_ready_seconds":                    {labelRuntimeMode, labelProvider},
 	"multica_runtime_failed_total":                     {labelRuntimeMode, labelProvider, labelFailureReason, labelRecoverable},
 	"multica_runtime_offline_total":                    {labelRuntimeMode, labelProvider},
+	"multica_runtime_gc_skipped_total":                 {labelReason},
+	"multica_runtime_gc_backlog_runtimes":              {labelReason},
 	"multica_daemon_ws_message_received_total":         {labelKind},
 	"multica_autopilot_run_started_total":              {labelCadence, labelTriggerKind},
 	"multica_autopilot_run_terminal_total":             {labelCadence, labelTriggerKind, labelTerminalStatus},

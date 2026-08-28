@@ -104,9 +104,9 @@
       "label": "Offline",
       "description": "No heartbeat for 5+ minutes. Restart the daemon or investigate the host."
     },
-    "about_to_gc": {
-      "label": "About to GC",
-      "description": "Offline 6+ days. Auto-deleted at 7 days unless it reconnects."
+    "long_offline": {
+      "label": "Long offline",
+      "description": "No heartbeat for 6+ days. If this host will stay offline, rebind its agents to another runtime or delete this runtime."
     }
   },
   "detail": {

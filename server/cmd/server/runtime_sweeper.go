@@ -56,10 +56,10 @@ const (
 	// 500 preserves a theoretical capacity of 12,000 candidates per day; the
 	// round timeout remains the hard bound on actual work.
 	runtimeGCBatchSize = 500
-	// runtimeGCBlockedScanLimit bounds the observability query as well. The
-	// gauge saturates at this value rather than turning a safety signal into an
-	// unbounded recurring scan when a large task backlog exists.
-	runtimeGCBlockedScanLimit = 1000
+	// runtimeGCBacklogScanLimit bounds the observability query as well. The
+	// reason-bucket gauges sample at most this many oldest stale runtimes rather
+	// than turning a safety signal into an unbounded recurring scan.
+	runtimeGCBacklogScanLimit = 1000
 	// runtimeGCTickTimeout bounds each independent hourly GC round so lock
 	// contention cannot occupy its worker indefinitely.
 	runtimeGCTickTimeout = 15 * time.Second
@@ -124,6 +124,11 @@ type runtimeGCTxStarter interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
 
+type runtimeGCEventPublisher interface {
+	PublishRuntimeTeardown(context.Context, service.RuntimeTeardownResult, string, string, string, string, bool)
+	PublishRuntimeRefresh(string, string, string, string)
+}
+
 type runtimeSweepStageStats struct {
 	candidates int
 	changed    int
@@ -184,9 +189,9 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 	})
 }
 
-func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, bus *events.Bus) {
+func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, publisher runtimeGCEventPublisher) {
 	runPeriodicSweep(ctx, runtimeGCSweepInterval, func() {
-		gcRuntimes(ctx, txStarter, queries, metrics, bus)
+		gcRuntimes(ctx, txStarter, queries, metrics, publisher)
 	})
 }
 
@@ -398,24 +403,24 @@ func filterStaleRuntimesByLiveness(ctx context.Context, candidates []db.SelectSt
 // agent_task_queue.runtime_id ON DELETE CASCADE. Candidate discovery is bounded;
 // each runtime then gets an independent transaction so one bad row cannot abort
 // the whole sweep.
-func gcRuntimes(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, bus *events.Bus) (stats runtimeSweepStageStats) {
+func gcRuntimes(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, publisher runtimeGCEventPublisher) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
 		observeRuntimeSweepStage(metrics, obsmetrics.RuntimeSweepStageGC, startedAt, stats)
 	}()
-	return gcRuntimesWithBudget(ctx, txStarter, queries, metrics, bus, runtimeGCTickTimeout)
+	return gcRuntimesWithBudget(ctx, txStarter, queries, metrics, publisher, runtimeGCTickTimeout)
 }
 
-func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, bus *events.Bus, budget time.Duration) (stats runtimeSweepStageStats) {
+func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, publisher runtimeGCEventPublisher, budget time.Duration) (stats runtimeSweepStageStats) {
 	gcCtx, cancelGC := context.WithTimeout(ctx, budget)
 	defer cancelGC()
 
-	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(countCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
+	blockedCtx, cancelBlocked := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
+	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(blockedCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
 		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBlockedScanLimit,
+		MaxRows:      runtimeGCBacklogScanLimit,
 	})
-	cancelCount()
+	cancelBlocked()
 	if err != nil {
 		slog.Warn("runtime GC: failed to count task-blocked runtimes", "error", err)
 		metrics.RecordRuntimeGCBlockedObservationFailed()
@@ -423,7 +428,36 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 		metrics.SetRuntimeGCBlocked(blocked)
 		if blocked > 0 {
 			slog.Debug("runtime GC: stale runtimes blocked by non-terminal tasks",
-				"count", blocked, "count_capped", blocked == runtimeGCBlockedScanLimit)
+				"count", blocked, "count_capped", blocked == runtimeGCBacklogScanLimit)
+		}
+	}
+
+	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
+	backlog, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(countCtx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
+		StaleSeconds: offlineRuntimeTTLSeconds,
+		MaxRows:      runtimeGCBacklogScanLimit,
+	})
+	cancelCount()
+	if err != nil {
+		slog.Warn("runtime GC: failed to classify stale runtime backlog", "error", err)
+		metrics.RecordRuntimeGCBlockedObservationFailed()
+	} else {
+		for _, reason := range []string{
+			obsmetrics.RuntimeGCBacklogActiveAgent,
+			obsmetrics.RuntimeGCBacklogNonTerminalTask,
+			obsmetrics.RuntimeGCBacklogWorkspaceMismatch,
+			obsmetrics.RuntimeGCBacklogEligible,
+		} {
+			metrics.SetRuntimeGCBacklog(reason, 0)
+		}
+		var sampled int64
+		for _, row := range backlog {
+			metrics.SetRuntimeGCBacklog(row.Reason, row.Count)
+			sampled += row.Count
+		}
+		if sampled > 0 {
+			slog.Debug("runtime GC: classified stale runtime backlog",
+				"sampled", sampled, "sample_capped", sampled == runtimeGCBacklogScanLimit)
 		}
 	}
 
@@ -452,7 +486,7 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 			break
 		}
 		runtimeCtx, cancelRuntime := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-		workspaceID, didDelete, taskBlocked, err := gcRuntime(runtimeCtx, txStarter, queries, runtimeID)
+		result, err := gcRuntime(runtimeCtx, txStarter, queries, runtimeID)
 		cancelRuntime()
 		if err != nil {
 			if gcCtx.Err() != nil {
@@ -465,18 +499,22 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 			metrics.RecordRuntimeGCFailed()
 			continue
 		}
-		if taskBlocked {
-			slog.Warn("runtime GC: candidate gained a non-terminal task; skipping",
-				"runtime_id", util.UUIDToString(runtimeID))
+		if result.skipReason != "" {
+			metrics.RecordRuntimeGCSkipped(result.skipReason)
+			slog.Warn("runtime GC: candidate no longer safe to delete; skipping",
+				"runtime_id", util.UUIDToString(runtimeID), "reason", result.skipReason)
 			continue
 		}
-		if !didDelete {
+		if !result.deleted {
 			continue
 		}
 		deleted++
 		stats.changed++
 		metrics.RecordRuntimeGCDeleted()
-		gcWorkspaces[workspaceID] = true
+		gcWorkspaces[result.workspaceID] = true
+		if publisher != nil {
+			publisher.PublishRuntimeTeardown(gcCtx, result.teardown, result.workspaceID, "system", "", "runtime_gc", false)
+		}
 	}
 	if deleted == 0 {
 		return
@@ -485,16 +523,18 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 	slog.Info("runtime GC: deleted stale offline runtimes", "count", deleted, "workspaces", len(gcWorkspaces))
 
 	for wsID := range gcWorkspaces {
-		bus.Publish(events.Event{
-			Type:        protocol.EventDaemonRegister,
-			WorkspaceID: wsID,
-			ActorType:   "system",
-			Payload: map[string]any{
-				"action": "runtime_gc",
-			},
-		})
+		if publisher != nil {
+			publisher.PublishRuntimeRefresh(wsID, "system", "", "runtime_gc")
+		}
 	}
 	return
+}
+
+type runtimeGCResult struct {
+	workspaceID string
+	teardown    service.RuntimeTeardownResult
+	deleted     bool
+	skipReason  string
 }
 
 // gcRuntime re-checks and deletes one candidate under a runtime-row FOR UPDATE
@@ -502,10 +542,11 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 // lock_task_owner_rows, so a concurrent enqueue either commits before the
 // checks below and blocks deletion, or waits until deletion commits and then
 // observes that its runtime no longer exists.
-func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, runtimeID pgtype.UUID) (workspaceID string, deleted bool, taskBlocked bool, err error) {
+func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, runtimeID pgtype.UUID) (runtimeGCResult, error) {
+	var result runtimeGCResult
 	tx, err := txStarter.Begin(ctx)
 	if err != nil {
-		return "", false, false, fmt.Errorf("begin transaction: %w", err)
+		return result, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() {
 		// The operation context may already be cancelled on a timeout. Give
@@ -519,10 +560,16 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 
 	runtime, err := qtx.LockAgentRuntime(ctx, runtimeID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", false, false, nil
+		return result, nil
 	}
 	if err != nil {
-		return "", false, false, fmt.Errorf("lock runtime: %w", err)
+		return result, fmt.Errorf("lock runtime: %w", err)
+	}
+	result.workspaceID = util.UUIDToString(runtime.WorkspaceID)
+
+	lockedAgents, err := qtx.ListUserAgentsByRuntimeForUpdate(ctx, runtimeID)
+	if err != nil {
+		return result, fmt.Errorf("lock runtime agents: %w", err)
 	}
 
 	eligible, err := qtx.IsAgentRuntimeEligibleForGC(ctx, db.IsAgentRuntimeEligibleForGCParams{
@@ -530,41 +577,59 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 		StaleSeconds: offlineRuntimeTTLSeconds,
 	})
 	if err != nil {
-		return "", false, false, fmt.Errorf("re-check eligibility: %w", err)
+		return result, fmt.Errorf("re-check eligibility: %w", err)
 	}
 	if !eligible {
-		return "", false, false, nil
+		result.skipReason = obsmetrics.RuntimeGCSkipEligibilityChanged
+		return result, nil
+	}
+	if err := service.ValidateRuntimeAgentWorkspaces(runtime, lockedAgents); err != nil {
+		if errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
+			result.skipReason = obsmetrics.RuntimeGCSkipWorkspaceMismatch
+			return result, nil
+		}
+		return result, fmt.Errorf("validate runtime agent workspaces: %w", err)
+	}
+
+	lockedAgentIDs := make([]pgtype.UUID, len(lockedAgents))
+	for i, agent := range lockedAgents {
+		lockedAgentIDs[i] = agent.ID
 	}
 
 	undrained, err := qtx.CountUndrainedTasksByRuntimeOrAgent(ctx, db.CountUndrainedTasksByRuntimeOrAgentParams{
 		RuntimeIds: []pgtype.UUID{runtimeID},
-		AgentIds:   []pgtype.UUID{},
+		AgentIds:   lockedAgentIDs,
 	})
 	if err != nil {
-		return "", false, false, fmt.Errorf("count non-terminal tasks: %w", err)
+		return result, fmt.Errorf("count non-terminal tasks: %w", err)
 	}
 	if undrained > 0 {
-		return "", false, true, nil
+		result.skipReason = obsmetrics.RuntimeGCSkipNonTerminalTask
+		return result, nil
 	}
 
-	if _, err := qtx.UnbindTasksFromRuntime(ctx, runtimeID); err != nil {
-		return "", false, false, fmt.Errorf("unbind task history: %w", err)
-	}
-	remaining, err := qtx.CountTasksByRuntime(ctx, runtimeID)
+	teardown, err := service.TeardownRuntime(ctx, qtx, runtimeID, service.RuntimeTeardownOptions{CancelNonTerminalTasks: false})
 	if err != nil {
-		return "", false, false, fmt.Errorf("confirm task history detached: %w", err)
-	}
-	if remaining != 0 {
-		return "", false, false, fmt.Errorf("task history still references runtime after detach: %d", remaining)
+		if errors.Is(err, service.ErrRuntimeNotDrained) {
+			result.skipReason = obsmetrics.RuntimeGCSkipNonTerminalTask
+			return result, nil
+		}
+		if errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
+			result.skipReason = obsmetrics.RuntimeGCSkipWorkspaceMismatch
+			return result, nil
+		}
+		return result, fmt.Errorf("teardown runtime: %w", err)
 	}
 	if err := qtx.DeleteAgentRuntime(ctx, runtimeID); err != nil {
-		return "", false, false, fmt.Errorf("delete runtime: %w", err)
+		return result, fmt.Errorf("delete runtime: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return "", false, false, fmt.Errorf("commit transaction: %w", err)
+		return result, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	return util.UUIDToString(runtime.WorkspaceID), true, false, nil
+	result.teardown = teardown
+	result.deleted = true
+	return result, nil
 }
 
 // sweepStaleTasks fails tasks stuck in dispatched/running for too long,
