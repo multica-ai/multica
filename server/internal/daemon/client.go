@@ -495,7 +495,7 @@ func (c *Client) ReportTaskMessages(ctx context.Context, taskID string, messages
 	}, nil)
 }
 
-func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
+func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, sessionID, workDir string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, help HelpSignal) error {
 	body := map[string]any{"output": output}
 	if branchName != "" {
 		body["branch_name"] = branchName
@@ -515,6 +515,18 @@ func (c *Client) CompleteTask(ctx context.Context, taskID, output, branchName, s
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
 	}
+	// GAP-25: forward the agent-authored help signal so the server can route
+	// the task to human attention instead of auto-retrying it. Omit the fields
+	// entirely when the signal is empty so legacy behavior is unchanged.
+	if help.BlockedReason != nil {
+		body["blocked_reason"] = *help.BlockedReason
+	}
+	if len(help.Needs) > 0 {
+		body["needs"] = help.Needs
+	}
+	if help.Confidence != nil {
+		body["confidence"] = *help.Confidence
+	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/complete", taskID), body, nil, defaultTerminalRetrySchedule)
 }
 
@@ -527,7 +539,7 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, help HelpSignal) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
@@ -552,6 +564,18 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	}
 	if retiredSessionID != "" {
 		body["retired_session_id"] = retiredSessionID
+	}
+	// GAP-25: forward the agent-authored help signal so the server can route
+	// the task to human attention instead of auto-retrying it. Omit the fields
+	// entirely when the signal is empty so legacy behavior is unchanged.
+	if help.BlockedReason != nil {
+		body["blocked_reason"] = *help.BlockedReason
+	}
+	if len(help.Needs) > 0 {
+		body["needs"] = help.Needs
+	}
+	if help.Confidence != nil {
+		body["confidence"] = *help.Confidence
 	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
 }

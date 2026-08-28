@@ -1117,6 +1117,45 @@ func TestBuildPromptOmitsActiveSiblingRunsForChatTask(t *testing.T) {
 	}
 }
 
+// TestBuildPromptInstructsAgentToEmitHelpSignalWhenBlocked locks in Step 1 of
+// closing the agent autonomy gap (GAP-25): every dispatched task prompt must
+// tell the agent to emit the help signal — ending the task as blocked/failed
+// with a blocked_reason, the specific needs, and a confidence — instead of
+// retrying endlessly or guessing. The distinctive phrase `agent_requested_help`
+// names the server-side signal the daemon maps the report onto; `report blocked`
+// guards against a future edit that silently drops the STOP-and-report
+// instruction.
+func TestBuildPromptInstructsAgentToEmitHelpSignalWhenBlocked(t *testing.T) {
+	cases := []struct {
+		name string
+		task Task
+	}{
+		{"default issue task", Task{IssueID: "issue-1"}},
+		{"comment task", Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "do it"}},
+		{"chat task", Task{ChatSessionID: "sess-1", ChatMessage: "hi"}},
+		{"quick-create task", Task{QuickCreatePrompt: "fix the thing"}},
+		{"autopilot task", Task{AutopilotRunID: "run-1"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := BuildPrompt(tc.task, "claude")
+			for _, want := range []string{
+				"When you are blocked, ask for help",
+				"agent_requested_help",
+				"blocked_reason",
+				"needs",
+				"confidence",
+				"do not guess",
+				"report blocked",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("%s prompt missing help-signal guidance %q\n--- output ---\n%s", tc.name, want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildPromptNonSquadLeaderNoRule verifies that non-squad-leader agents
 // do NOT get the squad leader no_action rule injected.
 func TestBuildPromptNonSquadLeaderNoRule(t *testing.T) {

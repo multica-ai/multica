@@ -69,6 +69,23 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	}
 	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
+	b.WriteString(buildHelpSignalBlock())
+	return b.String()
+}
+
+// buildHelpSignalBlock teaches a dispatched agent to emit the help signal
+// (GAP-25 / agent_requested_help) when it is genuinely blocked, instead of
+// retrying endlessly or guessing. The LLM agent never calls the daemon's HTTP
+// API itself — it ends the task through its normal completion/failure path — so
+// the instruction is phrased in terms of that outcome ("end the task as
+// blocked/failed and clearly state the blocker") so the daemon can map it onto
+// the help fields (blocked_reason / needs / confidence). Keep this a ponytail:
+// the agent already carries a full task brief, and the rest of the guidance is
+// elsewhere, so this only supplies the one missing instruction.
+func buildHelpSignalBlock() string {
+	var b strings.Builder
+	b.WriteString("## When you are blocked, ask for help — do not guess\n\n")
+	b.WriteString("If you cannot make progress after reasonable effort — a missing secret or access, an ambiguous or contradictory requirement, or a decision that only a human can make — STOP and report blocked rather than retrying endlessly or guessing. End the task as blocked/failed and clearly state: a `blocked_reason` (what is actually stopping you), the specific `needs` (exactly what a human must provide — a credential, a clarification, or a decision), and your `confidence` in the diagnosis on a 0–1 scale. The system treats this as an `agent_requested_help` signal and routes it straight to a human; it will NOT auto-retry, so a precise, honest blocker report is the fastest way to get unstuck.\n\n")
 	return b.String()
 }
 

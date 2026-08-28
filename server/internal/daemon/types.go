@@ -350,6 +350,26 @@ type TaskResult struct {
 	Confidence    *float64 `json:"confidence,omitempty"`
 }
 
+// HelpSignal is the daemon-side carrier for the agent-authored "I'm stuck"
+// signal (GAP-25 / agent_requested_help). A terminal TaskResult may carry one;
+// it is forwarded verbatim to the server's /complete and /fail capture paths,
+// which persist it as a help_signal and route the task to human attention. A
+// legacy agent that never sets it leaves every field nil/empty, and both the
+// daemon and the server ignore an empty signal — so callers may always pass the
+// result through.
+type HelpSignal struct {
+	BlockedReason *string
+	Needs         []string
+	Confidence    *float64
+}
+
+// HasHelp reports whether the signal carries any agent-authored content. An
+// empty signal is forwarded as nothing on the wire, so the server treats the
+// task as an ordinary terminal result rather than a help request.
+func (h HelpSignal) HasHelp() bool {
+	return h.BlockedReason != nil || len(h.Needs) > 0 || h.Confidence != nil
+}
+
 // PluginHookTool is one agent-trigger plugin hook, as the agent will see it.
 //
 // Mirrors service.PluginHookTool on the wire. Declared here rather than
