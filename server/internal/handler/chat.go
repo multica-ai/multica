@@ -1751,7 +1751,7 @@ func (h *Handler) ClearQueuedChatTasks(w http.ResponseWriter, r *http.Request) {
 
 func issueTaskCanReplayComments(status string) bool {
 	switch status {
-	case "dispatched", "running", "waiting_local_directory", "deferred":
+	case "dispatched", "running", "waiting_local_directory":
 		return true
 	default:
 		return false

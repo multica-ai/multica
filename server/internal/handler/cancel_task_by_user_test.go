@@ -228,6 +228,55 @@ func TestCancelTaskByUser_ReplaysIssueCommentForSessionResume(t *testing.T) {
 	}
 }
 
+// Deferred issue tasks have not received a claim, so cancelling one must not
+// reconcile comments that a later task already delivered.
+func TestCancelTaskByUser_DeferredIssueTaskDoesNotReplayConsumedComment(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "deferred cancellation does not replay", testutil.Cols{
+		"status":        "in_progress",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	deferredTaskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"status":     "deferred",
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+		"fire_at":    testutil.Raw("now() + interval '1 hour'"),
+	})
+	commentID := dbfx.Comment(t, issueID, "already consumed by a newer task", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '1 minute'"),
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":            runtimeID,
+		"issue_id":              issueID,
+		"status":                "completed",
+		"created_at":            testutil.Raw("now() - interval '30 seconds'"),
+		"completed_at":          testutil.Raw("now() - interval '10 seconds'"),
+		"delivered_comment_ids": testutil.Raw("ARRAY['" + commentID + "']::uuid[]"),
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, deferredTaskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("CancelTaskByUser: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queued int
+	dbfx.QueryRow(t, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentID).Scan(&queued)
+	if queued != 0 {
+		t.Fatalf("cancelling deferred task queued %d duplicate follow-up tasks", queued)
+	}
+}
+
 func TestCancelTaskByUser_QueuedEditPersistsDraftRestore(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
