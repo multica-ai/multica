@@ -566,8 +566,14 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
+		Addr:              ":" + port,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// Bound header reads to stop Slowloris; IdleTimeout is looser than the
+		// metrics/profiling servers' 30s for keep-alive-heavy CLI and daemon
+		// clients. ReadTimeout and WriteTimeout are unset so WebSocket upgrades
+		// (/ws, /api/daemon/ws) on this listener aren't killed mid-connection.
 	}
 	profilingServer := profiling.NewServer()
 
