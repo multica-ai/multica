@@ -65,6 +65,7 @@ function renderTab() {
     back: vi.fn(),
     pathname: "/acme/agents/agent-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (path) => path,
   };
   return render(

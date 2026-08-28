@@ -164,6 +164,7 @@ vi.mock("../../navigation", () => ({
   useNavigation: () => ({
     pathname: "/acme/settings",
     searchParams: new URLSearchParams(navigationState.search),
+    hash: "",
     push: vi.fn(),
     replace: navigationState.replace,
     back: vi.fn(),

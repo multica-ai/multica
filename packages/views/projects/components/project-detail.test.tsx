@@ -282,6 +282,7 @@ function renderProjectDetail() {
     back: vi.fn(),
     pathname: "/test-workspace/projects/project-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: mocks.getShareableUrl,
   };
 

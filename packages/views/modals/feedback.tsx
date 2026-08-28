@@ -29,7 +29,7 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { useT } from "../i18n";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { useOptionalNavigation } from "../navigation";
+import { currentPath, useOptionalNavigation } from "../navigation";
 
 const MAX_MESSAGE_LEN = 10000;
 
@@ -111,7 +111,6 @@ export function FeedbackModal({
       return;
     }
     try {
-      const search = navigation?.searchParams.toString() ?? "";
       const browserUrl =
         typeof window !== "undefined" &&
         (window.location.protocol === "http:" ||
@@ -119,9 +118,7 @@ export function FeedbackModal({
           ? window.location.href
           : undefined;
       const currentUrl = navigation
-        ? navigation.getShareableUrl(
-            `${navigation.pathname}${search ? `?${search}` : ""}`,
-          )
+        ? navigation.getShareableUrl(currentPath(navigation))
         : browserUrl;
       await mutation.mutateAsync({
         message: latest,
