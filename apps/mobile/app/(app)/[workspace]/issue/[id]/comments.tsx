@@ -54,6 +54,10 @@ import {
   buildCommentDirectory,
   filterCommentDirectory,
 } from "@/lib/comment-directory";
+import {
+  preMountNonceOf,
+  shouldAutoCloseOnLocated,
+} from "@/lib/comment-directory-close";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/use-t";
@@ -98,32 +102,29 @@ export default function IssueCommentsDirectoryRoute() {
 
   // ── Locate-status handshake with the timeline ─────────────────────────
   // The timeline's controller publishes pending/located/failed into the
-  // store. We close only on `located` for OUR issue, and only for a
-  // request minted while THIS modal mount is open. The mount-time nonce
-  // snapshot stops a re-opened modal from replaying the previous visit's
+  // store; we close only on `located` for OUR issue and only for an
+  // intent minted AFTER this mount. The pre-mount nonce snapshot below
+  // stops a re-opened modal from replaying the previous visit's
   // already-`located` intent into an unrequested router.back().
-  const mountedNonceRef = useRef<number>(-1);
-  if (
-    mountedNonceRef.current === -1 &&
-    focus &&
-    focus.issueId === id &&
-    focus.nonce > 0
-  ) {
-    mountedNonceRef.current = focus.nonce;
-  }
+  //
+  // RUYI-28 review round 1: that snapshot must be taken at MOUNT time,
+  // not "on the first render where a focus exists" — a render-time
+  // re-armed snapshot also captured the user's first selection (nonce
+  // minted by this very visit), so the session's first directory pick
+  // could never auto-close (located(1) tested `1 > 1`). The `useState`
+  // initializer runs exactly once per mount and reads the store
+  // imperatively, so it cannot observe post-mount selections; the close
+  // math itself lives in lib/comment-directory-close.ts (unit-tested).
+  const [preMountNonce] = useState(() =>
+    preMountNonceOf(useCommentFocusStore.getState().focus, id),
+  );
   const closedRef = useRef(false);
   useEffect(() => {
-    if (!focus || focus.issueId !== id || !status) return;
-    if (status.nonce !== focus.nonce) return;
-    if (
-      status.phase === "located" &&
-      !closedRef.current &&
-      status.nonce > mountedNonceRef.current
-    ) {
+    if (!closedRef.current && shouldAutoCloseOnLocated(focus, status, id, preMountNonce)) {
       closedRef.current = true;
       router.back();
     }
-  }, [focus, status, id]);
+  }, [focus, status, id, preMountNonce]);
 
   // Status relevant to THIS modal's latest request (failed → inline retry).
   const ownStatus: CommentFocusStatus | null =
