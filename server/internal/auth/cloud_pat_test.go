@@ -345,6 +345,7 @@ func TestCloudPATVerifier_NegativesNotCached(t *testing.T) {
 	}
 }
 
+
 // TestCloudPATVerifier_LookupRejectsUnknownOwner pins the new
 // owner-existence guard. Cloud says the token is valid, but the
 // caller's lookup says the owner_id does not exist locally — the

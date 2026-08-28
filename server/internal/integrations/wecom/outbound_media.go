@@ -197,16 +197,15 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget, carri
 	// have carried none is the false alarm the post-lookup gate exists to
 	// avoid.
 	if !o.admitAttachmentDelivery() {
-		// A scheduling refusal, counted under its own unit. NOT a file drop:
-		// the comment above is literal — nothing here knows whether this turn
-		// carries zero files or five, and a per-file counter fed from this
-		// branch fabricates cardinality both ways. The reply outcome is still
-		// owed when the files were the reply, because that unit is "one
-		// reply" regardless of how many files it turns out to hold.
+		// A scheduling refusal, counted under its own unit, and NOTHING else:
+		// the comment above is literal — this gate runs before the lookup, so
+		// it knows neither how many files the turn carries nor whether it
+		// carries any at all. A per-file counter fed from here fabricates
+		// cardinality, and a reply outcome asserted from here fabricates the
+		// reply: an empty completion with zero bound files would be counted
+		// as a dropped reply when the lookup would have classified it as
+		// nothing_to_say. What cannot be known here is not recorded here.
 		o.attachmentShed()
-		if carriesTheReply {
-			o.dropped(context.Background(), e, dropAttachmentNotAdmitted, nil)
-		}
 		o.logger.Warn("wecom outbound: attachment delivery not admitted, too many already running",
 			"installation_id", uuidStringPub(to.InstallationID),
 			"admitted", maxAdmittedAttachmentDeliveries)
@@ -292,6 +291,11 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	case attachmentSlots <- struct{}{}:
 		defer func() { <-attachmentSlots }()
 	case <-ctx.Done():
+		// The rows are known here, so every one of them settles: nothing was
+		// sent, which is the one case that is provably local.
+		for range rows {
+			o.attachmentDropped(ctx, dropTransport, ctx.Err())
+		}
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery gave up waiting for a slot",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
 		// Deliberately on a fresh context: the one that expired is the reason
@@ -310,15 +314,20 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		// the socket that is missing. The log is the only place this can go.
 		o.logger.WarnContext(ctx, "wecom outbound: no live connection for attachment delivery",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
-		o.attachmentDropped(ctx, dropNoConnection, nil)
+		for range rows {
+			o.attachmentDropped(ctx, dropNoConnection, nil)
+		}
 		replyFailed(dropNoConnection, nil)
 		return
 	}
 	failed, unknown := 0, 0
-	// replyReason aggregates the per-file reasons for the reply's own outcome,
-	// under worseDropReason's precedence — so a single refused file surfaces as
-	// platform_refused on the reply too, not as a generic transport_error.
+	// replyReason aggregates the DEFINITE per-file reasons for the reply's own
+	// outcome, under worseDropReason's precedence — so a single refused file
+	// surfaces as platform_refused on the reply too. Unknown outcomes stay out
+	// of it: a file that may have arrived must not turn the reply into a
+	// definite drop.
 	var replyReason dropReason
+	var replyUnconfirmed string
 	for _, row := range rows {
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
@@ -329,12 +338,14 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 			replyReason = worseDropReason(replyReason, r)
 		case deliveryUnknown:
 			unknown++
-			// Unknown is not a failure: the frame may well have arrived, and
-			// the reason set says so. Counted apart from a stated refusal for
-			// the same reason ack_timeout is.
-			r := classifyDrop(err)
-			o.attachmentDropped(ctx, r, err)
-			replyReason = worseDropReason(replyReason, r)
+			// Not a failure: the frame may well have arrived. Filed under its
+			// own counter so the drop rate stays a rate of definite drops.
+			r := unconfirmedReason(err)
+			if r == "" {
+				r = "ack_timeout" // sendOutcome and unconfirmedReason share a set; belt and braces
+			}
+			o.attachmentUnconfirmed(ctx, r, err)
+			replyUnconfirmed = r
 		default:
 			o.attachmentDelivered()
 		}
@@ -351,11 +362,18 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		}
 	}
 	if carriesTheReply {
-		// The files were the answer, so the reply landed iff any of them did.
-		if failed+unknown < len(rows) {
+		// The files were the answer. Three honest endings: any file arrived —
+		// delivered; none arrived and at least one failure is definite — a
+		// drop under the worst definite reason; nothing definite either way —
+		// unconfirmed, because calling a maybe-delivered reply a drop points
+		// the operator at a resend the user may already have.
+		switch {
+		case failed+unknown < len(rows):
 			o.delivered()
-		} else {
+		case failed > 0:
 			o.droppedFor(ctx, to.SessionID, "chat:done", replyReason, nil)
+		default:
+			o.unconfirmedFor(ctx, to.SessionID, "chat:done", replyUnconfirmed, nil)
 		}
 	}
 	// The answer is already on the user's screen and it may well refer to a

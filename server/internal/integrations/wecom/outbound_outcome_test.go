@@ -11,6 +11,7 @@ package wecom
 
 import (
 	"bytes"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -180,8 +181,14 @@ func TestRefusalIsNotATransportError(t *testing.T) {
 	if got := classifyDrop(&wecomAPIError{Cmd: cmdSendMsg, Code: 45002, Msg: "too long"}); got != dropPlatformRefused {
 		t.Errorf("a stated refusal classified as %q", got)
 	}
-	if got := classifyDrop(errAckTimeout); got != dropAckTimeout {
-		t.Errorf("a missing verdict classified as %q", got)
+	if got := unconfirmedReason(errAckTimeout); got != "ack_timeout" {
+		t.Errorf("a missing verdict classified as %q, want the unconfirmed ack_timeout", got)
+	}
+	if got := unconfirmedReason(errWriteAttempted); got != "write_attempted" {
+		t.Errorf("an attempted write classified as %q, want the unconfirmed write_attempted", got)
+	}
+	if got := unconfirmedReason(errors.New("wecom: send_msg requires chat_id")); got != "" {
+		t.Errorf("a provably local failure marked unconfirmed (%q); it is a definite drop", got)
 	}
 	if got := classifyDrop(errNoLiveConnection); got != dropNoConnection {
 		t.Errorf("a missing socket classified as %q", got)
@@ -215,7 +222,6 @@ func TestReasonStringsArePinned(t *testing.T) {
 		"no_live_connection":      dropNoConnection,
 		"task_missing":            dropTaskMissing,
 		"platform_refused":        dropPlatformRefused,
-		"ack_timeout":             dropAckTimeout,
 		"transport_error":         dropTransport,
 		"attachment_not_admitted": dropAttachmentNotAdmitted,
 	} {
@@ -278,7 +284,7 @@ func TestActionableSplitIsPinned(t *testing.T) {
 	t.Parallel()
 	for _, r := range []dropReason{
 		dropNoConnection, dropTaskMissing, dropPlatformRefused,
-		dropAckTimeout, dropTransport, dropAttachmentNotAdmitted,
+		dropTransport, dropAttachmentNotAdmitted,
 	} {
 		if !r.actionable() {
 			t.Errorf("%s is a drop and must reach an operator", r)

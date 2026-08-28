@@ -178,6 +178,8 @@ func TestWecomOutboundMetricsAreExported(t *testing.T) {
 	m.RecordAttachmentDelivered()
 	m.RecordAttachmentDropped("platform_refused")
 	m.RecordAttachmentDeliveryShed()
+	m.RecordOutboundUnconfirmed("ack_timeout")
+	m.RecordAttachmentUnconfirmed("write_attempted")
 
 	got, err := reg.Gather()
 	if err != nil {
@@ -200,15 +202,19 @@ func TestWecomOutboundMetricsAreExported(t *testing.T) {
 		"multica_wecom_outbound_attachment_delivered_total",
 		"multica_wecom_outbound_attachment_dropped_total",
 		"multica_wecom_outbound_attachment_delivery_shed_total",
+		"multica_wecom_outbound_unconfirmed_total",
+		"multica_wecom_outbound_attachment_unconfirmed_total",
 	} {
 		if !seen[want] {
 			t.Errorf("%s was not exported", want)
 		}
 	}
 	for name, want := range map[string]string{
-		"multica_wecom_outbound_dropped_total/reason":            "no_live_connection",
-		"multica_wecom_outbound_skipped_total/reason":            "origin_not_channel",
-		"multica_wecom_outbound_attachment_dropped_total/reason": "platform_refused",
+		"multica_wecom_outbound_dropped_total/reason":                "no_live_connection",
+		"multica_wecom_outbound_skipped_total/reason":                "origin_not_channel",
+		"multica_wecom_outbound_attachment_dropped_total/reason":     "platform_refused",
+		"multica_wecom_outbound_unconfirmed_total/reason":            "ack_timeout",
+		"multica_wecom_outbound_attachment_unconfirmed_total/reason": "write_attempted",
 	} {
 		if labels[name] != want {
 			t.Errorf("%s = %q, want %q", name, labels[name], want)

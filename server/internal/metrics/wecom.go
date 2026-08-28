@@ -45,16 +45,18 @@ import "github.com/prometheus/client_golang/prometheus"
 // here, and it stays bounded by construction — no installation, workspace or
 // session id, same rule as everywhere else in this package.
 type WecomMetrics struct {
-	ConnectFailures      prometheus.Counter
-	AuthFailures         prometheus.Counter
-	CallbacksQueued      prometheus.Counter
-	CallbackQueueBlocked prometheus.Counter
-	OutboundDelivered    prometheus.Counter
-	OutboundDropped      *prometheus.CounterVec
-	OutboundSkipped      *prometheus.CounterVec
-	AttachmentDelivered  prometheus.Counter
-	AttachmentDropped    *prometheus.CounterVec
-	AttachmentSheds      prometheus.Counter
+	ConnectFailures       prometheus.Counter
+	AuthFailures          prometheus.Counter
+	CallbacksQueued       prometheus.Counter
+	CallbackQueueBlocked  prometheus.Counter
+	OutboundDelivered     prometheus.Counter
+	OutboundDropped       *prometheus.CounterVec
+	OutboundSkipped       *prometheus.CounterVec
+	AttachmentDelivered   prometheus.Counter
+	AttachmentDropped     *prometheus.CounterVec
+	AttachmentSheds       prometheus.Counter
+	OutboundUnconfirmed   *prometheus.CounterVec
+	AttachmentUnconfirmed *prometheus.CounterVec
 }
 
 func NewWecomMetrics() *WecomMetrics {
@@ -90,6 +92,14 @@ func NewWecomMetrics() *WecomMetrics {
 		}, []string{"reason"}),
 		AttachmentSheds: counter("outbound_attachment_delivery_shed_total",
 			"Attachment delivery attempts refused admission before the lookup ran. Counts SCHEDULING decisions, not files: at that point nothing knows whether the turn carries zero files or five, so a per-file count from this gate would fabricate cardinality."),
+		OutboundUnconfirmed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_unconfirmed_total",
+			Help: "Agent replies whose delivery outcome is UNKNOWN: the frame reached the wire (write_attempted), the verdict never came back (ack_timeout), or the wait was cut short (interrupted). The message may already be in front of the user, which is why these are not drops — an operator paging on the drop rate must not be paged for deliveries that probably happened, and nothing here should prompt a resend.",
+		}, []string{"reason"}),
+		AttachmentUnconfirmed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_attachment_unconfirmed_total",
+			Help: "Files whose delivery outcome is UNKNOWN, by reason. Counts FILES, same unit as the attachment delivered/dropped pair; see outbound_unconfirmed_total for why unknown is not a drop.",
+		}, []string{"reason"}),
 	}
 }
 
@@ -99,6 +109,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 		m.CallbacksQueued, m.CallbackQueueBlocked,
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
+		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
 	}
 }
 
@@ -120,3 +131,9 @@ func (m *WecomMetrics) RecordAttachmentDropped(reason string) {
 	m.AttachmentDropped.WithLabelValues(reason).Inc()
 }
 func (m *WecomMetrics) RecordAttachmentDeliveryShed() { m.AttachmentSheds.Inc() }
+func (m *WecomMetrics) RecordOutboundUnconfirmed(reason string) {
+	m.OutboundUnconfirmed.WithLabelValues(reason).Inc()
+}
+func (m *WecomMetrics) RecordAttachmentUnconfirmed(reason string) {
+	m.AttachmentUnconfirmed.WithLabelValues(reason).Inc()
+}

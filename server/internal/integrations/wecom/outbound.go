@@ -141,7 +141,11 @@ func (o *Outbound) handleEvent(e events.Event) {
 	// end a turn without an error of their own record themselves and return
 	// nil; everything that surfaces here is classified from the error.
 	if err := o.processEvent(ctx, e); err != nil {
-		o.dropped(ctx, e, classifyDrop(err), err)
+		if reason := unconfirmedReason(err); reason != "" {
+			o.unconfirmed(ctx, e, reason, err)
+		} else {
+			o.dropped(ctx, e, classifyDrop(err), err)
+		}
 	}
 }
 

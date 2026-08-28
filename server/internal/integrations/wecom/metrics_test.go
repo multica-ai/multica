@@ -63,6 +63,14 @@ func (m *countingMetrics) RecordAttachmentDropped(reason string) {
 	m.bump("attachment_dropped:" + reason)
 }
 func (m *countingMetrics) RecordAttachmentDeliveryShed() { m.bump("attachment_shed") }
+func (m *countingMetrics) RecordOutboundUnconfirmed(reason string) {
+	m.bump("outbound_unconfirmed")
+	m.bump("outbound_unconfirmed:" + reason)
+}
+func (m *countingMetrics) RecordAttachmentUnconfirmed(reason string) {
+	m.bump("attachment_unconfirmed")
+	m.bump("attachment_unconfirmed:" + reason)
+}
 
 var _ Metrics = (*countingMetrics)(nil)
 

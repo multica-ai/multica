@@ -49,12 +49,6 @@ const (
 	// chat, the tenant is rate limited.
 	dropPlatformRefused dropReason = "platform_refused"
 
-	// dropAckTimeout — the frame went out and no verdict came back inside
-	// ackTimeout. NOT proof of non-delivery: the message may well have
-	// arrived. Counted apart from a refusal because the two call for opposite
-	// responses.
-	dropAckTimeout dropReason = "ack_timeout"
-
 	// dropTransport — the write itself failed, or the lookups ahead of it did.
 	dropTransport dropReason = "transport_error"
 
@@ -98,9 +92,29 @@ func (r dropReason) actionable() bool { return true }
 // classifyDrop can name it instead of pattern-matching prose.
 var errNoLiveConnection = errors.New("wecom: connection not ready on this replica")
 
-// classifyDrop turns a send error into the reason an operator reads. Order
-// matters: a stated refusal is more specific than a transport failure, and an
-// ack that never came is neither.
+// unconfirmedReason names a failure whose OUTCOME IS UNKNOWN — the message may
+// already be in front of the user — and returns "" for one that is definite.
+// The set mirrors sendOutcome's deliveryUnknown exactly: a verdict that never
+// came, a failure raised by the write itself (the peer may hold bytes the
+// local side reported an error for), and a context cut short while either was
+// pending. Callers MUST consult this before classifyDrop: an unknown filed as
+// a drop tells an operator to resend a message the user may already have.
+func unconfirmedReason(err error) string {
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, errAckTimeout):
+		return "ack_timeout"
+	case errors.Is(err, errWriteAttempted):
+		return "write_attempted"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "interrupted"
+	}
+	return ""
+}
+
+// classifyDrop turns a DEFINITE send failure into the reason an operator
+// reads. Definite is the caller's obligation: consult unconfirmedReason first.
 func classifyDrop(err error) dropReason {
 	var apiErr *wecomAPIError
 	switch {
@@ -110,8 +124,6 @@ func classifyDrop(err error) dropReason {
 		return dropNoConnection
 	case errors.As(err, &apiErr):
 		return dropPlatformRefused
-	case errors.Is(err, errAckTimeout):
-		return dropAckTimeout
 	default:
 		return dropTransport
 	}
@@ -145,6 +157,31 @@ func (o *Outbound) droppedFor(ctx context.Context, sessionID, eventType string, 
 		return
 	}
 	o.logger.DebugContext(ctx, "wecom outbound: reply not delivered", attrs...)
+}
+
+// unconfirmed records one reply whose outcome is unknown. WARN, because a
+// person deciding whether to resend needs to know this is NOT a failure.
+func (o *Outbound) unconfirmed(ctx context.Context, e events.Event, reason string, err error) {
+	o.unconfirmedFor(ctx, e.ChatSessionID, e.Type, reason, err)
+}
+
+func (o *Outbound) unconfirmedFor(ctx context.Context, sessionID, eventType, reason string, err error) {
+	o.mx().RecordOutboundUnconfirmed(reason)
+	attrs := []any{"reason", reason, "chat_session_id", sessionID, "event", eventType}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	o.logger.WarnContext(ctx, "wecom outbound: reply delivery unconfirmed", attrs...)
+}
+
+// attachmentUnconfirmed records one FILE whose outcome is unknown.
+func (o *Outbound) attachmentUnconfirmed(ctx context.Context, reason string, err error) {
+	o.mx().RecordAttachmentUnconfirmed(reason)
+	attrs := []any{"reason", reason}
+	if err != nil {
+		attrs = append(attrs, "error", err)
+	}
+	o.logger.WarnContext(ctx, "wecom outbound: attachment delivery unconfirmed", attrs...)
 }
 
 // skipped records one completion this adapter was never going to deliver.
@@ -189,8 +226,6 @@ func worseDropReason(a, b dropReason) dropReason {
 			return 3
 		case dropTransport:
 			return 2
-		case dropAckTimeout:
-			return 1
 		default:
 			return 0
 		}

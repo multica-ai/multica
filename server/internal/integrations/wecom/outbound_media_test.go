@@ -1025,16 +1025,144 @@ func TestMultiFileFailure_CountsFilesPerFileAndTheReplyOnce(t *testing.T) {
 // reason stays a rule and never becomes an accident of loop order.
 func TestWorseDropReason_PrecedenceIsStable(t *testing.T) {
 	t.Parallel()
-	if got := worseDropReason(dropAckTimeout, dropPlatformRefused); got != dropPlatformRefused {
-		t.Errorf("refusal must outrank a missing verdict, got %s", got)
-	}
-	if got := worseDropReason(dropPlatformRefused, dropTransport); got != dropPlatformRefused {
+	if got := worseDropReason(dropTransport, dropPlatformRefused); got != dropPlatformRefused {
 		t.Errorf("refusal must outrank a transport failure, got %s", got)
 	}
-	if got := worseDropReason(dropTransport, dropAckTimeout); got != dropTransport {
-		t.Errorf("a definite local failure must outrank a maybe-delivered, got %s", got)
+	if got := worseDropReason(dropPlatformRefused, dropTransport); got != dropPlatformRefused {
+		t.Errorf("refusal must outrank a transport failure regardless of order, got %s", got)
 	}
-	if got := worseDropReason("", dropAckTimeout); got != dropAckTimeout {
+	if got := worseDropReason("", dropTransport); got != dropTransport {
 		t.Errorf("anything outranks the zero value, got %s", got)
+	}
+}
+
+// ---- round-3 review regressions ------------------------------------------
+
+// The admission gate cannot assert a reply failure: an empty completion with
+// ZERO bound files, shed at admission, must record a shed and nothing else —
+// the lookup it never ran is the only thing that could have said whether a
+// reply payload existed at all.
+func TestAdmissionShed_EmptyContentZeroFilesAssertsNoReplyOutcome(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{ID: mustTestUUID(t), Filename: "a.pdf", Url: "u"})
+	q.attachments = nil
+	o, instID, _, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	for i := 0; i < maxAdmittedAttachmentDeliveries; i++ {
+		if !o.admitAttachmentDelivery() {
+			t.Fatalf("admission %d refused before the cap", i)
+		}
+	}
+
+	// Empty completion: mayCarryAttachments says maybe, admission says no.
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_shed"); got != 1 {
+		t.Errorf("attachment_shed = %d, want 1", got)
+	}
+	if got := mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — nothing here knew a reply payload existed", got)
+	}
+	if got := mx.get("outbound_delivered") + mx.get("outbound_unconfirmed"); got != 0 {
+		t.Errorf("some reply outcome was asserted (%d) from a gate that cannot know one", got)
+	}
+}
+
+// Three known files stuck behind a full pending queue: the slot-wait timeout
+// settles each of them, not none of them.
+func TestSlotWaitTimeout_SettlesEveryKnownFile(t *testing.T) {
+	rows := []db.Attachment{
+		{ID: mustTestUUID(t), Filename: "a.bin", Url: "https://cdn.example/obj/a"},
+		{ID: mustTestUUID(t), Filename: "b.bin", Url: "https://cdn.example/obj/b"},
+		{ID: mustTestUUID(t), Filename: "c.bin", Url: "https://cdn.example/obj/c"},
+	}
+	q := oneAttachmentQueries(t, rows[0])
+	q.attachments = rows
+	o, instID, _, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/a", data: []byte("D")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	// Occupy the package-level in-flight slots so the wait must give up, on a
+	// context that is already expired. Not t.Parallel: attachmentSlots is
+	// shared with every other delivery in the package, and holding it while
+	// unrelated tests run would measure this harness, not the code.
+	for i := 0; i < maxConcurrentAttachmentDeliveries; i++ {
+		attachmentSlots <- struct{}{}
+	}
+	defer func() {
+		for i := 0; i < maxConcurrentAttachmentDeliveries; i++ {
+			<-attachmentSlots
+		}
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	o.sendAttachments(ctx, mustParseTaskUUID(t, testMessageID), mustParseTaskUUID(t, testWorkspaceID),
+		attachmentTarget{InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt, SessionID: testSessionID}, true)
+
+	if got := mx.get("attachment_dropped:transport_error"); got != 3 {
+		t.Errorf("attachment_dropped:transport_error = %d, want 3 — every known file settles", got)
+	}
+	if got := mx.get("outbound_dropped"); got != 1 {
+		t.Errorf("outbound_dropped = %d, want exactly 1 for the file-only reply", got)
+	}
+}
+
+// Three known files and no live sender: one drop PER FILE, one reply outcome.
+func TestNoLiveSender_SettlesEveryKnownFile(t *testing.T) {
+	t.Parallel()
+	rows := []db.Attachment{
+		{ID: mustTestUUID(t), Filename: "a.bin", Url: "https://cdn.example/obj/a"},
+		{ID: mustTestUUID(t), Filename: "b.bin", Url: "https://cdn.example/obj/b"},
+		{ID: mustTestUUID(t), Filename: "c.bin", Url: "https://cdn.example/obj/c"},
+	}
+	q := oneAttachmentQueries(t, rows[0])
+	q.attachments = rows
+	mx := newCountingMetrics()
+	reg := newSendersRegistry() // empty: no live sender
+	instID := mustTestUUID(t)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	o := NewOutbound(q, reg, slog.Default(), WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{}))
+	o.spawn = func(f func()) { f() }
+
+	o.sendAttachments(context.Background(), mustParseTaskUUID(t, testMessageID), mustParseTaskUUID(t, testWorkspaceID),
+		attachmentTarget{InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt, SessionID: testSessionID}, true)
+
+	if got := mx.get("attachment_dropped:no_live_connection"); got != 3 {
+		t.Errorf("attachment_dropped:no_live_connection = %d, want 3", got)
+	}
+	if got := mx.get("outbound_dropped:no_live_connection"); got != 1 {
+		t.Errorf("outbound_dropped:no_live_connection = %d, want 1", got)
+	}
+}
+
+// An unknown outcome is not a drop. A file whose upload got no verdict files
+// under unconfirmed, and a file-only reply whose every file is unknown settles
+// the reply as unconfirmed — never as a definite drop an operator would act on.
+func TestUnknownOutcome_IsUnconfirmedNotDropped(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "a.png", Url: "https://cdn.example/obj/a", ContentType: "image/png",
+	})
+	o, instID, conn, mx := newMediaRigWithMetrics(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+	conn.dropAcks[cmdSendMsg] = 1 // the media push gets no verdict → deliveryUnknown
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+	if got := mx.get("attachment_unconfirmed"); got != 1 {
+		t.Errorf("attachment_unconfirmed = %d, want 1. counts=%v", got, mx.counts)
+	}
+	if got := mx.get("attachment_dropped"); got != 0 {
+		t.Errorf("attachment_dropped = %d, want 0 — the file may have arrived", got)
+	}
+	if got := mx.get("outbound_unconfirmed"); got != 1 {
+		t.Errorf("outbound_unconfirmed = %d, want 1 for the file-only reply", got)
+	}
+	if got := mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0", got)
 	}
 }
