@@ -57,6 +57,8 @@ import { ReactionBar } from "./reaction-bar";
 import { useCommentLongPress } from "./comment-context-menu";
 import { ActionSheetModal } from "@/components/ui/action-sheet";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import { useCommentFocusStore } from "@/data/stores/comment-focus-store";
+import { commentSummary } from "@/lib/comment-summary";
 
 interface Props {
   entry: TimelineEntry;
@@ -75,6 +77,18 @@ interface Props {
    *  flash that reply's wrapper (bg only). Mirrors web's distinction at
    *  packages/views/issues/components/comment-card.tsx:498-682. */
   highlightedCommentId?: string | null;
+  /** RUYI-28 controlled expansion. When true the root renders expanded
+   *  regardless of its default collapsed state (deep-link target, focus
+   *  intent from the comments modal, or just-published). The expansion
+   *  set lives in the per-issue session store because FlashList recycles
+   *  rows — per-row useState resets when the row scrolls out of view. */
+  forceExpanded?: boolean;
+  /** Same channel the composer uses (RUYI-28): fired with the SERVER
+   *  comment id when a Retry of THIS row's failed optimistic comment
+   *  succeeds, so the owning root expands exactly like a composer
+   *  publish. Optional — the just-published auto-expand is a nicety, not
+   *  required for correctness. */
+  onCommentPublished?: (commentId: string) => void;
 }
 
 export function CommentCard({
@@ -83,6 +97,8 @@ export function CommentCard({
   issueId,
   issueIdentifier,
   highlightedCommentId,
+  forceExpanded = false,
+  onCommentPublished,
 }: Props) {
   // Resolved threads default to a single-line bar; tap expands in place for
   // the current session. Unmount (scroll out of viewport) resets — same
@@ -91,6 +107,19 @@ export function CommentCard({
   // on the root is the single source of truth for this card.
   const resolved = !!entry.resolved_at;
   const [expanded, setExpanded] = useState(false);
+  // RUYI-28 root collapse: normal (unresolved) roots default to a compact
+  // single-line summary bar; the store-controlled set (session-scoped per
+  // issue) overrides. The SAME store gate now also applies to resolved
+  // roots: a directory focus intent (or deep link / just-published) that
+  // targets a resolved thread must land on the FULL thread, not a bar the
+  // user has to tap again. Manual collapse (either path) removes the id
+  // from the store, so the user's collapse choice still wins afterwards.
+  const collapseStore = useCommentFocusStore((s) => s.collapseRoot);
+  const expandStore = useCommentFocusStore((s) => s.expandRoot);
+  const storeExpanded = useCommentFocusStore((s) =>
+    s.expandedRoots[issueId]?.has(entry.id),
+  );
+  const isRootExpanded = forceExpanded || storeExpanded || expanded;
   // Highlight ring while a long-press action sheet is on screen — child
   // CommentBody flips this via onPressChange so the outer bubble shell can
   // visually bind the sheet to the targeted entry.
@@ -116,23 +145,52 @@ export function CommentCard({
 
   // Inbox deep-link target inside a resolved thread expands automatically —
   // otherwise tapping a notification would just reveal a bar with no content
-  // and force the user to tap again.
+  // and force the user to tap again. RUYI-28 extends the same rule to
+  // NORMAL roots, which now also default to collapsed. The expansion is
+  // ALSO written to the per-issue store so it survives FlashList recycling
+  // (a deep-linked row that scrolls out of view mid-read must not
+  // re-collapse when it remounts).
   useEffect(() => {
-    if (!resolved || !highlightedCommentId) return;
+    if (!highlightedCommentId) return;
     if (
       highlightedCommentId === entry.id ||
       replies.some((r) => r.id === highlightedCommentId)
     ) {
       setExpanded(true);
+      expandStore(issueId, entry.id);
     }
-  }, [resolved, highlightedCommentId, entry.id, replies]);
+  }, [highlightedCommentId, entry.id, replies, issueId, expandStore]);
 
-  if (resolved && !expanded) {
+  // ── RUYI-28 collapsed root (normal, unresolved) ────────────────────────
+  // Default collapsed; expansion is session-scoped per issue. The bar shows
+  // a 120-cp / 2-line summary (see lib/comment-summary.ts). Deep-link /
+  // focus-intent / just-published paths come in via `forceExpanded`.
+  if (!resolved && !isRootExpanded) {
+    return (
+      <CollapsedRootBar
+        entry={entry}
+        replies={replies}
+        onExpand={() => {
+          // Write BOTH the local state (this render) and the per-issue
+          // session store (survives FlashList cell recycling — a per-row
+          // useState alone would re-collapse when the row scrolls out of
+          // the recycle window and remounts).
+          setExpanded(true);
+          expandStore(issueId, entry.id);
+        }}
+      />
+    );
+  }
+
+  if (resolved && !isRootExpanded) {
     return (
       <ResolvedThreadBar
         entry={entry}
         replies={replies}
-        onExpand={() => setExpanded(true)}
+        onExpand={() => {
+          setExpanded(true);
+          expandStore(issueId, entry.id);
+        }}
       />
     );
   }
@@ -164,14 +222,33 @@ export function CommentCard({
           {resolved ? (
             <ResolvedIndicator
               entry={entry}
-              onCollapse={() => setExpanded(false)}
+              onCollapse={() => {
+                setExpanded(false);
+                // Clear the store gate too — a directory/deep-link focus
+                // wrote this root into the session expansion set, and a
+                // manual collapse must win over it (same contract as the
+                // unresolved CollapseRow below).
+                collapseStore(issueId, entry.id);
+              }}
             />
-          ) : null}
+          ) : (
+            // RUYI-28: expanded normal root carries a subtle collapse
+            // affordance so the collapsed-by-default state is reachable
+            // without scrolling away. Same self-contained-Pressable shape
+            // as ResolvedIndicator's collapse link.
+            <CollapseRow
+              onCollapse={() => {
+                setExpanded(false);
+                collapseStore(issueId, entry.id);
+              }}
+            />
+          )}
           <CommentBody
             entry={entry}
             issueId={issueId}
             issueIdentifier={issueIdentifier}
             onPressChange={handlePressChange}
+            onCommentPublished={onCommentPublished}
           />
           {replies.map((reply) => (
             <View key={reply.id} className="border-t border-border/60 pt-3">
@@ -180,6 +257,7 @@ export function CommentCard({
                 issueId={issueId}
                 issueIdentifier={issueIdentifier}
                 onPressChange={handlePressChange}
+                onCommentPublished={onCommentPublished}
               />
               <ReplyHighlightOverlay
                 active={highlightedCommentId === reply.id}
@@ -270,6 +348,110 @@ function ResolvedThreadBar({
         <Ionicons name="chevron-down" size={14} color={mutedFg} />
       </Pressable>
     </View>
+  );
+}
+
+/**
+ * Compact collapsed bar for a NORMAL (unresolved) root comment (RUYI-28).
+ * Author + time + 120-cp / 2-line summary + reply count. Tap anywhere to
+ * expand for this page session.
+ *
+ * Deliberately mirrors the shape of <ResolvedThreadBar> above (same
+ * `bg-surface-1` bubble rhythm) so collapsed rows — resolved or not —
+ * read as the same "row" idiom while scrolling.
+ */
+function CollapsedRootBar({
+  entry,
+  replies,
+  onExpand,
+}: {
+  entry: TimelineEntry;
+  replies: TimelineEntry[];
+  onExpand: () => void;
+}) {
+  const { getName } = useActorLookup();
+  const { t } = useT("issues");
+  const { colorScheme } = useColorScheme();
+  const mutedFg = THEME[colorScheme].mutedForeground;
+
+  const name = getName(
+    entry.actor_type as "member" | "agent" | null | undefined,
+    entry.actor_id,
+  );
+  const summary = commentSummary(entry.content);
+  const total = 1 + replies.length;
+
+  return (
+    <View className="px-4">
+      <Pressable
+        onPress={onExpand}
+        className="px-4 py-3 rounded-2xl bg-surface-1 gap-1 active:opacity-70"
+        accessibilityRole="button"
+        accessibilityLabel={t(
+          "mobile.comment.root_collapsed_a11y",
+          "Comment by {{authors}}, {{count}} messages. Tap to expand.",
+          { authors: name, count: total },
+        )}
+      >
+        <View className="flex-row items-center gap-2">
+          <ActorAvatar
+            type={entry.actor_type as "member" | "agent"}
+            id={entry.actor_id}
+            size={18}
+          />
+          <Text
+            className="text-sm font-medium text-foreground flex-1"
+            numberOfLines={1}
+          >
+            {name}
+          </Text>
+          <Text className="text-xs text-muted-foreground">
+            · {timeAgo(entry.created_at)}
+          </Text>
+          <Ionicons name="chevron-down" size={14} color={mutedFg} />
+        </View>
+        {summary ? (
+          <Text className="text-sm text-muted-foreground" numberOfLines={2}>
+            {summary}
+          </Text>
+        ) : null}
+        {replies.length > 0 ? (
+          <Text className="text-xs text-muted-foreground">
+            {/* Plurals go through i18next's count rules (zh/ja/ko only
+                carry the _other branch). */}
+            {t("mobile.comment.reply_count", "{{count}} replies", {
+              count: replies.length,
+            })}
+          </Text>
+        ) : null}
+      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Minimal collapse affordance at the top of an expanded NORMAL root
+ * (RUYI-28). Right-aligned "Collapse" text at the same scale as
+ * ResolvedIndicator's collapse link — no icon, no chrome; the summary bar
+ * below (after collapse) already carries the identity row.
+ */
+function CollapseRow({ onCollapse }: { onCollapse: () => void }) {
+  const { t } = useT("issues");
+  return (
+    <Pressable
+      onPress={onCollapse}
+      className="self-end active:opacity-60"
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={t(
+        "mobile.comment.collapse_root_a11y",
+        "Collapse comment",
+      )}
+    >
+      <Text className="text-xs text-muted-foreground">
+        {t("mobile.comment.collapse", "Collapse")}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -397,11 +579,13 @@ function CommentBody({
   issueId,
   issueIdentifier,
   onPressChange,
+  onCommentPublished,
 }: {
   entry: TimelineEntry;
   issueId: string;
   issueIdentifier: string | undefined;
   onPressChange?: (entryId: string, pressed: boolean) => void;
+  onCommentPublished?: (commentId: string) => void;
 }) {
   // When this comment is the active selection target, drop the long-press
   // wrapper AND make the markdown selectable — so the next long-press
@@ -461,12 +645,28 @@ function CommentBody({
     // mutation's own optimistic insert lands on a clean slate instead of
     // creating a duplicate row. The new attempt mints a fresh optimistic id.
     discardFailedComment(qc, wsId, issueId, entry.id);
-    createComment.mutate({
-      content: failed.content,
-      parentId: failed.parentId,
-      attachmentIds: failed.attachmentIds,
-    });
-  }, [failed, qc, wsId, issueId, entry.id, createComment]);
+    createComment.mutate(
+      {
+        content: failed.content,
+        parentId: failed.parentId,
+        attachmentIds: failed.attachmentIds,
+      },
+      // RUYI-28: a successful Retry must expand the owning root exactly
+      // like a composer publish — same precise channel, no last-row
+      // guessing. `onPublished` is the composer's existing plumbing; the
+      // server id arrives only on success (guarded the same way the
+      // composer's mutateAsync path guards `created?.id`).
+      { onSuccess: (created) => created?.id && onCommentPublished?.(created.id) },
+    );
+  }, [
+    failed,
+    qc,
+    wsId,
+    issueId,
+    entry.id,
+    createComment,
+    onCommentPublished,
+  ]);
 
   const handleDiscard = useCallback(() => {
     if (!wsId) return;

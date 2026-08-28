@@ -19,7 +19,16 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { MessageComposer } from "@/components/composer/message-composer";
 import { useT } from "@/lib/use-t";
 
-export function InlineCommentComposer({ issueId }: { issueId: string }) {
+export function InlineCommentComposer({
+  issueId,
+  onPublished,
+}: {
+  issueId: string;
+  /** Called with the SERVER comment id after this user's own publish is
+   *  accepted (RUYI-28 auto-expand). Not fired for optimistic inserts or
+   *  other users' realtime arrivals — only the local success path. */
+  onPublished?: (commentId: string) => void;
+}) {
   const { t } = useT("issues");
   const createComment = useCreateComment(issueId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -35,11 +44,12 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
       attachmentIds: string[];
     }) => {
       try {
-        await createComment.mutateAsync({
+        const created = await createComment.mutateAsync({
           content,
           parentId: replyTarget?.commentId,
           attachmentIds: attachmentIds.length > 0 ? attachmentIds : undefined,
         });
+        if (created?.id) onPublished?.(created.id);
       } catch (err) {
         // Rethrow so MessageComposer's catch path restores text + chips.
         // The optimistic timeline row stays with its inline
@@ -47,7 +57,7 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
         throw err;
       }
     },
-    [createComment, replyTarget?.commentId],
+    [createComment, replyTarget?.commentId, onPublished],
   );
 
   return (

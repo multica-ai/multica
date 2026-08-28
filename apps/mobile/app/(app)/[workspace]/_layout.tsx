@@ -248,6 +248,19 @@ export default function WorkspaceLayout() {
           name="issue/[id]/comment/[commentId]/emoji-picker"
           options={SHEET_OPTIONS}
         />
+        {/* Comments directory (RUYI-28) — Android-first navigation aid.
+            Full-page modal (not a formSheet): it's a browse/search surface
+            with a back-stack entry, not a picker row. Body draws its own
+            header per the modal-container rules; Android system back
+            closes it. Deliberately does NOT reuse the deep-link
+            `highlight` param — see comments.tsx header comment. */}
+        <Stack.Screen
+          name="issue/[id]/comments"
+          options={{
+            title: i18n.t("issues:mobile.detail.comments_title", "Comments"),
+            presentation: "modal",
+          }}
+        />
         {/* Project-detail formSheet pickers. */}
         <Stack.Screen
           name="project/[id]/picker/status"

@@ -871,7 +871,14 @@
       "discard_a11y": "送信に失敗したコメントを破棄",
       "add_reaction": "リアクションを追加",
       "delete_title": "コメントを削除しますか？",
-      "delete_desc": "このコメントは完全に削除され、スレッド内の返信もあわせて削除されます。この操作は元に戻せません。"
+      "delete_desc": "このコメントは完全に削除され、スレッド内の返信もあわせて削除されます。この操作は元に戻せません。",
+      "jump_bottom": "最下部へ",
+      "jump_bottom_a11y": "会話の末尾へスクロール",
+      "new_count_other": "新着 {{count}} 件",
+      "jump_new_a11y_other": "新着 {{count}} 件へ移動",
+      "root_collapsed_a11y_other": "{{authors}} のコメント、メッセージ {{count}} 件。タップして展開します。",
+      "reply_count_other": "返信 {{count}} 件",
+      "collapse_root_a11y": "コメントを折りたたむ"
     },
     "detail": {
       "actions_a11y": "タスクの操作",
@@ -880,7 +887,14 @@
       "load_failed": "タスクを読み込めませんでした：{{reason}}",
       "not_found": "見つかりません",
       "retry": "再試行",
-      "no_description": "説明はありません。"
+      "no_description": "説明はありません。",
+      "comments_locate_failed": "そのコメントへ移動できませんでした。",
+      "comments_locate_retry_a11y": "コメントへの移動を再試行",
+      "comments_title": "コメント",
+      "comments_search_placeholder": "作成者または本文で絞り込む…",
+      "comments_empty": "コメントはまだありません。",
+      "comments_no_match": "一致するコメントはありません。",
+      "comments_open_a11y": "コメントを参照"
     },
     "picker": {
       "unassigned": "未割り当て",

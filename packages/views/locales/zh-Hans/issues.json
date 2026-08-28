@@ -871,7 +871,14 @@
       "discard_a11y": "丢弃发送失败的评论",
       "add_reaction": "添加表情回应",
       "delete_title": "删除评论？",
-      "delete_desc": "此评论将被永久删除，话题中的回复也会一并移除。此操作无法撤销。"
+      "delete_desc": "此评论将被永久删除，话题中的回复也会一并移除。此操作无法撤销。",
+      "jump_bottom": "到底部",
+      "jump_bottom_a11y": "滚动到对话末尾",
+      "new_count_other": "{{count}} 条新消息",
+      "jump_new_a11y_other": "跳转到 {{count}} 条新消息",
+      "root_collapsed_a11y_other": "{{authors}} 的评论，共 {{count}} 条消息。点按展开。",
+      "reply_count_other": "{{count}} 条回复",
+      "collapse_root_a11y": "收起评论"
     },
     "detail": {
       "actions_a11y": "任务操作",
@@ -880,7 +887,14 @@
       "load_failed": "无法加载任务：{{reason}}",
       "not_found": "未找到",
       "retry": "重试",
-      "no_description": "暂无描述。"
+      "no_description": "暂无描述。",
+      "comments_locate_failed": "无法跳转到该评论。",
+      "comments_locate_retry_a11y": "重试跳转到评论",
+      "comments_title": "评论",
+      "comments_search_placeholder": "按作者或正文筛选…",
+      "comments_empty": "还没有评论。",
+      "comments_no_match": "没有匹配的评论。",
+      "comments_open_a11y": "浏览评论"
     },
     "picker": {
       "unassigned": "未指派",

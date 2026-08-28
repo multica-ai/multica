@@ -904,7 +904,18 @@
       "discard_a11y": "Discard failed comment",
       "add_reaction": "Add Reaction",
       "delete_title": "Delete comment?",
-      "delete_desc": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone."
+      "delete_desc": "This comment will be permanently deleted. Replies in the thread will also be removed. This cannot be undone.",
+      "jump_bottom": "To bottom",
+      "jump_bottom_a11y": "Scroll to the end of the conversation",
+      "new_count_one": "{{count}} new",
+      "new_count_other": "{{count}} new",
+      "jump_new_a11y_one": "Jump to {{count}} new message",
+      "jump_new_a11y_other": "Jump to {{count}} new messages",
+      "root_collapsed_a11y_one": "Comment by {{authors}}, {{count}} message. Tap to expand.",
+      "root_collapsed_a11y_other": "Comment by {{authors}}, {{count}} messages. Tap to expand.",
+      "reply_count_one": "{{count}} reply",
+      "reply_count_other": "{{count}} replies",
+      "collapse_root_a11y": "Collapse comment"
     },
     "detail": {
       "actions_a11y": "Issue actions",
@@ -913,7 +924,14 @@
       "load_failed": "Failed to load issue: {{reason}}",
       "not_found": "not found",
       "retry": "Retry",
-      "no_description": "No description."
+      "no_description": "No description.",
+      "comments_locate_failed": "Couldn't jump to that comment.",
+      "comments_locate_retry_a11y": "Retry jumping to comment",
+      "comments_title": "Comments",
+      "comments_search_placeholder": "Filter by author or text…",
+      "comments_empty": "No comments yet.",
+      "comments_no_match": "No matching comments.",
+      "comments_open_a11y": "Browse comments"
     },
     "picker": {
       "unassigned": "Unassigned",

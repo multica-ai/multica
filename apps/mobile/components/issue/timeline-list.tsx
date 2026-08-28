@@ -75,12 +75,21 @@
  *     we use `ItemSeparatorComponent` for the 12 px breathing room and
  *     `ListHeaderComponentStyle` to add the same gap below the header.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Pressable,
   RefreshControl,
   View,
+  type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   type ViewToken,
@@ -105,6 +114,20 @@ import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequenc
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import {
+  useCommentFocusStore,
+  type CommentFocusIntent,
+} from "@/data/stores/comment-focus-store";
+import {
+  CommentLocateController,
+  resolvePublishedRootIds,
+} from "@/lib/comment-locate";
+import {
+  computeBottomChipVisible,
+  distToPhysicalEnd,
+  shouldShowBottomChip,
+  type ScrollGeometry,
+} from "@/lib/timeline-scroll-metrics";
 import { useT } from "@/lib/use-t";
 
 interface Props {
@@ -121,6 +144,19 @@ interface Props {
    *  `highlightCommentId` but a fresh nonce, which re-triggers the
    *  scroll-and-flash effect (without this, identical props short-circuit). */
   highlightNonce?: string;
+  /** RUYI-28 shared publish channel: called with the SERVER comment id
+   *  whenever THIS user publishes a comment — composer success OR failed-
+   *  comment Retry success. The timeline maps it to the owning root and
+   *  expands it (see the just-published block below). */
+  onCommentPublished?: (commentId: string) => void;
+}
+
+/** Imperative surface exposed to the issue screen (RUYI-28).
+ *  `expandPublished(commentId)` is called by the composer path right
+ *  after THIS user's comment is accepted, so the owning root renders
+ *  expanded without relying on last-row heuristics. */
+export interface TimelineListHandle {
+  expandPublished: (commentId: string) => void;
 }
 
 /** How long the flash stays "claimed" before we let a new highlight take
@@ -140,15 +176,27 @@ const AT_BOTTOM_SLACK_PX = 80;
  *  / activity uuid. */
 const DIVIDER_ID = "__divider__";
 
-export function TimelineList({
-  issue,
-  entries,
-  timelineLoading,
-  refreshing,
-  onRefresh,
-  highlightCommentId,
-  highlightNonce,
-}: Props) {
+/** Upper bound for the just-published id queue. Two or three publishes can
+ *  realistically land before the refetch swaps optimistic ids; this cap
+ *  simply stops a pathological burst from growing the queue unbounded.
+ *  Overflow drops the OLDEST id — the earliest thread is the one the user
+ *  has had the most time to expand by hand anyway. */
+const PUBLISHED_QUEUE_MAX = 16;
+
+export const TimelineList = forwardRef<TimelineListHandle, Props>(
+  function TimelineList(
+    {
+      issue,
+      entries,
+      timelineLoading,
+      refreshing,
+      onRefresh,
+      highlightCommentId,
+      highlightNonce,
+      onCommentPublished,
+    },
+    ref,
+  ) {
   const { t } = useT("issues");
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
@@ -231,6 +279,19 @@ export function TimelineList({
     return () => clearTimeout(fade);
   }, [highlightCommentId, highlightNonce, data.length]);
 
+  // Focus-intent consumption lives after `dataWithDivider` is defined
+  // (hook ordering: the memo must run before effects that read it).
+
+  // Reset issue-scoped focus bookkeeping on unmount — the store is
+  // session-only, and a stale intent for THIS issue must not fire again
+  // when the user re-enters (approved scope: session-only state).
+  useEffect(() => {
+    const issueId = issue.id;
+    return () => {
+      useCommentFocusStore.getState().resetIssue(issueId);
+    };
+  }, [issue.id]);
+
   // ── New-comment-while-reading chip ────────────────────────────────────
   // After landing, if WS appends new entries while the user is NOT at the
   // bottom, surface a floating "↓ N new" chip instead of silently shifting
@@ -251,9 +312,75 @@ export function TimelineList({
     setNewCount((prev) => prev + diff);
   }, [data.length]);
 
+  // ── Independent "to bottom" chip (RUYI-28) ─────────────────────────────
+  // Purely physical: visible only when the viewport's bottom edge is more
+  // than 48px from the FlashList content end, regardless of newCount / the
+  // unread divider / last-viewed. Deliberately does NOT read or write any
+  // of the new-message chip's state — the two chips stack independently
+  // (spec: stacks alongside the existing new-message chip).
+  //
+  // onScroll alone is NOT sufficient: it only fires once the user drags.
+  // The chip must also recompute on mount, after data grows (WS append,
+  // published comment, expansion resizing a row) and after the viewport
+  // resizes (rotation, sheet). So every geometry source — scroll events,
+  // FlashList's onContentSizeChange, the outer onLayout — writes into
+  // `scrollGeoRef` and runs the SAME pure recompute
+  // (computeBottomChipVisible). One decision function, three triggers,
+  // no divergent state.
+  const scrollGeoRef = useRef<ScrollGeometry>({
+    contentHeight: 0,
+    offsetY: 0,
+    viewportHeight: 0,
+  });
+  const [farFromEnd, setFarFromEnd] = useState(false);
+  const farFromEndRef = useRef(false);
+  const setFarFromEndIfChanged = useCallback((next: boolean) => {
+    if (farFromEndRef.current === next) return;
+    farFromEndRef.current = next;
+    setFarFromEnd(next);
+  }, []);
+  const recomputeBottomChip = useCallback(() => {
+    setFarFromEndIfChanged(computeBottomChipVisible(scrollGeoRef.current));
+  }, [setFarFromEndIfChanged]);
+  const onJumpToBottom = useCallback(() => {
+    listRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  // Content size changes with async markdown passes, image natural sizes,
+  // WS appends and root expansion/collapse. All of them can move the
+  // content end across the 48px band without any scroll event.
+  const handleContentSizeChange = useCallback(
+    (w: number, h: number) => {
+      scrollGeoRef.current.contentHeight = h;
+      recomputeBottomChip();
+    },
+    [recomputeBottomChip],
+  );
+  // Viewport resize (rotation, split view, chrome shifts) — the wrapper
+  // View's onLayout is the only geometry source that fires in that case.
+  const handleListLayout = useCallback(
+    (e: LayoutChangeEvent) => {
+      const h = e.nativeEvent.layout.height;
+      if (h <= 0 || h === scrollGeoRef.current.viewportHeight) return;
+      scrollGeoRef.current.viewportHeight = h;
+      recomputeBottomChip();
+    },
+    [recomputeBottomChip],
+  );
+  // First layout + first content measurement can land in either order (and
+  // both may precede any scroll event) — this effect makes mount publish
+  // the initial chip state from whatever geometry is already known.
+  useEffect(() => {
+    recomputeBottomChip();
+  }, [recomputeBottomChip]);
+
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      // Keep the geometry snapshot current for the non-scroll triggers.
+      scrollGeoRef.current.contentHeight = contentSize.height;
+      scrollGeoRef.current.offsetY = contentOffset.y;
+      scrollGeoRef.current.viewportHeight = layoutMeasurement.height;
       const distFromBottom =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
       const wasAtBottom = isAtBottomRef.current;
@@ -263,14 +390,39 @@ export function TimelineList({
       if (!wasAtBottom && isAtBottomRef.current && newCount > 0) {
         setNewCount(0);
       }
+      // Independent physical-end chip (RUYI-28): same pure decision the
+      // mount / resize path uses.
+      setFarFromEndIfChanged(
+        shouldShowBottomChip(
+          distToPhysicalEnd(
+            contentSize.height,
+            contentOffset.y,
+            layoutMeasurement.height,
+          ),
+        ),
+      );
     },
-    [newCount],
+    [newCount, setFarFromEndIfChanged],
   );
 
   const onJumpToNew = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: true });
     setNewCount(0);
   }, []);
+
+  // ── Comments-directory focus intent (RUYI-28) ─────────────────────────
+  // The comments modal writes {issueId, rootId, nonce} into the per-issue
+  // focus store; we consume it here: expand the target root (collapse state
+  // is session-scoped per issue, lifted into the store because FlashList
+  // recycles rows and per-row useState resets), then bounded-locate it via
+  // the extracted CommentLocateController (lib/comment-locate.ts) — its
+  // adapter wiring is the block after `dataWithDivider`.
+  const focus = useCommentFocusStore((s) => s.focus);
+  const expandedRoots = useCommentFocusStore((s) => s.expandedRoots[issue.id]);
+  const expandRoot = useCommentFocusStore((s) => s.expandRoot);
+
+  const focusForIssue: CommentFocusIntent | null =
+    focus && focus.issueId === issue.id ? focus : null;
 
   // ── Inject divider as a sentinel row before its anchor entry ──────────
   // FlatList wants a flat data[] and a stable key per row. Rather than
@@ -295,14 +447,162 @@ export function TimelineList({
     return [...data.slice(0, anchorIdx), divider, ...data.slice(anchorIdx)];
   }, [data, dividerAnchorId]);
 
-  // Mark "scrolled past" once the divider row leaves the viewport — used
-  // by the unmount effect below to decide whether to bump last-viewed.
+  // ── Bounded-locate controller wiring (RUYI-28) ────────────────────────
+  // Sequencing lives in lib/comment-locate.ts; this block only injects
+  // side effects. The controller re-reads the CURRENT list through these
+  // refs (data memo, list ref, viewability set), so the consuming effect
+  // below can stay stable across re-renders — a run started for nonce N
+  // keeps working with fresh data rather than a stale closure, which was
+  // the race that previously ate consumed intents (64ms cleanup).
+  const dataRef = useRef(dataWithDivider);
+  dataRef.current = dataWithDivider;
+  const viewableIdsRef = useRef<Set<string>>(new Set());
+
+  const controllerRef = useRef<CommentLocateController | null>(null);
+  if (!controllerRef.current) {
+    controllerRef.current = new CommentLocateController(
+      {
+        findIndex: (rootId) => {
+          const idx = dataRef.current.findIndex(
+            (r) => r.entry.type === "comment" && r.entry.id === rootId,
+          );
+          return idx;
+        },
+        getLayout: (index) => {
+          const layout = listRef.current?.getLayout(index);
+          return layout ?? null;
+        },
+        scrollToIndex: (index) => {
+          // Place the row near the top of the viewport so the thread
+          // reads top-down; the small offset clears the header overlap.
+          return listRef.current
+            ? listRef.current.scrollToIndex({
+                index,
+                animated: true,
+                viewPosition: 0,
+                viewOffset: 8,
+              })
+            : Promise.reject(new Error("list not mounted"));
+        },
+        isViewable: (rootId) => viewableIdsRef.current.has(rootId),
+        schedule: (fn, ms) => {
+          const id = setTimeout(fn, ms);
+          return { cancel: () => clearTimeout(id) };
+        },
+      },
+      (result) => {
+        const setStatusFn = useCommentFocusStore.getState().setStatus;
+        if (result.status === "located") {
+          setStatusFn({ phase: "located", nonce: result.nonce });
+        } else {
+          setStatusFn({
+            phase: "failed",
+            nonce: result.nonce,
+            reason: result.reason ?? "timeout",
+          });
+        }
+      },
+    );
+  }
+  const locateController = controllerRef.current;
+
+  // Cancel the in-flight run on unmount without emitting a result.
+  useEffect(() => () => locateController.cancel(), [locateController]);
+
+  // Feed the controller every viewability edge — it no-ops unless a run
+  // is awaiting on-screen confirmation (see the stable forwarder below
+  // for why the FlashList-visible callback identity must not change).
+  const handleLocateViewable = useCallback(() => {
+    locateController.confirmViewable();
+  }, [locateController]);
+
+  // Consume a comments-directory focus intent: expand the target root and
+  // hand the intent to the locate controller. The controller is
+  // idempotent per nonce, so effect re-runs with an unchanged intent are
+  // harmless; a fresh nonce (user re-tap or Retry in the modal) always
+  // starts a new bounded run. Skipped while the timeline data hasn't
+  // arrived — the effect re-fires when `dataWithDivider.length` moves.
+  useEffect(() => {
+    if (!focusForIssue || dataWithDivider.length === 0) return;
+    expandRoot(issue.id, focusForIssue.rootId);
+    locateController.start({
+      issueId: focusForIssue.issueId,
+      rootId: focusForIssue.rootId,
+      nonce: focusForIssue.nonce,
+    });
+  }, [
+    focusForIssue,
+    dataWithDivider.length,
+    issue.id,
+    expandRoot,
+    locateController,
+  ]);
+
+  // ── Just-published auto-expand (RUYI-28) ──────────────────────────────
+  // ONLY local-authoring paths: when THIS user publishes a comment — via
+  // the composer OR a failed-comment Retry — the owning root must render
+  // expanded (a new root defaults to collapsed, and a reply can land in a
+  // root this user never expanded). The server comment id arrives through
+  // `expandPublished` and is mapped to its root with
+  // `resolvePublishedRootIds` over the CURRENT rows. Other users' WS
+  // arrivals are deliberately NOT auto-expanded.
+  //
+  // A small FIFO queue, not a single slot: two quick consecutive posts
+  // (root then reply, or reply-then-reply) both arrive before the timeline
+  // refetch lands; a single-slot ref forgot the first id and left that
+  // thread collapsed. Bounded so a pathological burst cannot grow it —
+  // the cap far exceeds any realistic consecutive-publish burst, and the
+  // batched resolver keeps the effect O(rows + queue).
+  const publishedQueueRef = useRef<string[]>([]);
+  const expandPublished = useCallback((commentId: string) => {
+    const queue = publishedQueueRef.current;
+    queue.push(commentId);
+    if (queue.length > PUBLISHED_QUEUE_MAX) queue.shift();
+  }, []);
+  useEffect(() => {
+    const queue = publishedQueueRef.current;
+    if (queue.length === 0) return;
+    // Batched resolve keeps this O(rows + queue) even for a burst.
+    const byPublishedId = resolvePublishedRootIds(dataWithDivider, queue);
+    if (byPublishedId.size === 0) return; // optimistic rows not in the
+    // cache yet — retry on the next data change; giving up is fine (the
+    // rows still render, just collapsed — the user can tap them).
+    publishedQueueRef.current = queue.filter(
+      (id) => !byPublishedId.has(id),
+    );
+    for (const rootId of byPublishedId.values()) {
+      expandRoot(issue.id, rootId);
+    }
+  }, [dataWithDivider, issue.id, expandRoot]);
+  useImperativeHandle(
+    ref,
+    () => ({ expandPublished }),
+    [expandPublished],
+  );
+
+  // Viewability serves two consumers:
+  //   1. the unread-divider "scrolled past" detector below, and
+  //   2. the locate controller's on-screen confirmation — a scroll promise
+  //      resolving does NOT prove the row is visible, so the run only
+  //      reaches `located` when the target's id is in this snapshot.
+  // The snapshot is a ref (not state): both consumers are event-driven and
+  // never render from it, so no re-render is needed per scroll frame.
   const viewabilityConfig = useMemo(
     () => ({ itemVisiblePercentThreshold: 1 }),
     [],
   );
   const handleViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      viewableIdsRef.current = new Set(
+        viewableItems
+          .map((v) => v.item)
+          .filter(
+            (row): row is TimelineRow =>
+              !!row && (row as TimelineRow).entry?.type === "comment",
+          )
+          .map((row) => row.entry.id),
+      );
+      handleLocateViewable();
       if (!dividerAnchorId) return;
       if (dividerScrolledPastRef.current) return;
       const dividerIdx = dataWithDivider.findIndex(
@@ -317,7 +617,7 @@ export function TimelineList({
         dividerScrolledPastRef.current = true;
       }
     },
-    [dividerAnchorId, dataWithDivider],
+    [dividerAnchorId, dataWithDivider, handleLocateViewable],
   );
   // FlashList v2 captures `viewabilityConfigCallbackPairs` at mount —
   // "Changing viewabilityConfig on the fly is not supported." So we wrap
@@ -417,6 +717,8 @@ export function TimelineList({
         data={dataWithDivider}
         keyExtractor={(row) => row.entry.id}
         ListHeaderComponent={ListHeader}
+        onLayout={handleListLayout}
+        onContentSizeChange={handleContentSizeChange}
         // Drag-to-dismiss keyboard — when the user scrolls the timeline
         // while the composer keyboard is up, the keyboard slides down
         // interactively (iMessage / WhatsApp / Slack idiom). Pairs with the
@@ -453,6 +755,10 @@ export function TimelineList({
               issueId={issue.id}
               issueIdentifier={issue.identifier}
               highlightedCommentId={highlightedId}
+              forceExpanded={
+                expandedRoots ? expandedRoots.has(item.entry.id) : false
+              }
+              onCommentPublished={onCommentPublished}
             />
           ) : (
             <ActivityRow entry={item.entry} />
@@ -476,13 +782,19 @@ export function TimelineList({
         contentContainerStyle={{ paddingBottom: 16 }}
       />
       </Pressable>
+      {/* Two independent chips, stacked when both are active (RUYI-28):
+          "↓ N new" (unread arrivals while scrolled up) and "To bottom"
+          (purely physical distance to the content end). Neither reads the
+          other's state; they clear on different conditions. */}
       {newCount > 0 ? (
         <NewCommentChip count={newCount} onPress={onJumpToNew} />
       ) : null}
+      {farFromEnd ? <BottomChip onPress={onJumpToBottom} /> : null}
     </View>
     </ImageSequenceProvider>
   );
-}
+  },
+);
 
 /**
  * 12 px vertical gap between every timeline row. FlashList ignores
@@ -521,7 +833,8 @@ function UnreadDivider() {
  * Positioned absolute bottom-center inside the parent <View flex-1> wrap;
  * doesn't overlap content because the timeline's `contentContainer`
  * already has its own bottom padding for breathing room above the
- * composer hand-off.
+ * composer hand-off. When the independent BottomChip is also visible it
+ * stacks ABOVE this one (see BottomChip's bottom offset note).
  */
 function NewCommentChip({
   count,
@@ -530,6 +843,7 @@ function NewCommentChip({
   count: number;
   onPress: () => void;
 }) {
+  const { t } = useT("issues");
   const { colorScheme } = useColorScheme();
   const fg = THEME[colorScheme].primaryForeground;
   return (
@@ -537,21 +851,60 @@ function NewCommentChip({
       onPress={onPress}
       className="absolute bottom-3 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
       accessibilityRole="button"
-      accessibilityLabel={`Jump to ${count} new ${count === 1 ? "message" : "messages"}`}
-      style={{
-        // shadow comes from system, not Tailwind — keeps the chip readable
-        // against either light or dark timeline content beneath.
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.18,
-        shadowRadius: 6,
-        elevation: 4,
-      }}
+      accessibilityLabel={t(
+        "mobile.comment.jump_new_a11y",
+        "Jump to {{count}} new messages",
+        { count },
+      )}
+      style={CHIP_SHADOW}
     >
       <Ionicons name="arrow-down" size={14} color={fg} />
       <Text className="text-xs font-semibold text-primary-foreground">
-        {count} new
+        {t("mobile.comment.new_count", "{{count}} new", { count })}
       </Text>
     </Pressable>
   );
 }
+
+/**
+ * Independent "to bottom" chip (RUYI-28). Shown whenever the viewport is
+ * more than 48px from the physical content end — including when there are
+ * zero new messages (the user simply scrolled up through history). Tap →
+ * scrollToEnd. Clears itself purely via geometry in handleScroll; never
+ * touches newCount or the unread divider.
+ *
+ * Stacks above the "N new" chip: bottom-14 (56px) vs bottom-3 (12px) so
+ * both are tappable when both are visible.
+ */
+function BottomChip({ onPress }: { onPress: () => void }) {
+  const { t } = useT("issues");
+  const { colorScheme } = useColorScheme();
+  const fg = THEME[colorScheme].primaryForeground;
+  return (
+    <Pressable
+      onPress={onPress}
+      className="absolute bottom-14 self-center px-3.5 py-1.5 rounded-full bg-primary active:opacity-80 flex-row items-center gap-1.5"
+      accessibilityRole="button"
+      accessibilityLabel={t(
+        "mobile.comment.jump_bottom_a11y",
+        "Scroll to the end of the conversation",
+      )}
+      style={CHIP_SHADOW}
+    >
+      <Ionicons name="arrow-down-sharp" size={14} color={fg} />
+      <Text className="text-xs font-semibold text-primary-foreground">
+        {t("mobile.comment.jump_bottom", "To bottom")}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** Shared chip shadow — system shadow, not Tailwind, so the chip stays
+ *  readable against either light or dark timeline content beneath. */
+const CHIP_SHADOW = {
+  shadowColor: "#000",
+  shadowOffset: { width: 0, height: 2 },
+  shadowOpacity: 0.18,
+  shadowRadius: 6,
+  elevation: 4,
+} as const;

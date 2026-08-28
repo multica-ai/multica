@@ -871,7 +871,14 @@
       "discard_a11y": "실패한 댓글 삭제",
       "add_reaction": "리액션 추가",
       "delete_title": "댓글을 삭제할까요?",
-      "delete_desc": "이 댓글은 영구적으로 삭제되며 스레드의 답글도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다."
+      "delete_desc": "이 댓글은 영구적으로 삭제되며 스레드의 답글도 함께 제거됩니다. 이 작업은 되돌릴 수 없습니다.",
+      "jump_bottom": "맨 아래로",
+      "jump_bottom_a11y": "대화 끝으로 스크롤",
+      "new_count_other": "새 항목 {{count}}개",
+      "jump_new_a11y_other": "새 항목 {{count}}개로 이동",
+      "root_collapsed_a11y_other": "{{authors}}의 댓글, 메시지 {{count}}개. 탭하여 펼치기.",
+      "reply_count_other": "답글 {{count}}개",
+      "collapse_root_a11y": "댓글 접기"
     },
     "detail": {
       "actions_a11y": "태스크 작업",
@@ -880,7 +887,14 @@
       "load_failed": "태스크를 불러오지 못했습니다: {{reason}}",
       "not_found": "찾을 수 없음",
       "retry": "다시 시도",
-      "no_description": "설명이 없습니다."
+      "no_description": "설명이 없습니다.",
+      "comments_locate_failed": "해당 댓글로 이동할 수 없습니다.",
+      "comments_locate_retry_a11y": "댓글로 이동 다시 시도",
+      "comments_title": "댓글",
+      "comments_search_placeholder": "작성자 또는 본문으로 필터링…",
+      "comments_empty": "아직 댓글이 없습니다.",
+      "comments_no_match": "일치하는 댓글이 없습니다.",
+      "comments_open_a11y": "댓글 찾아보기"
     },
     "picker": {
       "unassigned": "미할당",
