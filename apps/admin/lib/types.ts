@@ -35,6 +35,8 @@ export interface WorkspaceMetadata {
   model: string | null;
   root: string | null;
   repoCount: number;
+  /** Latest workspace update, activity-log event, or runtime heartbeat. */
+  lastActive?: string | null;
 }
 
 export interface IssueMetrics {

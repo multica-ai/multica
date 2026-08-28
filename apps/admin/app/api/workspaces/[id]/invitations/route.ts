@@ -42,8 +42,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const [members, pendingInvitations] = await Promise.all([
-      getWorkspaceMembers(id),
-      getPendingInvitations(id),
+      getWorkspaceMembers(metadata.id),
+      getPendingInvitations(metadata.id),
     ]);
 
     const eligibility = computeInviteEligibility(members);
@@ -63,7 +63,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return NextResponse.json({ error: "This email already has a pending invitation." }, { status: 409 });
     }
 
-    const result = await createWorkspaceInvitation(id, email, role);
+    const result = await createWorkspaceInvitation(metadata.id, email, role);
     if (!result.ok) {
       return NextResponse.json({ error: result.message }, { status: result.status });
     }

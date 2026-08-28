@@ -47,8 +47,26 @@ function parseParams(url: URL): ListWorkspacesParams {
 // best-effort LiteLLM key/team lookup. Never proxies to the Go API — this
 // app talks directly to Postgres + LiteLLM per the architecture decision.
 export async function GET(request: NextRequest) {
-  const params = parseParams(new URL(request.url));
+  const url = new URL(request.url);
+  const params = parseParams(url);
+  const all = url.searchParams.get("all") === "true";
   try {
+    // `all=true` is the dashboard export contract. It deliberately bypasses
+    // UI pagination, but does not infer any squad/team mapping: AgentFarm
+    // and squad-analytics have different definitions for those concepts.
+    if (all) {
+      const result = await listWorkspaces(params, { unpaged: true });
+      if (result.total > result.items.length) {
+        return NextResponse.json(
+          { error: "Workspace export exceeds the 5000-row safety limit" },
+          { status: 413 },
+        );
+      }
+      // Do not expose LiteLLM's team/key association here: it is not a
+      // squad assignment and would be misleading to dashboard consumers.
+      const items = result.items.map(({ llmKey, team, keySpend, ...workspace }) => workspace);
+      return NextResponse.json({ items, total: result.total });
+    }
     // keySpend has no DB column to ORDER BY (it's resolved via the LiteLLM
     // join below) — fetch every matching workspace unpaged, join, sort in
     // memory, then paginate by slicing. Every other sort column stays on

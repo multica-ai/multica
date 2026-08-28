@@ -27,7 +27,8 @@ import type {
 //                   recently-seen > idle (see deriveStatus in derive.ts;
 //                   duplicated here as SQL so it can drive filter/sort)
 //   openIssues   -- issue.status not in ('done','cancelled')
-//   lastActivity -- MAX(activity_log.created_at) for the workspace
+//   lastActivity -- latest workspace update, activity_log event, or runtime
+//                   heartbeat (agent_runtime.last_seen_at)
 //   root         -- NOT STORED anywhere in the DB. The prototype invents a
 //                   filesystem path; real workspaces don't have one on the
 //                   server (it's daemon/local-machine state). Rendered as an
@@ -94,19 +95,19 @@ export async function listWorkspaces(
     whereClauses.push(`(${STATUS_CASE}) = $${values.length}`);
   }
   // Plan §3.2: date-range filter on "Last Activity" — the same
-  // GREATEST(w.updated_at, activity.last_at) expression used in the SELECT
+  // GREATEST(w.updated_at, activity.last_at, runtime.last_at) expression used in the SELECT
   // below, filtered against inclusive date-only bounds. Applied as a HAVING-
   // style clause via the same lateral join, so it can't be expressed in the
   // WHERE list above (those only see columns on w/owner/model at this point);
   // pushed into the query below via placeholder markers instead.
   if (activityFrom) {
     values.push(activityFrom);
-    whereClauses.push(`GREATEST(w.updated_at, activity.last_at) >= $${values.length}::date`);
+    whereClauses.push(`GREATEST(w.updated_at, activity.last_at, runtime.last_at) >= $${values.length}::date`);
   }
   if (activityTo) {
     values.push(activityTo);
     // Inclusive of the whole end day: < (date + 1 day).
-    whereClauses.push(`GREATEST(w.updated_at, activity.last_at) < ($${values.length}::date + interval '1 day')`);
+    whereClauses.push(`GREATEST(w.updated_at, activity.last_at, runtime.last_at) < ($${values.length}::date + interval '1 day')`);
   }
   const where = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
@@ -138,7 +139,7 @@ export async function listWorkspaces(
       owner.name AS owner_name,
       model.model,
       COALESCE(issues.open_count, 0) AS open_issues,
-      GREATEST(w.updated_at, activity.last_at) AS last_activity,
+      GREATEST(w.updated_at, activity.last_at, runtime.last_at) AS last_activity,
       ${STATUS_CASE} AS derived_status,
       count(*) OVER () AS total
     FROM workspace w
@@ -159,6 +160,10 @@ export async function listWorkspaces(
       SELECT max(al.created_at) AS last_at FROM activity_log al
       WHERE al.workspace_id = w.id
     ) activity ON true
+    LEFT JOIN LATERAL (
+      SELECT max(ar.last_seen_at) AS last_at FROM agent_runtime ar
+      WHERE ar.workspace_id = w.id
+    ) runtime ON true
     ${where}
     ORDER BY ${sortColumn} ${sortDir} NULLS LAST
     LIMIT $${limitIdx} OFFSET $${offsetIdx}
@@ -192,13 +197,15 @@ export async function getWorkspaceMetadata(id: string): Promise<WorkspaceMetadat
     owner_name: string | null;
     model: string | null;
     repos: unknown;
+    last_active: string | null;
   }>(
     `
     SELECT
       w.id, w.slug, w.created_at,
       owner.name AS owner_name,
       model.model,
-      w.repos
+      w.repos,
+      GREATEST(w.updated_at, activity.last_at, runtime.last_at) AS last_active
     FROM workspace w
     LEFT JOIN LATERAL (
       SELECT u.name FROM member m JOIN "user" u ON u.id = m.user_id
@@ -209,7 +216,17 @@ export async function getWorkspaceMetadata(id: string): Promise<WorkspaceMetadat
       WHERE a.workspace_id = w.id AND a.model IS NOT NULL
       ORDER BY a.created_at DESC LIMIT 1
     ) model ON true
-    WHERE w.id = $1
+    LEFT JOIN LATERAL (
+      SELECT max(al.created_at) AS last_at FROM activity_log al
+      WHERE al.workspace_id = w.id
+    ) activity ON true
+    LEFT JOIN LATERAL (
+      SELECT max(ar.last_seen_at) AS last_at FROM agent_runtime ar
+      WHERE ar.workspace_id = w.id
+    ) runtime ON true
+    -- The analytics API uses the stable slug; the existing admin UI uses
+    -- UUIDs. Matching text avoids treating a slug as an invalid UUID.
+    WHERE w.id::text = $1 OR w.slug = $1
     `,
     [id],
   );
@@ -226,6 +243,7 @@ export async function getWorkspaceMetadata(id: string): Promise<WorkspaceMetadat
     model: row.model,
     root: null, // not stored server-side — see provenance note above
     repoCount,
+    lastActive: row.last_active,
   };
 }
 

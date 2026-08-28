@@ -52,12 +52,12 @@ export async function GET(
     }
 
     const [status, activity, issues, outcomes, members, pendingInvitations, litellmBase] = await Promise.all([
-      getWorkspaceStatus(id),
-      getRecentActivity(id),
-      getIssueMetrics(id),
-      getTaskOutcomeCounts(id),
-      getWorkspaceMembers(id),
-      getPendingInvitations(id),
+      getWorkspaceStatus(metadata.id),
+      getRecentActivity(metadata.id),
+      getIssueMetrics(metadata.id),
+      getTaskOutcomeCounts(metadata.id),
+      getWorkspaceMembers(metadata.id),
+      getPendingInvitations(metadata.id),
       buildLiteLlmSection(metadata.slug).catch((error) => {
         console.error("[admin] LiteLLM lookup failed", error);
         return {
