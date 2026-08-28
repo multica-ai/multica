@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -56,9 +58,38 @@ func TestOmniRouteMCPClientListsAndCallsTools(t *testing.T) {
 	}
 }
 
-func TestNewOmniRouteMCPClientsRejectsLocalServer(t *testing.T) {
-	_, err := newOmniRouteMCPClients(json.RawMessage(`{"mcpServers":{"local":{"command":"crm"}}}`), nil)
-	if err == nil {
-		t.Fatal("expected local server error")
+func TestNewOmniRouteMCPClientsAcceptsStdioServer(t *testing.T) {
+	clients, err := newOmniRouteMCPClients(json.RawMessage(`{"mcpServers":{"local":{"command":"crm"}}}`), nil)
+	if err != nil || len(clients) != 1 || len(clients["local"].command) != 1 {
+		t.Fatalf("clients=%#v err=%v", clients, err)
+	}
+}
+
+func TestOmniRouteMCPClientSupportsStdio(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "mcp.sh")
+	content := `#!/bin/sh
+while IFS= read -r line; do
+  case "$line" in
+    *initialize*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{}}' ;;
+    *tools/list*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}}' ;;
+    *tools/call*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"stdio-result"}]}}' ;;
+  esac
+done`
+	if err := os.WriteFile(script, []byte(content), 0o700); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	clients, err := newOmniRouteMCPClients(json.RawMessage(fmt.Sprintf(`{"mcpServers":{"local":{"command":%q}}}`, script)), nil)
+	if err != nil {
+		t.Fatalf("new clients: %v", err)
+	}
+	defer clients["local"].close()
+	tools, err := clients["local"].ListTools(context.Background())
+	if err != nil || len(tools) != 1 || tools[0].Function.Name != "lookup" {
+		t.Fatalf("tools=%#v err=%v", tools, err)
+	}
+	output, err := clients["local"].CallTool(context.Background(), "lookup", map[string]interface{}{"id": "1"})
+	if err != nil || output != "stdio-result" {
+		t.Fatalf("output=%q err=%v", output, err)
 	}
 }

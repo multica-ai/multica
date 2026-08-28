@@ -211,6 +211,7 @@ func (b *omnirouteBackend) executeWithTools(ctx context.Context, cfg omniRouteCo
 	resultCh := make(chan Result, 1)
 	go func() {
 		defer cancel()
+		defer registry.close()
 		defer close(msgCh)
 		defer close(resultCh)
 		start := time.Now()

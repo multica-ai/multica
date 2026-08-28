@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/exec"
 	"strings"
+	"sync"
 	"sync/atomic"
 )
 
@@ -24,6 +27,7 @@ type omniRouteToolBinding struct {
 type omniRouteToolRegistry struct {
 	tools    []omniRouteToolSpec
 	bindings map[string]omniRouteToolBinding
+	clients  map[string]*omniRouteMCPClient
 }
 
 func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpClient *http.Client, allowed []string, configured bool) (omniRouteToolRegistry, error) {
@@ -31,7 +35,7 @@ func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpCl
 	if err != nil {
 		return omniRouteToolRegistry{}, err
 	}
-	registry := omniRouteToolRegistry{bindings: make(map[string]omniRouteToolBinding)}
+	registry := omniRouteToolRegistry{bindings: make(map[string]omniRouteToolBinding), clients: clients}
 	for _, client := range clients {
 		tools, err := client.ListTools(ctx)
 		if err != nil {
@@ -52,6 +56,12 @@ func buildOmniRouteToolRegistry(ctx context.Context, raw json.RawMessage, httpCl
 	return registry, nil
 }
 
+func (r omniRouteToolRegistry) close() {
+	for _, client := range r.clients {
+		client.close()
+	}
+}
+
 func omniRouteToolAllowed(name string, allowed []string) bool {
 	for _, pattern := range allowed {
 		pattern = strings.TrimSpace(pattern)
@@ -67,6 +77,9 @@ func omniRouteToolAllowed(name string, allowed []string) bool {
 
 type omniRouteMCPServerConfig struct {
 	URL     string            `json:"url"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 }
 
@@ -76,10 +89,16 @@ type omniRouteMCPConfig struct {
 
 type omniRouteMCPClient struct {
 	serverURL string
+	command   []string
+	env       map[string]string
 	headers   map[string]string
 	http      *http.Client
 	seq       atomic.Int64
 	sessionID atomic.Value
+	stdioMu   sync.Mutex
+	stdioCmd  *exec.Cmd
+	stdioIn   io.WriteCloser
+	stdioOut  *json.Decoder
 }
 
 type omniRouteJSONRPCRequest struct {
@@ -117,18 +136,31 @@ func newOmniRouteMCPClients(raw json.RawMessage, httpClient *http.Client) (map[s
 	}
 	clients := make(map[string]*omniRouteMCPClient, len(config.MCPServers))
 	for name, server := range config.MCPServers {
-		if strings.TrimSpace(server.URL) == "" {
-			return nil, fmt.Errorf("omniroute MCP server %q: only remote servers with url are supported", name)
-		}
 		if httpClient == nil {
 			httpClient = http.DefaultClient
 		}
-		clients[name] = &omniRouteMCPClient{serverURL: strings.TrimRight(server.URL, "/"), headers: server.Headers, http: httpClient}
+		url := strings.TrimSpace(server.URL)
+		command := strings.TrimSpace(server.Command)
+		if url == "" && command == "" {
+			return nil, fmt.Errorf("omniroute MCP server %q: requires url or command", name)
+		}
+		if url != "" && command != "" {
+			return nil, fmt.Errorf("omniroute MCP server %q: url and command are mutually exclusive", name)
+		}
+		client := &omniRouteMCPClient{serverURL: strings.TrimRight(url, "/"), headers: server.Headers, http: httpClient}
+		if command != "" {
+			client.command = append([]string{command}, server.Args...)
+			client.env = server.Env
+		}
+		clients[name] = client
 	}
 	return clients, nil
 }
 
 func (c *omniRouteMCPClient) rpc(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	if len(c.command) > 0 {
+		return c.rpcStdio(ctx, method, params)
+	}
 	id := c.seq.Add(1)
 	body, err := json.Marshal(omniRouteJSONRPCRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
 	if err != nil {
@@ -169,6 +201,97 @@ func (c *omniRouteMCPClient) rpc(ctx context.Context, method string, params inte
 		return nil, fmt.Errorf("%s RPC %d: %s", method, response.Error.Code, response.Error.Message)
 	}
 	return response.Result, nil
+}
+
+func (c *omniRouteMCPClient) rpcStdio(ctx context.Context, method string, params interface{}) (json.RawMessage, error) {
+	c.stdioMu.Lock()
+	defer c.stdioMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := c.startStdioLocked(); err != nil {
+		return nil, err
+	}
+	id := c.seq.Add(1)
+	body, err := json.Marshal(omniRouteJSONRPCRequest{JSONRPC: "2.0", ID: id, Method: method, Params: params})
+	if err != nil {
+		return nil, fmt.Errorf("encode %s: %w", method, err)
+	}
+	if _, err := c.stdioIn.Write(append(body, '\n')); err != nil {
+		c.stopStdioLocked()
+		return nil, fmt.Errorf("write %s request: %w", method, err)
+	}
+	responseCh := make(chan struct {
+		response omniRouteJSONRPCResponse
+		err      error
+	}, 1)
+	decoder := c.stdioOut
+	go func() {
+		var response omniRouteJSONRPCResponse
+		responseCh <- struct {
+			response omniRouteJSONRPCResponse
+			err      error
+		}{response: response, err: decoder.Decode(&response)}
+	}()
+	select {
+	case <-ctx.Done():
+		c.stopStdioLocked()
+		return nil, ctx.Err()
+	case decoded := <-responseCh:
+		if decoded.err != nil {
+			c.stopStdioLocked()
+			return nil, fmt.Errorf("decode %s response: %w", method, decoded.err)
+		}
+		if decoded.response.Error != nil {
+			return nil, fmt.Errorf("%s RPC %d: %s", method, decoded.response.Error.Code, decoded.response.Error.Message)
+		}
+		return decoded.response.Result, nil
+	}
+}
+
+func (c *omniRouteMCPClient) startStdioLocked() error {
+	if c.stdioCmd != nil {
+		return nil
+	}
+	cmd := exec.Command(c.command[0], c.command[1:]...)
+	cmd.Env = os.Environ()
+	for key, value := range c.env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	cmd.Stderr = io.Discard
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdio stdout pipe: %w", err)
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("stdio stdin pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start MCP server: %w", err)
+	}
+	c.stdioCmd = cmd
+	c.stdioIn = stdin
+	c.stdioOut = json.NewDecoder(stdout)
+	return nil
+}
+
+func (c *omniRouteMCPClient) stopStdioLocked() {
+	if c.stdioCmd == nil {
+		return
+	}
+	_ = c.stdioIn.Close()
+	_ = c.stdioCmd.Process.Kill()
+	_ = c.stdioCmd.Wait()
+	c.stdioCmd = nil
+	c.stdioIn = nil
+	c.stdioOut = nil
+}
+
+func (c *omniRouteMCPClient) close() {
+	c.stdioMu.Lock()
+	defer c.stdioMu.Unlock()
+	c.stopStdioLocked()
 }
 
 func (c *omniRouteMCPClient) initialize(ctx context.Context) error {
