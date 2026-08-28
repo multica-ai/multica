@@ -104,22 +104,26 @@ describe("createLiveEndFollow", () => {
   });
 
   it("folds an overlapping notch on the way back to the live end too", () => {
+    // The reader must still be FOLLOWING for the pin verdict to mean anything:
+    // park the viewport out at 300px under a held pointer, which suppresses the
+    // pin without attributing anything, then walk back with two notches.
     const { follow, tick } = makeFollow();
     tick(1000);
-    follow.input(300);
-    tick(16);
-    follow.onScroll(300); // reader is out at 300px, no longer following
-    follow.endInputFrame();
-    tick(16);
+    follow.pointerDown(false);
+    follow.onScroll(300);
+    follow.pointerUp();
+    expect(follow.isFollowing()).toBe(true);
+
     follow.input(-100);
     tick(16);
-    follow.onScroll(200);
-    follow.input(-100); // second notch back, mid-animation
+    expect(follow.onScroll(260)).toBe(false);
+    follow.input(-100); // second notch back, first still animating
     tick(16);
-    follow.onScroll(160);
+    expect(follow.onScroll(220)).toBe(false);
     follow.endInputFrame();
     tick(16);
-    expect(follow.onScroll(100)).toBe(false); // still the reader's own scroll
+    // Without the toward fold the second notch is gone and this pins.
+    expect(follow.onScroll(180)).toBe(false);
   });
 
   it("releases when touch momentum carries a confirmed flick past the threshold", () => {
