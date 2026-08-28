@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebra"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 func TestCLIRoutingSimulation(t *testing.T) {
@@ -102,5 +103,42 @@ func TestCLIRoutingSimulation(t *testing.T) {
 	claudeMap := deriveRuntimeTierMap("claude")
 	if claudeMap[cerebra.TierSimple] != "claude-3-5-haiku" || claudeMap[cerebra.TierStandard] != "claude-3-5-sonnet" || claudeMap[cerebra.TierHeavy] != "claude-3-opus" {
 		t.Errorf("expected complete tier map for claude, got %v", claudeMap)
+	}
+
+	// Test Gemini catalog derivation
+	geminiMap := deriveRuntimeTierMap("gemini")
+	if geminiMap[cerebra.TierSimple] == "" || geminiMap[cerebra.TierStandard] == "" || geminiMap[cerebra.TierHeavy] == "" {
+		t.Errorf("expected complete tier map for gemini, got %v", geminiMap)
+	}
+
+	// Test Ollama / local machine models derivation
+	ollamaMap := deriveRuntimeTierMap("ollama")
+	if ollamaMap[cerebra.TierSimple] == "" || ollamaMap[cerebra.TierStandard] == "" || ollamaMap[cerebra.TierHeavy] == "" {
+		t.Errorf("expected complete tier map for ollama, got %v", ollamaMap)
+	}
+
+	// Test Dynamic Runtime Model Discovery (Simulating custom developer machine models)
+	origListModels := listModels
+	defer func() { listModels = origListModels }()
+
+	listModels = func(ctx context.Context, providerType string, runtimeCmd agent.Command) (agent.Catalog, error) {
+		return agent.Catalog{
+			Models: []agent.Model{
+				{ID: "ollama/llama3.2:1b-instruct-q4_0"},
+				{ID: "ollama/qwen2.5-coder:14b-instruct-q4_k_m"},
+				{ID: "ollama/deepseek-r1:32b-q4_k_m"},
+			},
+		}, nil
+	}
+
+	dynMap := deriveDynamicRuntimeTierMap(ctx, "ollama", agent.Command{})
+	if dynMap[cerebra.TierSimple] != "ollama/llama3.2:1b-instruct-q4_0" {
+		t.Errorf("expected dynamic Simple tier to pick llama3.2, got %q", dynMap[cerebra.TierSimple])
+	}
+	if dynMap[cerebra.TierStandard] != "ollama/qwen2.5-coder:14b-instruct-q4_k_m" {
+		t.Errorf("expected dynamic Standard tier to pick qwen2.5-coder, got %q", dynMap[cerebra.TierStandard])
+	}
+	if dynMap[cerebra.TierHeavy] != "ollama/deepseek-r1:32b-q4_k_m" {
+		t.Errorf("expected dynamic Heavy tier to pick deepseek-r1, got %q", dynMap[cerebra.TierHeavy])
 	}
 }

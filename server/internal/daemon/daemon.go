@@ -7576,9 +7576,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		var runtimes []cerebra.RuntimeEntry
 		if task.RuntimeID != "" {
+			runtimeCmd := agent.NewCommand(entry.Path, profileFixedArgs)
 			runtimes = append(runtimes, cerebra.RuntimeEntry{
 				RuntimeID: task.RuntimeID,
-				TierMap:   deriveRuntimeTierMap(provider),
+				TierMap:   deriveDynamicRuntimeTierMap(ctx, provider, runtimeCmd),
 			})
 		}
 		routingPrompt := prompt
