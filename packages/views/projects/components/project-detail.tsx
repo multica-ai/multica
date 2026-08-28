@@ -22,7 +22,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useNavigation } from "../../navigation";
+import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
@@ -508,7 +508,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 />
                 <DropdownMenuContent align="end" className="w-auto">
                   <DropdownMenuItem onClick={() => {
-                    void copyText(window.location.href).then((ok) => {
+                    void copyText(router.getShareableUrl(currentPath(router))).then((ok) => {
                       if (ok) toast.success(t(($) => $.detail.toast_link_copied));
                     });
                   }}>

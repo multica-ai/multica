@@ -208,6 +208,7 @@ function renderPage(search: string, { strict = false } = {}) {
     back: vi.fn(),
     pathname: "/acme/chat",
     searchParams: new URLSearchParams(search),
+    hash: "",
     getShareableUrl: (path) => path,
   };
   // A fresh element per render — reusing one element object lets React bail

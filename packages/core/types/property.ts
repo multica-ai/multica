@@ -62,6 +62,27 @@ export function isActorPropertyType(type: string): boolean {
   return type === "actor" || type === "multi_actor";
 }
 
+/**
+ * Types the issue filter menu exposes for value + "No value" filtering.
+ * Kept as an explicit enumeration (rather than delegating to
+ * isKnownPropertyType) so a future property type must opt into filtering —
+ * it should never become filterable by default.
+ */
+export function isFilterablePropertyType(type: string): boolean {
+  return (
+    type === "select" ||
+    type === "multi_select" ||
+    type === "checkbox" ||
+    isScalarPropertyType(type) ||
+    isActorPropertyType(type)
+  );
+}
+
+/** Single-valued scalar properties: text / number / date / url. */
+export function isScalarPropertyType(type: string): boolean {
+  return type === "text" || type === "url" || type === "number" || type === "date";
+}
+
 export function formatActorRef(kind: IssuePropertyActorKind, id: string): string {
   return `${kind}:${id}`;
 }

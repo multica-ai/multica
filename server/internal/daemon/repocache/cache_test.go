@@ -1105,14 +1105,14 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	}
 }
 
-// TestCreateWorktreeExcludesCodebuddySidecars is the regression guard for
+// TestCreateWorktreeExcludesAgentSidecars is the regression guard for
 // PR #5224's review feedback: once the daemon started writing
 // .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
 // reusing Claude's .claude/CLAUDE.md, which were already excluded), the
 // repo-cache worktree needed the new CodeBuddy sidecar paths added to
 // .git/info/exclude too — otherwise these daemon-injected files show up in
 // `git status` and risk being committed by the agent.
-func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
+func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
@@ -1140,6 +1140,11 @@ func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
 	}
 	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
 		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
+	}
+	for _, pattern := range []string{".pi\n", ".omp\n"} {
+		if !strings.Contains(exclude, pattern) {
+			t.Fatalf("expected .git/info/exclude to contain %q, got:\n%s", pattern, exclude)
+		}
 	}
 }
 

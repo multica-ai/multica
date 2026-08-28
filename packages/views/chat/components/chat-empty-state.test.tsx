@@ -28,6 +28,7 @@ const adapter = (): NavigationAdapter => ({
   back: vi.fn(),
   pathname: "/acme/chat",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (path: string) => `https://app.test${path}`,
 });
 

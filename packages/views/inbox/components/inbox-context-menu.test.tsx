@@ -64,6 +64,7 @@ const navigationAdapter = {
   back: vi.fn(),
   pathname: "/",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (p: string) => p,
   openInNewTab: vi.fn(),
 };

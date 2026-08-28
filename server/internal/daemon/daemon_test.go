@@ -3267,6 +3267,47 @@ func (b idleWatchdogBackend) Execute(_ context.Context, _ string, _ agent.ExecOp
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// TestIdleWatchdogTickInterval pins the ceiling, which is the reason the helper
+// exists: at window/2 alone the default 2h budget would only be polled hourly,
+// so a stuck run would hold its slot for up to 3h, and the overshoot would grow
+// with every increase to the budget instead of staying bounded.
+func TestIdleWatchdogTickInterval(t *testing.T) {
+	tests := []struct {
+		name   string
+		window time.Duration
+		want   time.Duration
+	}{
+		// Tiny budgets keep the raw half-window so the watchdog tests below,
+		// which use millisecond windows, still see it fire within a few ticks.
+		{name: "millisecond test window halves", window: 50 * time.Millisecond, want: 25 * time.Millisecond},
+		{name: "half rate at one minute", window: time.Minute, want: 30 * time.Second},
+		{name: "half rate below the ceiling", window: 8 * time.Minute, want: 4 * time.Minute},
+		{name: "ceiling engages exactly at its double", window: 10 * time.Minute, want: idleWatchdogMaxTick},
+		{name: "ceiling caps the default budget", window: 2 * time.Hour, want: idleWatchdogMaxTick},
+		{name: "ceiling holds for very large budgets", window: 24 * time.Hour, want: idleWatchdogMaxTick},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := idleWatchdogTickInterval(tt.window); got != tt.want {
+				t.Fatalf("idleWatchdogTickInterval(%s) = %s, want %s", tt.window, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIdleWatchdogTickInterval_NeverPollsFasterThanThirtySecondsInProduction
+// keeps the guarantee the removed 30 s floor was written for. The floor itself
+// was unreachable (window >= 1 min implies window/2 >= 30 s), so this asserts
+// the property directly against every production-shaped budget instead of
+// re-introducing a branch that can never run.
+func TestIdleWatchdogTickInterval_NeverPollsFasterThanThirtySecondsInProduction(t *testing.T) {
+	for window := time.Minute; window <= 4*time.Hour; window += time.Second {
+		if got := idleWatchdogTickInterval(window); got < 30*time.Second {
+			t.Fatalf("idleWatchdogTickInterval(%s) = %s, want >= 30s", window, got)
+		}
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Parallel()
 

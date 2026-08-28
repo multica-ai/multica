@@ -213,6 +213,7 @@ function makeAdapter(
     back: vi.fn(),
     pathname: "/test-workspace/agents",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };

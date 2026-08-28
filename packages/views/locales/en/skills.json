@@ -248,34 +248,24 @@
     "method": {
       "chooser": {
         "title": "New skill",
-        "desc": "Choose how you want to add a skill to this workspace."
+        "desc": "Choose how to add a skill to this workspace."
       },
       "manual": {
         "title": "Create manually",
-        "desc": "Write a new SKILL.md from scratch."
+        "desc": "Start from a blank SKILL.md."
       },
       "local": {
         "title": "Import from local",
-        "desc": "Choose a skill folder on this computer. Files are packed and uploaded."
+        "desc": "Pick a folder with SKILL.md, or a .skill / .zip archive."
       },
       "url": {
         "title": "Import from URL",
-        "desc": "Fetch a published skill by URL. Files are pulled server-side."
+        "desc": "Fetch a published skill by URL."
       },
       "runtime": {
         "title": "Copy from runtime",
-        "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+        "desc": "Promote a skill installed on your local runtime."
       }
-    },
-    "method_card": {
-      "manual_title": "Create manually",
-      "manual_desc": "Start from a blank SKILL.md and write your own instructions.",
-      "local_title": "Import from local",
-      "local_desc": "Pick a folder that contains SKILL.md, or a .skill / .zip archive.",
-      "url_title": "Import from URL",
-      "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
-      "runtime_title": "Copy from runtime",
-      "runtime_desc": "Promote a skill already installed on your local runtime."
     },
     "manual": {
       "name_label": "Name",
@@ -293,7 +283,6 @@
     "local": {
       "choose_folder": "Choose folder",
       "choose_archive": "Choose .skill / .zip",
-      "pick_hint": "Select a folder that contains SKILL.md, or a packaged .skill / .zip file.",
       "folder_label": "Folder",
       "archive_label": "Archive",
       "files_one": "{{count}} file",

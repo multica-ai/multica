@@ -274,6 +274,7 @@ function DashboardHarness({ initialSearch = "" }: { initialSearch?: string }) {
       back: vi.fn(),
       pathname: "/acme/usage",
       searchParams: new URLSearchParams(search),
+      hash: "",
       getShareableUrl: (path: string) => `https://example.test${path}`,
     }),
     [search],

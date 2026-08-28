@@ -56,6 +56,7 @@ vi.mock("../../navigation", () => ({
     back: vi.fn(),
     pathname: "/acme/settings",
     searchParams: searchParamsRef.current,
+    hash: "",
     getShareableUrl: (p: string) => `https://app.example${p}`,
   }),
 }));

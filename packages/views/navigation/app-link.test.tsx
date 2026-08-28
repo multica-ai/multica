@@ -11,6 +11,7 @@ function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdap
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };
@@ -28,6 +29,33 @@ function renderLink(
 }
 
 describe("AppLink", () => {
+  it("renders the public web URL on desktop so native copy-link affordances never expose the renderer URL", () => {
+    const adapter = makeAdapter({
+      openInNewTab: vi.fn(),
+      getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "https://app.example/acme/issues/MUL-7",
+    );
+  });
+
+  it("keeps web anchors route-relative for SSR and native browser navigation", () => {
+    const adapter = makeAdapter({
+      getShareableUrl: (path) => `https://app.example${path}`,
+    });
+
+    renderLink(adapter, { href: "/acme/issues/MUL-7" });
+
+    expect(screen.getByRole("link", { name: "go" })).toHaveAttribute(
+      "href",
+      "/acme/issues/MUL-7",
+    );
+  });
+
   it("calls caller onClick BEFORE push so synchronous side effects (close menu, etc) commit before the transition starts", () => {
     const order: string[] = [];
     const adapter = makeAdapter({
