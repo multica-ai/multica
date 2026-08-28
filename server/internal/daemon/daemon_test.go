@@ -3267,6 +3267,34 @@ func (b idleWatchdogBackend) Execute(_ context.Context, _ string, _ agent.ExecOp
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
+// TestIdleWatchdogTickInterval covers both ends of the clamp. The ceiling is
+// the point: at window/2 alone, the default 2h budget would only be polled
+// every hour, so a stuck run would hold its slot for up to 3h — the overshoot
+// would grow with every increase to the budget instead of staying bounded.
+func TestIdleWatchdogTickInterval(t *testing.T) {
+	tests := []struct {
+		name   string
+		window time.Duration
+		want   time.Duration
+	}{
+		// Sub-minute windows keep the raw half-window so tests that pass tiny
+		// budgets still see the watchdog fire within a few ticks.
+		{name: "tiny test window keeps half", window: 50 * time.Millisecond, want: 25 * time.Millisecond},
+		{name: "floor applies at one minute", window: time.Minute, want: 30 * time.Second},
+		{name: "floor applies below its own half", window: 90 * time.Second, want: 45 * time.Second},
+		{name: "half rate between floor and ceiling", window: 8 * time.Minute, want: 4 * time.Minute},
+		{name: "ceiling caps the default budget", window: 2 * time.Hour, want: idleWatchdogMaxTick},
+		{name: "ceiling holds for very large budgets", window: 24 * time.Hour, want: idleWatchdogMaxTick},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := idleWatchdogTickInterval(tt.window); got != tt.want {
+				t.Fatalf("idleWatchdogTickInterval(%s) = %s, want %s", tt.window, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Parallel()
 

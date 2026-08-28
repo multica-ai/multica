@@ -85,6 +85,14 @@ const (
 	// pendingWorkHintBookkeepingTTL is how long a runtime's last-hint timestamp
 	// is retained before it is swept — purely to keep the map bounded.
 	pendingWorkHintBookkeepingTTL = 10 * time.Minute
+	// idleWatchdogMaxTick caps the idle watchdog's polling interval. The
+	// interval is window/2, which was fine when the window was minutes but
+	// makes the overshoot scale with the budget: a 2h window would only be
+	// checked hourly, so a genuinely stuck run could hold its slot for 3h.
+	// Capping the tick keeps worst-case detection at window + 5m regardless of
+	// how large an operator sets the budget, at the cost of a no-op comparison
+	// every 5 minutes.
+	idleWatchdogMaxTick = 5 * time.Minute
 )
 
 // pendingWorkHintMinInterval is the floor between two hint-driven heartbeats
@@ -8513,6 +8521,27 @@ func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
 }
 
+// idleWatchdogTickInterval picks how often the idle watchdog re-checks the
+// silence budget. Half the window is the base rate; the 30 s floor only applies
+// to windows of at least a minute, so tests can pass tiny windows (50 ms) and
+// still see the watchdog fire within a few ticks. idleWatchdogMaxTick caps the
+// other end: without it the overshoot scales with the budget, and a multi-hour
+// window would be polled so rarely that a genuinely stuck run outlives its
+// budget by hours. Worst-case detection is therefore window + tick.
+func idleWatchdogTickInterval(window time.Duration) time.Duration {
+	interval := window / 2
+	if window >= time.Minute && interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	if interval > idleWatchdogMaxTick {
+		interval = idleWatchdogMaxTick
+	}
+	if interval <= 0 {
+		interval = window
+	}
+	return interval
+}
+
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
 // been silent past the applicable budget. On firing, it records the tripped
 // threshold, sets fired, and calls cancel, which propagates to the agent
@@ -8520,30 +8549,24 @@ func idleWatchdogReason(window time.Duration) string {
 // silence budget depends on whether a tool call is in flight:
 //
 //  1. No tool in flight — a silent backend is a hang after `window`.
-//  2. A tool in flight (tool_use with no matching tool_result yet) — a real
-//     tool (e.g. `npm install`, `docker build`) legitimately runs silently for
-//     many minutes, so the larger `toolWindow` applies instead. toolWindow <= 0
-//     keeps the historical behavior of never force-stopping while a tool is in
-//     flight. Without this in-flight budget a backend that emits tool_use and
-//     never the matching tool_result would run forever now that there is no
-//     wall-clock cap (MUL-3064).
+//  2. A tool in flight (tool_use with no matching tool_result yet) —
+//     `toolWindow` applies instead. It defaults to `window`, so the two are
+//     normally identical and this branch only changes which duration the
+//     failure message reports; an operator who deliberately sets
+//     MULTICA_AGENT_TOOL_WATCHDOG higher buys long tools extra room, and
+//     toolWindow <= 0 keeps the historical behavior of never force-stopping
+//     while a tool is in flight. Without this in-flight budget a backend that
+//     emits tool_use and never the matching tool_result would run forever now
+//     that there is no wall-clock cap (MUL-3064).
 //
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend.
 //
-// Tick interval is window/2 (floored at 30 s in production, but the floor only
-// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
-// see the watchdog fire within a few ticks).
+// Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
+// somewhere between its budget and budget + tick, never earlier.
 func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
-	interval := window / 2
-	if window >= time.Minute && interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
-	if interval <= 0 {
-		interval = window
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(idleWatchdogTickInterval(window))
 	defer ticker.Stop()
 	for {
 		select {
