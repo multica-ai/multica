@@ -14,6 +14,8 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   Calendar,
   CalendarClock,
   CalendarDays,
@@ -53,6 +55,14 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Popover, PopoverTrigger, PopoverContent } from "@multica/ui/components/ui/popover";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
@@ -62,7 +72,7 @@ import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { STATUS_CONFIG, PRIORITY_CONFIG, PRIORITY_ORDER } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -114,8 +124,11 @@ import {
   useSubIssuesCollapseStore,
   useSubIssueDisplayStore,
   SUB_ISSUE_ROW_PROPERTY_KEYS,
+  SUB_ISSUE_SORT_FIELDS,
   type SubIssueRowProperties,
   type SubIssueRowPropertyKey,
+  type SubIssueSortField,
+  type SubIssueSortDirection,
 } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -441,6 +454,25 @@ export function groupSubIssuesByStage(
     .map((s) => ({ stage: s, items: byStage.get(s) as Issue[] }));
   if (unstaged.length > 0) groups.push({ stage: null, items: unstaged });
   return groups;
+}
+
+/**
+ * Orders sub-issues for the detail panel without mutating the query cache.
+ * Priority follows the same high-to-low rank as the main issue surfaces;
+ * issue number is the deterministic sibling tie-breaker in either direction.
+ */
+export function sortSubIssues(
+  children: Issue[],
+  field: SubIssueSortField,
+  direction: SubIssueSortDirection,
+): Issue[] {
+  const directionFactor = direction === "asc" ? 1 : -1;
+  return children.toSorted((a, b) => {
+    const fieldOrder = field === "priority"
+      ? PRIORITY_ORDER.indexOf(a.priority) - PRIORITY_ORDER.indexOf(b.priority)
+      : a.number - b.number;
+    return fieldOrder === 0 ? a.number - b.number : fieldOrder * directionFactor;
+  });
 }
 
 // Shallow array equality by element identity. Used to reuse the previous
@@ -897,6 +929,14 @@ const SUB_ISSUE_ROW_PROPERTY_LABEL_KEY: Record<
   assignee: "card_assignee",
 };
 
+const SUB_ISSUE_SORT_LABEL_KEY: Record<
+  SubIssueSortField,
+  "sort_created" | "sort_priority"
+> = {
+  created: "sort_created",
+  priority: "sort_priority",
+};
+
 function SubIssueDisplayPopover({
   workspaceProperties,
 }: {
@@ -905,8 +945,17 @@ function SubIssueDisplayPopover({
   const { t } = useT("issues");
   const rowProperties = useSubIssueDisplayStore((s) => s.rowProperties);
   const rowPropertyIds = useSubIssueDisplayStore((s) => s.rowPropertyIds);
+  const sortBy = useSubIssueDisplayStore((s) => s.sortBy);
+  const sortDirection = useSubIssueDisplayStore((s) => s.sortDirection);
   const toggleRowProperty = useSubIssueDisplayStore((s) => s.toggleRowProperty);
   const toggleRowPropertyId = useSubIssueDisplayStore((s) => s.toggleRowPropertyId);
+  const setSortBy = useSubIssueDisplayStore((s) => s.setSortBy);
+  const setSortDirection = useSubIssueDisplayStore((s) => s.setSortDirection);
+  const sortItems: { value: SubIssueSortField; label: string }[] = SUB_ISSUE_SORT_FIELDS.map((value) => ({
+    value,
+    label: t(($) => $.display[SUB_ISSUE_SORT_LABEL_KEY[value]]),
+  }));
+  const sortLabel = t(($) => $.display[SUB_ISSUE_SORT_LABEL_KEY[sortBy]]);
 
   return (
     <Popover>
@@ -929,6 +978,55 @@ function SubIssueDisplayPopover({
         <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
       </Tooltip>
       <PopoverContent align="end" className="w-56 p-0">
+        <div className="flex items-center justify-between gap-3 border-b px-3 py-2.5">
+          <span className="text-caption font-medium text-muted-foreground">
+            {t(($) => $.display.ordering_section)}
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Select<SubIssueSortField>
+              items={sortItems}
+              value={sortBy}
+              onValueChange={(value) => {
+                if (value) setSortBy(value);
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-24"
+                aria-label={t(($) => $.display.ordering_section)}
+              >
+                <SelectValue>{sortLabel}</SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectGroup>
+                  {sortItems.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <Button
+              variant="outline"
+              size="icon-sm"
+              onClick={() =>
+                setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+              }
+              aria-label={
+                sortDirection === "asc"
+                  ? t(($) => $.display.ascending_title)
+                  : t(($) => $.display.descending_title)
+              }
+            >
+              {sortDirection === "asc" ? (
+                <ArrowUp className="size-3.5" />
+              ) : (
+                <ArrowDown className="size-3.5" />
+              )}
+            </Button>
+          </div>
+        </div>
         <div className="px-3 py-2.5">
           <div className="space-y-2">
             {SUB_ISSUE_ROW_PROPERTY_KEYS.map((key) => (
@@ -1838,6 +1936,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // definitions — ids from other workspaces or archived properties drop out.
   const subIssueRowProps = useSubIssueDisplayStore((s) => s.rowProperties);
   const subIssueRowPropertyIds = useSubIssueDisplayStore((s) => s.rowPropertyIds);
+  const subIssueSortBy = useSubIssueDisplayStore((s) => s.sortBy);
+  const subIssueSortDirection = useSubIssueDisplayStore((s) => s.sortDirection);
+  const sortedChildIssues = useMemo(
+    () => sortSubIssues(childIssues, subIssueSortBy, subIssueSortDirection),
+    [childIssues, subIssueSortBy, subIssueSortDirection],
+  );
   // Store-backed (not useState) so the collapsed state survives leaving the
   // issue and navigating back within the session.
   const subIssuesCollapsed = useSubIssuesCollapseStore((s) =>
@@ -3253,7 +3357,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
                 {/* List */}
                 {!subIssuesCollapsed && (() => {
-                  const groups = groupSubIssuesByStage(childIssues);
+                  const groups = groupSubIssuesByStage(sortedChildIssues);
                   const staged = childIssues.some((c) => c.stage != null);
                   return (
                     <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
