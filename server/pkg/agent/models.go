@@ -151,6 +151,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenclawAgents(ctx, executablePath)
 		})
+	case "omniroute":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOmniRouteModels(ctx)
+		})
 	case "codebuddy":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			models, err := discoverCodebuddyModels(ctx, executablePath)

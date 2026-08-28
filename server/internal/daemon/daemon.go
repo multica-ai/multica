@@ -919,10 +919,14 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	var runtimes []map[string]string
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
-		version, err := detectAgentVersion(ctx, entry.Path)
-		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
-			continue
+		version := "remote"
+		var err error
+		if name != "omniroute" {
+			version, err = detectAgentVersion(ctx, entry.Path)
+			if err != nil {
+				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+				continue
+			}
 		}
 		if err := checkAgentMinVersion(name, version); err != nil {
 			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
@@ -3222,7 +3226,8 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // name when simple title-casing would read awkwardly. Providers not listed
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
 var runtimeDisplayNameOverrides = map[string]string{
-	"traecli": "Trae",
+	"traecli":   "Trae",
+	"omniroute": "OmniRoute",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -3723,6 +3728,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"MULTICA_AGENT_ID":     task.AgentID,
 		"MULTICA_TASK_ID":      task.ID,
 		"MULTICA_TASK_SLOT":    strconv.Itoa(slot),
+	}
+	if provider == "omniroute" {
+		// The remote provider reads credentials only from the task process
+		// environment. Keep the API key out of task metadata, logs, and prompts.
+		if baseURL := strings.TrimSpace(os.Getenv("OMNIROUTE_BASE_URL")); baseURL != "" {
+			agentEnv["OMNIROUTE_BASE_URL"] = baseURL
+		}
+		if apiKey := strings.TrimSpace(os.Getenv("OMNIROUTE_API_KEY")); apiKey != "" {
+			agentEnv["OMNIROUTE_API_KEY"] = apiKey
+		}
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
