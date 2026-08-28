@@ -110,6 +110,12 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const inputFresh = () => now() - lastInputAt < MOTION_SETTLE_WINDOW_MS;
   const motionFresh = () => now() - lastMotionAt < MOTION_SETTLE_WINDOW_MS;
 
+  // Carry is spent in fractional steps, so its running total drifts from the
+  // surface's own arithmetic by a few ulps. Scaled to the amount at hand, a
+  // gap this small is rounding — the system moving the viewport is pixels.
+  const withinCarry = (amount: number) =>
+    amount <= motionCarry + Math.max(1, motionCarry) * 1e-9;
+
   const pinVerdict = (distance: number): boolean =>
     following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
 
@@ -192,16 +198,27 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       // spent yet, so a system shift landing inside the window (a transcript
       // prepend) finds nothing to draw on and falls through to the pin.
       if (moved > 0 && motionDirection === 1 && (touchHeld || motionFresh())) {
-        if (motionSource === "touch" || moved <= motionCarry) {
-          if (motionSource !== "touch") motionCarry -= moved;
+        // A notch arriving mid-animation is confirmed by this same-direction
+        // scroll, so fold it in: the frame that ends the claim would otherwise
+        // discard it and pin the rest of the reader's own scroll back.
+        if (inputFresh() && awayBudget > 0) {
+          motionCarry += awayBudget;
+          awayBudget = 0;
+        }
+        if (motionSource === "touch" || withinCarry(moved)) {
+          if (motionSource !== "touch") motionCarry = Math.max(0, motionCarry - moved);
           awayTaken += moved;
           lastMotionAt = now();
           if (following && awayTaken > FOLLOW_EDGE_THRESHOLD) following = false;
           return false;
         }
       } else if (moved < 0 && motionDirection === -1 && (touchHeld || motionFresh())) {
-        if (motionSource === "touch" || -moved <= motionCarry) {
-          if (motionSource !== "touch") motionCarry += moved;
+        if (inputFresh() && towardBudget > 0) {
+          motionCarry += towardBudget;
+          towardBudget = 0;
+        }
+        if (motionSource === "touch" || withinCarry(-moved)) {
+          if (motionSource !== "touch") motionCarry = Math.max(0, motionCarry + moved);
           awayTaken = Math.max(0, awayTaken + moved);
           lastMotionAt = now();
           if (distance === 0) {

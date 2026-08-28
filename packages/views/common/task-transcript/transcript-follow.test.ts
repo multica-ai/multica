@@ -67,6 +67,61 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(true); // 100px is inside the zone
   });
 
+  it("keeps following when an animated notch lands on uneven fractional frames", () => {
+    // Carry is spent in fractional steps, so its running total drifts from the
+    // surface's own arithmetic. An exact comparison rejected the last frame by
+    // about one ulp and pinned a perfectly ordinary wheel scroll back.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(100);
+    tick(16);
+    expect(follow.onScroll(7.29)).toBe(false);
+    follow.endInputFrame();
+    tick(16);
+    expect(follow.onScroll(22.86528)).toBe(false);
+    tick(16);
+    expect(follow.onScroll(100)).toBe(false);
+  });
+
+  it("confirms a second notch that arrives while the first is still animating", () => {
+    // The overlapping claim is confirmed by this same-direction scroll; without
+    // folding it into the carry, endInputFrame() dropped it and the rest of the
+    // reader's own scroll was pinned back.
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(100);
+    tick(16);
+    follow.onScroll(40);
+    follow.input(100); // second notch, first is still animating
+    tick(16);
+    follow.onScroll(80);
+    follow.endInputFrame();
+    tick(16);
+    expect(follow.onScroll(120)).toBe(false);
+    tick(16);
+    follow.onScroll(160);
+    expect(follow.isFollowing()).toBe(false); // 160px of their own scrolling
+  });
+
+  it("folds an overlapping notch on the way back to the live end too", () => {
+    const { follow, tick } = makeFollow();
+    tick(1000);
+    follow.input(300);
+    tick(16);
+    follow.onScroll(300); // reader is out at 300px, no longer following
+    follow.endInputFrame();
+    tick(16);
+    follow.input(-100);
+    tick(16);
+    follow.onScroll(200);
+    follow.input(-100); // second notch back, mid-animation
+    tick(16);
+    follow.onScroll(160);
+    follow.endInputFrame();
+    tick(16);
+    expect(follow.onScroll(100)).toBe(false); // still the reader's own scroll
+  });
+
   it("releases when touch momentum carries a confirmed flick past the threshold", () => {
     const { follow } = makeFollow();
     follow.touchStart();
