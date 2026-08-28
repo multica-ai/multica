@@ -277,12 +277,14 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `log_level` | `debug` | デーモンログのしきい値：`debug`、`info`、`warn`、`error`。設定時はこのプロファイルの `LOG_LEVEL` より優先 |
 
 値のルール:
 
 - duration 系のキーは正の Go duration（`10s`、`2h` など）を受け付け、`0s` と負の値は拒否されます。唯一の例外は `agent_timeout` で、`0s` は有効な値として実行時間上限を明示的に無効化します。
 - 空文字列を渡すと永続化された値がクリアされ、環境変数または組み込みデフォルトに戻ります。例: `multica config set poll_interval ""`。
 - `max_concurrent_tasks` には非負の整数が必要です。
+- `log_level` は `debug`、`info`、`warn`、`error` を受け付けます。空文字列でプロファイルの上書きを解除し、`LOG_LEVEL` または `debug` に戻ります。
 - 相対パスの `workspaces_root` は保存時に絶対パスへ変換されます。
 
 ## 可観測性と分析

@@ -212,6 +212,8 @@ multica config show
 multica config show --profile staging
 ```
 
+`multica config set log_level info`로 프로필별 데몬 로그 임계값을 설정할 수 있습니다. `debug`, `info`, `warn`, `error`를 지원하며 프로필 설정은 `LOG_LEVEL`보다 우선합니다.
+
 <Callout type="warning">
 CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 token이 들어 있습니다. 저장소에 commit하거나 로그에 올리거나 다른 사람과 공유하지 마세요.
 </Callout>

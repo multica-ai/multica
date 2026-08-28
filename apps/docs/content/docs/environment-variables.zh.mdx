@@ -277,12 +277,14 @@ multica config show
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |
+| `log_level` | `debug` | 守护进程日志阈值：`debug`、`info`、`warn` 或 `error`。设置后会优先于该 profile 的 `LOG_LEVEL` |
 
 几条取值规则：
 
 - duration 类键接受正的 Go duration（如 `10s`、`2h`），`0s` 和负值会被拒绝。唯一例外是 `agent_timeout`：`0s` 合法，表示明确关闭执行时限。
 - 传空字符串清除已持久化的值，回到环境变量或内置默认，例如 `multica config set poll_interval ""`。
 - `max_concurrent_tasks` 要求非负整数。
+- `log_level` 接受 `debug`、`info`、`warn` 或 `error`；传空值会清除 profile 覆盖，回到 `LOG_LEVEL` 或 `debug`。
 - 相对的 `workspaces_root` 值在保存时会转换为绝对路径。
 
 ## 观测与统计

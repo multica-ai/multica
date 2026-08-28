@@ -277,12 +277,14 @@ Supported keys:
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
+| `log_level` | `debug` | Daemon log threshold: `debug`, `info`, `warn`, or `error`. When set, it takes precedence over `LOG_LEVEL` for this profile |
 
 A few value rules:
 
 - Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
 - Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
 - `max_concurrent_tasks` requires a non-negative integer.
+- `log_level` accepts `debug`, `info`, `warn`, or `error`; an empty value clears the profile override and returns to `LOG_LEVEL` or `debug`.
 - Relative `workspaces_root` values are converted to absolute paths when saved.
 
 ## Observability and analytics

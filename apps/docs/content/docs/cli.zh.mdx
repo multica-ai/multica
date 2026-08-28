@@ -212,6 +212,8 @@ multica config show
 multica config show --profile staging
 ```
 
+使用 `multica config set log_level info` 设置 profile 专属的守护进程日志阈值。可选值为 `debug`、`info`、`warn` 和 `error`；profile 配置优先于 `LOG_LEVEL`。
+
 <Callout type="warning">
 CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓库、上传到日志或与他人共享。
 </Callout>

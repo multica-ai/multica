@@ -212,6 +212,8 @@ multica config show
 multica config show --profile staging
 ```
 
+Set a profile-specific daemon log threshold with `multica config set log_level info`. It accepts `debug`, `info`, `warn`, and `error`; the profile value takes precedence over `LOG_LEVEL`.
+
 Do not set `MULTICA_DAEMON_PORT` in the host shell, Compose service, or container entrypoint that starts a daemon. The host daemon derives its health port from `--profile` and injects this variable into agent tasks itself. Remove the variable from older startup environments entirely: versions 0.4.22 and 0.4.23 otherwise mistake that shell for a managed task and reject login. Newer versions let guarded human login and `daemon status` recover when the port is the only task signal, but ordinary API and profile-resolving commands intentionally remain fail-closed until the variable is removed.
 
 When the CLI runs inside a daemon-managed agent task, it does not load or modify these human-owned profile files. Multica API commands authenticate with the task-scoped credential injected by the daemon. `config show` and `config set` use private task-local state; human/local commands such as `login`, `logout`, `setup`, `workspace switch`, local runtime profile path changes, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` are unavailable. `auth status` does not print token material in this context.

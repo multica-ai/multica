@@ -212,6 +212,8 @@ multica config show
 multica config show --profile staging
 ```
 
+`multica config set log_level info` でプロファイル別のデーモンログしきい値を設定できます。指定できる値は `debug`、`info`、`warn`、`error` で、プロファイル設定は `LOG_LEVEL` より優先されます。
+
 <Callout type="warning">
 CLI の設定ファイルには、あなたとして Multica にアクセスできるトークンが含まれます。リポジトリにコミットしたり、ログにアップロードしたり、他人と共有したりしないでください。
 </Callout>

@@ -919,6 +919,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// than server URL: an unreadable / missing config only means "no
 	// persisted overrides", not "cannot start".
 	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	logLevel := resolveDaemonLogLevel(fileCfg.LogLevel)
 	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
 	// keeps live, colored logging on their terminal (a documented debugging
 	// path — see docs troubleshooting). A detached/background child, whose
@@ -930,7 +931,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		logRotator *lumberjack.Logger
 	)
 	if logger_pkg.StderrIsTerminal() {
-		logger = logger_pkg.NewLogger("daemon")
+		logger = logger_pkg.NewLoggerDefaultWithLevel("daemon", logLevel)
 	} else {
 		// An older self-update launcher may have handed this process daemon.log
 		// itself as stdout/stderr. On Windows that inherited handle lacks
@@ -944,7 +945,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// Route both this process's structured logger and the package-global
 		// slog default through the rotator, so every log line — including
 		// LoadConfig's slog.Warn below — is captured and rotated.
-		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+		logger = logger_pkg.NewWriterLoggerDefaultWithLevel("daemon", logRotator, logLevel)
 	}
 
 	serverURL := resolveDaemonServerURL(cmd, profile)
@@ -1089,7 +1090,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// including the package-global slog default (which would otherwise
 		// reopen daemon.log on its next write).
 		if logRotator != nil {
-			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			logger = logger_pkg.NewWriterLoggerDefaultWithLevel("daemon", os.Stderr, logLevel)
 			_ = logRotator.Close()
 		}
 
@@ -1614,6 +1615,16 @@ func flagString(cmd *cobra.Command, name string) string {
 // fallback purposes — same as the runtime.
 func envUnset(name string) bool {
 	return strings.TrimSpace(os.Getenv(name)) == ""
+}
+
+// resolveDaemonLogLevel gives the profile setting precedence over LOG_LEVEL.
+// Invalid manually edited values do not mask a valid environment override.
+func resolveDaemonLogLevel(configValue string) string {
+	configValue = strings.TrimSpace(configValue)
+	if logger_pkg.IsValidLevel(configValue) {
+		return strings.ToLower(configValue)
+	}
+	return os.Getenv("LOG_LEVEL")
 }
 
 // resolveDaemonStringOverride picks the value that goes into

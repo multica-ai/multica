@@ -137,6 +137,12 @@ type CLIConfig struct {
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
+	// LogLevel controls the local daemon's structured log threshold for this
+	// profile. Empty means no profile override: LOG_LEVEL, then the logger's
+	// built-in debug default, decides. Valid persisted values are debug, info,
+	// warn, and error.
+	LogLevel string `json:"log_level,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

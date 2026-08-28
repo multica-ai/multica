@@ -39,13 +39,16 @@ func TestRunConfigSetPersistsSupportedKeysInProfile(t *testing.T) {
 	if err := runConfigSet(cmd, []string{"workspaces_root", workspacesRoot}); err != nil {
 		t.Fatalf("runConfigSet workspaces_root: %v", err)
 	}
+	if err := runConfigSet(cmd, []string{"log_level", "warn"}); err != nil {
+		t.Fatalf("runConfigSet log_level: %v", err)
+	}
 	_ = stderr.read()
 
 	cfg, err := cli.LoadCLIConfigForProfile("dev")
 	if err != nil {
 		t.Fatalf("LoadCLIConfigForProfile: %v", err)
 	}
-	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" || cfg.WorkspacesRoot != workspacesRoot {
+	if cfg.ServerURL != "http://127.0.0.1:8080" || cfg.AppURL != "http://127.0.0.1:3000" || cfg.WorkspaceID != "ws-123" || cfg.WorkspacesRoot != workspacesRoot || cfg.LogLevel != "warn" {
 		t.Fatalf("config = %#v, want persisted supported keys", cfg)
 	}
 }
@@ -78,6 +81,7 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 		"disable_auto_update:",
 		"auto_update_check_interval:",
 		"disable_auto_reload:",
+		"log_level:",
 	} {
 		if !strings.Contains(out, key) {
 			t.Fatalf("runConfigShow output missing %q:\n%s", key, out)
@@ -213,6 +217,7 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		{"disable_auto_update", "true"},
 		{"auto_update_check_interval", "12h"},
 		{"disable_auto_reload", "true"},
+		{"log_level", "INFO"},
 	}
 	for _, p := range pairs {
 		if err := applyConfigSet(&cfg, p.key, p.val); err != nil {
@@ -231,6 +236,34 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		cfg.AutoUpdateCheckInterval != "12h" ||
 		cfg.DisableAutoReload != true {
 		t.Fatalf("cfg after set = %+v", cfg)
+	}
+	if cfg.LogLevel != "info" {
+		t.Fatalf("LogLevel = %q, want info", cfg.LogLevel)
+	}
+}
+
+func TestApplyConfigSetLogLevelValidation(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	for _, value := range []string{"debug", "INFO", "warn", "error"} {
+		if err := applyConfigSet(&cfg, "log_level", value); err != nil {
+			t.Fatalf("applyConfigSet(log_level=%q): %v", value, err)
+		}
+	}
+	if cfg.LogLevel != "error" {
+		t.Fatalf("LogLevel = %q, want error", cfg.LogLevel)
+	}
+	if err := applyConfigSet(&cfg, "log_level", ""); err != nil {
+		t.Fatalf("clear log_level: %v", err)
+	}
+	if cfg.LogLevel != "" {
+		t.Fatalf("LogLevel = %q, want cleared value", cfg.LogLevel)
+	}
+	for _, value := range []string{"verbose", "warning"} {
+		if err := applyConfigSet(&cfg, "log_level", value); err == nil {
+			t.Fatalf("invalid log_level %q unexpectedly succeeded", value)
+		}
 	}
 }
 

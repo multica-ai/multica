@@ -37,3 +37,27 @@ func TestNewWriterLoggerDefault(t *testing.T) {
 		t.Errorf("output contains ANSI color escapes, want NoColor: %q", out)
 	}
 }
+
+func TestNewWriterLoggerDefaultWithLevelFiltersRecords(t *testing.T) {
+	prev := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	var buf bytes.Buffer
+	log := NewWriterLoggerDefaultWithLevel("daemon", &buf, "warn")
+	log.Debug("debug-line")
+	log.Info("info-line")
+	slog.Warn("warn-line")
+	log.Error("error-line")
+
+	out := buf.String()
+	for _, hidden := range []string{"debug-line", "info-line"} {
+		if strings.Contains(out, hidden) {
+			t.Errorf("output unexpectedly contains %q: %q", hidden, out)
+		}
+	}
+	for _, visible := range []string{"warn-line", "error-line"} {
+		if !strings.Contains(out, visible) {
+			t.Errorf("output missing %q: %q", visible, out)
+		}
+	}
+}

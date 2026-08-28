@@ -277,12 +277,14 @@ multica config show
 | `disable_auto_update` | 환경을 따름 | `true`는 자동 업데이트를 끔. `false`는 로컬 덮어쓰기를 지우고 환경 변수 또는 기본값으로 복귀 |
 | `auto_update_check_interval` | `6h` | 업데이트 확인 간격 |
 | `disable_auto_reload` | 환경을 따름 | `true`는 디스크에서 교체된 바이너리 추적을 끔. `false`는 로컬 덮어쓰기를 지움. `disable_auto_update`와 별도로 해석됨 |
+| `log_level` | `debug` | 데몬 로그 임계값: `debug`, `info`, `warn`, `error`. 설정하면 이 프로필의 `LOG_LEVEL`보다 우선함 |
 
 값에는 다음 규칙이 적용됩니다.
 
 - duration key는 양의 Go duration(예: `10s`, `2h`)을 허용하며 `0s`와 음수는 거부합니다. 유일한 예외는 `agent_timeout`입니다. `0s`가 유효하며 실행 시간 제한을 명시적으로 끕니다.
 - 빈 문자열을 전달하면 저장된 값을 지우고 환경 변수 또는 내장 기본값으로 돌아갑니다. 예: `multica config set poll_interval ""`
 - `max_concurrent_tasks`는 0 이상의 정수여야 합니다.
+- `log_level`은 `debug`, `info`, `warn`, `error`를 허용합니다. 빈 문자열은 프로필 재정의를 지우고 `LOG_LEVEL` 또는 `debug`로 돌아갑니다.
 - 상대 `workspaces_root` 값은 저장할 때 절대 경로로 변환됩니다.
 
 ## 관측과 통계

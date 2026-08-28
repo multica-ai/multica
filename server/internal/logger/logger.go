@@ -41,13 +41,34 @@ func Init() {
 // TTY-detection rule as Init. Useful for standalone processes (daemon,
 // migrate) that want a component prefix.
 func NewLogger(component string) *slog.Logger {
-	level := parseLevel(os.Getenv("LOG_LEVEL"))
+	return NewLoggerWithLevel(component, os.Getenv("LOG_LEVEL"))
+}
+
+// NewLoggerWithLevel creates a named logger at level. Invalid or empty values
+// retain the package's debug default.
+func NewLoggerWithLevel(component, levelValue string) *slog.Logger {
+	level := parseLevel(levelValue)
 	handler := tint.NewHandler(os.Stderr, &tint.Options{
 		Level:      level,
 		TimeFormat: "15:04:05.000",
 		NoColor:    !isTerminal(os.Stderr),
 	})
 	return slog.New(handler).With("component", component)
+}
+
+// NewLoggerDefaultWithLevel creates a terminal-aware named logger and makes
+// its base handler the slog default. Daemon foreground mode needs this so
+// package-global slog calls honor the profile-selected threshold too.
+func NewLoggerDefaultWithLevel(component, levelValue string) *slog.Logger {
+	level := parseLevel(levelValue)
+	handler := tint.NewHandler(os.Stderr, &tint.Options{
+		Level:      level,
+		TimeFormat: "15:04:05.000",
+		NoColor:    !isTerminal(os.Stderr),
+	})
+	base := slog.New(handler)
+	slog.SetDefault(base)
+	return base.With("component", component)
 }
 
 // StderrIsTerminal reports whether this process's stderr is attached to a
@@ -67,7 +88,14 @@ func StderrIsTerminal() bool {
 // and every log line — injected-logger and package-global alike — must end up
 // in the one managed file. Reads LOG_LEVEL like NewLogger/Init.
 func NewWriterLoggerDefault(component string, w io.Writer) *slog.Logger {
-	level := parseLevel(os.Getenv("LOG_LEVEL"))
+	return NewWriterLoggerDefaultWithLevel(component, w, os.Getenv("LOG_LEVEL"))
+}
+
+// NewWriterLoggerDefaultWithLevel is NewWriterLoggerDefault with an explicit
+// level value. It lets profile-scoped CLI configuration override LOG_LEVEL
+// without mutating the process environment.
+func NewWriterLoggerDefaultWithLevel(component string, w io.Writer, levelValue string) *slog.Logger {
+	level := parseLevel(levelValue)
 	handler := tint.NewHandler(w, &tint.Options{
 		Level:      level,
 		TimeFormat: "15:04:05.000",
@@ -113,5 +141,17 @@ func parseLevel(s string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelDebug
+	}
+}
+
+// IsValidLevel reports whether s names a log level accepted by CLI
+// configuration. LOG_LEVEL keeps accepting the legacy "warning" spelling in
+// parseLevel, but persisted config deliberately exposes the canonical values.
+func IsValidLevel(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "debug", "info", "warn", "error":
+		return true
+	default:
+		return false
 	}
 }

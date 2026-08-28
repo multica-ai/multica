@@ -47,6 +47,29 @@ func TestResolveDaemonStringOverridePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveDaemonLogLevelPrecedence(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		env    string
+		want   string
+	}{
+		{"config wins over env", "warn", "debug", "warn"},
+		{"config is normalized", "WARN", "error", "warn"},
+		{"env used when config is absent", "", "info", "info"},
+		{"invalid config falls back to env", "verbose", "error", "error"},
+		{"all absent retains logger default", "", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LOG_LEVEL", tc.env)
+			if got := resolveDaemonLogLevel(tc.config); got != tc.want {
+				t.Fatalf("resolveDaemonLogLevel(%q) = %q, want %q", tc.config, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveDaemonWorkspacesRootPrecedence(t *testing.T) {
 	home := t.TempDir()
 	flagRoot := filepath.Join(t.TempDir(), "flag")

@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
 )
 
 var configCmd = &cobra.Command{
@@ -44,6 +45,7 @@ var configSetSupportedKeys = []string{
 	"disable_auto_update",
 	"auto_update_check_interval",
 	"disable_auto_reload",
+	"log_level",
 }
 
 var configSetCmd = &cobra.Command{
@@ -54,7 +56,7 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, " +
 		"heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, log_level.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -69,7 +71,8 @@ var configSetCmd = &cobra.Command{
 		"(single-direction: setting one to 'true' turns that behavior off, " +
 		"'false' clears the override so env/default decides). Pass an empty " +
 		"string to clear a persisted " +
-		"value (e.g. `config set poll_interval \"\"`).",
+		"value (e.g. `config set poll_interval \"\"`). log_level accepts debug, info, warn, or error; " +
+		"when set it takes precedence over LOG_LEVEL for the daemon.",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -109,6 +112,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "log_level:", valueOrDefault(cfg.LogLevel, "(not set)"))
 	return nil
 }
 
@@ -248,6 +252,16 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
 			return err
 		}
+	case "log_level":
+		if value == "" {
+			cfg.LogLevel = ""
+			return nil
+		}
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if !logger_pkg.IsValidLevel(normalized) {
+			return fmt.Errorf("log_level must be one of debug, info, warn, error (got %q)", value)
+		}
+		cfg.LogLevel = normalized
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}
