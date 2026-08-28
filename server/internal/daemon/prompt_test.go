@@ -1270,6 +1270,28 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 	}
 }
 
+// TestBuildCommentPromptResumedInterventionKeepsInstruction verifies the
+// stop-then-resume path: the follow-up task carries the cancelled provider
+// session while the new member instruction remains the authoritative turn
+// input.
+func TestBuildCommentPromptResumedInterventionKeepsInstruction(t *testing.T) {
+	const instruction = "로그인 버튼은 modal 말고 page transition으로 바꿔"
+	out := BuildPrompt(Task{
+		IssueID:               "issue-intervention-1",
+		TriggerCommentID:      "comment-intervention-1",
+		TriggerCommentContent: instruction,
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "cancelled-session-1",
+	}, "claude")
+
+	if !strings.Contains(out, instruction) {
+		t.Fatalf("resumed prompt dropped the intervention instruction:\n%s", out)
+	}
+	if !strings.Contains(out, "triggering comment is already included above") {
+		t.Fatalf("resumed prompt did not take the warm-session path:\n%s", out)
+	}
+}
+
 // TestBuildCommentPromptCoalescedCrossThread pins MUL-4195 review should-fix #3:
 // when a run coalesces comments that span MULTIPLE threads, the prompt must
 // embed each folded comment's content with its OWN thread id instead of

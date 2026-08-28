@@ -1749,6 +1749,15 @@ func (h *Handler) ClearQueuedChatTasks(w http.ResponseWriter, r *http.Request) {
 // Task cancellation (user-facing, with ownership check)
 // ---------------------------------------------------------------------------
 
+func issueTaskCanReplayComments(status string) bool {
+	switch status {
+	case "dispatched", "running", "waiting_local_directory", "deferred":
+		return true
+	default:
+		return false
+	}
+}
+
 // CancelTaskByUser cancels a task the caller is allowed to act on within the
 // current workspace.
 //
@@ -1870,6 +1879,14 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// A member may have posted an instruction while this issue task was
+	// running. The normal comment path defers that input to terminal reconcile;
+	// cancellation has no completion callback, so replay it here. Cancellation
+	// keeps the provider session on the task row, letting the queued follow-up
+	// resume the interrupted conversation instead of losing the instruction.
+	if !queuedOnly && task.IssueID.Valid && issueTaskCanReplayComments(task.Status) {
+		h.reconcileCommentsOnCompletion(r.Context(), &cancelled.Task)
 	}
 
 	resp := CancelTaskByUserResponse{

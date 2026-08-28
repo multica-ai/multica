@@ -169,6 +169,65 @@ func TestCancelTaskByUser_QueuedOnlyDoesNotCancelPromotedTask(t *testing.T) {
 	}
 }
 
+// TestCancelTaskByUser_ReplaysIssueCommentForSessionResume covers the
+// intervention path: a member posts an instruction while an issue task is
+// running, then stops that task. Cancellation has no completion callback, so
+// the handler must replay the undelivered comment and the next claim must keep
+// the cancelled provider session.
+func TestCancelTaskByUser_ReplaysIssueCommentForSessionResume(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "cancelled issue intervention", testutil.Cols{
+		"status":        "in_progress",
+		"number":        999731,
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	triggerID := dbfx.Comment(t, issueID, "initial request", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '10 minutes'"),
+	})
+	var taskID string
+	dbfx.QueryRow(t, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id, status, priority,
+			created_at, started_at, session_id, work_dir
+		)
+		VALUES ($1, $2, $3, $4, 'running', 0, now() - interval '10 minutes',
+		        now() - interval '5 minutes', 'intervention-session', '/tmp/intervention-workdir')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerID).Scan(&taskID)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	commentID := dbfx.Comment(t, issueID, "로그인 버튼은 modal 말고 page transition으로 바꿔", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '1 minute'"),
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.CancelTaskByUser(w, cancelTaskByUserRequest(t, testUserID, taskID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("CancelTaskByUser: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var queuedID, queuedTrigger string
+	dbfx.QueryRow(t, `
+		SELECT id, trigger_comment_id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		ORDER BY created_at DESC LIMIT 1
+	`, issueID, agentID).Scan(&queuedID, &queuedTrigger)
+	if queuedID == "" || queuedTrigger != commentID {
+		t.Fatalf("cancel should queue the intervention comment, got task=%q trigger=%q want trigger=%q", queuedID, queuedTrigger, commentID)
+	}
+
+	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if claimed.PriorSessionID != "intervention-session" {
+		t.Fatalf("resumed claim session = %q, want intervention-session", claimed.PriorSessionID)
+	}
+}
+
 func TestCancelTaskByUser_QueuedEditPersistsDraftRestore(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
