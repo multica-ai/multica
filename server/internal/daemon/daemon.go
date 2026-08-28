@@ -85,13 +85,16 @@ const (
 	// pendingWorkHintBookkeepingTTL is how long a runtime's last-hint timestamp
 	// is retained before it is swept — purely to keep the map bounded.
 	pendingWorkHintBookkeepingTTL = 10 * time.Minute
-	// idleWatchdogMaxTick caps the idle watchdog's polling interval. The
-	// interval is window/2, which was fine when the window was minutes but
-	// makes the overshoot scale with the budget: a 2h window would only be
-	// checked hourly, so a genuinely stuck run could hold its slot for 3h.
-	// Capping the tick keeps worst-case detection at window + 5m regardless of
-	// how large an operator sets the budget, at the cost of a no-op comparison
-	// every 5 minutes.
+	// idleWatchdogMaxTick caps the idle watchdog's polling interval. At the
+	// base rate of window/2 the overshoot scales with the budget: a 2h window
+	// would only be checked hourly, so a genuinely stuck run could hold its
+	// slot for 3h. The cap makes worst-case detection window + 5m no matter how
+	// large an operator sets the budget.
+	//
+	// 5m is chosen as the largest overshoot worth tolerating on top of a budget
+	// already measured in hours, not for its polling cost — a tick is an atomic
+	// load and a channel length check, so it is free at any interval anyone
+	// would pick.
 	idleWatchdogMaxTick = 5 * time.Minute
 )
 
@@ -1970,6 +1973,9 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"heartbeat_interval", d.cfg.HeartbeatInterval,
 		"agent_timeout", d.cfg.AgentTimeout,
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
+		// Logged explicitly because it is normally derived from idle_watchdog:
+		// without it an operator cannot read the tool budget actually in effect.
+		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
@@ -8522,17 +8528,18 @@ func idleWatchdogReason(window time.Duration) string {
 }
 
 // idleWatchdogTickInterval picks how often the idle watchdog re-checks the
-// silence budget. Half the window is the base rate; the 30 s floor only applies
-// to windows of at least a minute, so tests can pass tiny windows (50 ms) and
-// still see the watchdog fire within a few ticks. idleWatchdogMaxTick caps the
-// other end: without it the overshoot scales with the budget, and a multi-hour
-// window would be polled so rarely that a genuinely stuck run outlives its
-// budget by hours. Worst-case detection is therefore window + tick.
+// silence budget. Half the window is the base rate, capped at
+// idleWatchdogMaxTick so a run is force-stopped within window + tick rather
+// than window * 1.5. Sub-nanosecond halves fall back to the window itself so
+// tests can pass tiny budgets and still get a valid ticker.
+//
+// There used to be a `window >= time.Minute && interval < 30*time.Second` floor
+// here, meant to keep production polling no faster than 30 s. It was
+// unreachable — window >= 1 min implies window/2 >= 30 s — and its only effect
+// was to make the tests around it read as if a floor were being exercised.
+// Production windows are minutes or hours, so window/2 already clears 30 s.
 func idleWatchdogTickInterval(window time.Duration) time.Duration {
 	interval := window / 2
-	if window >= time.Minute && interval < 30*time.Second {
-		interval = 30 * time.Second
-	}
 	if interval > idleWatchdogMaxTick {
 		interval = idleWatchdogMaxTick
 	}

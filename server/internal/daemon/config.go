@@ -373,11 +373,19 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// The in-flight-tool budget defaults to the idle budget: the tool window
 	// only ever existed because 30 min was too short for a real build/install/
 	// test, and now that the idle budget is sized for the longest legitimate
-	// silent step it already covers those. Keeping it derived means an operator
-	// who raises MULTICA_AGENT_IDLE_WATCHDOG does not silently leave tool calls
-	// on the old ceiling. MULTICA_AGENT_TOOL_WATCHDOG still overrides for the
-	// deliberate "tools may run longer than the model may think" case, and 0
-	// keeps its meaning: never force-stop while a tool is in flight.
+	// silent step it already covers those.
+	//
+	// The derivation tracks in BOTH directions, which is the point of collapsing
+	// this to one number. Raising MULTICA_AGENT_IDLE_WATCHDOG no longer leaves
+	// tool calls silently pinned to the old ceiling — and lowering it now also
+	// lowers the tool budget, where previously a shortened idle window left
+	// tools at a separate, larger 2h. That second direction is a real behaviour
+	// change for anyone who had deliberately shortened the idle window; the
+	// override below is how they keep the two apart.
+	//
+	// MULTICA_AGENT_TOOL_WATCHDOG still overrides for the deliberate "tools may
+	// run longer than the model may think" case, and 0 keeps its meaning: never
+	// force-stop while a tool is in flight.
 	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
 	if err != nil {
 		return Config{}, err
