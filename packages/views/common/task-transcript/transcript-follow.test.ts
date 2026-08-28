@@ -58,6 +58,13 @@ describe("createLiveEndFollow", () => {
     expect(follow.isFollowing()).toBe(false);
   });
 
+  it("does not pin unattributed displacement during an active touch", () => {
+    const { follow } = makeFollow();
+    follow.touchStart();
+
+    expect(follow.onScroll(300)).toBe(false);
+  });
+
   it("releases for wheel notches spaced past the intent window", () => {
     // A discrete mouse wheel at reading pace: one notch per event, far more
     // than the window apart. Attributed displacement accumulates across
