@@ -23,8 +23,8 @@ const (
 	DefaultPollInterval      = 30 * time.Second
 	DefaultHeartbeatInterval = 15 * time.Second
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
-	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdogs
-	// (DefaultAgentIdleWatchdog / DefaultAgentToolWatchdog), so a session that keeps emitting events is
+	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog
+	// (DefaultAgentIdleWatchdog), so a session that keeps emitting events is
 	// never killed merely for running long (MUL-3064). Operators who want a
 	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
 	DefaultAgentTimeout                   = 0
@@ -42,23 +42,19 @@ const (
 	// on a stuck child process (e.g. `docker ps` against a frozen dockerd),
 	// in which case `cmd.Wait()` never returns. With no wall-clock cap
 	// (DefaultAgentTimeout = 0) such a run would otherwise sit at "running"
-	// forever, so this watchdog is its sole liveness net. The previous 5 min default
-	// killed legitimate long assistant outputs (e.g. RFC-length writeups)
-	// where the model streams a single message for many minutes without any
-	// daemon-visible activity — see MUL-2300. 30 min keeps the safety net for
-	// truly stuck runs (dockerd hang) while leaving headroom for long writes.
-	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable.
-	DefaultAgentIdleWatchdog = 30 * time.Minute
-	// DefaultAgentToolWatchdog bounds how long a single tool call may stay in
-	// flight (tool_use emitted, no tool_result and no other message) before the
-	// idle watchdog force-stops the run. The idle watchdog ignores its normal
-	// window while a tool is in flight, because a real build/install/test
-	// legitimately runs silently for many minutes — but with no wall-clock cap
-	// (DefaultAgentTimeout = 0) a backend that emits tool_use and never the
-	// matching tool_result would otherwise run forever. This is the backstop for
-	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
-	// disable, in which case an in-flight tool never force-stops the run.
-	DefaultAgentToolWatchdog              = 2 * time.Hour
+	// forever, so this watchdog is its sole liveness net.
+	//
+	// The budget answers one question: how long may the LONGEST legitimate
+	// silent step take? Not "how fast do we want to notice a hang". Those
+	// two costs are wildly asymmetric — force-stopping a healthy run throws
+	// away the work and flips the issue to blocked, while noticing a hang
+	// late only holds a concurrency slot. So the value tracks the legitimate
+	// end: a single RFC-length assistant message (MUL-2300, which moved this
+	// from 5 min to 30 min), a subagent, a full test suite. 30 min still cut
+	// real work short, so this is 2h.
+	//
+	// Set MULTICA_AGENT_IDLE_WATCHDOG=0 to disable the whole watchdog suite.
+	DefaultAgentIdleWatchdog              = 2 * time.Hour
 	DefaultRuntimeName                    = "Local Agent"
 	DefaultWorkspaceBootstrapSyncInterval = 30 * time.Second
 	DefaultWorkspaceLegacySyncInterval    = 5 * time.Minute
@@ -140,7 +136,7 @@ type Config struct {
 	CodexHandshakeTimeout           time.Duration
 	OpenCodeIdleWatchdog            time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
 	ClaudeArgs                      []string
 	CodexArgs                       []string
 	CodebuddyArgs                   []string
@@ -374,9 +370,23 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
-	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
-	// positive duration overrides DefaultAgentToolWatchdog.
-	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", DefaultAgentToolWatchdog)
+	// The in-flight-tool budget defaults to the idle budget: the tool window
+	// only ever existed because 30 min was too short for a real build/install/
+	// test, and now that the idle budget is sized for the longest legitimate
+	// silent step it already covers those.
+	//
+	// The derivation tracks in BOTH directions, which is the point of collapsing
+	// this to one number. Raising MULTICA_AGENT_IDLE_WATCHDOG no longer leaves
+	// tool calls silently pinned to the old ceiling — and lowering it now also
+	// lowers the tool budget, where previously a shortened idle window left
+	// tools at a separate, larger 2h. That second direction is a real behaviour
+	// change for anyone who had deliberately shortened the idle window; the
+	// override below is how they keep the two apart.
+	//
+	// MULTICA_AGENT_TOOL_WATCHDOG still overrides for the deliberate "tools may
+	// run longer than the model may think" case, and 0 keeps its meaning: never
+	// force-stop while a tool is in flight.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
 	if err != nil {
 		return Config{}, err
 	}

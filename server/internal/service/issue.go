@@ -647,7 +647,7 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		ActorType:   "member",
 		ActorID:     util.UUIDToString(actorID),
 		Payload: map[string]any{
-			"issue":            IssueToMapWithCategory(ctx, s.Queries, current, workspace.IssuePrefix),
+			"issue":            IssueToMapResolved(ctx, s.Queries, current, workspace.IssuePrefix),
 			"assignee_changed": false,
 			"status_changed":   false,
 			"project_changed":  false,

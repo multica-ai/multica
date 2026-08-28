@@ -760,6 +760,70 @@ func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog pins the merge: the
+// in-flight-tool budget is no longer an independent constant, so an operator
+// who raises the idle budget cannot accidentally leave tool calls capped at a
+// lower, invisible ceiling.
+func TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+
+	load := func(t *testing.T) Config {
+		t.Helper()
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := load(t)
+	if cfg.AgentIdleWatchdog != DefaultAgentIdleWatchdog {
+		t.Fatalf("AgentIdleWatchdog = %s, want default %s", cfg.AgentIdleWatchdog, DefaultAgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != cfg.AgentIdleWatchdog {
+		t.Fatalf("AgentToolWatchdog = %s, want it to track AgentIdleWatchdog %s", cfg.AgentToolWatchdog, cfg.AgentIdleWatchdog)
+	}
+
+	// Raising only the idle budget must carry the tool budget with it.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "6h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour || cfg.AgentToolWatchdog != 6*time.Hour {
+		t.Fatalf("idle=%s tool=%s, want both 6h", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+
+	// An explicit tool override still wins, so "tools may run longer than the
+	// model may think" stays expressible.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "12h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour {
+		t.Fatalf("AgentIdleWatchdog = %s, want 6h", cfg.AgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != 12*time.Hour {
+		t.Fatalf("AgentToolWatchdog = %s, want 12h from env", cfg.AgentToolWatchdog)
+	}
+
+	// Zero keeps its distinct meaning: never force-stop while a tool is in
+	// flight. It must NOT be re-derived from the idle budget.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "0")
+	cfg = load(t)
+	if cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("AgentToolWatchdog = %s, want 0 from env", cfg.AgentToolWatchdog)
+	}
+
+	// Disabling the suite disables both.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "0")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 0 || cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("idle=%s tool=%s, want both 0", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+}
+
 func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	stageFakeAgent(t)
 	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "")

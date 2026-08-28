@@ -27,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -131,9 +132,17 @@ func ValidateKey(key string) (string, error) {
 	return key, nil
 }
 
-// SlugifyKey derives a candidate key from a display name, for callers that let
-// an admin type only a name. Returns an error when nothing usable survives.
-func SlugifyKey(name string) (string, error) {
+// maxKeyLen mirrors the 32-character ceiling in keyPattern and the issue_status
+// CHECK. Suffixing a key has to stay under it, so the base gets truncated
+// rather than the suffix dropped — a truncated base is still unique-able, a
+// dropped suffix is not.
+const maxKeyLen = 32
+
+// slugify reduces a display name to the ASCII key alphabet, returning "" when
+// nothing survives. Lowercase because `multica issue status <id> human_review`
+// has to be unambiguous to type; runs of everything else collapse to a single
+// underscore so "Gate — Approved!" does not become "gate___approved".
+func slugify(name string) string {
 	var b strings.Builder
 	lastUnderscore := false
 	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
@@ -147,13 +156,109 @@ func SlugifyKey(name string) (string, error) {
 		}
 	}
 	slug := strings.Trim(b.String(), "_")
-	if len(slug) > 32 {
-		slug = strings.Trim(slug[:32], "_")
+	if len(slug) > maxKeyLen {
+		slug = strings.Trim(slug[:maxKeyLen], "_")
 	}
-	if slug == "" {
-		return "", errors.New("cannot derive a status key from that name; provide one explicitly")
+	return slug
+}
+
+// DeriveKey picks the stored key for a status whose creator supplied only a
+// display name (MUL-6749 / GitHub #7627).
+//
+// The key is an ASCII machine handle — it is what issue.status stores, what the
+// CLI takes as an argument, and what the column's CHECK constraint permits —
+// while the display name is free Unicode. Deriving one from the other therefore
+// has to survive names that share no alphabet with it:
+//
+//   - a name that slugs to something usable keeps that slug, so an
+//     English-named status still gets the readable `human_review` it always
+//     got;
+//   - a name written entirely in a non-Latin script slugs to nothing, and falls
+//     back to its CATEGORY plus an ordinal. Category, not a random suffix: it
+//     is already the anchor an agent reasons from, so `in_review_2` still says
+//     which platform behavior the status inherits, and it degrades into the
+//     right neighborhood when a model confuses it with its category. The
+//     meaning of the status travels with its name and description, which the
+//     agent brief prints beside the key.
+//
+// Either way the result is disambiguated against keys the workspace already
+// owns, so two names that collapse onto one slug ("待客户 Review" and
+// "待供应商 Review" both slug to "review") no longer make the second create
+// fail with a conflict that blames the display name.
+//
+// taken reports whether a key already exists in this workspace and MUST count
+// ARCHIVED statuses: idx_issue_status_workspace_key is not partial, so an
+// archived row still owns its key. Built-in keys are treated as taken here
+// regardless of what taken says, which both stops a custom status from
+// shadowing one and is what makes the fallback start at `<category>_2`.
+//
+// Derivation is expected to succeed for any name that reaches it. The one
+// refusal left is a name that slugs ONTO a built-in key: that is a naming
+// collision the admin should see rather than have quietly renamed, and it is
+// unchanged from before.
+func DeriveKey(name, category string, taken map[string]bool) (string, error) {
+	if slug := slugify(name); slug != "" {
+		if IsBuiltIn(slug) {
+			return "", fmt.Errorf("%q is a built-in status key and cannot be reused; rename the status or pass an explicit key", slug)
+		}
+		return firstFreeKey(slug, taken)
 	}
-	return ValidateKey(slug)
+	// Nothing in the name belongs to the key alphabet. Category is a valid key
+	// by construction, and its built-in always occupies it, so this lands on
+	// <category>_2 for the first such status in that category.
+	if !IsCategory(category) {
+		return "", fmt.Errorf("category must be one of: %s", strings.Join(canonicalOrder, ", "))
+	}
+	return firstFreeKey(category, taken)
+}
+
+// firstFreeKey returns base when it is unclaimed, otherwise the first
+// base_<n> that is. n starts at 2 so the series reads as "the second one".
+//
+// The scan is bounded by the CATALOG, not by a policy number. Every candidate
+// it tests is distinct, and at most len(taken)+7 keys can be occupied (the
+// workspace's own plus the built-ins), so by the pigeonhole principle a free
+// one has to turn up within that many attempts plus one. Picking a round
+// constant instead would invent a cap on custom statuses that exists nowhere
+// else in the product, and would fail with "provide one explicitly" — the very
+// error this package was changed to stop showing a UI that has no key field.
+func firstFreeKey(base string, taken map[string]bool) (string, error) {
+	if !keyOccupied(base, taken) {
+		return ValidateKey(base)
+	}
+	limit := len(taken) + len(canonicalOrder) + 2
+	for n := 2; n <= limit; n++ {
+		suffix := "_" + strconv.Itoa(n)
+		candidate := truncateForSuffix(base, len(suffix)) + suffix
+		if !keyOccupied(candidate, taken) {
+			return ValidateKey(candidate)
+		}
+	}
+	// Unreachable by the argument above; kept so a future change to candidate
+	// generation surfaces as an error rather than an infinite loop.
+	return "", errors.New("could not derive an unused status key from that name; provide one explicitly")
+}
+
+// keyOccupied folds the built-in set into the workspace's own keys. A built-in
+// counts as occupied even in a workspace whose catalog rows have not been
+// seeded yet, so an unseeded workspace cannot mint a custom status that
+// shadows one.
+func keyOccupied(key string, taken map[string]bool) bool {
+	if IsBuiltIn(key) {
+		return true
+	}
+	return taken[key]
+}
+
+// truncateForSuffix shortens base so base+suffix fits maxKeyLen. The trailing
+// underscore trim keeps "human_review" from becoming "human_" + "_2"; base
+// always starts with an alphanumeric, so trimming can never empty it.
+func truncateForSuffix(base string, suffixLen int) string {
+	limit := maxKeyLen - suffixLen
+	if len(base) <= limit {
+		return base
+	}
+	return strings.TrimRight(base[:limit], "_")
 }
 
 // Ensure idempotently seeds a workspace's 7 built-in statuses. Safe to call
@@ -190,6 +295,33 @@ func Effective(ctx context.Context, q Querier, workspaceID pgtype.UUID, status s
 		return status
 	}
 	return entry.Category
+}
+
+// EffectiveAndName resolves a status to BOTH its category and its display name
+// in one catalog read, for payload builders that need the pair.
+//
+// Two separate calls would double the query on every background event carrying
+// a custom status. Same fail-safe direction as Effective: an unresolvable key
+// yields the key unchanged and an empty name.
+//
+// The name is empty for a built-in on purpose — clients localize those from the
+// key, so echoing the seeded English one would be the single string a
+// non-English workspace has to ignore. (MUL-6749)
+func EffectiveAndName(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) (string, string) {
+	if IsBuiltIn(status) {
+		return status, ""
+	}
+	entry, err := q.GetIssueStatusEntryByKey(ctx, db.GetIssueStatusEntryByKeyParams{
+		WorkspaceID: workspaceID,
+		Key:         status,
+	})
+	if err != nil {
+		return status, ""
+	}
+	if !IsCategory(entry.Category) {
+		return status, entry.Name
+	}
+	return entry.Category, entry.Name
 }
 
 // Resolve validates that status is usable in this workspace, returning the
@@ -267,6 +399,42 @@ func ActiveKeys(ctx context.Context, q Querier, workspaceID pgtype.UUID) ([]stri
 	return keys, nil
 }
 
+// ActiveKeyLabels is ActiveKeys with each CUSTOM status's display name attached,
+// as `key (Name)`. It backs the error a caller sees after writing an unknown
+// status, where a bare key list is the least useful thing to hand back: a key
+// derived from a non-Latin name carries no meaning on its own (`in_review_2`),
+// so the reader — a person or an agent — has nothing to match against the name
+// they were told to use.
+//
+// Built-ins stay bare. Their key IS their category, their seeded name is
+// English, and every client localizes them from the key anyway, so printing
+// `todo (Todo)` would add noise rather than information.
+func ActiveKeyLabels(ctx context.Context, q Querier, workspaceID pgtype.UUID) ([]string, error) {
+	entries, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+		WorkspaceID:     workspaceID,
+		IncludeArchived: false,
+	})
+	if err != nil {
+		return nil, err
+	}
+	labels := make([]string, 0, len(entries)+len(canonicalOrder))
+	seen := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		seen[e.Key] = true
+		if IsBuiltIn(e.Key) || strings.TrimSpace(e.Name) == "" {
+			labels = append(labels, e.Key)
+			continue
+		}
+		labels = append(labels, e.Key+" ("+e.Name+")")
+	}
+	for _, key := range canonicalOrder {
+		if !seen[key] {
+			labels = append(labels, key)
+		}
+	}
+	return labels, nil
+}
+
 // Resolver resolves many statuses against ONE workspace's catalog using at most
 // one query, for list endpoints that would otherwise issue a lookup per row.
 //
@@ -281,12 +449,36 @@ func ActiveKeys(ctx context.Context, q Querier, workspaceID pgtype.UUID) ([]stri
 type Resolver struct {
 	workspaceID pgtype.UUID
 	categories  map[string]string
+	names       map[string]string
 	loaded      bool
 }
 
 // NewResolver returns a Resolver for one workspace. It performs no I/O.
 func NewResolver(workspaceID pgtype.UUID) *Resolver {
 	return &Resolver{workspaceID: workspaceID}
+}
+
+// load fetches the catalog once, on the first call that needs it. A failed read
+// leaves the maps nil, which makes every lookup below fall back to its
+// key-unchanged branch — the same fail-safe the single-shot resolver applies.
+func (r *Resolver) load(ctx context.Context, q Querier) {
+	if r.loaded {
+		return
+	}
+	r.loaded = true
+	entries, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+		WorkspaceID:     r.workspaceID,
+		IncludeArchived: true,
+	})
+	if err != nil {
+		return
+	}
+	r.categories = make(map[string]string, len(entries))
+	r.names = make(map[string]string, len(entries))
+	for _, e := range entries {
+		r.categories[e.Key] = e.Category
+		r.names[e.Key] = e.Name
+	}
 }
 
 // Effective mirrors the package-level Effective, but amortizes the catalog read
@@ -296,27 +488,32 @@ func (r *Resolver) Effective(ctx context.Context, q Querier, status string) stri
 	if IsBuiltIn(status) {
 		return status
 	}
-	if !r.loaded {
-		r.loaded = true
-		entries, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
-			WorkspaceID:     r.workspaceID,
-			IncludeArchived: true,
-		})
-		if err != nil {
-			// Leave the map nil; every custom key then falls back to itself,
-			// which is the same fail-safe the single-shot resolver applies.
-			return status
-		}
-		r.categories = make(map[string]string, len(entries))
-		for _, e := range entries {
-			r.categories[e.Key] = e.Category
-		}
-	}
+	r.load(ctx, q)
 	category, ok := r.categories[status]
 	if !ok || !IsCategory(category) {
 		return status
 	}
 	return category
+}
+
+// Name returns a CUSTOM status's display name, or "" for a built-in and for a
+// key the catalog does not hold.
+//
+// Built-ins return "" on purpose rather than their seeded English name: every
+// client renders those from the key through i18n, so handing back "In Progress"
+// would be the one string a Chinese workspace must ignore. Custom names are
+// user-authored and untranslatable, so they are the label everywhere — which is
+// also why a payload carrying a custom key should carry this beside it. A
+// generated key like `in_review_2` says nothing on its own. (MUL-6749)
+//
+// Shares the Resolver's single catalog read with Effective, so adding the name
+// to a response costs no extra query.
+func (r *Resolver) Name(ctx context.Context, q Querier, status string) string {
+	if IsBuiltIn(status) {
+		return ""
+	}
+	r.load(ctx, q)
+	return r.names[status]
 }
 
 // ExpandCategories turns a set of categories into the status keys that belong
