@@ -63,23 +63,40 @@ type omniRouteFunctionCall struct {
 }
 
 type omniRouteChatResponse struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Message struct {
-			Role      string              `json:"role"`
-			Content   string              `json:"content"`
-			ToolCalls []omniRouteToolCall `json:"tool_calls"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *struct {
+	ID      string            `json:"id"`
+	Model   string            `json:"model"`
+	Choices []omniRouteChoice `json:"choices"`
+	Usage   *struct {
 		PromptTokens     int64 `json:"prompt_tokens"`
 		CompletionTokens int64 `json:"completion_tokens"`
 		PromptDetails    *struct {
 			CachedTokens int64 `json:"cached_tokens"`
 		} `json:"prompt_tokens_details,omitempty"`
 	} `json:"usage,omitempty"`
+}
+
+type omniRouteChoice struct {
+	Message      omniRouteDelta `json:"message"`
+	Delta        omniRouteDelta `json:"delta"`
+	FinishReason string         `json:"finish_reason"`
+}
+
+type omniRouteDelta struct {
+	Role      string                   `json:"role"`
+	Content   string                   `json:"content"`
+	ToolCalls []omniRouteToolCallDelta `json:"tool_calls"`
+}
+
+type omniRouteToolCallDelta struct {
+	Index    int                    `json:"index"`
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Function omniRouteFunctionDelta `json:"function"`
+}
+
+type omniRouteFunctionDelta struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type omniRouteConfig struct {
@@ -181,6 +198,19 @@ func resolveOmniRouteConfig(env map[string]string) (omniRouteConfig, error) {
 func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Builder, result *Result, sessionID *string, model string) error {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 4096), 10*1024*1024)
+	pendingCalls := make(map[int]*omniRouteToolCall)
+	flushCalls := func() error {
+		for _, call := range pendingCalls {
+			args := map[string]interface{}{}
+			if call.Function.Arguments != "" {
+				if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+					return fmt.Errorf("omniroute: invalid tool arguments for %q: %w", call.Function.Name, err)
+				}
+			}
+			trySend(msgCh, Message{Type: MessageToolUse, Tool: call.Function.Name, CallID: call.ID, Input: args})
+		}
+		return nil
+	}
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data:") {
@@ -188,7 +218,7 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
-			return nil
+			return flushCalls()
 		}
 		var event omniRouteChatResponse
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
@@ -201,18 +231,33 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 			model = event.Model
 		}
 		for _, choice := range event.Choices {
-			if choice.Message.Content != "" {
-				output.WriteString(choice.Message.Content)
-				trySend(msgCh, Message{Type: MessageText, Content: choice.Message.Content})
+			delta := choice.Delta
+			if delta.Content == "" && delta.Role == "" && len(delta.ToolCalls) == 0 {
+				delta = choice.Message
 			}
-			for _, call := range choice.Message.ToolCalls {
-				args := map[string]interface{}{}
-				if call.Function.Arguments != "" {
-					if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
-						return fmt.Errorf("omniroute: invalid tool arguments for %q: %w", call.Function.Name, err)
-					}
+			if delta.Content != "" {
+				output.WriteString(delta.Content)
+				trySend(msgCh, Message{Type: MessageText, Content: delta.Content})
+			}
+			for _, fragment := range delta.ToolCalls {
+				call := pendingCalls[fragment.Index]
+				if call == nil {
+					call = &omniRouteToolCall{Type: fragment.Type}
+					pendingCalls[fragment.Index] = call
 				}
-				trySend(msgCh, Message{Type: MessageToolUse, Tool: call.Function.Name, CallID: call.ID, Input: args})
+				if fragment.ID != "" {
+					call.ID = fragment.ID
+				}
+				if fragment.Function.Name != "" {
+					call.Function.Name += fragment.Function.Name
+				}
+				call.Function.Arguments += fragment.Function.Arguments
+			}
+			if choice.FinishReason == "tool_calls" {
+				if err := flushCalls(); err != nil {
+					return err
+				}
+				pendingCalls = make(map[int]*omniRouteToolCall)
 			}
 		}
 		if event.Usage != nil {
@@ -228,7 +273,7 @@ func consumeOmniRouteSSE(r io.Reader, msgCh chan<- Message, output *strings.Buil
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("omniroute: read SSE stream: %w", err)
 	}
-	return nil
+	return flushCalls()
 }
 
 func sanitizedHTTPError(r io.Reader) string {

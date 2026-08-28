@@ -44,7 +44,7 @@ func TestOmniRouteExecuteSendsAuthenticatedStreamingRequest(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"id\":\"omni-1\",\"model\":\"auto\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"hello\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"id\":\"omni-1\",\"model\":\"auto\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"hello\"}}]}\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -78,6 +78,34 @@ func TestOmniRouteExecuteSendsAuthenticatedStreamingRequest(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].Type != MessageText || messages[0].Content != "hello" {
 		t.Fatalf("messages = %#v", messages)
+	}
+}
+
+func TestConsumeOmniRouteSSEBuffersToolCallArguments(t *testing.T) {
+	stream := strings.Join([]string{
+		`data: {"id":"s1","model":"auto","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"lookup","arguments":"{\"q\":"}}]}}]}`,
+		`data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"roof\"}"}}]}}]}`,
+		`data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+		`data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}`,
+		`data: [DONE]`,
+	}, "\n\n") + "\n\n"
+	msgCh := make(chan Message, 8)
+	var output strings.Builder
+	result := Result{}
+	var sessionID string
+	if err := consumeOmniRouteSSE(strings.NewReader(stream), msgCh, &output, &result, &sessionID, "auto"); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	close(msgCh)
+	var messages []Message
+	for msg := range msgCh {
+		messages = append(messages, msg)
+	}
+	if len(messages) != 1 || messages[0].Type != MessageToolUse || messages[0].Tool != "lookup" || messages[0].Input["q"] != "roof" {
+		t.Fatalf("messages = %#v", messages)
+	}
+	if result.Usage["auto"].InputTokens != 12 || result.Usage["auto"].OutputTokens != 4 {
+		t.Fatalf("usage = %#v", result.Usage)
 	}
 }
 
