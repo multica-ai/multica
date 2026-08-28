@@ -238,3 +238,97 @@ func TestCerebraFiveFailureModesDemonstration(t *testing.T) {
 	fmt.Println("=========================================================================================")
 }
 
+func TestLiveTestLabIssues(t *testing.T) {
+	ctx := context.Background()
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	sessionStore := cerebra.NewSessionStore(0)
+	unavailStore := cerebra.NewUnavailabilityStore(0)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	router := cerebra.NewRouter(classifier, policy, sessionStore, unavailStore, logger, nil)
+
+	localCatalog := []string{
+		"opencode/mimo-v2.5-free",
+		"opencode/nemotron-3.5-lightning-free",
+		"opencode/nemotron-3-ultra-free",
+		"opencode/big-pickle",
+	}
+	runtimes := []cerebra.RuntimeEntry{
+		{
+			RuntimeID: "local-runtime-testlab",
+			TierMap:   map[cerebra.Tier]string(cerebra.BuildTierMapFromCatalog(localCatalog)),
+		},
+	}
+
+	testLabIssues := []struct {
+		Key         string
+		Title       string
+		Description string
+		WillUseMCP  bool
+	}{
+		{
+			Key:         "TEST-14",
+			Title:       "CEREBRA-01: [Simple Tier] Documentation & Folder Structure",
+			Description: "What is the folder architecture and purpose of each package in this repo?",
+			WillUseMCP:  false,
+		},
+		{
+			Key:         "TEST-15",
+			Title:       "CEREBRA-02: [Standard Tier] Debug Database Connection Pool",
+			Description: "Debug the database connection deadlock and fix the concurrent query timeout.",
+			WillUseMCP:  false,
+		},
+		{
+			Key:         "TEST-16",
+			Title:       "CEREBRA-03: [Heavy Tier] Architect Distributed Sharding Engine",
+			Description: "Architect and design a new multi-tenant sharding and distributed consensus migration engine with failover.",
+			WillUseMCP:  false,
+		},
+		{
+			Key:         "TEST-17",
+			Title:       "CEREBRA-04: [MCP Tool Floor] MCP Tool Invocation Policy",
+			Description: "Fetch the user profile via remote MCP tool server and format the response.",
+			WillUseMCP:  true,
+		},
+		{
+			Key:         "TEST-18",
+			Title:       "CEREBRA-05: [Substring Trap] Verify Prefix and Fixture Documentation",
+			Description: "Explain what prefix and postfix conventions we use. Do not debug any code; just check the sample fixture structure.",
+			WillUseMCP:  false,
+		},
+	}
+
+	fmt.Println("\n========================================================================================================================")
+	fmt.Println("                            CEREBRA LIVE ROUTING RESULTS FOR 'TEST LAB' ISSUES")
+	fmt.Println("========================================================================================================================")
+	fmt.Printf("%-9s | %-10s | %-37s | %-18s | %s\n", "ISSUE KEY", "TIER", "DISPATCHED MODEL", "MATCHED RULE", "EXPLAINABILITY")
+	fmt.Println("------------------------------------------------------------------------------------------------------------------------")
+
+	for _, issue := range testLabIssues {
+		prompt := issue.Title + "\n" + issue.Description
+		meta := cerebra.TaskMeta{
+			TaskID:          "task-" + issue.Key,
+			IssueID:         issue.Key,
+			WillUseMCPTools: issue.WillUseMCP,
+		}
+		result := router.Route(ctx, prompt, meta, runtimes, "default-agent-model")
+		explain := ""
+		switch result.Tier {
+		case cerebra.TierSimple:
+			explain = "Lightweight fast model selected; minimal token cost."
+		case cerebra.TierStandard:
+			if result.MatchedRule == "mcp_floor" {
+				explain = "Tool Floor Policy raised tier to Standard for tool capability."
+			} else {
+				explain = "Coding/Debug tier selected for execution accuracy."
+			}
+		case cerebra.TierHeavy:
+			explain = "Frontier reasoning model allocated for architectural complexity."
+		}
+
+		fmt.Printf("%-9s | %-10s | %-37s | %-18s | %s\n", issue.Key, result.Tier, result.Model, result.MatchedRule, explain)
+	}
+	fmt.Println("========================================================================================================================")
+}
+
+
