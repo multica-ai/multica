@@ -25,7 +25,7 @@ const (
 	FailureContextLength
 )
 
-// quotaSignals are substrings that indicate a quota / billing error.
+// quotaSignals are substrings that indicate a quota, rate-limit, 404 not-found, or upstream provider failure.
 var quotaSignals = []string{
 	"insufficient_quota",
 	"quota exceeded",
@@ -35,6 +35,11 @@ var quotaSignals = []string{
 	"rate limit exceeded",
 	"too many requests",
 	"429",
+	"404",
+	"provider returned error",
+	"upstream request failed",
+	"model not found",
+	"model_not_found",
 }
 
 // contextLengthSignals indicate that the context window was exceeded.
