@@ -248,10 +248,25 @@ func writeRuntimeConfigFile(path, brief string) error {
 
 	existing, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return os.WriteFile(path, []byte(block), 0o644)
+		// A dangling symlink also reports ErrNotExist through ReadFile. Do not
+		// replace that user-owned link with a regular file; there is no existing
+		// target we can atomically replace.
+		if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("runtime config %s is a dangling symlink", path)
+		}
+		// CreateTemp starts at 0600, and keeping that private mode avoids
+		// bypassing a restrictive process umask with a later chmod to 0644.
+		return writeRuntimeConfigFileAtomic(path, []byte(block), 0o600)
 	}
 	if err != nil {
 		return fmt.Errorf("read existing runtime config %s: %w", path, err)
+	}
+	writePath, perm, err := existingRuntimeConfigWriteTarget(path)
+	if err != nil {
+		return err
+	}
+	if err := requireRuntimeConfigWritable(writePath); err != nil {
+		return err
 	}
 
 	existingStr := string(existing)
@@ -262,7 +277,7 @@ func writeRuntimeConfigFile(path, brief string) error {
 		// The managed separator (if any) lives in existingStr[:start] and
 		// is preserved untouched.
 		newContent := existingStr[:start] + block + existingStr[end:]
-		return os.WriteFile(path, []byte(newContent), 0o644)
+		return writeRuntimeConfigFileAtomic(writePath, []byte(newContent), perm)
 	}
 
 	// No marker block present. Append the fixed managed separator followed
@@ -270,7 +285,112 @@ func writeRuntimeConfigFile(path, brief string) error {
 	// that already end in two or more newlines — so the byte boundary
 	// between user content and the managed region is deterministic, which
 	// is what lets Cleanup roll back to the user's exact original bytes.
-	return os.WriteFile(path, []byte(existingStr+runtimeManagedSeparator+block), 0o644)
+	return writeRuntimeConfigFileAtomic(writePath, []byte(existingStr+runtimeManagedSeparator+block), perm)
+}
+
+// existingRuntimeConfigWriteTarget returns the regular file that an existing
+// runtime-config path names, plus its current permission bits. Resolving a
+// symlink before the atomic rename preserves the user's link itself; renaming
+// directly onto path would silently replace it with a regular file.
+func existingRuntimeConfigWriteTarget(path string) (string, fs.FileMode, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("stat existing runtime config %s: %w", path, err)
+	}
+	writePath := path
+	linkInfo, err := os.Lstat(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("lstat existing runtime config %s: %w", path, err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink != 0 {
+		writePath, err = filepath.EvalSymlinks(path)
+		if err != nil {
+			return "", 0, fmt.Errorf("resolve runtime config symlink %s: %w", path, err)
+		}
+	}
+	if !info.Mode().IsRegular() {
+		return "", 0, fmt.Errorf("runtime config %s resolves to non-regular file type %s", path, info.Mode().Type())
+	}
+	if err := validateRuntimeConfigReplacementTarget(writePath, info); err != nil {
+		return "", 0, err
+	}
+	return writePath, info.Mode(), nil
+}
+
+// requireRuntimeConfigWritable preserves the permission gate of the previous
+// os.WriteFile path without truncating the target. Checking mode bits alone is
+// insufficient because ACLs and the effective user also participate in the
+// operating system's access decision.
+func requireRuntimeConfigWritable(path string) error {
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open existing runtime config %s for writing: %w", path, err)
+	}
+	if err := file.Close(); err != nil {
+		return fmt.Errorf("close writable runtime config %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeRuntimeConfigFileAtomic stages data in the destination directory and
+// commits it with the platform's atomic replacement only after the complete
+// payload has been written, its metadata prepared, synced, and closed. A direct
+// os.WriteFile opens an existing target with O_TRUNC, so a disk-full or
+// short-write error can return after destroying the user's CLAUDE.md /
+// AGENTS.md. Every pre-commit failure leaves the original byte-identical.
+func writeRuntimeConfigFileAtomic(path string, data []byte, perm fs.FileMode) error {
+	return writeRuntimeConfigFileAtomicWith(path, data, perm, func(file *os.File, payload []byte) error {
+		_, err := file.Write(payload)
+		return err
+	})
+}
+
+// writeRuntimeConfigFileAtomicWith exposes only the staging write operation so
+// tests can inject a deterministic partial-write failure on every platform.
+// Production always enters through writeRuntimeConfigFileAtomic above.
+func writeRuntimeConfigFileAtomicWith(path string, data []byte, perm fs.FileMode, write func(*os.File, []byte) error) error {
+	metadataSource := ""
+	if _, err := os.Lstat(path); err == nil {
+		metadataSource = path
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect runtime config metadata source %s: %w", path, err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".multica-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp runtime config for %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	closed := false
+	committed := false
+	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := write(tmp, data); err != nil {
+		return fmt.Errorf("write temp runtime config for %s: %w", path, err)
+	}
+	if err := preserveRuntimeConfigFileMetadata(tmp, metadataSource, perm); err != nil {
+		return fmt.Errorf("preserve runtime config metadata for %s: %w", path, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temp runtime config for %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		closed = true
+		return fmt.Errorf("close temp runtime config for %s: %w", path, err)
+	}
+	closed = true
+	if err := replaceRuntimeConfigFile(tmpPath, path); err != nil {
+		return fmt.Errorf("replace runtime config %s: %w", path, err)
+	}
+	committed = true
+	return nil
 }
 
 // locateMarkerBlock finds the [start, end) byte range of the Multica marker
@@ -379,6 +499,9 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	if !hadManagedSeparator && remainder == "" {
 		// Inject created the file (no managed separator → block was the
 		// only content). Restore the missing-file state.
+		if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("runtime config %s is a symlink without a managed separator; refusing to remove it", path)
+		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("remove runtime config %s: %w", path, err)
 		}
@@ -389,7 +512,14 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 	// without any normalisation. An empty `remainder` here means the
 	// user's original file was empty; we still write it (zero-byte file)
 	// so the file's existence is preserved.
-	return os.WriteFile(path, []byte(remainder), 0o644)
+	writePath, perm, err := existingRuntimeConfigWriteTarget(path)
+	if err != nil {
+		return err
+	}
+	if err := requireRuntimeConfigWritable(writePath); err != nil {
+		return err
+	}
+	return writeRuntimeConfigFileAtomic(writePath, []byte(remainder), perm)
 }
 
 // buildMetaSkillContent generates the meta skill markdown that teaches the

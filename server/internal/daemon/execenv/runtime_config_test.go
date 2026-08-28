@@ -1,9 +1,11 @@
 package execenv
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -984,6 +986,100 @@ func TestWriteRuntimeConfigFileIsIdempotent(t *testing.T) {
 	}
 	if !strings.HasPrefix(s, userContent) {
 		t.Errorf("user content must remain intact at the top of the file, got:\n%s", s)
+	}
+}
+
+func TestWriteRuntimeConfigFileAtomicFailurePreservesOriginal(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	original := []byte("# User AGENTS.md\n\nThese bytes must survive a failed staging write.\n")
+	if err := os.WriteFile(path, original, 0o644); err != nil {
+		t.Fatalf("seed original: %v", err)
+	}
+
+	injectedErr := errors.New("injected partial-write failure")
+	err := writeRuntimeConfigFileAtomicWith(path, []byte("replacement that must never land"), 0o644, func(file *os.File, payload []byte) error {
+		if _, err := file.Write(payload[:8]); err != nil {
+			return err
+		}
+		return injectedErr
+	})
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("write error = %v, want injected error", err)
+	}
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read target after failed write: %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("failed staging write changed user file\n got: %q\nwant: %q", got, original)
+	}
+	temps, err := filepath.Glob(filepath.Join(dir, ".AGENTS.md.multica-*.tmp"))
+	if err != nil {
+		t.Fatalf("glob staging files: %v", err)
+	}
+	if len(temps) != 0 {
+		t.Fatalf("failed staging write left temp files: %v", temps)
+	}
+}
+
+func TestWriteRuntimeConfigFilePreservesExistingSymlink(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	target := filepath.Join(dir, "shared-instructions.md")
+	link := filepath.Join(dir, "AGENTS.md")
+	const original = "# Shared instructions\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatalf("seed symlink target: %v", err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlink unavailable on this platform: %v", err)
+	}
+
+	if err := writeRuntimeConfigFile(link, "runtime brief"); err != nil {
+		t.Fatalf("write through symlink: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatalf("lstat link: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("runtime config write replaced the user's symlink")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read symlink target: %v", err)
+	}
+	if !strings.HasPrefix(string(got), original) || !strings.Contains(string(got), "runtime brief") {
+		t.Fatalf("symlink target did not receive preserved user content plus brief:\n%s", got)
+	}
+}
+
+func TestWriteRuntimeConfigFilePreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not expose Unix permission bits consistently")
+	}
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "AGENTS.md")
+	if err := os.WriteFile(path, []byte("user rules\n"), 0o600); err != nil {
+		t.Fatalf("seed restricted file: %v", err)
+	}
+
+	if err := writeRuntimeConfigFile(path, "runtime brief"); err != nil {
+		t.Fatalf("inject: %v", err)
+	}
+	if err := CleanupRuntimeConfig(dir, "codex"); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat after round trip: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("permissions after atomic inject+cleanup = %04o, want 0600", got)
 	}
 }
 
