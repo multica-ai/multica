@@ -1,5 +1,97 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
 
+const LOCAL_NETWORK_USAGE_DESCRIPTION =
+  "Allow Multica to connect to your self-hosted server on the local network.";
+
+type IosInfoPlist = {
+  NSAppTransportSecurity: {
+    NSAllowsLocalNetworking: true;
+    NSExceptionDomains?: Record<
+      string,
+      {
+        NSExceptionAllowsInsecureHTTPLoads: boolean;
+        NSIncludesSubdomains: boolean;
+      }
+    >;
+  };
+  NSLocalNetworkUsageDescription?: string;
+};
+
+type NativeNetworkConfig = {
+  androidUsesCleartextTraffic: boolean;
+  iosInfoPlist?: IosInfoPlist;
+};
+
+function normalizeHostname(rawHostname: string): string {
+  return rawHostname
+    .toLowerCase()
+    .replace(/^\[/, "")
+    .replace(/\]$/, "")
+    .replace(/\.$/, "");
+}
+
+function isIpAddress(hostname: string): boolean {
+  const parts = hostname.split(".").map(Number);
+  return (
+    hostname.includes(":") ||
+    (parts.length === 4 &&
+      parts.every(
+        (part) => Number.isInteger(part) && part >= 0 && part <= 255,
+      ))
+  );
+}
+
+function isLocalName(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname.endsWith(".localhost") ||
+    hostname.endsWith(".local") ||
+    !hostname.includes(".")
+  );
+}
+
+/**
+ * Generates native transport exceptions only when the configured API uses
+ * cleartext HTTP. HTTPS builds keep the platform security defaults intact.
+ */
+export function getNativeNetworkConfig(
+  apiUrl: string | undefined,
+): NativeNetworkConfig {
+  let url: URL;
+  try {
+    url = new URL(apiUrl ?? "");
+  } catch {
+    return { androidUsesCleartextTraffic: false };
+  }
+
+  if (url.protocol !== "http:") {
+    return { androidUsesCleartextTraffic: false };
+  }
+
+  const hostname = normalizeHostname(url.hostname);
+  const domainExceptions = isIpAddress(hostname) || isLocalName(hostname)
+    ? {}
+    : {
+        NSExceptionDomains: {
+          [hostname]: {
+            NSExceptionAllowsInsecureHTTPLoads: true,
+            NSIncludesSubdomains: false,
+          },
+        },
+      };
+
+  return {
+    androidUsesCleartextTraffic: true,
+    iosInfoPlist: {
+      NSAppTransportSecurity: {
+        NSAllowsLocalNetworking: true,
+        ...domainExceptions,
+      },
+      NSLocalNetworkUsageDescription: LOCAL_NETWORK_USAGE_DESCRIPTION,
+    },
+  };
+}
+
 /**
  * Dynamic Expo config — replaces app.json so we can read APP_ENV at runtime
  * and switch bundleIdentifier / display name for dev / staging / production.
@@ -13,6 +105,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
   const env = process.env.APP_ENV ?? "development";
   const isProd = env === "production";
   const isStaging = env === "staging";
+  const nativeNetworkConfig = getNativeNetworkConfig(
+    process.env.EXPO_PUBLIC_API_URL,
+  );
 
   return {
     ...config,
@@ -31,6 +126,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // iOS icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {
+      ...config.ios,
       supportsTablet: false,
       // Pins DEVELOPMENT_TEAM on every prebuild. Leaving it unset is the normal
       // path — `expo run:ios` then resolves a signing identity from the Keychain
@@ -57,6 +153,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         : isStaging
           ? "ai.multica.mobile.staging"
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
+      ...(nativeNetworkConfig.iosInfoPlist
+        ? {
+            infoPlist: {
+              ...config.ios?.infoPlist,
+              ...nativeNetworkConfig.iosInfoPlist,
+            },
+          }
+        : {}),
     },
     plugins: [
       "expo-router",
@@ -79,6 +183,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       [
         "expo-build-properties",
         {
+          android: {
+            usesCleartextTraffic:
+              nativeNetworkConfig.androidUsesCleartextTraffic,
+          },
           ios: {
             buildReactNativeFromSource: true,
           },
