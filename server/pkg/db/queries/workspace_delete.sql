@@ -12,17 +12,17 @@ SELECT set_config('multica.workspace_teardown', 'on', true);
 -- takes it per transaction (migration 272) and the backfill commands take it
 -- per session. An in-flight rollup finishes first, then no new rollup can
 -- write the workspace's aggregates until this delete commits. The caller
--- bounds this wait with SET LOCAL lock_timeout — batch jobs hold 4246 for
+-- bounds this wait with SET LOCAL lock_timeout, because batch jobs hold 4246 for
 -- minutes, and an unbounded wait here hangs the delete request (MUL-5983).
 SELECT pg_advisory_xact_lock(4246);
 
 -- name: LockWorkspaceTaskOwnerAgents :exec
--- The three LockWorkspaceTaskOwner* statements are a write fence, not a lookup —
+-- The three LockWorkspaceTaskOwner* statements are a write fence, not a lookup.
 -- they deliberately return nothing, so a workspace with a huge owner set costs
 -- the API process no memory at all.
 --
 -- agent_task_queue has no workspace_id, so a task becomes this workspace's
--- problem through agent_id, issue_id or runtime_id — and inserting such a task
+-- problem through agent_id, issue_id or runtime_id, and inserting such a task
 -- requires FOR KEY SHARE on the referenced owner row, which conflicts with
 -- FOR UPDATE. Holding these locks for the rest of the teardown transaction
 -- therefore blocks any enqueue (or reassignment) that would add a task to this
@@ -111,8 +111,8 @@ FOR UPDATE;
 --
 -- Single-key equality is deliberate. All three ownership paths must stay (nothing
 -- enforces that a task's agent/runtime/issue share a workspace), but expressing
--- them as `OR agent_id IN (subquery) OR …` — or as a UNION of joins, or as
--- `= ANY($1::uuid[])` over a whole workspace's agents — makes the planner
+-- them as `OR agent_id IN (subquery) OR …`, or as a UNION of joins, or as
+-- `= ANY($1::uuid[])` over a whole workspace's agents, makes the planner
 -- estimate a proportional share of the global table and fall back to a Seq Scan
 -- on agent_task_queue. A single-key equality is the only form whose row estimate
 -- stays small enough to be index-driven regardless of how the workspace's tasks
@@ -121,7 +121,7 @@ FOR UPDATE;
 -- `id > $2 ORDER BY id LIMIT $3` against idx_agent_task_queue_agent_id_keyset
 -- (migration 278) bounds the SCAN, not just the result: each page is an index
 -- range scan that starts where the previous one stopped. Bounding only the result
--- — `ORDER BY id LIMIT n` against the (agent_id, status) index — puts a Sort over
+-- using `ORDER BY id LIMIT n` against the (agent_id, status) index puts a Sort over
 -- the agent's entire task set in front of every page, so a busy agent costs
 -- roughly O(N² / page) for the sweep.
 --
@@ -300,6 +300,15 @@ ws_channel_installations AS MATERIALIZED (
 ),
 ws_lark_installations AS MATERIALIZED (
     SELECT id FROM lark_installation WHERE workspace_id = $1
+),
+-- Tool action and approval rows are deletion leaves. Remove them in this early
+-- workspace-scoped stage so both are gone before the later agent step removes
+-- policy history and current policy rows.
+deleted_agent_tool_action_events AS (
+    DELETE FROM agent_tool_action_event WHERE workspace_id = $1
+),
+deleted_agent_tool_approval_requests AS (
+    DELETE FROM agent_tool_approval_request WHERE workspace_id = $1
 ),
 -- One of three explicit task_token paths. This is the workspace-keyed one;
 -- DeleteTaskBatch covers task_id and DeleteTaskTokensByAgent covers agent_id, so
@@ -647,6 +656,19 @@ deleted_packages AS (
 DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 
 -- name: DeleteWorkspaceAgents :exec
+-- Policy history and current policy rows are application-owned agent children.
+-- The earlier DeleteWorkspaceLeafData step has already removed action events
+-- and approval requests before this statement runs.
+WITH
+deleted_agent_tool_policy_rules AS (
+    DELETE FROM agent_tool_policy_rule WHERE workspace_id = $1
+),
+deleted_agent_tool_policy_revisions AS (
+    DELETE FROM agent_tool_policy_revision WHERE workspace_id = $1
+),
+deleted_agent_tool_policies AS (
+    DELETE FROM agent_tool_policy WHERE workspace_id = $1
+)
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
 -- name: DeleteWorkspaceRuntimesAndProjects :exec
