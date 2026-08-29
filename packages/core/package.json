@@ -171,7 +171,7 @@
     "zustand": "catalog:"
   },
   "peerDependencies": {
-    "react": "catalog:"
+    "react": ">=19.2.0 <20"
   },
   "devDependencies": {
     "@multica/eslint-config": "workspace:*",
