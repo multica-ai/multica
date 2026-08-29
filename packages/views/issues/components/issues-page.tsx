@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { ListTodo } from "lucide-react";
 import type {
   Issue,
@@ -14,6 +15,11 @@ import { RefreshablePageIcon } from "../../layout/refreshable-page-icon";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
+import {
+  LifeOSFocusStrip,
+  lifeOSFocusForIssue,
+  useLifeOSFocus,
+} from "./lifeos-focus-strip";
 
 function IssuesSurfaceHeader({
   issues,
@@ -22,6 +28,8 @@ function IssuesSurfaceHeader({
   facetCountsExact,
   tableFacetCounts,
   onTableFacetChange,
+  focus,
+  onFocusChange,
 }: {
   issues: Issue[];
   workingAgents: WorkingAgentSummary[] | undefined;
@@ -29,6 +37,8 @@ function IssuesSurfaceHeader({
   facetCountsExact: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange: (facet: IssueTableFacetSpec | null) => void;
+  focus: ReturnType<typeof useLifeOSFocus>[0];
+  onFocusChange: ReturnType<typeof useLifeOSFocus>[1];
 }) {
   const { t } = useT("issues");
   const dateFilter = useViewStore((s) => s.dateFilter);
@@ -51,6 +61,11 @@ function IssuesSurfaceHeader({
         tableFacetCounts={tableFacetCounts}
         onTableFacetChange={onTableFacetChange}
       />
+      <LifeOSFocusStrip
+        issues={issues}
+        value={focus}
+        onChange={onFocusChange}
+      />
     </>
   );
 }
@@ -58,6 +73,12 @@ function IssuesSurfaceHeader({
 export function IssuesPage() {
   const { t } = useT("issues");
   const scope = useIssuesScope("issues");
+  const [focus, setFocus] = useLifeOSFocus();
+  const focusFilter = useCallback(
+    (issue: Issue) =>
+      focus === "all" || lifeOSFocusForIssue(issue) === focus,
+    [focus],
+  );
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -65,6 +86,7 @@ export function IssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
+        clientFilter={focusFilter}
         renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
@@ -73,6 +95,8 @@ export function IssuesPage() {
             facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
+            focus={focus}
+            onFocusChange={setFocus}
           />
         )}
         renderEmpty={() => (

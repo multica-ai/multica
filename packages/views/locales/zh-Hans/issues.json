@@ -101,6 +101,15 @@
     "empty_title": "还没有任务",
     "move_failed": "移动任务失败"
   },
+  "focus": {
+    "label": "当前关注范围",
+    "all": "全部",
+    "decision": "需要决策",
+    "chairman_action": "需要你推进",
+    "review": "待验收",
+    "ai_working": "AI 处理中",
+    "waiting": "候选与等待"
+  },
   "status": {
     "backlog": "待规划",
     "todo": "待办",

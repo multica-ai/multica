@@ -101,6 +101,15 @@
     "empty_title": "まだタスクがありません",
     "move_failed": "タスクを移動できませんでした"
   },
+  "focus": {
+    "label": "現在の注目範囲",
+    "all": "すべて",
+    "decision": "判断が必要",
+    "chairman_action": "対応が必要",
+    "review": "確認待ち",
+    "ai_working": "AI が処理中",
+    "waiting": "候補と待機"
+  },
   "status": {
     "backlog": "バックログ",
     "todo": "未着手",

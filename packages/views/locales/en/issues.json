@@ -103,6 +103,15 @@
     "empty_title": "No issues yet",
     "move_failed": "Failed to move issue"
   },
+  "focus": {
+    "label": "Current focus",
+    "all": "All",
+    "decision": "Needs decision",
+    "chairman_action": "Needs your action",
+    "review": "Needs review",
+    "ai_working": "AI working",
+    "waiting": "Candidates & waiting"
+  },
   "status": {
     "backlog": "Backlog",
     "todo": "Todo",

@@ -101,6 +101,15 @@
     "empty_title": "아직 태스크가 없습니다",
     "move_failed": "태스크를 이동하지 못했습니다"
   },
+  "focus": {
+    "label": "현재 집중 범위",
+    "all": "전체",
+    "decision": "결정 필요",
+    "chairman_action": "직접 처리 필요",
+    "review": "검토 대기",
+    "ai_working": "AI 처리 중",
+    "waiting": "후보 및 대기"
+  },
   "status": {
     "backlog": "백로그",
     "todo": "할 일",

@@ -240,6 +240,59 @@ class ContextDatabaseTests(unittest.TestCase):
             )
             self.assertFalse(payload["result"]["raw_content_stored"])
 
+    def test_background_sync_reports_exhausted_summaries_as_degraded(self) -> None:
+        lifeos_root = Path("/tmp/lifeos-root")
+        controller_root = Path("/tmp/lifeos-controller")
+
+        def controller_result(_lifeos_root, _controller_root, *arguments):
+            if arguments[0] == "process-summaries":
+                return {
+                    "processed": [],
+                    "coverage": {
+                        "summaries_pending": 0,
+                        "ceo_reviews_pending": 0,
+                        "summary_dead_letters": 2,
+                    },
+                }
+            if arguments[0] == "triage-ceo":
+                return {
+                    "processed": [],
+                    "coverage": {
+                        "summaries_pending": 0,
+                        "ceo_reviews_pending": 0,
+                        "summary_dead_letters": 2,
+                    },
+                }
+            raise AssertionError(arguments)
+
+        provenance = {
+            "status": "committed",
+            "workbench_git_head": "a" * 40,
+            "controller_git_head": "b" * 40,
+        }
+        with mock.patch.object(
+            lifeos_workbench,
+            "implementation_provenance",
+            return_value=provenance,
+        ), mock.patch.object(
+            lifeos_workbench,
+            "persist_background_sync_receipt",
+            return_value=Path("/tmp/background-sync-receipt.json"),
+        ), mock.patch.object(
+            lifeos_workbench,
+            "ensure_running",
+        ), mock.patch.object(
+            lifeos_workbench,
+            "_controller_json",
+            side_effect=controller_result,
+        ), mock.patch("builtins.print"):
+            result = lifeos_workbench.background_sync(
+                lifeos_root,
+                controller_root,
+            )
+
+        self.assertEqual(result["status"], "degraded")
+
     def test_background_sync_rejects_uncommitted_runtime_implementation(self) -> None:
         with mock.patch.object(
             lifeos_workbench,

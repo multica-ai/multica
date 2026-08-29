@@ -752,10 +752,14 @@ def background_sync(
         raise WorkbenchError("LifeOS 后台实现提交在同步期间发生变化")
     result: Dict[str, object] = {
         "status": (
-            "completed"
-            if int(coverage.get("summaries_pending") or 0) == 0
-            and int(coverage.get("ceo_reviews_pending") or 0) == 0
-            else "deferred"
+            "degraded"
+            if int(coverage.get("summary_dead_letters") or 0) > 0
+            else (
+                "completed"
+                if int(coverage.get("summaries_pending") or 0) == 0
+                and int(coverage.get("ceo_reviews_pending") or 0) == 0
+                else "deferred"
+            )
         ),
         "summaries_processed": summaries_processed,
         "ceo_reviews_processed": reviews_processed,
