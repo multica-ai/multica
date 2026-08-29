@@ -30,10 +30,14 @@ function hasLegacyToken(): boolean {
 }
 
 // Derive WebSocket URL from the page origin so self-hosted / LAN deployments
-// work without an explicit runtime wsUrl. The Next.js runtime proxy handles
-// /ws -> backend when the deployment keeps WebSockets same-origin.
+// work without an explicit runtime wsUrl. In local development on localhost:3000,
+// connect directly to the backend on port 18614.
 function deriveWsUrl(): string | undefined {
   if (typeof window === "undefined") return undefined;
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  if (window.location.hostname === "localhost" && window.location.port === "3000") {
+    return "ws://localhost:18614/ws";
+  }
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${proto}//${window.location.host}/ws`;
 }

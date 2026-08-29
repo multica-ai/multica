@@ -1,8 +1,35 @@
 package cerebra
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 )
+
+var paramSizeRegex = regexp.MustCompile(`(?i)(?:^|[-_.:/@ ])(\d+(?:\.\d+)?)\s*([bmk])(?:$|[-_.:/@ ])`)
+
+// extractParamSizeInBillions parses parameter size from model names (e.g. "qwen2.5:0.5b" -> 0.5, "llama3.3:70b" -> 70, "smollm:135m" -> 0.135).
+func extractParamSizeInBillions(name string) (float64, bool) {
+	matches := paramSizeRegex.FindStringSubmatch(name)
+	if len(matches) < 3 {
+		return 0, false
+	}
+	val, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	unit := strings.ToLower(matches[2])
+	switch unit {
+	case "m":
+		return val / 1000.0, true
+	case "k":
+		return val / 1000000.0, true
+	case "b":
+		return val, true
+	default:
+		return val, true
+	}
+}
 
 // ModelProfile contains metadata and capability classification for a discovered model.
 type ModelProfile struct {
@@ -19,16 +46,15 @@ func ClassifyModelTier(modelID string) Tier {
 		return TierStandard
 	}
 
-	// Strip provider prefix (e.g. "opencode/", "anthropic/", "openai/") for model name matching.
+	// Strip provider prefix (e.g. "opencode/", "anthropic/", "openai/", "ollama/") for model name matching.
 	baseName := lower
 	if idx := strings.LastIndex(lower, "/"); idx != -1 {
 		baseName = lower[idx+1:]
 	}
 
-	// 1. Simple indicators (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free", "x-preview-f-free").
-	// Note: "preview" alone is a release tag, not always a tier indicator (e.g. "o1-preview", "gemini-1.5-pro-preview").
+	// 1. Explicit Simple flagship tags (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free").
 	simpleKeywords := []string{
-		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "lite", "x-preview",
+		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "lite", "x-preview", "tiny",
 	}
 	for _, kw := range simpleKeywords {
 		if hasModelSegment(baseName, kw) {
@@ -36,7 +62,7 @@ func ClassifyModelTier(modelID string) Tier {
 		}
 	}
 
-	// 2. Heavy indicators: High-parameter, advanced reasoning, architecture-capable models.
+	// 2. Explicit Heavy reasoning/flagship tags (e.g. "o1", "o3", "r1", "opus", "nemotron-3-ultra", "pickle").
 	heavyKeywords := []string{
 		"ultra", "opus", "pickle", "large", "max", "reasoning", "nemotron-3-ultra", "claude-3-opus",
 		"r1", "o1", "o3", "pro",
@@ -47,10 +73,24 @@ func ClassifyModelTier(modelID string) Tier {
 		}
 	}
 
-	// 3. Standard indicators: Balanced coding, 30B+ parameter, debugging, sonnet, general instruct models.
+	// 3. Dynamic Parameter-Size Auto-Detection for ANY newly downloaded model:
+	if size, ok := extractParamSizeInBillions(baseName); ok {
+		if size <= 4.0 {
+			// <= 4B parameters (e.g. 0.5B, 1B, 1.5B, 2B, 3B, 3.8B) -> Simple Tier
+			return TierSimple
+		} else if size >= 30.0 {
+			// >= 30B parameters (e.g. 32B, 70B, 72B, 110B, 405B) -> Heavy Tier
+			return TierHeavy
+		} else {
+			// 4B to 30B parameters (e.g. 7B, 8B, 9B, 12B, 14B, 27B) -> Standard Tier
+			return TierStandard
+		}
+	}
+
+	// 4. Standard indicators: Balanced coding, debugging, sonnet, general instruct models.
 	standardKeywords := []string{
 		"sonnet", "coder", "instruct", "lightning", "standard", "code", "starcoder", "deepseek-coder",
-		"gpt-4", "gpt-3.5", "nemotron-3.5", "3.5",
+		"gpt-4", "gpt-3.5", "nemotron-3.5", "3.5", "qwen", "mistral", "gemma", "llama",
 	}
 	for _, kw := range standardKeywords {
 		if hasModelSegment(baseName, kw) {
@@ -151,71 +191,126 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 	return tierMap
 }
 
+func isZeroCostModel(model string) bool {
+	lower := strings.ToLower(model)
+	return strings.HasPrefix(lower, "ollama/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
+}
+
 func selectBestSimpleModel(candidates []string) string {
-	// Simple tier: prefer lightweight, fast, conversational models
+	if len(candidates) == 0 {
+		return ""
+	}
+	// 1. Separate zero-cost (free/local) from paid candidates to avoid credit drain
+	var freeCandidates []string
+	var paidCandidates []string
 	for _, c := range candidates {
+		if isZeroCostModel(c) {
+			freeCandidates = append(freeCandidates, c)
+		} else {
+			paidCandidates = append(paidCandidates, c)
+		}
+	}
+
+	searchPool := freeCandidates
+	if len(searchPool) == 0 {
+		searchPool = paidCandidates
+	}
+
+	// 2. Prefer smallest tool-capable parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
+	var bestCandidate string
+	minSize := 999999.0
+	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "mimo") || strings.Contains(lower, "hy3") || strings.Contains(lower, "spark") {
+		if strings.Contains(lower, "smollm") {
+			continue // smollm does not support tool calling
+		}
+		if size, ok := extractParamSizeInBillions(c); ok {
+			effectiveSize := size
+			if strings.HasPrefix(strings.ToLower(c), "ollama/") {
+				effectiveSize -= 0.1 // Local priority
+			}
+			if effectiveSize < minSize {
+				minSize = effectiveSize
+				bestCandidate = c
+			}
+		}
+	}
+	if bestCandidate != "" {
+		return bestCandidate
+	}
+
+	// 3. Prefer fast free cloud models (flash, mimo, mini, nano, haiku)
+	for _, c := range searchPool {
+		lower := strings.ToLower(c)
+		if strings.Contains(lower, "flash") || strings.Contains(lower, "mini") || strings.Contains(lower, "nano") || strings.Contains(lower, "mimo") || strings.Contains(lower, "haiku") {
 			return c
 		}
 	}
-	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "haiku") || strings.Contains(lower, "mini") || strings.Contains(lower, "nano") {
-			return c
-		}
-	}
-	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "flash") {
-			return c
-		}
-	}
-	return candidates[0]
+	return searchPool[0]
 }
 
 func selectBestStandardModel(candidates []string) string {
-	// Standard tier: prefer strong coding, debugging, and tool execution models
+	if len(candidates) == 0 {
+		return ""
+	}
+	var freeCandidates []string
+	var paidCandidates []string
 	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "3.5") || strings.Contains(lower, "lightning") {
+		if isZeroCostModel(c) {
+			freeCandidates = append(freeCandidates, c)
+		} else {
+			paidCandidates = append(paidCandidates, c)
+		}
+	}
+
+	searchPool := freeCandidates
+	if len(searchPool) == 0 {
+		searchPool = paidCandidates
+	}
+
+	// 1. Prefer local Ollama 7B-14B coding models (e.g. qwen3:8b, qwen2.5-coder)
+	for _, c := range searchPool {
+		if strings.HasPrefix(strings.ToLower(c), "ollama/") {
 			return c
 		}
 	}
-	for _, c := range candidates {
+
+	// 2. Prefer balanced coding / instruct models
+	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "sonnet") || strings.Contains(lower, "coder") {
+		if strings.Contains(lower, "sonnet") || strings.Contains(lower, "coder") || strings.Contains(lower, "lightning") || strings.Contains(lower, "3.5") || strings.Contains(lower, "70b") {
 			return c
 		}
 	}
-	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "preview") {
-			return c
-		}
-	}
-	return candidates[0]
+	return searchPool[0]
 }
 
 func selectBestHeavyModel(candidates []string) string {
-	// Prefer ultra > opus > pickle > r1 > pro > first
+	if len(candidates) == 0 {
+		return ""
+	}
+	var freeCandidates []string
+	var paidCandidates []string
 	for _, c := range candidates {
+		if isZeroCostModel(c) {
+			freeCandidates = append(freeCandidates, c)
+		} else {
+			paidCandidates = append(paidCandidates, c)
+		}
+	}
+
+	searchPool := freeCandidates
+	if len(searchPool) == 0 {
+		searchPool = paidCandidates
+	}
+
+	// Prefer frontier reasoning models (r1, ultra, opus, o1, o3, 70b, 405b)
+	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "ultra") {
+		if strings.Contains(lower, "r1") || strings.Contains(lower, "ultra") || strings.Contains(lower, "opus") || strings.Contains(lower, "o1") || strings.Contains(lower, "o3") {
 			return c
 		}
 	}
-	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "opus") {
-			return c
-		}
-	}
-	for _, c := range candidates {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "pickle") || strings.Contains(lower, "r1") {
-			return c
-		}
-	}
-	return candidates[0]
+	return searchPool[0]
 }
+

@@ -40,6 +40,13 @@ var quotaSignals = []string{
 	"upstream request failed",
 	"model not found",
 	"model_not_found",
+	"does not support tools",
+	"not support tools",
+	"insufficient credits",
+	"insufficient credit",
+	"purchased credits",
+	"purchase more",
+	"insufficient balance",
 }
 
 // contextLengthSignals indicate that the context window was exceeded.
