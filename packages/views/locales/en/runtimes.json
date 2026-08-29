@@ -328,8 +328,8 @@
     "unassigned_title": "Custom runtimes without a machine",
     "unassigned_description": "These workspace runtimes are not connected to any machine. Connect a machine with the matching commands, or use a row's actions to edit or delete them.",
     "dialog_title": "Custom runtimes",
-    "dialog_description": "Custom runtime definitions are workspace-wide and sync to every connected machine. A machine registers the runtime when the command is available there.",
-    "create_dialog_description": "Set up a custom command from {{machine}}. The definition syncs workspace-wide and registers only on machines where that command is available.",
+    "dialog_description": "Custom runtime definitions are workspace-wide and sync to every connected machine. A machine registers the runtime when its command or API endpoint is available there.",
+    "create_dialog_description": "Set up a custom command or API provider from {{machine}}. The definition syncs workspace-wide and registers only when its command or endpoint is available.",
     "learn_more": "View setup guide",
     "close": "Close",
     "add_new": "New custom runtime",
@@ -341,7 +341,7 @@
     "builtin_section_aria": "Supported built-in protocol families",
     "builtin_reference": "Reference",
     "empty_title": "Create your first custom runtime",
-    "empty_description": "Pick a base protocol family, then point Multica at the command to run.",
+    "empty_description": "Pick a base protocol family, then configure its command or API endpoint.",
     "badge_builtin": "Built-in",
     "badge_custom": "Custom",
     "badge_disabled": "Disabled",
@@ -353,6 +353,10 @@
     "detail": {
       "base_family": "Base protocol family",
       "command": "Command",
+      "endpoint": "API endpoint",
+      "credential_env": "Credential environment",
+      "default_model": "Default model",
+      "not_configured": "Not configured",
       "description": "Description",
       "no_description": "No description",
       "edit": "Edit",
@@ -373,10 +377,17 @@
       "display_name_placeholder": "e.g. My custom Claude…",
       "command_name_label": "Command",
       "command_name_placeholder": "e.g. agent --model composer-2.5…",
+      "api_base_url_label": "API endpoint",
+      "api_base_url_hint": "Use an HTTPS endpoint or a local loopback HTTP endpoint. Do not include a secret.",
+      "credential_env_label": "Credential environment variable",
+      "credential_env_hint": "Enter the approved environment variable name only. The secret stays on the daemon machine.",
+      "default_model_label": "Default model",
+      "default_model_hint": "Optional. The daemon uses this model when a task does not specify one.",
       "description_label": "Description",
       "description_placeholder": "What this runtime is for (optional)…",
       "error_display_name_required": "Display name is required.",
       "error_command_required": "Command is required.",
+      "error_api_base_url_required": "API endpoint is required.",
       "error_command_unclosed_quote": "Close the quote before saving.",
       "error_command_trailing_escape": "Complete or remove the trailing backslash before saving.",
       "error_command_shell_syntax": "Shell pipelines, redirects, and control operators are not supported. Use a wrapper script for that.",
@@ -404,6 +415,20 @@
       "toast_deleted": "Custom runtime deleted from workspace",
       "error_bound": "This runtime can't be deleted while agents are still using it.",
       "error_generic": "Failed to delete the runtime."
+    }
+  },
+  "provider_support": {
+    "title": "Supported provider runtimes",
+    "description": "Multica can run subscription CLIs and daemon-managed HTTP or local-model providers through the same task lifecycle.",
+    "security_note": "API providers are detected from the daemon environment. Configure credentials on the daemon host, never in this browser. Multica does not display or persist API keys.",
+    "setup": {
+      "subscription": "Subscription CLI",
+      "api_key": "API key",
+      "local": "Local server"
+    },
+    "endpoint": {
+      "sign_in": "Sign in to the CLI",
+      "daemon_configured": "Daemon configured"
     }
   },
   "usage": {

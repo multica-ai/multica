@@ -37,25 +37,32 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
   }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
-  deriveRuntimeHealth: () => "online",
-  runtimeUsageOptions: () => ({ kind: "usage" }),
-  runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),
-  parseRuntimeProfileBoundConflict: () => null,
-  useDeleteRuntimeProfile: () => ({
-    mutate: vi.fn(),
-    isPending: false,
-    mutateAsync: vi.fn(),
-  }),
-  useCreateRuntimeProfile: () => ({
-    isPending: false,
-    mutateAsync: vi.fn(),
-  }),
-  useUpdateRuntimeProfile: () => ({
-    isPending: false,
-    mutateAsync: vi.fn(),
-  }),
-}));
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    deriveRuntimeHealth: () => "online",
+    runtimeUsageOptions: () => ({ kind: "usage" }),
+    runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),
+    parseRuntimeProfileBoundConflict: () => null,
+    useDeleteRuntimeProfile: () => ({
+      mutate: vi.fn(),
+      isPending: false,
+      mutateAsync: vi.fn(),
+    }),
+    useCreateRuntimeProfile: () => ({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    }),
+    useUpdateRuntimeProfile: () => ({
+      isPending: false,
+      mutateAsync: vi.fn(),
+    }),
+  };
+});
 
 vi.mock("@multica/core/agents", () => ({
   deriveWorkload: () => "idle",

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -27,6 +28,82 @@ func insertRuntimeProfileFixture(t *testing.T, ctx context.Context, displayName,
 		testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, profileID)
 	})
 	return profileID
+}
+
+func TestNormalizeRuntimeProfileAPIFieldsUsesCredentialReferencesOnly(t *testing.T) {
+	baseURL := " https://openrouter.example/v1/ "
+	credentialEnv := "OPENROUTER_API_KEY"
+	model := " openai/gpt-4o-mini "
+
+	apiBaseURL, storedCredentialEnv, defaultModel, err := normalizeRuntimeProfileAPIFields(
+		"openrouter", &baseURL, &credentialEnv, &model, nil,
+	)
+	if err != nil {
+		t.Fatalf("normalize API fields: %v", err)
+	}
+	if !apiBaseURL.Valid || apiBaseURL.String != "https://openrouter.example/v1" {
+		t.Fatalf("api_base_url = %#v", apiBaseURL)
+	}
+	if !storedCredentialEnv.Valid || storedCredentialEnv.String != credentialEnv {
+		t.Fatalf("credential_env = %#v", storedCredentialEnv)
+	}
+	if !defaultModel.Valid || defaultModel.String != "openai/gpt-4o-mini" {
+		t.Fatalf("default_model = %#v", defaultModel)
+	}
+
+	secret := "credential-value-never-persist"
+	if _, _, _, err := normalizeRuntimeProfileAPIFields(
+		"openrouter", &baseURL, &secret, nil, nil,
+	); err == nil {
+		t.Fatal("expected a secret value to be rejected as a credential reference")
+	}
+
+	unknownEnv := "HOME"
+	if _, _, _, err := normalizeRuntimeProfileAPIFields(
+		"openrouter", &baseURL, &unknownEnv, nil, nil,
+	); err == nil {
+		t.Fatal("expected an unapproved credential environment to be rejected")
+	}
+}
+
+func TestNormalizeRuntimeProfileAPIFieldsRejectsCLIAndUnsafeLocalProfiles(t *testing.T) {
+	baseURL := "https://openrouter.example/v1"
+	if _, _, _, err := normalizeRuntimeProfileAPIFields(
+		"codex", &baseURL, nil, nil, nil,
+	); err == nil {
+		t.Fatal("expected API fields on a CLI profile to be rejected")
+	}
+
+	unsafeLocalURL := "http://192.0.2.10:11434/v1"
+	if _, _, _, err := normalizeRuntimeProfileAPIFields(
+		"ollama", &unsafeLocalURL, nil, nil, nil,
+	); err == nil {
+		t.Fatal("expected a non-loopback local endpoint to be rejected")
+	}
+}
+
+func TestRuntimeProfileToResponseExposesNoCredentialValue(t *testing.T) {
+	profile := db.RuntimeProfile{
+		DisplayName:    "OpenRouter profile",
+		ProtocolFamily: "openrouter",
+		CommandName:    "",
+		ApiBaseUrl:     pgtype.Text{String: "https://openrouter.example/v1", Valid: true},
+		CredentialEnv:  pgtype.Text{String: "OPENROUTER_API_KEY", Valid: true},
+		DefaultModel:   pgtype.Text{String: "openai/gpt-4o-mini", Valid: true},
+		FixedArgs:      []byte("[]"),
+	}
+
+	body, err := json.Marshal(runtimeProfileToResponse(profile))
+	if err != nil {
+		t.Fatalf("marshal profile response: %v", err)
+	}
+	encoded := string(body)
+	if strings.Contains(encoded, "credential-value-never-persist") || strings.Contains(encoded, "api_key") {
+		t.Fatalf("response contains a credential value or secret-shaped field: %s", encoded)
+	}
+	if !strings.Contains(encoded, "OPENROUTER_API_KEY") {
+		t.Fatalf("response omitted the approved credential reference: %s", encoded)
+	}
 }
 
 // insertProfileRuntimeFixture creates an agent_runtime instance bound to the

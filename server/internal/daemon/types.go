@@ -19,6 +19,11 @@ type AgentEntry struct {
 	// Daemon.resolveAgentEntry and MUL-4486.
 	Command string
 	Model   string // model override (optional)
+	// APIBaseURL marks an API-backed provider discovered by the daemon. API
+	// providers do not have a local executable; apiKey stays private to the
+	// daemon package and is never part of a registration payload.
+	APIBaseURL string
+	apiKey     string
 }
 
 // Runtime represents a registered daemon runtime.

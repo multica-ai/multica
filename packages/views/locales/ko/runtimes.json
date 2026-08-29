@@ -340,6 +340,10 @@
     "detail": {
       "base_family": "기본 프로토콜 제품군",
       "command": "명령",
+      "endpoint": "API 엔드포인트",
+      "credential_env": "자격 증명 환경 변수",
+      "default_model": "기본 모델",
+      "not_configured": "구성되지 않음",
       "description": "설명",
       "no_description": "설명 없음",
       "edit": "편집",
@@ -360,10 +364,17 @@
       "display_name_placeholder": "예: 내 사용자 지정 Claude…",
       "command_name_label": "명령",
       "command_name_placeholder": "예: agent --model composer-2.5…",
+      "api_base_url_label": "API 엔드포인트",
+      "api_base_url_hint": "HTTPS 엔드포인트 또는 로컬 루프백 HTTP 엔드포인트를 사용하세요. 비밀 값을 입력하지 마세요.",
+      "credential_env_label": "자격 증명 환경 변수 이름",
+      "credential_env_hint": "승인된 환경 변수 이름만 입력하세요. 비밀 값은 데몬 시스템에 남습니다.",
+      "default_model_label": "기본 모델",
+      "default_model_hint": "선택 사항입니다. 작업에 모델이 없으면 데몬이 이 모델을 사용합니다.",
       "description_label": "설명",
       "description_placeholder": "이 런타임의 용도(선택 사항)…",
       "error_display_name_required": "표시 이름은 필수입니다.",
       "error_command_required": "명령은 필수입니다.",
+      "error_api_base_url_required": "API 엔드포인트는 필수입니다.",
       "error_command_unclosed_quote": "저장하기 전에 따옴표를 닫으세요.",
       "error_command_trailing_escape": "저장하기 전에 끝의 백슬래시를 완성하거나 제거하세요.",
       "error_command_shell_syntax": "셸 파이프, 리디렉션, 제어 연산자는 지원되지 않습니다. 이런 동작이 필요하면 래퍼 스크립트를 사용하세요.",
@@ -391,6 +402,20 @@
       "toast_deleted": "사용자 지정 런타임이 워크스페이스에서 삭제되었습니다",
       "error_bound": "아직 에이전트가 사용 중이어서 이 런타임을 삭제할 수 없습니다.",
       "error_generic": "런타임 삭제에 실패했습니다."
+    }
+  },
+  "provider_support": {
+    "title": "지원되는 프로바이더 런타임",
+    "description": "Multica는 동일한 작업 수명 주기에서 구독 CLI, 데몬 관리 HTTP, 로컬 모델 프로바이더를 실행할 수 있습니다.",
+    "security_note": "API 프로바이더는 데몬 환경에서 검색됩니다. 자격 증명은 이 브라우저가 아닌 데몬 호스트에서 구성하세요. Multica는 API 키를 표시하거나 저장하지 않습니다.",
+    "setup": {
+      "subscription": "구독 CLI",
+      "api_key": "API 키",
+      "local": "로컬 서버"
+    },
+    "endpoint": {
+      "sign_in": "CLI에 로그인",
+      "daemon_configured": "데몬 구성됨"
     }
   },
   "usage": {

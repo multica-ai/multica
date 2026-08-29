@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,11 +21,11 @@ import (
 // Custom Runtime Profiles (MUL-3284)
 //
 // A runtime_profile is a workspace-level, team-shared definition of a custom
-// runtime — e.g. an in-house Codex wrapper. Daemons pull the enabled profiles
-// for their workspace, resolve command_name on PATH, and register an
-// agent_runtime instance carrying the profile_id. The profile only changes how
-// a runtime is launched/displayed; the underlying protocol_family must be a
-// backend Multica officially supports (validated against agent.SupportedTypes).
+// runtime, such as an in-house Codex wrapper or an API provider endpoint.
+// Daemons pull enabled profiles for their workspace, resolve CLI command_name
+// on PATH or resolve API metadata against daemon-owned credentials, and
+// register an agent_runtime instance carrying the profile_id. The underlying
+// protocol_family must be a backend Multica officially supports.
 //
 // Iron rule: a profile carries NO generic per-agent args. Per-agent launch args
 // stay on agent.custom_args. The only args field is fixed_args — args every
@@ -37,6 +38,9 @@ type RuntimeProfileResponse struct {
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	CommandName    string   `json:"command_name"`
+	APIBaseURL     *string  `json:"api_base_url,omitempty"`
+	CredentialEnv  *string  `json:"credential_env,omitempty"`
+	DefaultModel   *string  `json:"default_model,omitempty"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`
@@ -60,6 +64,9 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 		DisplayName:    p.DisplayName,
 		ProtocolFamily: p.ProtocolFamily,
 		CommandName:    p.CommandName,
+		APIBaseURL:     textToPtr(p.ApiBaseUrl),
+		CredentialEnv:  textToPtr(p.CredentialEnv),
+		DefaultModel:   textToPtr(p.DefaultModel),
 		Description:    textToPtr(p.Description),
 		FixedArgs:      args,
 		Visibility:     p.Visibility,
@@ -114,10 +121,79 @@ func validateRuntimeProfileCommandName(commandName string) error {
 	return nil
 }
 
+func validateRuntimeProfileModel(model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	if len(model) > 512 {
+		return errors.New("default_model must be at most 512 characters")
+	}
+	if strings.ContainsRune(model, '\x00') || strings.ContainsAny(model, "\r\n") {
+		return errors.New("default_model cannot contain NUL or newline characters")
+	}
+	return nil
+}
+
+func hasNonEmptyString(value *string) bool {
+	return value != nil && strings.TrimSpace(*value) != ""
+}
+
+func normalizeRuntimeProfileAPIFields(protocolFamily string, baseURL, credentialEnv, defaultModel *string, fixedArgs []string) (pgtype.Text, pgtype.Text, pgtype.Text, error) {
+	if !agent.IsAPIProvider(protocolFamily) {
+		if hasNonEmptyString(baseURL) || hasNonEmptyString(credentialEnv) || hasNonEmptyString(defaultModel) {
+			return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, errors.New("API provider fields are only valid for API runtime profiles")
+		}
+		return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, nil
+	}
+	if len(fixedArgs) > 0 {
+		return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, errors.New("API runtime profiles cannot define fixed_args")
+	}
+	desc, ok := agent.ProviderByID(protocolFamily)
+	if !ok {
+		return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, errors.New("unknown API provider")
+	}
+
+	var apiBaseURL, credentialReference, model pgtype.Text
+	if baseURL != nil {
+		value := strings.TrimSpace(*baseURL)
+		if value != "" {
+			if err := agent.ValidateProviderAPIBaseURL(protocolFamily, value); err != nil {
+				return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, err
+			}
+			value = strings.TrimRight(value, "/")
+		}
+		apiBaseURL = strToText(value)
+	}
+	if credentialEnv != nil {
+		value := strings.TrimSpace(*credentialEnv)
+		if value != "" && !agent.ProviderCredentialEnvAllowed(protocolFamily, value) {
+			return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, fmt.Errorf("credential_env %q is not approved for provider %q", value, protocolFamily)
+		}
+		credentialReference = strToText(value)
+	} else if desc.RequiresKey {
+		// Store the approved variable name, not its secret value. This makes
+		// the profile self-describing while the daemon remains the only key
+		// holder.
+		credentialReference = strToText(desc.APIKeyEnv)
+	}
+	if defaultModel != nil {
+		value := strings.TrimSpace(*defaultModel)
+		if err := validateRuntimeProfileModel(value); err != nil {
+			return pgtype.Text{}, pgtype.Text{}, pgtype.Text{}, err
+		}
+		model = strToText(value)
+	}
+	return apiBaseURL, credentialReference, model, nil
+}
+
 type createRuntimeProfileRequest struct {
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	CommandName    string   `json:"command_name"`
+	APIBaseURL     *string  `json:"api_base_url"`
+	CredentialEnv  *string  `json:"credential_env"`
+	DefaultModel   *string  `json:"default_model"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Enabled        *bool    `json:"enabled"`
@@ -150,19 +226,33 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "display_name is required")
 		return
 	}
-	if !agent.IsSupportedType(req.ProtocolFamily) {
-		writeError(w, http.StatusBadRequest, "unsupported protocol_family: must be one of "+strings.Join(agent.SupportedTypes, ", "))
+	if !agent.IsProviderType(req.ProtocolFamily) {
+		writeError(w, http.StatusBadRequest, "unsupported protocol_family")
 		return
 	}
-	if req.CommandName == "" {
-		writeError(w, http.StatusBadRequest, "command_name is required")
-		return
+	if agent.IsAPIProvider(req.ProtocolFamily) {
+		if req.CommandName != "" {
+			writeError(w, http.StatusBadRequest, "API runtime profiles must not define command_name")
+			return
+		}
+	} else {
+		if req.CommandName == "" {
+			writeError(w, http.StatusBadRequest, "command_name is required")
+			return
+		}
+		if err := validateRuntimeProfileCommandName(req.CommandName); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	if err := validateRuntimeProfileCommandName(req.CommandName); err != nil {
+	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	fixedArgs, err := marshalFixedArgs(req.FixedArgs)
+	apiBaseURL, credentialEnv, defaultModel, err := normalizeRuntimeProfileAPIFields(
+		req.ProtocolFamily, req.APIBaseURL, req.CredentialEnv, req.DefaultModel, req.FixedArgs,
+	)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -177,6 +267,9 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		DisplayName:    req.DisplayName,
 		ProtocolFamily: req.ProtocolFamily,
 		CommandName:    req.CommandName,
+		ApiBaseUrl:     apiBaseURL,
+		CredentialEnv:  credentialEnv,
+		DefaultModel:   defaultModel,
 		Description:    ptrToText(req.Description),
 		FixedArgs:      fixedArgs,
 		Visibility:     runtimeProfileDefaultVisibility,
@@ -253,11 +346,14 @@ func (h *Handler) GetRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRuntimeProfileRequest struct {
-	DisplayName *string   `json:"display_name"`
-	CommandName *string   `json:"command_name"`
-	Description *string   `json:"description"`
-	FixedArgs   *[]string `json:"fixed_args"`
-	Enabled     *bool     `json:"enabled"`
+	DisplayName   *string   `json:"display_name"`
+	CommandName   *string   `json:"command_name"`
+	APIBaseURL    *string   `json:"api_base_url"`
+	CredentialEnv *string   `json:"credential_env"`
+	DefaultModel  *string   `json:"default_model"`
+	Description   *string   `json:"description"`
+	FixedArgs     *[]string `json:"fixed_args"`
+	Enabled       *bool     `json:"enabled"`
 }
 
 // UpdateRuntimeProfile applies a partial update. protocol_family is immutable
@@ -283,6 +379,14 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	existing, err := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+		ID: profileUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime profile not found")
+		return
+	}
+	isAPI := agent.IsAPIProvider(existing.ProtocolFamily)
 
 	params := db.UpdateRuntimeProfileParams{ID: profileUUID, WorkspaceID: wsUUID}
 	if req.DisplayName != nil {
@@ -295,11 +399,43 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.CommandName != nil {
 		cmd := strings.TrimSpace(*req.CommandName)
-		if err := validateRuntimeProfileCommandName(cmd); err != nil {
+		if isAPI {
+			if cmd != "" {
+				writeError(w, http.StatusBadRequest, "API runtime profiles must not define command_name")
+				return
+			}
+			params.CommandName = strToText("")
+		} else if err := validateRuntimeProfileCommandName(cmd); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		} else {
+			params.CommandName = strToText(cmd)
+		}
+	}
+	if isAPI {
+		if req.FixedArgs != nil && len(*req.FixedArgs) > 0 {
+			writeError(w, http.StatusBadRequest, "API runtime profiles cannot define fixed_args")
+			return
+		}
+		apiBaseURL, credentialEnv, defaultModel, err := normalizeRuntimeProfileAPIFields(
+			existing.ProtocolFamily, req.APIBaseURL, req.CredentialEnv, req.DefaultModel, nil,
+		)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		params.CommandName = strToText(cmd)
+		if req.APIBaseURL != nil {
+			params.ApiBaseUrl = apiBaseURL
+		}
+		if req.CredentialEnv != nil {
+			params.CredentialEnv = credentialEnv
+		}
+		if req.DefaultModel != nil {
+			params.DefaultModel = defaultModel
+		}
+	} else if hasNonEmptyString(req.APIBaseURL) || hasNonEmptyString(req.CredentialEnv) || hasNonEmptyString(req.DefaultModel) {
+		writeError(w, http.StatusBadRequest, "API provider fields are only valid for API runtime profiles")
+		return
 	}
 	if req.Description != nil {
 		params.Description = ptrToText(req.Description)

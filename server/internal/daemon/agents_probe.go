@@ -278,6 +278,9 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_ZEROCLAW_PATH", "zeroclaw", ""); ok {
 		agents["zeroclaw"] = e
 	}
+	for provider, entry := range probeAPIProviders() {
+		agents[provider] = entry
+	}
 	return agents
 }
 

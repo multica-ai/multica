@@ -21,6 +21,7 @@ import type {
   RuntimeProtocolFamily,
 } from "@multica/core/types";
 import {
+  replacementRuntimeProvider,
   runtimeProfileListOptions,
   useCreateRuntimeProfile,
   useUpdateRuntimeProfile,
@@ -44,7 +45,9 @@ import {
   PROTOCOL_FAMILIES,
   buildRuntimeCatalog,
   formatCommandLine,
+  isAPIProfileFamily,
   parseCommandLine,
+  runtimeFamilyLabel,
   validateProfileForm,
   type ProfileFormErrorField,
   type ProfileFormValues,
@@ -413,7 +416,9 @@ function CatalogRow({
 }) {
   const { t } = useT("runtimes");
   const label =
-    entry.kind === "custom" ? entry.profile.display_name : entry.protocolFamily;
+    entry.kind === "custom"
+      ? entry.profile.display_name
+      : runtimeFamilyLabel(entry.protocolFamily);
   const disabled = entry.kind === "custom" && !entry.profile.enabled;
   const isBuiltin = entry.kind === "builtin";
   return (
@@ -453,7 +458,7 @@ function CatalogRow({
         </span>
         {entry.kind === "custom" && (
           <span className="block truncate text-caption capitalize text-muted-foreground">
-            {entry.protocolFamily}
+            {runtimeFamilyLabel(entry.protocolFamily)}
           </span>
         )}
       </span>
@@ -512,7 +517,7 @@ function DetailPanel({
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-title-sm font-semibold capitalize">
-              {entry.protocolFamily}
+              {runtimeFamilyLabel(entry.protocolFamily)}
             </h3>
             <span className="text-caption text-muted-foreground">
               {t(($) => $.profiles.builtin_detail.read_only)}
@@ -529,10 +534,7 @@ function DetailPanel({
   }
 
   const profile = entry.profile;
-  const commandLine = formatCommandLine(
-    profile.command_name,
-    profile.fixed_args,
-  );
+  const commandLine = formatCommandLine(profile.command_name, profile.fixed_args);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -550,7 +552,7 @@ function DetailPanel({
                 {profile.display_name}
               </h3>
               <span className="text-caption capitalize text-muted-foreground">
-                {profile.protocol_family}
+                {runtimeFamilyLabel(profile.protocol_family)}
               </span>
             </div>
           </div>
@@ -558,11 +560,31 @@ function DetailPanel({
 
         <dl className="mt-5 space-y-4">
           <DetailRow label={t(($) => $.profiles.detail.base_family)}>
-            <span className="capitalize">{profile.protocol_family}</span>
+            <span>{runtimeFamilyLabel(profile.protocol_family)}</span>
           </DetailRow>
-          <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-caption">{commandLine}</span>
-          </DetailRow>
+          {isAPIProfileFamily(profile.protocol_family) ? (
+            <>
+              <DetailRow label={t(($) => $.profiles.detail.endpoint)}>
+                <span className="break-all font-mono text-caption">
+                  {profile.api_base_url ?? t(($) => $.profiles.detail.not_configured)}
+                </span>
+              </DetailRow>
+              <DetailRow label={t(($) => $.profiles.detail.credential_env)}>
+                <span className="font-mono text-caption">
+                  {profile.credential_env ?? t(($) => $.profiles.detail.not_configured)}
+                </span>
+              </DetailRow>
+              <DetailRow label={t(($) => $.profiles.detail.default_model)}>
+                <span className="font-mono text-caption">
+                  {profile.default_model ?? t(($) => $.profiles.detail.not_configured)}
+                </span>
+              </DetailRow>
+            </>
+          ) : (
+            <DetailRow label={t(($) => $.profiles.detail.command)}>
+              <span className="font-mono text-caption">{commandLine}</span>
+            </DetailRow>
+          )}
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
               <span>{profile.description}</span>
@@ -684,7 +706,7 @@ function ProfileFormView({
                 className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
-                <span className="truncate capitalize">{option}</span>
+                <span className="truncate">{runtimeFamilyLabel(option)}</span>
               </button>
             ))}
           </div>
@@ -747,12 +769,17 @@ function ProfileDetailsForm({
   const idPrefix = `runtime-profile-${useId().replace(/:/g, "")}`;
   const createProfile = useCreateRuntimeProfile(wsId);
   const updateProfile = useUpdateRuntimeProfile(wsId);
+  const provider = replacementRuntimeProvider(family);
+  const isAPIProfile = isAPIProfileFamily(family);
 
   const [values, setValues] = useState<ProfileFormValues>({
     displayName: profile?.display_name ?? "",
     commandLine: profile
       ? formatCommandLine(profile.command_name, profile.fixed_args)
       : "",
+    apiBaseURL: profile?.api_base_url ?? provider?.defaultBaseUrl ?? "",
+    credentialEnv: profile?.credential_env ?? provider?.apiKeyEnv ?? "",
+    defaultModel: profile?.default_model ?? "",
     description: profile?.description ?? "",
   });
   const [errors, setErrors] = useState<ProfileFormErrorField[]>([]);
@@ -767,16 +794,23 @@ function ProfileDetailsForm({
   };
 
   const parsedCommand = useMemo(
-    () => parseCommandLine(values.commandLine),
-    [values.commandLine],
+    () =>
+      isAPIProfile
+        ? ({ ok: true, commandName: "", fixedArgs: [] } as const)
+        : parseCommandLine(values.commandLine),
+    [isAPIProfile, values.commandLine],
   );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setFormError(null);
     setDuplicateName(false);
-    const validationErrors = validateProfileForm(values);
-    if (!validationErrors.includes("commandLine") && !parsedCommand.ok) {
+    const validationErrors = validateProfileForm(values, isAPIProfile);
+    if (
+      !isAPIProfile &&
+      !validationErrors.includes("commandLine") &&
+      !parsedCommand.ok
+    ) {
       validationErrors.push("commandLine");
     }
     setErrors(validationErrors);
@@ -784,8 +818,21 @@ function ProfileDetailsForm({
     if (!parsedCommand.ok) return;
 
     const description = values.description.trim();
-    const commandName = parsedCommand.commandName;
-    const fixedArgs = parsedCommand.fixedArgs;
+    const commandName = isAPIProfile ? "" : parsedCommand.commandName;
+    const fixedArgs: string[] = isAPIProfile ? [] : [...parsedCommand.fixedArgs];
+    const apiFields = isAPIProfile
+      ? {
+          ...(values.apiBaseURL.trim()
+            ? { api_base_url: values.apiBaseURL.trim() }
+            : {}),
+          ...(values.credentialEnv.trim()
+            ? { credential_env: values.credentialEnv.trim() }
+            : {}),
+          ...(values.defaultModel.trim()
+            ? { default_model: values.defaultModel.trim() }
+            : {}),
+        }
+      : {};
 
     try {
       if (mode === "create") {
@@ -794,6 +841,7 @@ function ProfileDetailsForm({
           protocol_family: family,
           command_name: commandName,
           fixed_args: fixedArgs,
+          ...apiFields,
           ...(description ? { description } : {}),
         });
         toast.success(t(($) => $.profiles.form.toast_created));
@@ -805,6 +853,7 @@ function ProfileDetailsForm({
             display_name: values.displayName.trim(),
             command_name: commandName,
             fixed_args: fixedArgs,
+            ...apiFields,
             description: description ? description : null,
           },
         });
@@ -870,7 +919,7 @@ function ProfileDetailsForm({
           </Label>
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <ProviderLogo provider={family} className="h-4 w-4 shrink-0" />
-            <span className="text-body capitalize">{family}</span>
+            <span className="text-body">{runtimeFamilyLabel(family)}</span>
           </div>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
@@ -917,56 +966,138 @@ function ProfileDetailsForm({
           )}
         </div>
 
-        <div className="space-y-1.5">
-          <Label
-            htmlFor={`${idPrefix}-command`}
-            className="text-caption text-muted-foreground"
-          >
-            {t(($) => $.profiles.form.command_name_label)}
-          </Label>
-          <Input
-            id={`${idPrefix}-command`}
-            name="command"
-            autoComplete="off"
-            spellCheck={false}
-            value={values.commandLine}
-            onChange={(e) => setField("commandLine", e.target.value)}
-            placeholder={t(($) => $.profiles.form.command_name_placeholder)}
-            aria-invalid={hasError("commandLine")}
-            aria-describedby={
-              hasError("commandLine") ? `${idPrefix}-command-error` : undefined
-            }
-            className="h-9 font-mono text-body"
-          />
-          {commandError && (
-            <p id={`${idPrefix}-command-error`} className="text-caption text-destructive">
-              {commandError}
-            </p>
-          )}
-          {parsedCommand.ok && (
-            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-micro text-muted-foreground">
-              <div className="flex min-w-0 gap-1">
-                <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
-                <span className="truncate font-mono text-foreground">
-                  {parsedCommand.commandName}
-                </span>
-              </div>
-              {parsedCommand.fixedArgs.length > 0 && (
-                <div className="flex min-w-0 flex-wrap gap-1">
-                  <span>{t(($) => $.profiles.form.command_preview_args)}</span>
-                  {parsedCommand.fixedArgs.map((arg, index) => (
-                    <span
-                      key={`${arg}-${index}`}
-                      className="rounded bg-background px-1 font-mono text-foreground"
-                    >
-                      {arg}
-                    </span>
-                  ))}
-                </div>
+        {isAPIProfile ? (
+          <div className="space-y-4 rounded-md border bg-muted/20 p-3">
+            <div className="space-y-1.5">
+              <Label
+                htmlFor={`${idPrefix}-api-base-url`}
+                className="text-caption text-muted-foreground"
+              >
+                {t(($) => $.profiles.form.api_base_url_label)}
+              </Label>
+              <Input
+                id={`${idPrefix}-api-base-url`}
+                name="apiBaseURL"
+                autoComplete="url"
+                spellCheck={false}
+                value={values.apiBaseURL}
+                onChange={(e) => setField("apiBaseURL", e.target.value)}
+                aria-invalid={hasError("apiBaseURL")}
+                aria-describedby={
+                  hasError("apiBaseURL")
+                    ? `${idPrefix}-api-base-url-error`
+                    : undefined
+                }
+                className="h-9 font-mono text-body"
+              />
+              {hasError("apiBaseURL") && (
+                <p
+                  id={`${idPrefix}-api-base-url-error`}
+                  className="text-caption text-destructive"
+                >
+                  {t(($) => $.profiles.form.error_api_base_url_required)}
+                </p>
               )}
+              <p className="text-micro text-muted-foreground">
+                {t(($) => $.profiles.form.api_base_url_hint)}
+              </p>
             </div>
-          )}
-        </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor={`${idPrefix}-credential-env`}
+                className="text-caption text-muted-foreground"
+              >
+                {t(($) => $.profiles.form.credential_env_label)}
+              </Label>
+              <Input
+                id={`${idPrefix}-credential-env`}
+                name="credentialEnv"
+                autoComplete="off"
+                spellCheck={false}
+                value={values.credentialEnv}
+                onChange={(e) => setField("credentialEnv", e.target.value)}
+                aria-invalid={hasError("credentialEnv")}
+                className="h-9 font-mono text-body"
+              />
+              <p className="text-micro text-muted-foreground">
+                {t(($) => $.profiles.form.credential_env_hint)}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label
+                htmlFor={`${idPrefix}-default-model`}
+                className="text-caption text-muted-foreground"
+              >
+                {t(($) => $.profiles.form.default_model_label)}
+              </Label>
+              <Input
+                id={`${idPrefix}-default-model`}
+                name="defaultModel"
+                autoComplete="off"
+                value={values.defaultModel}
+                onChange={(e) => setField("defaultModel", e.target.value)}
+                className="h-9 font-mono text-body"
+              />
+              <p className="text-micro text-muted-foreground">
+                {t(($) => $.profiles.form.default_model_hint)}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <Label
+              htmlFor={`${idPrefix}-command`}
+              className="text-caption text-muted-foreground"
+            >
+              {t(($) => $.profiles.form.command_name_label)}
+            </Label>
+            <Input
+              id={`${idPrefix}-command`}
+              name="command"
+              autoComplete="off"
+              spellCheck={false}
+              value={values.commandLine}
+              onChange={(e) => setField("commandLine", e.target.value)}
+              placeholder={t(($) => $.profiles.form.command_name_placeholder)}
+              aria-invalid={hasError("commandLine")}
+              aria-describedby={
+                hasError("commandLine") ? `${idPrefix}-command-error` : undefined
+              }
+              className="h-9 font-mono text-body"
+            />
+            {commandError && (
+              <p
+                id={`${idPrefix}-command-error`}
+                className="text-caption text-destructive"
+              >
+                {commandError}
+              </p>
+            )}
+            {parsedCommand.ok && (
+              <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-micro text-muted-foreground">
+                <div className="flex min-w-0 gap-1">
+                  <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
+                  <span className="truncate font-mono text-foreground">
+                    {parsedCommand.commandName}
+                  </span>
+                </div>
+                {parsedCommand.fixedArgs.length > 0 && (
+                  <div className="flex min-w-0 flex-wrap gap-1">
+                    <span>{t(($) => $.profiles.form.command_preview_args)}</span>
+                    {parsedCommand.fixedArgs.map((arg, index) => (
+                      <span
+                        key={`${arg}-${index}`}
+                        className="rounded bg-background px-1 font-mono text-foreground"
+                      >
+                        {arg}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="space-y-1.5">
           <Label

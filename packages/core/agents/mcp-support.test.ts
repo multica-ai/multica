@@ -39,4 +39,17 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig(undefined)).toBe(false);
     expect(providerSupportsMcpConfig(null)).toBe(false);
   });
+
+  it.each([
+    "opencode-api",
+    "opencode-zen",
+    "opencode-go",
+    "openrouter",
+    "vercel-ai-gateway",
+    "ollama",
+    "lmstudio",
+    "nvidia-nim",
+  ])("supports MCP over the API adapter for %s", (provider) => {
+    expect(providerSupportsMcpConfig(provider)).toBe(true);
+  });
 });

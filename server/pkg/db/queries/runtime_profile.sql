@@ -8,12 +8,15 @@ INSERT INTO runtime_profile (
     display_name,
     protocol_family,
     command_name,
+    api_base_url,
+    credential_env,
+    default_model,
     description,
     fixed_args,
     visibility,
     created_by,
     enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: GetRuntimeProfile :one
@@ -60,6 +63,9 @@ ORDER BY created_at ASC;
 UPDATE runtime_profile
 SET display_name = COALESCE(sqlc.narg('display_name'), display_name),
     command_name = COALESCE(sqlc.narg('command_name'), command_name),
+    api_base_url = COALESCE(sqlc.narg('api_base_url'), api_base_url),
+    credential_env = COALESCE(sqlc.narg('credential_env'), credential_env),
+    default_model = COALESCE(sqlc.narg('default_model'), default_model),
     description  = COALESCE(sqlc.narg('description'), description),
     fixed_args   = COALESCE(sqlc.narg('fixed_args'), fixed_args),
     visibility   = COALESCE(sqlc.narg('visibility'), visibility),

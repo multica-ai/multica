@@ -26,6 +26,14 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "traecli",
   "dim",
   "omp",
+  "opencode-api",
+  "opencode-zen",
+  "opencode-go",
+  "openrouter",
+  "vercel-ai-gateway",
+  "ollama",
+  "lmstudio",
+  "nvidia-nim",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

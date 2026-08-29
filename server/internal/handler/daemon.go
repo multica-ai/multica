@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -189,6 +190,10 @@ type DaemonRegisterRequest struct {
 		Type    string `json:"type"`
 		Version string `json:"version"` // agent CLI version (claude/codex)
 		Status  string `json:"status"`
+		// ProviderCapabilities is daemon-supplied capability metadata. It is
+		// distinct from the request's client capability header, which remains
+		// stored under metadata.capabilities for mixed-version compatibility.
+		ProviderCapabilities string `json:"provider_capabilities"`
 		// ProfileID, when non-empty, marks this as an instance of a custom
 		// runtime_profile (MUL-3284). Empty = built-in runtime (legacy path).
 		// Type carries the protocol family for both built-in and custom rows
@@ -464,10 +469,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		// same signal the claim path uses, instead of re-deriving it from a
 		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":      runtime.Version,
-			"cli_version":  req.CLIVersion,
-			"launched_by":  req.LaunchedBy,
-			"capabilities": requestClientCapabilities(r),
+			"version":               runtime.Version,
+			"cli_version":           req.CLIVersion,
+			"launched_by":           req.LaunchedBy,
+			"capabilities":          requestClientCapabilities(r),
+			"provider_capabilities": verifiedProviderCapabilities(provider, runtime.ProviderCapabilities),
 		})
 
 		var registered db.AgentRuntime
@@ -1474,6 +1480,38 @@ func requestClientCapabilities(r *http.Request) []string {
 		return nil
 	}
 	return out
+}
+
+func splitProviderCapabilities(raw string) []string {
+	parts := strings.Split(raw, ",")
+	capabilities := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		capability := strings.TrimSpace(part)
+		if capability == "" {
+			continue
+		}
+		if _, ok := seen[capability]; ok {
+			continue
+		}
+		seen[capability] = struct{}{}
+		capabilities = append(capabilities, capability)
+	}
+	return capabilities
+}
+
+func verifiedProviderCapabilities(provider, raw string) []string {
+	if _, ok := agent.ProviderByID(provider); !ok {
+		return []string{}
+	}
+	capabilities := splitProviderCapabilities(raw)
+	verified := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		if agent.ProviderSupportsCapability(provider, agent.ProviderCapability(capability)) {
+			verified = append(verified, capability)
+		}
+	}
+	return verified
 }
 
 // runtimeHasCapability reports whether a stored runtime row advertised the

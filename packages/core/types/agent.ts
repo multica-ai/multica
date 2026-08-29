@@ -131,6 +131,14 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "qwenpaw",
   "mcode",
   "zeroclaw",
+  "opencode-api",
+  "opencode-zen",
+  "opencode-go",
+  "openrouter",
+  "vercel-ai-gateway",
+  "ollama",
+  "lmstudio",
+  "nvidia-nim",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -146,6 +154,11 @@ export interface RuntimeProfile {
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
   command_name: string;
+  /** API profiles leave command_name empty and use daemon-side metadata. */
+  api_base_url?: string | null;
+  /** Name of an approved daemon environment variable, never its value. */
+  credential_env?: string | null;
+  default_model?: string | null;
   description: string | null;
   fixed_args: string[];
   visibility: RuntimeProfileVisibility;
@@ -162,6 +175,9 @@ export interface CreateRuntimeProfileRequest {
   display_name: string;
   protocol_family: RuntimeProtocolFamily;
   command_name: string;
+  api_base_url?: string;
+  credential_env?: string;
+  default_model?: string;
   description?: string;
   fixed_args?: string[];
   visibility?: RuntimeProfileVisibility;
@@ -173,6 +189,9 @@ export interface CreateRuntimeProfileRequest {
 export interface UpdateRuntimeProfileRequest {
   display_name?: string;
   command_name?: string;
+  api_base_url?: string;
+  credential_env?: string;
+  default_model?: string;
   description?: string | null;
   fixed_args?: string[];
   visibility?: RuntimeProfileVisibility;

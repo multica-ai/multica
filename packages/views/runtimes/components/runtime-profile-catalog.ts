@@ -3,6 +3,7 @@ import {
   type RuntimeProfile,
   type RuntimeProtocolFamily,
 } from "@multica/core/types";
+import { replacementRuntimeProvider } from "@multica/core/runtimes";
 
 // A single row in the runtimes catalog the management dialog renders: the
 // built-in protocol families ship as read-only reference rows, while custom
@@ -30,6 +31,17 @@ export interface RuntimeCatalogSections {
 // the catalog builder) share the single source of truth.
 export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
   RUNTIME_PROFILE_PROTOCOL_FAMILIES;
+
+export function runtimeFamilyLabel(family: RuntimeProtocolFamily): string {
+  const provider = replacementRuntimeProvider(family);
+  return provider && provider.setup !== "subscription"
+    ? provider.displayName
+    : family;
+}
+
+export function isAPIProfileFamily(family: RuntimeProtocolFamily): boolean {
+  return replacementRuntimeProvider(family)?.execution === "openai-compatible";
+}
 
 // buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
 // protocol families. The dialog renders customs as the primary management
@@ -66,10 +78,17 @@ export function buildRuntimeCatalog(
 export interface ProfileFormValues {
   displayName: string;
   commandLine: string;
+  apiBaseURL: string;
+  credentialEnv: string;
+  defaultModel: string;
   description: string;
 }
 
-export type ProfileFormErrorField = "displayName" | "commandLine";
+export type ProfileFormErrorField =
+  | "displayName"
+  | "commandLine"
+  | "apiBaseURL"
+  | "credentialEnv";
 
 export type CommandLineParseError =
   | "empty"
@@ -179,14 +198,19 @@ function quoteArg(arg: string): string {
 }
 
 // Pure, synchronous validation for the create/edit form. Returns the set of
-// invalid fields (empty = valid). Display name and command name are the only
-// hard-required fields; description and fixed args are optional.
+// invalid fields (empty = valid). CLI profiles require a command name, while
+// API profiles require an endpoint; description and fixed args are optional.
 export function validateProfileForm(
   values: ProfileFormValues,
+  isAPIProfile = false,
 ): ProfileFormErrorField[] {
   const errors: ProfileFormErrorField[] = [];
   if (!values.displayName.trim()) errors.push("displayName");
-  if (!values.commandLine.trim()) errors.push("commandLine");
+  if (isAPIProfile) {
+    if (!values.apiBaseURL.trim()) errors.push("apiBaseURL");
+  } else if (!values.commandLine.trim()) {
+    errors.push("commandLine");
+  }
   return errors;
 }
 

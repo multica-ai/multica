@@ -4,8 +4,11 @@ import type { RuntimeProfile } from "@multica/core/types";
 import {
   buildRuntimeCatalog,
   formatCommandLine,
+  isAPIProfileFamily,
   parseCommandLine,
   PROTOCOL_FAMILIES,
+  runtimeFamilyLabel,
+  validateProfileForm,
 } from "./runtime-profile-catalog";
 
 function profile(
@@ -134,5 +137,41 @@ describe("formatCommandLine", () => {
     expect(formatCommandLine("agent", ["--flag", "a b c"])).toBe(
       'agent --flag "a b c"',
     );
+  });
+});
+
+describe("API runtime profiles", () => {
+  it("identifies API families and does not require a command", () => {
+    expect(isAPIProfileFamily("openrouter")).toBe(true);
+    expect(isAPIProfileFamily("codex")).toBe(false);
+    expect(runtimeFamilyLabel("openrouter")).toBe("OpenRouter API");
+    expect(runtimeFamilyLabel("codex")).toBe("codex");
+
+    expect(
+      validateProfileForm(
+        {
+          displayName: "OpenRouter",
+          commandLine: "",
+          apiBaseURL: "https://openrouter.example/v1",
+          credentialEnv: "OPENROUTER_API_KEY",
+          defaultModel: "openai/gpt-4o-mini",
+          description: "",
+        },
+        true,
+      ),
+    ).toEqual([]);
+    expect(
+      validateProfileForm(
+        {
+          displayName: "OpenRouter",
+          commandLine: "",
+          apiBaseURL: "",
+          credentialEnv: "OPENROUTER_API_KEY",
+          defaultModel: "",
+          description: "",
+        },
+        true,
+      ),
+    ).toEqual(["apiBaseURL"]);
   });
 });

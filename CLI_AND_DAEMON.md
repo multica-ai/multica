@@ -229,7 +229,35 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [MiniMax Code](https://github.com/MiniMax-AI/minimax-code) | `mcode` | MiniMax Code ACP coding agent (ACP via `mcode acp`; model is managed by MCode) |
 | [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) | `dsh` | DeepSeek Harness (`dsh --profile multica --stdio`; requires the Multica runtime profile to be installed; reads AGENTS.md and .dsh/skills/) |
 
-You need at least one installed. The daemon registers each detected CLI as an available runtime.
+### API and local-model runtimes
+
+The daemon can also register providers that expose an OpenAI-compatible HTTP
+API. Hosted providers require a key in the daemon host environment. Ollama and
+LM Studio default to loopback endpoints and can run without a key. Every API
+provider must answer a bounded `GET /models` probe before it is registered.
+
+| Provider | Base URL variable | Credential variable | Model variable |
+|----------|-------------------|---------------------|----------------|
+| OpenCode Console API | `OPENCODE_API_BASE_URL` | `OPENCODE_API_KEY` or `OPENCODE_API_TOKEN` | `MULTICA_OPENCODE_API_MODEL` |
+| OpenCode Zen | `OPENCODE_ZEN_BASE_URL` | `OPENCODE_ZEN_API_KEY` or `OPENCODE_ZEN_TOKEN` | `MULTICA_OPENCODE_ZEN_MODEL` |
+| OpenCode Go | `OPENCODE_GO_BASE_URL` | `OPENCODE_GO_API_KEY` or `OPENCODE_GO_TOKEN` | `MULTICA_OPENCODE_GO_MODEL` |
+| OpenRouter | `OPENROUTER_BASE_URL` | `OPENROUTER_API_KEY` | `MULTICA_OPENROUTER_MODEL` |
+| Vercel AI Gateway | `AI_GATEWAY_BASE_URL` | `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` | `MULTICA_VERCEL_AI_GATEWAY_MODEL` |
+| Ollama | `OLLAMA_BASE_URL` | `OLLAMA_API_KEY` optional | `MULTICA_OLLAMA_MODEL` |
+| LM Studio | `LMSTUDIO_BASE_URL` | `LMSTUDIO_API_KEY` optional | `MULTICA_LMSTUDIO_MODEL` |
+| NVIDIA NIM | `NVIDIA_NIM_BASE_URL` | `NVIDIA_API_KEY` | `MULTICA_NVIDIA_NIM_MODEL` |
+
+Defaults are `https://opencode.ai/inference/openai/v1`,
+`https://opencode.ai/zen/v1`, `https://opencode.ai/zen/go/v1`,
+`https://openrouter.ai/api/v1`, `https://ai-gateway.vercel.sh/v1`,
+`http://127.0.0.1:11434/v1`, `http://127.0.0.1:1234/v1`, and
+`https://integrate.api.nvidia.com/v1`, respectively. The daemon keeps API
+credentials in memory. They are not sent in runtime registration payloads,
+written to task environments, displayed in the web UI, or placed in command
+arguments.
+
+You need at least one installed CLI or configured API provider. The daemon
+registers each healthy provider as an available runtime.
 
 ### How It Works
 

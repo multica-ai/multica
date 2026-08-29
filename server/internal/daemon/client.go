@@ -955,6 +955,9 @@ type RuntimeProfile struct {
 	DisplayName    string   `json:"display_name"`
 	ProtocolFamily string   `json:"protocol_family"`
 	CommandName    string   `json:"command_name"`
+	APIBaseURL     *string  `json:"api_base_url"`
+	CredentialEnv  *string  `json:"credential_env"`
+	DefaultModel   *string  `json:"default_model"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`

@@ -340,6 +340,10 @@
     "detail": {
       "base_family": "ベースプロトコルファミリー",
       "command": "コマンド",
+      "endpoint": "API エンドポイント",
+      "credential_env": "認証情報の環境変数",
+      "default_model": "デフォルトモデル",
+      "not_configured": "未設定",
       "description": "説明",
       "no_description": "説明なし",
       "edit": "編集",
@@ -360,10 +364,17 @@
       "display_name_placeholder": "例：マイカスタム Claude…",
       "command_name_label": "コマンド",
       "command_name_placeholder": "例：agent --model composer-2.5…",
+      "api_base_url_label": "API エンドポイント",
+      "api_base_url_hint": "HTTPS エンドポイントまたはローカルループバック HTTP エンドポイントを使用してください。秘密情報は入力しないでください。",
+      "credential_env_label": "認証情報の環境変数名",
+      "credential_env_hint": "承認済みの環境変数名だけを入力してください。秘密情報はデーモンのマシンに残ります。",
+      "default_model_label": "デフォルトモデル",
+      "default_model_hint": "任意です。タスクでモデルが指定されない場合にデーモンが使用します。",
       "description_label": "説明",
       "description_placeholder": "このランタイムの用途（任意）…",
       "error_display_name_required": "表示名は必須です。",
       "error_command_required": "コマンドは必須です。",
+      "error_api_base_url_required": "API エンドポイントは必須です。",
       "error_command_unclosed_quote": "保存する前に引用符を閉じてください。",
       "error_command_trailing_escape": "保存する前に末尾のバックスラッシュを補完するか削除してください。",
       "error_command_shell_syntax": "シェルのパイプ、リダイレクト、制御演算子はサポートされていません。必要な場合はラッパースクリプトを使用してください。",
@@ -391,6 +402,20 @@
       "toast_deleted": "カスタムランタイムをワークスペースから削除しました",
       "error_bound": "まだエージェントが使用しているため、このランタイムは削除できません。",
       "error_generic": "ランタイムの削除に失敗しました。"
+    }
+  },
+  "provider_support": {
+    "title": "対応プロバイダーランタイム",
+    "description": "Multica は、同じタスクライフサイクルでサブスクリプション CLI、デーモン管理の HTTP、ローカルモデルプロバイダーを実行できます。",
+    "security_note": "API プロバイダーはデーモン環境から検出されます。認証情報はブラウザーではなくデーモンホストで設定してください。Multica は API キーを表示または保存しません。",
+    "setup": {
+      "subscription": "サブスクリプション CLI",
+      "api_key": "API キー",
+      "local": "ローカルサーバー"
+    },
+    "endpoint": {
+      "sign_in": "CLI にサインイン",
+      "daemon_configured": "デーモンで設定済み"
     }
   },
   "usage": {

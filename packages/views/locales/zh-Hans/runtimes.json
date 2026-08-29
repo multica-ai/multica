@@ -340,6 +340,10 @@
     "detail": {
       "base_family": "基础协议类型",
       "command": "命令",
+      "endpoint": "API 端点",
+      "credential_env": "凭据环境变量",
+      "default_model": "默认模型",
+      "not_configured": "未配置",
       "description": "描述",
       "no_description": "无描述",
       "edit": "编辑",
@@ -360,10 +364,17 @@
       "display_name_placeholder": "例如：我的自定义 Claude...",
       "command_name_label": "命令",
       "command_name_placeholder": "例如：agent --model composer-2.5...",
+      "api_base_url_label": "API 端点",
+      "api_base_url_hint": "使用 HTTPS 端点或本机回环 HTTP 端点。不要填写密钥。",
+      "credential_env_label": "凭据环境变量名",
+      "credential_env_hint": "仅填写已批准的环境变量名。密钥保留在守护进程所在机器上。",
+      "default_model_label": "默认模型",
+      "default_model_hint": "可选。如果任务未指定模型，守护进程会使用此模型。",
       "description_label": "描述",
       "description_placeholder": "描述此运行时的用途（可选）...",
       "error_display_name_required": "显示名称为必填项。",
       "error_command_required": "命令为必填项。",
+      "error_api_base_url_required": "API 端点为必填项。",
       "error_command_unclosed_quote": "保存前请先闭合引号。",
       "error_command_trailing_escape": "保存前请补全或移除末尾的反斜杠。",
       "error_command_shell_syntax": "不支持 shell 管道、重定向和控制操作符。需要这些能力时请使用 wrapper 脚本。",
@@ -391,6 +402,20 @@
       "toast_deleted": "已从工作区删除自定义运行时",
       "error_bound": "仍有智能体在使用此运行时，无法删除。",
       "error_generic": "删除运行时失败。"
+    }
+  },
+  "provider_support": {
+    "title": "支持的提供商运行时",
+    "description": "Multica 可以在同一任务生命周期中运行订阅 CLI、由守护进程管理的 HTTP 提供商或本地模型提供商。",
+    "security_note": "API 提供商从守护进程环境中检测。请在守护进程主机上配置凭据，不要在此浏览器中配置。Multica 不会显示或保存 API 密钥。",
+    "setup": {
+      "subscription": "订阅 CLI",
+      "api_key": "API 密钥",
+      "local": "本地服务器"
+    },
+    "endpoint": {
+      "sign_in": "登录 CLI",
+      "daemon_configured": "已由守护进程配置"
     }
   },
   "usage": {

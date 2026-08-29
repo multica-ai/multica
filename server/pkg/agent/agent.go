@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -275,6 +276,13 @@ type Config struct {
 	// Command boundary applies it to every process the package spawns, task
 	// launches and CLI probes alike. Backends never read it directly.
 	LaunchPrefix []string
+	// APIBaseURL and APIKey configure API-backed providers. They are supplied
+	// by the daemon from the effective task environment and are never part of
+	// runtime registration or diagnostic logs.
+	APIBaseURL   string
+	APIKey       string
+	HTTPClient   *http.Client
+	DefaultModel string
 }
 
 // New creates a Backend for the given agent type.
@@ -424,6 +432,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &mcodeBackend{cfg: cfg}, nil
 	case "zeroclaw":
 		return &zeroclawBackend{cfg: cfg}, nil
+	case "opencode-api", "opencode-zen", "opencode-go", "openrouter", "vercel-ai-gateway", "ollama", "lmstudio", "nvidia-nim":
+		return newOpenAICompatibleBackend(agentType, cfg)
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -446,30 +456,38 @@ func DetectVersion(ctx context.Context, cmd Command) (string, error) {
 // environment variables are deliberately omitted so the string is a hint
 // about *what* users are extending, not a dump of the full command line.
 var launchHeaders = map[string]string{
-	"antigravity": "agy -p (non-interactive)",
-	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
-	"codex":       "codex app-server",
-	"copilot":     "copilot (json)",
-	"cursor":      "cursor-agent (stream-json)",
-	"deveco":      "deveco run (json)",
-	"hermes":      "hermes acp",
-	"kimi":        "kimi acp",
-	"reasonix":    "reasonix acp",
-	"dsh":         "dsh --profile multica (stdio)",
-	"kiro":        "kiro-cli acp",
-	"openclaw":    "openclaw agent (json)",
-	"opencode":    "opencode run (json)",
-	"pi":          "pi (json mode)",
-	"qoder":       "qodercli --acp",
-	"qoderclicn":  "qoderclicn --acp",
-	"traecli":     "traecli acp serve",
-	"grok":        "grok agent stdio",
-	"qwen":        "qwen -p (stream-json)",
-	"qwenpaw":     "qwenpaw acp",
-	"dim":         "dim acp",
-	"mcode":       "mcode acp",
-	"zeroclaw":    "zeroclaw acp",
+	"antigravity":       "agy -p (non-interactive)",
+	"claude":            "claude (stream-json)",
+	"codebuddy":         "codebuddy (stream-json)",
+	"codex":             "codex app-server",
+	"copilot":           "copilot (json)",
+	"cursor":            "cursor-agent (stream-json)",
+	"deveco":            "deveco run (json)",
+	"hermes":            "hermes acp",
+	"kimi":              "kimi acp",
+	"reasonix":          "reasonix acp",
+	"dsh":               "dsh --profile multica (stdio)",
+	"kiro":              "kiro-cli acp",
+	"openclaw":          "openclaw agent (json)",
+	"opencode":          "opencode run (json)",
+	"pi":                "pi (json mode)",
+	"qoder":             "qodercli --acp",
+	"qoderclicn":        "qoderclicn --acp",
+	"traecli":           "traecli acp serve",
+	"grok":              "grok agent stdio",
+	"qwen":              "qwen -p (stream-json)",
+	"qwenpaw":           "qwenpaw acp",
+	"dim":               "dim acp",
+	"mcode":             "mcode acp",
+	"zeroclaw":          "zeroclaw acp",
+	"opencode-api":      "OpenCode Console inference API",
+	"opencode-zen":      "OpenCode Zen API",
+	"opencode-go":       "OpenCode Go API",
+	"openrouter":        "OpenRouter API",
+	"vercel-ai-gateway": "Vercel AI Gateway API",
+	"ollama":            "Ollama OpenAI-compatible API",
+	"lmstudio":          "LM Studio OpenAI-compatible API",
+	"nvidia-nim":        "NVIDIA NIM OpenAI API",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

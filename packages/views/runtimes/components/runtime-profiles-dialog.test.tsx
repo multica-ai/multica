@@ -34,19 +34,26 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeProfileListOptions: vi.fn((wsId: string) => ({
-    queryKey: ["runtime-profiles", wsId, "list"],
-  })),
-  useCreateRuntimeProfile: vi.fn(() => ({
-    isPending: false,
-    mutateAsync: mutationState.createProfile,
-  })),
-  useUpdateRuntimeProfile: vi.fn(() => ({
-    isPending: false,
-    mutateAsync: mutationState.updateProfile,
-  })),
-}));
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    runtimeProfileListOptions: vi.fn((wsId: string) => ({
+      queryKey: ["runtime-profiles", wsId, "list"],
+    })),
+    useCreateRuntimeProfile: vi.fn(() => ({
+      isPending: false,
+      mutateAsync: mutationState.createProfile,
+    })),
+    useUpdateRuntimeProfile: vi.fn(() => ({
+      isPending: false,
+      mutateAsync: mutationState.updateProfile,
+    })),
+  };
+});
 
 vi.mock("./delete-runtime-profile-dialog", () => ({
   DeleteRuntimeProfileDialog: () => null,
@@ -277,5 +284,43 @@ describe("RuntimeProfilesDialog", () => {
     expect(
       screen.queryByText("Create your first custom runtime"),
     ).not.toBeInTheDocument();
+  });
+
+  it("creates an API runtime profile without accepting a secret value", async () => {
+    renderDialog();
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "New custom runtime" })[0]!,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /OpenRouter API/i }));
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Team OpenRouter" },
+    });
+    fireEvent.change(screen.getByLabelText("API endpoint"), {
+      target: { value: "https://openrouter.example/v1" },
+    });
+    fireEvent.change(screen.getByLabelText("Credential environment variable"), {
+      target: { value: "OPENROUTER_API_KEY" },
+    });
+    fireEvent.change(screen.getByLabelText("Default model"), {
+      target: { value: "openai/gpt-4o-mini" },
+    });
+
+    expect(screen.queryByLabelText("Command")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+
+    await waitFor(() =>
+      expect(mutationState.createProfile).toHaveBeenCalledWith({
+        display_name: "Team OpenRouter",
+        protocol_family: "openrouter",
+        command_name: "",
+        fixed_args: [],
+        api_base_url: "https://openrouter.example/v1",
+        credential_env: "OPENROUTER_API_KEY",
+        default_model: "openai/gpt-4o-mini",
+      }),
+    );
+    expect(screen.queryByLabelText(/API key value/i)).not.toBeInTheDocument();
   });
 });

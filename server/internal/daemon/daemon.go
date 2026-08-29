@@ -382,8 +382,12 @@ type Daemon struct {
 	// command resolves; read by runTask to launch the custom command for a
 	// claimed task. Guarded by mu.
 	profileLaunchSpecs map[string]profileLaunchSpec
-	reloading          sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	// profileAPIEntries holds daemon-local API credentials resolved from an API
+	// runtime profile. The map is keyed by profile UUID and never crosses the
+	// registration boundary.
+	profileAPIEntries map[string]profileAPIEntry
+	reloading         sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet        *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -621,6 +625,11 @@ type profileLaunchSpec struct {
 	fixedArgs []string
 }
 
+type profileAPIEntry struct {
+	workspaceID string
+	entry       AgentEntry
+}
+
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
@@ -638,6 +647,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
+		profileAPIEntries:         make(map[string]profileAPIEntry),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
 		skippedAgents:             make(map[string]string),
@@ -909,6 +919,9 @@ func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry A
 // launch; otherwise the stable entry could retarget after registration and run
 // a binary whose version and minimum-version policy were never checked.
 func (d *Daemon) resolveAgentEntryForLaunch(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, error) {
+	if entry.APIBaseURL != "" {
+		return entry, "", nil
+	}
 	resolved, version, outcome := d.resolveAgentEntryWithHeal(ctx, provider, entry)
 	if outcome.rejected != nil {
 		return entry, d.agentVersion(provider), outcome.rejected
@@ -945,6 +958,9 @@ type healOutcome struct {
 // fails, and reports "version detection failed" — which by design leaves the
 // runtime online, claiming tasks for a CLI that cannot launch.
 func (d *Daemon) resolveAgentEntryWithHeal(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string, healOutcome) {
+	if entry.APIBaseURL != "" {
+		return entry, "", healOutcome{}
+	}
 	// Windows installer entry points are stable junctions whose final target can
 	// change while the old release remains installed. Resolve the final path on
 	// every launch and adopt a changed target only after pairing it with a freshly
@@ -2162,6 +2178,47 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 	return spec, true
 }
 
+func (d *Daemon) recordProfileAPIEntry(workspaceID, profileID string, entry AgentEntry) {
+	if workspaceID == "" || profileID == "" || entry.APIBaseURL == "" {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.profileAPIEntries == nil {
+		d.profileAPIEntries = make(map[string]profileAPIEntry)
+	}
+	d.profileAPIEntries[profileID] = profileAPIEntry{workspaceID: workspaceID, entry: entry}
+}
+
+func (d *Daemon) clearProfileAPIEntriesForWorkspace(workspaceID string, keep map[string]struct{}) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for profileID, stored := range d.profileAPIEntries {
+		if stored.workspaceID == workspaceID {
+			if _, ok := keep[profileID]; !ok {
+				delete(d.profileAPIEntries, profileID)
+			}
+		}
+	}
+}
+
+func (d *Daemon) apiProfileForRuntime(runtimeID string) (AgentEntry, bool) {
+	if runtimeID == "" {
+		return AgentEntry{}, false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rt, ok := d.runtimeIndex[runtimeID]
+	if !ok || rt.ProfileID == "" {
+		return AgentEntry{}, false
+	}
+	stored, ok := d.profileAPIEntries[rt.ProfileID]
+	if !ok || stored.entry.APIBaseURL == "" {
+		return AgentEntry{}, false
+	}
+	return stored.entry, true
+}
+
 // runtimeVersionProbeConcurrency bounds how many `<cli> --version` probes run
 // at once during registration. Version detection is process-spawn bound rather
 // than CPU bound, and each probe already carries its own timeout, so a modest
@@ -2284,6 +2341,14 @@ func newRuntimeVerdict(verdict builtinProbeVerdict, reason, execPath string) run
 // not installed" apart from "CLI installed but dropped at registration", which
 // was previously only visible in the daemon log (MUL-5439).
 func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, string, builtinProbeVerdict) {
+	if entry.APIBaseURL != "" {
+		cfg := agent.ProviderAPIConfig{BaseURL: entry.APIBaseURL, APIKey: entry.apiKey}
+		if err := probeAPIProviderEndpoint(ctx, name, cfg); err != nil {
+			d.logger.Warn("skip registering API provider", "name", name, "error", err)
+			return "", fmt.Sprintf("API provider probe failed: %v", err), builtinProbeUnavailable
+		}
+		return "", "", builtinProbeOK
+	}
 	var (
 		lastErr  error
 		attempts int
@@ -2532,13 +2597,26 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
-			"name":    displayName,
-			"type":    r.name,
-			"version": r.version,
-			"status":  "online",
+			"name":                  displayName,
+			"type":                  r.name,
+			"version":               r.version,
+			"status":                "online",
+			"provider_capabilities": providerCapabilitiesForRegistration(r.name),
 		})
 	}
 	return runtimes, demotable, unavailable
+}
+
+func providerCapabilitiesForRegistration(provider string) string {
+	desc, ok := agent.ProviderByID(provider)
+	if !ok || len(desc.Capabilities) == 0 {
+		return ""
+	}
+	capabilities := make([]string, 0, len(desc.Capabilities))
+	for _, capability := range desc.Capabilities {
+		capabilities = append(capabilities, string(capability))
+	}
+	return strings.Join(capabilities, ",")
 }
 
 // cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
@@ -2733,10 +2811,10 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 
 // appendProfileRuntimes fetches the workspace's enabled custom runtime
 // profiles (MUL-3284) and appends a runtime registration entry for each one
-// whose command_name resolves on this host's PATH. For each resolved profile
-// it records the absolute command path and fixed args keyed by profile_id (via
-// recordProfileLaunch) so runTask can later launch the custom executable for a
-// claimed task.
+// whose CLI command_name resolves on this host's PATH or whose API endpoint
+// and daemon-owned credential reference pass validation and probing. For each
+// resolved profile it records launch metadata or an in-memory API entry keyed
+// by profile_id so runTask can later execute the claimed task.
 //
 // Best-effort by contract: any error fetching profiles (older server, network
 // blip) is logged and swallowed — registration proceeds with the built-in
@@ -2768,9 +2846,74 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// Empty payload — same shape as "server has zero profiles". Return
 		// the digest of an empty list so the sync loop can still detect a
 		// later transition (zero → first profile added).
+		d.clearProfileAPIEntriesForWorkspace(workspaceID, map[string]struct{}{})
 		return profileSetSignature(nil)
 	}
+	env := providerEnvironment()
+	keptAPIProfiles := make(map[string]struct{})
 	for _, profile := range resp.RuntimeProfiles {
+		if agent.IsAPIProvider(profile.ProtocolFamily) {
+			baseURL := ""
+			if profile.APIBaseURL != nil {
+				baseURL = *profile.APIBaseURL
+			}
+			credentialEnv := ""
+			if profile.CredentialEnv != nil {
+				credentialEnv = *profile.CredentialEnv
+			}
+			apiConfig, configErr := agent.ResolveProviderAPIProfileConfig(
+				profile.ProtocolFamily, env, baseURL, credentialEnv,
+			)
+			if configErr != nil {
+				d.logger.Warn("skip API runtime profile: configuration is unavailable",
+					"workspace_id", workspaceID, "profile_id", profile.ID,
+					"provider", profile.ProtocolFamily, "reason", configErr)
+				*failedProfiles = append(*failedProfiles, map[string]string{
+					"profile_id": profile.ID,
+					"reason":     configErr.Error(),
+				})
+				continue
+			}
+			probeCtx, cancel := context.WithTimeout(ctx, apiProviderProbeTimeout)
+			probeErr := probeAPIProviderEndpoint(probeCtx, profile.ProtocolFamily, apiConfig)
+			cancel()
+			if probeErr != nil {
+				d.logger.Warn("skip API runtime profile: endpoint probe failed",
+					"workspace_id", workspaceID, "profile_id", profile.ID,
+					"provider", profile.ProtocolFamily, "reason", probeErr)
+				*failedProfiles = append(*failedProfiles, map[string]string{
+					"profile_id": profile.ID,
+					"reason":     probeErr.Error(),
+				})
+				continue
+			}
+			model := ""
+			if profile.DefaultModel != nil {
+				model = strings.TrimSpace(*profile.DefaultModel)
+			}
+			if model == "" {
+				model = strings.TrimSpace(env[apiProviderModelEnv(profile.ProtocolFamily)])
+			}
+			d.recordProfileAPIEntry(workspaceID, profile.ID, AgentEntry{
+				Model:      model,
+				APIBaseURL: apiConfig.BaseURL,
+				apiKey:     apiConfig.APIKey,
+			})
+			keptAPIProfiles[profile.ID] = struct{}{}
+			displayName := profile.DisplayName
+			if d.cfg.DeviceName != "" {
+				displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
+			}
+			*runtimes = append(*runtimes, map[string]string{
+				"name":                  displayName,
+				"type":                  profile.ProtocolFamily,
+				"version":               "",
+				"status":                "online",
+				"profile_id":            profile.ID,
+				"provider_capabilities": providerCapabilitiesForRegistration(profile.ProtocolFamily),
+			})
+			continue
+		}
 		if profile.CommandName == "" || profile.ProtocolFamily == "" {
 			d.logger.Warn("skip custom runtime profile: missing command_name or protocol_family",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "display_name", profile.DisplayName)
@@ -2862,6 +3005,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			"profile_id": profile.ID,
 		})
 	}
+	d.clearProfileAPIEntriesForWorkspace(workspaceID, keptAPIProfiles)
 	return profileSetSignature(resp.RuntimeProfiles)
 }
 
@@ -2873,10 +3017,9 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 //
 // The hashed projection covers exactly the fields that affect what the
 // daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
-// FixedArgs (the launch args every agent on this runtime inherits) and
-// Visibility (so a hypothetical future per-creator filter still triggers
-// drift). Profiles are sorted by ID first so the digest is order-independent
-// (the server is allowed to return them in any order).
+// API metadata, FixedArgs (the launch args every agent on this runtime
+// inherits) and Visibility. Profiles are sorted by ID first so the digest is
+// order-independent (the server is allowed to return them in any order).
 func profileSetSignature(profiles []RuntimeProfile) string {
 	if len(profiles) == 0 {
 		return "0"
@@ -2894,6 +3037,15 @@ func profileSetSignature(profiles []RuntimeProfile) string {
 			p.CommandName, sep,
 			p.Visibility, sep,
 		)
+		if p.APIBaseURL != nil {
+			fmt.Fprintf(h, "%s%s", *p.APIBaseURL, sep)
+		}
+		if p.CredentialEnv != nil {
+			fmt.Fprintf(h, "%s%s", *p.CredentialEnv, sep)
+		}
+		if p.DefaultModel != nil {
+			fmt.Fprintf(h, "%s%s", *p.DefaultModel, sep)
+		}
 		for _, a := range p.FixedArgs {
 			fmt.Fprintf(h, "%s%s", a, sep)
 		}
@@ -4100,17 +4252,31 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
 	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
 	var fixedArgs []string
-	if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
+	var catalog agent.Catalog
+	var err error
+	if profileEntry, isAPIProfile := d.apiProfileForRuntime(rt.ID); isAPIProfile {
+		catalog, err = agent.ListAPIModels(ctx, rt.Provider, agent.ProviderAPIConfig{
+			BaseURL: profileEntry.APIBaseURL,
+			APIKey:  profileEntry.apiKey,
+		}, profileEntry.Model, nil)
+	} else if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
 		execPath = customSpec.path
 		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, customSpec.fixedArgs, d.logger)
 		d.logger.Info("model list uses custom runtime profile command",
 			"runtime_id", rt.ID, "provider", rt.Provider, "command_path", execPath,
 			"fixed_args", len(fixedArgs))
 	} else if entry, ok := d.agents()[rt.Provider]; ok {
-		// Built-in provider: self-heal a pinned executable path an in-place
-		// upgrade deleted (MUL-4486).
-		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
-		execPath = entry.Path
+		if entry.APIBaseURL != "" {
+			catalog, err = agent.ListAPIModels(ctx, rt.Provider, agent.ProviderAPIConfig{
+				BaseURL: entry.APIBaseURL,
+				APIKey:  entry.apiKey,
+			}, entry.Model, nil)
+		} else {
+			// Built-in provider: self-heal a pinned executable path an in-place
+			// upgrade deleted (MUL-4486).
+			entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+			execPath = entry.Path
+		}
 	} else {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -4119,7 +4285,9 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	if catalog.Models == nil {
+		catalog, err = listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
+	}
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -5664,14 +5832,22 @@ func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
-	"dsh":        "DeepSeek Harness",
-	"traecli":    "Trae",
-	"grok":       "Grok",
-	"qoderclicn": "Qoder CN",
-	"qwen":       "Qwen Code",
-	"qwenpaw":    "QwenPaw",
-	"mcode":      "MiniMax Code",
-	"zeroclaw":   "ZeroClaw",
+	"dsh":               "DeepSeek Harness",
+	"traecli":           "Trae",
+	"grok":              "Grok",
+	"opencode-api":      "OpenCode Console API",
+	"opencode-zen":      "OpenCode Zen",
+	"opencode-go":       "OpenCode Go",
+	"openrouter":        "OpenRouter",
+	"vercel-ai-gateway": "Vercel AI Gateway",
+	"ollama":            "Ollama",
+	"lmstudio":          "LM Studio",
+	"nvidia-nim":        "NVIDIA NIM",
+	"qoderclicn":        "Qoder CN",
+	"qwen":              "Qwen Code",
+	"qwenpaw":           "QwenPaw",
+	"mcode":             "MiniMax Code",
+	"zeroclaw":          "ZeroClaw",
 }
 
 func init() {
@@ -5714,7 +5890,7 @@ func providerDisplayName(name string) string {
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli", "qwenpaw":
+	case "openclaw", "kimi", "traecli", "qwenpaw", "opencode-api", "opencode-zen", "opencode-go", "openrouter", "vercel-ai-gateway", "ollama", "lmstudio", "nvidia-nim":
 		return true
 	default:
 		return false
@@ -6656,7 +6832,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// for compatibility exceptions verified against a specific vendor's CLI,
 	// which must not extend to arbitrary commands sharing a protocol family.
 	var usesCustomProfileCommand bool
-	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
+	if profileEntry, isAPIProfile := d.apiProfileForRuntime(task.RuntimeID); isAPIProfile {
+		entry = profileEntry
+		ok = true
+	} else if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
@@ -7476,6 +7655,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
 			profileFixedArgs, rawCustomArgs, d.logger)
 	}
+	model := ""
+	if task.Agent != nil && task.Agent.Model != "" {
+		model = task.Agent.Model
+	}
+	if model == "" {
+		model = entry.Model
+	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
 	// families go through New. This is the single production boundary — the
@@ -7492,31 +7678,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
 		BuiltinRuntime: !usesCustomProfileCommand,
+		APIBaseURL:     entry.APIBaseURL,
+		APIKey:         entry.apiKey,
+		DefaultModel:   model,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
-	}
-
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	//
-	// Resolved before the start log rather than at first use: logging
-	// entry.Model there reported the env-var tier alone, so every task whose
-	// model came from agent.model — the common case — announced itself with an
-	// empty model and looked like the selection had been dropped (GH #7300).
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
 	}
 
 	taskLog.Info("starting agent",
@@ -7525,7 +7692,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"model", model,
 		"reused", reused,
 	)
-	if task.PriorSessionID != "" {
+	if task.PriorSessionID != "" && entry.APIBaseURL == "" {
 		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
 	}
 
@@ -7554,13 +7721,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		thinkingLevel = task.Agent.ThinkingLevel
 		serviceTier = task.Agent.ServiceTier
 	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
-	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	if entry.APIBaseURL == "" {
+		selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
+			taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+		model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	}
 
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
+	}
+	resumeSessionID := task.PriorSessionID
+	resumeExpected := task.PriorSessionID != ""
+	resumeContinuityNotice := backendResumeContinuityNotice(task)
+	if entry.APIBaseURL != "" {
+		// OpenAI-compatible providers are stateless at the Multica session
+		// boundary. The issue context and comments are still supplied in the
+		// prompt, but a prior CLI session id must never make the task fail.
+		resumeSessionID = ""
+		resumeExpected = false
+		resumeContinuityNotice = ""
 	}
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,
@@ -7571,7 +7751,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
-		ResumeSessionID:            task.PriorSessionID,
+		ResumeSessionID:            resumeSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
 		// survived to here, the backend must disclose the loss when the live
@@ -7583,8 +7763,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// only the daemon knows — hence handing the backend finished text rather
 		// than a flag. Empty when the prompt already carries the notice, so a turn
 		// can never pay for it twice (MUL-5722).
-		ResumeExpected:         task.PriorSessionID != "",
-		ResumeContinuityNotice: backendResumeContinuityNotice(task),
+		ResumeExpected:         resumeExpected,
+		ResumeContinuityNotice: resumeContinuityNotice,
 		ExtraArgs:              extraArgs,
 		CustomArgs:             customArgs,
 		McpConfig:              mcpConfig,
@@ -8993,7 +9173,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS", "OPENCODE_API_BASE_URL", "OPENCODE_API_KEY", "OPENCODE_API_TOKEN", "OPENCODE_ZEN_BASE_URL", "OPENCODE_ZEN_API_KEY", "OPENCODE_ZEN_TOKEN", "OPENCODE_GO_BASE_URL", "OPENCODE_GO_API_KEY", "OPENCODE_GO_TOKEN", "OPENROUTER_BASE_URL", "OPENROUTER_API_KEY", "AI_GATEWAY_BASE_URL", "AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN", "OLLAMA_BASE_URL", "OLLAMA_API_KEY", "LMSTUDIO_BASE_URL", "LMSTUDIO_API_KEY", "NVIDIA_NIM_BASE_URL", "NVIDIA_API_KEY":
 		return true
 	}
 	return false

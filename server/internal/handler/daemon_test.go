@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,17 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
+
+func TestVerifiedProviderCapabilitiesFiltersUnverifiedValues(t *testing.T) {
+	got := verifiedProviderCapabilities("openrouter", "streaming,usage,not-a-provider-capability,streaming")
+	want := []string{"streaming", "usage"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("verified capabilities = %#v, want %#v", got, want)
+	}
+	if got := verifiedProviderCapabilities("unknown", "streaming"); len(got) != 0 {
+		t.Fatalf("unknown provider capabilities = %#v, want empty", got)
+	}
+}
 
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 	var logs bytes.Buffer
