@@ -79,6 +79,11 @@ export class LifeOSHostController {
     return this.ensurePromise;
   }
 
+  async ensureIfNeeded(): Promise<LifeOSHostStatus> {
+    const status = await this.probe();
+    return status.state === "ready" ? status : this.ensure();
+  }
+
   private async runEnsure(): Promise<LifeOSHostStatus> {
     this.update("starting");
     const script = join(

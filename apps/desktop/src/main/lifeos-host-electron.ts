@@ -126,7 +126,7 @@ export function setupLifeOSHost(options: {
   probeTimer.unref();
 
   return {
-    ensureOnLaunch: () => controller.ensure(),
+    ensureOnLaunch: () => controller.ensureIfNeeded(),
     dispose: () => {
       clearInterval(probeTimer);
       unsubscribe();

@@ -77,4 +77,19 @@ describe("LifeOSHostController", () => {
     await Promise.all([first, second]);
     expect(execFileImpl).toHaveBeenCalledTimes(1);
   });
+
+  it("opens immediately when the existing local host is already ready", async () => {
+    const execFileImpl = vi.fn();
+    const controller = new LifeOSHostController({
+      fetchImpl: vi.fn(async () =>
+        new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
+      ) as typeof fetch,
+      execFileImpl,
+    });
+
+    await expect(controller.ensureIfNeeded()).resolves.toMatchObject({
+      state: "ready",
+    });
+    expect(execFileImpl).not.toHaveBeenCalled();
+  });
 });
