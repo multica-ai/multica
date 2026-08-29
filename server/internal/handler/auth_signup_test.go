@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,26 +19,28 @@ func newTestHandler(cfg Config) *Handler {
 
 func TestSignupGating(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     Config
-		email   string
-		isNew   bool
-		wantErr bool
+		name  string
+		cfg   Config
+		email string
+		isNew bool
+		want  error
 	}{
-		{"allow_signup_true_new", Config{AllowSignup: true}, "a@x.com", true, false},
-		{"allow_signup_false_new", Config{AllowSignup: false}, "a@x.com", true, true},
-		{"allow_signup_false_existing", Config{AllowSignup: false}, "a@x.com", false, false},
-		{"domain_allowlist_match", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@company.com", true, false},
-		{"domain_allowlist_mismatch", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@other.com", true, true},
-		{"email_allowlist_match", Config{AllowSignup: false, AllowedEmails: []string{"boss@x.com"}}, "boss@x.com", true, false},
+		{"allow_signup_true_new", Config{AllowSignup: true}, "a@x.com", true, nil},
+		{"allow_signup_false_new", Config{AllowSignup: false}, "a@x.com", true, ErrSignupProhibited},
+		{"allow_signup_false_existing", Config{AllowSignup: false}, "a@x.com", false, nil},
+		{"domain_allowlist_match", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@company.com", true, nil},
+		{"domain_allowlist_mismatch_signup_disabled", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@other.com", true, ErrSignupProhibited},
+		{"domain_allowlist_mismatch_signup_enabled", Config{AllowSignup: true, AllowedEmailDomains: []string{"company.com"}}, "user@other.com", true, ErrEmailNotAllowed},
+		{"email_allowlist_match", Config{AllowSignup: false, AllowedEmails: []string{"boss@x.com"}}, "boss@x.com", true, nil},
+		{"email_allowlist_mismatch_signup_enabled", Config{AllowSignup: true, AllowedEmails: []string{"boss@x.com"}}, "user@other.com", true, ErrEmailNotAllowed},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(tt.cfg)
 			err := h.checkSignupAllowed(tt.email, tt.isNew)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("got err=%v wantErr=%v", err, tt.wantErr)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("got err=%v want=%v", err, tt.want)
 			}
 		})
 	}

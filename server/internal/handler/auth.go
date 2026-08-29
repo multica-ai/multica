@@ -38,6 +38,14 @@ func (e SignupError) Error() string {
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
 
+const (
+	googleLoginCodeAccountDisabled     = "account_disabled"
+	googleLoginCodeSignupProhibited    = "signup_prohibited"
+	googleLoginCodeEmailNotAllowed     = "email_not_allowed"
+	googleLoginCodeAccountWithoutEmail = "google_account_no_email"
+	googleLoginCodeInvalidOAuthCode    = "oauth_code_invalid"
+)
+
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
 // supportedLanguages mirrors `SUPPORTED_LOCALES` in packages/core/i18n/types.ts.
@@ -260,7 +268,7 @@ func (h *Handler) checkSignupAllowed(email string, isNewUser bool) error {
 
 	// 4. if allowlists are set but didn't match, block
 	if len(h.cfg.AllowedEmailDomains) > 0 || len(h.cfg.AllowedEmails) > 0 {
-		return ErrSignupProhibited
+		return ErrEmailNotAllowed
 	}
 
 	return nil
@@ -491,6 +499,27 @@ type googleUserInfo struct {
 	Picture string `json:"picture"`
 }
 
+func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, auth.ErrTemporarilyDisabledUser):
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeAccountDisabled, auth.TemporarilyDisabledUserError)
+	case errors.Is(err, ErrSignupProhibited):
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeSignupProhibited, ErrSignupProhibited.Error())
+	case errors.Is(err, ErrEmailNotAllowed):
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeEmailNotAllowed, ErrEmailNotAllowed.Error())
+	default:
+		return false
+	}
+	return true
+}
+
+func (h *Handler) googleHTTPClient() *http.Client {
+	if h.googleOAuthHTTPClient != nil {
+		return h.googleOAuthHTTPClient
+	}
+	return http.DefaultClient
+}
+
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	var req GoogleLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -516,7 +545,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange authorization code for tokens.
-	tokenResp, err := http.PostForm("https://oauth2.googleapis.com/token", url.Values{
+	tokenResp, err := h.googleHTTPClient().PostForm("https://oauth2.googleapis.com/token", url.Values{
 		"code":          {req.Code},
 		"client_id":     {clientID},
 		"client_secret": {clientSecret},
@@ -538,7 +567,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if tokenResp.StatusCode != http.StatusOK {
 		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeError(w, http.StatusBadRequest, "failed to exchange code with Google")
+		writeErrorCode(w, http.StatusBadRequest, googleLoginCodeInvalidOAuthCode, "failed to exchange code with Google")
 		return
 	}
 
@@ -557,7 +586,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
 
-	userInfoResp, err := http.DefaultClient.Do(userInfoReq)
+	userInfoResp, err := h.googleHTTPClient().Do(userInfoReq)
 	if err != nil {
 		slog.Error("google userinfo fetch failed", "error", err)
 		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
@@ -572,25 +601,19 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if gUser.Email == "" {
-		writeError(w, http.StatusBadRequest, "Google account has no email")
+		writeErrorCode(w, http.StatusBadRequest, googleLoginCodeAccountWithoutEmail, "Google account has no email")
 		return
 	}
 
 	email := strings.ToLower(strings.TrimSpace(gUser.Email))
 	if auth.IsTemporarilyDisabledUserEmail(email) {
-		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+		writeGoogleLoginActionableError(w, auth.ErrTemporarilyDisabledUser)
 		return
 	}
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
-		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
-			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
-			return
-		}
-		var signupErr SignupError
-		if errors.As(err, &signupErr) {
-			writeError(w, http.StatusForbidden, signupErr.Error())
+		if writeGoogleLoginActionableError(w, err) {
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create user")
@@ -630,8 +653,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	tokenString, err := h.issueJWT(user)
 	if err != nil {
-		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
-			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+		if writeGoogleLoginActionableError(w, err) {
 			return
 		}
 		slog.Warn("google login failed", append(logger.RequestAttrs(r), "error", err, "email", email)...)
