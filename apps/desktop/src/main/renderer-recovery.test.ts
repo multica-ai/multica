@@ -175,6 +175,25 @@ describe("installRendererRecoveryHandlers", () => {
     expect(detail).toContain("Activity Monitor sample");
     expect(detail).toContain("Diagnostic details:\nkind: unresponsive\ncontext: {}");
   });
+
+  it("uses the system locale for the native recovery prompt", async () => {
+    const showMessageBox = vi.fn(async () => ({ response: 1 }));
+    const showReloadPrompt = createElectronReloadPrompt(
+      showMessageBox,
+      "zh-CN",
+    );
+
+    await showReloadPrompt({ kind: "preload-error", context: {} });
+
+    expect(showMessageBox).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: ["重新加载", "关闭"],
+        title: "Multica 需要重新加载",
+        message: "桌面窗口无法完成启动。",
+        detail: expect.stringContaining("继续使用 Multica"),
+      }),
+    );
+  });
 });
 
 describe("freeze/crash breadcrumb state machine", () => {

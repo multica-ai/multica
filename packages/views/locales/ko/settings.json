@@ -868,6 +868,7 @@
   },
   "desktop": {
     "tabs": {
+      "daemon": "데몬",
       "updates": "업데이트"
     },
     "updates": {

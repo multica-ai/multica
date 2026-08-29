@@ -1133,6 +1133,7 @@
   },
   "desktop": {
     "tabs": {
+      "daemon": "Daemon",
       "updates": "Updates"
     },
     "updates": {

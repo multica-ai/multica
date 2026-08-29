@@ -1,4 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
@@ -42,6 +49,47 @@ const HTML_LANG: Record<SupportedLocale, string> = {
   ja: "ja-JP",
 };
 
+const RUNTIME_CONFIG_ERROR_COPY: Record<
+  SupportedLocale,
+  { title: string; description: ReactNode }
+> = {
+  en: {
+    title: "Desktop configuration error",
+    description: (
+      <>
+        Multica Desktop could not load <code>~/.multica/desktop.json</code>.{" "}
+        Fix or remove the file and restart the app.
+      </>
+    ),
+  },
+  "zh-Hans": {
+    title: "桌面端配置错误",
+    description: (
+      <>
+        Multica 桌面端无法加载 <code>~/.multica/desktop.json</code>
+        。请修复或删除该文件，然后重启应用。
+      </>
+    ),
+  },
+  ja: {
+    title: "デスクトップ設定エラー",
+    description: (
+      <>
+        Multica Desktop は <code>~/.multica/desktop.json</code>
+        を読み込めませんでした。ファイルを修正または削除して、アプリを再起動してください。
+      </>
+    ),
+  },
+  ko: {
+    title: "데스크톱 구성 오류",
+    description: (
+      <>
+        Multica Desktop에서 <code>~/.multica/desktop.json</code> 파일을
+        불러오지 못했습니다. 파일을 수정하거나 삭제한 후 앱을 다시 시작하세요.
+      </>
+    ),
+  },
+};
 
 /**
  * Cmd/Ctrl+W: close the active tab. When the last real tab is closed
@@ -333,13 +381,20 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  message,
+  locale,
+}: {
+  message: string;
+  locale: SupportedLocale;
+}) {
+  const copy = RUNTIME_CONFIG_ERROR_COPY[locale];
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">{copy.title}</h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {copy.description}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -476,7 +531,10 @@ export default function App() {
           )}
         </CoreProvider>
       ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
+        <BlockingRuntimeConfigError
+          message={runtimeConfigResult.error.message}
+          locale={locale}
+        />
       )}
       <Toaster />
       {windowContext.kind === "main" && <UpdateNotification />}

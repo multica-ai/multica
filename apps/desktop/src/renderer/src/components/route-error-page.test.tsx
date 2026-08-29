@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render as testingLibraryRender,
+  screen,
+} from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
+import type { ReactElement } from "react";
+import { I18nProvider } from "@multica/core/i18n/react";
+import type { SupportedLocale } from "@multica/core/i18n";
+import { RESOURCES } from "@multica/views/locales";
 
 const openModal = vi.fn();
 const reloadActiveTab = vi.fn();
@@ -8,6 +16,14 @@ const closeActiveTab = vi.fn();
 const navigateActiveSession = vi.fn();
 
 let activeWorkspaceSlug: string | null = "acme";
+
+function render(ui: ReactElement, locale: SupportedLocale = "en") {
+  return testingLibraryRender(
+    <I18nProvider locale={locale} resources={RESOURCES}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 vi.mock("@multica/core/modals", () => ({
   useModalStore: {
@@ -44,7 +60,10 @@ function Boom(): null {
  * Router produces a real 404 ErrorResponse — the same object shape the desktop
  * shell sees when a tab opens an unroutable URL.
  */
-function renderUnmatchedRoute(path: string) {
+function renderUnmatchedRoute(
+  path: string,
+  locale: SupportedLocale = "en",
+) {
   const router = createMemoryRouter(
     [
       {
@@ -55,7 +74,7 @@ function renderUnmatchedRoute(path: string) {
     ],
     { initialEntries: [path] },
   );
-  return render(<RouterProvider router={router} />);
+  return render(<RouterProvider router={router} />, locale);
 }
 
 describe("DesktopRouteErrorPage", () => {
@@ -173,6 +192,16 @@ describe("DesktopRouteErrorPage", () => {
       expect(await screen.findByRole("alert")).toHaveTextContent(
         "/Users/whoever/Desktop/shot.png",
       );
+    });
+
+    it("uses the selected locale for the recovery UI", async () => {
+      renderUnmatchedRoute("/missing", "zh-Hans");
+
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveTextContent("此页面不存在");
+      expect(
+        screen.getByRole("button", { name: "前往任务" }),
+      ).toBeInTheDocument();
     });
 
     it("always offers Close tab", async () => {

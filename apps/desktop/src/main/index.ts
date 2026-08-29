@@ -416,8 +416,9 @@ function createWindow(): BrowserWindow {
 
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
     isDev: is.dev,
-    showReloadPrompt: createElectronReloadPrompt((options) =>
-      dialog.showMessageBox(window, options),
+    showReloadPrompt: createElectronReloadPrompt(
+      (options) => dialog.showMessageBox(window, options),
+      app.getLocale(),
     ),
     getDiagnosticContext: () => {
       // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
@@ -504,8 +505,9 @@ function createIssueWindow(context: IssueWindowContext): void {
   }
   installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
     isDev: is.dev,
-    showReloadPrompt: createElectronReloadPrompt((options) =>
-      dialog.showMessageBox(window, options),
+    showReloadPrompt: createElectronReloadPrompt(
+      (options) => dialog.showMessageBox(window, options),
+      app.getLocale(),
     ),
     getDiagnosticContext: () => {
       // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`

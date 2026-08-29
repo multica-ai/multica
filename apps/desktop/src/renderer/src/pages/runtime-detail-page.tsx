@@ -10,15 +10,19 @@ import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { DaemonRuntimeActions } from "../components/daemon-runtime-card";
 import { useDesktopRuntimeContext } from "../components/use-desktop-runtime-context";
+import { useT } from "@multica/views/i18n";
 
 export function RuntimeDetailPage() {
+  const { t } = useT("layout");
   const { id } = useParams<{ id: string }>();
   const wsId = useWorkspaceId();
   const { data: runtimes } = useQuery(runtimeListOptions(wsId));
   const runtime = runtimes?.find((candidate) => candidate.id === id);
   const context = useDesktopRuntimeContext();
 
-  useDocumentTitle(runtime ? runtimeDisplayLabel(runtime) : "Runtimes");
+  useDocumentTitle(
+    runtime ? runtimeDisplayLabel(runtime) : t(($) => $.nav.runtimes),
+  );
 
   if (!id) return null;
   return (
@@ -34,6 +38,7 @@ export function RuntimeDetailPage() {
 }
 
 export function RuntimeSettingsPage() {
+  const { t } = useT("layout");
   const { id, runtimeId } = useParams<{
     id: string;
     runtimeId: string;
@@ -42,7 +47,9 @@ export function RuntimeSettingsPage() {
   const { data: runtimes } = useQuery(runtimeListOptions(wsId));
   const runtime = runtimes?.find((candidate) => candidate.id === runtimeId);
 
-  useDocumentTitle(runtime ? runtimeDisplayLabel(runtime) : "Runtime");
+  useDocumentTitle(
+    runtime ? runtimeDisplayLabel(runtime) : t(($) => $.tab.runtime),
+  );
 
   if (!id || !runtimeId) return null;
   return <SharedRuntimeSettingsPage machineId={id} runtimeId={runtimeId} />;

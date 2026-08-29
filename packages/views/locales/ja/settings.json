@@ -1130,6 +1130,7 @@
   },
   "desktop": {
     "tabs": {
+      "daemon": "デーモン",
       "updates": "アップデート"
     },
     "updates": {

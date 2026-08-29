@@ -28,6 +28,7 @@ import {
 } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
+import { useT } from "@multica/views/i18n";
 import {
   DesktopNavigationProvider,
   routeContentLinkPath,
@@ -46,6 +47,7 @@ const toolbarMotion = {
 } as const;
 
 function WindowToolbar() {
+  const { t } = useT("layout");
   const { canGoBack, canGoForward, goBack, goForward } = useTabHistory();
   const navButtonClassName =
     "flex size-7 items-center justify-center rounded-md text-faint-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-30";
@@ -71,8 +73,8 @@ function WindowToolbar() {
             type="button"
             onClick={goBack}
             disabled={!canGoBack}
-            aria-label="Go back"
-            title="Go back"
+            aria-label={t(($) => $.desktop.go_back)}
+            title={t(($) => $.desktop.go_back)}
             className={navButtonClassName}
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
@@ -82,8 +84,8 @@ function WindowToolbar() {
             type="button"
             onClick={goForward}
             disabled={!canGoForward}
-            aria-label="Go forward"
-            title="Go forward"
+            aria-label={t(($) => $.desktop.go_forward)}
+            title={t(($) => $.desktop.go_forward)}
             className={navButtonClassName}
             style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
           >
