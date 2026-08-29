@@ -1,12 +1,20 @@
-extends: ./electron-builder.yml
 appId: ai.lifeos.desktop
 productName: LifeOS
 extraMetadata:
   productName: LifeOS
+files:
+  - "!**/.vscode/*"
+  - "!src/*"
+  - "!electron.vite.config.*"
+  - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
+  - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  - "!dist/**"
 protocols:
   - name: LifeOS
     schemes:
       - lifeos
+asarUnpack:
+  - resources/**
 directories:
   buildResources: build
   output: dist/lifeos
@@ -19,3 +27,4 @@ mac:
   notarize: false
 dmg:
   artifactName: lifeos-desktop-${version}-mac-${arch}.${ext}
+npmRebuild: false
