@@ -155,6 +155,43 @@ describe("CreateSkillDialog local import", () => {
     expect(click).toHaveBeenCalled();
   });
 
+  // The local panel keeps its footer at Cancel + Import: a footer that also
+  // carried both source pickers overflowed the dialog and clipped Cancel
+  // (MUL-6794). The pickers live in the panel body instead.
+  it("offers both source pickers in the panel body", () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /Import from local/i }));
+
+    const archiveInput = document.querySelector(
+      'input[type="file"][accept]',
+    ) as HTMLInputElement;
+    const click = vi.fn();
+    archiveInput.click = click;
+    fireEvent.click(
+      screen.getByRole("button", { name: /Choose \.skill \/ \.zip/i }),
+    );
+    expect(click).toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: /Choose folder/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps Import disabled until a folder is prepared", async () => {
+    renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: /Import from local/i }));
+    expect(screen.getByRole("button", { name: /^Import$/i })).toBeDisabled();
+
+    const input = document.querySelector(
+      'input[type="file"][multiple]',
+    ) as HTMLInputElement;
+    fireEvent.change(input, {
+      target: { files: [new File(["---\nname: review-helper\n---\n"], "SKILL.md")] },
+    });
+
+    expect((await screen.findAllByText("review-helper")).length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: /^Import$/i })).toBeEnabled();
+  });
+
   it("does not import when the folder has no SKILL.md", async () => {
     mockPrepareFromPicker.mockResolvedValue({ ok: false, error: "missing_skill_md" });
     renderDialog();

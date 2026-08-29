@@ -304,7 +304,71 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agentTimeout = *overrides.AgentTimeout
 	}
 
-	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", DefaultCodexSemanticInactivityTimeout)
+	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
+	// route 0 through durationFromEnv so the operator can opt out without
+	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
+	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+	// MULTICA_OPENCODE_IDLE_WATCHDOG narrows the no-message window for
+	// OpenCode's streamed model responses. Zero removes the provider-specific
+	// override and falls back to MULTICA_AGENT_IDLE_WATCHDOG; positive values
+	// cannot extend the global bound, and the global zero still disables the
+	// whole mechanism.
+	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// The in-flight-tool budget defaults to the idle budget: the tool window
+	// only ever existed because 30 min was too short for a real build/install/
+	// test, and now that the idle budget is sized for the longest legitimate
+	// silent step it already covers those.
+	//
+	// The derivation tracks in BOTH directions, which is the point of collapsing
+	// this to one number. Raising MULTICA_AGENT_IDLE_WATCHDOG no longer leaves
+	// tool calls silently pinned to the old ceiling — and lowering it now also
+	// lowers the tool budget, where previously a shortened idle window left
+	// tools at a separate, larger 2h. That second direction is a real behaviour
+	// change for anyone who had deliberately shortened the idle window; the
+	// override below is how they keep the two apart.
+	//
+	// MULTICA_AGENT_TOOL_WATCHDOG still overrides for the deliberate "tools may
+	// run longer than the model may think" case, and 0 keeps its meaning: never
+	// force-stop while a tool is in flight.
+	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// Codex runs a semantic-inactivity timer of its own inside the app-server
+	// protocol, and unlike the daemon's watchdog it is NOT tool-aware: a
+	// commandExecution that emits nothing for the whole window trips it even
+	// though a tool is plainly in flight. That one timer therefore stands in
+	// for BOTH daemon watchdogs on a Codex run, so it has to be sized like the
+	// larger of them — otherwise a quiet test suite or an output-buffering
+	// `docker build` dies at the Codex ceiling long before the daemon budget
+	// that was supposed to protect it, and "we raised the budget to 2h" is
+	// simply false for Codex users.
+	//
+	// A tool budget of 0 means "never force-stop while a tool is in flight",
+	// which this timer cannot express — it has no way to see the tool. It falls
+	// back to the idle budget rather than running unbounded, which is the
+	// conservative reading.
+	//
+	// When the whole watchdog suite is disabled (idle = 0), Codex keeps its own
+	// built-in default. Disabling the daemon's watchdogs has never disabled this
+	// timer, and quietly turning it into "unbounded" here would be a much larger
+	// change than this one.
+	codexSemanticDefault := agentIdleWatchdog
+	if agentToolWatchdog > codexSemanticDefault {
+		codexSemanticDefault = agentToolWatchdog
+	}
+	if codexSemanticDefault <= 0 {
+		codexSemanticDefault = DefaultCodexSemanticInactivityTimeout
+	}
+	codexSemanticInactivityTimeout, err := durationFromEnv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", codexSemanticDefault)
 	if err != nil {
 		return Config{}, err
 	}
@@ -351,44 +415,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.CodexHandshakeTimeout > 0 {
 		codexHandshakeTimeout = overrides.CodexHandshakeTimeout
-	}
-
-	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
-	// route 0 through durationFromEnv so the operator can opt out without
-	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
-	agentIdleWatchdog, err := durationFromEnv("MULTICA_AGENT_IDLE_WATCHDOG", DefaultAgentIdleWatchdog)
-	if err != nil {
-		return Config{}, err
-	}
-	// MULTICA_OPENCODE_IDLE_WATCHDOG narrows the no-message window for
-	// OpenCode's streamed model responses. Zero removes the provider-specific
-	// override and falls back to MULTICA_AGENT_IDLE_WATCHDOG; positive values
-	// cannot extend the global bound, and the global zero still disables the
-	// whole mechanism.
-	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
-	if err != nil {
-		return Config{}, err
-	}
-
-	// The in-flight-tool budget defaults to the idle budget: the tool window
-	// only ever existed because 30 min was too short for a real build/install/
-	// test, and now that the idle budget is sized for the longest legitimate
-	// silent step it already covers those.
-	//
-	// The derivation tracks in BOTH directions, which is the point of collapsing
-	// this to one number. Raising MULTICA_AGENT_IDLE_WATCHDOG no longer leaves
-	// tool calls silently pinned to the old ceiling — and lowering it now also
-	// lowers the tool budget, where previously a shortened idle window left
-	// tools at a separate, larger 2h. That second direction is a real behaviour
-	// change for anyone who had deliberately shortened the idle window; the
-	// override below is how they keep the two apart.
-	//
-	// MULTICA_AGENT_TOOL_WATCHDOG still overrides for the deliberate "tools may
-	// run longer than the model may think" case, and 0 keeps its meaning: never
-	// force-stop while a tool is in flight.
-	agentToolWatchdog, err := durationFromEnv("MULTICA_AGENT_TOOL_WATCHDOG", agentIdleWatchdog)
-	if err != nil {
-		return Config{}, err
 	}
 
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
