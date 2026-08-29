@@ -172,10 +172,31 @@ func Text(s string) string {
 	}
 
 	// Redact home directory paths (e.g. /Users/john/ → /Users/****/).
-	if homeDir != "" && username != "" {
-		masked := strings.Replace(homeDir, username, "****", 1)
+	if homeDir != "" {
+		masked := maskHomeDirectory(homeDir, username)
 		s = strings.ReplaceAll(s, homeDir, masked)
 	}
 
 	return s
+}
+
+func maskHomeDirectory(home, currentUsername string) string {
+	if currentUsername != "" {
+		masked := strings.Replace(home, currentUsername, "****", 1)
+		if masked != home {
+			return masked
+		}
+	}
+
+	// A container may override HOME without changing the process account.
+	// Mask the final path component so that setup remains privacy-safe.
+	trimmed := strings.TrimRight(home, `/\`)
+	if trimmed == "" {
+		return home
+	}
+	separator := strings.LastIndexAny(trimmed, `/\`)
+	if separator < 0 {
+		return "****" + home[len(trimmed):]
+	}
+	return trimmed[:separator+1] + "****" + home[len(trimmed):]
 }

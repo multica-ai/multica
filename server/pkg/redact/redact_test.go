@@ -212,6 +212,27 @@ func TestRedactHomeDirectory(t *testing.T) {
 	}
 }
 
+func TestMaskHomeDirectoryWithOverriddenHome(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		home     string
+		username string
+		want     string
+	}{
+		{name: "matching username", home: "/home/runner", username: "runner", want: "/home/****"},
+		{name: "different process user", home: "/home/runner", username: "multica", want: "/home/****"},
+		{name: "windows home", home: `C:\Users\runner`, username: "multica", want: `C:\Users\****`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := maskHomeDirectory(tc.home, tc.username); got != tc.want {
+				t.Fatalf("maskHomeDirectory(%q, %q) = %q, want %q", tc.home, tc.username, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNoFalsePositivesOnNormalText(t *testing.T) {
 	t.Parallel()
 	inputs := []string{
