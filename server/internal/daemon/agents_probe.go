@@ -167,6 +167,13 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
 		agents["openclaw"] = e
 	}
+	// Engine7 (栖) — the Twinsun family of personal AI agents. CLI surface is
+	// openclaw-compatible (agent --message … --json), so it registers like
+	// openclaw: MULTICA_ENGINE7_PATH can pin a binary, otherwise the bare
+	// `engine7` command is probed on PATH.
+	if e, ok := probe("MULTICA_ENGINE7_PATH", "engine7", "MULTICA_ENGINE7_MODEL"); ok {
+		agents["engine7"] = e
+	}
 	if e, ok := probe("MULTICA_HERMES_PATH", "hermes", "MULTICA_HERMES_MODEL"); ok {
 		agents["hermes"] = e
 	}
