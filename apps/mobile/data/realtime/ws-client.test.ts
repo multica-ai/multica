@@ -81,6 +81,20 @@ describe("WSClient application heartbeat", () => {
     client.disconnect();
   });
 
+  it("puts the supplied client OS on the upgrade URL", () => {
+    const client = new WSClient({
+      url: "wss://example.test/ws",
+      token: "token",
+      workspaceSlug: "workspace",
+      clientOS: "android",
+    });
+    client.connect();
+    const socket = MockWebSocket.instances[0];
+    expect(socket.url).toContain("client_os=android");
+    expect(socket.url).toContain("client_platform=mobile");
+    client.disconnect();
+  });
+
   it("keeps a healthy socket connected when its pong arrives", () => {
     const { client, socket } = connectAuthenticatedClient();
     socket.receive({ type: "pong" });

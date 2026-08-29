@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ComponentProps } from "react";
+import { Platform } from "react-native";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@/data/queries/workspaces";
@@ -17,40 +18,26 @@ import { ModalCloseButton } from "@/components/ui/modal-close-button";
 import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
 import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
+import { sheetScreenOptions } from "@/lib/sheet-options";
 
 /**
- * Shared Stack.Screen options for every iOS formSheet-presented sheet route.
+ * Shared Stack.Screen options for every sheet-presented picker route.
  *
- * Why these specific values:
- *   - `presentation: "formSheet"` instantiates iOS
- *     UISheetPresentationController — native grabber, stacked-card backdrop,
- *     drag-to-dismiss spring physics, detents.
- *   - `sheetAllowedDetents: [0.6, 0.95]` — explicit numeric detents. The
- *     ergonomic `"fitToContents"` is broken on iOS 26 + Expo 55
- *     (expo/expo#42904 padding inconsistency, expo/expo#42965 zero-size).
- *     Predictable two-snap presentation across every picker-row sheet >
- *     shrink-wrap; this is the right default for sheets that sit next to
- *     other sheets in the same chip row (issue / project AttributeRow) so
- *     the user gets the same gesture regardless of which chip they tap.
- *     Isolated sheets that have no neighbour to be consistent with (e.g.
- *     the workspace `menu` sheet) override this with `"fitToContents"`
- *     to avoid the large blank area below their content.
- *   - `sheetGrabberVisible: true` — surfaces the iOS native drag handle
- *     so users discover the gesture.
- *   - `contentStyle.height: "100%"` — safety net against the same
- *     zero-size class of bugs above; ensures the sheet body fills the
- *     allotted detent.
- *   - `headerShown: false` — every sheet body draws its own header (title
- *     + optional right action). The native Stack header would double up.
+ * iOS: `presentation: "formSheet"` instantiates UISheetPresentationController
+ * — native grabber, stacked-card backdrop, drag-to-dismiss spring physics,
+ * detents. Explicit numeric detents dodge expo/expo#42904+#42965 (`fitToContents`
+ * zero-size / padding bugs on iOS 26 + Expo 55).
+ *
+ * Android: formSheet has no grabber or detents, so we fall back to a
+ * bottom-entering modal and dismiss with system back. See `sheetScreenOptions`.
+ *
+ * `headerShown: false` — every sheet body draws its own header (title +
+ * optional right action). Search pickers override this to `true` so iOS can
+ * host UISearchController / Android can show a stack title above the inline
+ * search field.
  */
-const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] = {
-  presentation: "formSheet",
-  sheetGrabberVisible: true,
-  sheetAllowedDetents: [0.6, 0.95],
-  sheetCornerRadius: 20,
-  contentStyle: { flex: 1 },
-  headerShown: false,
-};
+const SHEET_OPTIONS: ComponentProps<typeof Stack.Screen>["options"] =
+  sheetScreenOptions(Platform.OS);
 
 /**
  * Cold-start deep-link anchor. Expo Router otherwise treats whatever
@@ -200,7 +187,11 @@ export default function WorkspaceLayout() {
         />
         <Stack.Screen
           name="issue/[id]/picker/label"
-          options={SHEET_OPTIONS}
+          options={{
+            ...SHEET_OPTIONS,
+            headerShown: true,
+            title: "Labels",
+          }}
         />
         <Stack.Screen
           name="mention-picker"
@@ -212,7 +203,11 @@ export default function WorkspaceLayout() {
         />
         <Stack.Screen
           name="issue/[id]/picker/project"
-          options={SHEET_OPTIONS}
+          options={{
+            ...SHEET_OPTIONS,
+            headerShown: true,
+            title: "Project",
+          }}
         />
         <Stack.Screen
           name="issue/[id]/picker/due-date"
@@ -237,7 +232,11 @@ export default function WorkspaceLayout() {
         />
         <Stack.Screen
           name="project/[id]/picker/lead"
-          options={SHEET_OPTIONS}
+          options={{
+            ...SHEET_OPTIONS,
+            headerShown: true,
+            title: "Lead",
+          }}
         />
         <Stack.Screen
           name="project/[id]/add-resource"
@@ -265,7 +264,11 @@ export default function WorkspaceLayout() {
         />
         <Stack.Screen
           name="new-issue-picker/project"
-          options={SHEET_OPTIONS}
+          options={{
+            ...SHEET_OPTIONS,
+            headerShown: true,
+            title: "Project",
+          }}
         />
         <Stack.Screen
           name="new-issue-picker/due-date"

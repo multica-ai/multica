@@ -69,6 +69,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ? "ai.kitta.multica.staging"
           : "ai.kitta.multica.dev",
       versionCode: 1,
+      // Full-screen pages (login / verify) rely on window resize rather than
+      // KeyboardAvoidingView padding, which would double-offset on Android.
+      softwareKeyboardLayoutMode: "resize",
       adaptiveIcon: {
         // The source icon already contains the Multica mark on its dark
         // background. Expo derives the Android adaptive-icon resources during
