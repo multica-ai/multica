@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,6 +15,7 @@ describe("replacement runtime provider catalog", () => {
       "antigravity",
       "cursor",
       "grok",
+      "opencode",
       "opencode-api",
       "opencode-zen",
       "opencode-go",
@@ -40,5 +43,39 @@ describe("replacement runtime provider catalog", () => {
       execution: "openai-compatible",
       defaultBaseUrl: "http://127.0.0.1:11434/v1",
     });
+  });
+
+  it("does not advertise MCP for API execution providers", () => {
+    const apiProviders = REPLACEMENT_RUNTIME_PROVIDERS.filter(
+      (provider) => provider.execution === "openai-compatible",
+    );
+    expect(apiProviders.map((provider) => provider.id)).toEqual([
+      "opencode-api",
+      "opencode-zen",
+      "opencode-go",
+      "openrouter",
+      "vercel-ai-gateway",
+      "ollama",
+      "lmstudio",
+      "nvidia-nim",
+    ]);
+    for (const provider of apiProviders) {
+      expect(provider.capabilities).not.toContain("mcp");
+    }
+  });
+
+  it("preserves native CLI capability declarations", () => {
+    expect(
+      REPLACEMENT_RUNTIME_PROVIDERS.filter(
+        (provider) => provider.execution === "cli",
+      ).map((provider) => [provider.id, provider.capabilities]),
+    ).toEqual([
+      ["codex", ["streaming", "model-selection", "mcp"]],
+      ["claude", ["streaming", "model-selection", "mcp"]],
+      ["antigravity", ["streaming", "model-selection"]],
+      ["cursor", ["streaming", "model-selection", "mcp"]],
+      ["grok", ["streaming", "model-selection", "mcp"]],
+      ["opencode", ["streaming", "model-selection", "mcp"]],
+    ]);
   });
 });

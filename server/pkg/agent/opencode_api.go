@@ -26,16 +26,16 @@ func providerModelAPIProtocol(provider, model string) (apiProtocol, bool) {
 	}
 	switch provider {
 	case "opencode-zen", "opencode-go":
-		if strings.HasPrefix(model, "gemini-") {
-			return "", false
-		}
 		if strings.HasPrefix(model, "claude-") || strings.HasPrefix(model, "qwen3") {
 			return apiProtocolAnthropicMessages, true
 		}
 		if strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "grok-") || strings.HasPrefix(model, "muse-spark") {
 			return apiProtocolResponses, true
 		}
-		return apiProtocolChatCompletions, true
+		if strings.HasPrefix(model, "deepseek-") || strings.HasPrefix(model, "glm-") {
+			return apiProtocolChatCompletions, true
+		}
+		return "", false
 	default:
 		return apiProtocolChatCompletions, true
 	}

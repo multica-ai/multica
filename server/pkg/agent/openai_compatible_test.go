@@ -16,6 +16,9 @@ import (
 func TestOpenAICompatibleExecuteStreamsReasoningTextAndUsage(t *testing.T) {
 	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		requests.Add(1)
 		if r.URL.Path != "/v1/chat/completions" {
 			t.Errorf("request path = %q, want /v1/chat/completions", r.URL.Path)
@@ -70,7 +73,7 @@ func TestOpenAICompatibleExecuteStreamsReasoningTextAndUsage(t *testing.T) {
 		t.Fatalf("usage = %#v", result.Usage)
 	}
 	if requests.Load() != 1 {
-		t.Fatalf("request count = %d, want 1", requests.Load())
+		t.Fatalf("completion request count = %d, want 1", requests.Load())
 	}
 	if !hasMessage(messages, MessageThinking, "checking") || !hasMessage(messages, MessageText, "hello") {
 		t.Fatalf("streamed messages = %#v", messages)
@@ -91,7 +94,10 @@ func TestListAPIModelsNormalizesCatalogAndMarksDefault(t *testing.T) {
 	}))
 	defer server.Close()
 
-	catalog, err := ListAPIModels(context.Background(), "openrouter", ProviderAPIConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}, "z-model", nil)
+	catalog, err := ListAPIModelsWithTrustedHostOverride(context.Background(), "openrouter", ProviderAPIConfig{
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}, "z-model", nil, true)
 	if err != nil {
 		t.Fatalf("ListAPIModels: %v", err)
 	}
@@ -113,7 +119,10 @@ func TestListAPIModelsFiltersUnsupportedOpenCodeProtocolModels(t *testing.T) {
 	}))
 	defer server.Close()
 
-	catalog, err := ListAPIModels(context.Background(), "opencode-zen", ProviderAPIConfig{BaseURL: server.URL + "/v1", APIKey: "test-key"}, "gpt-5.6-sol", nil)
+	catalog, err := ListAPIModelsWithTrustedHostOverride(context.Background(), "opencode-zen", ProviderAPIConfig{
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-key",
+	}, "gpt-5.6-sol", nil, true)
 	if err != nil {
 		t.Fatalf("ListAPIModels: %v", err)
 	}
@@ -129,6 +138,9 @@ func TestListAPIModelsFiltersUnsupportedOpenCodeProtocolModels(t *testing.T) {
 
 func TestOpenCodeZenRoutesResponsesModelsToResponsesAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "gpt-5.6-sol") {
+			return
+		}
 		if r.URL.Path != "/v1/responses" {
 			t.Errorf("request path = %q, want /v1/responses", r.URL.Path)
 		}
@@ -153,7 +165,12 @@ func TestOpenCodeZenRoutesResponsesModelsToResponsesAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := New("opencode-zen", Config{APIBaseURL: server.URL + "/v1", APIKey: "zen-key", DefaultModel: "gpt-5.6-sol"})
+	backend, err := New("opencode-zen", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "zen-key",
+		DefaultModel:           "gpt-5.6-sol",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(opencode-zen): %v", err)
 	}
@@ -171,6 +188,9 @@ func TestOpenCodeZenRoutesResponsesModelsToResponsesAPI(t *testing.T) {
 
 func TestOpenCodeGoRoutesAnthropicModelsToMessagesAPI(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "qwen3.7-max") {
+			return
+		}
 		if r.URL.Path != "/v1/messages" {
 			t.Errorf("request path = %q, want /v1/messages", r.URL.Path)
 		}
@@ -198,7 +218,12 @@ func TestOpenCodeGoRoutesAnthropicModelsToMessagesAPI(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := New("opencode-go", Config{APIBaseURL: server.URL + "/v1", APIKey: "go-key", DefaultModel: "qwen3.7-max"})
+	backend, err := New("opencode-go", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "go-key",
+		DefaultModel:           "qwen3.7-max",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(opencode-go): %v", err)
 	}
@@ -215,7 +240,10 @@ func TestOpenCodeGoRoutesAnthropicModelsToMessagesAPI(t *testing.T) {
 }
 
 func TestOpenAICompatibleExecuteFailsClosedWithoutDone(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		writeSSE(w, `{"choices":[{"delta":{"content":"partial"}}]}`)
 	}))
 	defer server.Close()
@@ -237,13 +265,21 @@ func TestOpenAICompatibleExecuteFailsClosedWithoutDone(t *testing.T) {
 }
 
 func TestOpenAICompatibleExecuteRedactsAPIErrorSecrets(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"error":{"message":"api_key=fixture-secret"}}`))
 	}))
 	defer server.Close()
 
-	backend, err := New("openrouter", Config{APIBaseURL: server.URL + "/v1", APIKey: "fixture-secret", DefaultModel: "fixture-model"})
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-secret",
+		DefaultModel:           "fixture-model",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(openrouter): %v", err)
 	}
@@ -260,7 +296,10 @@ func TestOpenAICompatibleExecuteRedactsAPIErrorSecrets(t *testing.T) {
 }
 
 func TestOpenAICompatibleExecuteRedactsAPISecretsFromStreamedOutput(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		writeSSE(w,
 			`{"choices":[{"delta":{"content":"the key is fixture-secret"}}]}`,
 			`{"choices":[{"delta":{"reasoning_content":"fixture-secret"}}]}`,
@@ -270,7 +309,12 @@ func TestOpenAICompatibleExecuteRedactsAPISecretsFromStreamedOutput(t *testing.T
 	}))
 	defer server.Close()
 
-	backend, err := New("openrouter", Config{APIBaseURL: server.URL + "/v1", APIKey: "fixture-secret", DefaultModel: "fixture-model"})
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-secret",
+		DefaultModel:           "fixture-model",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(openrouter): %v", err)
 	}
@@ -293,7 +337,10 @@ func TestOpenAICompatibleExecuteRedactsAPISecretsFromStreamedOutput(t *testing.T
 }
 
 func TestOpenAICompatibleExecuteFailsClosedOnProviderStreamError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		writeSSE(w,
 			`{"error":{"message":"provider key fixture-secret was rejected"}}`,
 			"[DONE]",
@@ -301,7 +348,12 @@ func TestOpenAICompatibleExecuteFailsClosedOnProviderStreamError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	backend, err := New("openrouter", Config{APIBaseURL: server.URL + "/v1", APIKey: "fixture-secret", DefaultModel: "fixture-model"})
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-secret",
+		DefaultModel:           "fixture-model",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(openrouter): %v", err)
 	}
@@ -331,23 +383,17 @@ func TestOpenAICompatibleProviderClientRefusesRedirects(t *testing.T) {
 	defer redirect.Close()
 
 	backend, err := New("openrouter", Config{
-		APIBaseURL:   redirect.URL + "/v1",
-		APIKey:       "fixture-secret",
-		DefaultModel: "fixture-model",
-		HTTPClient:   &http.Client{CheckRedirect: func(req *http.Request, _ []*http.Request) error { return nil }},
+		APIBaseURL:             redirect.URL + "/v1",
+		APIKey:                 "fixture-secret",
+		DefaultModel:           "fixture-model",
+		HTTPClient:             &http.Client{CheckRedirect: func(req *http.Request, _ []*http.Request) error { return nil }},
+		TrustedAPIHostOverride: true,
 	})
 	if err != nil {
 		t.Fatalf("New(openrouter): %v", err)
 	}
-	session, err := backend.Execute(context.Background(), "say hello", ExecOptions{})
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-	for range session.Messages {
-	}
-	result := <-session.Result
-	if result.Status != "failed" || !strings.Contains(result.Error, "HTTP 307") {
-		t.Fatalf("result = %#v", result)
+	if _, err := backend.Execute(context.Background(), "say hello", ExecOptions{}); err == nil || !strings.Contains(err.Error(), "HTTP 307") {
+		t.Fatalf("Execute error = %v, want redirect rejection", err)
 	}
 	if targetRequests.Load() != 0 {
 		t.Fatal("provider client followed a redirect to the target origin")
@@ -355,7 +401,14 @@ func TestOpenAICompatibleProviderClientRefusesRedirects(t *testing.T) {
 }
 
 func TestOpenAICompatibleMCPRejectsNonHTTPURL(t *testing.T) {
-	backend, err := New("ollama", Config{APIBaseURL: "http://127.0.0.1:1/v1", DefaultModel: "fixture-model"})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serveAPIModelCatalog(w, r, "fixture-model") {
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	backend, err := New("ollama", Config{APIBaseURL: server.URL + "/v1", DefaultModel: "fixture-model"})
 	if err != nil {
 		t.Fatalf("New(ollama): %v", err)
 	}
@@ -402,6 +455,9 @@ func TestOpenAICompatibleExecuteRunsHTTPMCPTool(t *testing.T) {
 	defer mcp.Close()
 
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		requestNumber := apiRequests.Add(1)
 		var payload struct {
 			Messages []struct {
@@ -433,7 +489,12 @@ func TestOpenAICompatibleExecuteRunsHTTPMCPTool(t *testing.T) {
 	}))
 	defer api.Close()
 
-	backend, err := New("openrouter", Config{APIBaseURL: api.URL + "/v1", APIKey: "test-key", DefaultModel: "fixture-model"})
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             api.URL + "/v1",
+		APIKey:                 "test-key",
+		DefaultModel:           "fixture-model",
+		TrustedAPIHostOverride: true,
+	})
 	if err != nil {
 		t.Fatalf("New(openrouter): %v", err)
 	}
@@ -454,7 +515,9 @@ func TestOpenAICompatibleExecuteRunsHTTPMCPTool(t *testing.T) {
 }
 
 func TestOpenAICompatibleConstructorRequiresHostedKeyButAllowsLocalKeyless(t *testing.T) {
-	if _, err := New("openrouter", Config{APIBaseURL: "http://127.0.0.1:1/v1"}); err == nil || !strings.Contains(err.Error(), "API key") {
+	if _, err := New("openrouter", Config{
+		APIBaseURL: "https://openrouter.ai/api/v1",
+	}); err == nil || !strings.Contains(err.Error(), "OPENROUTER_API_KEY") {
 		t.Fatalf("New(openrouter) error = %v, want missing key error", err)
 	}
 	if _, err := New("ollama", Config{APIBaseURL: "http://127.0.0.1:1/v1", DefaultModel: "fixture-model"}); err != nil {
@@ -465,8 +528,211 @@ func TestOpenAICompatibleConstructorRequiresHostedKeyButAllowsLocalKeyless(t *te
 	}
 }
 
-func TestOpenAICompatibleExecuteHonorsCancellation(t *testing.T) {
+func TestOpenAICompatibleConstructorRejectsUntrustedHostedEndpointWithoutRequest(t *testing.T) {
+	var requests atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		writeJSON(w, map[string]any{"data": []any{map[string]any{"id": "fixture-model"}}})
+	}))
+	defer server.Close()
+
+	for _, provider := range []string{
+		"opencode-api",
+		"opencode-zen",
+		"opencode-go",
+		"openrouter",
+		"vercel-ai-gateway",
+		"nvidia-nim",
+	} {
+		t.Run(provider, func(t *testing.T) {
+			_, err := New(provider, Config{
+				APIBaseURL:   server.URL + "/v1",
+				APIKey:       "fixture-key",
+				DefaultModel: "fixture-model",
+				Env: map[string]string{
+					"MULTICA_TRUSTED_PROVIDER_HOST_OVERRIDE": "1",
+				},
+			})
+			if err == nil {
+				t.Error("constructor accepted an untrusted hosted endpoint")
+			}
+		})
+	}
+	if requests.Load() != 0 {
+		t.Errorf("untrusted hosted endpoint received %d requests, want zero", requests.Load())
+	}
+}
+
+func TestOpenAICompatibleConstructorAllowsExplicitTrustedHostOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
+		writeSSE(w, `{"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}`, "[DONE]")
+	}))
+	defer server.Close()
+
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-key",
+		DefaultModel:           "fixture-model",
+		TrustedAPIHostOverride: true,
+	})
+	if err != nil {
+		t.Fatal("constructor rejected an explicit trusted host override")
+	}
+	session, err := backend.Execute(context.Background(), "say done", ExecOptions{})
+	if err != nil {
+		t.Fatal("execution rejected an explicit trusted host override")
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatal("trusted host override execution did not complete")
+	}
+}
+
+func TestAPIProviderModelDiscoveryRejectsUntrustedHostedEndpointWithoutRequest(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		writeJSON(w, map[string]any{"data": []any{map[string]any{"id": "fixture-model"}}})
+	}))
+	defer server.Close()
+
+	for _, provider := range []string{
+		"opencode-api",
+		"opencode-zen",
+		"opencode-go",
+		"openrouter",
+		"vercel-ai-gateway",
+		"nvidia-nim",
+	} {
+		t.Run(provider, func(t *testing.T) {
+			_, err := ListAPIModels(context.Background(), provider, ProviderAPIConfig{
+				BaseURL: server.URL + "/v1",
+				APIKey:  "fixture-key",
+			}, "fixture-model", nil)
+			if err == nil {
+				t.Error("model discovery accepted an untrusted hosted endpoint")
+			}
+		})
+	}
+	if requests.Load() != 0 {
+		t.Errorf("untrusted hosted endpoint received %d requests, want zero", requests.Load())
+	}
+}
+
+func TestAPIProviderModelDiscoveryAllowsExplicitTrustedHostOverride(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !serveAPIModelCatalog(w, r, "fixture-model") {
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	catalog, err := ListAPIModelsWithTrustedHostOverride(
+		context.Background(),
+		"openrouter",
+		ProviderAPIConfig{BaseURL: server.URL + "/v1", APIKey: "fixture-key"},
+		"fixture-model",
+		nil,
+		true,
+	)
+	if err != nil {
+		t.Fatal("model discovery rejected an explicit trusted host override")
+	}
+	if !apiCatalogContainsModel(catalog, "fixture-model") {
+		t.Fatal("trusted host override discovery omitted the advertised model")
+	}
+}
+
+func TestOpenAICompatibleExecuteRevalidatesSelectedModel(t *testing.T) {
+	var completionRequests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			writeJSON(w, map[string]any{"data": []any{map[string]any{"id": "available-model"}}})
+		case "/v1/chat/completions":
+			completionRequests.Add(1)
+			writeSSE(w, `{"choices":[{"delta":{"content":"unexpected"},"finish_reason":"stop"}]}`, "[DONE]")
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-key",
+		DefaultModel:           "available-model",
+		TrustedAPIHostOverride: true,
+	})
+	if err != nil {
+		t.Fatalf("New(openrouter): %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "say hello", ExecOptions{Model: "removed-model"})
+	if err == nil {
+		for range session.Messages {
+		}
+		<-session.Result
+		t.Fatal("Execute accepted a selected model missing from fresh discovery")
+	}
+	if !strings.Contains(err.Error(), "not advertised") {
+		t.Fatalf("Execute error = %v, want missing discovery model rejection", err)
+	}
+	if completionRequests.Load() != 0 {
+		t.Fatalf("completion requests = %d, want zero", completionRequests.Load())
+	}
+}
+
+func TestOpenAICompatibleExecuteRevalidatesDefaultSelectedModel(t *testing.T) {
+	var completionRequests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			writeJSON(w, map[string]any{"data": []any{map[string]any{"id": "available-model"}}})
+		case "/v1/chat/completions":
+			completionRequests.Add(1)
+			writeSSE(w, `{"choices":[{"delta":{"content":"unexpected"},"finish_reason":"stop"}]}`, "[DONE]")
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	backend, err := New("openrouter", Config{
+		APIBaseURL:             server.URL + "/v1",
+		APIKey:                 "fixture-key",
+		DefaultModel:           "removed-model",
+		TrustedAPIHostOverride: true,
+	})
+	if err != nil {
+		t.Fatalf("New(openrouter): %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "say hello", ExecOptions{})
+	if err == nil {
+		for range session.Messages {
+		}
+		<-session.Result
+		t.Fatal("Execute accepted a default model missing from fresh discovery")
+	}
+	if !strings.Contains(err.Error(), "not advertised") {
+		t.Fatalf("Execute error = %v, want missing discovery model rejection", err)
+	}
+	if completionRequests.Load() != 0 {
+		t.Fatalf("completion requests = %d, want zero", completionRequests.Load())
+	}
+}
+
+func TestOpenAICompatibleExecuteHonorsCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveAPIModelCatalog(w, r, "fixture-model") {
+			return
+		}
 		time.Sleep(250 * time.Millisecond)
 		writeSSE(w, `{"choices":[{"delta":{"content":"too late"}}]}`, "[DONE]")
 	}))
@@ -507,6 +773,18 @@ func writeNamedSSE(w http.ResponseWriter, events ...string) {
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func serveAPIModelCatalog(w http.ResponseWriter, r *http.Request, modelIDs ...string) bool {
+	if r.URL.Path != "/v1/models" {
+		return false
+	}
+	models := make([]any, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		models = append(models, map[string]any{"id": modelID})
+	}
+	writeJSON(w, map[string]any{"data": models})
+	return true
 }
 
 func hasMessage(messages []Message, typ MessageType, content string) bool {

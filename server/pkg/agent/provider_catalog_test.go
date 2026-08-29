@@ -1,6 +1,9 @@
 package agent
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestProviderCatalogContainsRequestedRuntimeFamilies(t *testing.T) {
 	want := []string{
@@ -42,15 +45,67 @@ func TestProviderCatalogDistinguishesCLIAndAPIProviders(t *testing.T) {
 func TestResolveProviderAPIConfigUsesTaskEnvBeforeProcessEnv(t *testing.T) {
 	desc, _ := ProviderByID("openrouter")
 	env := map[string]string{
-		desc.BaseURLEnv: "https://example.test/v1",
+		desc.BaseURLEnv: "https://openrouter.ai/alternative/v1",
 		desc.APIKeyEnv:  "task-key",
 	}
 	got, err := ResolveProviderAPIConfig("openrouter", env)
 	if err != nil {
 		t.Fatalf("ResolveProviderAPIConfig: %v", err)
 	}
-	if got.BaseURL != "https://example.test/v1" || got.APIKey != "task-key" {
+	if got.BaseURL != "https://openrouter.ai/alternative/v1" || got.APIKey != "task-key" {
 		t.Fatalf("config = %+v, want task values", got)
+	}
+}
+
+func TestProviderHostedCredentialsRejectUntrustedHostWithoutOperatorOverride(t *testing.T) {
+	for _, provider := range []string{
+		"opencode-api",
+		"opencode-zen",
+		"opencode-go",
+		"openrouter",
+		"vercel-ai-gateway",
+		"nvidia-nim",
+	} {
+		t.Run(provider, func(t *testing.T) {
+			desc, _ := ProviderByID(provider)
+			env := map[string]string{
+				desc.BaseURLEnv:                          "https://untrusted.example/v1",
+				desc.APIKeyEnv:                           "fixture-key",
+				"MULTICA_TRUSTED_PROVIDER_HOST_OVERRIDE": "1",
+			}
+
+			_, err := ResolveProviderAPIConfig(provider, env)
+			if err == nil || !strings.Contains(err.Error(), "untrusted host") {
+				t.Fatalf("ResolveProviderAPIConfig error = %v, want untrusted host rejection", err)
+			}
+		})
+	}
+}
+
+func TestProviderHostedCredentialsAllowExplicitOperatorOverride(t *testing.T) {
+	for _, provider := range []string{
+		"opencode-api",
+		"opencode-zen",
+		"opencode-go",
+		"openrouter",
+		"vercel-ai-gateway",
+		"nvidia-nim",
+	} {
+		t.Run(provider, func(t *testing.T) {
+			desc, _ := ProviderByID(provider)
+			env := map[string]string{
+				desc.BaseURLEnv: "https://operator-approved.example/v1",
+				desc.APIKeyEnv:  "fixture-key",
+			}
+
+			got, err := ResolveProviderAPIConfigWithTrustedHostOverride(provider, env, true)
+			if err != nil {
+				t.Fatalf("ResolveProviderAPIConfigWithTrustedHostOverride: %v", err)
+			}
+			if got.BaseURL != "https://operator-approved.example/v1" {
+				t.Fatalf("trusted override base URL = %q, want configured endpoint", got.BaseURL)
+			}
+		})
 	}
 }
 
@@ -90,9 +145,24 @@ func TestProviderCatalogCapabilitiesFailClosed(t *testing.T) {
 		t.Error("antigravity must not advertise MCP without a verified transport")
 	}
 	for _, id := range []string{"opencode-api", "opencode-zen", "opencode-go", "openrouter", "vercel-ai-gateway", "ollama", "lmstudio", "nvidia-nim"} {
-		for _, capability := range []ProviderCapability{ProviderCapabilityStreaming, ProviderCapabilityModelDiscovery, ProviderCapabilityUsage, ProviderCapabilityMCP} {
+		for _, capability := range []ProviderCapability{
+			ProviderCapabilityPrompt,
+			ProviderCapabilityStreaming,
+			ProviderCapabilityCompletion,
+			ProviderCapabilityCancellation,
+			ProviderCapabilityModelDiscovery,
+		} {
 			if !ProviderSupportsCapability(id, capability) {
 				t.Errorf("API provider %q is missing capability %q", id, capability)
+			}
+		}
+		for _, capability := range []ProviderCapability{
+			ProviderCapabilityUsage,
+			ProviderCapabilityTools,
+			ProviderCapabilityMCP,
+		} {
+			if ProviderSupportsCapability(id, capability) {
+				t.Errorf("API provider %q advertises unproven capability %q", id, capability)
 			}
 		}
 	}
@@ -165,6 +235,11 @@ func TestOpenCodeModelProtocolsAreProviderSpecific(t *testing.T) {
 	if _, ok := providerModelAPIProtocol("opencode-zen", "gemini-3.7-flash"); ok {
 		t.Error("OpenCode Zen Gemini models must remain gated until a Google protocol adapter exists")
 	}
+	for _, provider := range []string{"opencode-zen", "opencode-go"} {
+		if _, ok := providerModelAPIProtocol(provider, "unknown-model-family"); ok {
+			t.Errorf("%s unknown model families must fail closed", provider)
+		}
+	}
 }
 
 func TestValidateAPIBaseURLRejectsUnsafeEndpoints(t *testing.T) {
@@ -191,15 +266,49 @@ func TestValidateAPIBaseURLRejectsUnsafeEndpoints(t *testing.T) {
 
 func TestResolveProviderAPIProfileConfigUsesOnlyApprovedCredentialReference(t *testing.T) {
 	env := map[string]string{"OPENROUTER_API_KEY": "profile-key"}
-	got, err := ResolveProviderAPIProfileConfig("openrouter", env, "https://example.test/v1", "OPENROUTER_API_KEY")
+	got, err := ResolveProviderAPIProfileConfig(
+		"openrouter", env, "https://openrouter.ai/profile/v1", "OPENROUTER_API_KEY",
+	)
 	if err != nil {
 		t.Fatalf("ResolveProviderAPIProfileConfig: %v", err)
 	}
-	if got.BaseURL != "https://example.test/v1" || got.APIKey != "profile-key" {
+	if got.BaseURL != "https://openrouter.ai/profile/v1" || got.APIKey != "profile-key" {
 		t.Fatalf("config = %+v, want profile endpoint and local key", got)
 	}
-	if _, err := ResolveProviderAPIProfileConfig("openrouter", env, "https://example.test/v1", "EVIL_KEY"); err == nil {
+	if _, err := ResolveProviderAPIProfileConfig(
+		"openrouter", env, "https://openrouter.ai/profile/v1", "EVIL_KEY",
+	); err == nil {
 		t.Fatal("unapproved credential environment unexpectedly accepted")
+	}
+}
+
+func TestProviderProfileCredentialsRejectUntrustedHostWithoutOperatorOverride(t *testing.T) {
+	env := map[string]string{
+		"OPENROUTER_API_KEY":                     "fixture-key",
+		"MULTICA_TRUSTED_PROVIDER_HOST_OVERRIDE": "1",
+	}
+	_, err := ResolveProviderAPIProfileConfig(
+		"openrouter", env, "https://untrusted.example/v1", "OPENROUTER_API_KEY",
+	)
+	if err == nil || !strings.Contains(err.Error(), "untrusted host") {
+		t.Fatalf("ResolveProviderAPIProfileConfig error = %v, want untrusted host rejection", err)
+	}
+}
+
+func TestProviderProfileCredentialsAllowExplicitOperatorOverride(t *testing.T) {
+	env := map[string]string{"OPENROUTER_API_KEY": "fixture-key"}
+	got, err := ResolveProviderAPIProfileConfigWithTrustedHostOverride(
+		"openrouter",
+		env,
+		"https://operator-approved.example/v1",
+		"OPENROUTER_API_KEY",
+		true,
+	)
+	if err != nil {
+		t.Fatalf("ResolveProviderAPIProfileConfigWithTrustedHostOverride: %v", err)
+	}
+	if got.BaseURL != "https://operator-approved.example/v1" {
+		t.Fatalf("trusted override base URL = %q, want configured endpoint", got.BaseURL)
 	}
 }
 

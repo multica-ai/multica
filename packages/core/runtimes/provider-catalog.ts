@@ -59,6 +59,13 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     capabilities: ["streaming", "model-selection", "mcp"],
   },
   {
+    id: "opencode",
+    displayName: "OpenCode CLI",
+    setup: "subscription",
+    execution: "cli",
+    capabilities: ["streaming", "model-selection", "mcp"],
+  },
+  {
     id: "opencode-api",
     displayName: "OpenCode Console API",
     setup: "api_key",
@@ -67,7 +74,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     baseUrlEnv: "OPENCODE_API_BASE_URL",
     apiKeyEnv: "OPENCODE_API_KEY",
     optionalKeyEnv: ["OPENCODE_API_TOKEN"],
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "opencode-zen",
@@ -78,7 +85,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     baseUrlEnv: "OPENCODE_ZEN_BASE_URL",
     apiKeyEnv: "OPENCODE_ZEN_API_KEY",
     optionalKeyEnv: ["OPENCODE_ZEN_TOKEN"],
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "opencode-go",
@@ -89,7 +96,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     baseUrlEnv: "OPENCODE_GO_BASE_URL",
     apiKeyEnv: "OPENCODE_GO_API_KEY",
     optionalKeyEnv: ["OPENCODE_GO_TOKEN"],
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "openrouter",
@@ -99,7 +106,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     defaultBaseUrl: "https://openrouter.ai/api/v1",
     baseUrlEnv: "OPENROUTER_BASE_URL",
     apiKeyEnv: "OPENROUTER_API_KEY",
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "vercel-ai-gateway",
@@ -110,7 +117,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     baseUrlEnv: "AI_GATEWAY_BASE_URL",
     apiKeyEnv: "AI_GATEWAY_API_KEY",
     optionalKeyEnv: ["VERCEL_OIDC_TOKEN"],
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "ollama",
@@ -120,7 +127,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     defaultBaseUrl: "http://127.0.0.1:11434/v1",
     baseUrlEnv: "OLLAMA_BASE_URL",
     apiKeyEnv: "OLLAMA_API_KEY",
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "lmstudio",
@@ -130,7 +137,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     defaultBaseUrl: "http://127.0.0.1:1234/v1",
     baseUrlEnv: "LMSTUDIO_BASE_URL",
     apiKeyEnv: "LMSTUDIO_API_KEY",
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
   {
     id: "nvidia-nim",
@@ -140,7 +147,7 @@ export const REPLACEMENT_RUNTIME_PROVIDERS = [
     defaultBaseUrl: "https://integrate.api.nvidia.com/v1",
     baseUrlEnv: "NVIDIA_NIM_BASE_URL",
     apiKeyEnv: "NVIDIA_API_KEY",
-    capabilities: ["streaming", "model-selection", "mcp"],
+    capabilities: ["streaming", "model-selection"],
   },
 ] as const satisfies readonly RuntimeProviderDescriptor[];
 

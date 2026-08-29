@@ -3,6 +3,7 @@ package agent
 import (
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 
@@ -23,9 +24,9 @@ var (
 )
 
 // sanitizeAgentDiagnostic removes terminal control characters, common secret
-// shapes, and local home-directory details before a child-process diagnostic is
-// persisted in Result.Error. stderr is still forwarded to the local daemon log;
-// this helper protects the task row and user-visible failure comment.
+// shapes, and local home-directory details from child-process diagnostics.
+// Native providers layer exact effective-environment credential removal on top
+// before diagnostics reach daemon logs or Result fields.
 func sanitizeAgentDiagnostic(value string) string {
 	value = strings.Map(func(r rune) rune {
 		if r < 0x20 && r != '\n' && r != '\t' {
@@ -37,6 +38,64 @@ func sanitizeAgentDiagnostic(value string) string {
 	value = agentJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
 	value = agentDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
 	return redact.Text(value)
+}
+
+// sanitizeNativeProviderDiagnostic removes exact credential values from a
+// native provider diagnostic before it reaches a daemon log or Result. The
+// effective child environment is the authority because it includes both
+// daemon overrides and inherited provider credentials.
+func sanitizeNativeProviderDiagnostic(value string, env []string) string {
+	secrets := nativeProviderCredentialValues(env)
+	for _, secret := range secrets {
+		value = strings.ReplaceAll(value, secret, "[REDACTED]")
+	}
+	return sanitizeAgentDiagnostic(value)
+}
+
+func nativeProviderCredentialValues(env []string) []string {
+	seen := make(map[string]struct{})
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if !ok || value == "" || !nativeProviderCredentialEnv(key) {
+			continue
+		}
+		seen[value] = struct{}{}
+	}
+	values := make([]string, 0, len(seen))
+	for value := range seen {
+		values = append(values, value)
+	}
+	sort.Slice(values, func(i, j int) bool {
+		return len(values[i]) > len(values[j])
+	})
+	return values
+}
+
+func nativeProviderCredentialEnv(key string) bool {
+	key = strings.ToUpper(strings.TrimSpace(key))
+	for _, marker := range []string{
+		"API_KEY",
+		"APIKEY",
+		"ACCESS_KEY",
+		"TOKEN",
+		"SECRET",
+		"PASSWORD",
+		"CREDENTIAL",
+		"AUTHORIZATION",
+	} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeNativeProviderResult(result Result, env []string) Result {
+	result.Status = sanitizeNativeProviderDiagnostic(result.Status, env)
+	result.Output = sanitizeNativeProviderDiagnostic(result.Output, env)
+	result.Error = sanitizeNativeProviderDiagnostic(result.Error, env)
+	result.SessionID = sanitizeNativeProviderDiagnostic(result.SessionID, env)
+	return result
 }
 
 // stderrTail forwards writes to an inner writer (typically the daemon's

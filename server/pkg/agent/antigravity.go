@@ -94,7 +94,8 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		_ = os.Remove(logPath)
 		return nil, fmt.Errorf("agy stdout pipe: %w", err)
 	}
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
+	stderrLog := newSanitizedLogWriter(b.cfg.Logger, "[agy:stderr] ", cmd.Env)
+	stderrBuf := newStderrTail(stderrLog, agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
@@ -153,6 +154,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 
 		waitErr := cmd.Wait()
+		stderrLog.Flush()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
@@ -208,7 +210,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		b.cfg.Logger.Info("agy finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		resCh <- Result{
+		resCh <- sanitizeNativeProviderResult(Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
 			Error:      finalError,
@@ -218,7 +220,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// leave Usage empty rather than report misleading zeros under a
 			// guessed model name.
 			Usage: map[string]TokenUsage{},
-		}
+		}, cmd.Env)
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil

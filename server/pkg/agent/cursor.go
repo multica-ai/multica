@@ -57,7 +57,8 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[cursor:stderr] "), agentStderrTailBytes)
+	stderrLog := newSanitizedLogWriter(b.cfg.Logger, "[cursor:stderr] ", cmd.Env)
+	stderrBuf := newStderrTail(stderrLog, agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
@@ -332,6 +333,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 
 		exitErr := cmd.Wait()
+		stderrLog.Flush()
 		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
@@ -438,14 +440,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			finalOutput = ""
 		}
 
-		resCh <- Result{
+		resCh <- sanitizeNativeProviderResult(Result{
 			Status:     finalStatus,
 			Output:     finalOutput,
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
 			SessionID:  sessionID,
 			Usage:      resultUsage,
-		}
+		}, cmd.Env)
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil

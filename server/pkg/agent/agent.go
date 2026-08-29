@@ -283,6 +283,9 @@ type Config struct {
 	APIKey       string
 	HTTPClient   *http.Client
 	DefaultModel string
+	// TrustedAPIHostOverride is an explicit daemon-owned trust decision for a
+	// hosted API endpoint. It defaults to false and is never derived from Env.
+	TrustedAPIHostOverride bool
 }
 
 // New creates a Backend for the given agent type.

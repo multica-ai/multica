@@ -141,9 +141,6 @@ func apiProviderCapabilities() []ProviderCapability {
 		ProviderCapabilityCompletion,
 		ProviderCapabilityCancellation,
 		ProviderCapabilityModelDiscovery,
-		ProviderCapabilityUsage,
-		ProviderCapabilityTools,
-		ProviderCapabilityMCP,
 	}
 }
 
@@ -228,9 +225,9 @@ func ProviderCredentialEnvAllowed(provider, envName string) bool {
 	return false
 }
 
-// ValidateProviderAPIBaseURL validates a profile-supplied endpoint against the
-// provider's scheme and host policy. It deliberately does not perform network
-// access.
+// ValidateProviderAPIBaseURL validates the scheme and local-provider policy for
+// a profile-supplied endpoint. Credential host binding happens later, when a
+// daemon-owned credential is resolved and operator trust provenance is known.
 func ValidateProviderAPIBaseURL(provider, raw string) error {
 	desc, ok := ProviderByID(provider)
 	if !ok || !IsAPIProvider(provider) {
@@ -243,6 +240,20 @@ func ValidateProviderAPIBaseURL(provider, raw string) error {
 // the daemon's process environment. The profile can select an approved
 // credential variable name and endpoint, while the secret value remains local.
 func ResolveProviderAPIProfileConfig(provider string, env map[string]string, baseURL, credentialEnv string) (ProviderAPIConfig, error) {
+	return ResolveProviderAPIProfileConfigWithTrustedHostOverride(provider, env, baseURL, credentialEnv, false)
+}
+
+// ResolveProviderAPIProfileConfigWithTrustedHostOverride resolves a profile
+// with an explicit operator-owned trust decision. Environment input cannot
+// enable this override; callers must pass true from a separate trusted control
+// plane. Ordinary profile resolution always passes false.
+func ResolveProviderAPIProfileConfigWithTrustedHostOverride(
+	provider string,
+	env map[string]string,
+	baseURL string,
+	credentialEnv string,
+	trustedHostOverride bool,
+) (ProviderAPIConfig, error) {
 	desc, ok := ProviderByID(provider)
 	if !ok || !IsAPIProvider(provider) {
 		return ProviderAPIConfig{}, fmt.Errorf("provider %q is not an API provider", provider)
@@ -251,7 +262,7 @@ func ResolveProviderAPIProfileConfig(provider string, env map[string]string, bas
 	if baseURL == "" {
 		baseURL = desc.DefaultBaseURL
 	}
-	if err := ValidateProviderAPIBaseURL(provider, baseURL); err != nil {
+	if err := validateProviderAPIBaseURL(provider, baseURL, trustedHostOverride); err != nil {
 		return ProviderAPIConfig{}, err
 	}
 
@@ -281,6 +292,14 @@ func ResolveProviderAPIProfileConfig(provider string, env map[string]string, bas
 // the descriptor default endpoint. The caller supplies the effective task
 // environment so a per-agent credential wins over the daemon process.
 func ResolveProviderAPIConfig(provider string, env map[string]string) (ProviderAPIConfig, error) {
+	return ResolveProviderAPIConfigWithTrustedHostOverride(provider, env, false)
+}
+
+// ResolveProviderAPIConfigWithTrustedHostOverride resolves a built-in API
+// provider with an explicit operator-owned trust decision. Environment input
+// supplies endpoint and credential values only and cannot self-authorize a
+// different hosted origin.
+func ResolveProviderAPIConfigWithTrustedHostOverride(provider string, env map[string]string, trustedHostOverride bool) (ProviderAPIConfig, error) {
 	desc, ok := ProviderByID(provider)
 	if !ok || (desc.Kind != ProviderKindOpenAICompatible && desc.Kind != ProviderKindOpenCodeAPI) {
 		return ProviderAPIConfig{}, fmt.Errorf("provider %q is not an API provider", provider)
@@ -298,13 +317,33 @@ func ResolveProviderAPIConfig(provider string, env map[string]string) (ProviderA
 			}
 		}
 	}
-	if err := validateAPIBaseURL(baseURL, desc.LocalOnly); err != nil {
+	if err := validateProviderAPIBaseURL(provider, baseURL, trustedHostOverride); err != nil {
 		return ProviderAPIConfig{}, fmt.Errorf("provider %q: %w", provider, err)
 	}
 	if desc.RequiresKey && key == "" {
 		return ProviderAPIConfig{}, fmt.Errorf("provider %q requires %s", provider, desc.APIKeyEnv)
 	}
 	return ProviderAPIConfig{BaseURL: strings.TrimRight(baseURL, "/"), APIKey: key}, nil
+}
+
+func validateProviderAPIBaseURL(provider, raw string, trustedHostOverride bool) error {
+	desc, ok := ProviderByID(provider)
+	if !ok || !IsAPIProvider(provider) {
+		return fmt.Errorf("provider %q is not an API provider", provider)
+	}
+	if err := validateAPIBaseURL(raw, desc.LocalOnly); err != nil {
+		return err
+	}
+	if desc.LocalOnly || trustedHostOverride {
+		return nil
+	}
+
+	configured, _ := url.Parse(strings.TrimSpace(raw))
+	trusted, _ := url.Parse(desc.DefaultBaseURL)
+	if strings.EqualFold(configured.Host, trusted.Host) {
+		return nil
+	}
+	return fmt.Errorf("provider %q base URL uses an untrusted host", provider)
 }
 
 func validateAPIBaseURL(raw string, localOnly bool) error {

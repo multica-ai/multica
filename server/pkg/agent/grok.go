@@ -180,11 +180,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		return nil, fmt.Errorf("start grok: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[grok:stderr] "), providerErr)
+	stderrLog := newSanitizedLogWriter(b.cfg.Logger, "[grok:stderr] ", childEnv)
+	stderrSink := io.MultiWriter(stderrLog, providerErr)
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		_, _ = io.Copy(stderrSink, stderr)
+		stderrLog.Flush()
 	}()
 
 	b.cfg.Logger.Info("grok acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
@@ -259,6 +261,19 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			stderrTimer := time.NewTimer(grokReaderDrainGrace)
+			select {
+			case <-stderrDone:
+				if !stderrTimer.Stop() {
+					select {
+					case <-stderrTimer.C:
+					default:
+					}
+				}
+			case <-stderrTimer.C:
+				_ = stderr.Close()
+				<-stderrDone
+			}
 			releaseProcessGroup(cmd)
 		}()
 
@@ -271,6 +286,9 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
 		effectiveModel := strings.TrimSpace(opts.Model)
+		sendResult := func(result Result) {
+			resCh <- sanitizeNativeProviderResult(result, childEnv)
+		}
 
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
@@ -283,7 +301,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok initialize failed: %v", err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 
@@ -300,7 +318,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 		if _, err := c.request(runCtx, "authenticate", map[string]any{
@@ -309,7 +327,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}); err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 			return
 		}
 		b.cfg.Logger.Info("grok authenticated", "method", methodID)
@@ -332,7 +350,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok session/load failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 				return
 			}
 			var changed bool
@@ -355,14 +373,14 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok session/new failed: %v", err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 				return
 			}
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
 				finalError = "grok session/new returned no session ID"
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				sendResult(Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()})
 				return
 			}
 			if effectiveModel == "" {
@@ -380,7 +398,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
 			}); err != nil {
-				b.cfg.Logger.Warn("grok set_session_model failed", "error", err, "requested_model", opts.Model)
+				b.cfg.Logger.Warn("grok set_session_model failed", "error", sanitizeNativeProviderDiagnostic(err.Error(), childEnv), "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("grok could not switch to model %q: %v", opts.Model, err)
 				if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
@@ -391,13 +409,13 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					sessionID = ""
 					resumeRejected = true
 				}
-				resCh <- Result{
+				sendResult(Result{
 					Status:         finalStatus,
 					Error:          finalError,
 					DurationMs:     time.Since(startTime).Milliseconds(),
 					SessionID:      sessionID,
 					ResumeRejected: resumeRejected,
-				}
+				})
 				return
 			}
 			b.cfg.Logger.Info("grok session model set", "model", opts.Model)
@@ -500,7 +518,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			usageMap = map[string]TokenUsage{model: u}
 		}
 
-		resCh <- Result{
+		sendResult(Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
 			Error:          finalError,
@@ -508,7 +526,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			SessionID:      sessionID,
 			ResumeRejected: resumeRejected,
 			Usage:          usageMap,
-		}
+		})
 	}()
 
 	return &Session{Messages: msgStream.ch, Result: resCh}, nil

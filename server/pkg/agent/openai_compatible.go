@@ -31,25 +31,26 @@ func newOpenAICompatibleBackend(provider string, cfg Config) (Backend, error) {
 	if !ok || (desc.Kind != ProviderKindOpenAICompatible && desc.Kind != ProviderKindOpenCodeAPI) {
 		return nil, fmt.Errorf("provider %q is not an HTTP API provider", provider)
 	}
-	resolved, err := ResolveProviderAPIConfig(provider, cfg.Env)
+	effectiveEnv := make(map[string]string, len(cfg.Env)+2)
+	for key, value := range cfg.Env {
+		effectiveEnv[key] = value
+	}
 	if cfg.APIBaseURL != "" {
-		resolved.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.APIBaseURL), "/")
+		effectiveEnv[desc.BaseURLEnv] = cfg.APIBaseURL
 	}
 	if cfg.APIKey != "" {
-		resolved.APIKey = strings.TrimSpace(cfg.APIKey)
+		effectiveEnv[desc.APIKeyEnv] = cfg.APIKey
 	}
-	if err != nil && cfg.APIBaseURL == "" && cfg.APIKey == "" {
+	resolved, err := ResolveProviderAPIConfigWithTrustedHostOverride(
+		provider,
+		effectiveEnv,
+		cfg.TrustedAPIHostOverride,
+	)
+	if err != nil {
 		return nil, err
 	}
-	if resolved.BaseURL == "" {
-		return nil, fmt.Errorf("provider %q has no API base URL", provider)
-	}
-	if err := validateAPIBaseURL(resolved.BaseURL, desc.LocalOnly); err != nil {
-		return nil, fmt.Errorf("provider %q: %w", provider, err)
-	}
-	if desc.RequiresKey && resolved.APIKey == "" {
-		return nil, fmt.Errorf("provider %q requires an API key", provider)
-	}
+	cfg.APIBaseURL = resolved.BaseURL
+	cfg.APIKey = resolved.APIKey
 	cfg.HTTPClient = safeProviderHTTPClient(cfg.HTTPClient)
 	return &openAICompatibleBackend{cfg: cfg, provider: desc}, nil
 }
@@ -58,11 +59,26 @@ func newOpenAICompatibleBackend(provider string, cfg Config) (Backend, error) {
 // and credential are supplied by the daemon, and the returned catalog contains
 // only provider metadata suitable for the model picker.
 func ListAPIModels(ctx context.Context, provider string, cfg ProviderAPIConfig, defaultModel string, client *http.Client) (Catalog, error) {
+	return ListAPIModelsWithTrustedHostOverride(ctx, provider, cfg, defaultModel, client, false)
+}
+
+// ListAPIModelsWithTrustedHostOverride performs model discovery with an
+// explicit daemon-owned host trust decision. Callers must never derive this
+// value from task or workspace environment input. ListAPIModels defaults it to
+// false for ordinary discovery.
+func ListAPIModelsWithTrustedHostOverride(
+	ctx context.Context,
+	provider string,
+	cfg ProviderAPIConfig,
+	defaultModel string,
+	client *http.Client,
+	trustedHostOverride bool,
+) (Catalog, error) {
 	desc, ok := ProviderByID(provider)
 	if !ok || (desc.Kind != ProviderKindOpenAICompatible && desc.Kind != ProviderKindOpenCodeAPI) {
 		return Catalog{}, fmt.Errorf("provider %q is not an HTTP API provider", provider)
 	}
-	if err := validateAPIBaseURL(cfg.BaseURL, desc.LocalOnly); err != nil {
+	if err := validateProviderAPIBaseURL(provider, cfg.BaseURL, trustedHostOverride); err != nil {
 		return Catalog{}, fmt.Errorf("provider %q: %w", provider, err)
 	}
 	if desc.RequiresKey && strings.TrimSpace(cfg.APIKey) == "" {
@@ -157,8 +173,27 @@ func (b *openAICompatibleBackend) Execute(ctx context.Context, prompt string, op
 		return nil, fmt.Errorf("provider %q requires an explicit model", b.provider.ID)
 	}
 
-	servers, err := newAPIHTTPMCPServers(ctx, b.cfg.HTTPClient, opts.McpConfig)
+	runCtx, cancel := runContext(ctx, opts.Timeout)
+	catalog, err := ListAPIModelsWithTrustedHostOverride(runCtx, b.provider.ID, ProviderAPIConfig{
+		BaseURL: b.cfg.APIBaseURL,
+		APIKey:  b.cfg.APIKey,
+	}, model, b.cfg.HTTPClient, b.cfg.TrustedAPIHostOverride)
 	if err != nil {
+		cancel()
+		return nil, fmt.Errorf(
+			"provider %q model revalidation failed: %s",
+			b.provider.ID,
+			sanitizeProviderOutput(err.Error(), b.cfg.APIKey),
+		)
+	}
+	if !apiCatalogContainsModel(catalog, model) {
+		cancel()
+		return nil, fmt.Errorf("provider %q selected model is not advertised by fresh discovery", b.provider.ID)
+	}
+
+	servers, err := newAPIHTTPMCPServers(runCtx, b.cfg.HTTPClient, opts.McpConfig)
+	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("%s MCP setup: %s", b.provider.ID, sanitizeProviderOutput(err.Error(), b.cfg.APIKey))
 	}
 	tools := flattenAPIHTTPMCPTools(servers)
@@ -167,7 +202,6 @@ func (b *openAICompatibleBackend) Execute(ctx context.Context, prompt string, op
 		maxTurns = apiProviderMaxTurns
 	}
 
-	runCtx, cancel := runContext(ctx, opts.Timeout)
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 	go func() {
@@ -250,6 +284,15 @@ func (b *openAICompatibleBackend) Execute(ctx context.Context, prompt string, op
 		resCh <- Result{Status: status, Output: output.String(), Error: finalErr, DurationMs: time.Since(startedAt).Milliseconds(), Usage: usageMap}
 	}()
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func apiCatalogContainsModel(catalog Catalog, modelID string) bool {
+	for _, model := range catalog.Models {
+		if model.ID == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func statusForAPIContext(ctx context.Context) string {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -109,7 +110,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
 	// like "claude exited with error: exit status 3" — which is useless for
 	// root-causing V8 aborts, Bun panics, or any other CLI-side crash.
-	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[claude:stderr] "), agentStderrTailBytes)
+	stderrLog := newSanitizedLogWriter(b.cfg.Logger, "[claude:stderr] ", cmd.Env)
+	stderrBuf := newStderrTail(stderrLog, agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
@@ -275,6 +277,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		stderrLog.Flush()
 		close(procDone)
 		// The leader is reaped; drop ownership. On Windows that closes the Job
 		// Object, which kills anything still inside it — precisely what should
@@ -348,7 +351,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			)
 		}
 
-		resCh <- Result{
+		resCh <- sanitizeNativeProviderResult(Result{
 			Status:         finalStatus,
 			Output:         finalOutput,
 			Error:          finalError,
@@ -356,7 +359,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			SessionID:      reportedSessionID,
 			Usage:          usage,
 			ResumeRejected: resumeRejected,
-		}
+		}, cmd.Env)
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
@@ -1231,19 +1234,108 @@ func extractVersionLine(raw string) (string, bool) {
 }
 
 // logWriter adapts a *slog.Logger to an io.Writer for capturing stderr.
+const sanitizedLogPendingLimit = 64 << 10
+
+const sanitizedLogOmissionMarker = "[diagnostic omitted: line exceeded safe limit]"
+
 type logWriter struct {
-	logger *slog.Logger
-	prefix string
+	logger              *slog.Logger
+	prefix              string
+	diagnosticEnv       []string
+	sanitizeDiagnostics bool
+
+	mu               sync.Mutex
+	pending          []byte
+	omitUntilNewline bool
 }
 
 func newLogWriter(logger *slog.Logger, prefix string) *logWriter {
 	return &logWriter{logger: logger, prefix: prefix}
 }
 
+func newSanitizedLogWriter(logger *slog.Logger, prefix string, env []string) *logWriter {
+	return &logWriter{
+		logger:              logger,
+		prefix:              prefix,
+		diagnosticEnv:       append([]string(nil), env...),
+		sanitizeDiagnostics: true,
+	}
+}
+
 func (w *logWriter) Write(p []byte) (int, error) {
-	text := strings.TrimSpace(string(p))
+	if !w.sanitizeDiagnostics {
+		text := strings.TrimSpace(string(p))
+		if text != "" {
+			w.logger.Debug(w.prefix + text)
+		}
+		return len(p), nil
+	}
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.writeSanitizedLocked(p)
+	return len(p), nil
+}
+
+func (w *logWriter) writeSanitizedLocked(p []byte) {
+	for len(p) > 0 {
+		if w.omitUntilNewline {
+			newline := bytes.IndexByte(p, '\n')
+			if newline < 0 {
+				return
+			}
+			w.omitUntilNewline = false
+			p = p[newline+1:]
+			continue
+		}
+
+		newline := bytes.IndexByte(p, '\n')
+		if newline < 0 {
+			if len(w.pending)+len(p) > sanitizedLogPendingLimit {
+				w.pending = nil
+				w.omitUntilNewline = true
+				w.logger.Debug(w.prefix + sanitizedLogOmissionMarker)
+				return
+			}
+			w.pending = append(w.pending, p...)
+			return
+		}
+
+		line := p[:newline]
+		if len(w.pending)+len(line) > sanitizedLogPendingLimit {
+			w.pending = nil
+			w.logger.Debug(w.prefix + sanitizedLogOmissionMarker)
+		} else {
+			w.pending = append(w.pending, line...)
+			w.emitSanitizedLocked(w.pending)
+			w.pending = w.pending[:0]
+		}
+		p = p[newline+1:]
+	}
+}
+
+func (w *logWriter) emitSanitizedLocked(line []byte) {
+	text := strings.TrimSpace(string(line))
+	if text == "" {
+		return
+	}
+	text = sanitizeNativeProviderDiagnostic(text, w.diagnosticEnv)
 	if text != "" {
 		w.logger.Debug(w.prefix + text)
 	}
-	return len(p), nil
+}
+
+func (w *logWriter) Flush() {
+	if !w.sanitizeDiagnostics {
+		return
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.omitUntilNewline {
+		w.pending = nil
+		w.omitUntilNewline = false
+		return
+	}
+	w.emitSanitizedLocked(w.pending)
+	w.pending = nil
 }
