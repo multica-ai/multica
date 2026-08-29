@@ -1,4 +1,5 @@
 node_modules
+.pnpm-store
 dist
 *.log
 .DS_Store
