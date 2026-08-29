@@ -259,6 +259,25 @@ arguments.
 You need at least one installed CLI or configured API provider. The daemon
 registers each healthy provider as an available runtime.
 
+For an opt-in live API smoke test, set `MULTICA_RUN_REAL_PROVIDER_SMOKE=1` and
+choose a provider with `MULTICA_PROVIDER_SMOKE_PROVIDER`. Set
+`MULTICA_PROVIDER_SMOKE_MODEL` for a deterministic model choice; when it is
+omitted, the test uses the first model returned by discovery. The test reads
+the provider endpoint and credential variables from the daemon environment,
+performs model discovery, and sends one completion request. For example, a
+local Ollama run is:
+
+```bash
+MULTICA_RUN_REAL_PROVIDER_SMOKE=1 \
+MULTICA_PROVIDER_SMOKE_PROVIDER=ollama \
+MULTICA_PROVIDER_SMOKE_MODEL=qwen3.5:latest \
+go test -tags agentintegration ./pkg/agent -run '^TestConfiguredAPIProviderSmoke$' -count=1
+```
+
+Hosted provider smoke tests use the same command shape, but credentials must
+already be present in the daemon environment. The test never prints or stores
+credential values.
+
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
