@@ -1,0 +1,1 @@
+ALTER TABLE agent_tool_policy_revision DROP CONSTRAINT IF EXISTS agent_tool_policy_revision_pkey;

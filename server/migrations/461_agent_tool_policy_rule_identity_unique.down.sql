@@ -1,0 +1,1 @@
+ALTER TABLE agent_tool_policy_rule DROP CONSTRAINT IF EXISTS agent_tool_policy_rule_identity_key;

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_tool_approval_request_pkey_uidx;

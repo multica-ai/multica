@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_agent_tool_policy_revision_workspace_agent;

@@ -117,7 +117,7 @@ var commentContentBigramIndex = usableIndexRequirement{
 // migrations costs one to_regclass lookup each, and only on a database where
 // they are still pending: a fresh self-hosted install, which is exactly where an
 // interrupted build would otherwise leave a permanently unusable index.
-var concurrentIndexCleanups = map[string]string{
+var concurrentIndexCleanups = mergeConcurrentIndexCleanupMaps(map[string]string{
 	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
 	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
 	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",
@@ -274,6 +274,38 @@ var concurrentIndexCleanups = map[string]string{
 	"438_agent_runtime_online_last_seen_index":                  "idx_agent_runtime_online_last_seen",
 	"439_agent_runtime_offline_last_seen_index":                 "idx_agent_runtime_offline_last_seen",
 	"440_github_pr_head_sha_index":                              "idx_github_pull_request_head_sha",
+}, operationalControlConcurrentIndexCleanups)
+
+var operationalControlConcurrentIndexCleanups = map[string]string{
+	"448_agent_tool_policy_pkey_index":                              "agent_tool_policy_pkey_uidx",
+	"450_agent_tool_policy_agent_unique_index":                      "agent_tool_policy_agent_uidx",
+	"452_agent_tool_policy_workspace_agent_index":                   "idx_agent_tool_policy_workspace_agent",
+	"453_agent_tool_policy_revision_pkey_index":                     "agent_tool_policy_revision_pkey_uidx",
+	"455_agent_tool_policy_revision_agent_revision_unique_index":    "agent_tool_policy_revision_agent_revision_uidx",
+	"457_agent_tool_policy_revision_workspace_agent_index":          "idx_agent_tool_policy_revision_workspace_agent",
+	"458_agent_tool_policy_rule_pkey_index":                         "agent_tool_policy_rule_pkey_uidx",
+	"460_agent_tool_policy_rule_identity_unique_index":              "agent_tool_policy_rule_identity_uidx",
+	"462_agent_tool_policy_rule_workspace_agent_index":              "idx_agent_tool_policy_rule_workspace_agent",
+	"463_agent_tool_policy_rule_policy_index":                       "idx_agent_tool_policy_rule_workspace_policy",
+	"464_agent_tool_approval_request_pkey_index":                    "agent_tool_approval_request_pkey_uidx",
+	"466_agent_tool_approval_request_task_idempotency_unique_index": "agent_tool_approval_request_task_idempotency_uidx",
+	"468_agent_tool_approval_request_task_invocation_unique_index":  "agent_tool_approval_request_task_invocation_uidx",
+	"470_agent_tool_approval_request_pending_queue_index":           "idx_agent_tool_approval_request_pending_queue",
+	"471_agent_tool_approval_request_agent_history_index":           "idx_agent_tool_approval_request_agent_history",
+	"472_agent_tool_approval_request_expiry_index":                  "idx_agent_tool_approval_request_expiry",
+	"473_agent_tool_approval_request_retention_index":               "idx_agent_tool_approval_request_retention",
+	"474_agent_tool_action_event_pkey_index":                        "agent_tool_action_event_pkey_uidx",
+	"476_agent_tool_action_event_identity_unique_index":             "agent_tool_action_event_identity_uidx",
+	"478_agent_tool_action_event_agent_history_index":               "idx_agent_tool_action_event_agent_history",
+	"479_agent_tool_action_event_retention_index":                   "idx_agent_tool_action_event_retention",
+	"480_agent_tool_action_event_dashboard_index":                   "idx_agent_tool_action_event_dashboard",
+}
+
+func mergeConcurrentIndexCleanupMaps(base, additional map[string]string) map[string]string {
+	for version, indexName := range additional {
+		base[version] = indexName
+	}
+	return base
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

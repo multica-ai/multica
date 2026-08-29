@@ -1,0 +1,2 @@
+ALTER TABLE agent_tool_approval_request
+    DROP CONSTRAINT IF EXISTS agent_tool_approval_request_task_idempotency_key;

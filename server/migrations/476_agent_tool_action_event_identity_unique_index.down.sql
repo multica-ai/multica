@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_tool_action_event_identity_uidx;

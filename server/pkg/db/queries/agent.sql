@@ -58,14 +58,15 @@ INSERT INTO agent (
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    composio_toolkit_allowlist, permission_mode, operating_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    COALESCE(sqlc.narg('operating_mode')::text, 'coding')
 )
 RETURNING *;
 
@@ -77,11 +78,11 @@ RETURNING *;
 INSERT INTO agent (
     workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
     visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
-    custom_env, custom_args, model, kind, system_key
+    custom_env, custom_args, model, kind, system_key, operating_mode
 ) VALUES (
     @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
     'private', 'private', 1, @owner_id, @instructions,
-    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
+    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key, 'coding'
 )
 RETURNING *;
 
@@ -130,6 +131,7 @@ UPDATE agent SET
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
+    operating_mode = COALESCE(sqlc.narg('operating_mode')::text, operating_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
@@ -2624,10 +2626,11 @@ LIMIT 1;
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode, runtime_config,
     runtime_id, model, visibility, permission_mode, max_concurrent_tasks,
-    owner_id, instructions, custom_env, custom_args, kind, system_key
+    owner_id, instructions, custom_env, custom_args, kind, system_key,
+    operating_mode
 ) VALUES (
     @workspace_id, @name, @description, @avatar_url, @runtime_mode, '{}'::jsonb,
     @runtime_id, @model, @visibility, @permission_mode, @max_concurrent_tasks,
-    @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key
+    @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key, 'coding'
 )
 RETURNING *;

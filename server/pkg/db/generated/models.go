@@ -53,6 +53,7 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
 	ConversationStarters  []byte      `json:"conversation_starters"`
+	OperatingMode         string      `json:"operating_mode"`
 }
 
 type AgentBuilderDraft struct {
@@ -178,6 +179,94 @@ type AgentToLabel struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	LabelID   pgtype.UUID        `json:"label_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentToolActionEvent struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	TaskID            pgtype.UUID        `json:"task_id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	InvocationID      pgtype.UUID        `json:"invocation_id"`
+	ApprovalRequestID pgtype.UUID        `json:"approval_request_id"`
+	TransportKind     string             `json:"transport_kind"`
+	ServerKey         string             `json:"server_key"`
+	ToolName          string             `json:"tool_name"`
+	SchemaDigest      string             `json:"schema_digest"`
+	CoverageKind      string             `json:"coverage_kind"`
+	EventType         string             `json:"event_type"`
+	ArgumentBytes     pgtype.Int4        `json:"argument_bytes"`
+	ResultBytes       pgtype.Int4        `json:"result_bytes"`
+	DurationMs        pgtype.Int8        `json:"duration_ms"`
+	OutcomeCode       pgtype.Text        `json:"outcome_code"`
+	ErrorClass        pgtype.Text        `json:"error_class"`
+	ActorUserID       pgtype.UUID        `json:"actor_user_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentToolApprovalRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	InvocationID     pgtype.UUID        `json:"invocation_id"`
+	IdempotencyKey   string             `json:"idempotency_key"`
+	TransportKind    string             `json:"transport_kind"`
+	ServerKey        string             `json:"server_key"`
+	ToolName         string             `json:"tool_name"`
+	SchemaDigest     string             `json:"schema_digest"`
+	PolicyRevision   int64              `json:"policy_revision"`
+	SchemaFieldNames []string           `json:"schema_field_names"`
+	ArgumentBytes    int32              `json:"argument_bytes"`
+	Status           string             `json:"status"`
+	ReasonCode       pgtype.Text        `json:"reason_code"`
+	RequestedAt      pgtype.Timestamptz `json:"requested_at"`
+	DecidedAt        pgtype.Timestamptz `json:"decided_at"`
+	ConsumedAt       pgtype.Timestamptz `json:"consumed_at"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	DecidedByUserID  pgtype.UUID        `json:"decided_by_user_id"`
+}
+
+type AgentToolPolicy struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	Revision        int64              `json:"revision"`
+	Status          string             `json:"status"`
+	PolicyDigest    string             `json:"policy_digest"`
+	DefaultEffect   string             `json:"default_effect"`
+	CreatedByUserID pgtype.UUID        `json:"created_by_user_id"`
+	UpdatedByUserID pgtype.UUID        `json:"updated_by_user_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentToolPolicyRevision struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	Revision       int64              `json:"revision"`
+	Status         string             `json:"status"`
+	PolicyDigest   string             `json:"policy_digest"`
+	DefaultEffect  string             `json:"default_effect"`
+	RuleIdentities []byte             `json:"rule_identities"`
+	ActorUserID    pgtype.UUID        `json:"actor_user_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentToolPolicyRule struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	PolicyID      pgtype.UUID        `json:"policy_id"`
+	TransportKind string             `json:"transport_kind"`
+	ServerKey     string             `json:"server_key"`
+	ToolName      string             `json:"tool_name"`
+	SchemaDigest  string             `json:"schema_digest"`
+	Effect        string             `json:"effect"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type Attachment struct {

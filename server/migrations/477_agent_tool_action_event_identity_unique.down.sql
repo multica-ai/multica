@@ -1,0 +1,1 @@
+ALTER TABLE agent_tool_action_event DROP CONSTRAINT IF EXISTS agent_tool_action_event_identity_key;

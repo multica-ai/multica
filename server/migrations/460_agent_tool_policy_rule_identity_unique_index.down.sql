@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS agent_tool_policy_rule_identity_uidx;
