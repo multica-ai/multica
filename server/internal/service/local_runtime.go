@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"log/slog"
 	"os/exec"
@@ -10,19 +9,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // DetectedAgent represents a locally detected agent CLI.
 type DetectedAgent struct {
-	Provider string `json:"provider"`
-	Path     string `json:"path"`
-	Version  string `json:"version"`
-	Status   string `json:"status"` // "available", "unavailable"
-	Error    string `json:"error,omitempty"`
-	IsCustom bool   `json:"is_custom_path"`
+	Provider  string `json:"provider"`
+	Path      string `json:"path"`
+	Version   string `json:"version"`
+	Status    string `json:"status"` // "available", "unavailable"
+	Error     string `json:"error,omitempty"`
+	IsCustom  bool   `json:"is_custom_path"`
 }
 
 // LocalRuntimeService manages detection and health checking of local agent CLIs.
@@ -42,7 +41,8 @@ func NewLocalRuntimeService(q *db.Queries) *LocalRuntimeService {
 var supportedProviders = []string{"claude", "codex", "opencode"}
 
 // DetectAgents probes for available agent CLI installations.
-func (s *LocalRuntimeService) DetectAgents(ctx context.Context, workspaceID string) ([]DetectedAgent, error) {
+// Returns detected agents and persists results to the database.
+func (s *LocalRuntimeService) DetectAgents(ctx context.Context, workspaceID pgtype.UUID) ([]DetectedAgent, error) {
 	var results []DetectedAgent
 
 	// Load any existing custom paths from DB.
@@ -59,19 +59,19 @@ func (s *LocalRuntimeService) DetectAgents(ctx context.Context, workspaceID stri
 		results = append(results, detected)
 
 		// Persist detection result.
-		var healthErr sql.NullString
+		var healthErr pgtype.Text
 		if detected.Error != "" {
-			healthErr = sql.NullString{String: detected.Error, Valid: true}
+			healthErr = pgtype.Text{String: detected.Error, Valid: true}
 		}
 		s.Queries.UpsertLocalAgentConfig(ctx, db.UpsertLocalAgentConfigParams{
-			ID:           uuid.New().String(),
-			WorkspaceID:  workspaceID,
-			Provider:     provider,
-			CliPath:      detected.Path,
-			Version:      detected.Version,
-			Status:       detected.Status,
-			IsCustomPath: detected.IsCustom,
-			HealthError:  healthErr,
+			WorkspaceID:     workspaceID,
+			Provider:        provider,
+			CliPath:         detected.Path,
+			Version:         detected.Version,
+			Status:          detected.Status,
+			IsCustomPath:    detected.IsCustom,
+			LastHealthCheck: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+			HealthError:     healthErr,
 		})
 	}
 
@@ -85,6 +85,7 @@ func (s *LocalRuntimeService) probeAgent(ctx context.Context, provider, customPa
 	isCustom := customPath != ""
 
 	if path == "" {
+		// Auto-detect from PATH.
 		detectedPath, err := exec.LookPath(cliName)
 		if err != nil {
 			return DetectedAgent{
@@ -96,6 +97,7 @@ func (s *LocalRuntimeService) probeAgent(ctx context.Context, provider, customPa
 		path = detectedPath
 	}
 
+	// Try to get version.
 	versionCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
@@ -120,38 +122,40 @@ func (s *LocalRuntimeService) probeAgent(ctx context.Context, provider, customPa
 }
 
 // SetCustomPath updates the CLI path for a provider.
-func (s *LocalRuntimeService) SetCustomPath(ctx context.Context, workspaceID string, provider, path string) (*DetectedAgent, error) {
+func (s *LocalRuntimeService) SetCustomPath(ctx context.Context, workspaceID pgtype.UUID, provider, path string) (*DetectedAgent, error) {
+	// Validate path exists.
 	if _, err := exec.LookPath(path); err != nil {
 		return nil, fmt.Errorf("path %q not found or not executable: %w", path, err)
 	}
 
+	// Probe the custom path.
 	detected := s.probeAgent(ctx, provider, path)
 
-	var healthErr sql.NullString
+	var healthErr pgtype.Text
 	if detected.Error != "" {
-		healthErr = sql.NullString{String: detected.Error, Valid: true}
+		healthErr = pgtype.Text{String: detected.Error, Valid: true}
 	}
 	s.Queries.UpsertLocalAgentConfig(ctx, db.UpsertLocalAgentConfigParams{
-		ID:           uuid.New().String(),
-		WorkspaceID:  workspaceID,
-		Provider:     provider,
-		CliPath:      detected.Path,
-		Version:      detected.Version,
-		Status:       detected.Status,
-		IsCustomPath: true,
-		HealthError:  healthErr,
+		WorkspaceID:     workspaceID,
+		Provider:        provider,
+		CliPath:         detected.Path,
+		Version:         detected.Version,
+		Status:          detected.Status,
+		IsCustomPath:    true,
+		LastHealthCheck: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		HealthError:     healthErr,
 	})
 
 	return &detected, nil
 }
 
 // HealthCheckAll runs health checks on all configured agents for a workspace.
-func (s *LocalRuntimeService) HealthCheckAll(ctx context.Context, workspaceID string) ([]DetectedAgent, error) {
+func (s *LocalRuntimeService) HealthCheckAll(ctx context.Context, workspaceID pgtype.UUID) ([]DetectedAgent, error) {
 	return s.DetectAgents(ctx, workspaceID)
 }
 
 // StartPeriodicHealthCheck starts a background health check loop.
-func (s *LocalRuntimeService) StartPeriodicHealthCheck(ctx context.Context, workspaceID string, interval time.Duration) {
+func (s *LocalRuntimeService) StartPeriodicHealthCheck(ctx context.Context, workspaceID pgtype.UUID, interval time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

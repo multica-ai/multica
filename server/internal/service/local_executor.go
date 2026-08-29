@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -13,9 +12,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -24,12 +24,13 @@ import (
 
 // LocalExecutorConfig holds configuration for the local task executor.
 type LocalExecutorConfig struct {
-	MaxConcurrentTasks int
-	AgentTimeout       time.Duration
-	WorkspacesRoot     string
+	MaxConcurrentTasks int           // default: 3
+	AgentTimeout       time.Duration // default: 2 hours
+	WorkspacesRoot     string        // base path for execution envs
 }
 
 // LocalExecutor runs agent tasks in-process without requiring a daemon.
+// It directly spawns agent CLI processes and streams output via WebSocket.
 type LocalExecutor struct {
 	cfg         LocalExecutorConfig
 	queries     *db.Queries
@@ -37,9 +38,9 @@ type LocalExecutor struct {
 	bus         *events.Bus
 	taskService *TaskService
 
-	mu      sync.Mutex
-	sem     chan struct{}
-	running map[string]context.CancelFunc
+	mu       sync.Mutex
+	sem      chan struct{}            // concurrency limiter
+	running  map[string]context.CancelFunc // taskID -> cancel
 }
 
 // NewLocalExecutor creates a new LocalExecutor.
@@ -66,38 +67,50 @@ func NewLocalExecutor(cfg LocalExecutorConfig, q *db.Queries, hub *realtime.Hub,
 	}
 }
 
+// RunningTaskCount returns the number of currently executing tasks.
+func (e *LocalExecutor) RunningTaskCount() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.running)
+}
+
 // ExecuteTask starts a task execution directly (no daemon polling).
-func (e *LocalExecutor) ExecuteTask(ctx context.Context, taskID string) error {
+// The task must already exist in the DB with status 'queued'.
+// This transitions: queued → dispatched → running → completed/failed.
+func (e *LocalExecutor) ExecuteTask(ctx context.Context, taskID pgtype.UUID) error {
+	// Acquire concurrency slot.
 	select {
 	case e.sem <- struct{}{}:
 	default:
 		return fmt.Errorf("at capacity: %d concurrent tasks running", e.cfg.MaxConcurrentTasks)
 	}
 
+	taskIDStr := util.UUIDToString(taskID)
+
+	// Load task from DB.
 	task, err := e.queries.GetAgentTask(ctx, taskID)
 	if err != nil {
 		<-e.sem
 		return fmt.Errorf("load task: %w", err)
 	}
 
+	// Load agent.
 	agentRow, err := e.queries.GetAgent(ctx, task.AgentID)
 	if err != nil {
 		<-e.sem
 		return fmt.Errorf("load agent: %w", err)
 	}
 
-	var issue db.Issue
-	if task.IssueID.Valid {
-		issue, err = e.queries.GetIssue(ctx, task.IssueID.String)
-		if err != nil {
-			<-e.sem
-			return fmt.Errorf("load issue: %w", err)
-		}
+	// Load issue for workspace context.
+	issue, err := e.queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		<-e.sem
+		return fmt.Errorf("load issue: %w", err)
 	}
 
 	// Determine provider from runtime.
-	provider := "claude"
-	if task.RuntimeID != "" {
+	provider := "claude" // default
+	if task.RuntimeID.Valid {
 		if rt, err := e.queries.GetAgentRuntime(ctx, task.RuntimeID); err == nil {
 			provider = rt.Provider
 		}
@@ -113,34 +126,36 @@ func (e *LocalExecutor) ExecuteTask(ctx context.Context, taskID string) error {
 		}
 	}
 
-	// Claim task.
+	// Claim task (queued → dispatched).
 	claimedTask, err := e.taskService.ClaimTask(ctx, task.AgentID)
 	if err != nil {
 		<-e.sem
 		return fmt.Errorf("claim task: %w", err)
 	}
-	if claimedTask == nil || claimedTask.ID != taskID {
+	if claimedTask == nil || util.UUIDToString(claimedTask.ID) != taskIDStr {
 		<-e.sem
 		return fmt.Errorf("task was not claimed (may already be running)")
 	}
 
-	// Start task.
+	// Start task (dispatched → running).
 	if _, err := e.taskService.StartTask(ctx, taskID); err != nil {
 		<-e.sem
 		e.taskService.FailTask(ctx, taskID, fmt.Sprintf("start failed: %v", err))
 		return fmt.Errorf("start task: %w", err)
 	}
 
+	// Register cancel function.
 	runCtx, runCancel := context.WithCancel(ctx)
 	e.mu.Lock()
-	e.running[taskID] = runCancel
+	e.running[taskIDStr] = runCancel
 	e.mu.Unlock()
 
+	// Run in background.
 	go func() {
 		defer func() {
 			<-e.sem
 			e.mu.Lock()
-			delete(e.running, taskID)
+			delete(e.running, taskIDStr)
 			e.mu.Unlock()
 			runCancel()
 		}()
@@ -151,11 +166,12 @@ func (e *LocalExecutor) ExecuteTask(ctx context.Context, taskID string) error {
 	return nil
 }
 
-// CancelTask cancels a running task.
+// CancelTask cancels a running task by sending a signal to its context.
 func (e *LocalExecutor) CancelTask(taskID string) bool {
 	e.mu.Lock()
 	cancel, ok := e.running[taskID]
 	e.mu.Unlock()
+
 	if ok {
 		cancel()
 		return true
@@ -164,34 +180,33 @@ func (e *LocalExecutor) CancelTask(taskID string) bool {
 }
 
 func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, agentRow db.Agent, issue db.Issue, provider, cliPath string) {
-	taskLog := slog.With("task_id", task.ID[:8], "provider", provider)
+	taskIDStr := util.UUIDToString(task.ID)
+	issueIDStr := util.UUIDToString(task.IssueID)
+	workspaceIDStr := util.UUIDToString(issue.WorkspaceID)
+
+	taskLog := slog.With("task_id", taskIDStr[:8], "provider", provider)
 	taskLog.Info("local executor: starting agent")
 
+	// Load agent skills.
 	skills := e.taskService.LoadAgentSkills(ctx, task.AgentID)
 
-	var prompt string
-	var wsID string
-	if task.IssueID.Valid {
-		prompt = buildLocalPrompt(task.IssueID.String)
-		wsID = issue.WorkspaceID
-	} else if task.ChannelID.Valid {
-		prompt = buildLocalChannelPrompt(task.ChannelID.String, task.ChannelMessageID)
-		if ch, err := e.queries.GetChannel(ctx, task.ChannelID.String); err == nil {
-			wsID = ch.WorkspaceID
-		}
-	}
+	// Build prompt.
+	prompt := buildLocalPrompt(issueIDStr)
 
-	workDir := filepath.Join(e.cfg.WorkspacesRoot, wsID, task.ID[:8], "workdir")
+	// Prepare work directory.
+	workDir := filepath.Join(e.cfg.WorkspacesRoot, workspaceIDStr, taskIDStr[:8], "workdir")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		taskLog.Error("failed to create workdir", "error", err)
 		e.taskService.FailTask(ctx, task.ID, fmt.Sprintf("create workdir: %v", err))
 		return
 	}
 
+	// Write context files (CLAUDE.md, skills, etc).
 	if err := writeLocalContextFiles(workDir, provider, agentRow, issue, skills); err != nil {
 		taskLog.Warn("failed to write context files", "error", err)
 	}
 
+	// Create agent backend.
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: cliPath,
 		Logger:         slog.Default(),
@@ -202,15 +217,17 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 		return
 	}
 
+	// Determine model from agent config.
 	model := ""
-	if agentRow.RuntimeConfig != "" {
+	if agentRow.RuntimeConfig != nil {
 		var rc map[string]any
-		json.Unmarshal([]byte(agentRow.RuntimeConfig), &rc)
+		json.Unmarshal(agentRow.RuntimeConfig, &rc)
 		if m, ok := rc["model"].(string); ok {
 			model = m
 		}
 	}
 
+	// Check for prior session to resume.
 	var resumeSessionID string
 	if prior, err := e.queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
 		AgentID: task.AgentID,
@@ -232,7 +249,7 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 	}
 
 	// Stream messages to WebSocket.
-	var seq atomic.Int64
+	var seq atomic.Int32
 	go func() {
 		var batch []map[string]any
 		var mu sync.Mutex
@@ -246,7 +263,7 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 			for _, msg := range toSend {
 				e.bus.Publish(events.Event{
 					Type:        protocol.EventTaskMessage,
-					WorkspaceID: issue.WorkspaceID,
+					WorkspaceID: workspaceIDStr,
 					ActorType:   "system",
 					Payload:     msg,
 				})
@@ -261,8 +278,8 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 			s := seq.Add(1)
 
 			payload := map[string]any{
-				"task_id":  task.ID,
-				"issue_id": task.IssueID,
+				"task_id":  taskIDStr,
+				"issue_id": issueIDStr,
 				"seq":      int(s),
 				"type":     mapMessageType(msg.Type),
 				"content":  redact.Text(msg.Content),
@@ -278,21 +295,18 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 			}
 
 			// Store in DB.
-			var inputJSON sql.NullString
+			var inputJSON []byte
 			if msg.Input != nil {
-				if b, err := json.Marshal(msg.Input); err == nil {
-					inputJSON = sql.NullString{String: string(b), Valid: true}
-				}
+				inputJSON, _ = json.Marshal(msg.Input)
 			}
 			e.queries.CreateTaskMessage(ctx, db.CreateTaskMessageParams{
-				ID:      uuid.New().String(),
 				TaskID:  task.ID,
 				Seq:     s,
 				Type:    string(msg.Type),
-				Tool:    sql.NullString{String: msg.Tool, Valid: msg.Tool != ""},
-				Content: sql.NullString{String: redact.Text(msg.Content), Valid: msg.Content != ""},
+				Tool:    pgtype.Text{String: msg.Tool, Valid: msg.Tool != ""},
+				Content: pgtype.Text{String: redact.Text(msg.Content), Valid: msg.Content != ""},
 				Input:   inputJSON,
-				Output:  sql.NullString{String: redact.Text(msg.Output), Valid: msg.Output != ""},
+				Output:  pgtype.Text{String: redact.Text(msg.Output), Valid: msg.Output != ""},
 			})
 
 			mu.Lock()
@@ -307,6 +321,7 @@ func (e *LocalExecutor) runTask(ctx context.Context, task db.AgentTaskQueue, age
 		}
 	}()
 
+	// Wait for result.
 	result := <-session.Result
 
 	if result.Status == "completed" {
@@ -345,23 +360,8 @@ func buildLocalPrompt(issueID string) string {
 	return b.String()
 }
 
-func buildLocalChannelPrompt(channelID string, messageID sql.NullString) string {
-	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
-	fmt.Fprintf(&b, "You have been mentioned in a channel chat. Your channel ID is: %s\n\n", channelID)
-	if messageID.Valid {
-		fmt.Fprintf(&b, "The triggering message ID is: %s\n\n", messageID.String)
-	}
-	b.WriteString("Start by reading the recent channel messages to understand the conversation context:\n")
-	fmt.Fprintf(&b, "1. Run `multica channel messages %s --output json` to read recent messages\n", channelID)
-	b.WriteString("2. Understand what is being discussed and what is being asked of you\n")
-	fmt.Fprintf(&b, "3. Reply: `multica channel reply %s --content \"your response\"`\n\n", channelID)
-	b.WriteString("If the conversation suggests work that should be tracked:\n")
-	fmt.Fprintf(&b, "- Suggest a task: `multica channel suggest %s --title \"...\" --description \"...\" [--assignee <agent-id>]`\n", channelID)
-	return b.String()
-}
-
 func writeLocalContextFiles(workDir, provider string, agentRow db.Agent, issue db.Issue, skills []AgentSkillData) error {
+	// Write CLAUDE.md / AGENTS.md with agent identity and instructions.
 	var b strings.Builder
 	b.WriteString("# Multica Agent Runtime\n\n")
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
@@ -382,11 +382,12 @@ func writeLocalContextFiles(workDir, provider string, agentRow db.Agent, issue d
 	b.WriteString("- `multica issue comment add <issue-id> --content \"...\"` — Post a comment\n")
 	b.WriteString("- `multica issue status <id> <status>` — Update issue status\n\n")
 
+	issueID := util.UUIDToString(issue.ID)
 	b.WriteString("### Workflow\n\n")
-	fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", issue.ID)
-	fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", issue.ID)
+	fmt.Fprintf(&b, "1. Run `multica issue get %s --output json` to understand your task\n", issueID)
+	fmt.Fprintf(&b, "2. Run `multica issue status %s in_progress`\n", issueID)
 	b.WriteString("3. Implement the changes, commit, and push\n")
-	fmt.Fprintf(&b, "4. Run `multica issue status %s in_review`\n\n", issue.ID)
+	fmt.Fprintf(&b, "4. Run `multica issue status %s in_review`\n\n", issueID)
 
 	if len(skills) > 0 {
 		b.WriteString("## Skills\n\n")

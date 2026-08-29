@@ -1,31 +1,32 @@
--- MULTICA-LOCAL: Stage 4 — Local agent configuration and skills tables (SQLite).
-
+-- Local agent configuration: stores detected CLI installations and user overrides.
 CREATE TABLE IF NOT EXISTS local_agent_config (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6)))),
-    workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-    provider TEXT NOT NULL,
-    cli_path TEXT NOT NULL DEFAULT '',
-    version TEXT NOT NULL DEFAULT '',
-    status TEXT NOT NULL DEFAULT 'unknown',
-    is_custom_path INTEGER NOT NULL DEFAULT 0,
-    last_health_check TEXT,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,             -- "claude", "codex", "opencode"
+    cli_path TEXT NOT NULL DEFAULT '',  -- auto-detected or user-configured path
+    version TEXT NOT NULL DEFAULT '',   -- detected CLI version
+    status TEXT NOT NULL DEFAULT 'unknown', -- "available", "unavailable", "unknown"
+    is_custom_path BOOLEAN NOT NULL DEFAULT false,
+    last_health_check TIMESTAMPTZ,
     health_error TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (workspace_id, provider)
 );
 
+-- Local skills: filesystem-backed skills stored in DB for sync.
 CREATE TABLE IF NOT EXISTS local_skill (
-    id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)),2) || '-' || substr('89ab',abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6)))),
-    workspace_id TEXT REFERENCES workspace(id) ON DELETE CASCADE,
-    project_path TEXT,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id UUID REFERENCES workspace(id) ON DELETE CASCADE, -- NULL = global skill
+    project_path TEXT,                  -- NULL = global, non-null = project-specific
     name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
-    is_default INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    is_default BOOLEAN NOT NULL DEFAULT false, -- bundled default skill
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Index for looking up local skills by workspace or globally.
 CREATE INDEX IF NOT EXISTS idx_local_skill_workspace ON local_skill(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_local_skill_project ON local_skill(project_path);

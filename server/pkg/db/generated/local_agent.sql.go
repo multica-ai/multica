@@ -7,34 +7,35 @@ package db
 
 import (
 	"context"
-	"database/sql"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // --- Local Agent Config ---
 
 type LocalAgentConfig struct {
-	ID              string         `json:"id"`
-	WorkspaceID     string         `json:"workspace_id"`
-	Provider        string         `json:"provider"`
-	CliPath         string         `json:"cli_path"`
-	Version         string         `json:"version"`
-	Status          string         `json:"status"`
-	IsCustomPath    bool           `json:"is_custom_path"`
-	LastHealthCheck sql.NullString `json:"last_health_check"`
-	HealthError     sql.NullString `json:"health_error"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	CliPath         string             `json:"cli_path"`
+	Version         string             `json:"version"`
+	Status          string             `json:"status"`
+	IsCustomPath    bool               `json:"is_custom_path"`
+	LastHealthCheck pgtype.Timestamptz `json:"last_health_check"`
+	HealthError     pgtype.Text        `json:"health_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 const listLocalAgentConfigs = `-- name: ListLocalAgentConfigs :many
 SELECT id, workspace_id, provider, cli_path, version, status, is_custom_path, last_health_check, health_error, created_at, updated_at
 FROM local_agent_config
-WHERE workspace_id = ?
+WHERE workspace_id = $1
 ORDER BY provider ASC
 `
 
-func (q *Queries) ListLocalAgentConfigs(ctx context.Context, workspaceID string) ([]LocalAgentConfig, error) {
-	rows, err := q.db.QueryContext(ctx, listLocalAgentConfigs, workspaceID)
+func (q *Queries) ListLocalAgentConfigs(ctx context.Context, workspaceID pgtype.UUID) ([]LocalAgentConfig, error) {
+	rows, err := q.db.Query(ctx, listLocalAgentConfigs, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -57,11 +58,16 @@ func (q *Queries) ListLocalAgentConfigs(ctx context.Context, workspaceID string)
 const getLocalAgentConfig = `-- name: GetLocalAgentConfig :one
 SELECT id, workspace_id, provider, cli_path, version, status, is_custom_path, last_health_check, health_error, created_at, updated_at
 FROM local_agent_config
-WHERE workspace_id = ? AND provider = ?
+WHERE workspace_id = $1 AND provider = $2
 `
 
-func (q *Queries) GetLocalAgentConfig(ctx context.Context, workspaceID string, provider string) (LocalAgentConfig, error) {
-	row := q.db.QueryRowContext(ctx, getLocalAgentConfig, workspaceID, provider)
+type GetLocalAgentConfigParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Provider    string      `json:"provider"`
+}
+
+func (q *Queries) GetLocalAgentConfig(ctx context.Context, arg GetLocalAgentConfigParams) (LocalAgentConfig, error) {
+	row := q.db.QueryRow(ctx, getLocalAgentConfig, arg.WorkspaceID, arg.Provider)
 	var i LocalAgentConfig
 	err := row.Scan(
 		&i.ID, &i.WorkspaceID, &i.Provider, &i.CliPath, &i.Version,
@@ -72,35 +78,35 @@ func (q *Queries) GetLocalAgentConfig(ctx context.Context, workspaceID string, p
 }
 
 const upsertLocalAgentConfig = `-- name: UpsertLocalAgentConfig :one
-INSERT INTO local_agent_config (id, workspace_id, provider, cli_path, version, status, is_custom_path, last_health_check, health_error)
-VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+INSERT INTO local_agent_config (workspace_id, provider, cli_path, version, status, is_custom_path, last_health_check, health_error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (workspace_id, provider)
 DO UPDATE SET
-    cli_path = excluded.cli_path,
-    version = excluded.version,
-    status = excluded.status,
-    is_custom_path = excluded.is_custom_path,
-    last_health_check = datetime('now'),
-    health_error = excluded.health_error,
-    updated_at = datetime('now')
+    cli_path = EXCLUDED.cli_path,
+    version = EXCLUDED.version,
+    status = EXCLUDED.status,
+    is_custom_path = EXCLUDED.is_custom_path,
+    last_health_check = EXCLUDED.last_health_check,
+    health_error = EXCLUDED.health_error,
+    updated_at = now()
 RETURNING id, workspace_id, provider, cli_path, version, status, is_custom_path, last_health_check, health_error, created_at, updated_at
 `
 
 type UpsertLocalAgentConfigParams struct {
-	ID           string         `json:"id"`
-	WorkspaceID  string         `json:"workspace_id"`
-	Provider     string         `json:"provider"`
-	CliPath      string         `json:"cli_path"`
-	Version      string         `json:"version"`
-	Status       string         `json:"status"`
-	IsCustomPath bool           `json:"is_custom_path"`
-	HealthError  sql.NullString `json:"health_error"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	CliPath         string             `json:"cli_path"`
+	Version         string             `json:"version"`
+	Status          string             `json:"status"`
+	IsCustomPath    bool               `json:"is_custom_path"`
+	LastHealthCheck pgtype.Timestamptz `json:"last_health_check"`
+	HealthError     pgtype.Text        `json:"health_error"`
 }
 
 func (q *Queries) UpsertLocalAgentConfig(ctx context.Context, arg UpsertLocalAgentConfigParams) (LocalAgentConfig, error) {
-	row := q.db.QueryRowContext(ctx, upsertLocalAgentConfig,
-		arg.ID, arg.WorkspaceID, arg.Provider, arg.CliPath, arg.Version,
-		arg.Status, arg.IsCustomPath, arg.HealthError,
+	row := q.db.QueryRow(ctx, upsertLocalAgentConfig,
+		arg.WorkspaceID, arg.Provider, arg.CliPath, arg.Version,
+		arg.Status, arg.IsCustomPath, arg.LastHealthCheck, arg.HealthError,
 	)
 	var i LocalAgentConfig
 	err := row.Scan(
@@ -111,35 +117,56 @@ func (q *Queries) UpsertLocalAgentConfig(ctx context.Context, arg UpsertLocalAge
 	return i, err
 }
 
+const updateLocalAgentHealthCheck = `-- name: UpdateLocalAgentHealthCheck :exec
+UPDATE local_agent_config
+SET status = $3, version = $4, last_health_check = now(), health_error = $5, updated_at = now()
+WHERE workspace_id = $1 AND provider = $2
+`
+
+type UpdateLocalAgentHealthCheckParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Provider    string      `json:"provider"`
+	Status      string      `json:"status"`
+	Version     string      `json:"version"`
+	HealthError pgtype.Text `json:"health_error"`
+}
+
+func (q *Queries) UpdateLocalAgentHealthCheck(ctx context.Context, arg UpdateLocalAgentHealthCheckParams) error {
+	_, err := q.db.Exec(ctx, updateLocalAgentHealthCheck,
+		arg.WorkspaceID, arg.Provider, arg.Status, arg.Version, arg.HealthError,
+	)
+	return err
+}
+
 // --- Local Skills ---
 
 type LocalSkill struct {
-	ID          string         `json:"id"`
-	WorkspaceID sql.NullString `json:"workspace_id"`
-	ProjectPath sql.NullString `json:"project_path"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Content     string         `json:"content"`
-	IsDefault   bool           `json:"is_default"`
-	CreatedAt   string         `json:"created_at"`
-	UpdatedAt   string         `json:"updated_at"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectPath pgtype.Text        `json:"project_path"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Content     string             `json:"content"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 const listLocalSkills = `-- name: ListLocalSkills :many
 SELECT id, workspace_id, project_path, name, description, content, is_default, created_at, updated_at
 FROM local_skill
-WHERE (workspace_id = ? OR workspace_id IS NULL)
-  AND (project_path = ? OR project_path IS NULL)
+WHERE (workspace_id = $1 OR workspace_id IS NULL)
+  AND (project_path = $2 OR project_path IS NULL)
 ORDER BY is_default DESC, name ASC
 `
 
 type ListLocalSkillsParams struct {
-	WorkspaceID string         `json:"workspace_id"`
-	ProjectPath sql.NullString `json:"project_path"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectPath pgtype.Text `json:"project_path"`
 }
 
 func (q *Queries) ListLocalSkills(ctx context.Context, arg ListLocalSkillsParams) ([]LocalSkill, error) {
-	rows, err := q.db.QueryContext(ctx, listLocalSkills, arg.WorkspaceID, arg.ProjectPath)
+	rows, err := q.db.Query(ctx, listLocalSkills, arg.WorkspaceID, arg.ProjectPath)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +194,7 @@ ORDER BY name ASC
 `
 
 func (q *Queries) ListGlobalLocalSkills(ctx context.Context) ([]LocalSkill, error) {
-	rows, err := q.db.QueryContext(ctx, listGlobalLocalSkills)
+	rows, err := q.db.Query(ctx, listGlobalLocalSkills)
 	if err != nil {
 		return nil, err
 	}
@@ -190,11 +217,11 @@ func (q *Queries) ListGlobalLocalSkills(ctx context.Context) ([]LocalSkill, erro
 const getLocalSkill = `-- name: GetLocalSkill :one
 SELECT id, workspace_id, project_path, name, description, content, is_default, created_at, updated_at
 FROM local_skill
-WHERE id = ?
+WHERE id = $1
 `
 
-func (q *Queries) GetLocalSkill(ctx context.Context, id string) (LocalSkill, error) {
-	row := q.db.QueryRowContext(ctx, getLocalSkill, id)
+func (q *Queries) GetLocalSkill(ctx context.Context, id pgtype.UUID) (LocalSkill, error) {
+	row := q.db.QueryRow(ctx, getLocalSkill, id)
 	var i LocalSkill
 	err := row.Scan(
 		&i.ID, &i.WorkspaceID, &i.ProjectPath, &i.Name,
@@ -205,24 +232,23 @@ func (q *Queries) GetLocalSkill(ctx context.Context, id string) (LocalSkill, err
 }
 
 const createLocalSkill = `-- name: CreateLocalSkill :one
-INSERT INTO local_skill (id, workspace_id, project_path, name, description, content, is_default)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO local_skill (workspace_id, project_path, name, description, content, is_default)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, workspace_id, project_path, name, description, content, is_default, created_at, updated_at
 `
 
 type CreateLocalSkillParams struct {
-	ID          string         `json:"id"`
-	WorkspaceID sql.NullString `json:"workspace_id"`
-	ProjectPath sql.NullString `json:"project_path"`
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Content     string         `json:"content"`
-	IsDefault   bool           `json:"is_default"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ProjectPath pgtype.Text `json:"project_path"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Content     string      `json:"content"`
+	IsDefault   bool        `json:"is_default"`
 }
 
 func (q *Queries) CreateLocalSkill(ctx context.Context, arg CreateLocalSkillParams) (LocalSkill, error) {
-	row := q.db.QueryRowContext(ctx, createLocalSkill,
-		arg.ID, arg.WorkspaceID, arg.ProjectPath, arg.Name,
+	row := q.db.QueryRow(ctx, createLocalSkill,
+		arg.WorkspaceID, arg.ProjectPath, arg.Name,
 		arg.Description, arg.Content, arg.IsDefault,
 	)
 	var i LocalSkill
@@ -236,24 +262,24 @@ func (q *Queries) CreateLocalSkill(ctx context.Context, arg CreateLocalSkillPara
 
 const updateLocalSkill = `-- name: UpdateLocalSkill :one
 UPDATE local_skill SET
-    name = COALESCE(NULLIF(?, ''), name),
-    description = COALESCE(NULLIF(?, ''), description),
-    content = COALESCE(NULLIF(?, ''), content),
-    updated_at = datetime('now')
-WHERE id = ?
+    name = COALESCE(NULLIF($2, ''), name),
+    description = COALESCE(NULLIF($3, ''), description),
+    content = COALESCE(NULLIF($4, ''), content),
+    updated_at = now()
+WHERE id = $1
 RETURNING id, workspace_id, project_path, name, description, content, is_default, created_at, updated_at
 `
 
 type UpdateLocalSkillParams struct {
-	Name        sql.NullString `json:"name"`
-	Description sql.NullString `json:"description"`
-	Content     sql.NullString `json:"content"`
-	ID          string         `json:"id"`
+	ID          pgtype.UUID `json:"id"`
+	Name        pgtype.Text `json:"name"`
+	Description pgtype.Text `json:"description"`
+	Content     pgtype.Text `json:"content"`
 }
 
 func (q *Queries) UpdateLocalSkill(ctx context.Context, arg UpdateLocalSkillParams) (LocalSkill, error) {
-	row := q.db.QueryRowContext(ctx, updateLocalSkill,
-		arg.Name, arg.Description, arg.Content, arg.ID,
+	row := q.db.QueryRow(ctx, updateLocalSkill,
+		arg.ID, arg.Name, arg.Description, arg.Content,
 	)
 	var i LocalSkill
 	err := row.Scan(
@@ -265,10 +291,10 @@ func (q *Queries) UpdateLocalSkill(ctx context.Context, arg UpdateLocalSkillPara
 }
 
 const deleteLocalSkill = `-- name: DeleteLocalSkill :exec
-DELETE FROM local_skill WHERE id = ?
+DELETE FROM local_skill WHERE id = $1
 `
 
-func (q *Queries) DeleteLocalSkill(ctx context.Context, id string) error {
-	_, err := q.db.ExecContext(ctx, deleteLocalSkill, id)
+func (q *Queries) DeleteLocalSkill(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteLocalSkill, id)
 	return err
 }

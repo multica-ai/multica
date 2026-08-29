@@ -2,10 +2,9 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"log/slog"
 
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -97,6 +96,7 @@ func SeedDefaultSkills(ctx context.Context, q *db.Queries) {
 	defaults := BundledDefaultSkills()
 
 	for _, skill := range defaults {
+		// Check if already exists.
 		existing, _ := q.ListGlobalLocalSkills(ctx)
 		found := false
 		for _, e := range existing {
@@ -110,9 +110,8 @@ func SeedDefaultSkills(ctx context.Context, q *db.Queries) {
 		}
 
 		_, err := q.CreateLocalSkill(ctx, db.CreateLocalSkillParams{
-			ID:          uuid.New().String(),
-			WorkspaceID: sql.NullString{},
-			ProjectPath: sql.NullString{},
+			WorkspaceID: pgtype.UUID{}, // global
+			ProjectPath: pgtype.Text{}, // global
 			Name:        skill.Name,
 			Description: skill.Description,
 			Content:     skill.Content,

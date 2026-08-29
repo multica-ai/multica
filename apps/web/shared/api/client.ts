@@ -52,7 +52,12 @@ import type {
   CreateChannelMessageRequest,
   CreateIssueFromChannelRequest,
   TaskSuggestion,
-  CreateSuggestionRequest,
+  CreateSuggestionRequest,)
+  LocalDetectedAgent,
+  RunAgentResponse,
+  IssueDiffResponse,
+  CommitResponse,
+  LocalSkill,
 } from "@/shared/types";
 import { type Logger, noopLogger } from "@/shared/logger";
 
