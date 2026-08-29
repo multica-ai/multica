@@ -18,6 +18,10 @@ const (
 	defaultLifeOSProfile    = "lifeos"
 	lifeOSAgentName         = "AI 星耀"
 	lifeOSJudgeName         = "LifeOS Judge"
+	lifeOSExecutionModel    = "gpt-5.6-sol"
+	lifeOSExecutionThinking = "high"
+	lifeOSJudgeModel        = "gpt-5.6-sol"
+	lifeOSJudgeThinking     = "xhigh"
 	lifeOSJudgeInstructions = `你是 LifeOS Judge。先调用 LifeOS MCP 的 context_prepare，独立审核 AI 星耀的结果，核对任务成功标准、事实证据、测试结果、隐私边界与未覆盖风险，不替执行者粉饰结论。
 
 用户可见评论必须讲人话并且只发一条：第一句直接说“我检查完了：可以验收”“我检查完了：需要返工”或“我检查完了：需要你决定”；随后最多使用“我确认了什么”“还需要注意什么”“你现在需要做什么”三段。董事长无需处理时明确写“你现在不用处理”。除非某项内部技术信息本身会改变董事长的判断或下一动作，不得在用户可见评论中出现 UUID、评论 ID、提交哈希、文件路径、运行键、字段名、模型名、状态枚举或完整测试清单。
@@ -320,7 +324,32 @@ type lifeOSAgentSpec struct {
 	Role               string
 	Description        string
 	Instructions       string
+	Model              string
+	ThinkingLevel      string
 	MaxConcurrentTasks int
+}
+
+func defaultLifeOSAgentSpecs() []lifeOSAgentSpec {
+	return []lifeOSAgentSpec{
+		{
+			Name:               lifeOSAgentName,
+			Role:               "ceo",
+			Description:        "LifeOS CEO：理解全局、接单、执行、暴露阻塞并推进闭环。",
+			Instructions:       `你是 AI 星耀，陈星耀的 LifeOS CEO。每次接到任务，先调用 LifeOS MCP 的 context_prepare 获取任务简报和必要上下文，再真正执行任务，而不只给建议。保持事实、推测和工作标签可区分；不得把私密原文、密钥或 Token 写入 LifeOS。所有进展、验证证据和阻塞问题都必须先用 multica issue comment add 以你自己的 Agent 身份发布，再调用 LifeOS MCP 改变状态；MCP 只负责状态与交接，不代你写评论。缺少关键信息或需要董事长判断时，先发布具体问题和已完成排查，再通过 task_update_or_resume 把任务转为 blocked（需要我）。完成执行后，先发布结果与验证证据，再通过 task_update_or_resume 把任务转为 in_review（待验收），由 Judge 独立复核；不要自行宣告最终验收，也不得写入 done。外部发送、公开发布、付款、删除、权限或生产变更必须等待董事长确认。`,
+			Model:              lifeOSExecutionModel,
+			ThinkingLevel:      lifeOSExecutionThinking,
+			MaxConcurrentTasks: 2,
+		},
+		{
+			Name:               lifeOSJudgeName,
+			Role:               "judge",
+			Description:        "LifeOS 独立审核：核对证据、边界、完成标准与战略适配。",
+			Instructions:       lifeOSJudgeInstructions,
+			Model:              lifeOSJudgeModel,
+			ThinkingLevel:      lifeOSJudgeThinking,
+			MaxConcurrentTasks: 1,
+		},
+	}
 }
 
 func ensureLifeOSAgents(ctx context.Context, cfg cli.CLIConfig, lifeOSRoot, controllerRoot string) error {
@@ -365,22 +394,7 @@ func ensureLifeOSAgents(ctx context.Context, cfg cli.CLIConfig, lifeOSRoot, cont
 		}
 		workbenchDB = filepath.Join(home, "Library", "Application Support", "LifeOS", "data", "lifeos-workbench.sqlite3")
 	}
-	specs := []lifeOSAgentSpec{
-		{
-			Name:               lifeOSAgentName,
-			Role:               "ceo",
-			Description:        "LifeOS CEO：理解全局、接单、执行、暴露阻塞并推进闭环。",
-			Instructions:       `你是 AI 星耀，陈星耀的 LifeOS CEO。每次接到任务，先调用 LifeOS MCP 的 context_prepare 获取任务简报和必要上下文，再真正执行任务，而不只给建议。保持事实、推测和工作标签可区分；不得把私密原文、密钥或 Token 写入 LifeOS。所有进展、验证证据和阻塞问题都必须先用 multica issue comment add 以你自己的 Agent 身份发布，再调用 LifeOS MCP 改变状态；MCP 只负责状态与交接，不代你写评论。缺少关键信息或需要董事长判断时，先发布具体问题和已完成排查，再通过 task_update_or_resume 把任务转为 blocked（需要我）。完成执行后，先发布结果与验证证据，再通过 task_update_or_resume 把任务转为 in_review（待验收），由 Judge 独立复核；不要自行宣告最终验收，也不得写入 done。外部发送、公开发布、付款、删除、权限或生产变更必须等待董事长确认。`,
-			MaxConcurrentTasks: 2,
-		},
-		{
-			Name:               lifeOSJudgeName,
-			Role:               "judge",
-			Description:        "LifeOS 独立审核：核对证据、边界、完成标准与战略适配。",
-			Instructions:       lifeOSJudgeInstructions,
-			MaxConcurrentTasks: 1,
-		},
-	}
+	specs := defaultLifeOSAgentSpecs()
 
 	for _, spec := range specs {
 		existing, found := byName[spec.Name]
@@ -393,6 +407,8 @@ func ensureLifeOSAgents(ctx context.Context, cfg cli.CLIConfig, lifeOSRoot, cont
 			"runtime_id":           runtimeID,
 			"description":          spec.Description,
 			"instructions":         spec.Instructions,
+			"model":                spec.Model,
+			"thinking_level":       spec.ThinkingLevel,
 			"mcp_config":           lifeOSMCPConfig(lifeOSRoot, controllerRoot, cfg.ServerURL, codexHome, workbenchDB, spec.Role),
 			"max_concurrent_tasks": spec.MaxConcurrentTasks,
 		}

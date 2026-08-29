@@ -21,6 +21,25 @@ func TestLifeOSJudgeInstructionsUsePlainChairmanFacingChinese(t *testing.T) {
 	}
 }
 
+func TestLifeOSAgentsUseExplicitRoleScopedModels(t *testing.T) {
+	specs := defaultLifeOSAgentSpecs()
+	if len(specs) != 2 {
+		t.Fatalf("LifeOS agent specs = %d, want 2", len(specs))
+	}
+	byName := make(map[string]lifeOSAgentSpec, len(specs))
+	for _, spec := range specs {
+		byName[spec.Name] = spec
+	}
+	ceo := byName[lifeOSAgentName]
+	if ceo.Model != "gpt-5.6-sol" || ceo.ThinkingLevel != "high" {
+		t.Fatalf("AI 星耀 routing = %q/%q", ceo.Model, ceo.ThinkingLevel)
+	}
+	judge := byName[lifeOSJudgeName]
+	if judge.Model != "gpt-5.6-sol" || judge.ThinkingLevel != "xhigh" {
+		t.Fatalf("LifeOS Judge routing = %q/%q", judge.Model, judge.ThinkingLevel)
+	}
+}
+
 func TestLifeOSMCPConfigIsRoleScopedAndUsesOriginalCodexHome(t *testing.T) {
 	root := filepath.Join("tmp", "Life OS AI")
 	controllerRoot := filepath.Join("tmp", "lifeos-controller")
