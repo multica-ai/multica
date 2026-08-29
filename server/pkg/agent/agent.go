@@ -473,6 +473,7 @@ var launchHeaders = map[string]string{
 	"dim":         "dim acp",
 	"mcode":       "mcode acp",
 	"zeroclaw":    "zeroclaw acp",
+	"engine7":     "engine7 agent (json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an
