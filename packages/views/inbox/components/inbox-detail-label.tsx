@@ -8,6 +8,7 @@ import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
 import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useT } from "../../i18n";
+import { useStatusLabel } from "../../issues/utils/status-label";
 
 // Hook returning the inbox-item type → human label map. Replaces the
 // previous static `typeLabels` const so the labels can flow through
@@ -45,17 +46,18 @@ function shortDate(dateStr: string): string {
 
 export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { t } = useT("inbox");
+  const { t: tIssues } = useT("issues");
   const typeLabels = useTypeLabels();
   const { getActorName } = useActorName();
   // Inbox is a cross-workspace surface, so the catalog is read per item's own
   // workspace rather than from the route. (MUL-6243)
-  const { categoryOf, entryOf, colorOf } = useIssueStatuses(item.workspace_id);
+  const { categoryOf, colorOf } = useIssueStatuses(item.workspace_id);
+  const statusLabelOf = useStatusLabel(item.workspace_id);
   const details = item.details ?? {};
 
   switch (item.type) {
     case "status_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const entry = entryOf(details.to);
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_status_to)}
@@ -65,13 +67,17 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
             color={colorOf(details.to)}
             className="h-3 w-3"
           />
-          {entry?.name ?? details.to}
+          {statusLabelOf(details.to)}
         </span>
       );
     }
     case "priority_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = PRIORITY_CONFIG[details.to as IssuePriority]?.label ?? details.to;
+      const priority = details.to as IssuePriority;
+      const label =
+        priority in PRIORITY_CONFIG
+          ? tIssues(($) => $.priority[priority])
+          : details.to;
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_priority_to)}
