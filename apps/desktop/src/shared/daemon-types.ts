@@ -63,17 +63,6 @@ export const DAEMON_STATE_COLORS: Record<DaemonState, string> = {
   auth_expired: "bg-red-500",
 };
 
-export const DAEMON_STATE_LABELS: Record<DaemonState, string> = {
-  running: "Running",
-  stopped: "Stopped",
-  starting: "Starting…",
-  stopping: "Stopping…",
-  installing_cli: "Setting up…",
-  cli_not_found: "Setup Failed",
-  recovery_paused: "Recovery paused",
-  auth_expired: "Sign-in required",
-};
-
 export function formatUptime(uptime?: string): string {
   if (!uptime) return "";
   const match = uptime.match(/(?:(\d+)h)?(\d+)m/);
