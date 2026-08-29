@@ -3,17 +3,20 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import {
   DEFAULT_RUNTIME_CONFIG,
+  LIFEOS_RUNTIME_CONFIG,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
   type RuntimeConfig,
   type RuntimeConfigEnv,
   type RuntimeConfigResult,
 } from "../shared/runtime-config";
+import type { DesktopFlavor } from "../shared/desktop-flavor";
 
 export async function loadRuntimeConfig(options: {
   isDev: boolean;
   env: RuntimeConfigEnv;
   configPath?: string;
+  flavor?: DesktopFlavor;
 }): Promise<RuntimeConfigResult> {
   if (options.isDev) {
     try {
@@ -23,13 +26,21 @@ export async function loadRuntimeConfig(options: {
     }
   }
 
-  const configPath = options.configPath ?? desktopConfigPath();
+  const flavor = options.flavor ?? "multica";
+  const configPath = options.configPath ?? desktopConfigPath(flavor);
   try {
     const raw = await readFile(configPath, "utf-8");
     return { ok: true, config: parseRuntimeConfig(raw) };
   } catch (err) {
     if (isMissingFileError(err)) {
-      return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+      return {
+        ok: true,
+        config: {
+          ...(flavor === "lifeos"
+            ? LIFEOS_RUNTIME_CONFIG
+            : DEFAULT_RUNTIME_CONFIG),
+        },
+      };
     }
     return {
       ok: false,
@@ -40,7 +51,10 @@ export async function loadRuntimeConfig(options: {
   }
 }
 
-export function desktopConfigPath(): string {
+export function desktopConfigPath(flavor: DesktopFlavor = "multica"): string {
+  if (flavor === "lifeos") {
+    return join(app.getPath("userData"), "desktop.json");
+  }
   return join(app.getPath("home"), ".multica", "desktop.json");
 }
 

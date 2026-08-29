@@ -1,12 +1,32 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_RUNTIME_CONFIG,
+  LIFEOS_RUNTIME_CONFIG,
   deriveWsUrl,
   parseRuntimeConfig,
   runtimeConfigFromDevEnv,
 } from "./runtime-config";
 
 describe("runtime config", () => {
+  it("uses cloud defaults without a desktop.json file", () => {
+    expect(DEFAULT_RUNTIME_CONFIG).toEqual({
+      schemaVersion: 1,
+      apiUrl: "https://api.multica.ai",
+      wsUrl: "wss://api.multica.ai/ws",
+      appUrl: "https://multica.ai",
+    });
+  });
+
+  it("keeps the dedicated LifeOS client on loopback by default", () => {
+    expect(LIFEOS_RUNTIME_CONFIG).toEqual({
+      schemaVersion: 1,
+      apiUrl: "http://127.0.0.1:8080",
+      wsUrl: "ws://127.0.0.1:8080/ws",
+      appUrl: "http://127.0.0.1:3000",
+    });
+  });
+
   it("derives https/wss compatible URLs from apiUrl", () => {
     expect(
       parseRuntimeConfig(

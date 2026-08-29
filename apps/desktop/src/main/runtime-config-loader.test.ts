@@ -54,6 +54,26 @@ describe("loadRuntimeConfig", () => {
     });
   });
 
+  it("uses loopback-only defaults for the packaged LifeOS client", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "lifeos-desktop-config-"));
+    await expect(
+      loadRuntimeConfig({
+        isDev: false,
+        flavor: "lifeos",
+        configPath: join(dir, "missing.json"),
+        env: {},
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "http://127.0.0.1:8080",
+        wsUrl: "ws://127.0.0.1:8080/ws",
+        appUrl: "http://127.0.0.1:3000",
+      },
+    });
+  });
+
   it("parses a valid packaged desktop.json", async () => {
     const dir = await mkdtemp(join(tmpdir(), "multica-desktop-config-"));
     const configPath = join(dir, "desktop.json");

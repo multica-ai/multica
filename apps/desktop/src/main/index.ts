@@ -15,7 +15,12 @@ import { installNavigationGuard } from "./navigation-guard";
 import { createRendererWebPreferences } from "./renderer-web-preferences";
 import { getAppVersion } from "./app-version";
 import { loadRuntimeConfig } from "./runtime-config-loader";
+import { setupLifeOSHost } from "./lifeos-host-electron";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
+import {
+  desktopIdentity,
+  resolveDesktopFlavor,
+} from "../shared/desktop-flavor";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   sanitizeRendererRouteContext,
@@ -121,7 +126,16 @@ if (process.platform !== "win32") {
   ]);
 }
 
-const PROTOCOL = "multica";
+const DESKTOP_FLAVOR = resolveDesktopFlavor(
+  app.getName(),
+  process.env.LIFEOS_DESKTOP_MODE,
+);
+const DESKTOP_IDENTITY = desktopIdentity(
+  DESKTOP_FLAVOR,
+  is.dev,
+  process.env.DESKTOP_APP_SUFFIX,
+);
+const PROTOCOL = DESKTOP_IDENTITY.protocol;
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
@@ -553,16 +567,12 @@ function createIssueWindow(context: IssueWindowContext): void {
 
 // DESKTOP_APP_SUFFIX lets parallel worktrees run dev Electron side-by-side
 // without fighting for the shared single-instance lock. The suffix is
-// appended to the app name + userData path, so each worktree gets its own
-// lock file. Default (no env var) keeps behavior unchanged — the common
-// single-worktree case still lands at "Multica Canary".
-const DEV_APP_NAME = process.env.DESKTOP_APP_SUFFIX
-  ? `Multica Canary ${process.env.DESKTOP_APP_SUFFIX}`
-  : "Multica Canary";
-
 if (is.dev) {
-  app.setName(DEV_APP_NAME);
-  app.setPath("userData", join(app.getPath("appData"), DEV_APP_NAME));
+  app.setName(DESKTOP_IDENTITY.appName);
+  app.setPath(
+    "userData",
+    join(app.getPath("appData"), DESKTOP_IDENTITY.appName),
+  );
 } else {
   // Pin the production app name in code. Electron's Linux WM_CLASS is set
   // from app.getName() when the first BrowserWindow is realized; the
@@ -570,7 +580,7 @@ if (is.dev) {
   // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
   // (declared in electron-builder.yml) survive a regression in
   // productName / the build pipeline. Must run before requestSingleInstanceLock().
-  app.setName("Multica");
+  app.setName(DESKTOP_IDENTITY.appName);
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -626,6 +636,7 @@ if (!gotTheLock) {
 
     runtimeConfigResult = await loadRuntimeConfig({
       isDev: is.dev,
+      flavor: DESKTOP_FLAVOR,
       // electron-vite exposes VITE_* on import.meta.env for the main process;
       // keep dev URL overrides on the same source the renderer used before
       // runtime config moved endpoint resolution into main/preload.
@@ -636,9 +647,7 @@ if (!gotTheLock) {
       },
     });
 
-    electronApp.setAppUserModelId(
-      is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
-    );
+    electronApp.setAppUserModelId(DESKTOP_IDENTITY.appUserModelId);
 
     // macOS: replace the default Electron dock icon with the bundled logo
     // so the Canary dev build is visually distinct from a stock Electron
@@ -695,7 +704,11 @@ if (!gotTheLock) {
     ipcMain.on("app:get-info", (event) => {
       const p = process.platform;
       const os = p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
-      event.returnValue = { version: getAppVersion(), os };
+      event.returnValue = {
+        version: getAppVersion(),
+        os,
+        flavor: DESKTOP_FLAVOR,
+      };
     });
 
     // Sync IPC: read + clear any freeze/crash breadcrumb left by a previous
@@ -836,9 +849,30 @@ if (!gotTheLock) {
     });
 
     desktopInitialized = true;
+    const lifeOSHost = setupLifeOSHost({
+      enabled: DESKTOP_FLAVOR === "lifeos",
+      getMainWindow: () => mainWindow,
+      showMainWindow: () => {
+        const window = ensureMainWindow();
+        if (window) focusMainWindow(window);
+      },
+      iconPath: BUNDLED_ICON_PATH,
+    });
+    app.once("before-quit", () => lifeOSHost.dispose());
+    // Start recovery before loading the renderer so the gate receives the
+    // current "starting" state, but do not hold the first native window behind
+    // a potentially slow Docker/launchd recovery. The controller resolves to
+    // an actionable status instead of rejecting, so this background launch is
+    // safe to leave detached.
+    void lifeOSHost.ensureOnLaunch();
     createWindow();
 
-    setupAutoUpdater(() => mainWindow);
+    // The personal LifeOS build is installed locally and intentionally has no
+    // public release channel. Keep Multica's updater untouched, but never let
+    // the LifeOS package query or install Multica releases.
+    if (DESKTOP_FLAVOR === "multica") {
+      setupAutoUpdater(() => mainWindow);
+    }
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
 

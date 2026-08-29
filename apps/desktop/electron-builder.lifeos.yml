@@ -1,0 +1,21 @@
+extends: ./electron-builder.yml
+appId: ai.lifeos.desktop
+productName: LifeOS
+extraMetadata:
+  productName: LifeOS
+protocols:
+  - name: LifeOS
+    schemes:
+      - lifeos
+directories:
+  buildResources: build
+  output: dist/lifeos
+mac:
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - dmg
+    - zip
+  artifactName: lifeos-desktop-${version}-mac-${arch}.${ext}
+  notarize: false
+dmg:
+  artifactName: lifeos-desktop-${version}-mac-${arch}.${ext}

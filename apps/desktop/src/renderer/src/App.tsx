@@ -16,6 +16,7 @@ import { DesktopLoginPage } from "./pages/login";
 import { DesktopAuthRecoveryPage } from "./pages/auth-recovery";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
+import { LifeOSHostGate } from "./components/lifeos-host-gate";
 import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
@@ -340,13 +341,33 @@ function AppContent() {
   return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
-function BlockingRuntimeConfigError({ message }: { message: string }) {
+function BlockingRuntimeConfigError({
+  flavor,
+  message,
+}: {
+  flavor: "multica" | "lifeos";
+  message: string;
+}) {
+  const isLifeOS = flavor === "lifeos";
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <h1 className="text-title font-semibold">
+          {isLifeOS ? "客户端配置错误" : "Desktop configuration error"}
+        </h1>
         <p className="mt-3 text-body text-muted-foreground">
-          Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
+          {isLifeOS ? (
+            <>
+              LifeOS 无法读取
+              <code className="mx-1">客户端专用 desktop.json</code>
+              ，请修复或移除该文件后重新启动。
+            </>
+          ) : (
+            <>
+              Multica Desktop could not load <code>~/.multica/desktop.json</code>.
+              Fix or remove the file and restart the app.
+            </>
+          )}
         </p>
         <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
@@ -378,7 +399,7 @@ function handleSessionExpired() {
 }
 
 export default function App() {
-  const { version, os } = window.desktopAPI.appInfo;
+  const { version, os, flavor = "multica" } = window.desktopAPI.appInfo;
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
   // The fallback keeps renderer HMR safe while a main/preload rebuild is
@@ -435,6 +456,10 @@ export default function App() {
     document.documentElement.lang = HTML_LANG[locale];
   }, [locale]);
 
+  useEffect(() => {
+    document.title = flavor === "lifeos" ? "LifeOS" : "Multica";
+  }, [flavor]);
+
   // React to OS-level language changes detected by main on focus regain.
   // Only act when the user is following the system signal (no explicit
   // Settings choice) — otherwise their preference wins. Cross-device sync
@@ -455,39 +480,46 @@ export default function App() {
 
   return (
     <ThemeProvider>
-      {runtimeConfigResult.ok ? (
-        <CoreProvider
-          apiBaseUrl={runtimeConfigResult.config.apiUrl}
-          wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={
-            windowContext.kind === "main" ? handleDaemonLogout : undefined
-          }
-          onSessionExpired={
-            windowContext.kind === "main" ? handleSessionExpired : undefined
-          }
-          identity={identity}
-          locale={locale}
-          resources={resources}
-          localeAdapter={localeAdapter}
-        >
-          <DesktopAuthSessionBridge />
-          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
-          {windowContext.kind === "main" && (
-            <DesktopClientUsageReporter
-              apiUrl={runtimeConfigResult.config.apiUrl}
-            />
-          )}
-          {windowContext.kind === "issue" ? (
-            <IssueWindowContent />
-          ) : (
-            <AppContent />
-          )}
-        </CoreProvider>
-      ) : (
-        <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
-      )}
+      <LifeOSHostGate>
+        {runtimeConfigResult.ok ? (
+          <CoreProvider
+            apiBaseUrl={runtimeConfigResult.config.apiUrl}
+            wsUrl={runtimeConfigResult.config.wsUrl}
+            onLogout={
+              windowContext.kind === "main" ? handleDaemonLogout : undefined
+            }
+            onSessionExpired={
+              windowContext.kind === "main" ? handleSessionExpired : undefined
+            }
+            identity={identity}
+            locale={locale}
+            resources={resources}
+            localeAdapter={localeAdapter}
+          >
+            <DesktopAuthSessionBridge />
+            {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+            {windowContext.kind === "main" && (
+              <DesktopClientUsageReporter
+                apiUrl={runtimeConfigResult.config.apiUrl}
+              />
+            )}
+            {windowContext.kind === "issue" ? (
+              <IssueWindowContent />
+            ) : (
+              <AppContent />
+            )}
+          </CoreProvider>
+        ) : (
+          <BlockingRuntimeConfigError
+            flavor={flavor}
+            message={runtimeConfigResult.error.message}
+          />
+        )}
+      </LifeOSHostGate>
       <Toaster />
-      {windowContext.kind === "main" && <UpdateNotification />}
+      {windowContext.kind === "main" && flavor === "multica" && (
+        <UpdateNotification />
+      )}
     </ThemeProvider>
   );
 }

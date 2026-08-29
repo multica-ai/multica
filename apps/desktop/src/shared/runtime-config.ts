@@ -20,6 +20,13 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   appUrl: "https://multica.ai",
 });
 
+export const LIFEOS_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
+  schemaVersion: 1,
+  apiUrl: "http://127.0.0.1:8080",
+  wsUrl: "ws://127.0.0.1:8080/ws",
+  appUrl: "http://127.0.0.1:3000",
+});
+
 const LOCAL_DEV_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
   schemaVersion: 1,
   apiUrl: "http://localhost:8080",

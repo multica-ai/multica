@@ -17,12 +17,15 @@ import type {
   LocalRuntimeProbe,
 } from "../shared/daemon-types";
 import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
+import type { DesktopFlavor } from "../shared/desktop-flavor";
+import type { LifeOSHostStatus } from "../shared/lifeos-host";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
   appInfo: {
     version: string;
     os: "macos" | "windows" | "linux" | "unknown";
+    flavor?: DesktopFlavor;
   };
   /** OS-preferred locale (BCP 47) injected by main via additionalArguments. */
   systemLocale: string;
@@ -120,6 +123,15 @@ interface DesktopAPI {
   openIssueWindow: (
     request: IssueWindowRequest,
   ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
+  /** Fixed, allowlisted LifeOS host controls. Never accepts a command or path. */
+  lifeOSHost?: {
+    initialStatus: LifeOSHostStatus;
+    ensure: () => Promise<LifeOSHostStatus>;
+    openLogs: () => Promise<{ ok: boolean; error?: string }>;
+    onStatusChange: (
+      callback: (status: LifeOSHostStatus) => void,
+    ) => () => void;
+  };
 }
 
 type DaemonReauthResult =

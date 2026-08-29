@@ -31,17 +31,38 @@ import {
   type MainRendererMessageChannel,
   type TabSelectionShortcutKey,
 } from "../shared/main-renderer-messages";
+import type { DesktopFlavor } from "../shared/desktop-flavor";
+import {
+  LIFEOS_HOST_ENSURE_CHANNEL,
+  LIFEOS_HOST_GET_STATUS_CHANNEL,
+  LIFEOS_HOST_OPEN_LOGS_CHANNEL,
+  LIFEOS_HOST_STATUS_CHANNEL,
+  type LifeOSHostStatus,
+} from "../shared/lifeos-host";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
 // (async ipc.invoke) would race the ApiClient construction in initCore and
 // the first few HTTP requests would go out without X-Client-Version/OS.
-function fetchAppInfo(): { version: string; os: "macos" | "windows" | "linux" | "unknown" } {
+function fetchAppInfo(): {
+  version: string;
+  os: "macos" | "windows" | "linux" | "unknown";
+  flavor: DesktopFlavor;
+} {
   try {
     const info = ipcRenderer.sendSync("app:get-info") as
-      | { version: string; os: "macos" | "windows" | "linux" | "unknown" }
+      | {
+          version: string;
+          os: "macos" | "windows" | "linux" | "unknown";
+          flavor?: DesktopFlavor;
+        }
       | undefined;
-    if (info && typeof info.version === "string" && typeof info.os === "string") return info;
+    if (info && typeof info.version === "string" && typeof info.os === "string") {
+      return {
+        ...info,
+        flavor: info.flavor === "lifeos" ? "lifeos" : "multica",
+      };
+    }
   } catch {
     // fall through
   }
@@ -49,7 +70,7 @@ function fetchAppInfo(): { version: string; os: "macos" | "windows" | "linux" | 
   const p = process.platform;
   const os: "macos" | "windows" | "linux" | "unknown" =
     p === "darwin" ? "macos" : p === "win32" ? "windows" : p === "linux" ? "linux" : "unknown";
-  return { version: "unknown", os };
+  return { version: "unknown", os, flavor: "multica" };
 }
 
 function fetchRuntimeConfig(): RuntimeConfigResult {
@@ -79,6 +100,21 @@ function fetchSystemLocale(): string {
 }
 
 const systemLocale = fetchSystemLocale();
+
+function fetchLifeOSHostStatus(): LifeOSHostStatus {
+  try {
+    const status = ipcRenderer.sendSync(
+      LIFEOS_HOST_GET_STATUS_CHANNEL,
+    ) as LifeOSHostStatus | undefined;
+    if (status && typeof status.state === "string") return status;
+  } catch {
+    // Fall through to a recoverable local error state.
+  }
+  return {
+    state: appInfo.flavor === "lifeos" ? "offline" : "disabled",
+    checkedAt: Date.now(),
+  };
+}
 
 function subscribeToMainRendererChannel<T>(
   channel: MainRendererMessageChannel,
@@ -243,6 +279,21 @@ const desktopAPI = {
   /** Open a validated issue-detail route in a dedicated native window. */
   openIssueWindow: (request: IssueWindowRequest) =>
     ipcRenderer.invoke("window:open-issue", request),
+  lifeOSHost: {
+    initialStatus: fetchLifeOSHostStatus(),
+    ensure: (): Promise<LifeOSHostStatus> =>
+      ipcRenderer.invoke(LIFEOS_HOST_ENSURE_CHANNEL),
+    openLogs: (): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(LIFEOS_HOST_OPEN_LOGS_CHANNEL),
+    onStatusChange: (callback: (status: LifeOSHostStatus) => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        status: LifeOSHostStatus,
+      ) => callback(status);
+      ipcRenderer.on(LIFEOS_HOST_STATUS_CHANNEL, handler);
+      return () => ipcRenderer.removeListener(LIFEOS_HOST_STATUS_CHANNEL, handler);
+    },
+  },
 };
 
 type DaemonReauthResult =
