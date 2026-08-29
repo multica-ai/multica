@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 import sqlite3
 import tempfile
 import unittest
@@ -338,6 +339,58 @@ class ContextDatabaseTests(unittest.TestCase):
                 lifeos_workbench.CONTROLLER_DEPLOYED_SHA_ENV: "d" * 64,
             },
         )
+
+    def test_autostart_deployment_detects_stale_controller_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            launch_dir = Path(temporary)
+            plist_path = launch_dir / (lifeos_workbench.INDEX_LABEL + ".plist")
+            installed = {
+                lifeos_workbench.WORKBENCH_DEPLOYED_HEAD_ENV: "a" * 40,
+                lifeos_workbench.WORKBENCH_DEPLOYED_SHA_ENV: "b" * 64,
+                lifeos_workbench.CONTROLLER_DEPLOYED_HEAD_ENV: "c" * 40,
+                lifeos_workbench.CONTROLLER_DEPLOYED_SHA_ENV: "d" * 64,
+            }
+            with plist_path.open("wb") as handle:
+                plistlib.dump({"EnvironmentVariables": installed}, handle)
+            expected = {
+                **installed,
+                lifeos_workbench.CONTROLLER_DEPLOYED_HEAD_ENV: "e" * 40,
+            }
+            with mock.patch.object(
+                lifeos_workbench,
+                "implementation_deployment_environment",
+                return_value=expected,
+            ):
+                current = lifeos_workbench.autostart_deployment_is_current(
+                    Path("/tmp/controller"),
+                    launch_dir=launch_dir,
+                )
+
+        self.assertFalse(current)
+
+    def test_ensure_autostart_reinstalls_only_when_binding_is_stale(self) -> None:
+        lifeos_root = Path("/tmp/lifeos-root")
+        controller_root = Path("/tmp/lifeos-controller")
+        with mock.patch.object(
+            lifeos_workbench,
+            "autostart_deployment_is_current",
+            side_effect=[True, False],
+        ), mock.patch.object(
+            lifeos_workbench,
+            "install_autostart",
+        ) as install:
+            self.assertFalse(
+                lifeos_workbench.ensure_autostart_deployment(
+                    lifeos_root, controller_root
+                )
+            )
+            self.assertTrue(
+                lifeos_workbench.ensure_autostart_deployment(
+                    lifeos_root, controller_root
+                )
+            )
+
+        install.assert_called_once_with(lifeos_root, controller_root)
 
     def test_admin_commands_require_explicit_private_inputs(self) -> None:
         reset_args = lifeos_workbench.build_parser().parse_args(

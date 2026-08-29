@@ -593,6 +593,39 @@ def implementation_deployment_environment(
     }
 
 
+def autostart_deployment_is_current(
+    controller_root: Path,
+    *,
+    launch_dir: Optional[Path] = None,
+) -> bool:
+    """Return whether the installed background sync is bound to current code."""
+    directory = launch_dir or (Path.home() / "Library/LaunchAgents")
+    plist_path = directory / (INDEX_LABEL + ".plist")
+    if not plist_path.is_file():
+        return False
+    try:
+        with plist_path.open("rb") as handle:
+            payload = plistlib.load(handle)
+    except (OSError, plistlib.InvalidFileException):
+        return False
+    installed = payload.get("EnvironmentVariables")
+    if not isinstance(installed, dict):
+        return False
+    expected = implementation_deployment_environment(controller_root)
+    return all(installed.get(key) == value for key, value in expected.items())
+
+
+def ensure_autostart_deployment(
+    lifeos_root: Path,
+    controller_root: Path,
+) -> bool:
+    """Refresh stale LaunchAgents after protected runtime code is committed."""
+    if autostart_deployment_is_current(controller_root):
+        return False
+    install_autostart(lifeos_root, controller_root)
+    return True
+
+
 def implementation_provenance(controller_root: Path) -> Dict[str, object]:
     workbench_path = REPO / "scripts/lifeos_workbench.py"
     controller_path = controller_root / "scripts/lifeos_controller.py"
@@ -1215,6 +1248,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return doctor(lifeos_root, controller_root)
         if args.command == "ensure":
             ensure_running(lifeos_root, controller_root)
+            ensure_autostart_deployment(lifeos_root, controller_root)
             return 0
         if args.command == "background-sync":
             background_sync(
