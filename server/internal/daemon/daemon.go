@@ -2533,6 +2533,10 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 		unavailable = map[string]string{}
 		g           errgroup.Group
 	)
+	for provider, reason := range apiProviderProbeFailuresSnapshot() {
+		skipped[provider] = reason
+		unavailable[provider] = reason
+	}
 	g.SetLimit(runtimeVersionProbeConcurrency)
 	for name, entry := range d.agents() {
 		name, entry := name, entry
@@ -2865,12 +2869,13 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 				profile.ProtocolFamily, env, baseURL, credentialEnv,
 			)
 			if configErr != nil {
+				reason := sanitizedProviderOfflineReason(configErr)
 				d.logger.Warn("skip API runtime profile: configuration is unavailable",
 					"workspace_id", workspaceID, "profile_id", profile.ID,
-					"provider", profile.ProtocolFamily, "reason", configErr)
+					"provider", profile.ProtocolFamily, "reason", reason)
 				*failedProfiles = append(*failedProfiles, map[string]string{
 					"profile_id": profile.ID,
-					"reason":     configErr.Error(),
+					"reason":     reason,
 				})
 				continue
 			}
@@ -2878,12 +2883,13 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			probeErr := probeAPIProviderEndpoint(probeCtx, profile.ProtocolFamily, apiConfig)
 			cancel()
 			if probeErr != nil {
+				reason := sanitizedProviderOfflineReason(probeErr)
 				d.logger.Warn("skip API runtime profile: endpoint probe failed",
 					"workspace_id", workspaceID, "profile_id", profile.ID,
-					"provider", profile.ProtocolFamily, "reason", probeErr)
+					"provider", profile.ProtocolFamily, "reason", reason)
 				*failedProfiles = append(*failedProfiles, map[string]string{
 					"profile_id": profile.ID,
-					"reason":     probeErr.Error(),
+					"reason":     reason,
 				})
 				continue
 			}

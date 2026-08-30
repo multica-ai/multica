@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -20,11 +21,10 @@ func TestProbeAPIProvidersDiscoversConfiguredProvidersWithoutExecutables(t *test
 		if desc.Kind != agent.ProviderKindOpenAICompatible && desc.Kind != agent.ProviderKindOpenCodeAPI {
 			continue
 		}
-		scheme := "https"
 		if desc.LocalOnly {
 			t.Setenv(desc.BaseURLEnv, "http://127.0.0.1:12345/v1")
 		} else {
-			t.Setenv(desc.BaseURLEnv, scheme+"://"+desc.ID+".example.test/v1")
+			t.Setenv(desc.BaseURLEnv, desc.DefaultBaseURL)
 		}
 		if desc.RequiresKey {
 			t.Setenv(desc.APIKeyEnv, "key-for-"+desc.ID)
@@ -88,6 +88,67 @@ func TestProbeAPIProvidersSkipsUnconfiguredOrInvalidProviders(t *testing.T) {
 	}
 }
 
+func TestProbeAPIProvidersSanitizesFailureAndRetriesOnNextRefresh(t *testing.T) {
+	setMissingCLIs(t)
+	t.Setenv("OPENROUTER_API_KEY", "openrouter-canary-secret")
+	publishAPIProviderProbeFailures(nil)
+	t.Cleanup(func() { publishAPIProviderProbeFailures(nil) })
+
+	oldProbe := probeAPIProviderEndpoint
+	var openRouterCalls atomic.Int32
+	probeAPIProviderEndpoint = func(_ context.Context, provider string, _ agent.ProviderAPIConfig) error {
+		switch provider {
+		case "openrouter":
+			if openRouterCalls.Add(1) == 1 {
+				return errors.New("dial failed with openrouter-canary-secret")
+			}
+			return nil
+		case "ollama":
+			return nil
+		default:
+			return errors.New("provider is offline")
+		}
+	}
+	t.Cleanup(func() { probeAPIProviderEndpoint = oldProbe })
+
+	first := probeAPIProviders()
+	if _, ok := first["ollama"]; !ok {
+		t.Fatalf("healthy provider was hidden by a sibling failure: %v", first)
+	}
+	if _, ok := first["openrouter"]; ok {
+		t.Fatalf("failed provider was reported online: %v", first)
+	}
+	failures := apiProviderProbeFailuresSnapshot()
+	if got := failures["openrouter"]; got != "provider endpoint is unavailable" {
+		t.Fatalf("sanitized offline reason = %q, want provider endpoint is unavailable", got)
+	}
+	if strings.Contains(failures["openrouter"], "openrouter-canary-secret") {
+		t.Fatalf("offline reason exposed the credential: %q", failures["openrouter"])
+	}
+
+	d := &Daemon{
+		cfg:           Config{Agents: first},
+		logger:        quietLogger(),
+		agentVersions: make(map[string]string),
+		skippedAgents: make(map[string]string),
+	}
+	d.detectBuiltinRuntimes(context.Background())
+	if got := d.skippedAgentsSnapshot()["openrouter"]; got != "provider endpoint is unavailable" {
+		t.Fatalf("health offline reason = %q, want sanitized provider failure", got)
+	}
+
+	second := probeAPIProviders()
+	if _, ok := second["openrouter"]; !ok {
+		t.Fatalf("failed provider was not retried on refresh: %v", second)
+	}
+	if got := openRouterCalls.Load(); got != 2 {
+		t.Fatalf("openrouter probe calls = %d, want 2", got)
+	}
+	if _, ok := apiProviderProbeFailuresSnapshot()["openrouter"]; ok {
+		t.Fatal("successful refresh retained the stale offline reason")
+	}
+}
+
 func TestAPIProviderProbeRefusesRedirectsBeforeForwardingCredential(t *testing.T) {
 	var targetRequests atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -100,7 +161,7 @@ func TestAPIProviderProbeRefusesRedirectsBeforeForwardingCredential(t *testing.T
 	}))
 	defer redirect.Close()
 
-	err := defaultProbeAPIProviderEndpoint(context.Background(), "openrouter", agent.ProviderAPIConfig{
+	err := defaultProbeAPIProviderEndpoint(context.Background(), "ollama", agent.ProviderAPIConfig{
 		BaseURL: redirect.URL + "/v1",
 		APIKey:  "probe-secret",
 	})
@@ -109,6 +170,26 @@ func TestAPIProviderProbeRefusesRedirectsBeforeForwardingCredential(t *testing.T
 	}
 	if targetRequests.Load() != 0 {
 		t.Fatal("API provider probe followed redirect to another origin")
+	}
+}
+
+func TestAPIProviderProbeRejectsUntrustedHostedEndpointBeforeCredentialAttachment(t *testing.T) {
+	var requests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	err := defaultProbeAPIProviderEndpoint(context.Background(), "openrouter", agent.ProviderAPIConfig{
+		BaseURL: target.URL + "/v1",
+		APIKey:  "host-binding-secret",
+	})
+	if err == nil || !strings.Contains(err.Error(), "untrusted host") {
+		t.Fatalf("probe error = %v, want untrusted host refusal", err)
+	}
+	if requests.Load() != 0 {
+		t.Fatal("untrusted hosted endpoint received a credential-bearing request")
 	}
 }
 
@@ -134,7 +215,7 @@ func TestDetectBuiltinRuntimesRegistersAPIProviderWithoutVersionProbe(t *testing
 		"type":                  "openrouter",
 		"version":               "",
 		"status":                "online",
-		"provider_capabilities": "prompt,streaming,completion,cancellation,model-discovery,usage,tools,mcp",
+		"provider_capabilities": "prompt,streaming,completion,cancellation,model-discovery",
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("detected runtimes = %#v, want %#v", got, want)
@@ -156,7 +237,7 @@ func TestRuntimeProfilesRegisterAPIProvidersWithoutExecutables(t *testing.T) {
 		WorkspaceID:    "ws-1",
 		DisplayName:    "OpenRouter profile",
 		ProtocolFamily: "openrouter",
-		APIBaseURL:     stringPtr("https://openrouter.example.test/v1"),
+		APIBaseURL:     stringPtr("https://openrouter.ai/api/v1"),
 		CredentialEnv:  stringPtr("OPENROUTER_API_KEY"),
 		DefaultModel:   stringPtr("openai/gpt-4o-mini"),
 		Enabled:        true,
@@ -177,8 +258,47 @@ func TestRuntimeProfilesRegisterAPIProvidersWithoutExecutables(t *testing.T) {
 		t.Fatalf("profile failures = %v, want none", fx.sentFailures)
 	}
 	entry, ok := fx.daemon.profileAPIEntries["api-profile"]
-	if !ok || entry.entry.APIBaseURL != "https://openrouter.example.test/v1" || entry.entry.apiKey != "profile-test-key" || entry.entry.Model != "openai/gpt-4o-mini" {
+	if !ok || entry.entry.APIBaseURL != "https://openrouter.ai/api/v1" || entry.entry.apiKey != "profile-test-key" || entry.entry.Model != "openai/gpt-4o-mini" {
 		t.Fatalf("profile API entry = %+v, want daemon-local resolved config", entry)
+	}
+}
+
+func TestRuntimeProfileAPIFailureReasonIsSanitized(t *testing.T) {
+	t.Setenv("OPENROUTER_API_KEY", "profile-canary-secret")
+	oldProbe := probeAPIProviderEndpoint
+	probeAPIProviderEndpoint = func(_ context.Context, _ string, _ agent.ProviderAPIConfig) error {
+		return errors.New("request failed with profile-canary-secret")
+	}
+	t.Cleanup(func() { probeAPIProviderEndpoint = oldProbe })
+
+	fx := newProfileRegisterFixture(t, []RuntimeProfile{{
+		ID:             "api-profile",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "OpenRouter profile",
+		ProtocolFamily: "openrouter",
+		APIBaseURL:     stringPtr("https://openrouter.ai/api/v1"),
+		CredentialEnv:  stringPtr("OPENROUTER_API_KEY"),
+		DefaultModel:   stringPtr("openai/gpt-4o-mini"),
+		Enabled:        true,
+	}}, 200)
+	fx.daemon.cfg.Agents = map[string]AgentEntry{}
+
+	_, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentFailures) != 1 {
+		t.Fatalf("profile failures = %v, want one sanitized failure", fx.sentFailures)
+	}
+	reason, _ := fx.sentFailures[0]["reason"].(string)
+	if reason != "provider endpoint is unavailable" {
+		t.Fatalf("profile failure reason = %q, want sanitized provider failure", reason)
+	}
+	if strings.Contains(reason, "profile-canary-secret") {
+		t.Fatalf("profile failure reason exposed the credential: %q", reason)
+	}
+	if _, ok := fx.daemon.profileAPIEntries["api-profile"]; ok {
+		t.Fatal("failed API profile retained daemon launch credentials")
 	}
 }
 

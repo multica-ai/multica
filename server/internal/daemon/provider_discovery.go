@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,6 +35,9 @@ var (
 	// local and deterministic. Production uses the provider's bounded /models
 	// endpoint, which validates both reachability and model-catalog shape.
 	probeAPIProviderEndpoint = defaultProbeAPIProviderEndpoint
+
+	apiProviderProbeFailuresMu sync.RWMutex
+	apiProviderProbeFailures   map[string]string
 )
 
 // probeAPIProviders discovers configured API and local-model providers. Hosted
@@ -44,6 +48,7 @@ func probeAPIProviders() map[string]AgentEntry {
 	env := providerEnvironment()
 	providers := agent.ProviderCatalog()
 	entries := make(map[string]AgentEntry)
+	failures := make(map[string]string)
 
 	var (
 		mu sync.Mutex
@@ -56,6 +61,9 @@ func probeAPIProviders() map[string]AgentEntry {
 		desc := desc
 		cfg, err := agent.ResolveProviderAPIConfig(desc.ID, env)
 		if err != nil {
+			mu.Lock()
+			failures[desc.ID] = sanitizedProviderOfflineReason(err)
+			mu.Unlock()
 			continue
 		}
 		wg.Add(1)
@@ -64,6 +72,9 @@ func probeAPIProviders() map[string]AgentEntry {
 			ctx, cancel := context.WithTimeout(context.Background(), apiProviderProbeTimeout)
 			defer cancel()
 			if err := probeAPIProviderEndpoint(ctx, desc.ID, cfg); err != nil {
+				mu.Lock()
+				failures[desc.ID] = sanitizedProviderOfflineReason(err)
+				mu.Unlock()
 				return
 			}
 			entry := AgentEntry{
@@ -77,7 +88,57 @@ func probeAPIProviders() map[string]AgentEntry {
 		}()
 	}
 	wg.Wait()
+	publishAPIProviderProbeFailures(failures)
 	return entries
+}
+
+func publishAPIProviderProbeFailures(failures map[string]string) {
+	copyOfFailures := make(map[string]string, len(failures))
+	for provider, reason := range failures {
+		copyOfFailures[provider] = reason
+	}
+	apiProviderProbeFailuresMu.Lock()
+	apiProviderProbeFailures = copyOfFailures
+	apiProviderProbeFailuresMu.Unlock()
+}
+
+func apiProviderProbeFailuresSnapshot() map[string]string {
+	apiProviderProbeFailuresMu.RLock()
+	defer apiProviderProbeFailuresMu.RUnlock()
+	if len(apiProviderProbeFailures) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(apiProviderProbeFailures))
+	for provider, reason := range apiProviderProbeFailures {
+		result[provider] = reason
+	}
+	return result
+}
+
+func sanitizedProviderOfflineReason(err error) string {
+	if err == nil {
+		return "provider unavailable"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return "provider probe timed out"
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "requires "):
+		return "provider credential is not configured"
+	case strings.Contains(message, "untrusted host"),
+		strings.Contains(message, "base url"),
+		strings.Contains(message, "not an api provider"):
+		return "provider configuration is invalid"
+	case strings.Contains(message, "no data catalog"),
+		strings.Contains(message, "not json"),
+		strings.Contains(message, "exceeds"):
+		return "provider model catalog is invalid"
+	case strings.Contains(message, "http "):
+		return "provider probe returned an error"
+	default:
+		return "provider endpoint is unavailable"
+	}
 }
 
 func providerEnvironment() map[string]string {
@@ -96,6 +157,20 @@ func apiProviderModelEnv(provider string) string {
 }
 
 func defaultProbeAPIProviderEndpoint(ctx context.Context, provider string, cfg agent.ProviderAPIConfig) error {
+	desc, ok := agent.ProviderByID(provider)
+	if !ok || !agent.IsAPIProvider(provider) {
+		return fmt.Errorf("provider %q is not an API provider", provider)
+	}
+	validated, err := agent.ResolveProviderAPIProfileConfig(
+		provider,
+		map[string]string{desc.APIKeyEnv: cfg.APIKey},
+		cfg.BaseURL,
+		desc.APIKeyEnv,
+	)
+	if err != nil {
+		return fmt.Errorf("provider %q configuration: %w", provider, err)
+	}
+	cfg = validated
 	modelsURL, err := modelsEndpoint(cfg.BaseURL)
 	if err != nil {
 		return fmt.Errorf("provider %q models endpoint: %w", provider, err)
