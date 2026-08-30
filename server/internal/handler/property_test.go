@@ -1355,6 +1355,18 @@ func TestParsePropertiesFilterOperatorUnit(t *testing.T) {
 		t.Fatalf("gte bind arg must be 3.5 as a number, got %T %v", last, last)
 	}
 
+	// ParseFloat accepts forms Postgres ::numeric rejects (hex-float,
+	// underscores); the compiled pattern must store the canonical plain
+	// decimal or the static open_only unroll would 500 on the cast.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[{"op":"gt","value":"0x1p4"}]}`, defID))
+	if !ok {
+		t.Fatalf("hex-float parse failed: %s", w.Body.String())
+	}
+	pattern, isOp = parseOperatorPattern(groups[0][0])
+	if !isOp || pattern.Value != "16" {
+		t.Fatalf("hex-float bound not canonicalized to 16: %+v isOp=%v", pattern, isOp)
+	}
+
 	// Date ops render the lexicographic string comparison.
 	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[{"op":"before","value":"2026-02-01"}]}`, defID))
 	if !ok {
@@ -1521,6 +1533,21 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	expect(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"})+"&open_only=true", hasAll)
 	expect(noneOrAfter+"&open_only=true", hasAll, empty)
 	notPresent(noneOrAfter+"&open_only=true", hasText)
+
+	// A ParseFloat-only bound form (hex-float) must behave identically on the
+	// dynamic and the static open_only path — an uncanonicalized raw string
+	// would 500 the static ::numeric cast.
+	expect(opQuery(num.ID, map[string]any{"op": "lt", "value": "0x1p4"}), hasAll)
+	expect(opQuery(num.ID, map[string]any{"op": "lt", "value": "0x1p4"})+"&open_only=true", hasAll)
+	notPresent(opQuery(num.ID, map[string]any{"op": "lt", "value": "0x1p4"})+"&open_only=true", hasText)
+
+	// Issues without the filtered key never match an operator on either path —
+	// the guards (ILIKE-NULL / jsonb_typeof / IS NOT NULL) exclude the seeded
+	// "empty" issue, which is open and matches the same queries pre-guard.
+	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"}), empty)
+	notPresent(opQuery(date.ID, map[string]any{"op": "before", "value": "2026-02-01"}), empty)
+	notPresent(opQuery(date.ID, map[string]any{"op": "after", "value": "2026-02-01"}), empty)
+	notPresent(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"})+"&open_only=true", empty)
 
 	// The table-rows endpoint is the third serving path for the properties
 	// filter: members arrive as raw JSON in issueTableFiltersRequest, go

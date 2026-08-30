@@ -575,10 +575,13 @@ describe("scalar operator filters", () => {
     expect(matches(withText, textId, { op: "contains", value: "hello!" })).toBe(false);
   });
 
-  it("contains matches url values and never matches an unset key", () => {
+  it("contains matches url values and never matches an unset key or an empty needle", () => {
     expect(matches(withUrl, urlId, { op: "contains", value: "example.com" })).toBe(true);
     expect(matches(unset, urlId, { op: "contains", value: "example.com" })).toBe(false);
-    expect(matches(unset, textId, { op: "contains", value: "" })).toBe(false);
+    // Asserted against a SET value on purpose: the unset case short-circuits
+    // before the operator runs, so it cannot catch an empty-needle match-all.
+    // The server rejects empty operator values; the matcher agrees.
+    expect(matches(withText, textId, { op: "contains", value: "" })).toBe(false);
   });
 
   it("number comparisons match stored numbers with the bound as a string", () => {

@@ -1153,6 +1153,12 @@ func validatePropertyFilterOperator(definitionID string, op propertyFilterOperat
 		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
 			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a finite number", op.Op)
 		}
+		// Canonicalize to plain decimal before storing: ParseFloat accepts forms
+		// Postgres ::numeric rejects ("0x1p4" hex-float, "1_000" underscores on
+		// older PG), and the static open_only unroll casts this exact string
+		// inside SQL — an uncanonicalized value would 500 that path while the
+		// dynamic path (which binds the parsed float) succeeds.
+		pattern.Value = strconv.FormatFloat(num, 'f', -1, 64)
 	case "before", "after":
 		if _, err := time.Parse("2006-01-02", op.Value); err != nil {
 			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a YYYY-MM-DD date", op.Op)

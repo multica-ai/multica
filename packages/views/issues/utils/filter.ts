@@ -85,6 +85,11 @@ export function issueValueMatchesOperator(
   switch (filter.op) {
     case "contains": {
       const needle = filter.value.toLowerCase();
+      // An empty needle would substring-match every value ("".includes("") is
+      // true); the server rejects an empty operator value outright, so the
+      // matcher must refuse it too rather than match-all on hand-edited
+      // saved-view blobs.
+      if (needle === "") return false;
       if (typeof value === "string") return value.toLowerCase().includes(needle);
       if (typeof value === "number" || typeof value === "boolean") {
         return String(value).toLowerCase().includes(needle);
