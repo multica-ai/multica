@@ -1,0 +1,148 @@
+# .understandignore — patterns for files/dirs to exclude from analysis
+# Syntax: same as .gitignore (globs, # comments, ! negation, trailing / for dirs)
+# Lines below are suggestions — uncomment to activate.
+# Use ! prefix to force-include something excluded by defaults.
+#
+# Built-in defaults (always excluded unless negated):
+#   node_modules/, .git/, dist/, build/, obj/, *.lock, *.min.js, etc.
+#
+
+# --- From .gitignore (uncomment to exclude) ---
+
+# .DS_Store
+# .envrc
+# bin
+# dist-electron
+# *.tsbuildinfo
+# !apps/desktop/build/
+# !apps/desktop/build/**
+# .env*
+# !.env.example
+# !apps/desktop/.env.production
+# !apps/desktop/.env.staging
+# !apps/mobile/.env.staging
+# !apps/mobile/.env.production
+# server/bin/
+# server/tmp/
+# server/migrate
+# server/daemon
+# server/multica
+# test-results/
+# apps/web/test-results/
+# .context
+# .agent_context/
+# .multica/
+# .claude/
+# .tool-versions
+# _features/
+# *.pid
+# *.dmg
+# *.app
+# server/server
+# data/
+# .kilo
+# .gstack/
+# *.pyc
+
+# --- Detected directories (uncomment to exclude) ---
+
+# docs/
+# examples/
+# scripts/
+
+# --- Test file patterns (uncomment to exclude) ---
+
+# JS / TS
+# *.test.*
+# *.spec.*
+# *.snap
+# C# / .NET
+# **/*Tests.cs
+# **/*Test.cs
+# **/*Fixture.cs
+# **/*.Tests.csproj
+# Java / Kotlin
+# **/src/test/**
+# **/*Test.java
+# **/*IT.java
+# **/*Spec.kt
+# Go
+# **/*_test.go
+# C++
+# **/*_test.cc
+# **/*_test.cpp
+# **/*_test.cxx
+# **/*Test.cc
+# **/*Test.cpp
+# **/*_unittest.cc
+# **/*_unittest.cpp
+# **/*_browsertest.cc
+# **/*_benchmark.cc
+# **/*Benchmark.cpp
+# Python
+# **/test_*.py
+# **/*_test.py
+# **/tests.py
+# **/conftest.py
+# Rust
+# **/tests.rs
+# **/test_*.rs
+# **/*_test.rs
+# **/bench_*.rs
+# **/*_bench.rs
+# Ruby
+# **/*_spec.rb
+# **/*_test.rb
+# **/test_*.rb
+# **/spec_helper.rb
+# **/test_helper.rb
+# **/rails_helper.rb
+# Swift
+# **/Tests/**/*.swift
+# **/Specs/**/*.swift
+
+# --- Consolidated from per-workspace .ua/.understandignore files (2026-08-30) ---
+apps/desktop/**/*.snap
+apps/desktop/**/*.spec.*
+apps/desktop/**/*.test.*
+apps/desktop/__tests__/
+apps/docs/**/*.snap
+apps/docs/**/*.spec.*
+apps/docs/**/*.test.*
+apps/docs/__tests__/
+apps/mobile/**/*.snap
+apps/mobile/**/*.spec.*
+apps/mobile/**/*.test.*
+apps/mobile/__tests__/
+apps/web/**/*.snap
+apps/web/**/*.spec.*
+apps/web/**/*.test.*
+apps/web/__tests__/
+packages/core/**/*.snap
+packages/core/**/*.spec.*
+packages/core/**/*.test.*
+packages/core/__tests__/
+packages/eslint-config/**/*.snap
+packages/eslint-config/**/*.spec.*
+packages/eslint-config/**/*.test.*
+packages/eslint-config/__tests__/
+packages/plugin-sdk/**/*.snap
+packages/plugin-sdk/**/*.spec.*
+packages/plugin-sdk/**/*.test.*
+packages/plugin-sdk/__tests__/
+packages/tsconfig/**/*.snap
+packages/tsconfig/**/*.spec.*
+packages/tsconfig/**/*.test.*
+packages/tsconfig/__tests__/
+packages/ui/**/*.snap
+packages/ui/**/*.spec.*
+packages/ui/**/*.test.*
+packages/ui/__tests__/
+packages/views/**/*.snap
+packages/views/**/*.spec.*
+packages/views/**/*.test.*
+packages/views/__tests__/
+server/**/*_test.go
+server/migrations/
+server/pkg/db/generated/
+server/testdata/

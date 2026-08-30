@@ -1,0 +1,2850 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "Multica",
+    "languages": [
+      "Go",
+      "TypeScript",
+      "SQL"
+    ],
+    "frameworks": [
+      "Chi",
+      "sqlc",
+      "gorilla/websocket",
+      "Next.js",
+      "React",
+      "TanStack Query",
+      "Zustand",
+      "Electron",
+      "Expo",
+      "Turborepo"
+    ],
+    "description": "Multica 是一个开源的 AI 原生任务管理平台：像给同事派活一样把 issue 指派给 AI 编码 agent，agent 作为第一类指派人领取 issue、汇报进度、提出阻塞并交回评审。支持自托管，可对接 23 种 agent CLI，并原生集成 Slack、飞书、钉钉、企业微信、Telegram 等协作渠道。",
+    "analyzedAt": "2026-08-30T01:03:27Z",
+    "gitCommitHash": "64ec7f54163d918d5d7fd4dcae857f241b7842d0"
+  },
+  "nodes": [
+    {
+      "id": "domain:issue-management",
+      "type": "domain",
+      "name": "问题管理",
+      "summary": "负责工作空间内 issue 的全生命周期：创建、指派、状态流转、标签/属性/元数据、表格视图查询与批量操作。issue 的指派人是多态的（assignee_type + assignee_id），既可以是成员也可以是 agent；指派给 agent 或状态离开 backlog 时会触发一次 agent 运行。所有查询按 workspace_id 隔离，成员资格决定访问边界。",
+      "tags": [
+        "issue",
+        "协作",
+        "看板",
+        "polymorphic-assignee",
+        "workspace-scoped"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "Issue",
+          "Comment",
+          "Label",
+          "Property",
+          "IssueView",
+          "Attachment",
+          "Subscriber",
+          "Activity"
+        ],
+        "businessRules": [
+          "所有查询按 workspace_id 过滤，成员资格决定访问权限",
+          "issue 指派人通过 assignee_type + assignee_id 多态引用成员或 agent",
+          "私有 agent 的可见性在写入边界（validateAssigneePair）统一校验，服务层不重复判定"
+        ],
+        "crossDomainInteractions": [
+          "指派 agent 或状态离开 backlog 时，向 Agent 任务编排域入队一次运行任务",
+          "Autopilot 自动化域的运行会按配置创建或更新 issue",
+          "渠道集成域的 /issue 命令代用户创建带来源标记的 issue"
+        ]
+      }
+    },
+    {
+      "id": "domain:agent-task-orchestration",
+      "type": "domain",
+      "name": "Agent 任务编排与执行",
+      "summary": "平台核心执行域：daemon 进程向服务端注册运行时（agent CLI 探测结果），服务端把指派给 agent 的工作排队，daemon 领取任务后准备执行环境并拉起 agent 子进程，流式回传执行消息与 token 用量，最终回写完成/失败。同时涵盖 agent 本体与其技能、环境变量、权限的配置。",
+      "tags": [
+        "daemon",
+        "agent-task",
+        "runtime",
+        "任务队列",
+        "lease"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "AgentTaskQueue",
+          "Runtime",
+          "Daemon",
+          "TaskMessage",
+          "PrepareLease",
+          "SkillBundle"
+        ],
+        "businessRules": [
+          "任务领取以 runtime 身份进行，准备阶段使用租约（prepare-lease）防止僵死占用",
+          "默认测试绝不解析或执行用户安装的 agent CLI；真实 agent 冒烟测试隔离在 agentintegration 构建标签后",
+          "任务生命周期消息经 WebSocket（task:*、chat:* 事件）推送，客户端只更新 Query 缓存不镜像进 Zustand"
+        ],
+        "crossDomainInteractions": [
+          "问题管理域的指派/状态变更产生任务入队，任务结果回写 issue 状态与评论",
+          "对话协作域的每条用户消息入队一次回复任务，执行消息流式回传到会话",
+          "daemon 注册的运行时归属工作空间与身份域管理的运行时档案"
+        ]
+      }
+    },
+    {
+      "id": "domain:chat-collaboration",
+      "type": "domain",
+      "name": "对话协作",
+      "summary": "用户与 agent 的即时对话域：聊天会话管理、消息发送与排队、agent 回复经 WebSocket 流式回传，以及快捷指令（quick actions）的生成与运行。发送采用 pending-message 模式：消息立即以可见的待定状态渲染，失败可重试。",
+      "tags": [
+        "chat",
+        "WebSocket",
+        "流式",
+        "quick-actions",
+        "pending-message"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "ChatSession",
+          "ChatMessage",
+          "PendingTask",
+          "QuickAction",
+          "Draft"
+        ],
+        "businessRules": [
+          "消息发送采用 pending-message 模式，失败重试而非静默乐观更新",
+          "归档会话只读，拒绝为它入队新的 agent 任务",
+          "每次发送都重新校验私有 agent 访问门槛，防止过期会话成为越权后门"
+        ],
+        "crossDomainInteractions": [
+          "每条用户消息为 Agent 任务编排域入队一次回复任务，执行消息流式回传到会话",
+          "会话与快捷指令可经 quick-create 在问题管理域快捷创建 issue"
+        ]
+      }
+    },
+    {
+      "id": "domain:automation-autopilot",
+      "type": "domain",
+      "name": "自动化 (Autopilot)",
+      "summary": "Autopilot 让 agent 按计划或外部事件自动开工：定时触发（cron 计划 + 服务端调度器）、webhook 触发（限流、令牌与签名验证、投递记录与重放）和手动触发。每次运行按配额核算，并在工作空间内产出 issue 与 agent 任务。",
+      "tags": [
+        "autopilot",
+        "cron",
+        "webhook",
+        "自动化",
+        "quota"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "Autopilot",
+          "AutopilotTrigger",
+          "AutopilotRun",
+          "Delivery",
+          "Quota"
+        ],
+        "businessRules": [
+          "定时触发有最大迟到窗口（默认 5 分钟），过期补跑等待下一个配置时段",
+          "webhook 令牌区分「无记录」与「数据库错误」，避免瞬时故障静默丢弃投递",
+          "运行配额按工作空间核算，超限拒绝触发"
+        ],
+        "crossDomainInteractions": [
+          "每次运行在问题管理域创建或更新 issue",
+          "运行最终经 Agent 任务编排域执行 agent 任务",
+          "调度器依赖数据库 cron 执行审计表（sys_cron_executions）保证多副本只跑一次"
+        ]
+      }
+    },
+    {
+      "id": "domain:channel-integrations",
+      "type": "domain",
+      "name": "渠道与外部集成",
+      "summary": "把 Multica 接入外部协作渠道（Slack、钉钉、飞书、企业微信、Telegram）与代码托管（GitHub/VCS）：渠道消息经统一引擎完成安装路由、两阶段去重、身份绑定后创建 issue 或映射到聊天会话，并把 agent 结果回贴到渠道；GitHub webhook 同步 PR 与仓库快照。",
+      "tags": [
+        "integration",
+        "slack",
+        "lark",
+        "dingtalk",
+        "wecom",
+        "telegram",
+        "github",
+        "webhook"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": [
+          "Installation",
+          "InboundMessage",
+          "Binding",
+          "ChannelSession",
+          "PullRequest"
+        ],
+        "businessRules": [
+          "入站消息采用两阶段去重认领（owner fencing），重连重放不会重复触发绑定提示或回复",
+          "渠道安装凭证按 installation 行加密存储，回复时解密解析，密钥不落明文",
+          "渠道来源的 issue 写入 origin_type 标记（如 lark_chat）以便溯源"
+        ],
+        "crossDomainInteractions": [
+          "渠道 /issue 命令在问题管理域代用户创建带来源标记的 issue",
+          "渠道私聊/群聊映射到对话协作域的聊天会话并回贴回复",
+          "GitHub webhook 更新 issue 关联的 PR 与仓库快照"
+        ]
+      }
+    },
+    {
+      "id": "domain:workspace-identity",
+      "type": "domain",
+      "name": "工作空间与身份",
+      "summary": "用户注册登录与会话凭证（Cookie/JWT/CLI 令牌/PAT）、工作空间与成员管理、邀请与分享链接加入，以及工作空间级配置（运行时档案、MCP 服务器、保留 slug）。成员资格是所有资源访问的前置门槛。",
+      "tags": [
+        "auth",
+        "workspace",
+        "member",
+        "invitation",
+        "PAT"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": [
+          "User",
+          "Workspace",
+          "Member",
+          "Invitation",
+          "PersonalAccessToken",
+          "RuntimeProfile"
+        ],
+        "businessRules": [
+          "所有资源查询按 workspace_id 过滤，X-Workspace-ID 选择当前工作空间，成员资格决定访问权限",
+          "保留 slug 由 reserved_slugs.json 控制并生成到共享包，工作空间名占用受其约束",
+          "DisableWorkspaceCreation 开启后创建工作空间统一 403，用户只能经邀请或分享链接加入"
+        ],
+        "crossDomainInteractions": [
+          "成员身份决定问题管理域所有查询与写入的可见范围",
+          "daemon 注册的运行时归属工作空间的运行时档案（runtime profile）",
+          "会话令牌（Cookie/JWT/PAT）贯穿所有域的 API 鉴权中间件"
+        ]
+      }
+    },
+    {
+      "id": "flow:create-issue",
+      "type": "flow",
+      "name": "创建 issue 并派发 Agent 任务",
+      "summary": "用户创建 issue 并可指派给成员或 agent。写入原子化完成后，触发判定（RunEnqueueSource=assign）决定是否为 agent 入队一次运行任务，前端经实时事件同步新 issue。",
+      "tags": [
+        "issue",
+        "创建",
+        "assignee",
+        "触发器"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/issues",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:query-issue-board",
+      "type": "flow",
+      "name": "issue 表格查询与视图",
+      "summary": "支撑主看板/表格的查询链路：按保存的 issue 视图解析查询参数，装配行数据、分组聚合与筛选分面，供 web 与 desktop 表格渲染。",
+      "tags": [
+        "查询",
+        "视图",
+        "表格",
+        "分组"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/issues/table/rows",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:issue-collaboration",
+      "type": "flow",
+      "name": "issue 评论与协作",
+      "summary": "issue 上的评论、@提及、表情回应、订阅与活动时间线。评论中的触发器可以唤醒 agent 继续处理，订阅关系决定通知路由。",
+      "tags": [
+        "评论",
+        "协作",
+        "订阅",
+        "reaction"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/issues/{id}/comments",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:batch-issue-operations",
+      "type": "flow",
+      "name": "批量操作与移动",
+      "summary": "对多个 issue 批量修改字段/状态/标签、批量删除，以及在父子层级间移动 issue，操作一致生效并同步实时事件。",
+      "tags": [
+        "批量操作",
+        "移动",
+        "状态"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "POST /api/issues/batch-update",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:daemon-registration",
+      "type": "flow",
+      "name": "Daemon 注册与心跳",
+      "summary": "daemon 启动后向服务端注册其管理的运行时与 agent CLI 探测结果，通过心跳保活并维持 daemon WebSocket 长连接；服务端定期清扫失联 runtime。",
+      "tags": [
+        "daemon",
+        "注册",
+        "心跳",
+        "WebSocket"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/daemon/register",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:task-claim-execution",
+      "type": "flow",
+      "name": "任务领取与执行生命周期",
+      "summary": "daemon 以 WS 优先、HTTP 兜底批量领取排队任务，准备租约与技能包、搭建执行环境并启动 agent 子进程，流式上报执行消息，最终上报完成或失败并回写 issue。",
+      "tags": [
+        "任务执行",
+        "claim",
+        "租约",
+        "skill-bundle"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /api/daemon/tasks/claim",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:task-cancel-rerun",
+      "type": "flow",
+      "name": "任务取消与重跑",
+      "summary": "用户可以取消运行中或排队中的 agent 任务（daemon 确认终止进程），也可以对 issue 重跑一次新的 agent 运行。",
+      "tags": [
+        "取消",
+        "重跑",
+        "任务"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "POST /api/tasks/{taskId}/cancel",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:agent-skill-configuration",
+      "type": "flow",
+      "name": "Agent 与技能配置",
+      "summary": "管理工作空间内的 agent（第一类指派人）与其技能绑定、环境变量、权限和 MCP 服务器，决定 agent 可用的执行能力面。",
+      "tags": [
+        "agent",
+        "skills",
+        "配置",
+        "权限"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/agents",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:send-chat-message",
+      "type": "flow",
+      "name": "发送消息并触发 Agent 回复",
+      "summary": "用户在会话中发送消息：校验会话可达性与归档状态，落库消息后为 agent 入队一次回复任务，回复经 WebSocket 流式回传并终结。",
+      "tags": [
+        "chat",
+        "发送",
+        "流式"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/chat/sessions/{sessionId}/messages",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:chat-quick-actions",
+      "type": "flow",
+      "name": "快捷指令生成与运行",
+      "summary": "从会话上下文自动生成快捷指令，用户可在会话或 issue 上一键运行指令触发 agent 任务，并渲染结构化结果。",
+      "tags": [
+        "quick-actions",
+        "指令",
+        "自动化"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/chat/sessions/{sessionId}/quick-actions/regenerate",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:chat-session-management",
+      "type": "flow",
+      "name": "会话管理",
+      "summary": "聊天会话的创建、置顶、归档、删除与已读管理，以及会话内排队任务的优先级调度与清理。",
+      "tags": [
+        "会话",
+        "置顶",
+        "归档",
+        "排队"
+      ],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "POST /api/chat/sessions",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:autopilot-cron-dispatch",
+      "type": "flow",
+      "name": "定时调度触发",
+      "summary": "服务端调度器周期评估到期的定时触发计划，计算 cron 触发时间并丢弃过迟的补跑，随后派发一次 autopilot 运行。",
+      "tags": [
+        "cron",
+        "调度器",
+        "定时"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "scheduler manager tick（每 30 秒）",
+        "entryType": "cron"
+      }
+    },
+    {
+      "id": "flow:autopilot-webhook",
+      "type": "flow",
+      "name": "Webhook 触发",
+      "summary": "外部系统调用 autopilot webhook 触发运行：经过 IP 限流、触发器令牌查找与签名验证后记录投递并触发运行，历史投递可重放。",
+      "tags": [
+        "webhook",
+        "签名",
+        "限流",
+        "投递"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /api/webhooks/autopilots/{token}",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:autopilot-management",
+      "type": "flow",
+      "name": "Autopilot 配置管理",
+      "summary": "autopilot 本体与触发器的配置管理：创建/更新、配置 webhook 触发器与签名密钥、手动触发、配额核算与协作者管理。",
+      "tags": [
+        "autopilot",
+        "配置",
+        "配额",
+        "协作者"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/autopilots",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:channel-inbound-message",
+      "type": "flow",
+      "name": "渠道消息接入",
+      "summary": "渠道平台的 webhook 消息进入统一引擎：验签解密、安装路由与去重认领、发送者身份绑定，然后创建 issue 或映射聊天会话，最后把结果回贴到渠道。",
+      "tags": [
+        "inbound",
+        "去重",
+        "身份绑定",
+        "渠道"
+      ],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "各平台 webhook 回调（Slack/Lark/钉钉/企微/Telegram）",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:channel-installation",
+      "type": "flow",
+      "name": "渠道安装与绑定",
+      "summary": "把渠道应用安装到工作空间：发起安装会话并轮询状态、注册自建（BYO）应用、管理安装与群绑定。",
+      "tags": [
+        "安装",
+        "BYO",
+        "绑定"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/workspaces/{id}/lark/install/begin",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:github-integration",
+      "type": "flow",
+      "name": "GitHub 集成",
+      "summary": "通过 GitHub App 连接工作空间，接收 GitHub webhook 同步 PR 状态，并把 PR 与 issue 关联起来供 agent 与用户检索。",
+      "tags": [
+        "github",
+        "webhook",
+        "pull-request"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/webhooks/github",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:signup-login",
+      "type": "flow",
+      "name": "注册与登录",
+      "summary": "用户注册准入校验、会话凭证签发与吊销，以及 CLI 令牌与个人访问令牌（PAT）管理。",
+      "tags": [
+        "注册",
+        "登录",
+        "JWT",
+        "PAT"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /auth/*, POST /api/cli-token",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:workspace-invitation",
+      "type": "flow",
+      "name": "成员与邀请",
+      "summary": "工作空间成员的增删改与邀请生命周期：带限流的邀请创建、接受/拒绝、分享链接加入、角色更新、移除成员与主动退出。",
+      "tags": [
+        "邀请",
+        "成员",
+        "分享链接"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/workspaces/{id}/members",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:workspace-configuration",
+      "type": "flow",
+      "name": "工作空间配置",
+      "summary": "工作空间本体的创建与更新，以及工作空间级配置：运行时档案（runtime profile）与 MCP 服务器的增删改查。",
+      "tags": [
+        "工作空间",
+        "runtime-profile",
+        "MCP",
+        "配置"
+      ],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /api/workspaces",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "step:create-issue:validate-request",
+      "type": "step",
+      "name": "校验请求与指派人权限",
+      "summary": "解析请求体，校验标题/项目/父子关系等输入，并按 validateAssigneePair 校验成员或 agent 指派人的访问权限。",
+      "tags": [
+        "校验",
+        "权限"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue.go",
+      "lineRange": [
+        2771,
+        2771
+      ]
+    },
+    {
+      "id": "step:create-issue:create-issue-record",
+      "type": "step",
+      "name": "原子化创建 issue 记录",
+      "summary": "在服务层事务中创建 issue 行，同步落库项目归属与父子边界校验，返回完整 issue 实体。",
+      "tags": [
+        "事务",
+        "持久化"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/service/issue.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:create-issue:resolve-run-trigger",
+      "type": "step",
+      "name": "解析 Agent 运行触发决策",
+      "summary": "按 IssueTriggerInput（IsCreate/AssigneeChanged/StatusChanged）解析 IssueRunTrigger，判定本次写入是否会为 agent/squad 入队运行。",
+      "tags": [
+        "触发器",
+        "决策"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/issue_trigger.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:create-issue:enqueue-agent-task",
+      "type": "step",
+      "name": "入队 Agent 执行任务",
+      "summary": "触发命中时将一次 agent 运行写入任务队列（agent_task_queue），等待 daemon 领取执行。",
+      "tags": [
+        "任务队列",
+        "入队"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/task.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:create-issue:broadcast-realtime",
+      "type": "step",
+      "name": "广播 issue 实时事件",
+      "summary": "经实时 hub 向工作空间成员推送 issue:created 事件，客户端缓存据此增量更新。",
+      "tags": [
+        "WebSocket",
+        "实时"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/realtime/hub.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:query-issue-board:resolve-view",
+      "type": "step",
+      "name": "解析视图与查询参数",
+      "summary": "读取用户的 issue 视图偏好与保存视图，规范化筛选、排序与列配置。",
+      "tags": [
+        "视图",
+        "参数"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue_view.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:query-issue-board:build-query-plan",
+      "type": "step",
+      "name": "生成表格查询计划",
+      "summary": "将视图参数编译为服务端可执行的查询计划，决定行装配与聚合的范围。",
+      "tags": [
+        "查询计划"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/issue_table_query.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:query-issue-board:assemble-rows",
+      "type": "step",
+      "name": "装配表格行数据",
+      "summary": "按 workspace 过滤装配行数据，附带指派人、状态、标签等展示所需的关联实体。",
+      "tags": [
+        "行装配"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/issue_table_rows.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:query-issue-board:group-issues",
+      "type": "step",
+      "name": "计算分组聚合",
+      "summary": "按状态/指派人/优先级等维度计算分组，支撑表格分组表头与计数。",
+      "tags": [
+        "分组",
+        "聚合"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue_table_group.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:query-issue-board:compute-facets",
+      "type": "step",
+      "name": "计算筛选分面",
+      "summary": "统计各筛选维度的候选值与计数，驱动筛选面板。",
+      "tags": [
+        "分面",
+        "统计"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue_table_facets.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:issue-collaboration:create-comment",
+      "type": "step",
+      "name": "创建评论并解析 @提及",
+      "summary": "落库评论内容，解析被 @ 的成员与 agent，为后续触发与通知准备目标。",
+      "tags": [
+        "评论",
+        "提及"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/comment.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:issue-collaboration:preview-comment-triggers",
+      "type": "step",
+      "name": "预览评论触发器",
+      "summary": "解析评论中会唤醒 agent 的触发指令并给出预览，明确每次触发将启动哪次运行。",
+      "tags": [
+        "触发器",
+        "预览"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/issue_trigger.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:issue-collaboration:update-subscribers",
+      "type": "step",
+      "name": "更新订阅关系",
+      "summary": "订阅/退订 issue 及其子树，决定后续活动通知的接收人集合。",
+      "tags": [
+        "订阅",
+        "通知"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/subscriber.go",
+      "lineRange": [
+        59,
+        59
+      ]
+    },
+    {
+      "id": "step:issue-collaboration:react-issue",
+      "type": "step",
+      "name": "添加表情回应",
+      "summary": "在 issue 或评论上添加/移除表情回应并广播变化事件。",
+      "tags": [
+        "reaction",
+        "互动"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue_reaction.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:issue-collaboration:record-activity",
+      "type": "step",
+      "name": "记录活动时间线",
+      "summary": "将字段变更、评论、指派等写入活动时间线，供 issue 详情页回放。",
+      "tags": [
+        "活动",
+        "时间线"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/activity.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:batch-issue-operations:batch-update",
+      "type": "step",
+      "name": "批量更新字段与状态",
+      "summary": "对一批 issue 应用字段/状态/标签变更，并逐个评估是否触发 agent 运行。",
+      "tags": [
+        "批量更新",
+        "触发器"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/issue.go",
+      "lineRange": [
+        3999,
+        3999
+      ]
+    },
+    {
+      "id": "step:batch-issue-operations:batch-delete",
+      "type": "step",
+      "name": "批量删除 issue",
+      "summary": "批量删除 issue 并清理关联的订阅、附件与任务引用。",
+      "tags": [
+        "批量删除"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/issue.go",
+      "lineRange": [
+        4371,
+        4371
+      ]
+    },
+    {
+      "id": "step:batch-issue-operations:move-issue",
+      "type": "step",
+      "name": "移动 issue 层级",
+      "summary": "在父子层级与项目间移动 issue，重算兄弟排序位置。",
+      "tags": [
+        "移动",
+        "排序"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/issue_move.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:daemon-registration:register-daemon",
+      "type": "step",
+      "name": "注册 daemon 与运行时",
+      "summary": "daemon 上报身份与探测到的 agent CLI，服务端持久化 runtime 行并返回工作空间绑定。",
+      "tags": [
+        "注册",
+        "runtime"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        385,
+        385
+      ]
+    },
+    {
+      "id": "step:daemon-registration:heartbeat",
+      "type": "step",
+      "name": "心跳保活",
+      "summary": "daemon 周期性心跳，服务端据此维护 runtime 在线状态与最近活跃时间。",
+      "tags": [
+        "心跳"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        1047,
+        1047
+      ]
+    },
+    {
+      "id": "step:daemon-registration:daemon-websocket",
+      "type": "step",
+      "name": "建立 daemon WebSocket 通道",
+      "summary": "建立 daemon 与服务端的 WebSocket 连接，承载任务下发、消息流与配置广播。",
+      "tags": [
+        "WebSocket",
+        "通道"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/daemon_ws.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:daemon-registration:sweep-runtimes",
+      "type": "step",
+      "name": "清扫失联运行时",
+      "summary": "后台清扫器回收超时未心跳的 runtime，释放其占用的任务与注册槽位。",
+      "tags": [
+        "清扫",
+        "回收"
+      ],
+      "complexity": "simple",
+      "filePath": "server/cmd/server/runtime_sweeper.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:claim-tasks",
+      "type": "step",
+      "name": "批量领取待执行任务",
+      "summary": "daemon 按 runtime 身份批量领取排队任务（WS 优先、HTTP 兜底），获得任务载荷与执行参数。",
+      "tags": [
+        "claim",
+        "任务队列"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        1584,
+        1584
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:extend-prepare-lease",
+      "type": "step",
+      "name": "延长准备租约",
+      "summary": "在 runtime 解析、技能包解析、执行环境搭建等准备阶段维持租约，防止任务被判定超时回收。",
+      "tags": [
+        "租约",
+        "超时"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        3511,
+        3511
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:resolve-skill-bundles",
+      "type": "step",
+      "name": "解析技能包",
+      "summary": "按 agent 与工作空间配置解析任务可用的技能包清单，供执行环境装载。",
+      "tags": [
+        "技能包",
+        "skills"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        3392,
+        3392
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:start-agent-process",
+      "type": "step",
+      "name": "准备执行环境并启动 agent 子进程",
+      "summary": "搭建执行环境（git worktree、沙箱与 MCP 配置），启动任务对应的 agent CLI 子进程并标记任务运行中。",
+      "tags": [
+        "执行环境",
+        "子进程",
+        "worktree"
+      ],
+      "complexity": "complex",
+      "filePath": "server/internal/daemon/daemon.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:stream-messages",
+      "type": "step",
+      "name": "流式上报执行消息",
+      "summary": "agent 产生的文本、工具调用与 thinking 以消息批次上报，经 WebSocket（task:message/chat:message）流式推送到客户端。",
+      "tags": [
+        "消息流",
+        "WebSocket"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        4484,
+        4484
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:complete-or-fail",
+      "type": "step",
+      "name": "上报任务完成或失败",
+      "summary": "daemon 回传输出、分支名与会话 ID 标记完成，或经 FailTask 上报失败；服务端据此回写 issue 状态与活动。",
+      "tags": [
+        "完成",
+        "失败",
+        "状态回写"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        3683,
+        3683
+      ]
+    },
+    {
+      "id": "step:task-claim-execution:report-usage",
+      "type": "step",
+      "name": "上报 token 用量",
+      "summary": "回传本次运行的 token/模型用量，驱动工作空间用量看板与配额核算。",
+      "tags": [
+        "用量",
+        "配额"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:task-cancel-rerun:user-cancel",
+      "type": "step",
+      "name": "用户发起取消",
+      "summary": "用户从会话或 issue 取消任务，服务端标记取消并向 daemon 下发终止指令。",
+      "tags": [
+        "取消"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        1772,
+        1772
+      ]
+    },
+    {
+      "id": "step:task-cancel-rerun:ack-cancel",
+      "type": "step",
+      "name": "确认取消回执",
+      "summary": "daemon 终止 agent 子进程后回报取消确认，任务进入终态。",
+      "tags": [
+        "回执",
+        "终态"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/daemon.go",
+      "lineRange": [
+        4637,
+        4637
+      ]
+    },
+    {
+      "id": "step:task-cancel-rerun:rerun-issue",
+      "type": "step",
+      "name": "重跑 issue 运行",
+      "summary": "对已有 issue 发起重跑：作废旧任务并重新入队一次 agent 运行。",
+      "tags": [
+        "重跑",
+        "入队"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/task_lifecycle.go",
+      "lineRange": [
+        165,
+        165
+      ]
+    },
+    {
+      "id": "step:agent-skill-configuration:create-update-agent",
+      "type": "step",
+      "name": "创建/更新 agent",
+      "summary": "创建或修改 agent 的名称、提示词、运行时绑定与默认工作目录等配置。",
+      "tags": [
+        "agent",
+        "CRUD"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/agent.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:agent-skill-configuration:bind-skills",
+      "type": "step",
+      "name": "绑定技能并控制启用",
+      "summary": "为 agent 附加/移除技能，按技能或运行时粒度控制启用状态，并广播运行时技能变更。",
+      "tags": [
+        "skills",
+        "绑定"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/agent_runtime_skills.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:agent-skill-configuration:configure-env-permissions",
+      "type": "step",
+      "name": "配置环境变量与权限",
+      "summary": "维护 agent 的环境变量注入与工具权限白名单，脱敏后回显。",
+      "tags": [
+        "环境变量",
+        "权限"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/agent_env.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:agent-skill-configuration:archive-restore-agent",
+      "type": "step",
+      "name": "归档/恢复 agent",
+      "summary": "归档 agent 停止其接新任务，或恢复归档的 agent 重新参与指派。",
+      "tags": [
+        "归档",
+        "恢复"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/agent.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:send-chat-message:gate-session",
+      "type": "step",
+      "name": "校验会话访问与归档状态",
+      "summary": "重新校验发送者对会话与私有 agent 的访问权限，归档会话拒绝入队新任务。",
+      "tags": [
+        "权限",
+        "校验"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        824,
+        824
+      ]
+    },
+    {
+      "id": "step:send-chat-message:create-message",
+      "type": "step",
+      "name": "创建聊天消息",
+      "summary": "落库用户消息并挂接附件，客户端以 pending-message 模式先行渲染。",
+      "tags": [
+        "消息",
+        "附件"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:send-chat-message:enqueue-reply-task",
+      "type": "step",
+      "name": "入队 agent 回复任务",
+      "summary": "为会话的 agent 入队一次回复任务；会话已有运行中任务时进入排队并可调优先级。",
+      "tags": [
+        "任务队列",
+        "排队"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/task.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:send-chat-message:stream-reply",
+      "type": "step",
+      "name": "流式回传 agent 回复",
+      "summary": "客户端订阅 chat:message/chat:done/chat:quick_actions 事件，把回复流式渲染进会话并终结 pending 状态。",
+      "tags": [
+        "WebSocket",
+        "流式"
+      ],
+      "complexity": "moderate",
+      "filePath": "packages/core/realtime/use-realtime-sync.ts",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:send-chat-message:mark-read",
+      "type": "step",
+      "name": "更新已读与未读状态",
+      "summary": "标记会话已读，驱动会话列表的未读计数与 inbox 汇总。",
+      "tags": [
+        "已读",
+        "未读"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-quick-actions:generate-quick-actions",
+      "type": "step",
+      "name": "生成会话快捷指令",
+      "summary": "基于会话上下文由 LLM 生成候选快捷指令并落库，供会话界面一键运行。",
+      "tags": [
+        "生成",
+        "LLM"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/chat_quick_actions_generate.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-quick-actions:manage-quick-actions",
+      "type": "step",
+      "name": "管理快捷指令",
+      "summary": "工作空间级快捷指令的增删改查与作用域配置。",
+      "tags": [
+        "CRUD"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/quick_action.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-quick-actions:run-quick-action",
+      "type": "step",
+      "name": "运行快捷指令",
+      "summary": "在 issue 或会话上运行快捷指令，为对应 agent 入队一次任务。",
+      "tags": [
+        "运行",
+        "入队"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/quick_action.go",
+      "lineRange": [
+        849,
+        849
+      ]
+    },
+    {
+      "id": "step:chat-quick-actions:render-result",
+      "type": "step",
+      "name": "渲染指令结果",
+      "summary": "将快捷指令产出的结构化结果渲染为可预览的组件内容。",
+      "tags": [
+        "渲染",
+        "预览"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/quick_action.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-session-management:create-session",
+      "type": "step",
+      "name": "创建/更新会话",
+      "summary": "创建与 agent 的聊天会话并维护标题、状态等元数据。",
+      "tags": [
+        "会话",
+        "CRUD"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-session-management:pin-agents",
+      "type": "step",
+      "name": "置顶会话与常用 agent",
+      "summary": "维护会话置顶与常用 agent 快捷入口列表。",
+      "tags": [
+        "置顶"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat_pinned_agent.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-session-management:archive-delete-session",
+      "type": "step",
+      "name": "归档/删除会话",
+      "summary": "归档使会话只读，删除会话并清理其消息与排队任务。",
+      "tags": [
+        "归档",
+        "删除"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:chat-session-management:schedule-queued-tasks",
+      "type": "step",
+      "name": "调度排队任务",
+      "summary": "查看会话排队中的任务，调整优先级或清空排队。",
+      "tags": [
+        "排队",
+        "优先级"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/chat.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-cron-dispatch:evaluate-due-plans",
+      "type": "step",
+      "name": "调度器评估到期计划",
+      "summary": "Manager 按 tick 周期扫描各 job 的到期计划，以数据库审计行保证多副本互斥。",
+      "tags": [
+        "调度",
+        "互斥"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/scheduler/manager.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-cron-dispatch:resolve-cron-occurrence",
+      "type": "step",
+      "name": "计算触发时间与迟到丢弃",
+      "summary": "为定时触发计算本次 cron 发生时间，超过最大迟到窗口（5 分钟）的补跑直接跳过等下一个时段。",
+      "tags": [
+        "cron",
+        "迟到窗口"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/scheduler/jobs_autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-cron-dispatch:dispatch-run",
+      "type": "step",
+      "name": "派发 autopilot 运行",
+      "summary": "按触发器配置创建一次 autopilot 运行记录并进入执行。",
+      "tags": [
+        "运行",
+        "派发"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-cron-dispatch:produce-issue-task",
+      "type": "step",
+      "name": "产出 issue 与 agent 任务",
+      "summary": "运行按配置创建或更新 issue 并入队 agent 任务，运行产物可追溯回触发器。",
+      "tags": [
+        "issue",
+        "任务"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/issue.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-webhook:rate-limit",
+      "type": "step",
+      "name": "IP 限流防护",
+      "summary": "对 webhook 入口施加绝对 IP 上限与坏凭证滑窗限流，防止限流预算被合法钩子耗尽。",
+      "tags": [
+        "限流",
+        "防护"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/autopilot_webhook.go",
+      "lineRange": [
+        347,
+        347
+      ]
+    },
+    {
+      "id": "step:autopilot-webhook:lookup-token",
+      "type": "step",
+      "name": "查找触发器令牌",
+      "summary": "按 URL 令牌定位 webhook 触发器，区分「无记录」与数据库错误，避免瞬时故障静默丢弃投递。",
+      "tags": [
+        "令牌",
+        "容错"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/autopilot_webhook.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-webhook:verify-signature",
+      "type": "step",
+      "name": "验证签名",
+      "summary": "对配置了签名密钥的触发器校验请求签名，拒绝伪造载荷。",
+      "tags": [
+        "签名",
+        "安全"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/autopilot_webhook.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-webhook:record-delivery",
+      "type": "step",
+      "name": "记录投递并触发运行",
+      "summary": "持久化一次投递（delivery）记录后触发 autopilot 运行，投递可追溯。",
+      "tags": [
+        "投递",
+        "运行"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/autopilot_webhook.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-webhook:replay-delivery",
+      "type": "step",
+      "name": "重放历史投递",
+      "summary": "对失败或遗漏的投递执行重放，重建运行。",
+      "tags": [
+        "重放"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-management:create-update-autopilot",
+      "type": "step",
+      "name": "创建/更新 autopilot",
+      "summary": "维护 autopilot 的名称、提示词、目标 agent 与默认 issue 归属等配置。",
+      "tags": [
+        "CRUD",
+        "配置"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-management:configure-triggers",
+      "type": "step",
+      "name": "配置触发器与签名密钥",
+      "summary": "创建/修改 schedule、webhook、manual 触发器，轮换 webhook 令牌与签名密钥。",
+      "tags": [
+        "触发器",
+        "密钥"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-management:manual-trigger",
+      "type": "step",
+      "name": "手动触发运行",
+      "summary": "用户手动触发一次 autopilot 运行用于验证配置。",
+      "tags": [
+        "手动触发"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-management:account-quota",
+      "type": "step",
+      "name": "配额用量核算",
+      "summary": "按工作空间核算 autopilot 运行配额的占用与余量，超限拒绝触发。",
+      "tags": [
+        "配额",
+        "用量"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/service/autopilot_quota.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:autopilot-management:manage-collaborators",
+      "type": "step",
+      "name": "管理协作者",
+      "summary": "添加/移除可查看与操作该 autopilot 的协作者。",
+      "tags": [
+        "协作者",
+        "权限"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/autopilot.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-inbound-message:verify-inbound",
+      "type": "step",
+      "name": "平台回调验签与解密",
+      "summary": "校验渠道平台回调签名，解密承载的安装凭证，构造统一的 InboundMessage。",
+      "tags": [
+        "验签",
+        "解密"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/slack/inbound.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-inbound-message:route-and-dedup",
+      "type": "step",
+      "name": "安装路由与去重认领",
+      "summary": "按平台路由键定位 installation，两阶段去重认领（owner fencing）拦截重放与重复投递。",
+      "tags": [
+        "路由",
+        "去重"
+      ],
+      "complexity": "complex",
+      "filePath": "server/internal/integrations/channel/engine/router.go",
+      "lineRange": [
+        273,
+        273
+      ]
+    },
+    {
+      "id": "step:channel-inbound-message:bind-identity",
+      "type": "step",
+      "name": "发送者身份解析与绑定",
+      "summary": "把渠道发送者映射到 Multica 用户；未绑定时发起绑定流程，经 binding redeem 完成关联。",
+      "tags": [
+        "身份",
+        "绑定"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/slack/binding.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-inbound-message:create-issue-or-session",
+      "type": "step",
+      "name": "创建 issue 或映射会话",
+      "summary": "/issue 命令在对应工作空间代用户创建 issue（记录 origin_type），普通消息则映射到 agent 聊天会话。",
+      "tags": [
+        "issue",
+        "会话",
+        "溯源"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/channel/engine/router.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-inbound-message:reply-channel",
+      "type": "step",
+      "name": "回贴渠道回复",
+      "summary": "agent 结果经 OutboundReplier 回贴到来源会话，并维护输入中（typing）指示。",
+      "tags": [
+        "回复",
+        "outbound"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/slack/outbound.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-installation:begin-install",
+      "type": "step",
+      "name": "发起安装会话",
+      "summary": "创建一次渠道安装会话并返回平台授权入口。",
+      "tags": [
+        "安装",
+        "会话"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/lark.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-installation:poll-install-status",
+      "type": "step",
+      "name": "轮询安装状态",
+      "summary": "前端轮询安装会话状态直到安装完成或失败。",
+      "tags": [
+        "轮询",
+        "状态"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/lark.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-installation:register-byo",
+      "type": "step",
+      "name": "注册自建应用",
+      "summary": "为 Slack/企业微信/钉钉/Telegram 注册自建（BYO）应用凭证并落库 installation。",
+      "tags": [
+        "BYO",
+        "凭证"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/slack/byo_install.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:channel-installation:manage-installations",
+      "type": "step",
+      "name": "管理安装与群绑定",
+      "summary": "列出/吊销渠道安装，绑定或遗忘特定群会话。",
+      "tags": [
+        "管理",
+        "吊销"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/dingtalk.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:github-integration:connect-github",
+      "type": "step",
+      "name": "连接 GitHub App",
+      "summary": "发起 GitHub App 安装并在 setup 回调中完成工作空间绑定。",
+      "tags": [
+        "GitHub App",
+        "安装"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/github.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:github-integration:receive-webhook",
+      "type": "step",
+      "name": "接收 GitHub webhook",
+      "summary": "校验并分发 GitHub webhook 事件（PR 打开/合并、issue 评论等）。",
+      "tags": [
+        "webhook",
+        "事件"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/github.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:github-integration:sync-snapshot",
+      "type": "step",
+      "name": "同步仓库快照与 PR",
+      "summary": "刷新仓库与 PR 快照数据，供 issue 关联与 agent 上下文使用。",
+      "tags": [
+        "快照",
+        "同步"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/integrations/ghsnapshot/refresh.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:github-integration:link-issue-pr",
+      "type": "step",
+      "name": "维护 issue 与 PR 关联",
+      "summary": "按分支/正文引用把 PR 关联到 issue，支撑 issue 详情的 PR 列表。",
+      "tags": [
+        "关联",
+        "PR"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/github.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:signup-login:admission-check",
+      "type": "step",
+      "name": "注册准入校验",
+      "summary": "按 AllowSignup、允许邮箱与邮箱域名白名单判定注册请求是否准入。",
+      "tags": [
+        "准入",
+        "白名单"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/admission.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:signup-login:issue-credentials",
+      "type": "step",
+      "name": "签发会话凭证",
+      "summary": "注册/登录成功后签发会话 Cookie 与 JWT，并由鉴权中间件在后续请求中校验。",
+      "tags": [
+        "JWT",
+        "Cookie"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/auth/jwt.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:signup-login:issue-cli-token",
+      "type": "step",
+      "name": "签发 CLI 令牌",
+      "summary": "为已登录用户签发 CLI/daemon 使用的令牌，支撑本地 agent 接入。",
+      "tags": [
+        "CLI",
+        "令牌"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/auth.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:signup-login:manage-pat",
+      "type": "step",
+      "name": "管理个人访问令牌",
+      "summary": "个人访问令牌（PAT）的创建、续期与吊销，带缓存加速校验。",
+      "tags": [
+        "PAT",
+        "吊销"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/personal_access_token.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:signup-login:logout",
+      "type": "step",
+      "name": "登出与会话吊销",
+      "summary": "清除会话 Cookie 并吊销服务端会话状态。",
+      "tags": [
+        "登出",
+        "吊销"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/auth.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:workspace-invitation:create-invitation",
+      "type": "step",
+      "name": "创建成员邀请",
+      "summary": "创建带速率限制的成员邀请，防止邀请轰炸。",
+      "tags": [
+        "邀请",
+        "限流"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/invitation.go",
+      "lineRange": [
+        59,
+        59
+      ]
+    },
+    {
+      "id": "step:workspace-invitation:accept-decline",
+      "type": "step",
+      "name": "接受/拒绝邀请",
+      "summary": "被邀请人查看并接受或拒绝邀请，接受后加入工作空间成为成员。",
+      "tags": [
+        "接受",
+        "拒绝"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/invitation.go",
+      "lineRange": [
+        453,
+        453
+      ]
+    },
+    {
+      "id": "step:workspace-invitation:join-by-share-link",
+      "type": "step",
+      "name": "分享链接加入",
+      "summary": "凭工作空间分享链接直接加入，作为邀请之外的低门槛入口。",
+      "tags": [
+        "分享链接"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/share_link.go",
+      "lineRange": [
+        264,
+        264
+      ]
+    },
+    {
+      "id": "step:workspace-invitation:update-members",
+      "type": "step",
+      "name": "更新成员角色与移除",
+      "summary": "更新成员角色或移除成员，移除时清理其订阅与实时会话。",
+      "tags": [
+        "角色",
+        "移除"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/workspace.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:workspace-invitation:leave-workspace",
+      "type": "step",
+      "name": "离开工作空间",
+      "summary": "成员主动退出工作空间，服务端先行确认再执行导航与清理。",
+      "tags": [
+        "退出"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/workspace.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:workspace-configuration:create-workspace",
+      "type": "step",
+      "name": "创建工作空间",
+      "summary": "创建工作空间并校验名称不占用保留 slug，创建者成为首个成员。",
+      "tags": [
+        "创建",
+        "slug"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/workspace.go",
+      "lineRange": [
+        202,
+        202
+      ]
+    },
+    {
+      "id": "step:workspace-configuration:update-workspace",
+      "type": "step",
+      "name": "更新工作空间信息",
+      "summary": "更新名称、图标等基本信息，slug 变更同样受保留 slug 约束。",
+      "tags": [
+        "更新"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/workspace.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    },
+    {
+      "id": "step:workspace-configuration:manage-runtime-profiles",
+      "type": "step",
+      "name": "管理运行时档案",
+      "summary": "工作空间级 runtime profile（agent CLI 运行配置）的增删改查，供 daemon 注册与 agent 执行引用。",
+      "tags": [
+        "runtime-profile",
+        "配置"
+      ],
+      "complexity": "moderate",
+      "filePath": "server/internal/handler/runtime_profile.go",
+      "lineRange": [
+        128,
+        128
+      ]
+    },
+    {
+      "id": "step:workspace-configuration:manage-mcp-servers",
+      "type": "step",
+      "name": "管理 MCP 服务器",
+      "summary": "工作空间级 MCP 服务器配置的增删改查，绑定到 agent 后影响其工具面。",
+      "tags": [
+        "MCP",
+        "配置"
+      ],
+      "complexity": "simple",
+      "filePath": "server/internal/handler/workspace_mcp.go",
+      "lineRange": [
+        0,
+        0
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "domain:issue-management",
+      "target": "flow:create-issue",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:issue-management",
+      "target": "flow:query-issue-board",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:issue-management",
+      "target": "flow:issue-collaboration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:issue-management",
+      "target": "flow:batch-issue-operations",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:agent-task-orchestration",
+      "target": "flow:daemon-registration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:agent-task-orchestration",
+      "target": "flow:task-claim-execution",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:agent-task-orchestration",
+      "target": "flow:task-cancel-rerun",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:agent-task-orchestration",
+      "target": "flow:agent-skill-configuration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:chat-collaboration",
+      "target": "flow:send-chat-message",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:chat-collaboration",
+      "target": "flow:chat-quick-actions",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:chat-collaboration",
+      "target": "flow:chat-session-management",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:automation-autopilot",
+      "target": "flow:autopilot-cron-dispatch",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:automation-autopilot",
+      "target": "flow:autopilot-webhook",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:automation-autopilot",
+      "target": "flow:autopilot-management",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:channel-integrations",
+      "target": "flow:channel-inbound-message",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:channel-integrations",
+      "target": "flow:channel-installation",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:channel-integrations",
+      "target": "flow:github-integration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:workspace-identity",
+      "target": "flow:signup-login",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:workspace-identity",
+      "target": "flow:workspace-invitation",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:workspace-identity",
+      "target": "flow:workspace-configuration",
+      "type": "contains_flow",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:create-issue",
+      "target": "step:create-issue:validate-request",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:create-issue",
+      "target": "step:create-issue:create-issue-record",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:create-issue",
+      "target": "step:create-issue:resolve-run-trigger",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:create-issue",
+      "target": "step:create-issue:enqueue-agent-task",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:create-issue",
+      "target": "step:create-issue:broadcast-realtime",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:query-issue-board",
+      "target": "step:query-issue-board:resolve-view",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:query-issue-board",
+      "target": "step:query-issue-board:build-query-plan",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:query-issue-board",
+      "target": "step:query-issue-board:assemble-rows",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:query-issue-board",
+      "target": "step:query-issue-board:group-issues",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:query-issue-board",
+      "target": "step:query-issue-board:compute-facets",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:issue-collaboration",
+      "target": "step:issue-collaboration:create-comment",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:issue-collaboration",
+      "target": "step:issue-collaboration:preview-comment-triggers",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:issue-collaboration",
+      "target": "step:issue-collaboration:update-subscribers",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:issue-collaboration",
+      "target": "step:issue-collaboration:react-issue",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:issue-collaboration",
+      "target": "step:issue-collaboration:record-activity",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:batch-issue-operations",
+      "target": "step:batch-issue-operations:batch-update",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:batch-issue-operations",
+      "target": "step:batch-issue-operations:batch-delete",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "flow:batch-issue-operations",
+      "target": "step:batch-issue-operations:move-issue",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:daemon-registration",
+      "target": "step:daemon-registration:register-daemon",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:daemon-registration",
+      "target": "step:daemon-registration:heartbeat",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:daemon-registration",
+      "target": "step:daemon-registration:daemon-websocket",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:daemon-registration",
+      "target": "step:daemon-registration:sweep-runtimes",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:claim-tasks",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.1
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:extend-prepare-lease",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:resolve-skill-bundles",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:start-agent-process",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:stream-messages",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:complete-or-fail",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.9
+    },
+    {
+      "source": "flow:task-claim-execution",
+      "target": "step:task-claim-execution:report-usage",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:task-cancel-rerun",
+      "target": "step:task-cancel-rerun:user-cancel",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.3
+    },
+    {
+      "source": "flow:task-cancel-rerun",
+      "target": "step:task-cancel-rerun:ack-cancel",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.7
+    },
+    {
+      "source": "flow:task-cancel-rerun",
+      "target": "step:task-cancel-rerun:rerun-issue",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:agent-skill-configuration",
+      "target": "step:agent-skill-configuration:create-update-agent",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:agent-skill-configuration",
+      "target": "step:agent-skill-configuration:bind-skills",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:agent-skill-configuration",
+      "target": "step:agent-skill-configuration:configure-env-permissions",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:agent-skill-configuration",
+      "target": "step:agent-skill-configuration:archive-restore-agent",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:send-chat-message",
+      "target": "step:send-chat-message:gate-session",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:send-chat-message",
+      "target": "step:send-chat-message:create-message",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:send-chat-message",
+      "target": "step:send-chat-message:enqueue-reply-task",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:send-chat-message",
+      "target": "step:send-chat-message:stream-reply",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:send-chat-message",
+      "target": "step:send-chat-message:mark-read",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:chat-quick-actions",
+      "target": "step:chat-quick-actions:generate-quick-actions",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:chat-quick-actions",
+      "target": "step:chat-quick-actions:manage-quick-actions",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:chat-quick-actions",
+      "target": "step:chat-quick-actions:run-quick-action",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:chat-quick-actions",
+      "target": "step:chat-quick-actions:render-result",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:chat-session-management",
+      "target": "step:chat-session-management:create-session",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:chat-session-management",
+      "target": "step:chat-session-management:pin-agents",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:chat-session-management",
+      "target": "step:chat-session-management:archive-delete-session",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:chat-session-management",
+      "target": "step:chat-session-management:schedule-queued-tasks",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:autopilot-cron-dispatch",
+      "target": "step:autopilot-cron-dispatch:evaluate-due-plans",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:autopilot-cron-dispatch",
+      "target": "step:autopilot-cron-dispatch:resolve-cron-occurrence",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:autopilot-cron-dispatch",
+      "target": "step:autopilot-cron-dispatch:dispatch-run",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:autopilot-cron-dispatch",
+      "target": "step:autopilot-cron-dispatch:produce-issue-task",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:autopilot-webhook",
+      "target": "step:autopilot-webhook:rate-limit",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:autopilot-webhook",
+      "target": "step:autopilot-webhook:lookup-token",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:autopilot-webhook",
+      "target": "step:autopilot-webhook:verify-signature",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:autopilot-webhook",
+      "target": "step:autopilot-webhook:record-delivery",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:autopilot-webhook",
+      "target": "step:autopilot-webhook:replay-delivery",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:autopilot-management",
+      "target": "step:autopilot-management:create-update-autopilot",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:autopilot-management",
+      "target": "step:autopilot-management:configure-triggers",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:autopilot-management",
+      "target": "step:autopilot-management:manual-trigger",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:autopilot-management",
+      "target": "step:autopilot-management:account-quota",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:autopilot-management",
+      "target": "step:autopilot-management:manage-collaborators",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:channel-inbound-message",
+      "target": "step:channel-inbound-message:verify-inbound",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:channel-inbound-message",
+      "target": "step:channel-inbound-message:route-and-dedup",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:channel-inbound-message",
+      "target": "step:channel-inbound-message:bind-identity",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:channel-inbound-message",
+      "target": "step:channel-inbound-message:create-issue-or-session",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:channel-inbound-message",
+      "target": "step:channel-inbound-message:reply-channel",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:channel-installation",
+      "target": "step:channel-installation:begin-install",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:channel-installation",
+      "target": "step:channel-installation:poll-install-status",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:channel-installation",
+      "target": "step:channel-installation:register-byo",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:channel-installation",
+      "target": "step:channel-installation:manage-installations",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:github-integration",
+      "target": "step:github-integration:connect-github",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:github-integration",
+      "target": "step:github-integration:receive-webhook",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:github-integration",
+      "target": "step:github-integration:sync-snapshot",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:github-integration",
+      "target": "step:github-integration:link-issue-pr",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:signup-login",
+      "target": "step:signup-login:admission-check",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:signup-login",
+      "target": "step:signup-login:issue-credentials",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:signup-login",
+      "target": "step:signup-login:issue-cli-token",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:signup-login",
+      "target": "step:signup-login:manage-pat",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:signup-login",
+      "target": "step:signup-login:logout",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:workspace-invitation",
+      "target": "step:workspace-invitation:create-invitation",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:workspace-invitation",
+      "target": "step:workspace-invitation:accept-decline",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.4
+    },
+    {
+      "source": "flow:workspace-invitation",
+      "target": "step:workspace-invitation:join-by-share-link",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.6
+    },
+    {
+      "source": "flow:workspace-invitation",
+      "target": "step:workspace-invitation:update-members",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:workspace-invitation",
+      "target": "step:workspace-invitation:leave-workspace",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "flow:workspace-configuration",
+      "target": "step:workspace-configuration:create-workspace",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.2
+    },
+    {
+      "source": "flow:workspace-configuration",
+      "target": "step:workspace-configuration:update-workspace",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.5
+    },
+    {
+      "source": "flow:workspace-configuration",
+      "target": "step:workspace-configuration:manage-runtime-profiles",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 0.8
+    },
+    {
+      "source": "flow:workspace-configuration",
+      "target": "step:workspace-configuration:manage-mcp-servers",
+      "type": "flow_step",
+      "direction": "forward",
+      "weight": 1.0
+    },
+    {
+      "source": "domain:issue-management",
+      "target": "domain:agent-task-orchestration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "issue 指派给 agent 或状态离开 backlog 时，经 issue 触发判定（IssueRunTrigger）为该 agent 入队一次运行任务",
+      "weight": 0.9
+    },
+    {
+      "source": "domain:agent-task-orchestration",
+      "target": "domain:issue-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "任务执行完成后回写 issue 状态、评论与活动时间线，agent 作为第一类指派人闭环工作项",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:chat-collaboration",
+      "target": "domain:agent-task-orchestration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "每条会话消息入队一次 agent 回复任务，任务执行消息经 WebSocket（chat:message/chat:done）流式回传到会话",
+      "weight": 0.8
+    },
+    {
+      "source": "domain:chat-collaboration",
+      "target": "domain:issue-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "会话与快捷指令可经 quick-create 在对话中直接创建 issue",
+      "weight": 0.5
+    },
+    {
+      "source": "domain:automation-autopilot",
+      "target": "domain:issue-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "autopilot 运行按触发器配置自动创建或更新 issue",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:automation-autopilot",
+      "target": "domain:agent-task-orchestration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "autopilot 运行最终转化为 agent 任务，由 daemon 领取执行",
+      "weight": 0.7
+    },
+    {
+      "source": "domain:channel-integrations",
+      "target": "domain:issue-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "渠道 /issue 命令代用户创建带 origin_type 来源标记的 issue",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:channel-integrations",
+      "target": "domain:chat-collaboration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "渠道私聊/群聊消息映射为平台聊天会话，agent 结果回贴到渠道",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:workspace-identity",
+      "target": "domain:issue-management",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "成员资格与工作空间隔离决定 issue 查询与写入的访问边界",
+      "weight": 0.6
+    },
+    {
+      "source": "domain:workspace-identity",
+      "target": "domain:agent-task-orchestration",
+      "type": "cross_domain",
+      "direction": "forward",
+      "description": "daemon 注册的运行时与运行时档案归属工作空间，凭 daemon 令牌访问",
+      "weight": 0.6
+    }
+  ],
+  "layers": [],
+  "tour": []
+}
