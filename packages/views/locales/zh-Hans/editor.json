@@ -111,7 +111,7 @@
     "title_aria_label": "标题"
   },
   "mermaid": {
-    "diagram_aria": "Mermaid 图表",
+    "diagram_label": "Mermaid 图表",
     "render_error": "无法渲染 Mermaid 图。",
     "rendering": "渲染中…",
     "viewer_title": "图表",

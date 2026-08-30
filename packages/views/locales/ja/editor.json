@@ -104,7 +104,7 @@
     "title_aria_label": "タイトル"
   },
   "mermaid": {
-    "diagram_aria": "Mermaid 図",
+    "diagram_label": "Mermaid 図",
     "render_error": "Mermaid ダイアグラムを描画できません。",
     "rendering": "ダイアグラムを描画中…",
     "viewer_title": "ダイアグラム",

@@ -111,7 +111,7 @@
     "title_aria_label": "Title"
   },
   "mermaid": {
-    "diagram_aria": "Mermaid diagram",
+    "diagram_label": "Mermaid diagram",
     "render_error": "Unable to render Mermaid diagram.",
     "rendering": "Rendering diagram…",
     "viewer_title": "Diagram",

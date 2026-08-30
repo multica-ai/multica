@@ -46,15 +46,17 @@
     "label_member": "成员",
     "label_role": "角色",
     "label_optional": "（可选）",
-    "placeholder_role_inline": "添加角色…",
     "cancel": "取消",
     "select_target": "选择成员或智能体",
     "search_placeholder": "搜索成员或智能体...",
     "members_section": "成员",
     "agents_section": "智能体",
     "role_placeholder": "例如：审查者、前端负责人",
-    "role_inline_placeholder": "角色（例如：审查者）",
     "add": "添加"
+  },
+  "role_editor": {
+    "empty": "添加角色…",
+    "placeholder": "角色（例如：审查者）"
   },
   "description_dialog": {
     "title": "编辑描述",

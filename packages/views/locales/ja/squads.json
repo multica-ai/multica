@@ -46,15 +46,17 @@
     "label_member": "メンバー",
     "label_role": "役割",
     "label_optional": "（任意）",
-    "placeholder_role_inline": "役割を追加…",
     "cancel": "キャンセル",
     "select_target": "メンバーまたはエージェントを選択",
     "search_placeholder": "メンバーまたはエージェントを検索...",
     "members_section": "メンバー",
     "agents_section": "エージェント",
     "role_placeholder": "例：レビュアー、フロントエンドリード",
-    "role_inline_placeholder": "役割（例：レビュアー）",
     "add": "追加"
+  },
+  "role_editor": {
+    "empty": "役割を追加…",
+    "placeholder": "役割（例：レビュアー）"
   },
   "description_dialog": {
     "title": "説明を編集",

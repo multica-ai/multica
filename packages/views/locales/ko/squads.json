@@ -46,15 +46,17 @@
     "label_member": "멤버",
     "label_role": "역할",
     "label_optional": "(선택 사항)",
-    "placeholder_role_inline": "역할 추가...",
     "cancel": "취소",
     "select_target": "멤버 또는 에이전트 선택",
     "search_placeholder": "멤버 또는 에이전트 검색...",
     "members_section": "멤버",
     "agents_section": "에이전트",
     "role_placeholder": "예: 리뷰어, 프런트엔드 리드",
-    "role_inline_placeholder": "역할(예: 리뷰어)",
     "add": "추가"
+  },
+  "role_editor": {
+    "empty": "역할 추가...",
+    "placeholder": "역할(예: 리뷰어)"
   },
   "description_dialog": {
     "title": "설명 수정",

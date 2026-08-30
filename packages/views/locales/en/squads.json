@@ -46,15 +46,17 @@
     "label_member": "Member",
     "label_role": "Role",
     "label_optional": "(optional)",
-    "placeholder_role_inline": "Add role…",
     "cancel": "Cancel",
     "select_target": "Select a member or agent",
     "search_placeholder": "Search members or agents...",
     "members_section": "Members",
     "agents_section": "Agents",
     "role_placeholder": "e.g. Reviewer, Frontend Lead",
-    "role_inline_placeholder": "Role (e.g. Reviewer)",
     "add": "Add"
+  },
+  "role_editor": {
+    "empty": "Add role…",
+    "placeholder": "Role (e.g. Reviewer)"
   },
   "description_dialog": {
     "title": "Edit description",

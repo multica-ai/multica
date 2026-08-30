@@ -691,7 +691,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
           else if (e.key === "Escape") { setDraft(value); setEditing(false); }
         }}
         disabled={saving}
-        placeholder={t(($) => $.add_member_dialog.role_inline_placeholder)}
+        placeholder={t(($) => $.role_editor.placeholder)}
         className="h-6 mt-0.5 text-caption px-1.5"
       />
     );
@@ -703,7 +703,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
       onClick={() => setEditing(true)}
       className="text-caption text-muted-foreground mt-0.5 text-left hover:text-foreground transition-colors"
     >
-      {value || <span className="italic opacity-60">{t(($) => $.add_member_dialog.placeholder_role_inline)}</span>}
+      {value || <span className="italic opacity-60">{t(($) => $.role_editor.empty)}</span>}
     </button>
   );
 }
@@ -1014,9 +1014,7 @@ function SquadOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.id === "members"
-              ? t(($) => $.detail_tabs.members)
-              : t(($) => $.detail_tabs.instructions)}
+            {t(($) => $.detail_tabs[tab.id])}
           </button>
         ))}
       </div>

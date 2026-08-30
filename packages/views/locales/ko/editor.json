@@ -104,7 +104,7 @@
     "title_aria_label": "제목"
   },
   "mermaid": {
-    "diagram_aria": "Mermaid 다이어그램",
+    "diagram_label": "Mermaid 다이어그램",
     "render_error": "Mermaid 다이어그램을 렌더링할 수 없습니다.",
     "rendering": "다이어그램 렌더링 중...",
     "viewer_title": "다이어그램",
