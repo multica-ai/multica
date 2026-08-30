@@ -135,6 +135,17 @@ func isSegmentDelimiter(b byte) bool {
 	return b == '-' || b == '_' || b == '.' || b == '/' || b == ':' || b == ' ' || b == '@'
 }
 
+func isNonChatModel(model string) bool {
+	lower := strings.ToLower(model)
+	nonChatTags := []string{"embedding", "embed", "tts", "-image", "-video", "audio", "lyria", "veo", "research", "clip", "translate", "robotics", "customtools"}
+	for _, tag := range nonChatTags {
+		if strings.Contains(lower, tag) {
+			return true
+		}
+	}
+	return false
+}
+
 // BuildTierMapFromCatalog scans a slice of discovered runtime models and dynamically selects
 // the optimal model for each of the 3 tiers (Simple, Standard, Heavy).
 func BuildTierMapFromCatalog(availableModels []string) TierMap {
@@ -149,7 +160,7 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 	var heavyCandidates []string
 
 	for _, model := range availableModels {
-		if strings.TrimSpace(model) == "" {
+		if strings.TrimSpace(model) == "" || isNonChatModel(model) {
 			continue
 		}
 		tier := ClassifyModelTier(model)

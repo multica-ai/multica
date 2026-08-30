@@ -38,6 +38,8 @@ var quotaSignals = []string{
 	"temporarily rate-limited",
 	"rate-limited upstream",
 	"rate limited upstream",
+	"only supports interactions api",
+	"interactions api",
 	"too many requests",
 	"429",
 	"404",
