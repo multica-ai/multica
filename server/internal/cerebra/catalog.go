@@ -52,20 +52,13 @@ func ClassifyModelTier(modelID string) Tier {
 		baseName = lower[idx+1:]
 	}
 
-	// 1. Explicit Simple flagship tags (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free", "gemini-1.5-flash").
-	simpleKeywords := []string{
-		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "lite", "x-preview", "tiny",
-	}
-	for _, kw := range simpleKeywords {
-		if hasModelSegment(baseName, kw) {
-			return TierSimple
-		}
-	}
-
-	// 2. Explicit Heavy reasoning/flagship tags (e.g. "o1", "o3", "r1", "opus", "nemotron-3-ultra", "pickle").
+	// 1. Universal Heavy / Frontier Reasoning descriptors:
 	heavyKeywords := []string{
-		"ultra", "opus", "pickle", "large", "max", "reasoning", "nemotron-3-ultra", "claude-3-opus",
-		"r1", "o1", "o3", "pro",
+		"reasoning", "ultra", "pro", "max", "large", "opus", "r1", "o1", "o3", "pickle",
+	}
+	// Exception: o1-mini and o3-mini are lightweight mini models (Simple Tier)
+	if hasModelSegment(baseName, "mini") || hasModelSegment(baseName, "nano") {
+		return TierSimple
 	}
 	for _, kw := range heavyKeywords {
 		if hasModelSegment(baseName, kw) {
@@ -73,24 +66,19 @@ func ClassifyModelTier(modelID string) Tier {
 		}
 	}
 
-	// 3. Dynamic Parameter-Size Auto-Detection for ANY newly downloaded model:
-	if size, ok := extractParamSizeInBillions(baseName); ok {
-		if size <= 4.0 {
-			// <= 4B parameters (e.g. 0.5B, 1B, 1.5B, 2B, 3B, 3.8B) -> Simple Tier
+	// 2. Universal Simple / Fast capability descriptors:
+	simpleKeywords := []string{
+		"lite", "small", "tiny", "haiku", "flash", "mimo", "spark", "hy3", "preview",
+	}
+	for _, kw := range simpleKeywords {
+		if hasModelSegment(baseName, kw) {
 			return TierSimple
-		} else if size >= 30.0 {
-			// >= 30B parameters (e.g. 32B, 70B, 72B, 110B, 405B) -> Heavy Tier
-			return TierHeavy
-		} else {
-			// 4B to 30B parameters (e.g. 7B, 8B, 9B, 12B, 14B, 27B) -> Standard Tier
-			return TierStandard
 		}
 	}
 
-	// 4. Standard indicators: Balanced coding, debugging, sonnet, general instruct models.
+	// 3. Universal Standard Coding / Instruct descriptors:
 	standardKeywords := []string{
-		"sonnet", "coder", "instruct", "lightning", "standard", "code", "starcoder", "deepseek-coder",
-		"gpt-4", "gpt-3.5", "nemotron-3.5", "3.5", "qwen", "mistral", "gemma", "llama",
+		"coder", "code", "instruct", "sonnet", "standard", "chat", "lightning",
 	}
 	for _, kw := range standardKeywords {
 		if hasModelSegment(baseName, kw) {
@@ -98,7 +86,21 @@ func ClassifyModelTier(modelID string) Tier {
 		}
 	}
 
-	// Default to Standard (balanced coding, debugging, refactoring)
+	// 4. Dynamic Parameter-Size Auto-Detection (0.5B, 1B, 7B, 14B, 32B, 70B, etc.):
+	if size, ok := extractParamSizeInBillions(baseName); ok {
+		if size <= 4.0 {
+			// <= 4B parameters (e.g. 0.5B, 1B, 1.5B, 2B, 3B) -> Simple Tier
+			return TierSimple
+		} else if size >= 30.0 {
+			// >= 30B parameters (e.g. 31B, 32B, 70B, 405B) -> Heavy Tier
+			return TierHeavy
+		} else {
+			// 4B to 30B parameters (e.g. 7B, 8B, 9B, 12B, 14B) -> Standard Tier
+			return TierStandard
+		}
+	}
+
+	// Default to Standard Tier
 	return TierStandard
 }
 
@@ -213,20 +215,24 @@ func filterPreferredPool(candidates []string) []string {
 	return proxyCandidates
 }
 
+func getBaseModelName(model string) string {
+	lower := strings.ToLower(model)
+	if idx := strings.LastIndex(lower, "/"); idx != -1 {
+		return lower[idx+1:]
+	}
+	return lower
+}
+
 func selectBestSimpleModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
 	searchPool := filterPreferredPool(candidates)
 
-	// 1. Prefer smallest tool-capable parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
+	// 1. Prefer smallest parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
 	var bestCandidate string
 	minSize := 999999.0
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "smollm") {
-			continue // smollm does not support tool calling
-		}
 		if size, ok := extractParamSizeInBillions(c); ok {
 			effectiveSize := size
 			if strings.HasPrefix(strings.ToLower(c), "ollama/") {
@@ -243,11 +249,11 @@ func selectBestSimpleModel(candidates []string) string {
 	}
 
 	// 2. Prefer fast lightweight models (mini, nano, mimo, haiku, lite, flash)
-	simpleTags := []string{"mini", "nano", "mimo", "haiku", "lite", "flash", "small", "tiny"}
+	simpleTags := []string{"mini", "nano", "mimo", "haiku", "lite", "flash", "small", "tiny", "spark"}
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
+		base := getBaseModelName(c)
 		for _, tag := range simpleTags {
-			if strings.Contains(lower, tag) {
+			if hasModelSegment(base, tag) {
 				return c
 			}
 		}
@@ -271,9 +277,9 @@ func selectBestStandardModel(candidates []string) string {
 	// 2. Prefer balanced coding / instruct model indicators
 	standardTags := []string{"coder", "code", "sonnet", "flash", "instruct", "lightning", "standard"}
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
+		base := getBaseModelName(c)
 		for _, tag := range standardTags {
-			if strings.Contains(lower, tag) {
+			if hasModelSegment(base, tag) {
 				return c
 			}
 		}
@@ -298,9 +304,9 @@ func selectBestHeavyModel(candidates []string) string {
 	// 1. Prefer frontier reasoning tags (pro, r1, ultra, opus, o1, o3, max, large, reasoning)
 	heavyTags := []string{"pro", "r1", "ultra", "opus", "o1", "o3", "max", "large", "reasoning"}
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
+		base := getBaseModelName(c)
 		for _, tag := range heavyTags {
-			if strings.Contains(lower, tag) {
+			if hasModelSegment(base, tag) {
 				return c
 			}
 		}
