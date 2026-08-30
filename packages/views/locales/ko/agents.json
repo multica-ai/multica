@@ -11,6 +11,24 @@
     "list_load_failed_default": "에이전트 목록을 가져오는 중 문제가 발생했습니다.",
     "try_again": "다시 시도"
   },
+  "operating_mode": {
+    "label": "운영 모드",
+    "hint": "워크플로 의도만 설명합니다. 권한을 부여하거나 도구 사용을 승인하지 않습니다.",
+    "modes": {
+      "coding": {
+        "title": "코딩",
+        "description": "저장소와 소프트웨어 제공 맥락을 바탕으로 작업합니다."
+      },
+      "operational": {
+        "title": "운영",
+        "description": "저장소 브리핑 없이 비즈니스 워크플로에 집중합니다."
+      },
+      "hybrid": {
+        "title": "하이브리드",
+        "description": "비즈니스 워크플로 지침과 저장소 맥락을 함께 사용합니다."
+      }
+    }
+  },
   "scope": {
     "mine": "내 것",
     "all": "전체",

@@ -182,7 +182,18 @@ func buildPromptBody(task Task, provider string) string {
 		return buildQuickCreatePrompt(task)
 	}
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	operatingMode := "coding"
+	if task.Agent != nil {
+		switch task.Agent.OperatingMode {
+		case "operational", "hybrid":
+			operatingMode = task.Agent.OperatingMode
+		}
+	}
+	if operatingMode == "coding" {
+		b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
+	} else {
+		b.WriteString("You are running as a business-task agent for a Multica workspace.\n\n")
+	}
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a

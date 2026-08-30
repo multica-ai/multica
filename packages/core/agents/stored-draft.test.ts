@@ -15,6 +15,7 @@ const draft = (): AgentDraft => ({
   ],
   avatarUrl: "🚀",
   runtimeId: "runtime-1",
+  operatingMode: "operational",
   model: "gpt-5.6-sol",
   thinkingLevel: "high",
   serviceTier: "priority",
@@ -43,6 +44,17 @@ describe("stored agent draft", () => {
     expect(fromStoredAgentDraft(stored, "runtime-2").runtimeId).toBe(
       "runtime-2",
     );
+  });
+
+  it("defaults an unfinished legacy draft without a mode to coding", () => {
+    const stored = toStoredAgentDraft(draft(), null);
+    const { operating_mode: _operatingMode, ...legacyStored } = stored;
+    expect(
+      fromStoredAgentDraft(
+        legacyStored as typeof stored,
+        "runtime-1",
+      ).operatingMode,
+    ).toBe("coding");
   });
 
   // The marker is what stops a restore from re-applying the last reply over

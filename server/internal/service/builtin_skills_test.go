@@ -125,6 +125,41 @@ func TestBuiltinSkillsFrontmatterIsStrictYAML(t *testing.T) {
 	}
 }
 
+func TestOperationalWorkflowSkillContract(t *testing.T) {
+	skill, ok := findSkill(t, "multica-operational-workflow")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+		t.Errorf("user-invocable = %q, want false", got)
+	}
+	if got := strings.TrimSpace(fm["allowed-tools"]); got != "Bash(multica *)" {
+		t.Errorf("allowed-tools = %q, want Bash(multica *)", got)
+	}
+
+	for _, want := range []string{
+		"workflow intent only",
+		"does not grant authorization",
+		"multica issue get <issue-id> --output json",
+		"multica issue comment list <issue-id>",
+		"approved MCP business tools",
+		"not raw external APIs",
+		"Post a concise result comment",
+		"Move the issue to done only when evidence",
+		"Do not write or modify code unless the issue explicitly asks",
+		"references/operational-workflow-source-map.md",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("operational workflow skill missing %q", want)
+		}
+	}
+	if !skillHasFile(skill, "references/operational-workflow-source-map.md") {
+		t.Error("operational workflow skill is missing its source map")
+	}
+}
+
 // TestMentioningSkillFollowsContractFrontmatter locks the reference template:
 // the mentioning skill is a context-triggered platform-contract skill, so it
 // must declare user-invocable:false and fence itself to the multica CLI. New

@@ -28,6 +28,7 @@ import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
+import { OperatingModePicker } from "../components/operating-mode-picker";
 
 const PERMISSION_SCOPES: AgentPermissionScope[] = [
   "private",
@@ -98,6 +99,12 @@ export function AgentConfigurationPanel({
         description={t(($) => $.creation_studio.sections.identity_hint)}
       >
         <SettingsCard>
+          <div className="px-4 py-4">
+            <OperatingModePicker
+              value={draft.operatingMode}
+              onChange={(value) => set("operatingMode", value)}
+            />
+          </div>
           <DraftFieldRow
             compact={compact}
             label={t(($) => $.create_dialog.avatar.change_aria)}

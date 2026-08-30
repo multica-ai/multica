@@ -23,3 +23,29 @@ func defaultAndValidateAgentMaxConcurrentTasks(rawFields map[string]json.RawMess
 	}
 	return validateAgentMaxConcurrentTasks(*value)
 }
+
+const defaultAgentOperatingMode = "coding"
+
+func validateAgentOperatingMode(value string) error {
+	switch value {
+	case "coding", "operational", "hybrid":
+		return nil
+	default:
+		return fmt.Errorf("operating_mode must be one of coding, operational, hybrid")
+	}
+}
+
+func defaultAndValidateAgentOperatingMode(rawFields map[string]json.RawMessage, value *string) error {
+	if _, provided := rawFields["operating_mode"]; !provided {
+		*value = defaultAgentOperatingMode
+		return nil
+	}
+	return validateAgentOperatingMode(*value)
+}
+
+func normaliseStoredAgentOperatingMode(value string) string {
+	if validateAgentOperatingMode(value) != nil {
+		return defaultAgentOperatingMode
+	}
+	return value
+}

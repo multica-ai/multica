@@ -78,6 +78,7 @@ type AgentResponse struct {
 	SystemInstructions string          `json:"system_instructions,omitempty"`
 	AvatarURL          *string         `json:"avatar_url"`
 	RuntimeMode        string          `json:"runtime_mode"`
+	OperatingMode      string          `json:"operating_mode"`
 	RuntimeConfig      any             `json:"runtime_config"`
 	CustomArgs         []string        `json:"custom_args"`
 	McpConfig          json.RawMessage `json:"mcp_config"`
@@ -211,6 +212,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:              a.RuntimeMode,
+		OperatingMode:            normaliseStoredAgentOperatingMode(a.OperatingMode),
 		RuntimeConfig:            rc,
 		CustomArgs:               customArgs,
 		McpConfig:                mcpConfig,
@@ -728,6 +730,7 @@ type TaskAgentData struct {
 	ID                    string                      `json:"id"`
 	Name                  string                      `json:"name"`
 	Instructions          string                      `json:"instructions"`
+	OperatingMode         string                      `json:"operating_mode"`
 	Skills                []service.AgentSkillData    `json:"skills,omitempty"`
 	SkillRefs             []service.AgentSkillRefData `json:"skill_refs,omitempty"`
 	CustomEnv             map[string]string           `json:"custom_env,omitempty"`
@@ -1143,6 +1146,7 @@ type CreateAgentRequest struct {
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
 	AvatarURL            *string                    `json:"avatar_url"`
 	RuntimeID            string                     `json:"runtime_id"`
+	OperatingMode        string                     `json:"operating_mode"`
 	RuntimeConfig        any                        `json:"runtime_config"`
 	CustomEnv            map[string]string          `json:"custom_env"`
 	CustomArgs           []string                   `json:"custom_args"`
@@ -1258,6 +1262,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		req.Visibility = "private"
 	}
 	if err := defaultAndValidateAgentMaxConcurrentTasks(rawFields, &req.MaxConcurrentTasks); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := defaultAndValidateAgentOperatingMode(rawFields, &req.OperatingMode); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1408,6 +1416,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Instructions:             req.Instructions,
 		AvatarUrl:                avatarURL,
 		RuntimeMode:              runtime.RuntimeMode,
+		OperatingMode:            pgtype.Text{String: req.OperatingMode, Valid: true},
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,
 		Visibility:               perm.legacyVisibility(),
@@ -1493,6 +1502,7 @@ type UpdateAgentRequest struct {
 	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
 	AvatarURL            *string                     `json:"avatar_url"`
 	RuntimeID            *string                     `json:"runtime_id"`
+	OperatingMode        *string                     `json:"operating_mode"`
 	RuntimeConfig        any                         `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
@@ -1744,6 +1754,17 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	params := db.UpdateAgentParams{
 		ID: existing.ID,
+	}
+	if _, provided := rawFields["operating_mode"]; provided {
+		if req.OperatingMode == nil {
+			writeError(w, http.StatusBadRequest, "operating_mode must be one of coding, operational, hybrid")
+			return
+		}
+		if err := validateAgentOperatingMode(*req.OperatingMode); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.OperatingMode = pgtype.Text{String: *req.OperatingMode, Valid: true}
 	}
 	if req.Name != nil {
 		params.Name = pgtype.Text{String: *req.Name, Valid: true}

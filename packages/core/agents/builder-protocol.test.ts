@@ -16,6 +16,7 @@ const draft = (): AgentDraft => ({
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
+  operatingMode: "operational",
   model: "model-1",
   thinkingLevel: "",
   serviceTier: "",
@@ -106,6 +107,7 @@ Return findings."}</agent_draft>`;
         { id: "gpt-5.5", label: "GPT-5.5", provider: "openai" },
       ],
       current_draft: {
+        operating_mode: "operational",
         conversation_starters: [
           { label: "Plan a release", prompt: "Plan the next release." },
         ],
@@ -171,6 +173,29 @@ Return findings."}</agent_draft>`;
     expect([...result.skillIds]).toEqual(["skill-2"]);
     expect(result.permissionScope).toBe("members");
     expect([...result.memberIds]).toEqual(["member-1"]);
+  });
+
+  it("accepts supported modes and preserves the current mode for invalid values", () => {
+    for (const operatingMode of ["coding", "operational", "hybrid"] as const) {
+      expect(
+        mergeBuilderDraft(
+          draft(),
+          { operating_mode: operatingMode },
+          new Set(),
+          new Set(),
+          new Set(["model-1"]),
+        ).operatingMode,
+      ).toBe(operatingMode);
+    }
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { operating_mode: "admin" },
+        new Set(),
+        new Set(),
+        new Set(["model-1"]),
+      ).operatingMode,
+    ).toBe("operational");
   });
 
   it("accepts catalog models and rejects invented or cross-runtime models", () => {

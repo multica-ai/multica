@@ -39,8 +39,12 @@ import (
 // below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
-func writeHeader(b *strings.Builder) {
+func writeHeader(b *strings.Builder, operatingMode string) {
 	b.WriteString("# Multica Agent Runtime\n\n")
+	if operatingMode == "operational" || operatingMode == "hybrid" {
+		b.WriteString("You are a business-task agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
+		return
+	}
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 }
 
@@ -913,7 +917,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	// rendered here. They are per-run values, so emitting them into this file
 	// broke prompt-cache prefix stability on every resume; they now travel in
 	// the per-turn user message (daemon.BuildPrompt) instead. See MUL-5377.
-	writeHeader(&b)
+	writeHeader(&b, ctx.AgentOperatingMode)
 	writeBackgroundTaskSafetySlim(&b)
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
@@ -931,7 +935,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeCommentFormatting(&b)
 	}
 
-	if kind != kindQuickCreate {
+	if kind != kindQuickCreate && ctx.AgentOperatingMode != "operational" {
 		writeRepositories(&b, ctx)
 	}
 

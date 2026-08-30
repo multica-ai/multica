@@ -37,6 +37,7 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
+import { OperatingModePicker } from "./operating-mode-picker";
 
 interface InspectorProps {
   agent: Agent;
@@ -167,6 +168,15 @@ export function AgentDetailInspector({
         }
       >
         <SettingsCard>
+          <div className="px-4 py-4">
+            <OperatingModePicker
+              value={agent.operating_mode ?? "coding"}
+              disabled={!canEdit}
+              onChange={(operatingMode) =>
+                update({ operating_mode: operatingMode })
+              }
+            />
+          </div>
           <SettingsRow
             label={t(($) => $.inspector.avatar_label)}
             description={t(($) => $.inspector.avatar_hint)}

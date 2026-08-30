@@ -18,6 +18,7 @@ const draft = (): AgentDraft => ({
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
+  operatingMode: "operational",
   model: "model-1",
   thinkingLevel: "",
   serviceTier: "",
@@ -53,6 +54,7 @@ const sourceAgent = (overrides: Partial<Agent> = {}): Agent =>
     instructions: "Be quick",
     avatar_url: null,
     runtime_mode: "managed",
+    operating_mode: "hybrid",
     runtime_config: {},
     custom_args: ["--verbose"],
     visibility: "private",
@@ -100,6 +102,37 @@ describe("duplicate access", () => {
         invocation_targets: [{ target_type: "workspace", target_id: null }],
       }).permissionScope,
     ).toBe("workspace");
+  });
+});
+
+describe("agent operating mode", () => {
+  it("includes the selected mode in the create request", () => {
+    expect(
+      buildCreateAgentRequest({ draft: draft(), runtimeId: "runtime-1" }),
+    ).toMatchObject({ operating_mode: "operational" });
+  });
+
+  it("preserves the source mode when duplicating", () => {
+    const duplicate = buildDuplicateDraft(sourceAgent(), {
+      runtimes: [CODEX_RUNTIME],
+      currentUserId: "user-1",
+      fallbackRuntimeId: "runtime-1",
+      nameSuffix: " copy",
+    });
+    expect(duplicate.operatingMode).toBe("hybrid");
+  });
+
+  it("defaults a legacy source without a mode to coding", () => {
+    const duplicate = buildDuplicateDraft(
+      sourceAgent({ operating_mode: undefined }),
+      {
+        runtimes: [CODEX_RUNTIME],
+        currentUserId: "user-1",
+        fallbackRuntimeId: "runtime-1",
+        nameSuffix: " copy",
+      },
+    );
+    expect(duplicate.operatingMode).toBe("coding");
   });
 });
 

@@ -4,6 +4,8 @@ export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
 export type AgentRuntimeMode = "local" | "cloud";
 
+export type AgentOperatingMode = "coding" | "operational" | "hybrid";
+
 export type AgentVisibility = "workspace" | "private";
 
 // ---------------------------------------------------------------------------
@@ -507,6 +509,8 @@ export interface Agent {
   system_instructions?: string;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
+  /** Product workflow intent only. Missing values from older servers mean coding. */
+  operating_mode?: AgentOperatingMode;
   runtime_config: Record<string, unknown>;
   custom_args: string[];
   /**
@@ -656,6 +660,7 @@ export interface CreateAgentRequest {
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id: string;
+  operating_mode?: AgentOperatingMode;
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
@@ -708,6 +713,7 @@ export interface StoredAgentDraft {
   instructions: string;
   conversation_starters: AgentConversationStarter[];
   avatar_url: string | null;
+  operating_mode: AgentOperatingMode;
   model: string;
   thinking_level: string;
   service_tier: string;
@@ -752,6 +758,7 @@ export interface UpdateAgentRequest {
   conversation_starters?: AgentConversationStarter[];
   avatar_url?: string;
   runtime_id?: string;
+  operating_mode?: AgentOperatingMode;
   runtime_config?: Record<string, unknown>;
   /**
    * NOTE: `custom_env` is intentionally NOT updatable through this

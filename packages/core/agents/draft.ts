@@ -2,6 +2,7 @@ import { isRuntimeUsableForUser } from "../runtimes/access";
 import type {
   Agent,
   AgentInvocationTargetInput,
+  AgentOperatingMode,
   AgentPermissionScope,
   AgentConversationStarter,
   CreateAgentRequest,
@@ -29,6 +30,7 @@ export interface AgentDraft {
   conversationStarters: AgentConversationStarter[];
   avatarUrl: string | null;
   runtimeId: string;
+  operatingMode: AgentOperatingMode;
   model: string;
   /** Runtime-native reasoning/effort token, scoped to `model`. */
   thinkingLevel: string;
@@ -48,6 +50,7 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "",
+  operatingMode: "coding",
   model: "",
   thinkingLevel: "",
   serviceTier: "",
@@ -194,6 +197,10 @@ export function buildDuplicateDraft(
     runtimeId: keepsRuntime
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
+    operatingMode:
+      source.operating_mode === "operational" || source.operating_mode === "hybrid"
+        ? source.operating_mode
+        : "coding",
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
@@ -230,6 +237,7 @@ export function buildCreateAgentRequest(options: {
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
+    operating_mode: draft.operatingMode,
     model: draft.model.trim() || undefined,
     thinking_level: draft.thinkingLevel.trim() || undefined,
     service_tier: draft.serviceTier.trim() || undefined,

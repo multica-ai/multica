@@ -2181,6 +2181,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		ID:                    uuidToString(agent.ID),
 		Name:                  agent.Name,
 		Instructions:          agent.Instructions,
+		OperatingMode:         normaliseStoredAgentOperatingMode(agent.OperatingMode),
 		CustomEnv:             customEnv,
 		CustomArgs:            customArgs,
 		McpConfig:             mcpConfig,
@@ -2204,12 +2205,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 	if useSkillRefs {
 		_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+		skillRefs = filterOperationalWorkflowSkillRefs(skillRefs, agent.OperatingMode)
 		agentSkillCount = len(skillRefs)
 		resp.Agent.SkillRefs = skillRefs
 	} else {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		agentSkillCount = len(skills)
 		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkills = filterOperationalWorkflowSkillData(builtinSkills, agent.OperatingMode)
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		resp.Agent.Skills = skills

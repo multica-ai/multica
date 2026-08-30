@@ -11,6 +11,24 @@
     "list_load_failed_default": "Something went wrong fetching the agent list.",
     "try_again": "Try again"
   },
+  "operating_mode": {
+    "label": "Operating mode",
+    "hint": "Workflow intent only. This does not grant permissions or approve tool use.",
+    "modes": {
+      "coding": {
+        "title": "Coding",
+        "description": "Work with repositories and software delivery context."
+      },
+      "operational": {
+        "title": "Operational",
+        "description": "Focus on business workflows without repository briefings."
+      },
+      "hybrid": {
+        "title": "Hybrid",
+        "description": "Combine business workflow guidance with repository context."
+      }
+    }
+  },
   "scope": {
     "mine": "Mine",
     "all": "All",

@@ -1979,6 +1979,7 @@ export const StoredAgentDraftSchema = z.object({
     )
     .catch([]),
   avatar_url: z.string().nullable().catch(null),
+  operating_mode: z.enum(["coding", "operational", "hybrid"]).catch("coding"),
   model: z.string().catch(""),
   thinking_level: z.string().catch(""),
   service_tier: z.string().catch(""),

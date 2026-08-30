@@ -28,6 +28,7 @@ export interface BuilderDraftPayload {
   description?: unknown;
   instructions?: unknown;
   conversation_starters?: unknown;
+  operating_mode?: unknown;
   model?: unknown;
   skill_ids?: unknown;
   permission_scope?: unknown;
@@ -137,6 +138,7 @@ export function encodeBuilderInput(
           description: draft.description,
           instructions: draft.instructions,
           conversation_starters: draft.conversationStarters,
+          operating_mode: draft.operatingMode,
           model: draft.model,
           skill_ids: [...draft.skillIds],
           permission_scope: draft.permissionScope,
@@ -229,6 +231,12 @@ export function mergeBuilderDraft(
     payload.permission_scope === "private"
       ? payload.permission_scope
       : current.permissionScope;
+  const operatingMode =
+    payload.operating_mode === "coding" ||
+    payload.operating_mode === "operational" ||
+    payload.operating_mode === "hybrid"
+      ? payload.operating_mode
+      : current.operatingMode;
   const skillIds = Array.isArray(payload.skill_ids)
     ? payload.skill_ids.filter(
         (id): id is string => typeof id === "string" && validSkillIds.has(id),
@@ -285,6 +293,7 @@ export function mergeBuilderDraft(
         ? payload.instructions
         : current.instructions,
     conversationStarters,
+    operatingMode,
     model,
     // The builder can move the model, which invalidates whatever thinking /
     // speed the user picked for the previous one. It never sets these two

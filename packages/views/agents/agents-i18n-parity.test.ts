@@ -10,6 +10,23 @@ import { availabilityConfig, workloadConfig } from "./presence";
 
 const LOCALES = { en, "zh-Hans": zhHans, ja, ko } as const;
 
+describe("operating mode i18n parity across all 4 locales", () => {
+  it("ships the complete localized mode surface", () => {
+    const modeKeys = ["coding", "operational", "hybrid"] as const;
+    for (const [name, locale] of Object.entries(LOCALES)) {
+      expect(locale.operating_mode.label.length, `${name}: label empty`).toBeGreaterThan(0);
+      expect(locale.operating_mode.hint.length, `${name}: hint empty`).toBeGreaterThan(0);
+      expect(Object.keys(locale.operating_mode.modes).toSorted()).toEqual(
+        [...modeKeys].toSorted(),
+      );
+      for (const key of modeKeys) {
+        expect(locale.operating_mode.modes[key].title.length).toBeGreaterThan(0);
+        expect(locale.operating_mode.modes[key].description.length).toBeGreaterThan(0);
+      }
+    }
+  });
+});
+
 describe("task failure reason i18n parity across all 4 locales", () => {
   const expectedKeys = Object.values(FAILURE_REASON_I18N_KEYS).toSorted();
 

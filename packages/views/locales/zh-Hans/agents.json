@@ -11,6 +11,24 @@
     "list_load_failed_default": "获取智能体列表时出错。",
     "try_again": "重试"
   },
+  "operating_mode": {
+    "label": "工作模式",
+    "hint": "仅描述工作流意图，不授予权限，也不批准工具使用。",
+    "modes": {
+      "coding": {
+        "title": "编码",
+        "description": "使用代码仓库与软件交付上下文开展工作。"
+      },
+      "operational": {
+        "title": "运营",
+        "description": "专注业务工作流，不提供代码仓库简报。"
+      },
+      "hybrid": {
+        "title": "混合",
+        "description": "结合业务工作流指导与代码仓库上下文。"
+      }
+    }
+  },
   "scope": {
     "mine": "我的",
     "all": "全部",

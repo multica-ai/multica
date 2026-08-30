@@ -74,6 +74,7 @@ const baseDraft: AgentDraft = {
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "runtime-1",
+  operatingMode: "coding",
   model: "gpt-5.6-sol",
   thinkingLevel: "",
   serviceTier: "",

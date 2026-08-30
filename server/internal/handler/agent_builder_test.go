@@ -29,6 +29,22 @@ func TestAgentBuilderInstructionsConstrainModelsToRuntimeCatalog(t *testing.T) {
 	}
 }
 
+func TestAgentBuilderInstructionsConstrainOperatingMode(t *testing.T) {
+	if !strings.Contains(agentBuilderInstructions, agentBuilderOperatingModeRule) {
+		t.Fatal("agent builder instructions are missing the operating mode rule")
+	}
+	for _, requirement := range []string{
+		`"operating_mode":"coding"`,
+		"operating_mode must be coding, operational, or hybrid",
+		"workflow intent only",
+		"does not grant authorization",
+	} {
+		if !strings.Contains(agentBuilderInstructions, requirement) {
+			t.Fatalf("agent builder instructions missing operating mode constraint %q", requirement)
+		}
+	}
+}
+
 func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

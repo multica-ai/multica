@@ -11,6 +11,7 @@ export type {
   AgentConversationStarter,
   AgentStatus,
   AgentRuntimeMode,
+  AgentOperatingMode,
   AgentVisibility,
   AgentPermissionMode,
   AgentInvocationTarget,
