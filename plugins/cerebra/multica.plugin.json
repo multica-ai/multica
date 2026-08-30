@@ -1,9 +1,9 @@
 {
   "manifest_version": 1,
   "key": "com.multica.cerebra",
-  "name": "Cerebra — Intelligent Model Router",
+  "name": "cerebra- v1.0.0",
   "description": "Zero-config intelligent model routing for all agents. Automatically routes each task to the optimal model tier (simple/standard/heavy) based on prompt complexity and your connected providers. Works with any runtime: OpenCode, OpenClaw, Claude, Kimi, Grok, Ollama, or any custom provider.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": {
     "name": "Multica Community",
     "url": "https://github.com/multica-ai/multica"

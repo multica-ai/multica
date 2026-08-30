@@ -278,11 +278,14 @@ func runPluginList(cmd *cobra.Command, _ []string) error {
 		m, _ := p.(map[string]any)
 		id, _ := m["id"].(string)
 		enabled, _ := m["enabled"].(bool)
-		manifest, _ := m["manifest"].(map[string]any)
-		name, version := "", ""
-		if manifest != nil {
-			name, _ = manifest["name"].(string)
-			version, _ = manifest["version"].(string)
+		name, _ := m["name"].(string)
+		version, _ := m["version"].(string)
+		if name == "" {
+			manifest, _ := m["manifest"].(map[string]any)
+			if manifest != nil {
+				name, _ = manifest["name"].(string)
+				version, _ = manifest["version"].(string)
+			}
 		}
 		status := "no"
 		if enabled {
@@ -358,6 +361,16 @@ func resolvePluginDir() string {
 		return d
 	}
 	cwd, _ := os.Getwd()
+	candidates := []string{
+		filepath.Join(cwd, "plugins"),
+		filepath.Join(cwd, "..", "plugins"),
+		filepath.Join(cwd, "..", "..", "plugins"),
+	}
+	for _, c := range candidates {
+		if info, err := os.Stat(c); err == nil && info.IsDir() {
+			return c
+		}
+	}
 	return filepath.Join(cwd, "plugins")
 }
 
