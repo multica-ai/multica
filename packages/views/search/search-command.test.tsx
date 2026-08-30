@@ -27,6 +27,11 @@ const TEST_RESOURCES = {
   },
 };
 
+// Deliberately NOT a full zh-Hans bundle: only `projects` is translated, and
+// every other namespace stays on its English bundle under the zh-Hans key.
+// The one thing under test is whether a project row names its status through
+// the projects namespace, and keeping the chrome in English lets these tests
+// go on addressing the palette by its English placeholder and group headings.
 const ZH_TEST_RESOURCES = {
   "zh-Hans": {
     common: enCommon,

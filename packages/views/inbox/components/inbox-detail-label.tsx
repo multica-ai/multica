@@ -1,6 +1,5 @@
 "use client";
 
-import { PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -9,6 +8,7 @@ import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@mult
 import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useT } from "../../i18n";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { priorityLabel } from "../../issues/utils/priority-label";
 
 // Hook returning the inbox-item type → human label map. Replaces the
 // previous static `typeLabels` const so the labels can flow through
@@ -73,11 +73,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "priority_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const priority = details.to as IssuePriority;
-      const label =
-        priority in PRIORITY_CONFIG
-          ? tIssues(($) => $.priority[priority])
-          : details.to;
+      const label = priorityLabel(details.to, tIssues);
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_priority_to)}

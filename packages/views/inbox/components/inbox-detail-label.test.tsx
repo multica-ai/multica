@@ -27,6 +27,13 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
     isLoaded: true,
   }),
 }));
+// Scope note: stubbing the resolver keeps this suite about the ONE thing this
+// component owns — which resolver it asks. The catalog stub above still hands
+// back the English seed name for `in_progress`, so a component that went back
+// to reading `entryOf(...).name` renders "In Progress" and fails here. What
+// the real `useStatusLabel` does with a key (built-in through i18n, custom
+// through the catalog) is its own contract, covered by `run-confirm.test.tsx`
+// and `issues/utils/status-options.test.tsx`.
 vi.mock("../../issues/utils/status-label", () => ({
   useStatusLabel: () => (key: string) =>
     key === "in_progress" ? "进行中" : key,
