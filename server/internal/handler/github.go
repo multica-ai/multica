@@ -98,6 +98,11 @@ type GitHubPullRequestResponse struct {
 	// "dirty" | "blocked" | "behind" | "unstable" | "draft" | "has_hooks" |
 	// "unknown" | null. "Ready to merge" is derived ONLY from "clean".
 	MergeStateStatus *string `json:"merge_state_status"`
+	// MergeQueueState is the PR's merge-queue entry state, lowercased:
+	// "queued" | "awaiting_checks" | "mergeable" | "unmergeable" | "locked" |
+	// null. Non-null means the PR is sitting in the repository's merge queue —
+	// a fact no other field carries, since a queued PR is still an open PR.
+	MergeQueueState *string `json:"merge_queue_state"`
 	// SnapshotAvailable distinguishes a current API snapshot from both
 	// "feature disabled / not fetched yet" and "a current snapshot whose
 	// statusCheckRollup is null". Only the last case may render "no checks".
@@ -265,6 +270,7 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow, snapshotEnab
 	if snapshotAvailable {
 		resp.Mergeable = lowerTextPtr(p.ApiMergeable)
 		resp.MergeStateStatus = lowerTextPtr(p.ApiMergeStateStatus)
+		resp.MergeQueueState = lowerTextPtr(p.ApiMergeQueueState)
 		resp.ChecksRollup = lowerTextPtr(p.ChecksRollupState)
 		resp.ChecksConclusion = rollupToConclusion(p.ChecksRollupState, p.ChecksFailed, p.ChecksRunning, p.ChecksPassed)
 		resp.ChecksTotal = p.ChecksTotal

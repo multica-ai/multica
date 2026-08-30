@@ -25,6 +25,7 @@ WHERE installation_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number 
 UPDATE github_pull_request
 SET api_mergeable          = sqlc.narg('api_mergeable'),
     api_merge_state_status = sqlc.narg('api_merge_state_status'),
+    api_merge_queue_state  = sqlc.narg('api_merge_queue_state'),
     checks_rollup_state    = sqlc.narg('checks_rollup_state'),
     snapshot_head_sha      = sqlc.arg('head_sha'),
     snapshot_fetched_at    = sqlc.arg('fetched_at'),

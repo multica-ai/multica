@@ -14,6 +14,10 @@ import (
 //     conflict" only;
 //   - mergeStateStatus: CLEAN / DIRTY / BLOCKED / BEHIND / UNSTABLE / ... —
 //     "Ready to merge" is derived ONLY from CLEAN;
+//   - isInMergeQueue / mergeQueueEntry.state: whether the PR is sitting in the
+//     repository's merge queue and what that entry is doing. A queued PR is
+//     still an open PR with an unremarkable mergeStateStatus, so without this
+//     the UI cannot tell "waiting its turn to merge" from "nobody has acted";
 //   - statusCheckRollup: the overall CI verdict plus every check/status context.
 //
 // $cursor paginates statusCheckRollup.contexts; the caller loops until
@@ -24,6 +28,8 @@ const prSnapshotQuery = `query($owner:String!,$repo:String!,$number:Int!,$cursor
       headRefOid
       mergeable
       mergeStateStatus
+      isInMergeQueue
+      mergeQueueEntry{state}
       commits(last:1){nodes{commit{
         statusCheckRollup{
           state
@@ -63,6 +69,11 @@ type PRSnapshot struct {
 	HeadSHA          string
 	Mergeable        string // MERGEABLE / CONFLICTING / UNKNOWN (raw enum)
 	MergeStateStatus string // CLEAN / DIRTY / BLOCKED / BEHIND / UNSTABLE / ... (raw enum)
+	// MergeQueueState is the PR's merge-queue entry state: QUEUED /
+	// AWAITING_CHECKS / MERGEABLE / UNMERGEABLE / LOCKED (raw enum). Empty when
+	// the PR is not in a merge queue, which is also the case for every
+	// repository that has no merge queue configured.
+	MergeQueueState string
 	// RollupState is statusCheckRollup.state (SUCCESS/FAILURE/PENDING/ERROR/
 	// EXPECTED). Empty ONLY when HasChecks is false.
 	RollupState string
@@ -109,13 +120,31 @@ type graphqlPullRequest struct {
 	HeadRefOid       string `json:"headRefOid"`
 	Mergeable        string `json:"mergeable"`
 	MergeStateStatus string `json:"mergeStateStatus"`
-	Commits          struct {
+	IsInMergeQueue   bool   `json:"isInMergeQueue"`
+	MergeQueueEntry  *struct {
+		State string `json:"state"`
+	} `json:"mergeQueueEntry"`
+	Commits struct {
 		Nodes []struct {
 			Commit struct {
 				StatusCheckRollup *graphqlRollup `json:"statusCheckRollup"`
 			} `json:"commit"`
 		} `json:"nodes"`
 	} `json:"commits"`
+}
+
+// mergeQueueState normalizes the two merge-queue fields into one value.
+// mergeQueueEntry is the richer signal, but GitHub can report isInMergeQueue
+// while the entry itself is momentarily unreadable (it is nullable), so fall
+// back to the plain QUEUED state rather than losing the fact entirely.
+func (pr *graphqlPullRequest) mergeQueueState() string {
+	if pr.MergeQueueEntry != nil && pr.MergeQueueEntry.State != "" {
+		return pr.MergeQueueEntry.State
+	}
+	if pr.IsInMergeQueue {
+		return "QUEUED"
+	}
+	return ""
 }
 
 func (pr *graphqlPullRequest) rollup() *graphqlRollup {
@@ -167,6 +196,7 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 			snap.HeadSHA = pr.HeadRefOid
 			snap.Mergeable = pr.Mergeable
 			snap.MergeStateStatus = pr.MergeStateStatus
+			snap.MergeQueueState = pr.mergeQueueState()
 		} else if pr.HeadRefOid != snap.HeadSHA {
 			// Every page re-reads the PR's latest commit. If a synchronize
 			// event advances the head while pagination is in progress, mixing
