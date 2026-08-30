@@ -360,6 +360,8 @@
     "pull_request_checks_failed_named": "{{failed}}/{{total}} 실패 · {{names}}",
     "pull_request_checks_more": "+{{count}}개",
     "pull_request_merge_conflicting": "병합 충돌 있음",
+    "pull_request_merge_queued": "병합 대기열에 있음",
+    "pull_request_merge_queued_unmergeable": "병합 대기열에서 차단됨",
     "pull_request_merge_ready": "병합 가능",
     "pull_request_merge_blocked": "차단됨",
     "pull_request_merge_behind": "기준 브랜치보다 뒤처짐",

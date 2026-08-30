@@ -12,6 +12,7 @@ import {
   GitPullRequestArrow,
   GitPullRequestClosed,
   GitPullRequestDraft,
+  ListOrdered,
   TriangleAlert,
   XCircle,
 } from "lucide-react";
@@ -278,6 +279,18 @@ function getMergeBadge(status: PullRequestMergeStatus, t: IssuesT): PullRequestB
         icon: TriangleAlert,
         className: "text-amber-600 dark:text-amber-400",
         label: t(($) => $.detail.pull_request_merge_conflicting),
+      };
+    case "queued":
+      return {
+        icon: ListOrdered,
+        className: "text-blue-600 dark:text-blue-400",
+        label: t(($) => $.detail.pull_request_merge_queued),
+      };
+    case "queued_unmergeable":
+      return {
+        icon: TriangleAlert,
+        className: "text-amber-600 dark:text-amber-400",
+        label: t(($) => $.detail.pull_request_merge_queued_unmergeable),
       };
     case "ready":
       return {

@@ -192,6 +192,7 @@ export type {
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestChecksRollup,
   GitHubPullRequestMergeable,
+  GitHubPullRequestMergeQueueState,
   GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,

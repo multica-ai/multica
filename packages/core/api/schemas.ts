@@ -409,6 +409,7 @@ export const GitHubPullRequestSchema = z.object({
   pr_updated_at: z.string(),
   mergeable: z.string().nullable().optional(),
   merge_state_status: z.string().nullable().optional(),
+  merge_queue_state: z.string().nullable().optional(),
   snapshot_available: z.boolean().optional(),
   checks_rollup: z.string().nullable().optional(),
   checks_conclusion: z.string().nullable().optional(),

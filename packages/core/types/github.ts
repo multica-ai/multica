@@ -31,6 +31,17 @@ export type GitHubPullRequestMergeStateStatus =
   | "has_hooks"
   | "unknown";
 
+/** GitHub's `mergeQueueEntry.state`. Present only while the PR sits in a
+ * repository merge queue; a queued PR is otherwise indistinguishable from any
+ * other open PR, because `mergeStateStatus` describes the branch, not the
+ * queue (it usually reads `blocked` for a queued PR). */
+export type GitHubPullRequestMergeQueueState =
+  | "queued"
+  | "awaiting_checks"
+  | "mergeable"
+  | "unmergeable"
+  | "locked";
+
 /** GitHub's overall CI rollup verdict (`statusCheckRollup.state`). `null`/absent
  * means NO checks have been reported yet — it must never render as passed. */
 export type GitHubPullRequestChecksRollup =
@@ -81,6 +92,9 @@ export interface GitHubPullRequest {
   /** GitHub's `mergeStateStatus` from the snapshot. Source of the "Ready to
    * merge" claim (only when `clean`); older backends omit it. */
   merge_state_status?: GitHubPullRequestMergeStateStatus | null;
+  /** The PR's merge-queue entry state from the snapshot. Non-null means the PR
+   * is waiting in the repository's merge queue; older backends omit it. */
+  merge_queue_state?: GitHubPullRequestMergeQueueState | null;
   /** GitHub's overall CI rollup verdict from the snapshot. `null` means no
    * checks only when `snapshot_available === true`; absence alone is not a
    * positive or "no checks" verdict. */

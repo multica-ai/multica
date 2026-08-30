@@ -153,6 +153,49 @@ describe("deriveMergeStatus", () => {
       deriveMergeStatus({ mergeable: "conflicting", merge_state_status: "blocked" }).kind,
     ).toBe("conflicting");
   });
+
+  it("reports merge-queue membership for every mergeable entry state", () => {
+    expect(deriveMergeStatus({ merge_queue_state: "queued" }).kind).toBe("queued");
+    expect(deriveMergeStatus({ merge_queue_state: "awaiting_checks" }).kind).toBe("queued");
+    expect(deriveMergeStatus({ merge_queue_state: "mergeable" }).kind).toBe("queued");
+    expect(deriveMergeStatus({ merge_queue_state: "locked" }).kind).toBe("queued");
+  });
+
+  it("separates a queue entry GitHub cannot merge", () => {
+    expect(deriveMergeStatus({ merge_queue_state: "unmergeable" }).kind).toBe(
+      "queued_unmergeable",
+    );
+  });
+
+  it("queued wins over the merge state a queued PR actually reports", () => {
+    // GitHub reports a queued PR as `blocked` — branch protection routes the
+    // merge through the queue. Reading that literally hides the queue entirely.
+    expect(
+      deriveMergeStatus({ merge_state_status: "blocked", merge_queue_state: "queued" }).kind,
+    ).toBe("queued");
+    expect(
+      deriveMergeStatus({ merge_state_status: "clean", merge_queue_state: "queued" }).kind,
+    ).toBe("queued");
+  });
+
+  it("conflict still wins over a queue entry", () => {
+    expect(deriveMergeStatus({ mergeable: "conflicting", merge_queue_state: "queued" }).kind).toBe(
+      "conflicting",
+    );
+  });
+
+  it("ignores the queue when the API snapshot feature is unavailable", () => {
+    expect(
+      deriveMergeStatus({ snapshot_available: false, merge_queue_state: "queued" }).kind,
+    ).toBe("none");
+  });
+
+  it("treats an absent merge_queue_state as not queued (older backend)", () => {
+    expect(deriveMergeStatus({ merge_state_status: "clean" }).kind).toBe("ready");
+    expect(deriveMergeStatus({ merge_state_status: "clean", merge_queue_state: null }).kind).toBe(
+      "ready",
+    );
+  });
 });
 
 describe("shouldShowPullRequestStats", () => {
