@@ -58,6 +58,8 @@ interface ExecutionLogSectionProps {
   issueId: string;
   /** Shown in the usage dialog's subtitle so the panel names what it totals. */
   identifier?: string;
+  /** Keep the historical rows in the header chip when the panel is compact. */
+  showPast?: boolean;
 }
 
 // Past-runs sort priority: newest first by timestamp. When two runs
@@ -69,7 +71,39 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSectionProps) {
+export function isActiveTask(task: AgentTask): boolean {
+  return (
+    task.status === "queued" ||
+    task.status === "dispatched" ||
+    task.status === "waiting_local_directory" ||
+    task.status === "running"
+  );
+}
+
+export function sortPastTasks(tasks: AgentTask[]): AgentTask[] {
+  const past = tasks.filter(
+    (task) =>
+      task.status === "completed" ||
+      task.status === "failed" ||
+      task.status === "cancelled",
+  );
+  return past.toSorted((a, b) => {
+    const at = a.completed_at ?? a.created_at;
+    const bt = b.completed_at ?? b.created_at;
+    const timeDiff = new Date(bt).getTime() - new Date(at).getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return (
+      (PAST_STATUS_RANK[a.status] ?? 99) -
+      (PAST_STATUS_RANK[b.status] ?? 99)
+    );
+  });
+}
+
+export function ExecutionLogSection({
+  issueId,
+  identifier,
+  showPast: showPastRuns = true,
+}: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
@@ -88,40 +122,13 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
   });
 
   const activeTasks = useMemo(
-    () =>
-      tasks.filter(
-        (t) =>
-          t.status === "queued" ||
-          t.status === "dispatched" ||
-          // Daemon-parked task on a busy local_directory — still active
-          // (waiting on a path lock), not terminal. Surfacing it here is
-          // what tells the user the agent is alive and will resume.
-          t.status === "waiting_local_directory" ||
-          t.status === "running",
-      ),
+    () => tasks.filter(isActiveTask),
     [tasks],
   );
 
-  const pastTasks = useMemo(() => {
-    const past = tasks.filter(
-      (t) =>
-        t.status === "completed" ||
-        t.status === "failed" ||
-        t.status === "cancelled",
-    );
-    return past.toSorted((a, b) => {
-      const at = a.completed_at ?? a.created_at;
-      const bt = b.completed_at ?? b.created_at;
-      const timeDiff = new Date(bt).getTime() - new Date(at).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return (
-        (PAST_STATUS_RANK[a.status] ?? 99) -
-        (PAST_STATUS_RANK[b.status] ?? 99)
-      );
-    });
-  }, [tasks]);
+  const pastTasks = useMemo(() => sortPastTasks(tasks), [tasks]);
 
-  if (activeTasks.length === 0 && pastTasks.length === 0) return null;
+  if (activeTasks.length === 0 && (!showPastRuns || pastTasks.length === 0)) return null;
 
   return (
     // `@container/execution-log`: the header's three items only fit side by
@@ -173,7 +180,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
             <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
           ))}
 
-          {pastTasks.length > 0 && (
+          {showPastRuns && pastTasks.length > 0 && (
             <>
               {activeTasks.length > 0 && (
                 <div className="my-1.5 border-t border-border/60" />
@@ -195,7 +202,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
+                    <PastTaskRow key={task.id} task={task} issueId={issueId} />
                   ))}
                 </div>
               )}
@@ -425,7 +432,7 @@ export function ActiveTaskRow({
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+export function PastTaskRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
   const timeAgo = useTimeAgo();

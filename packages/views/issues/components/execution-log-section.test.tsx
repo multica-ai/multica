@@ -319,22 +319,26 @@ describe("per-run token usage", () => {
 // label was the only item that could give. It gave by breaking "Execution log"
 // across two lines (MUL-5804). These tests pin the contract that replaced that:
 // one line always, and a width tier that drops the token figure whole.
-describe("execution log header geometry", () => {
-  function renderSection(tasks: AgentTask[]) {
-    // Seed the cache instead of mocking the API: the query is fresh for 30s,
-    // so `listTasksByIssue` is never reached and the section renders its real
-    // header markup.
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
-    return renderWithI18n(
-      <QueryClientProvider client={queryClient}>
-        <ExecutionLogSection issueId="issue-1" identifier="MUL-1" />
-      </QueryClientProvider>,
-    );
-  }
+function renderSection(tasks: AgentTask[], showPast?: boolean) {
+  // Seed the cache instead of mocking the API: the query is fresh for 30s,
+  // so `listTasksByIssue` is never reached and the section renders its real
+  // header markup.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  queryClient.setQueryData(issueKeys.tasks("issue-1"), tasks);
+  return renderWithI18n(
+    <QueryClientProvider client={queryClient}>
+      <ExecutionLogSection
+        issueId="issue-1"
+        identifier="MUL-1"
+        showPast={showPast}
+      />
+    </QueryClientProvider>,
+  );
+}
 
+describe("execution log header geometry", () => {
   function headerOf(): HTMLElement {
     const label = screen.getByText("Execution log");
     const header = label.closest("div");
@@ -405,6 +409,36 @@ describe("execution log header geometry", () => {
     expect(header.getByText("892K").className).toContain(
       "@max-[16rem]/execution-log:hidden",
     );
+  });
+});
+
+describe("execution log history visibility", () => {
+  const past = makeTask({
+    id: "task-past",
+    status: "completed",
+    completed_at: "2026-06-08T08:04:00Z",
+  });
+
+  it("keeps active rows while hiding historical rows in compact mode", () => {
+    renderSection(
+      [
+        makeTask({ id: "task-running", status: "running" }),
+        past,
+      ],
+      false,
+    );
+
+    expect(screen.getByText("Execution log")).toBeInTheDocument();
+    expect(screen.getByText("Started from comment")).toBeInTheDocument();
+    expect(screen.queryByText("Show past runs (1)")).not.toBeInTheDocument();
+    expect(screen.queryByText("task-past")).not.toBeInTheDocument();
+  });
+
+  it("omits the sidebar section when only historical rows remain", () => {
+    renderSection([past], false);
+
+    expect(screen.queryByText("Execution log")).not.toBeInTheDocument();
+    expect(screen.queryByText("task-past")).not.toBeInTheDocument();
   });
 });
 
