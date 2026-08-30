@@ -191,32 +191,35 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 	return tierMap
 }
 
-func isZeroCostModel(model string) bool {
-	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "ollama/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
+func filterPreferredPool(candidates []string) []string {
+	if len(candidates) == 0 {
+		return nil
+	}
+	// 1. Separate direct authenticated / local providers from public aggregator proxies (openrouter/ and public free endpoints)
+	var directCandidates []string
+	var proxyCandidates []string
+	for _, c := range candidates {
+		lower := strings.ToLower(c)
+		if strings.Contains(lower, "openrouter/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free") {
+			proxyCandidates = append(proxyCandidates, c)
+		} else {
+			directCandidates = append(directCandidates, c)
+		}
+	}
+
+	if len(directCandidates) > 0 {
+		return directCandidates
+	}
+	return proxyCandidates
 }
 
 func selectBestSimpleModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	// 1. Separate zero-cost (free/local) from paid candidates to avoid credit drain
-	var freeCandidates []string
-	var paidCandidates []string
-	for _, c := range candidates {
-		if isZeroCostModel(c) {
-			freeCandidates = append(freeCandidates, c)
-		} else {
-			paidCandidates = append(paidCandidates, c)
-		}
-	}
+	searchPool := filterPreferredPool(candidates)
 
-	searchPool := freeCandidates
-	if len(searchPool) == 0 {
-		searchPool = paidCandidates
-	}
-
-	// 2. Prefer smallest tool-capable parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
+	// 1. Prefer smallest tool-capable parameter model (e.g. 0.5B < 1B < 3B) with local Ollama priority
 	var bestCandidate string
 	minSize := 999999.0
 	for _, c := range searchPool {
@@ -239,7 +242,7 @@ func selectBestSimpleModel(candidates []string) string {
 		return bestCandidate
 	}
 
-	// 3. Prefer fast lightweight models (mini, nano, mimo, haiku, lite, flash)
+	// 2. Prefer fast lightweight models (mini, nano, mimo, haiku, lite, flash)
 	simpleTags := []string{"mini", "nano", "mimo", "haiku", "lite", "flash", "small", "tiny"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
@@ -256,37 +259,17 @@ func selectBestStandardModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	var freeCandidates []string
-	var paidCandidates []string
-	for _, c := range candidates {
-		if isZeroCostModel(c) {
-			freeCandidates = append(freeCandidates, c)
-		} else {
-			paidCandidates = append(paidCandidates, c)
-		}
-	}
+	searchPool := filterPreferredPool(candidates)
 
-	searchPool := freeCandidates
-	if len(searchPool) == 0 {
-		searchPool = paidCandidates
-	}
-
-	// 1. Prefer mid-sized coding parameter models (7B - 14B)
+	// 1. Prefer mid-sized coding parameter models (7B - 16B)
 	for _, c := range searchPool {
 		if size, ok := extractParamSizeInBillions(c); ok && size >= 7.0 && size <= 16.0 {
 			return c
 		}
 	}
 
-	// 2. Prefer local Ollama models
-	for _, c := range searchPool {
-		if strings.HasPrefix(strings.ToLower(c), "ollama/") {
-			return c
-		}
-	}
-
-	// 3. Prefer balanced coding / instruct model indicators
-	standardTags := []string{"coder", "code", "sonnet", "instruct", "lightning", "standard"}
+	// 2. Prefer balanced coding / instruct model indicators
+	standardTags := []string{"coder", "code", "sonnet", "flash", "instruct", "lightning", "standard"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
 		for _, tag := range standardTags {
@@ -295,6 +278,14 @@ func selectBestStandardModel(candidates []string) string {
 			}
 		}
 	}
+
+	// 3. Fall back to local Ollama models if present
+	for _, c := range searchPool {
+		if strings.HasPrefix(strings.ToLower(c), "ollama/") {
+			return c
+		}
+	}
+
 	return searchPool[0]
 }
 
@@ -302,30 +293,10 @@ func selectBestHeavyModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	var freeCandidates []string
-	var paidCandidates []string
-	for _, c := range candidates {
-		if isZeroCostModel(c) {
-			freeCandidates = append(freeCandidates, c)
-		} else {
-			paidCandidates = append(paidCandidates, c)
-		}
-	}
+	searchPool := filterPreferredPool(candidates)
 
-	searchPool := freeCandidates
-	if len(searchPool) == 0 {
-		searchPool = paidCandidates
-	}
-
-	// 1. Prefer large parameter models (>= 30B, e.g. 32B, 70B, 405B)
-	for _, c := range searchPool {
-		if size, ok := extractParamSizeInBillions(c); ok && size >= 30.0 {
-			return c
-		}
-	}
-
-	// 2. Prefer frontier reasoning tags
-	heavyTags := []string{"r1", "ultra", "pro", "opus", "o1", "o3", "max", "large", "reasoning"}
+	// 1. Prefer frontier reasoning tags (pro, r1, ultra, opus, o1, o3, max, large, reasoning)
+	heavyTags := []string{"pro", "r1", "ultra", "opus", "o1", "o3", "max", "large", "reasoning"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
 		for _, tag := range heavyTags {
@@ -334,6 +305,14 @@ func selectBestHeavyModel(candidates []string) string {
 			}
 		}
 	}
+
+	// 2. Prefer large parameter models (>= 30B, e.g. 31B, 32B, 70B, 405B)
+	for _, c := range searchPool {
+		if size, ok := extractParamSizeInBillions(c); ok && size >= 30.0 {
+			return c
+		}
+	}
+
 	return searchPool[0]
 }
 
