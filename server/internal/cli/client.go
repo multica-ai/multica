@@ -733,11 +733,46 @@ func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archiv
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodPost, path, resp)
 	}
+	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
+}
+
+// UploadPluginPackage uploads a plugin package archive (.zip) to /api/workspaces/{id}/plugins/packages.
+func (c *APIClient) UploadPluginPackage(ctx context.Context, workspaceID string, archive []byte, filename string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("bundle", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create plugin bundle form file: %w", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		return fmt.Errorf("write plugin bundle: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close plugin bundle upload: %w", err)
+	}
+
+	path := "/api/workspaces/" + workspaceID + "/plugins/packages"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
+	}
 	if out == nil {
 		return nil
 	}
 	return wrapBodyRead(req, json.NewDecoder(resp.Body).Decode(out))
 }
+
 
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
