@@ -12,7 +12,12 @@ export type {
   ClientRuntimeSnapshot,
   ClientUsageRequest,
 } from "./client";
-export { parseWithFallback, setSchemaLogger } from "./schema";
+export {
+  parseProtectedResponse,
+  parseWithFallback,
+  ProtectedResponseValidationError,
+  setSchemaLogger,
+} from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";

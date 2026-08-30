@@ -236,7 +236,26 @@ import type {
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
-import { parseWithFallback } from "./schema";
+import { parseProtectedResponse, parseWithFallback } from "./schema";
+import {
+  AgentToolActionListResponseSchema,
+  AgentToolApprovalListResponseSchema,
+  AgentToolApprovalSchema,
+  AgentToolPolicySchema,
+  OperationalCapabilityListResponseSchema,
+  OperationalSummarySchema,
+  type AgentToolActionListParams,
+  type AgentToolActionListResponse,
+  type AgentToolApproval,
+  type AgentToolApprovalDecisionRequest,
+  type AgentToolApprovalListParams,
+  type AgentToolApprovalListResponse,
+  type AgentToolPolicy,
+  type OperationalCapabilityListResponse,
+  type OperationalSummary,
+  type OperationalSummaryParams,
+  type ReplaceAgentToolPolicyRequest,
+} from "../operational-controls/schemas";
 import {
   AgentTaskListSchema,
   AttachmentResponseSchema,
@@ -1462,6 +1481,113 @@ export class ApiClient {
 
   async getAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`);
+  }
+
+  async getAgentToolPolicy(agentId: string): Promise<AgentToolPolicy> {
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${encodeURIComponent(agentId)}/tool-policy`,
+    );
+    return parseProtectedResponse(raw, AgentToolPolicySchema, {
+      endpoint: "GET /api/agents/:id/tool-policy",
+    });
+  }
+
+  async replaceAgentToolPolicy(
+    agentId: string,
+    request: ReplaceAgentToolPolicyRequest,
+  ): Promise<AgentToolPolicy> {
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${encodeURIComponent(agentId)}/tool-policy`,
+      {
+        method: "PUT",
+        body: JSON.stringify(request),
+      },
+    );
+    return parseProtectedResponse(raw, AgentToolPolicySchema, {
+      endpoint: "PUT /api/agents/:id/tool-policy",
+    });
+  }
+
+  async listAgentToolActions(
+    agentId: string,
+    params: AgentToolActionListParams = {},
+  ): Promise<AgentToolActionListResponse> {
+    const search = new URLSearchParams();
+    if (params.event_type) search.set("event_type", params.event_type);
+    if (params.since) search.set("since", params.since);
+    if (params.cursor) search.set("cursor", params.cursor);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    const suffix = search.size > 0 ? `?${search}` : "";
+    const raw = await this.fetch<unknown>(
+      `/api/agents/${encodeURIComponent(agentId)}/tool-actions${suffix}`,
+    );
+    return parseProtectedResponse(raw, AgentToolActionListResponseSchema, {
+      endpoint: "GET /api/agents/:id/tool-actions",
+    });
+  }
+
+  async listAgentToolApprovals(
+    params: AgentToolApprovalListParams = {},
+  ): Promise<AgentToolApprovalListResponse> {
+    const search = new URLSearchParams();
+    if (params.agent_id) search.set("agent_id", params.agent_id);
+    if (params.status) search.set("status", params.status);
+    if (params.cursor) search.set("cursor", params.cursor);
+    if (params.limit !== undefined) search.set("limit", String(params.limit));
+    const suffix = search.size > 0 ? `?${search}` : "";
+    const raw = await this.fetch<unknown>(`/api/approvals${suffix}`);
+    return parseProtectedResponse(raw, AgentToolApprovalListResponseSchema, {
+      endpoint: "GET /api/approvals",
+    });
+  }
+
+  async getAgentToolApproval(
+    approvalId: string,
+  ): Promise<AgentToolApproval> {
+    const raw = await this.fetch<unknown>(
+      `/api/approvals/${encodeURIComponent(approvalId)}`,
+    );
+    return parseProtectedResponse(raw, AgentToolApprovalSchema, {
+      endpoint: "GET /api/approvals/:id",
+    });
+  }
+
+  async decideAgentToolApproval(
+    approvalId: string,
+    request: AgentToolApprovalDecisionRequest,
+  ): Promise<AgentToolApproval> {
+    const raw = await this.fetch<unknown>(
+      `/api/approvals/${encodeURIComponent(approvalId)}/decision`,
+      { method: "POST", body: JSON.stringify(request) },
+    );
+    return parseProtectedResponse(raw, AgentToolApprovalSchema, {
+      endpoint: "POST /api/approvals/:id/decision",
+    });
+  }
+
+  async listOperationalCapabilities(): Promise<OperationalCapabilityListResponse> {
+    const raw = await this.fetch<unknown>(
+      "/api/operational-controls/capabilities",
+    );
+    return parseProtectedResponse(raw, OperationalCapabilityListResponseSchema, {
+      endpoint: "GET /api/operational-controls/capabilities",
+    });
+  }
+
+  async getOperationalSummary(
+    params: OperationalSummaryParams,
+  ): Promise<OperationalSummary> {
+    const search = new URLSearchParams({
+      days: String(params.days),
+      tz: params.tz,
+    });
+    if (params.project_id) search.set("project_id", params.project_id);
+    const raw = await this.fetch<unknown>(
+      `/api/dashboard/operations/summary?${search}`,
+    );
+    return parseProtectedResponse(raw, OperationalSummarySchema, {
+      endpoint: "GET /api/dashboard/operations/summary",
+    });
   }
 
   async createAgent(data: CreateAgentRequest): Promise<Agent> {

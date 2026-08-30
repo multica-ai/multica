@@ -51,6 +51,10 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import {
+  handleCurrentMemberRoleUpdated,
+  handleOperationalControlsChanged,
+} from "../operational-controls/realtime";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showWebNotification,
@@ -73,6 +77,7 @@ import {
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
+  MemberUpdatedPayload,
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
   MemberRemovedPayload,
@@ -955,6 +960,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
+      "operational_controls:changed",
       "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
@@ -1285,6 +1291,31 @@ export function useRealtimeSync(
         );
       }
     });
+
+    const unsubMemberUpdated = ws.on("member:updated", (p) => {
+      const workspaceId = getCurrentWsId();
+      if (!workspaceId) return;
+      const member = (p as Partial<MemberUpdatedPayload> | null)?.member;
+      if (
+        !member ||
+        typeof member.user_id !== "string" ||
+        typeof member.role !== "string"
+      ) {
+        return;
+      }
+      handleCurrentMemberRoleUpdated(qc, {
+        workspaceId,
+        currentUserId: authStore.getState().user?.id,
+        member,
+      });
+    });
+
+    const unsubOperationalControlsChanged = ws.on(
+      "operational_controls:changed",
+      (payload) => {
+        handleOperationalControlsChanged(qc, payload, getCurrentWsId() ?? undefined);
+      },
+    );
 
     // invitation:created — notify the invitee of a new pending invitation
     const unsubInvitationCreated = ws.on("invitation:created", (p) => {
@@ -1715,6 +1746,8 @@ export function useRealtimeSync(
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
+      unsubMemberUpdated();
+      unsubOperationalControlsChanged();
       unsubInvitationCreated();
       unsubInvitationAccepted();
       unsubInvitationDeclined();

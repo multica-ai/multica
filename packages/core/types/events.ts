@@ -44,6 +44,7 @@ export type WSEventType =
   | "member:added"
   | "member:updated"
   | "member:removed"
+  | "operational_controls:changed"
   | "daemon:heartbeat"
   | "daemon:register"
   | "skill:created"
@@ -263,6 +264,10 @@ export interface MemberAddedPayload {
 export interface MemberRemovedPayload {
   member_id: string;
   user_id: string;
+  workspace_id: string;
+}
+
+export interface OperationalControlsChangedPayload {
   workspace_id: string;
 }
 
@@ -594,6 +599,7 @@ export interface WSEventPayloadMap {
   "member:added": MemberAddedPayload;
   "member:updated": MemberUpdatedPayload;
   "member:removed": MemberRemovedPayload;
+  "operational_controls:changed": OperationalControlsChangedPayload;
   "subscriber:added": SubscriberAddedPayload;
   "subscriber:removed": SubscriberRemovedPayload;
   "activity:created": ActivityCreatedPayload;

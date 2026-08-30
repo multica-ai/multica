@@ -16,6 +16,16 @@ export interface ParseOptions {
   endpoint: string;
 }
 
+export class ProtectedResponseValidationError extends Error {
+  readonly endpoint: string;
+
+  constructor(endpoint: string) {
+    super(`Protected API response failed schema validation: ${endpoint}`);
+    this.name = "ProtectedResponseValidationError";
+    this.endpoint = endpoint;
+  }
+}
+
 /**
  * Validate a JSON value parsed from an API response against a zod schema,
  * returning the parsed value on success or `fallback` on failure.
@@ -52,4 +62,26 @@ export function parseWithFallback<T>(
     },
   );
   return fallback;
+}
+
+/**
+ * Validates authorization-sensitive responses without retaining or logging the
+ * received body. A malformed policy, approval, capability, or operations
+ * response must fail closed, and diagnostics must remain metadata-only even
+ * when the bad body contains credentials or customer values.
+ */
+export function parseProtectedResponse<T>(
+  data: unknown,
+  schema: ZodType<T>,
+  opts: ParseOptions,
+): T {
+  const result = schema.safeParse(data);
+  if (result.success) return result.data;
+
+  schemaLogger.warn("API response failed protected schema validation", {
+    endpoint: opts.endpoint,
+    issue_count: result.error.issues.length,
+    issue_codes: [...new Set(result.error.issues.map((issue) => issue.code))],
+  });
+  throw new ProtectedResponseValidationError(opts.endpoint);
 }
