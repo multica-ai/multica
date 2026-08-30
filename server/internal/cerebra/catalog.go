@@ -52,7 +52,7 @@ func ClassifyModelTier(modelID string) Tier {
 		baseName = lower[idx+1:]
 	}
 
-	// 1. Explicit Simple flagship tags (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free").
+	// 1. Explicit Simple flagship tags (e.g. "o1-mini", "gpt-4o-mini", "claude-3-5-haiku", "mimo-v2.5-free", "gemini-1.5-flash").
 	simpleKeywords := []string{
 		"mimo", "hy3", "flash", "haiku", "nano", "mini", "small", "spark", "lite", "x-preview", "tiny",
 	}
@@ -193,14 +193,14 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 
 func isZeroCostModel(model string) bool {
 	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "ollama/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
+	return strings.HasPrefix(lower, "ollama/") || strings.HasPrefix(lower, "google/gemini") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
 }
 
 func selectBestSimpleModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	// 1. Separate zero-cost (free/local) from paid candidates to avoid credit drain
+	// 1. Separate zero-cost (free/local/gemini) from paid candidates to avoid credit drain
 	var freeCandidates []string
 	var paidCandidates []string
 	for _, c := range candidates {
@@ -239,10 +239,10 @@ func selectBestSimpleModel(candidates []string) string {
 		return bestCandidate
 	}
 
-	// 3. Prefer fast free cloud models (flash, mimo, mini, nano, haiku)
+	// 3. Prefer fast free cloud models (flash-lite, flash, mimo, mini, nano, haiku)
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "flash") || strings.Contains(lower, "mini") || strings.Contains(lower, "nano") || strings.Contains(lower, "mimo") || strings.Contains(lower, "haiku") {
+		if strings.Contains(lower, "flash-lite") || strings.Contains(lower, "mini") || strings.Contains(lower, "nano") || strings.Contains(lower, "mimo") || strings.Contains(lower, "haiku") {
 			return c
 		}
 	}
@@ -268,7 +268,13 @@ func selectBestStandardModel(candidates []string) string {
 		searchPool = paidCandidates
 	}
 
-	// 1. Prefer local Ollama 7B-14B coding models (e.g. qwen3:8b, qwen2.5-coder)
+	// 1. Prefer Google Gemini Flash or local Ollama coding models
+	for _, c := range searchPool {
+		lower := strings.ToLower(c)
+		if strings.Contains(lower, "gemini-2.5-flash") || strings.Contains(lower, "gemini-2.0-flash") || strings.Contains(lower, "gemini-flash") {
+			return c
+		}
+	}
 	for _, c := range searchPool {
 		if strings.HasPrefix(strings.ToLower(c), "ollama/") {
 			return c
@@ -304,7 +310,13 @@ func selectBestHeavyModel(candidates []string) string {
 		searchPool = paidCandidates
 	}
 
-	// Prefer frontier reasoning models (r1, ultra, opus, o1, o3, 70b, 405b)
+	// 1. Prefer Google Gemini Pro or frontier reasoning models (pro, r1, ultra, opus, o1, o3, 70b, 405b)
+	for _, c := range searchPool {
+		lower := strings.ToLower(c)
+		if strings.Contains(lower, "gemini-2.5-pro") || strings.Contains(lower, "gemini-pro") {
+			return c
+		}
+	}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
 		if strings.Contains(lower, "r1") || strings.Contains(lower, "ultra") || strings.Contains(lower, "opus") || strings.Contains(lower, "o1") || strings.Contains(lower, "o3") {
@@ -313,4 +325,5 @@ func selectBestHeavyModel(candidates []string) string {
 	}
 	return searchPool[0]
 }
+
 
