@@ -85,6 +85,20 @@ type Outbound struct {
 	// test can run it inline and observe the result deterministically.
 	spawn func(func())
 
+	// slots is the process-wide attachment concurrency channel every Outbound
+	// shares (attachmentSlots). A field for the same reason spawn is one: the
+	// wait on it is a place a delivery can be stranded, and a test that has to
+	// strand one must be able to do it without starving the whole process.
+	slots chan struct{}
+
+	// noticeBudget bounds a failure notice that runs after the delivery's own
+	// context is already spent. streamCloseTimeout is what it defaults to, and
+	// by its own definition rather than by coincidence: it is the budget for a
+	// last frame with no caller's context to inherit, which is what this is.
+	// Held as the same named constant so the two cannot drift into different
+	// policies while reading as one.
+	noticeBudget time.Duration
+
 	// Two counters bound attachment delivery, and they are two because one
 	// cannot be in both places at once.
 	//
@@ -133,6 +147,9 @@ func NewOutbound(q outboundQueries, senders *sendersRegistry, streams *streamSto
 		logger:     logger,
 		retryAfter: answerRetryAfter,
 		spawn:      func(f func()) { go f() },
+
+		slots:        attachmentSlots,
+		noticeBudget: streamCloseTimeout,
 	}
 	for _, opt := range opts {
 		opt(o)

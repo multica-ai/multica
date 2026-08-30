@@ -258,17 +258,13 @@ func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunk
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(mediaChunkParallelism(len(chunks)))
 	for i, chunk := range chunks {
-		// Asked before DISPATCH, not inside the goroutine: with the group's
-		// parallelism a chunk already in flight finishes, but nothing new is
-		// put on the wire once the hook says stop. Refusing here also cancels
-		// gctx via the group, which is what stops the in-flight retries.
-		if beforeChunk != nil {
-			if err := beforeChunk(gctx); err != nil {
-				_ = g.Wait()
-				return err
-			}
+		// Nothing new is offered once a sibling has failed. The goroutine
+		// would refuse it on the same cancelled context anyway; a group
+		// already ending has no use for the slot.
+		if gctx.Err() != nil {
+			break
 		}
-		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk) })
+		g.Go(func() error { return s.uploadMediaChunk(gctx, uploadID, i, chunk, beforeChunk) })
 	}
 	return g.Wait()
 }
@@ -278,7 +274,7 @@ func (s *wsSender) uploadMediaChunks(ctx context.Context, uploadID string, chunk
 // chunk_index goes on the wire as a number. The field table in the document
 // calls it a string and the worked example beside it passes a number; WeCom's
 // own SDK sends a number, so that is what the server is known to accept.
-func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index int, chunk []byte) error {
+func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index int, chunk []byte, beforeChunk func(context.Context) error) error {
 	body := map[string]any{
 		"upload_id":   uploadID,
 		"chunk_index": index,
@@ -286,6 +282,23 @@ func (s *wsSender) uploadMediaChunk(ctx context.Context, uploadID string, index 
 	}
 	var lastErr error
 	for attempt := 0; attempt < mediaChunkAttempts; attempt++ {
+		// Asked here, immediately before the write, and again before the
+		// retry — because a verdict is only as good as the moment it was
+		// given, and this chunk has two waits between the dispatch loop and
+		// the wire. errgroup.Go blocks while the group is at its limit, so a
+		// yes taken out there can sit behind the slowest chunk ahead of it;
+		// and a lost verdict buys the second offer a whole ackTimeout later.
+		// Both are long enough for someone to take the connection back.
+		//
+		// Refusing from in here is also what cancels the siblings. g.Wait()
+		// from the dispatch loop does not: it waits for the in-flight
+		// goroutines FIRST and cancels afterwards, which is after the thing
+		// it was meant to stop.
+		if beforeChunk != nil {
+			if err := beforeChunk(ctx); err != nil {
+				return err
+			}
+		}
 		_, err := s.request(ctx, cmdUploadMediaChunk, body)
 		if err == nil {
 			return nil

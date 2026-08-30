@@ -246,9 +246,10 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	// the task-completion goroutine, so blocking out there would wedge the
 	// completion path for up to the attachment budget — which is the very thing
 	// the spawn exists to prevent.
+	slots := o.attachmentSlotsChan()
 	select {
-	case attachmentSlots <- struct{}{}:
-		defer func() { <-attachmentSlots }()
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
 	case <-ctx.Done():
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery gave up waiting for a slot",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
@@ -256,7 +257,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		// we are here — but a BOUNDED one: this failure notice runs while the
 		// admission and pending slots are still held, and an unbounded hang in
 		// the permission read or the send would hold a worker forever.
-		notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		notifyCtx, cancelNotify := context.WithTimeout(context.WithoutCancel(ctx), o.failureNoticeBudget())
 		o.tellUser(notifyCtx, to, mediaSendFailedText)
 		cancelNotify()
 		return
@@ -577,6 +578,9 @@ func chatDoneMessageID(payload any) string {
 // per-installation cap on a deployment running several bots just multiplies.
 // Each delivery holds one object while it chunks it up the socket, so this is
 // the number that decides peak resident attachment bytes.
+//
+// Every Outbound is built holding this one (Outbound.slots), which is what
+// keeps the cap process-wide across several bots.
 var attachmentSlots = make(chan struct{}, maxConcurrentAttachmentDeliveries)
 
 const (
@@ -609,6 +613,28 @@ const (
 	// cap with pending at zero.
 	maxAdmittedAttachmentDeliveries = 2 * maxPendingAttachmentDeliveries
 )
+
+// attachmentSlotsChan is the concurrency channel this subscriber waits on: its
+// own when one was set, the process-wide default otherwise. Resolved rather
+// than read straight off the field because the zero value of a channel does
+// not fail — it blocks forever, and a delivery parked on a nil channel holds
+// its admission and its pending slot for the life of the process.
+func (o *Outbound) attachmentSlotsChan() chan struct{} {
+	if o.slots != nil {
+		return o.slots
+	}
+	return attachmentSlots
+}
+
+// failureNoticeBudget bounds the last sentence a stranded delivery writes.
+// Same resolution as above and for the same reason: an unset budget would make
+// the notice's context expire on creation and silence it.
+func (o *Outbound) failureNoticeBudget() time.Duration {
+	if o.noticeBudget > 0 {
+		return o.noticeBudget
+	}
+	return streamCloseTimeout
+}
 
 // claimAttachmentSlot reserves one of the pending slots, or reports that the
 // backlog is full.

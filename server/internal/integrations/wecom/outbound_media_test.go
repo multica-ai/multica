@@ -1037,7 +1037,7 @@ func TestSendAttachment_RevocationAfterUploadStopsTheSend(t *testing.T) {
 	o, instID, conn := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	q.atInstallation = func(int) {
+	q.atInstallation = func(context.Context, int) {
 		if len(conn.cmdFrames(cmdUploadMediaFinish)) > 0 {
 			q.installation.Status = "revoked"
 		}
@@ -1054,5 +1054,62 @@ func TestSendAttachment_RevocationAfterUploadStopsTheSend(t *testing.T) {
 	}
 	if n := len(mediaSends(t, conn)); n != 0 {
 		t.Fatalf("media sends = %d, want 0 — the send ran after the withdrawal", n)
+	}
+}
+
+// The notice a stranded delivery leaves behind runs after the delivery's own
+// budget is gone, so it carries one of its own — and this is what that budget
+// is for. A permission read that never answers must be cut off, because the
+// worker is still holding the admission and the pending slot while it waits,
+// and a slot nobody ever gives back is one fewer for every turn after it.
+func TestSendAttachments_ANoticeThatHangsStillReleasesTheWorker(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID: mustTestUUID(t), Filename: "a.png", Url: "https://cdn.example/obj/a",
+		ContentType: "image/png", SizeBytes: 7,
+	})
+	o, instID, _ := newOutboundWithMedia(t, q, &fakeObjectStore{key: "obj/a", data: []byte("PNGDATA")})
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	// A private concurrency channel with its only slot already taken: this
+	// delivery finds a file and then waits for capacity that never comes.
+	o.slots = make(chan struct{}, 1)
+	o.slots <- struct{}{}
+	o.noticeBudget = 80 * time.Millisecond
+
+	var hadDeadline atomic.Bool
+	q.atInstallation = func(ctx context.Context, _ int) {
+		if _, ok := ctx.Deadline(); ok {
+			hadDeadline.Store(true)
+		}
+		<-ctx.Done() // the lookup behind the notice never answers on its own
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		o.sendAttachments(ctx, mustUUID(testMessageID), mustUUID(testWorkspaceID),
+			attachmentTarget{InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeGroupInt})
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the worker never returned — a hung notice holds the admission and the pending slot forever")
+	}
+
+	if !hadDeadline.Load() {
+		t.Error("the failure notice ran on a context with no deadline")
+	}
+	o.pendingMu.Lock()
+	pending := o.pendingAttachments
+	o.pendingMu.Unlock()
+	if pending != 0 {
+		t.Errorf("pending attachments = %d, want 0 — the slot was not given back", pending)
+	}
+	if n := len(o.slots); n != 1 {
+		t.Errorf("concurrency slots held = %d, want 1 (only the one this test took)", n)
 	}
 }

@@ -75,12 +75,14 @@ type fakeOutboundQueries struct {
 	// a delivery with no bubble left has to make. It is where a test says "and
 	// by the time the delivery got here, the caller's budget was gone".
 	atBinding func()
-	// atInstallation runs at the top of each installation read, with the
-	// 1-based read count, BEFORE the answer is computed — so a hook that flips
-	// the row on some condition (a frame already on the wire, a read ordinal)
-	// decides what this very read sees. That is how a test lands a revocation
-	// exactly between two stages of a delivery.
-	atInstallation func(read int)
+	// atInstallation runs at the top of each installation read, with that
+	// read's own context and the 1-based read count, BEFORE the answer is
+	// computed — so a hook that flips the row on some condition (a frame
+	// already on the wire, a read ordinal) decides what this very read sees.
+	// That is how a test lands a revocation exactly between two stages of a
+	// delivery. The context is what lets a hook model the other failure: a
+	// lookup that hangs until something stops it.
+	atInstallation func(ctx context.Context, read int)
 	// channelIngested is the channel_ingested stamp on the input batch the
 	// task owns: askedOverWecom for a question typed in the room,
 	// askedInTheWebUI for one typed in Multica.
@@ -143,7 +145,7 @@ func (f *fakeOutboundQueries) GetChannelTaskDelivery(context.Context, pgtype.UUI
 		RouteRevision: f.sessionBinding.RouteRevision, Config: f.sessionBinding.Config,
 	}, nil
 }
-func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
+func (f *fakeOutboundQueries) GetChannelInstallation(ctx context.Context, _ db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// installErrFor lets a test fail one read and not the rest, which is the
@@ -154,7 +156,7 @@ func (f *fakeOutboundQueries) GetChannelInstallation(context.Context, db.GetChan
 		return db.ChannelInstallation{}, errors.New("wecom test: transient database error")
 	}
 	if f.atInstallation != nil {
-		f.atInstallation(f.installReads)
+		f.atInstallation(ctx, f.installReads)
 	}
 	return f.installation, f.installErr
 }
