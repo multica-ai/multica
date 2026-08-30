@@ -59,11 +59,14 @@ func probeAPIProviders() map[string]AgentEntry {
 			continue
 		}
 		desc := desc
+		explicitlyConfigured := providerExplicitlyConfigured(desc, env)
 		cfg, err := agent.ResolveProviderAPIConfig(desc.ID, env)
 		if err != nil {
-			mu.Lock()
-			failures[desc.ID] = sanitizedProviderOfflineReason(err)
-			mu.Unlock()
+			if explicitlyConfigured {
+				mu.Lock()
+				failures[desc.ID] = sanitizedProviderOfflineReason(err)
+				mu.Unlock()
+			}
 			continue
 		}
 		wg.Add(1)
@@ -72,9 +75,11 @@ func probeAPIProviders() map[string]AgentEntry {
 			ctx, cancel := context.WithTimeout(context.Background(), apiProviderProbeTimeout)
 			defer cancel()
 			if err := probeAPIProviderEndpoint(ctx, desc.ID, cfg); err != nil {
-				mu.Lock()
-				failures[desc.ID] = sanitizedProviderOfflineReason(err)
-				mu.Unlock()
+				if explicitlyConfigured {
+					mu.Lock()
+					failures[desc.ID] = sanitizedProviderOfflineReason(err)
+					mu.Unlock()
+				}
 				return
 			}
 			entry := AgentEntry{
@@ -90,6 +95,18 @@ func probeAPIProviders() map[string]AgentEntry {
 	wg.Wait()
 	publishAPIProviderProbeFailures(failures)
 	return entries
+}
+
+func providerExplicitlyConfigured(desc agent.ProviderDescriptor, env map[string]string) bool {
+	if strings.TrimSpace(env[desc.BaseURLEnv]) != "" || strings.TrimSpace(env[desc.APIKeyEnv]) != "" {
+		return true
+	}
+	for _, name := range desc.OptionalKeyEnv {
+		if strings.TrimSpace(env[name]) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func publishAPIProviderProbeFailures(failures map[string]string) {
