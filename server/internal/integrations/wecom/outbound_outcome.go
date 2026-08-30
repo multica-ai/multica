@@ -50,11 +50,22 @@ const (
 	// chat, the tenant is rate limited.
 	dropPlatformRefused dropReason = "platform_refused"
 
-	// dropTransport — the write itself failed, or the lookups ahead of it did.
+	// dropTransport — nothing reached the platform, for a local reason. The
+	// write itself failed, or a lookup ahead of it did, or this delivery's own
+	// budget ran out before it got a turn on the wire. What the three have in
+	// common is the fact an operator needs: the failure is on our side of the
+	// socket, so nothing was shown to anybody.
 	dropTransport dropReason = "transport_error"
 
 	// dropAttachmentNotAdmitted — the delivery was shed because too many were
-	// already running or pending. A file only, never a whole reply.
+	// already running or pending.
+	//
+	// It appears on BOTH units, and means a different thing on each. On the
+	// file counter it is one file that will not be sent. On the reply counter
+	// it appears only when the files WERE the reply — an empty completion that
+	// reached delivery because something was bound to it — and there it means
+	// the user got nothing at all. A reply whose words already landed is
+	// settled before this gate and never reaches it.
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
 
 	// dropRelayOverflow — a routed REPLY was shed because this replica's
@@ -227,6 +238,35 @@ func (o *Outbound) attachmentDropped(ctx context.Context, reason dropReason, err
 // attachmentShed records one delivery attempt refused admission before the
 // lookup. Not a file count: nothing knows yet whether a file exists.
 func (o *Outbound) attachmentShed() { o.mx().RecordAttachmentDeliveryShed() }
+
+// worseUnconfirmedReason is worseDropReason's twin, for the other unit. A reply
+// whose files came back unknown for more than one reason needs its own outcome
+// chosen by a rule rather than by whichever row the loop happened to end on —
+// the same objection that made the definite side a documented precedence.
+//
+// Ordered by how much each one establishes about the frame. ack_timeout is the
+// most specific: the frame reached the wire and only its verdict is missing.
+// write_attempted is next: the local side reported a failure, and the peer may
+// still hold the bytes. interrupted says least — the wait ended and where it
+// ended is not knowable from here.
+func worseUnconfirmedReason(a, b string) string {
+	rank := func(r string) int {
+		switch r {
+		case "ack_timeout":
+			return 3
+		case "write_attempted":
+			return 2
+		case "interrupted":
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
 
 // worseDropReason is the aggregation rule for a reply whose files failed for
 // more than one reason. Precedence: a stated refusal beats a local transport

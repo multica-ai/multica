@@ -354,7 +354,7 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 				r = "ack_timeout" // sendOutcome and unconfirmedReason share a set; belt and braces
 			}
 			o.attachmentUnconfirmed(ctx, r, err)
-			replyUnconfirmed = r
+			replyUnconfirmed = worseUnconfirmedReason(replyUnconfirmed, r)
 		default:
 			o.attachmentDelivered()
 		}

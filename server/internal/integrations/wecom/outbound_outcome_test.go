@@ -11,6 +11,7 @@ package wecom
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log/slog"
 	"strings"
@@ -308,5 +309,146 @@ func TestCompletionWithNoTaskIdIsCounted(t *testing.T) {
 	}
 	if n := r.frames(); n != 0 {
 		t.Errorf("frames = %d, want 0", n)
+	}
+}
+
+// Every way out of sendAttachments before the per-file loop has to settle BOTH
+// units: one outcome per file that will not be sent, and — when the files were
+// the reply — exactly one reply outcome. Table-driven because the four exits
+// were fixed one at a time and each fix left the others unasserted.
+//
+// It also pins which reason each exit files under, which is the half a comment
+// cannot enforce: attachment_not_admitted appears on the reply counter only
+// here, and only because these files WERE the answer.
+func TestSendAttachments_EveryEarlyExitSettlesBothUnits(t *testing.T) {
+	t.Parallel()
+	const files = 3
+	for _, tc := range []struct {
+		name       string
+		arrange    func(t *testing.T, o *Outbound, q *fakeOutboundQueries) context.Context
+		wantFiles  string // attachment_dropped:<reason>, "" when the rows are not known yet
+		wantReply  string // outbound_dropped:<reason>
+		wantNFiles int
+	}{
+		{
+			name: "the lookup itself failed, so no file is known",
+			arrange: func(_ *testing.T, _ *Outbound, q *fakeOutboundQueries) context.Context {
+				q.attachmentsErr = errors.New("wecom test: database is unwell")
+				return context.Background()
+			},
+			wantReply:  "transport_error",
+			wantNFiles: 0,
+		},
+		{
+			name: "too many deliveries are already pending",
+			arrange: func(_ *testing.T, o *Outbound, _ *fakeOutboundQueries) context.Context {
+				o.pendingMu.Lock()
+				o.pendingAttachments = maxPendingAttachmentDeliveries
+				o.pendingMu.Unlock()
+				return context.Background()
+			},
+			wantFiles:  "attachment_not_admitted",
+			wantReply:  "attachment_not_admitted",
+			wantNFiles: files,
+		},
+		{
+			name: "the budget ran out waiting for a concurrency slot",
+			arrange: func(_ *testing.T, _ *Outbound, _ *fakeOutboundQueries) context.Context {
+				// Every slot taken, and a context already spent: the select
+				// takes its ctx.Done arm without waiting on anything.
+				for i := 0; i < maxConcurrentAttachmentDeliveries; i++ {
+					attachmentSlots <- struct{}{}
+				}
+				t.Cleanup(func() {
+					for i := 0; i < maxConcurrentAttachmentDeliveries; i++ {
+						<-attachmentSlots
+					}
+				})
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+			wantFiles:  "transport_error",
+			wantReply:  "transport_error",
+			wantNFiles: files,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := deliverableTurn(t)
+			for i := 0; i < files; i++ {
+				q.attachments = append(q.attachments, db.Attachment{
+					ID: mustTestUUID(t), Filename: "f.bin",
+					Url: "https://cdn.example/obj/f", SizeBytes: 4,
+				})
+			}
+			r := newOutcomeRig(t, q, true)
+			ctx := tc.arrange(t, r.o, q)
+
+			// carriesTheReply: an empty completion whose files ARE the answer,
+			// which is the only shape where a file outcome is also the reply's.
+			r.o.sendAttachments(ctx, mustTestUUID(t), mustTestUUID(t),
+				attachmentTarget{InstallationID: q.installation.ID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt},
+				true)
+
+			if got := r.mx.get("attachment_dropped"); got != tc.wantNFiles {
+				t.Errorf("attachment_dropped = %d, want %d — one per file that will not be sent",
+					got, tc.wantNFiles)
+			}
+			if tc.wantFiles != "" {
+				if got := r.mx.get("attachment_dropped:" + tc.wantFiles); got != tc.wantNFiles {
+					t.Errorf("attachment_dropped:%s = %d, want %d", tc.wantFiles, got, tc.wantNFiles)
+				}
+			}
+			if got := r.mx.get("outbound_dropped"); got != 1 {
+				t.Errorf("outbound_dropped = %d, want exactly 1 — the files were the reply", got)
+			}
+			if got := r.mx.get("outbound_dropped:" + tc.wantReply); got != 1 {
+				t.Errorf("outbound_dropped:%s = %d, want 1. log:\n%s", tc.wantReply, got, r.logs.String())
+			}
+		})
+	}
+}
+
+// A reply whose words already landed is settled: the same exits must move the
+// file counter and leave the reply counter alone.
+func TestSendAttachments_AnEarlyExitDoesNotReCountASettledReply(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.attachments = append(q.attachments, db.Attachment{
+		ID: mustTestUUID(t), Filename: "f.bin", Url: "https://cdn.example/obj/f", SizeBytes: 4,
+	})
+	r := newOutcomeRig(t, q, true)
+	r.o.pendingMu.Lock()
+	r.o.pendingAttachments = maxPendingAttachmentDeliveries
+	r.o.pendingMu.Unlock()
+
+	r.o.sendAttachments(context.Background(), mustTestUUID(t), mustTestUUID(t),
+		attachmentTarget{InstallationID: q.installation.ID, ChatID: "CHAT_1", ChatType: chatTypeSingleInt},
+		false) // the words went out on their own
+
+	if got := r.mx.get("attachment_dropped:attachment_not_admitted"); got != 1 {
+		t.Errorf("attachment_dropped = %d, want 1", got)
+	}
+	if got := r.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("outbound_dropped = %d, want 0 — that reply was delivered and counted already", got)
+	}
+}
+
+// The unknown side needs a rule for the same reason the definite side does: a
+// reply with several unconfirmed files must not report whichever reason the
+// loop happened to end on.
+func TestWorseUnconfirmedReason_IsARuleNotALoopOrder(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ a, b, want string }{
+		{"", "interrupted", "interrupted"},
+		{"interrupted", "write_attempted", "write_attempted"},
+		{"write_attempted", "interrupted", "write_attempted"},
+		{"write_attempted", "ack_timeout", "ack_timeout"},
+		{"ack_timeout", "interrupted", "ack_timeout"},
+		{"ack_timeout", "ack_timeout", "ack_timeout"},
+	} {
+		if got := worseUnconfirmedReason(tc.a, tc.b); got != tc.want {
+			t.Errorf("worseUnconfirmedReason(%q, %q) = %q, want %q", tc.a, tc.b, got, tc.want)
+		}
 	}
 }
