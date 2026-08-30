@@ -50,6 +50,13 @@ var pluginPublishCmd = &cobra.Command{
 	RunE:  runPluginPublish,
 }
 
+var installCmd = &cobra.Command{
+	Use:   "install <name>",
+	Short: "Install a plugin by name (e.g. cerebra)",
+	Args:  exactArgs(1),
+	RunE:  runPluginInstall,
+}
+
 func init() {
 	pluginCmd.AddCommand(pluginInstallCmd)
 	pluginCmd.AddCommand(pluginListCmd)
