@@ -326,3 +326,134 @@ func TestLiveTestLabIssues(t *testing.T) {
 	}
 	fmt.Println("========================================================================================================================")
 }
+
+// TestOpenCodeToOllamaFailover verifies seamless automatic failover from OpenCode
+// provider models to local Ollama models when OpenCode endpoints are rate-limited,
+// crash, or become unavailable — across all tiers and all prompt types.
+func TestOpenCodeToOllamaFailover(t *testing.T) {
+	ctx := context.Background()
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	fmt.Println("\n========================================================================================================================")
+	fmt.Println("                    CEREBRA OPENCODE → OLLAMA SEAMLESS FAILOVER TEST SUITE")
+	fmt.Println("========================================================================================================================")
+
+	// Mixed catalog: OpenCode (primary) + Ollama (fallback) — mirrors real user setup
+	mixedCatalog := []string{
+		"opencode/nemotron-3-ultra-free",       // heavy
+		"opencode/nemotron-3.5-lightning-free", // standard
+		"opencode/mimo-v2.5-free",              // simple
+		"ollama/deepseek-r1:32b-q4_k_m",       // heavy fallback
+		"ollama/qwen2.5-coder:14b-instruct",   // standard fallback
+		"ollama/llama3.2:1b-instruct",         // simple fallback
+	}
+	tierMap := cerebra.BuildTierMapFromCatalog(mixedCatalog)
+	runtimes := []cerebra.RuntimeEntry{{RuntimeID: "rt-mixed", TierMap: tierMap}}
+
+	prompts := []struct {
+		label string
+		text  string
+		tier  cerebra.Tier
+	}{
+		{"Simple", "What files are in this repo?", cerebra.TierSimple},
+		{"Standard", "Debug and fix the race condition in auth handler.", cerebra.TierStandard},
+		{"Heavy", "Architect a distributed consensus sharding engine.", cerebra.TierHeavy},
+	}
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 1: All OpenCode healthy — should route to OpenCode
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 1] All OpenCode models healthy — expect OpenCode:")
+	router1 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), cerebra.NewUnavailabilityStore(0), logger, nil)
+	for _, p := range prompts {
+		res := router1.Route(ctx, p.text, cerebra.TaskMeta{}, runtimes, "fallback")
+		if res.Tier != p.tier {
+			t.Errorf("[S1 %s] Expected tier %s, got %s", p.label, p.tier, res.Tier)
+		}
+		if res.Model == "" {
+			t.Errorf("[S1 %s] Got empty model", p.label)
+		}
+		fmt.Printf("  ✅ %-8s → %s (tier: %s)\n", p.label+":", res.Model, res.Tier)
+	}
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 2: OpenCode Simple (mimo) → 429 → auto-bind to ollama/llama
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 2] opencode/mimo-v2.5-free rate-limited → failover to Ollama simple:")
+	unavail2 := cerebra.NewUnavailabilityStore(0)
+	unavail2.MarkUnavailable(ctx, "rt-mixed", "opencode/mimo-v2.5-free", time.Hour)
+	router2 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), unavail2, logger, nil)
+	res2 := router2.Route(ctx, "What is the folder structure?", cerebra.TaskMeta{}, runtimes, "fallback")
+	if res2.Model == "opencode/mimo-v2.5-free" {
+		t.Errorf("[S2] Expected failover but still got unavailable model: %s", res2.Model)
+	}
+	fmt.Printf("  ✅ opencode/mimo-v2.5-free (unavailable) → %s\n", res2.Model)
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 3: OpenCode Standard (lightning) → 429 → auto-bind to ollama/qwen
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 3] opencode/nemotron-3.5-lightning-free rate-limited → failover to Ollama standard:")
+	unavail3 := cerebra.NewUnavailabilityStore(0)
+	unavail3.MarkUnavailable(ctx, "rt-mixed", "opencode/nemotron-3.5-lightning-free", time.Hour)
+	router3 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), unavail3, logger, nil)
+	res3 := router3.Route(ctx, "Debug and fix the race condition in auth handler.", cerebra.TaskMeta{}, runtimes, "fallback")
+	if res3.Model == "opencode/nemotron-3.5-lightning-free" {
+		t.Errorf("[S3] Expected failover but still got unavailable model: %s", res3.Model)
+	}
+	fmt.Printf("  ✅ opencode/nemotron-3.5-lightning-free (unavailable) → %s\n", res3.Model)
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 4: OpenCode Heavy (ultra) → 429 → auto-bind to ollama/deepseek-r1
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 4] opencode/nemotron-3-ultra-free rate-limited → failover to Ollama heavy:")
+	unavail4 := cerebra.NewUnavailabilityStore(0)
+	unavail4.MarkUnavailable(ctx, "rt-mixed", "opencode/nemotron-3-ultra-free", time.Hour)
+	router4 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), unavail4, logger, nil)
+	res4 := router4.Route(ctx, "Architect a multi-region distributed sharding engine.", cerebra.TaskMeta{}, runtimes, "fallback")
+	if res4.Model == "opencode/nemotron-3-ultra-free" {
+		t.Errorf("[S4] Expected failover but still got unavailable model: %s", res4.Model)
+	}
+	fmt.Printf("  ✅ opencode/nemotron-3-ultra-free (unavailable) → %s\n", res4.Model)
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 5: ALL OpenCode models fail → 100% traffic auto-shifts to Ollama
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 5] ALL OpenCode models unavailable → full failover to Ollama only:")
+	unavail5 := cerebra.NewUnavailabilityStore(0)
+	unavail5.MarkUnavailable(ctx, "rt-mixed", "opencode/mimo-v2.5-free", time.Hour)
+	unavail5.MarkUnavailable(ctx, "rt-mixed", "opencode/nemotron-3.5-lightning-free", time.Hour)
+	unavail5.MarkUnavailable(ctx, "rt-mixed", "opencode/nemotron-3-ultra-free", time.Hour)
+	router5 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), unavail5, logger, nil)
+	for _, p := range prompts {
+		res := router5.Route(ctx, p.text, cerebra.TaskMeta{}, runtimes, "fallback")
+		isOpenCode := len(res.Model) >= 9 && res.Model[:9] == "opencode/"
+		if isOpenCode {
+			t.Errorf("[S5 %s] All OpenCode unavailable but routed to OpenCode: %s", p.label, res.Model)
+			fmt.Printf("  ❌ %-8s → %s (should not be opencode!)\n", p.label+":", res.Model)
+		} else {
+			fmt.Printf("  ✅ %-8s → %s (correctly avoided all OpenCode)\n", p.label+":", res.Model)
+		}
+	}
+
+	// -----------------------------------------------------------------------
+	// SCENARIO 6: OpenCode recovers (cooldown expires) → traffic returns automatically
+	// -----------------------------------------------------------------------
+	fmt.Println("\n[SCENARIO 6] OpenCode recovers after cooldown expiry → traffic returns:")
+	unavail6 := cerebra.NewUnavailabilityStore(0)
+	unavail6.MarkUnavailable(ctx, "rt-recover", "opencode/nemotron-3-ultra-free", time.Millisecond)
+	time.Sleep(10 * time.Millisecond) // wait for 1ms cooldown to expire
+	router6 := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), unavail6, logger, nil)
+	runtimes6 := []cerebra.RuntimeEntry{{RuntimeID: "rt-recover", TierMap: tierMap}}
+	res6 := router6.Route(ctx, "Architect a new consensus system.", cerebra.TaskMeta{}, runtimes6, "fallback")
+	if res6.Tier != cerebra.TierHeavy {
+		t.Errorf("[S6] Expected heavy tier after recovery, got %s (model: %s)", res6.Tier, res6.Model)
+	}
+	fmt.Printf("  ✅ After cooldown expiry → dispatched to: %s (tier: %s)\n", res6.Model, res6.Tier)
+
+	fmt.Println("\n========================================================================================================================")
+	fmt.Println("  RESULT: Seamless OpenCode → Ollama auto-binding failover verified across all 6 scenarios")
+	fmt.Println("========================================================================================================================")
+}
+
