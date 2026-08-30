@@ -259,6 +259,8 @@
       "close_tab": "アクティブなタブを閉じる",
       "select_tab_1_to_8": "1〜8番目のタブを選択",
       "select_last_tab": "最後のタブを選択",
+      "previous_tab": "前のタブ",
+      "next_tab": "次のタブ",
       "zoom_in": "拡大",
       "zoom_out": "縮小",
       "reset_zoom": "ズームをリセット",

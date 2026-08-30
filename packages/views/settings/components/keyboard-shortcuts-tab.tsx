@@ -18,6 +18,8 @@ import { cn } from "@multica/ui/lib/utils";
 import {
   findShortcutConflict,
   createShortcutChord,
+  getShortcutPlatform,
+  getShortcutRuntime,
   isReservedShortcut,
   isShortcutAllowedForAction,
   isPlainShortcut,
@@ -73,6 +75,9 @@ export function KeyboardShortcutsTab() {
   }, [query, t]);
 
   const groups: readonly ShortcutCategory[] = ["general", "navigation"];
+  const tabCyclingShortcuts = getShortcutRuntime() === "desktop";
+  const macos = getShortcutPlatform() === "macos";
+  const controlTabModifiers = macos ? { control: true } : { primary: true };
 
   const capture = (actionId: ShortcutActionId, event: React.KeyboardEvent) => {
     event.preventDefault();
@@ -199,6 +204,23 @@ export function KeyboardShortcutsTab() {
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.close_tab)} shortcut={createShortcutChord("W", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_tab_1_to_8)} shortcut={createShortcutChord("1–8", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.select_last_tab)} shortcut={createShortcutChord("9", { primary: true })} />
+          {tabCyclingShortcuts ? (
+            <>
+              <FixedShortcutRow
+                label={t(($) => $.shortcuts.fixed.previous_tab)}
+                shortcut={createShortcutChord("Tab", {
+                  ...controlTabModifiers,
+                  shift: true,
+                })}
+                alias={macos ? createShortcutChord("[", { primary: true, shift: true }) : undefined}
+              />
+              <FixedShortcutRow
+                label={t(($) => $.shortcuts.fixed.next_tab)}
+                shortcut={createShortcutChord("Tab", controlTabModifiers)}
+                alias={macos ? createShortcutChord("]", { primary: true, shift: true }) : undefined}
+              />
+            </>
+          ) : null}
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_in)} shortcut={createShortcutChord("Plus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.zoom_out)} shortcut={createShortcutChord("Minus", { primary: true })} />
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.reset_zoom)} shortcut={createShortcutChord("0", { primary: true })} />
@@ -357,10 +379,22 @@ function ShortcutRow({
   );
 }
 
-function FixedShortcutRow({ label, shortcut }: { label: string; shortcut: ShortcutChord }) {
+function FixedShortcutRow({
+  label,
+  shortcut,
+  alias,
+}: {
+  label: string;
+  shortcut: ShortcutChord;
+  alias?: ShortcutChord;
+}) {
   return (
     <SettingsRow label={label}>
-      <ShortcutKeycaps shortcut={shortcut} size="md" className="justify-end" />
+      <div className="flex items-center justify-end gap-2">
+        <ShortcutKeycaps shortcut={shortcut} size="md" />
+        {alias ? <span aria-hidden="true">/</span> : null}
+        {alias ? <ShortcutKeycaps shortcut={alias} size="md" /> : null}
+      </div>
     </SettingsRow>
   );
 }

@@ -196,6 +196,8 @@ interface TabStore {
    * path that "jumps" to a tab belonging to a non-active workspace.
    */
   setActiveTab: (tabId: string) => void;
+  /** Cycle through the active workspace's tabs in visual order. */
+  cycleActiveTab: (direction: -1 | 1) => void;
   /** Patch display metadata of a tab (title-sync). Finds across groups. */
   updateTab: (tabId: string, patch: Partial<Pick<TabSession, "title">>) => void;
   /**
@@ -690,6 +692,29 @@ export const useTabStore = create<TabStore>()(
           byWorkspace: {
             ...byWorkspace,
             [slug]: reconcileGroup(group, group.tabs, tabId),
+          },
+        });
+      },
+
+      cycleActiveTab(direction) {
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group || group.tabs.length < 2) return;
+        const activeIndex = group.tabs.findIndex(
+          (tab) => tab.id === group.activeTabId,
+        );
+        if (activeIndex < 0) return;
+        const nextIndex =
+          (activeIndex + direction + group.tabs.length) % group.tabs.length;
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [activeWorkspaceSlug]: reconcileGroup(
+              group,
+              group.tabs,
+              group.tabs[nextIndex].id,
+            ),
           },
         });
       },

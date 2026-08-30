@@ -259,6 +259,8 @@
       "close_tab": "关闭当前标签页",
       "select_tab_1_to_8": "选择第 1–8 个标签页",
       "select_last_tab": "选择最后一个标签页",
+      "previous_tab": "上一个标签页",
+      "next_tab": "下一个标签页",
       "zoom_in": "放大",
       "zoom_out": "缩小",
       "reset_zoom": "重置缩放",
