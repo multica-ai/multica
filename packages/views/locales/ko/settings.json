@@ -686,7 +686,7 @@
   },
   "delete_workspace_dialog": {
     "title": "워크스페이스 삭제",
-    "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 데이터가 영구 삭제됩니다.",
+    "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 채팅, 실행 기록이 영구 삭제됩니다.",
     "type_to_confirm_prefix": "확인하려면 아래에",
     "type_to_confirm_suffix": "을(를) 입력하세요.",
     "cancel": "취소",
