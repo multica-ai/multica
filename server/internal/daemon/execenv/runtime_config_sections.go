@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -391,16 +392,42 @@ func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments (MUL-2904); never use `--content-stdin` HEREDOCs alongside other flags (#4182). Write the file inside your working directory, never `/tmp` or shared paths (MUL-4252). Keep the same `--parent` value from the trigger comment when replying; delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 }
 
-// writeRepositories emits the Repositories section when at least one repo
-// is configured. The closing paragraph from the legacy version is dropped
-// (it re-stated the opening); intro is tightened into one line.
+// writeRepositories emits workspace repos that are not already represented by
+// a richer github_repo entry in Project Context. The claim deliberately lifts
+// project github_repo resources into ctx.Repos for checkout authorization and
+// caching, but rendering both lists repeated the same URL in the brief. This is
+// a presentation-only filter: ctx.Repos remains unchanged for runtime behavior
+// (issue #7773).
 func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
-	if len(ctx.Repos) == 0 {
+	projectRepoURLs := make(map[string]struct{})
+	for _, resource := range ctx.ProjectResources {
+		if resource.ResourceType != "github_repo" {
+			continue
+		}
+		var ref struct {
+			URL string `json:"url"`
+		}
+		if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+			continue
+		}
+		if url := strings.TrimSpace(ref.URL); url != "" {
+			projectRepoURLs[url] = struct{}{}
+		}
+	}
+
+	repos := make([]RepoContextForEnv, 0, len(ctx.Repos))
+	for _, repo := range ctx.Repos {
+		if _, duplicatedByProjectContext := projectRepoURLs[strings.TrimSpace(repo.URL)]; duplicatedByProjectContext {
+			continue
+		}
+		repos = append(repos, repo)
+	}
+	if len(repos) == 0 {
 		return
 	}
 	b.WriteString("## Repositories\n\n")
 	b.WriteString("Available in this workspace — `multica repo checkout <url> [--ref <branch-or-sha>]` to fetch (creates a repository checkout on a dedicated branch).\n\n")
-	for _, repo := range ctx.Repos {
+	for _, repo := range repos {
 		if repo.Description != "" {
 			fmt.Fprintf(b, "- %s — %s\n", repo.URL, repo.Description)
 		} else {
