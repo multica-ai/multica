@@ -373,6 +373,15 @@ func (d *sharedDedupe) Release(_ context.Context, key string) {
 	delete(d.held, key)
 }
 
+func (d *sharedDedupe) Held(_ context.Context, key string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.fail {
+		return false, errors.New("dedupe unavailable")
+	}
+	return d.held[key], nil
+}
+
 // relayReplica is one backend process wired for cross-replica routing.
 type relayReplica struct {
 	*replica
@@ -382,6 +391,11 @@ type relayReplica struct {
 }
 
 func newRelayReplica(t *testing.T, pool *pgxpool.Pool, instID string, holdsSocket bool, relay *fanoutRelay, dedupe DedupeStore) *relayReplica {
+	return newRelayReplicaWith(t, pool, instID, holdsSocket, relay, dedupe, RelayConfig{})
+}
+
+// newRelayReplicaWith is the same, with the dispatcher sized by the caller.
+func newRelayReplicaWith(t *testing.T, pool *pgxpool.Pool, instID string, holdsSocket bool, relay *fanoutRelay, dedupe DedupeStore, cfg RelayConfig) *relayReplica {
 	t.Helper()
 	base := &replica{bus: events.New(), logs: &strings.Builder{}, mx: newCountingMetrics()}
 	reg := newSendersRegistry()
@@ -398,7 +412,7 @@ func newRelayReplica(t *testing.T, pool *pgxpool.Pool, instID string, holdsSocke
 	// Registered and started BEFORE the subscriber exists, which is the real
 	// boot order: the relay's readers open on a replay window and anything
 	// registered after them misses it.
-	router := NewRelayOutbound(relay, dedupe, 0, log)
+	router := NewRelayOutbound(relay, dedupe, cfg, log)
 	router.SetMetrics(base.mx)
 	relay.register(router)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -498,7 +512,7 @@ func TestRelay_DispatchNeverBlocksTheShardReader(t *testing.T) {
 	instID := mustTestUUID(t)
 	reg.set(instID, newWSSender(silent, nil))
 
-	router := NewRelayOutbound(nil, nil, 0, slog.Default())
+	router := NewRelayOutbound(nil, nil, RelayConfig{}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() { cancel(); router.Wait() }()
 	router.Start(ctx)
@@ -517,18 +531,51 @@ func TestRelay_DispatchNeverBlocksTheShardReader(t *testing.T) {
 
 // TestRelay_ShedsRatherThanStalls — when a bot's queue is full the frame is
 // dropped and counted, because the alternative is stalling the shard.
+//
+// Asserted at the BOUNDARY rather than approximately: QueueDepth frames are
+// accepted and the next one is not, so the configured depth is the depth.
 func TestRelay_ShedsRatherThanStalls(t *testing.T) {
 	t.Parallel()
 	mx := newCountingMetrics()
-	router := NewRelayOutbound(nil, nil, 0, slog.Default())
+	const depth = 4
+	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
 	router.SetMetrics(mx)
 	// Never Start and never Attach: nothing drains, so the queue fills.
 	body, _ := json.Marshal(relayFrame{Kind: relayKindReply, InstallationID: "inst-1"})
-	for i := 0; i < relayQueueDepth+10; i++ {
+	for i := 0; i < depth; i++ {
 		router.DeliverWecomOutbound("inst-1", body, "ev")
 	}
-	if got := mx.get("outbound_dropped:relay_overflow"); got == 0 {
-		t.Fatal("a full queue silently swallowed frames")
+	if got := mx.get("outbound_dropped:relay_overflow"); got != 0 {
+		t.Fatalf("shed %d frames while the queue still had room for them", got)
+	}
+	router.DeliverWecomOutbound("inst-1", body, "ev")
+	if got := mx.get("outbound_dropped:relay_overflow"); got != 1 {
+		t.Fatalf("outbound_dropped:relay_overflow = %d, want 1 — the frame past the depth must be shed and counted", got)
+	}
+	if got := mx.get("relay_shed:reply"); got != 1 {
+		t.Fatalf("relay_shed:reply = %d, want 1 — the admission decision has its own unit", got)
+	}
+}
+
+// The same queue, an inbox notification instead of a reply. It must be shed the
+// same way and counted in a DIFFERENT place: outbound_dropped counts agent
+// replies, and an inbox push filed there makes the delivered/dropped ratio
+// track which replica held a socket rather than what happened to anyone.
+func TestRelay_AnInboxPushShedDoesNotMoveTheReplyCounters(t *testing.T) {
+	t.Parallel()
+	mx := newCountingMetrics()
+	const depth = 2
+	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
+	router.SetMetrics(mx)
+	body, _ := json.Marshal(relayFrame{Kind: relayKindInbox, InstallationID: "inst-1"})
+	for i := 0; i < depth+3; i++ {
+		router.DeliverWecomOutbound("inst-1", body, "ev")
+	}
+	if got := mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("outbound_dropped = %d, want 0 — an inbox push is not an agent reply", got)
+	}
+	if got := mx.get("relay_shed:inbox"); got != 3 {
+		t.Fatalf("relay_shed:inbox = %d, want 3 — the sheds must still be visible somewhere", got)
 	}
 }
 
@@ -587,7 +634,7 @@ func TestRelay_NonHolderNeverCompetesForTheClaim(t *testing.T) {
 
 	// Only a non-holder is registered: empty registry.
 	reg := newSendersRegistry()
-	router := NewRelayOutbound(relay, dedupe, 0, slog.Default())
+	router := NewRelayOutbound(relay, dedupe, RelayConfig{}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
@@ -611,7 +658,7 @@ func TestRelay_NonHolderNeverCompetesForTheClaim(t *testing.T) {
 	conn := &recordingConn{}
 	holderReg := newSendersRegistry()
 	holderReg.set(instID, conn.autoAck(newWSSender(conn, nil)))
-	holderRouter := NewRelayOutbound(relay, dedupe, 0, slog.Default())
+	holderRouter := NewRelayOutbound(relay, dedupe, RelayConfig{}, slog.Default())
 	hctx, hcancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { hcancel(); holderRouter.Wait() })
 	holderRouter.Start(hctx)
@@ -644,7 +691,7 @@ func TestRelay_AttemptedWriteKeepsTheClaim(t *testing.T) {
 	instID := mustTestUUID(t)
 	reg := newSendersRegistry()
 	reg.set(instID, newWSSender(writeFailConn{}, nil))
-	router := NewRelayOutbound(relay, dedupe, 0, slog.Default())
+	router := NewRelayOutbound(relay, dedupe, RelayConfig{}, slog.Default())
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
@@ -728,7 +775,7 @@ func TestRelay_LeaseMoveMidFlightIsRescuedByRetry(t *testing.T) {
 	// Replica A: passes ownsSocket, then finds the sender gone at delivery —
 	// a handler whose ownership answer and whose delivery disagree, which is
 	// exactly what a lease moving between the two moments looks like.
-	aRouter := NewRelayOutbound(relay, dedupe, 0, slog.Default())
+	aRouter := NewRelayOutbound(relay, dedupe, RelayConfig{}, slog.Default())
 	actx, acancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { acancel(); aRouter.Wait() })
 	aRouter.Start(actx)
@@ -738,7 +785,7 @@ func TestRelay_LeaseMoveMidFlightIsRescuedByRetry(t *testing.T) {
 	conn := &recordingConn{}
 	bReg := newSendersRegistry()
 	bReg.set(instID, conn.autoAck(newWSSender(conn, nil)))
-	bRouter := NewRelayOutbound(relay, dedupe, 0, slog.Default())
+	bRouter := NewRelayOutbound(relay, dedupe, RelayConfig{}, slog.Default())
 	bctx, bcancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { bcancel(); bRouter.Wait() })
 	bRouter.Start(bctx)
@@ -858,7 +905,7 @@ func TestDrainDeliversOnlyWhileSocketsLive(t *testing.T) {
 		reg := newSendersRegistry()
 		sender := conn.autoAck(newWSSender(conn, nil))
 		reg.set(instID, sender)
-		router := NewRelayOutbound(nil, nil, 0, slog.Default())
+		router := NewRelayOutbound(nil, nil, RelayConfig{}, slog.Default())
 		ctx, cancel := context.WithCancel(context.Background())
 		router.Attach(&Outbound{senders: reg, logger: slog.Default()})
 

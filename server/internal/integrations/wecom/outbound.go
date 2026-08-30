@@ -427,7 +427,17 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 				"installation_id", uuidStringPub(binding.InstallationID))
 			return true
 		}
-		o.dropped(ctx, events.Event{Type: protocol.EventInboxNew}, dropNoConnection, nil)
+		// Logged, not counted on the reply counters. Their documented unit is
+		// AGENT REPLIES, and an inbox notification recorded there would show up
+		// as a reply this adapter owed somebody and failed to deliver — the
+		// same unit error the relayed-inbox path in deliverRelayed already
+		// avoids, and the reason the delivered/dropped ratio can be read as an
+		// outcome at all. The member still receives this in the in-app inbox,
+		// which is what makes a missed bot push a degradation rather than a
+		// loss.
+		o.logger.WarnContext(ctx, "wecom outbound: inbox push not delivered and not routable",
+			"installation_id", uuidStringPub(binding.InstallationID),
+			"recipient_id", recipientIDStr)
 		return false // supervisor down or reconnecting — no live connection
 	}
 	if err := sender.sendTextCtx(ctx, binding.ChannelUserID, chatTypeSingleInt, content); err != nil {

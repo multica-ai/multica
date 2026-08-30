@@ -460,9 +460,22 @@ func main() {
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			}
 			if wecomRelay != nil {
+				// LeaseSettle comes from the supervisor's own knob rather than
+				// from a constant here: the re-offer chain exists to outlast a
+				// lease move, and how long that takes is the supervisor's poll
+				// interval, which a deployment can tune.
+				leaseSettle, err := channelLeasePollInterval()
+				if err != nil {
+					slog.Warn("wecom relay: unreadable lease poll interval, using the dispatcher default",
+						"error", err)
+					leaseSettle = 0
+				}
 				wecomRelayOutbound = wecom.NewRelayOutbound(wecomRelay,
 					wecom.NewRedisDedupe(relayWriteRedis, slog.Default()),
-					relayConfig.ReplayGrace, slog.Default())
+					wecom.RelayConfig{
+						ReplayGrace: relayConfig.ReplayGrace,
+						LeaseSettle: leaseSettle,
+					}, slog.Default())
 				wecomRelay.SetWecomOutboundDeliverer(wecomRelayOutbound)
 				wecomRelayOutbound.Start(relayCtx)
 			}
@@ -763,73 +776,78 @@ func main() {
 	signal.Stop(quit)
 
 	slog.Info("shutting down server")
-	autopilotCancel()
 
-	// Order matters: drain in-flight HTTP first so any heartbeat handlers
-	// finish calling Schedule() before we stop the scheduler. Otherwise a
-	// late heartbeat could enqueue a pending ID after Run has already
-	// drained and exited, and Stop() would not flush it.
-	apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	if err := srv.Shutdown(apiShutdownCtx); err != nil {
-		apiShutdownCancel()
-		slog.Error("server forced to shutdown", "error", err)
-		os.Exit(1)
-	}
-	apiShutdownCancel()
-
-	// HTTP is fully drained — safe to stop the sweeper and flush the
-	// final batch of queued heartbeat bumps.
-	sweepCancel()
-	heartbeatScheduler.Stop()
-	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
-		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
-	}
-	if h.TelegramOutbound != nil && !h.TelegramOutbound.WaitWithTimeout(5*time.Second) {
-		slog.Warn("telegram outbound workers did not exit within shutdown timeout")
-	}
-
-	// Join the channel supervisor's per-installation goroutines so the
-	// lease renewer can issue a final release before process exit;
-	// otherwise the next replica would have to wait the full LeaseTTL
-	// before picking up the installation on the other side of the
-	// redeploy. The wait is bounded — if a supervisor is wedged (DB
-	// pool stalled, a connector ignoring ctx, etc.) the fallback is the
-	// natural LeaseTTL expiry on the other side, which is strictly better
-	// than holding shutdown open forever. Then drain the Feishu runtime:
-	// the supervisors have stopped delivering inbound events, so flush the
-	// debounced run triggers and join any in-flight outbound replies
-	// (each bounded by ReplyTimeout) so a binding card / offline notice is
-	// not lost on shutdown.
-	// Relay first, supervisor second: the dispatcher's graceful drain can only
-	// deliver while the supervised connections are still live.
-	stopRelay()
-
-	if h.ChannelSupervisor != nil {
-		if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
-			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
-				"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
-			)
-		}
-		if h.ChannelRouter != nil {
+	// The order below is the contract, and shutdown.go is where it is stated
+	// and pinned. The one that is not self-evident: the WeCom dispatcher must
+	// be drained BEFORE sweepCancel, not merely before the supervisor is
+	// joined — cancelling the sweeper context is already what makes every
+	// supervised connection clear its sender, and a drain past that point
+	// finds no socket to deliver over.
+	shutdownSequence{
+		StopAutopilot: autopilotCancel,
+		DrainHTTP: func() {
+			apiShutdownCtx, apiShutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := srv.Shutdown(apiShutdownCtx); err != nil {
+				apiShutdownCancel()
+				slog.Error("server forced to shutdown", "error", err)
+				os.Exit(1)
+			}
+			apiShutdownCancel()
+		},
+		StopOutboundRelay: stopRelay,
+		CancelWorkers:     sweepCancel,
+		StopHeartbeats:    heartbeatScheduler.Stop,
+		JoinWebhookWorker: func() {
+			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
+				slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+			}
+		},
+		JoinTelegram: func() {
+			if h.TelegramOutbound != nil && !h.TelegramOutbound.WaitWithTimeout(5*time.Second) {
+				slog.Warn("telegram outbound workers did not exit within shutdown timeout")
+			}
+		},
+		// Joined so the lease renewer can issue a final release before exit;
+		// otherwise the next replica waits out the whole LeaseTTL on the far
+		// side of a redeploy. Bounded: a wedged supervisor falls back to the
+		// natural expiry rather than holding shutdown open.
+		JoinChannelSupervisor: func() {
+			if h.ChannelSupervisor == nil {
+				return
+			}
+			if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
+				slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
+					"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
+				)
+			}
+		},
+		DrainChannelRouter: func() {
+			if h.ChannelSupervisor == nil || h.ChannelRouter == nil {
+				return
+			}
 			drainCtx, drainCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if !h.ChannelRouter.Drain(drainCtx) {
 				slog.Warn("channel router: drain deadline reached; deferred media fallback remains durable")
 			}
 			drainCancel()
-		}
-	}
-
-	if metricsServer != nil {
-		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := metricsServer.Shutdown(metricsShutdownCtx); err != nil {
-			slog.Error("metrics server forced to shutdown", "error", err)
-		}
-		metricsShutdownCancel()
-	}
-	profilingShutdownCtx, profilingShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	if err := profilingServer.Shutdown(profilingShutdownCtx); err != nil {
-		slog.Error("pprof server forced to shutdown", "error", err)
-	}
-	profilingShutdownCancel()
+		},
+		StopMetricsServer: func() {
+			if metricsServer == nil {
+				return
+			}
+			metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if err := metricsServer.Shutdown(metricsShutdownCtx); err != nil {
+				slog.Error("metrics server forced to shutdown", "error", err)
+			}
+			metricsShutdownCancel()
+		},
+		StopProfiling: func() {
+			profilingShutdownCtx, profilingShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if err := profilingServer.Shutdown(profilingShutdownCtx); err != nil {
+				slog.Error("pprof server forced to shutdown", "error", err)
+			}
+			profilingShutdownCancel()
+		},
+	}.run()
 	slog.Info("server stopped")
 }

@@ -40,8 +40,17 @@ package wecom
 //     Frames that arrive in between wait in the queue rather than being
 //     dropped against a nil field.
 //
-// ORDERING: queues are sharded by installation, so two replies to the same bot
-// keep their order while unrelated bots cannot block each other.
+// ORDERING: every reply for one installation is carried by one queue and one
+// worker, in the order it arrived — INCLUDING across a re-offer. A frame that
+// has to be tried again does not go to the back of the queue; it parks at the
+// head of its own installation's line and everything behind it waits, because
+// two answers to the same person arriving in the wrong order is the defect
+// this ordering exists to prevent.
+//
+// Sharding is a CONCURRENCY bound, not an isolation guarantee: installations
+// are hashed onto RelayConfig.Shards queues, so two bots that collide on a
+// shard do wait behind each other. What the shard count buys is that one slow
+// bot cannot occupy every worker.
 
 import (
 	"context"
@@ -56,6 +65,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -76,6 +86,10 @@ type DedupeStore interface {
 	Claim(ctx context.Context, key string, ttl time.Duration) (bool, error)
 	// Release gives a claim back, for a delivery that provably did not happen.
 	Release(ctx context.Context, key string)
+	// Held reports whether key is claimed right now. It is how the publisher
+	// learns, after the fact, whether ANY replica took a delivery it routed —
+	// see RelayOutbound.watchOutcomes.
+	Held(ctx context.Context, key string) (bool, error)
 }
 
 // minDedupeTTL floors the claim lifetime. The invariant the claim upholds is
@@ -96,20 +110,123 @@ func dedupeTTLFor(replayGrace time.Duration) time.Duration {
 	return minDedupeTTL
 }
 
-// relayShards is how many independent queues carry frames. Per-installation
-// ordering comes from hashing onto one of them; the count bounds how many
-// unhealthy bots it takes to occupy every worker.
-const relayShards = 8
+// RelayConfig sizes the dispatcher. None of these is a taste: each one has an
+// operational bound behind it, named in its comment, and the two whose bound
+// lives OUTSIDE this package are passed in rather than guessed — the relay's
+// replay window and the supervisor's lease poll interval.
+//
+// A zero field takes its documented default.
+type RelayConfig struct {
+	// Shards is how many independent queues carry frames, and it is a
+	// concurrency bound rather than an ordering one: ordering comes from the
+	// hash putting one installation on one queue, and installations that
+	// collide on a shard DO wait behind each other. The number to size against
+	// is therefore how many bots may be slow at once before a healthy one
+	// queues behind them. Eight covers a deployment's worth of bots against
+	// the one thing that makes a delivery slow — ackTimeout, 5s — while
+	// keeping eight idle goroutines rather than one per installation.
+	Shards int
 
-// relayQueueDepth is per shard. Deep enough to absorb a replay burst, shallow
-// enough that a wedged bot sheds rather than hoards memory.
-const relayQueueDepth = 256
+	// QueueDepth is per shard, and the burst it must absorb is a restart's
+	// replay: the shard reader opens at (now - ReplayGrace) and hands over
+	// everything published in that window at once. 256 per shard is 2048
+	// frames in flight across the default eight — more than a replay window
+	// of WeCom answers can hold for one deployment, and small enough that a
+	// wedged bot sheds instead of growing the heap without bound.
+	QueueDepth int
 
-// relayDrainBudget bounds the WHOLE post-shutdown drain, not one delivery.
-// Without it a full shard could extend shutdown by queue-depth sequential
-// ack waits; with it, whatever is not delivered inside the budget is left to
-// the claim TTL and the next replica's replay window.
-const relayDrainBudget = 10 * time.Second
+	// DrainBudget bounds the WHOLE post-shutdown drain, not one delivery.
+	// Its bound is external: the drain runs inside the process's own
+	// shutdown, so it must fit under the channel supervisor's ShutdownTimeout
+	// (engine.Config, 15s by default) with room for the supervisor's own
+	// join. Ten seconds is that fit; whatever misses it is left to the claim
+	// TTL and the next replica's replay window.
+	DrainBudget time.Duration
+
+	// ReplayGrace is the relay's configured startup lookback. It sizes the
+	// claim TTL (dedupeTTLFor) and it is an operator knob
+	// (REALTIME_RELAY_REPLAY_GRACE), which is exactly why it is a parameter.
+	ReplayGrace time.Duration
+
+	// LeaseSettle is how long a WebSocket lease takes to finish moving to
+	// another replica, and it sizes the retry chain. Its bound is the channel
+	// supervisor's PollInterval (CHANNEL_WS_LEASE_POLL_INTERVAL, 30s by
+	// default): a replica learns it should hold an installation on its next
+	// sweep, so a frame that arrives mid-move has to be re-offered for at
+	// least that long or it is given up on while the holder is still on its
+	// way. The previous fixed five attempts at 200ms covered three seconds —
+	// a tenth of one poll — and expired long before the move it existed for.
+	LeaseSettle time.Duration
+
+	// RetryBackoff is the FIRST wait between re-offers; the chain doubles from
+	// there, capped at a quarter of LeaseSettle so a lease that lands early is
+	// not sat out. Small on purpose: the common reason a re-offer succeeds is
+	// that the move has already finished.
+	RetryBackoff time.Duration
+}
+
+const (
+	defaultRelayShards      = 8
+	defaultRelayQueueDepth  = 256
+	defaultRelayDrainBudget = 10 * time.Second
+	// defaultRelayLeaseSettle is the supervisor's own default poll interval,
+	// referenced rather than repeated: it is the same quantity, and a copy
+	// here would be free to drift from the thing it is meant to outlast.
+	defaultRelayLeaseSettle  = engine.DefaultPollInterval
+	defaultRelayRetryBackoff = 200 * time.Millisecond
+)
+
+// withDefaults fills the zero fields and returns the completed config.
+func (c RelayConfig) withDefaults() RelayConfig {
+	if c.Shards <= 0 {
+		c.Shards = defaultRelayShards
+	}
+	if c.QueueDepth <= 0 {
+		c.QueueDepth = defaultRelayQueueDepth
+	}
+	if c.DrainBudget <= 0 {
+		c.DrainBudget = defaultRelayDrainBudget
+	}
+	if c.LeaseSettle <= 0 {
+		c.LeaseSettle = defaultRelayLeaseSettle
+	}
+	if c.RetryBackoff <= 0 {
+		c.RetryBackoff = defaultRelayRetryBackoff
+	}
+	return c
+}
+
+// retryPlan is the re-offer chain, computed once from the settle window rather
+// than written down: delays double from RetryBackoff, each capped at a quarter
+// of LeaseSettle, and the chain is long enough that its TOTAL covers one and a
+// half settle windows — the move itself, plus half of one for the reconnect
+// and subscribe that follow it.
+//
+// Bounded twice over so a pathological config cannot produce an unbounded
+// chain: at most relayRetryChainCap entries.
+const relayRetryChainCap = 24
+
+func (c RelayConfig) retryPlan() []time.Duration {
+	target := c.LeaseSettle + c.LeaseSettle/2
+	cap := c.LeaseSettle / 4
+	if cap < c.RetryBackoff {
+		cap = c.RetryBackoff
+	}
+	var (
+		plan  []time.Duration
+		total time.Duration
+		delay = c.RetryBackoff
+	)
+	for total < target && len(plan) < relayRetryChainCap {
+		if delay > cap {
+			delay = cap
+		}
+		plan = append(plan, delay)
+		total += delay
+		delay *= 2
+	}
+	return plan
+}
 
 // relayFrame is one delivery in transit between replicas. It carries
 // identifiers rather than rendered payloads for anything the lease holder can
@@ -215,11 +332,15 @@ type queued struct {
 // "release so the holder can take it" strands the reply whenever the holder
 // already processed its copy — it lost the claim race, returned, and nothing
 // will ever wake it again. The party that released is therefore the party
-// that re-enqueues, bounded and backed off, until the lease settles.
-const (
-	relayMaxAttempts  = 5
-	relayRetryBackoff = 200 * time.Millisecond
-)
+// that re-offers it, on RelayConfig.retryPlan, until the lease settles.
+
+// hold is one installation's line while its head is waiting out a re-offer.
+// items[0] is the frame being retried; everything after it arrived later and
+// must not overtake it. Owned by exactly one worker goroutine, so unlocked.
+type hold struct {
+	items   []queued
+	readyAt time.Time
+}
 
 // RelayOutbound publishes a delivery to the replica holding the bot's socket,
 // and performs the ones other replicas publish. One per process.
@@ -227,8 +348,15 @@ type RelayOutbound struct {
 	publisher relayPublisher
 	dedupe    DedupeStore
 	dedupeTTL time.Duration
+	cfg       RelayConfig
+	retryPlan []time.Duration
 	logger    *slog.Logger
 	seen      *seenEvents
+
+	// verify carries a routed reply's id to the outcome watcher — the one
+	// owner of "did anybody end up delivering this". Buffered and shed rather
+	// than blocking: the publisher is on a bus subscriber's goroutine.
+	verify chan pendingOutcome
 
 	// metrics arrives after construction: this object is built before the
 	// metrics registry exists, because the relay's shard readers start before
@@ -247,21 +375,25 @@ type RelayOutbound struct {
 // configured startup replay window, which sizes the claim TTL (dedupeTTLFor).
 // Call Attach with the subscriber and Start with the process context;
 // registering it on the relay is safe before either.
-func NewRelayOutbound(publisher relayPublisher, dedupe DedupeStore, replayGrace time.Duration, logger *slog.Logger) *RelayOutbound {
+func NewRelayOutbound(publisher relayPublisher, dedupe DedupeStore, cfg RelayConfig, logger *slog.Logger) *RelayOutbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	cfg = cfg.withDefaults()
 	r := &RelayOutbound{
 		publisher: publisher,
 		dedupe:    dedupe,
-		dedupeTTL: dedupeTTLFor(replayGrace),
+		dedupeTTL: dedupeTTLFor(cfg.ReplayGrace),
+		cfg:       cfg,
+		retryPlan: cfg.retryPlan(),
 		logger:    logger,
 		seen:      newSeenEvents(4096),
+		verify:    make(chan pendingOutcome, cfg.QueueDepth),
 		ready:     make(chan struct{}),
-		queues:    make([]chan queued, relayShards),
+		queues:    make([]chan queued, cfg.Shards),
 	}
 	for i := range r.queues {
-		r.queues[i] = make(chan queued, relayQueueDepth)
+		r.queues[i] = make(chan queued, cfg.QueueDepth)
 	}
 	return r
 }
@@ -301,40 +433,200 @@ func (r *RelayOutbound) Start(ctx context.Context) {
 	}
 	for i := range r.queues {
 		r.wg.Add(1)
-		go func(q chan queued) {
-			defer r.wg.Done()
-			select {
-			case <-r.ready:
-			case <-ctx.Done():
-				// Cancelled before (or while) the handler arrived. If it IS
-				// already attached — the select picks between two ready
-				// channels arbitrarily — what is queued can still be drained;
-				// without it there is nothing a drain could deliver with.
-				select {
-				case <-r.ready:
-				default:
-					return
-				}
-			}
-			for {
-				select {
-				case item := <-q:
-					// The select is fair, so an item can win against an
-					// already-fired ctx.Done. Performing it on the cancelled
-					// context would misfile it as a dedupe outage; it belongs
-					// to the drain.
-					if ctx.Err() != nil {
-						r.drainRemaining(ctx, q, &item)
-						return
-					}
-					r.perform(ctx, item)
-				case <-ctx.Done():
-					r.drainRemaining(ctx, q, nil)
-					return
-				}
-			}
-		}(r.queues[i])
+		go r.work(ctx, r.queues[i])
 	}
+	r.wg.Add(1)
+	go r.watchOutcomes(ctx)
+}
+
+// handlerReady blocks until Attach has run, and reports whether there is a
+// handler to deliver with at all.
+func (r *RelayOutbound) handlerReady(ctx context.Context) bool {
+	select {
+	case <-r.ready:
+		return true
+	case <-ctx.Done():
+		// Cancelled before (or while) the handler arrived. If it IS already
+		// attached — the select picks between two ready channels arbitrarily —
+		// what is queued can still be drained; without it there is nothing a
+		// drain could deliver with.
+		select {
+		case <-r.ready:
+			return true
+		default:
+			return false
+		}
+	}
+}
+
+// work is one shard's whole life.
+//
+// Everything it touches belongs to this goroutine alone: the per-installation
+// lines and the one timer that wakes them. That is deliberate on both counts.
+// The lines are what keep a re-offered frame AT THE HEAD of its installation
+// rather than at the back of the queue, so a later reply for the same bot
+// cannot overtake it. The timer being the worker's own is what makes a pending
+// re-offer part of the worker — a timer scheduled outside it could fire after
+// the worker had drained and exited, and put a frame into a queue nobody is
+// reading.
+func (r *RelayOutbound) work(ctx context.Context, q chan queued) {
+	defer r.wg.Done()
+	if !r.handlerReady(ctx) {
+		return
+	}
+	lines := map[string]*hold{}
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+	for {
+		wait := time.Hour
+		if next, ok := earliestDue(lines); ok {
+			if wait = time.Until(next); wait < 0 {
+				wait = 0
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(wait)
+
+		select {
+		case item := <-q:
+			// The select is fair, so an item can win against an already-fired
+			// ctx.Done. Performing it on the cancelled context would misfile it
+			// as a dedupe outage; it belongs to the drain.
+			if ctx.Err() != nil {
+				r.drainRemaining(ctx, q, lines, &item)
+				return
+			}
+			r.offer(ctx, lines, item)
+		case <-timer.C:
+			if ctx.Err() != nil {
+				r.drainRemaining(ctx, q, lines, nil)
+				return
+			}
+			r.fireDue(ctx, lines)
+		case <-ctx.Done():
+			r.drainRemaining(ctx, q, lines, nil)
+			return
+		}
+	}
+}
+
+// earliestDue is the soonest moment any line's head may be offered again.
+func earliestDue(lines map[string]*hold) (time.Time, bool) {
+	var soonest time.Time
+	found := false
+	for _, h := range lines {
+		if len(h.items) == 0 {
+			continue
+		}
+		if !found || h.readyAt.Before(soonest) {
+			soonest, found = h.readyAt, true
+		}
+	}
+	return soonest, found
+}
+
+// offer takes one frame off the shard queue. If its installation already has a
+// line waiting out a re-offer, it joins the BACK of that line: overtaking the
+// frame in front of it is exactly the reordering this exists to prevent.
+func (r *RelayOutbound) offer(ctx context.Context, lines map[string]*hold, item queued) {
+	if h := lines[item.frame.InstallationID]; h != nil {
+		if len(h.items) >= r.cfg.QueueDepth {
+			r.shed(item, "the installation's line is full behind a retry")
+			return
+		}
+		h.items = append(h.items, item)
+		return
+	}
+	r.step(ctx, lines, item)
+}
+
+// step runs one delivery and files what it means for the line. A frame that
+// needs another offer stays at the head of its installation's line with the
+// next delay on it; a finished one lets whatever queued behind it move up.
+func (r *RelayOutbound) step(ctx context.Context, lines map[string]*hold, item queued) {
+	inst := item.frame.InstallationID
+	if r.perform(ctx, item) {
+		r.advance(lines, inst)
+		return
+	}
+	delay, more := r.delayFor(item.attempts)
+	if !more {
+		// By far the likeliest reason to exhaust the chain is a claim held
+		// because another replica already delivered, so this is not counted as
+		// a drop. The publisher's outcome watch is what names a reply nobody
+		// delivered, and it names it once.
+		r.logger.Warn("wecom relay: giving up on a routed delivery after retries",
+			"installation_id", inst, "task_id", item.frame.TaskID,
+			"attempts", item.attempts+1)
+		r.advance(lines, inst)
+		return
+	}
+	item.attempts++
+	h := lines[inst]
+	if h == nil {
+		h = &hold{items: []queued{item}}
+		lines[inst] = h
+	} else {
+		h.items[0] = item // it is the head; step is only ever called on one
+	}
+	h.readyAt = time.Now().Add(delay)
+}
+
+// advance retires a finished head and lets the next frame for that
+// installation become due immediately.
+func (r *RelayOutbound) advance(lines map[string]*hold, inst string) {
+	h := lines[inst]
+	if h == nil {
+		return // it came straight off the queue and never joined a line
+	}
+	h.items = h.items[1:]
+	if len(h.items) == 0 {
+		delete(lines, inst)
+		return
+	}
+	h.readyAt = time.Time{} // due now; the next loop turn picks it up
+}
+
+// fireDue offers every line whose head has waited out its backoff.
+func (r *RelayOutbound) fireDue(ctx context.Context, lines map[string]*hold) {
+	now := time.Now()
+	for inst, h := range lines {
+		if len(h.items) == 0 {
+			delete(lines, inst)
+			continue
+		}
+		if h.readyAt.After(now) {
+			continue
+		}
+		r.step(ctx, lines, h.items[0])
+	}
+}
+
+// delayFor is how long the next offer waits, and whether there is one.
+func (r *RelayOutbound) delayFor(attempts int) (time.Duration, bool) {
+	if attempts < 0 || attempts >= len(r.retryPlan) {
+		return 0, false
+	}
+	return r.retryPlan[attempts], true
+}
+
+// shed records a frame dropped for want of queue space. Only a REPLY moves the
+// reply drop counter: an inbox push counted there would make the delivered /
+// dropped ratio track socket placement rather than outcomes, which is the same
+// unit error the relayed-inbox path already avoids.
+func (r *RelayOutbound) shed(item queued, why string) {
+	if item.frame.Kind == relayKindReply {
+		r.mx().RecordOutboundDropped(string(dropRelayOverflow))
+	}
+	r.mx().RecordRelayShed(item.frame.Kind)
+	r.logger.Warn("wecom relay: shedding a routed delivery, "+why,
+		"kind", item.frame.Kind,
+		"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
 }
 
 // drainRemaining performs what is already queued so a graceful shutdown does
@@ -342,11 +634,23 @@ func (r *RelayOutbound) Start(ctx context.Context) {
 // shard cannot stack sequential ack waits. Deliveries started near the edge
 // inherit the deadline and abort with it. first is an item a worker had
 // already taken off the queue when the cancel won the race.
-func (r *RelayOutbound) drainRemaining(ctx context.Context, q chan queued, first *queued) {
-	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), relayDrainBudget)
+// Frames parked in a line waiting out a re-offer go first and without their
+// backoff: the wait existed to give a lease time to move, and shutdown has
+// overtaken that.
+func (r *RelayOutbound) drainRemaining(ctx context.Context, q chan queued, lines map[string]*hold, first *queued) {
+	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.DrainBudget)
 	defer cancel()
 	if first != nil {
 		r.perform(drainCtx, *first)
+	}
+	for inst, h := range lines {
+		for _, item := range h.items {
+			if drainCtx.Err() != nil {
+				return
+			}
+			r.perform(drainCtx, item)
+		}
+		delete(lines, inst)
 	}
 	for {
 		if drainCtx.Err() != nil {
@@ -383,6 +687,11 @@ func (r *RelayOutbound) publish(f relayFrame, eventID string) bool {
 			"error", err, "installation_id", f.InstallationID, "task_id", f.TaskID)
 		return false
 	}
+	// A published reply is now owed an outcome by somebody. watchOutcomes is
+	// that somebody — see its comment for why it cannot be anyone else.
+	if f.Kind == relayKindReply {
+		r.awaitOutcome(f, eventID)
+	}
 	return true
 }
 
@@ -399,24 +708,25 @@ func (r *RelayOutbound) DeliverWecomOutbound(scopeID string, frame []byte, event
 		return
 	}
 	select {
-	case r.queues[shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
+	case r.queues[r.shardFor(f.InstallationID)] <- queued{frame: f, eventID: eventID}:
 	default:
 		// Shed rather than stall the shard. Counted, because a reply nobody
 		// gets is exactly what this whole path exists to stop being silent.
-		r.mx().RecordOutboundDropped(string(dropRelayOverflow))
-		r.logger.Warn("wecom relay: dispatch queue full, shedding a routed reply",
-			"installation_id", f.InstallationID, "task_id", f.TaskID)
+		r.shed(queued{frame: f, eventID: eventID}, "dispatch queue full")
 	}
 }
 
-func shardFor(installationID string) int {
+func (r *RelayOutbound) shardFor(installationID string) int {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(installationID))
-	return int(h.Sum32() % uint32(relayShards))
+	return int(h.Sum32() % uint32(len(r.queues)))
 }
 
-// perform runs one delivery under an at-most-once claim.
-func (r *RelayOutbound) perform(ctx context.Context, item queued) {
+// perform runs one delivery under an at-most-once claim, and reports whether
+// this frame is FINISHED — delivered, refused, or not this replica's business.
+// False means it is owed another offer, which the caller schedules at the head
+// of the installation's line.
+func (r *RelayOutbound) perform(ctx context.Context, item queued) bool {
 	// Ownership FIRST, the global claim second. The claim is a cross-replica
 	// SET NX: every replica reads every frame, and if one that cannot send
 	// were allowed to win it, the replica that can send would lose the race,
@@ -428,10 +738,10 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) {
 	// window is why deliverRelayed re-checks and why a not-ours outcome
 	// releases the claim.
 	if !r.handler.ownsSocket(item.frame.InstallationID) {
-		return
+		return true
 	}
 	if !r.seen.claim(item.eventID) {
-		return
+		return true
 	}
 	key := dedupeKey(item.eventID)
 	if r.dedupe != nil {
@@ -444,8 +754,7 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) {
 			r.seen.forget(item.eventID)
 			r.logger.WarnContext(ctx, "wecom relay: dedupe unavailable, retrying locally",
 				"error", err, "installation_id", item.frame.InstallationID)
-			r.requeue(ctx, item)
-			return
+			return false
 		}
 		if !won {
 			// Losing the claim does NOT mean somebody else will deliver. In a
@@ -455,54 +764,157 @@ func (r *RelayOutbound) perform(ctx context.Context, item queued) {
 			// frame exactly once, so nothing external ever hands it back.
 			// The loser therefore checks again, bounded and backed off; the
 			// common case (the claim is held because the reply was
-			// delivered) burns out at relayMaxAttempts and stops.
+			// delivered) burns the chain out and stops.
 			r.seen.forget(item.eventID)
-			r.requeue(ctx, item)
-			return
+			return false
 		}
 	}
 	outcome := r.handler.deliverRelayed(ctx, item.frame)
 	if outcome == outcomeDone {
-		return
+		return true
 	}
-	// Not ours, or provably never written: give the claim back — and retry
-	// locally too, because release alone wakes nobody (see the !won comment).
+	// Not ours, or provably never written: give the claim back — and offer it
+	// again locally too, because release alone wakes nobody (see !won above).
 	r.seen.forget(item.eventID)
 	if r.dedupe != nil {
 		r.dedupe.Release(ctx, key)
 	}
-	r.requeue(ctx, item)
-}
-
-// requeue schedules one more attempt at item, after a backoff that doubles per
-// attempt, without ever blocking the worker. It gives up quietly past
-// relayMaxAttempts: by far the likeliest reason to exhaust the budget is a
-// claim held because another replica already delivered, and counting that as
-// a drop would be false.
-func (r *RelayOutbound) requeue(ctx context.Context, item queued) {
-	if item.attempts+1 >= relayMaxAttempts {
-		r.logger.Warn("wecom relay: giving up on a routed delivery after retries",
-			"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID,
-			"attempts", item.attempts+1)
-		return
-	}
-	item.attempts++
-	delay := relayRetryBackoff << (item.attempts - 1)
-	time.AfterFunc(delay, func() {
-		if ctx.Err() != nil {
-			return // shutting down; the claim TTL and the next replay own it now
-		}
-		select {
-		case r.queues[shardFor(item.frame.InstallationID)] <- item:
-		default:
-			r.mx().RecordOutboundDropped(string(dropRelayOverflow))
-			r.logger.Warn("wecom relay: retry shed, dispatch queue full",
-				"installation_id", item.frame.InstallationID, "task_id", item.frame.TaskID)
-		}
-	})
+	return false
 }
 
 func dedupeKey(eventID string) string { return "wecom:outbound:claim:" + eventID }
+
+// pendingOutcome is one routed reply whose end-to-end fate is not known yet.
+type pendingOutcome struct {
+	key       string
+	sessionID string
+	instID    string
+	taskID    string
+	dueAt     time.Time
+}
+
+// outcomeGrace is how long a routed reply is given to find a holder before the
+// publisher concludes nobody had one. It has to outlast the WHOLE re-offer
+// chain — a reply still being retried is in flight, not lost — plus one claim
+// round trip on top.
+func (r *RelayOutbound) outcomeGrace() time.Duration {
+	total := claimTimeout
+	for _, d := range r.retryPlan {
+		total += d
+	}
+	return total
+}
+
+// watchOutcomes is the ONE owner of a routed reply's final outcome.
+//
+// Nobody else can be. The publisher hands the frame to Redis and returns; every
+// replica that reads it and holds no socket returns silently, correctly, and
+// counts nothing; the replica that does deliver counts the delivery. So when
+// NO replica holds the socket — all of them mid-reconnect — the reply is lost
+// with every party behaving properly and no counter moving. That is the window
+// SELF_HOSTING.md describes and that nothing could previously size.
+//
+// The claim key is what makes it observable after the fact: it is set by
+// whoever took the delivery and released only by a replica that proved it sent
+// nothing. So once the re-offer chain can no longer be running, a key that is
+// absent means the reply reached nobody. One Redis EXISTS per routed reply,
+// and routed replies are the off-lease minority.
+func (r *RelayOutbound) watchOutcomes(ctx context.Context) {
+	defer r.wg.Done()
+	if r.dedupe == nil {
+		// No claim store means no relay either (see DedupeStore), so there is
+		// no routed reply whose outcome could be in question.
+		for {
+			select {
+			case <-r.verify:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+	var pending []pendingOutcome
+	timer := time.NewTimer(time.Hour)
+	defer timer.Stop()
+	for {
+		wait := time.Hour
+		if len(pending) > 0 {
+			if wait = time.Until(pending[0].dueAt); wait < 0 {
+				wait = 0
+			}
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(wait)
+
+		select {
+		case p := <-r.verify:
+			pending = append(pending, p) // the grace is constant, so this stays sorted
+		case <-timer.C:
+			now := time.Now()
+			for len(pending) > 0 && !pending[0].dueAt.After(now) {
+				r.settle(ctx, pending[0])
+				pending = pending[1:]
+			}
+		case <-ctx.Done():
+			// Shutdown is not evidence. A reply still inside its grace may yet
+			// be delivered by the replica that has it, and this process is
+			// leaving; counting it here would report a loss that did not
+			// happen.
+			if len(pending) > 0 {
+				r.logger.Info("wecom relay: shutting down with routed replies still unresolved",
+					"count", len(pending))
+			}
+			return
+		}
+	}
+}
+
+// settle asks whether anybody ever claimed one routed reply, and records the
+// loss if nobody did.
+func (r *RelayOutbound) settle(ctx context.Context, p pendingOutcome) {
+	held, err := r.dedupe.Held(ctx, p.key)
+	if err != nil {
+		// An unreadable claim store proves nothing either way. Saying "lost"
+		// here would turn a Redis blip into a fleet of phantom drops.
+		r.logger.WarnContext(ctx, "wecom relay: could not settle a routed reply's outcome",
+			"error", err, "installation_id", p.instID, "task_id", p.taskID)
+		return
+	}
+	if held {
+		return // somebody took it; the replica that did is what counts it
+	}
+	r.mx().RecordOutboundDropped(string(dropNoConnection))
+	r.logger.WarnContext(ctx, "wecom outbound: reply not delivered",
+		"reason", string(dropNoConnection),
+		"chat_session_id", p.sessionID,
+		"installation_id", p.instID,
+		"task_id", p.taskID,
+		"detail", "routed to the replicas and no replica held a live connection")
+}
+
+// awaitOutcome enrolls a routed reply for the check above. Never blocks: the
+// caller is a bus subscriber's goroutine.
+func (r *RelayOutbound) awaitOutcome(f relayFrame, eventID string) {
+	if r.dedupe == nil {
+		return
+	}
+	select {
+	case r.verify <- pendingOutcome{
+		key:       dedupeKey(eventID),
+		sessionID: f.SessionID,
+		instID:    f.InstallationID,
+		taskID:    f.TaskID,
+		dueAt:     time.Now().Add(r.outcomeGrace()),
+	}:
+	default:
+		r.logger.Warn("wecom relay: outcome watch full, a routed reply's fate will go unrecorded",
+			"installation_id", f.InstallationID, "task_id", f.TaskID)
+	}
+}
 
 // WithRelay attaches the cross-replica router to the subscriber. Without it the
 // subscriber keeps the behaviour it had: a reply produced off-lease is dropped

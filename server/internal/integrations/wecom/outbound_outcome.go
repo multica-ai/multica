@@ -31,12 +31,13 @@ import (
 type dropReason string
 
 const (
-	// dropNoConnection — no live WebSocket for this installation in THIS
-	// process. Either the Supervisor is mid-reconnect, or, on a multi-replica
-	// deployment, the lease is held by a different replica than the one that
-	// published the completion, which is the constraint SELF_HOSTING.md
-	// documents. The two are indistinguishable from here; a deployment's
-	// replica count is what tells them apart.
+	// dropNoConnection — no live WebSocket carried this reply. Two situations
+	// reach it. Without a relay: none in THIS process, which on a
+	// multi-replica deployment cannot be told apart from the lease simply
+	// being held elsewhere. With one: the reply WAS routed to every replica
+	// and none of them held a connection either, which is the residual window
+	// SELF_HOSTING.md describes — recorded once, by the replica that routed
+	// it, from the claim nobody took (RelayOutbound.watchOutcomes).
 	dropNoConnection dropReason = "no_live_connection"
 
 	// dropTaskMissing — the task the completion belongs to could not be
@@ -56,12 +57,17 @@ const (
 	// already running or pending. A file only, never a whole reply.
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
 
-	// dropRelayOverflow — a routed delivery was shed because this replica's
+	// dropRelayOverflow — a routed REPLY was shed because this replica's
 	// dispatch queue was full. Shedding rather than blocking is deliberate:
 	// the caller is the shared realtime shard reader, and stalling it would
 	// hold up browser traffic, daemon wakeups and every other bot on that
 	// shard. A sustained rate here means one bot cannot keep up and is
 	// starving the queue it shares.
+	//
+	// Replies only. The same queue carries inbox notifications, and those are
+	// counted on RecordRelayShed instead — this counter's unit is one agent
+	// reply owed to a user, and an inbox push filed here would make the
+	// delivered/dropped ratio track socket placement rather than outcomes.
 	dropRelayOverflow dropReason = "relay_overflow"
 )
 

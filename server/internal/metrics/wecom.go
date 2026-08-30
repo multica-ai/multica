@@ -57,6 +57,10 @@ type WecomMetrics struct {
 	AttachmentSheds       prometheus.Counter
 	OutboundUnconfirmed   *prometheus.CounterVec
 	AttachmentUnconfirmed *prometheus.CounterVec
+	// RelayShed counts admission decisions on the cross-replica dispatcher,
+	// labelled by frame kind. Its own metric because the relay carries inbox
+	// notifications as well as replies and the reply counters are per reply.
+	RelayShed *prometheus.CounterVec
 }
 
 func NewWecomMetrics() *WecomMetrics {
@@ -100,6 +104,10 @@ func NewWecomMetrics() *WecomMetrics {
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_attachment_unconfirmed_total",
 			Help: "Files whose delivery outcome is UNKNOWN, by reason. Counts FILES, same unit as the attachment delivered/dropped pair; see outbound_unconfirmed_total for why unknown is not a drop.",
 		}, []string{"reason"}),
+		RelayShed: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "wecom", Name: "outbound_relay_shed_total",
+			Help: "Frames the cross-replica dispatcher refused because a shard queue was full, by kind (reply|inbox). An ADMISSION decision, not a per-reply outcome: the relay carries inbox notifications too, and counting those as dropped replies would make the delivered/dropped ratio track which replica held a socket instead of what happened to anyone's message. A shed reply also increments outbound_dropped_total{reason=\"relay_overflow\"}.",
+		}, []string{"kind"}),
 	}
 }
 
@@ -110,6 +118,7 @@ func (m *WecomMetrics) Collectors() []prometheus.Collector {
 		m.OutboundDelivered, m.OutboundDropped, m.OutboundSkipped,
 		m.AttachmentDelivered, m.AttachmentDropped, m.AttachmentSheds,
 		m.OutboundUnconfirmed, m.AttachmentUnconfirmed,
+		m.RelayShed,
 	}
 }
 
@@ -136,4 +145,8 @@ func (m *WecomMetrics) RecordOutboundUnconfirmed(reason string) {
 }
 func (m *WecomMetrics) RecordAttachmentUnconfirmed(reason string) {
 	m.AttachmentUnconfirmed.WithLabelValues(reason).Inc()
+}
+
+func (m *WecomMetrics) RecordRelayShed(kind string) {
+	m.RelayShed.WithLabelValues(kind).Inc()
 }

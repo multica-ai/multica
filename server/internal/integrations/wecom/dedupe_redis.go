@@ -49,6 +49,16 @@ func (d *redisDedupe) Claim(ctx context.Context, key string, ttl time.Duration) 
 	return d.rdb.SetNX(ctx, key, "1", ttl).Result()
 }
 
+// Held reports whether a claim is currently taken. One EXISTS, on the same
+// bounded budget as the claim itself: the caller is deciding whether to record
+// a lost reply, and a Redis that cannot answer must not become evidence.
+func (d *redisDedupe) Held(ctx context.Context, key string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, claimTimeout)
+	defer cancel()
+	n, err := d.rdb.Exists(ctx, key).Result()
+	return n > 0, err
+}
+
 // Release gives a claim back for a delivery that provably did not happen.
 // Best effort by design: a Release that fails leaves a key that expires on its
 // own, which costs one un-retried delivery in the replay window rather than a
