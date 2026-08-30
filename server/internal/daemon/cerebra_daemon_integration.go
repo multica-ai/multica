@@ -224,5 +224,6 @@ func routeBeforeDispatch(
 		return agentDefaultModel
 	}
 	result := router.Route(ctx, prompt, meta, runtimes, agentDefaultModel)
+	slog.Info("cerebra routed task model", "task_id", meta.TaskID, "tier", string(result.Tier), "model", result.Model, "matched_rule", result.MatchedRule)
 	return result.Model
 }
