@@ -88,6 +88,25 @@ func TestProbeAPIProvidersSkipsUnconfiguredOrInvalidProviders(t *testing.T) {
 	}
 }
 
+func TestProbeAPIProvidersDoesNotPublishUnconfiguredFailures(t *testing.T) {
+	setMissingCLIs(t)
+	publishAPIProviderProbeFailures(nil)
+	t.Cleanup(func() { publishAPIProviderProbeFailures(nil) })
+
+	oldProbe := probeAPIProviderEndpoint
+	probeAPIProviderEndpoint = func(_ context.Context, _ string, _ agent.ProviderAPIConfig) error {
+		return errors.New("default local endpoint is offline")
+	}
+	t.Cleanup(func() { probeAPIProviderEndpoint = oldProbe })
+
+	if got := probeAPIProviders(); len(got) != 0 {
+		t.Fatalf("unconfigured offline providers were discovered: %v", got)
+	}
+	if failures := apiProviderProbeFailuresSnapshot(); len(failures) != 0 {
+		t.Fatalf("unconfigured providers polluted the failure snapshot: %v", failures)
+	}
+}
+
 func TestProbeAPIProvidersSanitizesFailureAndRetriesOnNextRefresh(t *testing.T) {
 	setMissingCLIs(t)
 	t.Setenv("OPENROUTER_API_KEY", "openrouter-canary-secret")
