@@ -208,12 +208,12 @@ func filterPreferredPool(candidates []string) []string {
 	if len(candidates) == 0 {
 		return nil
 	}
-	// 1. Separate direct authenticated / local providers from public aggregator proxies (openrouter/ and public free endpoints)
+	// 1. Separate direct authenticated / local providers from public aggregator proxies (openrouter/)
 	var directCandidates []string
 	var proxyCandidates []string
 	for _, c := range candidates {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "openrouter/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free") {
+		if strings.HasPrefix(lower, "openrouter/") || strings.Contains(lower, "/openrouter/") {
 			proxyCandidates = append(proxyCandidates, c)
 		} else {
 			directCandidates = append(directCandidates, c)
@@ -285,11 +285,11 @@ func selectBestStandardModel(candidates []string) string {
 		}
 	}
 
-	// 2. Prefer balanced coding / instruct model indicators
-	standardTags := []string{"coder", "code", "sonnet", "flash", "instruct", "lightning", "standard"}
-	for _, c := range searchPool {
-		base := getBaseModelName(c)
-		for _, tag := range standardTags {
+	// 2. Prefer balanced coding / instruct model indicators in priority order
+	standardTags := []string{"coder", "sonnet", "lightning", "instruct", "flash", "code", "standard"}
+	for _, tag := range standardTags {
+		for _, c := range searchPool {
+			base := getBaseModelName(c)
 			if hasModelSegment(base, tag) {
 				return c
 			}
@@ -312,11 +312,11 @@ func selectBestHeavyModel(candidates []string) string {
 	}
 	searchPool := filterPreferredPool(candidates)
 
-	// 1. Prefer frontier reasoning tags (pro, r1, ultra, opus, o1, o3, max, large, reasoning)
-	heavyTags := []string{"pro", "r1", "ultra", "opus", "o1", "o3", "max", "large", "reasoning"}
-	for _, c := range searchPool {
-		base := getBaseModelName(c)
-		for _, tag := range heavyTags {
+	// 1. Prefer frontier reasoning tags in priority order (ultra, pro, opus, r1, o1, o3, max, large, reasoning)
+	heavyTags := []string{"ultra", "pro", "opus", "r1", "o1", "o3", "reasoning", "max", "large", "pickle"}
+	for _, tag := range heavyTags {
+		for _, c := range searchPool {
+			base := getBaseModelName(c)
 			if hasModelSegment(base, tag) {
 				return c
 			}
