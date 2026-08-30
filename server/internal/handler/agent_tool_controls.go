@@ -162,9 +162,8 @@ func (h *Handler) toolPolicyActor(r *http.Request, workspaceID, role string) too
 		}
 		return actor
 	}
-	if actorType, actorID := h.resolveActor(r, actor.UserID, workspaceID); actorType == "agent" {
-		actor.Kind = toolpolicy.ActorAgent
-		actor.AgentID = actorID
+	if r.Header.Get("X-Agent-ID") != "" || r.Header.Get("X-Task-ID") != "" {
+		actor.Kind = toolpolicy.ActorDaemon
 	}
 	return actor
 }

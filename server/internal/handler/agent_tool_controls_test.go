@@ -192,6 +192,16 @@ func TestAgentToolControlReadsAllowOnlyTheOwnerOrTargetAgent(t *testing.T) {
 				t.Fatalf("plain member read status = %d, want 403: %s", w.Code, w.Body.String())
 			}
 		})
+		t.Run("member_forged_agent_headers_"+tc.name, func(t *testing.T) {
+			req := withURLParam(newRequestAs(memberID, http.MethodGet, "/api/agents/"+targetID+tc.suffix, nil), "id", targetID)
+			req.Header.Set("X-Agent-ID", targetID)
+			req.Header.Set("X-Task-ID", taskID)
+			w := httptest.NewRecorder()
+			tc.call(w, req)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("member with forged agent headers read status = %d, want 403: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 
 	selfRequest := func(method, suffix string) *http.Request {
