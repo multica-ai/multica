@@ -208,20 +208,49 @@ func filterPreferredPool(candidates []string) []string {
 	if len(candidates) == 0 {
 		return nil
 	}
-	// 1. Separate direct authenticated / local providers from public aggregator proxies (openrouter/)
-	var directCandidates []string
+
+	// Tier 1: Direct authenticated cloud providers (user has connected API key)
+	var authenticatedCloud []string
+	// Tier 2: Local Ollama (free, private, always available)
+	var localOllama []string
+	// Tier 3: OpenCode direct runtime models (authenticated runtime, not openrouter proxies)
+	var openCodeDirect []string
+	// Tier 4: OpenRouter public aggregator proxies
 	var proxyCandidates []string
+
+	authenticatedPrefixes := []string{"google/", "anthropic/", "openai/", "azure/", "bedrock/", "vertex/"}
+
 	for _, c := range candidates {
 		lower := strings.ToLower(c)
 		if strings.HasPrefix(lower, "openrouter/") || strings.Contains(lower, "/openrouter/") {
 			proxyCandidates = append(proxyCandidates, c)
+		} else if strings.HasPrefix(lower, "ollama/") {
+			localOllama = append(localOllama, c)
 		} else {
-			directCandidates = append(directCandidates, c)
+			isAuthenticated := false
+			for _, prefix := range authenticatedPrefixes {
+				if strings.HasPrefix(lower, prefix) {
+					isAuthenticated = true
+					break
+				}
+			}
+			if isAuthenticated {
+				authenticatedCloud = append(authenticatedCloud, c)
+			} else {
+				openCodeDirect = append(openCodeDirect, c)
+			}
 		}
 	}
 
-	if len(directCandidates) > 0 {
-		return directCandidates
+	// Return highest priority non-empty pool
+	if len(authenticatedCloud) > 0 {
+		return authenticatedCloud
+	}
+	if len(localOllama) > 0 {
+		return localOllama
+	}
+	if len(openCodeDirect) > 0 {
+		return openCodeDirect
 	}
 	return proxyCandidates
 }
