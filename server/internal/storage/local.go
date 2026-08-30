@@ -153,7 +153,7 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, bytes.NewReader(data)); err != nil {
+	if err := writeAtomic(ctx, dest, bytes.NewReader(data)); err != nil {
 		return "", err
 	}
 	// Best-effort sidecar so ServeFile can restore the original filename in
@@ -177,7 +177,7 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 
 func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := writeAtomic(dest, data); err != nil {
+	if err := writeAtomic(ctx, dest, data); err != nil {
 		return "", err
 	}
 	if filename != "" {
@@ -200,8 +200,13 @@ func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Rea
 // removed it outright) — an attachment row could then point at a file that no
 // longer exists. With rename-into-place a failed write only discards its own
 // temp file and the existing object survives untouched. Both upload paths go
-// through here so neither can reintroduce the destructive shape.
-func writeAtomic(dest string, src io.Reader) error {
+// through here so neither can reintroduce the destructive shape. Context
+// cancellation is checked before filesystem work, around each source read, and
+// before the staging file is renamed over the destination.
+func writeAtomic(ctx context.Context, dest string, src io.Reader) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("local storage stream copy: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("local storage MkdirAll: %w", err)
 	}
@@ -212,20 +217,44 @@ func writeAtomic(dest string, src io.Reader) error {
 	if err != nil {
 		return fmt.Errorf("local storage create temp: %w", err)
 	}
-	if _, err := io.Copy(f, src); err != nil {
+	_, copyErr := io.Copy(f, &contextReader{ctx: ctx, src: src})
+	if copyErr == nil {
+		copyErr = ctx.Err()
+	}
+	if copyErr != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
-		return fmt.Errorf("local storage stream copy: %w", err)
+		return fmt.Errorf("local storage stream copy: %w", copyErr)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("local storage Close: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage stream copy: %w", err)
 	}
 	if err := os.Rename(tmp, dest); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("local storage Rename: %w", err)
 	}
 	return nil
+}
+
+type contextReader struct {
+	ctx context.Context
+	src io.Reader
+}
+
+func (r *contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	n, err := r.src.Read(p)
+	if ctxErr := r.ctx.Err(); ctxErr != nil {
+		return 0, ctxErr
+	}
+	return n, err
 }
 
 // tempPath is the staging file writeAtomic renames into place. It is derived
@@ -325,7 +354,7 @@ func readLocalMeta(filePath string) (localMeta, bool) {
 }
 
 func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, contentType string, filename string) (string, error) {
-	data, err := io.ReadAll(reader)
+	data, err := io.ReadAll(&contextReader{ctx: ctx, src: reader})
 	if err != nil {
 		return "", fmt.Errorf("local storage ReadAll: %w", err)
 	}
