@@ -251,13 +251,33 @@ GROUP BY a.id`, compiled.where)
 			// "No value" option carries a real count (issues without the key).
 			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
 		case "text", "url", "date", "number":
-			// Scalar values are free-form, so grouping by distinct value would
-			// return one row per observed value with no bound. The filter menu
-			// only reads the "__none__" bucket for these types, so compute just
-			// the two bounded buckets instead of pulling the whole value space.
-			// Key existence is exact for "no value": stored values can never be
-			// null or empty, so a present key is always a set value.
-			query = fmt.Sprintf(`SELECT CASE WHEN i.properties ? %s THEN '__set__' ELSE '__none__' END, COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, propertyKey, compiled.where)
+			// Scalar values are free-form, so grouping by raw value had no upper
+			// bound: a free-form text property on a large workspace produced one
+			// row per distinct value, all serialized and discarded except
+			// "__none__". The facet therefore returns the top
+			// scalarPropertyFacetLimit observed values by count — enough for the
+			// filter menu's pick list, where unlisted values remain reachable
+			// through the free input — and always unions the "__none__" bucket on
+			// top so "No value" can never be crowded out by the limit. Number
+			// keys canonicalize through trim_scale(::numeric) so the stored
+			// jsonb literals 3.50 and 3.5 group into one "3.5" facet; the text/url/date keys are
+			// the stored strings themselves, grouped exactly (case-sensitive, by
+			// design: "Alpha" and "alpha" are distinct observed values). Malformed
+			// shapes (a number stored under a text definition) are not listed;
+			// key absence stays the exact "__none__" predicate because stored
+			// values are never null or empty.
+			valueKey := fmt.Sprintf("i.properties ->> %s", propertyKey)
+			jsonbType := "string"
+			if property.Type == "number" {
+				// ::numeric alone keeps the literal's scale (3.50::text is
+				// "3.50"), so trim_scale collapses it to the canonical "3.5".
+				valueKey = fmt.Sprintf("trim_scale((i.properties ->> %s)::numeric)::text", propertyKey)
+				jsonbType = "number"
+			}
+			query = fmt.Sprintf(`(SELECT %s AS facet_key, COUNT(*)::bigint AS facet_count FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = '%s' GROUP BY 1 ORDER BY 2 DESC, 1 ASC LIMIT %d)
+UNION ALL
+(SELECT '__none__', COUNT(*)::bigint FROM issue i WHERE %s AND NOT (i.properties ? %s))`,
+				valueKey, compiled.where, propertyKey, jsonbType, scalarPropertyFacetLimit, compiled.where, propertyKey)
 		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
 		case "checkbox":

@@ -22,7 +22,7 @@ import {
   viewStoreSlice,
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { IssueProperty } from "@multica/core/types";
+import type { Issue, IssueProperty, IssuePropertyValues } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueFilterMenu } from "./issues-header";
 
@@ -44,7 +44,50 @@ function textProperty(id: string, name: string): IssueProperty {
   };
 }
 
-function renderFilterMenu(props: IssueProperty[]) {
+function propertyOf(id: string, name: string, type: IssueProperty["type"]): IssueProperty {
+  return {
+    id,
+    workspace_id: "ws-1",
+    name,
+    type,
+    config: {},
+    position: 1,
+    archived: false,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+/** Minimal issue with only the fields the local facet-count path reads. */
+function issueWithProperties(id: string, properties: IssuePropertyValues): Issue {
+  return {
+    id,
+    workspace_id: "ws-1",
+    number: 1,
+    identifier: "MUL-1",
+    title: "Test",
+    description: null,
+    status: "todo",
+    priority: "medium",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "u-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 0,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    labels: [],
+    created_at: "2025-01-01T00:00:00Z",
+    updated_at: "2025-01-01T00:00:00Z",
+    properties,
+  };
+}
+
+function renderFilterMenu(props: IssueProperty[], scopedIssues?: Issue[]) {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: props }),
@@ -71,19 +114,24 @@ function renderFilterMenu(props: IssueProperty[]) {
   const view = renderWithI18n(
     <QueryClientProvider client={qc}>
       <ViewStoreProvider store={store}>
-        <IssueFilterMenu trigger={<button type="button">Filter</button>} />
+        <IssueFilterMenu
+          trigger={<button type="button">Filter</button>}
+          scopedIssues={scopedIssues}
+        />
       </ViewStoreProvider>
     </QueryClientProvider>,
   );
   return { store, ...view };
 }
 
-async function openPropertySubmenu(name: string) {
+async function openPropertySubmenu(name: string, inputRole: "textbox" | "spinbutton" = "textbox") {
   fireEvent.click(screen.getByRole("button", { name: "Filter" }));
   const trigger = await screen.findByRole("menuitem", { name: new RegExp(name) });
   fireEvent.click(trigger);
+  // A number scalar renders <input type="number">, whose ARIA role is
+  // spinbutton rather than textbox.
   await waitFor(() =>
-    expect(screen.getByRole("textbox")).toBeInTheDocument(),
+    expect(screen.getByRole(inputRole)).toBeInTheDocument(),
   );
 }
 
@@ -178,5 +226,42 @@ describe("IssueFilterMenu scalar property filter", () => {
     // Enter commits the draft as another member of the OR-set.
     await userEvent.type(screen.getByRole("textbox"), "{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
+  });
+
+  it("lists observed scalar values as checkboxes with counts and toggles them", async () => {
+    // The observed rows come from the local facet-count path over the loaded
+    // issues; the server facet path feeds the same map with the same keys.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+      issueWithProperties("i-3", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    const alpha = screen.getByRole("menuitemcheckbox", { name: /alpha/ });
+    expect(alpha).toHaveTextContent("2");
+    expect(screen.getByRole("menuitemcheckbox", { name: /beta/ })).toHaveTextContent("1");
+
+    // Toggling an observed value commits it as a bare equality member — the
+    // same shape the free input produces — so the two paths compose.
+    await userEvent.click(alpha);
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(store.getState().propertyFilters).toEqual({});
+  });
+
+  it("lists observed number values under their canonical string key", async () => {
+    const { store } = renderFilterMenu([propertyOf(PROP, "Estimate", "number")], [
+      issueWithProperties("i-1", { [PROP]: 3.5 }),
+      issueWithProperties("i-2", { [PROP]: 3.5 }),
+    ]);
+    await openPropertySubmenu("Estimate", "spinbutton");
+
+    const threePointFive = screen.getByRole("menuitemcheckbox", { name: /3\.5/ });
+    expect(threePointFive).toHaveTextContent("2");
+    await userEvent.click(threePointFive);
+    // The committed member is the equality string, which matches the stored
+    // jsonb number on both the server and the client matcher.
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["3.5"] });
   });
 });

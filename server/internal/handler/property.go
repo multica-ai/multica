@@ -50,6 +50,12 @@ const (
 	// bag shares one 16KB row budget, and a property holding hundreds of
 	// actors would crowd out every other property on the same issue.
 	maxPropertyActorValues = 20
+
+	// scalarPropertyFacetLimit bounds the per-value scalar facet (text / url /
+	// date / number): the filter menu lists at most this many observed values
+	// by count, and the free input covers anything the limit drops. Matched to
+	// maxPropertySelectOptions so scalar pick lists feel like select lists.
+	scalarPropertyFacetLimit = 50
 )
 
 var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}

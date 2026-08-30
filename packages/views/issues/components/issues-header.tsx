@@ -273,9 +273,13 @@ function useIssueCounts(
             ? [value]
             : Array.isArray(value)
               ? value
-              : typeof value === "boolean"
-                ? [String(value)]
-                : [];
+              : typeof value === "number"
+                ? // Number facet key: String() is already canonical in JS (no
+                  // trailing zeros), matching the server's trim_scale key.
+                  [String(value)]
+                : typeof value === "boolean"
+                  ? [String(value)]
+                  : [];
         if (optionKeys.length === 0) continue;
         let perOption = property.get(propertyId);
         if (!perOption) {
@@ -762,6 +766,14 @@ function PropertyFilterOptions({
           ? t(($) => $.pickers.custom_property.number_placeholder)
           : t(($) => $.pickers.custom_property.value_placeholder);
     const noneCount = counts?.get(NO_PROPERTY_VALUE) ?? 0;
+    // Observed values for the pick list (#7693): the server facet returns the
+    // top scalar values by count plus "__none__"; without server facets the
+    // same per-value counts derive from the loaded issues. "__set__" is the
+    // legacy pre-per-value server bucket — a new menu must ignore it exactly
+    // the way an old client ignores the per-value rows.
+    const observedValues = [...(counts?.entries() ?? [])].filter(
+      ([key]) => key !== NO_PROPERTY_VALUE && key !== "__set__",
+    );
     // A saved view locks this dimension: the scalar value AND "No value" are
     // both part of the view's identity, so neither can be edited in place.
     const locked = fixedIds !== undefined && fixedIds.size > 0;
@@ -813,6 +825,30 @@ function PropertyFilterOptions({
             className="h-8"
           />
         </div>
+        {/* Observed values toggle exactly like select options: each one is a
+            bare-string member of the same OR-set, so committing an unlisted
+            value through the input composes with them and the counts stay
+            clickable discovery rather than a separate filter mode. */}
+        {observedValues.map(([value, count]) => {
+          const checked = selected.includes(value);
+          return (
+            <DropdownMenuCheckboxItem
+              key={value}
+              checked={checked}
+              disabled={locked}
+              onCheckedChange={() => onToggle(value)}
+              className={FILTER_ITEM_CLASS}
+            >
+              <HoverCheck checked={checked} />
+              <span className="truncate">{value}</span>
+              {count > 0 && (
+                <span className="ml-auto text-caption text-muted-foreground">
+                  {count}
+                </span>
+              )}
+            </DropdownMenuCheckboxItem>
+          );
+        })}
         <DropdownMenuCheckboxItem
           checked={hasNoValue}
           disabled={locked}
