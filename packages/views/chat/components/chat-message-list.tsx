@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { captureEvent } from "@multica/core/analytics";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -561,6 +562,44 @@ function AssistantMessage({
   // still arriving and a trailing fence may be half-written.
   const phase: "streaming" | "settled" = message ? "settled" : "streaming";
 
+  // The persisted row's own answer text renders only when the timeline
+  // is empty; with a timeline, the answer must come from the timeline's
+  // trailing text (`final` — text after the last non-text item). When that
+  // tail is missing — a daemon tail-flush that failed to persist, the answer
+  // text sandwiched before a later thinking/tool frame, or a hole in the
+  // client's task-messages cache — the turn otherwise renders elapsed +
+  // quick actions but NO reply. extractCopyText already falls back to
+  // message.content for exactly this shape; the render path now does too.
+  const { final: finalTimelineItems } = useMemo(
+    () => splitTimeline(timeline),
+    [timeline],
+  );
+  const isNoResponse = message?.message_kind === "no_response";
+  const missingFinalText =
+    !!message &&
+    timeline.length > 0 &&
+    finalTimelineItems.length === 0 &&
+    !isNoResponse &&
+    (message.content?.trim().length ?? 0) > 0;
+
+  // Count every visibly-rendered turn that needed the fallback — this is the
+  // direct measure of the user-facing missing-final-text symptom, whichever upstream path
+  // dropped the tail. Fired once per message id for the life of the mounted
+  // row; a remount (session revisit) re-emits, which is correct: the turn was
+  // invisible again.
+  const missingFinalTelemetryFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!missingFinalText || !message) return;
+    if (missingFinalTelemetryFor.current === message.id) return;
+    missingFinalTelemetryFor.current = message.id;
+    captureEvent("assistant_reply_missing_final_text", {
+      message_id: message.id,
+      task_id: message.task_id ?? null,
+      message_kind: message.message_kind ?? "message",
+      timeline_items: timeline.length,
+    });
+  }, [missingFinalText, message, timeline.length]);
+
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
   // human-readable reason label + collapsible raw errMsg + the same timeline
@@ -579,8 +618,6 @@ function AssistantMessage({
   // no_response path (MUL-4351): the agent completed this direct-chat turn
   // without any text. Keep whatever tool/thinking timeline the run produced and
   // show a localized "no text reply" notice instead of an empty markdown block.
-  const isNoResponse = message?.message_kind === "no_response";
-
   return (
     <div className="w-full space-y-1.5">
       {timeline.length > 0 && (
@@ -594,6 +631,17 @@ function AssistantMessage({
       {isNoResponse ? (
         <NoResponseNotice />
       ) : message && timeline.length === 0 ? (
+        <RichContent
+          content={message.content}
+          attachments={message.attachments}
+          density="compact"
+          phase="settled"
+          className="leading-relaxed"
+        />
+      ) : missingFinalText ? (
+        // Fallback: the timeline carried no trailing text but the
+        // persisted row has the authoritative answer — render it rather than
+        // leaving the turn blank.
         <RichContent
           content={message.content}
           attachments={message.attachments}

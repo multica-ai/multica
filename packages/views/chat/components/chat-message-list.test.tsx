@@ -1,11 +1,14 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { TaskMessagePayload } from "@multica/core/types";
+import { captureEvent } from "@multica/core/analytics";
+import type { ChatMessage, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
+
+vi.mock("@multica/core/analytics", () => ({ captureEvent: vi.fn() }));
 
 // The live timeline is a real list row rather than Virtuoso chrome (MUL-4922),
 // so it shares one identity with the persisted assistant row and keeps its
@@ -572,5 +575,136 @@ describe("ChatMessageList onboarding starter cards", () => {
       await screen.findByRole("button", { name: "Get a board up in minutes" }),
     ).toBeEnabled();
     expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
+  });
+});
+
+describe("ChatMessageList missing final text fallback", () => {
+  // The persisted assistant row renders its answer text ONLY from the task
+  // timeline's trailing text (splitTimeline's `final` segment) whenever the
+  // timeline is non-empty — `message.content` is gated off entirely. When the
+  // timeline's tail is missing (daemon tail-flush loss, sandwiched text, a
+  // client cache hole), the turn renders elapsed + quick actions but NO
+  // answer. extractCopyText already falls back to message.content for this
+  // exact shape; the render path must too.
+  beforeEach(() => {
+    vi.mocked(captureEvent).mockClear();
+  });
+  const ANSWER = "Task list updated: T-2001";
+
+  // Tool steps with NO trailing text after the last non-text item — the
+  // pathological shape where the whole answer is invisible today.
+  const TAILLESS_TIMELINE: TaskMessagePayload[] = [
+    taskMsg(0, "tool_use", { tool: "Bash", input: { command: "multica issue create" } }),
+    taskMsg(1, "tool_result", { tool: "Bash", output: "ok" }),
+  ];
+
+  function renderIs90(
+    messageOverrides: Partial<ChatMessage> = {},
+    timeline: TaskMessagePayload[] = TAILLESS_TIMELINE,
+  ) {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), timeline);
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "m-is90",
+                chat_session_id: "s1",
+                role: "assistant" as const,
+                content: ANSWER,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+                ...messageOverrides,
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("renders message.content when the timeline has no trailing text", async () => {
+    renderIs90();
+    // The timeline itself still renders (the fold), and the authoritative
+    // answer text from the persisted row becomes visible below it.
+    expect(await screen.findByText("2 steps")).toBeInTheDocument();
+    expect(await screen.findByText(ANSWER)).toBeInTheDocument();
+  });
+
+  it("does not duplicate the answer when trailing text exists", async () => {
+    renderIs90(
+      {},
+      [
+        taskMsg(0, "tool_use", { tool: "Bash", input: { command: "ls" } }),
+        taskMsg(1, "tool_result", { tool: "Bash", output: "ok" }),
+        taskMsg(2, "text", { content: ANSWER }),
+      ],
+    );
+    expect(await screen.findByText(ANSWER)).toBeInTheDocument();
+    expect(screen.getAllByText(ANSWER)).toHaveLength(1);
+  });
+
+  it("keeps the no_response placeholder instead of a fabricated answer", async () => {
+    renderIs90({ content: "", message_kind: "no_response" as const });
+    expect(await screen.findByText(enChat.message_list.no_response)).toBeInTheDocument();
+    expect(screen.queryByText(ANSWER)).toBeNull();
+  });
+
+  it("keeps the failure bubble for failed turns", async () => {
+    renderIs90({ failure_reason: "something_entirely_new" });
+    expect(
+      await screen.findByText(enChat.message_list.failure.fallback),
+    ).toBeInTheDocument();
+  });
+
+  it("fires assistant_reply_missing_final_text telemetry once per message", async () => {
+    const { rerender } = renderIs90();
+    await screen.findByText(ANSWER);
+    expect(vi.mocked(captureEvent)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(captureEvent)).toHaveBeenCalledWith(
+      "assistant_reply_missing_final_text",
+      expect.objectContaining({ message_id: "m-is90", task_id: TASK_ID }),
+    );
+
+    // A re-render of the same row (quick-actions patch, task:message tick)
+    // must not re-emit.
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "m-is90",
+                chat_session_id: "s1",
+                role: "assistant" as const,
+                content: ANSWER,
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(vi.mocked(captureEvent)).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire telemetry for turns that render their text normally", async () => {
+    renderIs90(
+      {},
+      [
+        taskMsg(0, "tool_use", { tool: "Bash", input: { command: "ls" } }),
+        taskMsg(1, "tool_result", { tool: "Bash", output: "ok" }),
+        taskMsg(2, "text", { content: ANSWER }),
+      ],
+    );
+    await screen.findByText(ANSWER);
+    expect(vi.mocked(captureEvent)).not.toHaveBeenCalled();
   });
 });
