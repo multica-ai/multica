@@ -2616,9 +2616,12 @@ func providerCapabilitiesForRegistration(provider string) string {
 	if !ok || len(desc.Capabilities) == 0 {
 		return ""
 	}
-	capabilities := make([]string, 0, len(desc.Capabilities))
+	capabilities := make([]string, 0, len(desc.Capabilities)+1)
 	for _, capability := range desc.Capabilities {
 		capabilities = append(capabilities, string(capability))
+	}
+	if providerSupportsRemoteMCPBroker(provider) && agent.ProviderSupportsCapability(provider, agent.ProviderCapabilityMCP) {
+		capabilities = append(capabilities, managedMCPPreTransportCapability(provider))
 	}
 	return strings.Join(capabilities, ",")
 }
@@ -6999,11 +7002,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
-	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
+	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokersWithGate(
 		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
 		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
 			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
 		},
+		newTaskManagedMCPInvocationGate(d.client, task, provider),
 		taskLog,
 	)
 	if remoteMCPErr != nil {

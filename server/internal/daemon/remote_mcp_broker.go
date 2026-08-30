@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -53,6 +54,10 @@ func (set *remoteMCPBrokerSet) Close() {
 }
 
 func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []remotemcp.Connection, resolveCredential remoteMCPCredentialResolver, logger *slog.Logger) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
+	return startTaskRemoteMCPBrokersWithGate(setupCtx, lifetimeCtx, taskID, provider, connections, resolveCredential, nil, logger)
+}
+
+func startTaskRemoteMCPBrokersWithGate(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []remotemcp.Connection, resolveCredential remoteMCPCredentialResolver, invocationGate remoteMCPInvocationGate, logger *slog.Logger) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
 	if len(connections) == 0 {
 		return nil, nil, nil, nil
 	}
@@ -121,10 +126,11 @@ func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, pr
 			return nil, diagnostics, nil, err
 		}
 		proxy := &remoteMCPProxy{
-			taskID: taskID, connection: connection, endpoint: endpoint,
+			taskID: taskID, provider: provider, connection: connection, endpoint: endpoint,
 			client: remotemcp.NewSecureHTTPClient(endpoint), credentialHeaders: headers,
 			resolveCredential: resolveCredential, path: "/" + pathToken,
 			semaphore: make(chan struct{}, remoteMCPMaxConcurrency), logger: logger,
+			invocationGate: invocationGate,
 		}
 		server := &http.Server{Handler: proxy, ReadHeaderTimeout: 5 * time.Second}
 		set.servers = append(set.servers, server)
@@ -206,6 +212,7 @@ func remoteMCPServerName(connection remotemcp.Connection) string {
 
 type remoteMCPProxy struct {
 	taskID            string
+	provider          string
 	connection        remotemcp.Connection
 	endpoint          *url.URL
 	client            *http.Client
@@ -215,6 +222,49 @@ type remoteMCPProxy struct {
 	semaphore         chan struct{}
 	calls             atomic.Int64
 	logger            *slog.Logger
+	invocationGate    remoteMCPInvocationGate
+}
+
+var (
+	errRemoteMCPCapabilityUnsupported = errors.New("Remote MCP pre-transport capability is unavailable")
+	errRemoteMCPPolicyDenied          = errors.New("Remote MCP invocation is denied by policy")
+	errRemoteMCPSchemaDrift           = errors.New("Remote MCP tool schema changed and requires review")
+	errRemoteMCPApprovalPending       = errors.New("Remote MCP invocation approval is pending")
+	errRemoteMCPApprovalDenied        = errors.New("Remote MCP invocation approval was denied")
+	errRemoteMCPApprovalExpired       = errors.New("Remote MCP invocation approval expired")
+	errRemoteMCPApprovalCancelled     = errors.New("Remote MCP invocation approval was cancelled")
+	errRemoteMCPApprovalConsumed      = errors.New("Remote MCP invocation approval was already consumed")
+)
+
+type remoteMCPInvocation struct {
+	TaskID         string
+	ProviderFamily string
+	TransportKind  string
+	ServerKey      string
+	ToolName       string
+	SchemaDigest   string
+	ArgumentBytes  int32
+	IdempotencyKey string
+}
+
+type remoteMCPInvocationGrant struct {
+	InvocationID      string
+	ApprovalRequestID string
+	PolicyRevision    int64
+	Invocation        remoteMCPInvocation
+}
+
+type remoteMCPInvocationResult struct {
+	OutcomeCode string
+	ErrorClass  string
+	ResultBytes int32
+	DurationMS  int64
+}
+
+type remoteMCPInvocationGate interface {
+	CheckCapability(providerFamily, transportKind string) error
+	Begin(context.Context, remoteMCPInvocation) (remoteMCPInvocationGrant, error)
+	Finish(context.Context, remoteMCPInvocationGrant, remoteMCPInvocationResult) error
 }
 
 type remoteMCPRequest struct {
@@ -269,18 +319,71 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		writeRemoteMCPError(w, rpcRequest.ID, -32601, "Only approved Remote MCP tools are available")
 		return
 	}
+	var invocationGrant remoteMCPInvocationGrant
+	invocationStarted := false
+	finishInvocation := func(outcomeCode, errorClass string, resultBytes int32) error {
+		if !invocationStarted {
+			return nil
+		}
+		return proxy.invocationGate.Finish(request.Context(), invocationGrant, remoteMCPInvocationResult{
+			OutcomeCode: outcomeCode, ErrorClass: errorClass, ResultBytes: resultBytes,
+			DurationMS: time.Since(started).Milliseconds(),
+		})
+	}
 	if rpcRequest.Method == "tools/call" {
 		var params struct {
-			Name string `json:"name"`
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
 		}
-		if err := json.Unmarshal(rpcRequest.Params, &params); err != nil || !proxy.toolApproved(params.Name) {
+		if err := json.Unmarshal(rpcRequest.Params, &params); err != nil {
 			writeRemoteMCPError(w, rpcRequest.ID, -32602, "Remote MCP tool is not approved")
 			return
 		}
 		toolName = params.Name
+		if proxy.invocationGate != nil {
+			if err := proxy.invocationGate.CheckCapability(proxy.provider, managedMCPTransportKind); err != nil {
+				resultClass = remoteMCPGateResultClass(err)
+				writeRemoteMCPError(w, rpcRequest.ID, -32007, remoteMCPGateMessage(err))
+				return
+			}
+		}
+		approvedTool, approved := proxy.approvedTool(params.Name)
+		if !approved {
+			writeRemoteMCPError(w, rpcRequest.ID, -32602, "Remote MCP tool is not approved")
+			return
+		}
+		if proxy.invocationGate != nil {
+			invocationGrant, err = proxy.invocationGate.Begin(request.Context(), remoteMCPInvocation{
+				TaskID: proxy.taskID, ProviderFamily: proxy.provider,
+				TransportKind: "managed_mcp", ServerKey: proxy.connection.ContributionKey,
+				ToolName: approvedTool.Name, SchemaDigest: approvedTool.SchemaDigest,
+				ArgumentBytes:  int32(len(params.Arguments)),
+				IdempotencyKey: remoteMCPInvocationIdempotencyKey(proxy.taskID, proxy.connection.ContributionKey, approvedTool.Name, rpcRequest.ID),
+			})
+			if err != nil {
+				resultClass = remoteMCPGateResultClass(err)
+				writeRemoteMCPError(w, rpcRequest.ID, -32007, remoteMCPGateMessage(err))
+				return
+			}
+			invocationStarted = true
+		}
+		if proxy.connection.Transport != "http" {
+			if err := finishInvocation("failed", "unsupported", 0); err != nil {
+				resultClass = "audit_failure"
+				writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+				return
+			}
+			writeRemoteMCPError(w, rpcRequest.ID, -32006, "Remote MCP transport is not supported")
+			return
+		}
 	}
 	upstream, err := http.NewRequestWithContext(request.Context(), http.MethodPost, proxy.endpoint.String(), bytes.NewReader(raw))
 	if err != nil {
+		if finishErr := finishInvocation("failed", "internal", 0); finishErr != nil {
+			resultClass = "audit_failure"
+			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+			return
+		}
 		writeRemoteMCPError(w, rpcRequest.ID, -32603, "Remote MCP request failed")
 		return
 	}
@@ -296,6 +399,11 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		credentialHeaders, err = proxy.resolveCredential(request.Context(), proxy.connection.ContributionID)
 		if err != nil {
 			resultClass = "credential_revoked"
+			if finishErr := finishInvocation("failed", "provider", 0); finishErr != nil {
+				resultClass = "audit_failure"
+				writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+				return
+			}
 			writeRemoteMCPError(w, rpcRequest.ID, -32005, "Remote MCP credential is revoked or unavailable")
 			return
 		}
@@ -308,6 +416,15 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	response, err := proxy.client.Do(upstream)
 	if err != nil {
 		resultClass = "remote_error"
+		outcomeCode, errorClass := "failed", "transport"
+		if request.Context().Err() != nil {
+			outcomeCode, errorClass = "cancelled", "cancelled"
+		}
+		if finishErr := finishInvocation(outcomeCode, errorClass, 0); finishErr != nil {
+			resultClass = "audit_failure"
+			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+			return
+		}
 		writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service is unavailable")
 		return
 	}
@@ -315,11 +432,21 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, remotemcp.MaxResponseBytes+1))
 	if err != nil || len(responseBody) > remotemcp.MaxResponseBytes {
 		resultClass = "remote_error"
+		if finishErr := finishInvocation("failed", "transport", 0); finishErr != nil {
+			resultClass = "audit_failure"
+			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+			return
+		}
 		writeRemoteMCPError(w, rpcRequest.ID, -32001, "Remote MCP response exceeded the allowed limit")
 		return
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		resultClass = "remote_error"
+		if finishErr := finishInvocation("failed", "transport", int32(len(responseBody))); finishErr != nil {
+			resultClass = "audit_failure"
+			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+			return
+		}
 		writeRemoteMCPError(w, rpcRequest.ID, -32000, "Remote MCP service returned an error")
 		return
 	}
@@ -345,9 +472,28 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 			w.Header().Set(header, value)
 		}
 	}
+	if invocationStarted {
+		if err := proxy.invocationGate.Finish(request.Context(), invocationGrant, remoteMCPInvocationResult{OutcomeCode: "succeeded", ResultBytes: int32(len(responseBody)), DurationMS: time.Since(started).Milliseconds()}); err != nil {
+			resultClass = "audit_failure"
+			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
+			return
+		}
+		if invocationGrant.InvocationID != "" {
+			w.Header().Set("X-Multica-Tool-Invocation-ID", invocationGrant.InvocationID)
+		}
+	}
 	w.WriteHeader(response.StatusCode)
 	_, _ = w.Write(responseBody)
 	resultClass = "success"
+}
+
+func remoteMCPInvocationIdempotencyKey(taskID, serverKey, toolName string, rpcID json.RawMessage) string {
+	hash := sha256.New()
+	for _, value := range [][]byte{[]byte(taskID), []byte(serverKey), []byte(toolName), rpcID} {
+		_, _ = hash.Write(value)
+		_, _ = hash.Write([]byte{0})
+	}
+	return "mcp:sha256:" + hex.EncodeToString(hash.Sum(nil))
 }
 
 func decodeRemoteMCPSSEData(contentType string, raw []byte) ([]byte, error) {
@@ -374,13 +520,59 @@ func allowedRemoteMCPMethod(method string) bool {
 	}
 }
 
-func (proxy *remoteMCPProxy) toolApproved(name string) bool {
+func (proxy *remoteMCPProxy) approvedTool(name string) (remotemcp.Tool, bool) {
 	for _, tool := range proxy.connection.ApprovedTools {
 		if tool.Name == name {
-			return true
+			return tool, true
 		}
 	}
-	return false
+	return remotemcp.Tool{}, false
+}
+
+func remoteMCPGateMessage(err error) string {
+	switch {
+	case errors.Is(err, errRemoteMCPCapabilityUnsupported):
+		return "Remote MCP pre-transport capability is unavailable"
+	case errors.Is(err, errRemoteMCPSchemaDrift):
+		return "Remote MCP tool schema changed and requires review"
+	case errors.Is(err, errRemoteMCPApprovalPending):
+		return "Remote MCP invocation approval is pending"
+	case errors.Is(err, errRemoteMCPApprovalDenied):
+		return "Remote MCP invocation approval was denied"
+	case errors.Is(err, errRemoteMCPApprovalExpired):
+		return "Remote MCP invocation approval expired"
+	case errors.Is(err, errRemoteMCPApprovalCancelled):
+		return "Remote MCP invocation approval was cancelled"
+	case errors.Is(err, errRemoteMCPApprovalConsumed):
+		return "Remote MCP invocation approval was already consumed"
+	case errors.Is(err, errRemoteMCPAuditFailure):
+		return "Remote MCP audit commit failed"
+	default:
+		return "Remote MCP invocation is denied by policy"
+	}
+}
+
+func remoteMCPGateResultClass(err error) string {
+	switch {
+	case errors.Is(err, errRemoteMCPCapabilityUnsupported):
+		return "unsupported"
+	case errors.Is(err, errRemoteMCPSchemaDrift):
+		return "schema_drift"
+	case errors.Is(err, errRemoteMCPApprovalPending):
+		return "approval_pending"
+	case errors.Is(err, errRemoteMCPApprovalDenied):
+		return "approval_denied"
+	case errors.Is(err, errRemoteMCPApprovalExpired):
+		return "approval_expired"
+	case errors.Is(err, errRemoteMCPApprovalCancelled):
+		return "approval_cancelled"
+	case errors.Is(err, errRemoteMCPApprovalConsumed):
+		return "approval_consumed"
+	case errors.Is(err, errRemoteMCPAuditFailure):
+		return "audit_failure"
+	default:
+		return "policy_denied"
+	}
 }
 
 func (proxy *remoteMCPProxy) filterToolsListResponse(raw []byte) ([]byte, error) {
