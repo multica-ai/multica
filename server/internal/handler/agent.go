@@ -364,6 +364,7 @@ type AgentTaskResponse struct {
 	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
 	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	ManagedMCPPolicy     *ManagedMCPPolicyData  `json:"managed_mcp_policy,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
 	// disabling or uninstalling a plugin takes effect on the next task rather
@@ -535,6 +536,20 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+type ManagedMCPPolicyData struct {
+	Capability string                     `json:"capability"`
+	Revision   int64                      `json:"revision"`
+	Rules      []ManagedMCPPolicyRuleData `json:"rules"`
+}
+
+type ManagedMCPPolicyRuleData struct {
+	TransportKind string `json:"transport_kind"`
+	ServerKey     string `json:"server_key"`
+	ToolName      string `json:"tool_name"`
+	SchemaDigest  string `json:"schema_digest"`
+	Effect        string `json:"effect"`
 }
 
 // TaskAttribution is the wire shape of a run's accountable-human provenance

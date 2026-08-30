@@ -39,6 +39,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/service/toolaction"
+	"github.com/multica-ai/multica/server/internal/service/toolapproval"
 	"github.com/multica-ai/multica/server/internal/service/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -189,6 +190,7 @@ type Handler struct {
 	AutopilotService       *service.AutopilotService
 	ToolPolicyService      *toolpolicy.Service
 	ToolActionService      *toolaction.SQLService
+	ToolApprovalService    *toolapproval.Service
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
@@ -460,6 +462,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		ToolPolicyService:            toolpolicy.NewSQLService(queries, txStarter),
 		ToolActionService:            toolaction.NewSQLService(queries),
+		ToolApprovalService:          toolapproval.NewSQLService(queries, txStarter),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),

@@ -1535,6 +1535,50 @@ func runtimeHasCapability(metadata []byte, capability string) bool {
 	return false
 }
 
+func managedMCPPreTransportCapability(provider string) string {
+	return "managed-mcp-pretransport-v1:" + normalizeProvider(provider)
+}
+
+func (h *Handler) managedMCPPolicyForClaim(ctx context.Context, task *db.AgentTaskQueue, runtime db.AgentRuntime) (*ManagedMCPPolicyData, *claimBuildFailure) {
+	policy, err := h.Queries.GetAgentToolPolicy(ctx, db.GetAgentToolPolicyParams{WorkspaceID: runtime.WorkspaceID, AgentID: task.AgentID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, &claimBuildFailure{outcome: "error_tool_policy", status: http.StatusInternalServerError, message: "failed to load agent tool policy"}
+	}
+	if policy.Status != "active" || policy.Revision < 1 {
+		return nil, h.failClaimedTaskBeforeLaunch(ctx, task,
+			"This agent has an incomplete tool policy. Publish an active policy before retrying the task.",
+			taskfailure.ReasonInvalidTaskIdentity, "error_tool_policy_inactive", http.StatusConflict, "agent tool policy is not active")
+	}
+	rules, err := h.Queries.ListAgentToolPolicyRules(ctx, db.ListAgentToolPolicyRulesParams{
+		WorkspaceID: runtime.WorkspaceID, AgentID: task.AgentID, PolicyID: policy.ID,
+	})
+	if err != nil {
+		return nil, &claimBuildFailure{outcome: "error_tool_policy", status: http.StatusInternalServerError, message: "failed to load agent tool policy rules"}
+	}
+	capability := managedMCPPreTransportCapability(runtime.Provider)
+	if !runtimeHasCapability(runtime.Metadata, capability) {
+		return nil, h.failClaimedTaskBeforeLaunch(ctx, task,
+			"This agent requires managed tool enforcement, but the selected runtime cannot enforce its policy before forwarding tool calls. Update or change the runtime, then retry.",
+			taskfailure.ReasonInvalidTaskIdentity, "error_tool_policy_capability", http.StatusUnprocessableEntity, "runtime lacks managed tool enforcement capability")
+	}
+	out := &ManagedMCPPolicyData{Capability: capability, Revision: policy.Revision, Rules: make([]ManagedMCPPolicyRuleData, 0, len(rules))}
+	for _, rule := range rules {
+		if rule.TransportKind != "managed_mcp" {
+			return nil, h.failClaimedTaskBeforeLaunch(ctx, task,
+				"This agent policy includes a tool transport that the selected runtime cannot enforce before execution.",
+				taskfailure.ReasonInvalidTaskIdentity, "error_tool_policy_transport", http.StatusUnprocessableEntity, "runtime lacks policy transport enforcement")
+		}
+		out.Rules = append(out.Rules, ManagedMCPPolicyRuleData{
+			TransportKind: rule.TransportKind, ServerKey: rule.ServerKey, ToolName: rule.ToolName,
+			SchemaDigest: rule.SchemaDigest, Effect: rule.Effect,
+		})
+	}
+	return out, nil
+}
+
 func requestHasClientCapability(r *http.Request, capability string) bool {
 	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 		if strings.TrimSpace(part) == capability {
@@ -1919,7 +1963,7 @@ func (h *Handler) rejectClaimOnWorkspaceMismatch(ctx context.Context, task *db.A
 // returned only in the claim response; its hash is committed atomically with
 // the task-scoped agent token by FinalizeTaskClaim.
 func remoteMCPDaemonTokenForClaim(resp AgentTaskResponse, runtime db.AgentRuntime) (string, []db.CreateDaemonTokenParams, error) {
-	if len(resp.RemoteMCPConnections) == 0 {
+	if len(resp.RemoteMCPConnections) == 0 && resp.ManagedMCPPolicy == nil {
 		return "", nil, nil
 	}
 	if !runtime.DaemonID.Valid || strings.TrimSpace(runtime.DaemonID.String) == "" {
@@ -2117,6 +2161,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
 	}
+	managedPolicy, policyFailure := h.managedMCPPolicyForClaim(r.Context(), task, runtime)
+	if policyFailure != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, policyFailure
+	}
+	resp.ManagedMCPPolicy = managedPolicy
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {

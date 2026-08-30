@@ -1415,6 +1415,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 		r.Post("/tasks/{taskId}/cancel-ack", h.AckTaskCancelled)
+		r.Post("/tasks/{taskId}/tool-invocations", h.CreateDaemonToolInvocation)
+		r.Get("/tasks/{taskId}/tool-approvals/{approvalId}", h.GetDaemonToolApproval)
+		r.Post("/tasks/{taskId}/tool-approvals/{approvalId}/consume", h.ConsumeDaemonToolApproval)
+		r.Post("/tasks/{taskId}/tool-invocations/{invocationId}/events", h.CommitDaemonToolInvocationEvent)
 
 		r.Post("/workspaces/{workspaceId}/issues/gc-check", h.BatchIssueGCCheck)
 		r.Get("/issues/{issueId}/gc-check", h.GetIssueGCCheck)
@@ -1484,6 +1488,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
+		r.With(handler.RequireHumanActor).Get("/api/approvals", h.ListAgentToolApprovals)
+		r.With(handler.RequireHumanActor).Get("/api/approvals/{approvalId}", h.GetAgentToolApproval)
+		r.With(handler.RequireHumanActor).Post("/api/approvals/{approvalId}/decision", h.DecideAgentToolApproval)
 
 		// Note (MUL-4309): the generic OpenAI-compatible passthrough endpoints
 		// (POST /api/llm/v1/chat/completions[/stream]) were intentionally
