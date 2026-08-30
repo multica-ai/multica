@@ -20,7 +20,7 @@ function useHealthTick(): number {
 }
 
 /**
- * Derived runtime health (online / recently_lost / offline / about_to_gc),
+ * Derived runtime health (online / recently_lost / offline / long_offline),
  * or "loading" while the runtime list is still resolving.
  *
  * Accepts wsId as a parameter so the hook works outside WorkspaceIdProvider.

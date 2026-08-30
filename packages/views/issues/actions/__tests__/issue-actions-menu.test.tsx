@@ -99,6 +99,7 @@ vi.mock("../../../navigation", () => ({
     push: vi.fn(),
     pathname: "/test/issues/issue-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     back: vi.fn(),
     replace: vi.fn(),
     ...(navState.hasOpenInNewTab ? { openInNewTab: openInNewTabMock } : {}),

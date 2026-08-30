@@ -54,7 +54,8 @@ Add the Bot to a group, then either @-mention it or reply directly to one of its
 
 ### Commands
 
-- `/new <message>` runs the message without previous chat context. In an explicitly mentioned reply to another person, the selected quote remains attached to that fresh instruction. Sending `/new` by itself applies the fresh start to the next non-empty message.
+- `/new` creates a new empty Multica Chat and routes later messages in the Telegram conversation to it. `/new <message>` creates the Chat with that message as its first turn. In an explicitly mentioned reply to another person, the selected quote remains attached to that first turn.
+- `/clear` keeps the current Multica Chat and applies a fresh agent-visible context to the next non-empty message. `/clear <message>` uses that message as the first turn after the context boundary; an explicitly selected reply quote remains attached.
 - `/issue <title>` creates a Multica issue; following lines are used as its optional description. `/issue` without a title returns usage guidance.
 - Telegram command suffixes such as `/issue@your_bot` are supported in groups.
 

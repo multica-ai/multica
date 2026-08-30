@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // openclawCLIStub captures one or more (subcommand, response) pairs and
@@ -27,6 +28,12 @@ type openclawCLIStub struct {
 type openclawCall struct {
 	bin  string
 	args []string
+	// deadline is the ctx deadline this invocation ran under, zero if it had
+	// none. Recorded because the budget the ceiling is derived from counts
+	// deadlines, not calls: path resolution makes two invocations under one
+	// shared deadline, and a test that counted calls could not tell that apart
+	// from a fifth budget. See TestPrepareOpenclawConfigWorstCaseCLIBudgets.
+	deadline time.Time
 }
 
 type openclawResponse struct {
@@ -47,14 +54,53 @@ func installOpenclawStub(t *testing.T, responses map[string]openclawResponse) *o
 	return stub
 }
 
-func (s *openclawCLIStub) exec(_ context.Context, bin string, args ...string) (string, error) {
-	s.calls = append(s.calls, openclawCall{bin: bin, args: append([]string(nil), args...)})
+func (s *openclawCLIStub) exec(ctx context.Context, bin string, args ...string) (string, error) {
+	deadline, _ := ctx.Deadline()
+	s.calls = append(s.calls, openclawCall{bin: bin, args: append([]string(nil), args...), deadline: deadline})
 	key := strings.Join(args, " ")
-	resp, ok := s.responses[key]
-	if !ok {
-		return "", fmt.Errorf("openclawCLIStub: unexpected args %q", key)
+	if resp, ok := s.responses[key]; ok {
+		return resp.stdout, resp.err
 	}
-	return resp.stdout, resp.err
+	if key == "config validate --json" {
+		return s.derivedValidateResponse()
+	}
+	return "", fmt.Errorf("openclawCLIStub: unexpected args %q", key)
+}
+
+// derivedValidateResponse answers `config validate --json` from the registered
+// `config file` response when a test did not register one itself.
+//
+// openclawActiveConfigPath asks `config validate --json` first because its answer
+// arrives in a named field (see there). Almost every test in this package fixes
+// the *outcome* of path resolution — which file the wrapper $includes, how many
+// CLI calls a cold preparation makes, what happens when the CLI is missing — and
+// not which subcommand supplies it. Deriving keeps those tests stating what they
+// are about; hand-writing a second response into 30-odd maps would turn the next
+// change to this boundary into a 30-site edit and bury the two tests that do care.
+//
+// A test that cares registers "config validate --json" explicitly:
+// TestOpenclawActiveConfigPathIgnoresAPathShapedWarning and the fallback cases in
+// openclaw_process_tree_test.go drive the real binary instead, so they are
+// unaffected by this.
+func (s *openclawCLIStub) derivedValidateResponse() (string, error) {
+	resp, ok := s.responses["config file"]
+	if !ok {
+		return "", fmt.Errorf("openclawCLIStub: no `config file` response to derive validate from")
+	}
+	// An unusable `config file` means an unusable CLI for this purpose: report the
+	// same failure so the test exercises whatever fallback it is about.
+	if resp.err != nil {
+		return "", resp.err
+	}
+	path := strings.TrimSpace(resp.stdout)
+	if path == "" {
+		return "", nil
+	}
+	payload, err := json.Marshal(map[string]any{"valid": true, "path": path})
+	if err != nil {
+		return "", err
+	}
+	return string(payload) + "\n", nil
 }
 
 func mustReadJSON(t *testing.T, path string) map[string]any {
@@ -246,11 +292,23 @@ func TestPrepareOpenclawConfigFallsBackWhenConfigFileUnsupported(t *testing.T) {
 	if len(list) != 1 || list[0].(map[string]any)["workspace"] != workDir {
 		t.Errorf("agents.list workspace rewrite after fallback = %v, want workDir %q", list, workDir)
 	}
-	if len(stub.calls) != 2 {
-		t.Fatalf("openclaw calls = %d, want 2: %+v", len(stub.calls), stub.calls)
+	// Three calls, not two, and the extra one is the point of this test now: a CLI
+	// too old to support `config file` is also too old for `config validate --json`,
+	// so path resolution asks both before falling back to the candidate shape. That
+	// is one extra invocation on exactly the hosts that were already on a
+	// deprecated command shape, and it buys every current host an answer that a
+	// path-shaped warning line cannot corrupt (see openclawActiveConfigPath).
+	if len(stub.calls) != 3 {
+		t.Fatalf("openclaw calls = %d, want 3: %+v", len(stub.calls), stub.calls)
 	}
-	if strings.Join(stub.calls[1].args, " ") != "config get agents.list --json" {
-		t.Errorf("second openclaw call = %q, want config get agents.list --json", strings.Join(stub.calls[1].args, " "))
+	if got := strings.Join(stub.calls[0].args, " "); got != "config validate --json" {
+		t.Errorf("first openclaw call = %q, want config validate --json", got)
+	}
+	if got := strings.Join(stub.calls[1].args, " "); got != "config file" {
+		t.Errorf("second openclaw call = %q, want config file", got)
+	}
+	if strings.Join(stub.calls[2].args, " ") != "config get agents.list --json" {
+		t.Errorf("third openclaw call = %q, want config get agents.list --json", strings.Join(stub.calls[2].args, " "))
 	}
 }
 
@@ -1100,6 +1158,97 @@ func TestPrepareOpenclawConfigManagedSetFreshInstall(t *testing.T) {
 	}
 }
 
+// TestPrepareOpenclawConfigFallsBackToRegistryOnEnvelopeWithoutExit — the
+// completeness rule accepts a JSON error envelope as a finished answer (it is
+// valid JSON), so a CLI that prints one and then lingers past the idle grace
+// yields err == nil with the envelope in stdout. The missing-key verdict must be
+// the same as when the CLI exits non-zero: select the registry rather than
+// decoding the envelope as an agent list and failing the whole preparation.
+func TestPrepareOpenclawConfigFallsBackToRegistryOnEnvelopeWithoutExit(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: userCfgPath},
+		// Envelope, no error: the CLI answered and then failed to exit.
+		"config get agents.list --json": {stdout: `{"error":"Config path not found: agents.list"}`},
+		"agents list --json":            {stdout: `[{"id":"scout","workspace":"/old"}]`},
+	})
+
+	// Without the envelope check this decodes as an agent list, fails to
+	// unmarshal into []any, and takes the whole preparation down.
+	if _, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{}); err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	var called []string
+	registryConsulted := false
+	for _, call := range stub.calls {
+		joined := strings.Join(call.args, " ")
+		called = append(called, joined)
+		if joined == "agents list --json" {
+			registryConsulted = true
+		}
+	}
+	if !registryConsulted {
+		t.Errorf("registry was never consulted (calls: %v), so the envelope was not recognized", called)
+	}
+	wrapper, err := os.ReadFile(filepath.Join(envRoot, openclawConfigFile))
+	if err != nil {
+		t.Fatalf("read wrapper: %v", err)
+	}
+	// A registry-sourced list is deliberately not written back as
+	// `agents.list` (see buildPerTaskOpenclawConfig), but the envelope must not
+	// reach the wrapper by any route either.
+	if strings.Contains(string(wrapper), "Config path not found") {
+		t.Errorf("wrapper %s carries the CLI error envelope", wrapper)
+	}
+}
+
+// TestPrepareOpenclawConfigFailsClosedOnResolvedConfigEnvelopeWithoutExit — the
+// object-target counterpart, and the one with a silent failure mode: an envelope
+// decoded as the user's resolved config would be sanitized and written into the
+// task's snapshot, so preparation has to fail closed with the CLI's own message.
+func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigEnvelopeWithoutExit(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userCfgPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+	installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: userCfgPath},
+		"config get agents.list --json": {stdout: "null"},
+		"config get --json": {
+			stdout: `{"error":"schema validation failed","resolved":{"apiKey":"must-not-leak"}}`,
+		},
+	})
+
+	_, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		McpConfig: json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`),
+	})
+	if err == nil {
+		t.Fatal("prepareOpenclawConfig succeeded on an error envelope that arrived without a non-zero exit")
+	}
+	if !strings.Contains(err.Error(), "schema validation failed") {
+		t.Errorf("error %q omits the CLI's own diagnostic", err.Error())
+	}
+	if strings.Contains(err.Error(), "must-not-leak") {
+		t.Errorf("error leaked a non-diagnostic JSON field: %q", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(envRoot, openclawUserSnapshotFile)); !os.IsNotExist(statErr) {
+		t.Errorf("snapshot exists after fail-closed: %v", statErr)
+	}
+}
+
 // TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError — when the
 // user has a config on disk and the agent has managed mcp_config but
 // `openclaw config get --json` errors, the preparer must NOT fall back to
@@ -1356,10 +1505,10 @@ func TestPrepareEnvironmentNonOpenclawSkipsConfig(t *testing.T) {
 	stub := installOpenclawStub(t, map[string]openclawResponse{})
 
 	taskIDs := map[string]string{
-		"claude":   "aaaaaaaa-1111-2222-3333-444444444444",
-		"opencode": "bbbbbbbb-1111-2222-3333-444444444444",
-		"hermes":   "cccccccc-1111-2222-3333-444444444444",
-		"kiro":     "dddddddd-1111-2222-3333-444444444444",
+		"claude":   "aaaaaaaa-1111-2222-3333-4444444444aa",
+		"opencode": "bbbbbbbb-1111-2222-3333-4444444444bb",
+		"hermes":   "cccccccc-1111-2222-3333-4444444444cc",
+		"kiro":     "dddddddd-1111-2222-3333-4444444444dd",
 	}
 	for provider, taskID := range taskIDs {
 		t.Run(provider, func(t *testing.T) {
@@ -1743,6 +1892,255 @@ func TestExpandOpenclawPathTildeSeparators(t *testing.T) {
 				t.Errorf("expandOpenclawPath(%q) = %q, want it rooted at the home dir %q", tc.in, got, fakeHome)
 			}
 		})
+	}
+}
+
+// TestExpandOpenclawPathOpenclawHome — the same failure as #6630 in a second
+// shape. When OPENCLAW_HOME is set, current releases print the variable name
+// instead of its value, and an unexpanded `$OPENCLAW_HOME\...` line is not
+// absolute, so it lands under the daemon's working directory and stats as
+// missing — reported as a fresh install, wrapper without the user's $include.
+func TestExpandOpenclawPathOpenclawHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("OPENCLAW_HOME", home)
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "dollar Windows separator", in: `$OPENCLAW_HOME\.openclaw\openclaw.json`, want: filepath.Join(home, `.openclaw\openclaw.json`)},
+		{name: "braced POSIX separator", in: `${OPENCLAW_HOME}/.openclaw/openclaw.json`, want: filepath.Join(home, ".openclaw", "openclaw.json")},
+		{name: "bare variable", in: `$OPENCLAW_HOME`, want: home},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := expandOpenclawPath(tc.in)
+			if err != nil {
+				t.Fatalf("expandOpenclawPath(%q): %v", tc.in, err)
+			}
+			if got != tc.want {
+				t.Errorf("expandOpenclawPath(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExpandOpenclawPathOpenclawHomeUnsetFailsLoudly — the variable form with
+// nothing to expand it to must be an error, not a relative-path fallback.
+// Falling through would resolve the literal `$OPENCLAW_HOME` segment against
+// the daemon's working directory and hand back a confident absolute path to a
+// file that cannot exist, which is exactly the silent-fresh-install failure
+// this shape causes in the first place.
+func TestExpandOpenclawPathOpenclawHomeUnsetFailsLoudly(t *testing.T) {
+	t.Setenv("OPENCLAW_HOME", "")
+
+	got, err := expandOpenclawPath(`$OPENCLAW_HOME/.openclaw/openclaw.json`)
+	if err == nil {
+		t.Fatalf("expandOpenclawPath returned %q, want an error when OPENCLAW_HOME is empty", got)
+	}
+	if !strings.Contains(err.Error(), "OPENCLAW_HOME") {
+		t.Errorf("error %q does not name the variable that could not be expanded", err.Error())
+	}
+	// The path is what the reader of a daemon log needs in order to act.
+	if !strings.Contains(err.Error(), `"$OPENCLAW_HOME/.openclaw/openclaw.json"`) {
+		t.Errorf("error %q does not name the path being expanded", err.Error())
+	}
+}
+
+// TestPrepareOpenclawConfigExpandsOpenclawHome — end-to-end guard, mirroring
+// TestPrepareOpenclawConfigExpandsWindowsTilde below: the banner-then-path
+// output shape with the variable form must still produce a wrapper that
+// $includes the user's config, and the include-root grant that goes with it.
+func TestPrepareOpenclawConfigExpandsOpenclawHome(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	openclawHome := t.TempDir()
+	t.Setenv("OPENCLAW_HOME", openclawHome)
+
+	// Built with filepath.Join for the reason the tilde test gives: the
+	// remainder arrives with the CLI's separators and production normalizes it
+	// the same way, so on a non-Windows host this is one oddly-named file.
+	wantPath := filepath.Join(openclawHome, `.openclaw\openclaw.json`)
+	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
+		t.Fatalf("mkdir user cfg dir: %v", err)
+	}
+	if err := os.WriteFile(wantPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	banner := "|\no  Config warnings ---------------------------------+\n" +
+		"|  - plugins.entries.duckduckgo: plugin not found  |\n" +
+		"+--------------------------------------------------+\n" +
+		`$OPENCLAW_HOME\.openclaw\openclaw.json` + "\n"
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: banner},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok {
+		t.Fatalf("wrapper has no $include — the user's models and auth profiles would be lost: %#v", got)
+	}
+	if include[0] != wantPath {
+		t.Errorf("$include[0] = %v, want %q", include[0], wantPath)
+	}
+	if result.IncludeRoot != filepath.Dir(wantPath) {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, filepath.Dir(wantPath))
+	}
+}
+
+// TestExpandOpenclawPathOpenclawHomeIsItselfATilde — the variable's *value* may
+// be a tilde path. Upstream documents that and expands it before computing the
+// home `config file` then shortens (`docs/help/environment.md` and
+// `src/infra/home-dir.ts:41-47` at `v2026.5.27`), so the printed
+// `$OPENCLAW_HOME` stands for `<os-home>/svc` and the daemon has to land on the
+// same file. Joining the raw value leaves the `~` embedded, filepath.Abs makes
+// that absolute under the daemon's working directory, and the stat miss is once
+// again reported as a fresh install — the failure this whole branch removes,
+// reached through the branch itself.
+func TestExpandOpenclawPathOpenclawHomeIsItselfATilde(t *testing.T) {
+	osHome := t.TempDir()
+	t.Setenv("HOME", osHome)
+	t.Setenv("USERPROFILE", osHome)
+
+	cases := []struct {
+		name string
+		env  string
+		in   string
+		want string
+	}{
+		{
+			name: "tilde value, posix remainder",
+			env:  "~/svc",
+			in:   `$OPENCLAW_HOME/.openclaw/openclaw.json`,
+			want: filepath.Join(osHome, "svc", ".openclaw", "openclaw.json"),
+		},
+		{
+			name: "tilde value, windows remainder",
+			env:  "~/svc",
+			in:   `$OPENCLAW_HOME\.openclaw\openclaw.json`,
+			want: filepath.Join(osHome, "svc", `.openclaw\openclaw.json`),
+		},
+		{
+			name: "tilde value with windows separator",
+			env:  `~\svc`,
+			in:   `$OPENCLAW_HOME/.openclaw/openclaw.json`,
+			want: filepath.Join(osHome, "svc", ".openclaw", "openclaw.json"),
+		},
+		{
+			name: "bare tilde value",
+			env:  "~",
+			in:   `$OPENCLAW_HOME/.openclaw/openclaw.json`,
+			want: filepath.Join(osHome, ".openclaw", "openclaw.json"),
+		},
+		{
+			name: "bare variable, tilde value",
+			env:  "~/svc",
+			in:   `$OPENCLAW_HOME`,
+			want: filepath.Join(osHome, "svc"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("OPENCLAW_HOME", tc.env)
+			got, err := expandOpenclawPath(tc.in)
+			if err != nil {
+				t.Fatalf("expandOpenclawPath(%q) with OPENCLAW_HOME=%q: %v", tc.in, tc.env, err)
+			}
+			if strings.Contains(got, "~") {
+				t.Errorf("expandOpenclawPath(%q) = %q, want the value's `~` expanded (a literal ~ can never stat)", tc.in, got)
+			}
+			if got != tc.want {
+				t.Errorf("expandOpenclawPath(%q) with OPENCLAW_HOME=%q = %q, want %q", tc.in, tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExpandOpenclawPathLeavesLookalikePrefixesAlone — the risk claim is that no
+// path which works today changes, and this is what guards it. A variable whose
+// name merely starts with OPENCLAW_HOME must not be treated as the shape.
+func TestExpandOpenclawPathLeavesLookalikePrefixesAlone(t *testing.T) {
+	t.Setenv("OPENCLAW_HOME", t.TempDir())
+
+	for _, in := range []string{
+		`$OPENCLAW_HOMEX/y`,
+		`$OPENCLAW_HOME_EXTRA/y`,
+		`${OPENCLAW_HOMEX}/y`,
+		`$OPENCLAW/y`,
+	} {
+		t.Run(in, func(t *testing.T) {
+			got, err := expandOpenclawPath(in)
+			if err != nil {
+				t.Fatalf("expandOpenclawPath(%q): %v", in, err)
+			}
+			// Untouched by the new branch: still resolved as an ordinary
+			// relative path, exactly as on `main`.
+			want, aerr := filepath.Abs(in)
+			if aerr != nil {
+				t.Fatalf("filepath.Abs(%q): %v", in, aerr)
+			}
+			if got != want {
+				t.Errorf("expandOpenclawPath(%q) = %q, want it left as a relative path -> %q", in, got, want)
+			}
+		})
+	}
+}
+
+// TestPrepareOpenclawConfigExpandsTildeValuedOpenclawHome — the same defect at
+// the level that decides what the user actually gets. A unit assertion on
+// expandOpenclawPath would not have caught it: the value's `~` survived into a
+// path that looks absolute, so only following it through to the wrapper shows
+// the `$include` going missing.
+func TestPrepareOpenclawConfigExpandsTildeValuedOpenclawHome(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	osHome := t.TempDir()
+	t.Setenv("HOME", osHome)
+	t.Setenv("USERPROFILE", osHome)
+	t.Setenv("OPENCLAW_HOME", "~/svc")
+
+	wantPath := filepath.Join(osHome, "svc", ".openclaw", "openclaw.json")
+	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
+		t.Fatalf("mkdir user cfg dir: %v", err)
+	}
+	if err := os.WriteFile(wantPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: `$OPENCLAW_HOME/.openclaw/openclaw.json` + "\n"},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok {
+		t.Fatalf("wrapper has no $include — the user's models and auth profiles would be lost: %#v", got)
+	}
+	if include[0] != wantPath {
+		t.Errorf("$include[0] = %v, want %q", include[0], wantPath)
+	}
+	if result.IncludeRoot != filepath.Dir(wantPath) {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, filepath.Dir(wantPath))
 	}
 }
 

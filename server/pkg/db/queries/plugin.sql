@@ -1,15 +1,107 @@
+-- name: LockPluginPackageKey :exec
+-- Serializes publish, install and delete for one (workspace, plugin key).
+--
+-- Relationships are application-owned by repository policy, so there are no
+-- foreign keys to make "this version still exists" true across statements.
+-- Without this lock the interleaving `delete counts 0 installs` → `install
+-- reads the version` → `delete commits` → `install commits` leaves an
+-- installation pointing at a version that no longer exists, and its panel 404s
+-- forever with nothing in the product able to explain why.
+--
+-- Keyed on the plugin key rather than the package id because publish has no
+-- package id yet — the row it would lock is the one it may be about to create.
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
+
+-- name: CreatePluginPackage :one
+INSERT INTO plugin_package (workspace_id, plugin_key, name, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: UpdatePluginPackageName :one
+-- The display name follows the newest published version. The key never moves:
+-- it is the identity an installation was consented under.
+UPDATE plugin_package
+SET name = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: GetWorkspacePluginPackageByKey :one
+SELECT * FROM plugin_package
+WHERE workspace_id = $1 AND plugin_key = $2;
+
+-- name: GetWorkspacePluginPackage :one
+SELECT * FROM plugin_package
+WHERE workspace_id = $1 AND id = $2;
+
+-- name: ListWorkspacePluginPackages :many
+SELECT * FROM plugin_package
+WHERE workspace_id = $1
+ORDER BY name ASC;
+
+-- name: DeletePluginPackage :exec
+DELETE FROM plugin_package WHERE id = $1;
+
+-- name: CreatePluginPackageVersion :one
+-- Published versions are only ever inserted. Nothing updates one, and the
+-- (package_id, version) unique index is what makes a second publish of the same
+-- version a conflict instead of a silent overwrite.
+INSERT INTO plugin_package_version (
+    package_id, workspace_id, version, manifest, digest, size_bytes, published_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: ListPluginPackageVersions :many
+SELECT * FROM plugin_package_version
+WHERE package_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetWorkspacePluginPackageVersion :one
+SELECT * FROM plugin_package_version
+WHERE workspace_id = $1 AND id = $2;
+
+-- name: DeletePluginPackageVersionsByPackage :exec
+DELETE FROM plugin_package_version WHERE package_id = $1;
+
+-- name: CountInstallationsOfPackageVersions :one
+-- Whether any workspace still runs a version of this package. Publishing is
+-- workspace-private, so this is scoped to the same workspace by construction.
+SELECT count(*) FROM plugin_installation
+WHERE package_version_id IN (
+    SELECT id FROM plugin_package_version WHERE package_id = $1
+);
+
+-- name: CreatePluginPackageFile :exec
+INSERT INTO plugin_package_file (version_id, path, content, size_bytes, sha256)
+VALUES ($1, $2, $3, $4, $5);
+
+-- name: GetPluginPackageFile :one
+SELECT * FROM plugin_package_file
+WHERE version_id = $1 AND path = $2;
+
+-- name: ListPluginPackageFilePaths :many
+-- Paths and sizes only: the publisher's file list never needs the bytes.
+SELECT path, size_bytes, sha256 FROM plugin_package_file
+WHERE version_id = $1
+ORDER BY path ASC;
+
+-- name: DeletePluginPackageFilesByPackage :exec
+DELETE FROM plugin_package_file
+WHERE version_id IN (SELECT id FROM plugin_package_version WHERE package_id = $1);
+
 -- name: CreatePluginInstallation :one
 INSERT INTO plugin_installation (
-    workspace_id, plugin_key, source_url, version, manifest, granted_scopes, installed_by
+    workspace_id, plugin_key, package_version_id, version, manifest, granted_scopes, installed_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: UpdatePluginInstallationManifest :one
--- Upgrade path: the re-consented manifest snapshot replaces the old one in
--- place. Config values survive on purpose; fields the new manifest dropped are
--- pruned by the service before this runs.
+-- Upgrade path: the installation is re-pointed at another published version and
+-- takes that version's consented manifest snapshot. Config values survive on
+-- purpose; fields the new manifest dropped are pruned by the service before this
+-- runs.
 UPDATE plugin_installation
-SET source_url = $2,
+SET package_version_id = $2,
     version = $3,
     manifest = $4,
     granted_scopes = $5,
@@ -50,6 +142,71 @@ ORDER BY created_at ASC;
 
 -- name: DeletePluginInstallation :exec
 DELETE FROM plugin_installation WHERE id = $1;
+
+-- name: CreatePluginHookSchedule :one
+INSERT INTO plugin_hook_schedule (
+    installation_id, workspace_id, hook_key, cron_expression, timezone,
+    next_run_at, enabled
+) VALUES ($1, $2, $3, $4, $5, sqlc.narg(next_run_at), $6)
+RETURNING *;
+
+-- name: GetPluginHookSchedule :one
+SELECT * FROM plugin_hook_schedule WHERE id = $1;
+
+-- name: ListPluginHookSchedulesByInstallation :many
+SELECT * FROM plugin_hook_schedule
+WHERE installation_id = $1
+ORDER BY hook_key ASC;
+
+-- name: ListEnabledPluginHookSchedules :many
+-- Do not filter by next_run_at: it is display-only, while retries and recovery
+-- derive eligibility from cron + activated_at + sys_cron_executions.
+SELECT * FROM plugin_hook_schedule
+WHERE enabled
+ORDER BY id ASC;
+
+-- name: UpdatePluginHookScheduleDefinition :one
+-- A cron/timezone change creates a new scheduler generation. The old
+-- sys_cron_executions rows remain immutable history under the prior scope id.
+UPDATE plugin_hook_schedule
+SET cron_expression = $2,
+    timezone = $3,
+    generation = gen_random_uuid(),
+    activated_at = now(),
+    next_run_at = sqlc.narg(next_run_at),
+    enabled = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: DisablePluginHookSchedules :exec
+UPDATE plugin_hook_schedule
+SET enabled = FALSE, next_run_at = NULL, updated_at = now()
+WHERE installation_id = $1;
+
+-- name: ReactivatePluginHookSchedule :one
+-- Re-enable starts a new epoch so occurrences while the installation was off
+-- are never caught up. An already-sent request from the old generation may
+-- finish, but no unstarted old plan survives the generation check.
+UPDATE plugin_hook_schedule
+SET enabled = TRUE,
+    generation = gen_random_uuid(),
+    activated_at = now(),
+    next_run_at = sqlc.narg(next_run_at),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdatePluginHookScheduleNextRun :execrows
+UPDATE plugin_hook_schedule
+SET next_run_at = sqlc.narg(next_run_at), updated_at = now()
+WHERE id = $1 AND generation = $2 AND enabled;
+
+-- name: DeletePluginHookSchedule :exec
+DELETE FROM plugin_hook_schedule WHERE id = $1;
+
+-- name: DeletePluginHookSchedulesByInstallation :exec
+DELETE FROM plugin_hook_schedule WHERE installation_id = $1;
 
 -- name: UpsertPluginStorageValue :one
 INSERT INTO plugin_storage (installation_id, scope_type, scope_id, key, value)
@@ -119,8 +276,13 @@ SELECT * FROM plugin_installation WHERE token_hash = $1;
 
 -- name: CreatePluginInvocation :one
 INSERT INTO plugin_invocation (
-    installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error
-) VALUES ($1, $2, $3, $4, $5, sqlc.narg(event_type), $6, $7, sqlc.narg(error))
+    id, installation_id, workspace_id, hook_key, trigger, status, event_type,
+    delivery_id, planned_at, attempt, latency_ms, error
+) VALUES (
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
+    $1, $2, $3, $4, $5, sqlc.narg(event_type), sqlc.narg(delivery_id),
+    sqlc.narg(planned_at), $6, $7, sqlc.narg(error)
+)
 RETURNING *;
 
 -- name: ListPluginInvocations :many

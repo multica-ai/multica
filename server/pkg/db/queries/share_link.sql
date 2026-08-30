@@ -3,19 +3,24 @@ INSERT INTO workspace_share_link (workspace_id, code, created_by, role, expires_
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
--- name: ClaimShareLinkByCode :one
--- Atomically consume one use of a share link. The conditional UPDATE both
--- revalidates validity (active, not expired, below max_uses) and increments
--- use_count in a single statement, so concurrent joins cannot exceed max_uses
--- and a join cannot slip in after the link was revoked or expired. Returns the
--- row only if the link is still usable.
+-- name: ClaimShareLinkByID :one
+-- The caller first resolves the opaque code and then atomically consumes the
+-- non-secret row ID. The conditional UPDATE revalidates validity and the use
+-- limit so a join cannot race past revocation or expiry.
 UPDATE workspace_share_link
 SET use_count = use_count + 1
-WHERE code = $1
+WHERE id = $1
   AND is_active = true
   AND (expires_at IS NULL OR expires_at > now())
   AND (max_uses IS NULL OR use_count < max_uses)
 RETURNING *;
+
+-- name: GetActiveShareLinkByCode :one
+SELECT * FROM workspace_share_link
+WHERE code = $1
+  AND is_active = true
+  AND (expires_at IS NULL OR expires_at > now())
+  AND (max_uses IS NULL OR use_count < max_uses);
 
 -- name: GetShareLinkInfoByCode :one
 SELECT wsl.role,

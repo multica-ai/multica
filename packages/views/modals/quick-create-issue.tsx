@@ -54,6 +54,7 @@ import {
   contentReferencesAttachment,
   type Agent,
   type IssuePriority,
+  type SourceContextPreview,
   type Squad,
 } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
@@ -82,6 +83,8 @@ import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
+import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
+import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -116,11 +119,24 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { t: tProjects } = useT("projects");
   const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
   const workspacePaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
+  const anchorCommentId = typeof data?.anchor_comment_id === "string" ? data.anchor_comment_id : null;
+  const sourcePreview = data?.source_context_preview as SourceContextPreview | undefined;
+  const sourceContextLoading = data?.source_context_loading === true;
+  const sourceContextFailed = data?.source_context_failed === true;
+  const sourceContextError = data?.source_context_error;
+  const refetchSourceContext = data?.source_context_refetch as (() => Promise<unknown>) | undefined;
+  const sourceContextExpanded = typeof data?.source_context_expanded === "boolean"
+    ? data.source_context_expanded
+    : undefined;
+  const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
+  const sourceContextFailureMessage = useSourceContextFailureMessage();
+  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -394,7 +410,7 @@ export function AgentCreatePanel({
     onSubmit: async (md): Promise<boolean> => {
       // The button already disables on !actor / versionBlocked, but the
       // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
-      if (!actor || versionBlocked) return false;
+      if (!actor || versionBlocked || (anchorCommentId && !sourcePreview)) return false;
       // Flush the prompt editor's pending debounce before snapshotting — see
       // ManualCreatePanel.
       const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
@@ -405,17 +421,34 @@ export function AgentCreatePanel({
         .map((a) => a.id);
       setError(null);
       try {
-        await api.quickCreateIssue({
-          ...(actor.type === "agent"
-            ? { agent_id: actor.id }
-            : { squad_id: actor.id }),
-          prompt: md,
-          project_id: projectId ?? undefined,
-          ...(priority !== "none" ? { priority } : {}),
-          ...(dueDate ? { due_date: dueDate } : {}),
-          parent_issue_id: parentIssueId,
-          ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
-        });
+        if (anchorCommentId && sourcePreview) {
+          await api.createCommentSubIssue(anchorCommentId, {
+            mode: "agent",
+            capture_token: sourcePreview.capture_token,
+            quick_create: {
+              ...(actor.type === "agent"
+                ? { agent_id: actor.id }
+                : { squad_id: actor.id }),
+              prompt: md,
+              project_id: projectId ?? undefined,
+              ...(priority !== "none" ? { priority } : {}),
+              ...(dueDate ? { due_date: dueDate } : {}),
+              ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
+            },
+          });
+        } else {
+          await api.quickCreateIssue({
+            ...(actor.type === "agent"
+              ? { agent_id: actor.id }
+              : { squad_id: actor.id }),
+            prompt: md,
+            project_id: projectId ?? undefined,
+            ...(priority !== "none" ? { priority } : {}),
+            ...(dueDate ? { due_date: dueDate } : {}),
+            parent_issue_id: parentIssueId,
+            ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
+          });
+        }
         setLastActor(actor.type, actor.id);
         setLastMode("agent");
         toast.success(t(($) => $.create_issue.agent.toast_sent), {
@@ -434,6 +467,10 @@ export function AgentCreatePanel({
             current_version?: string;
             min_version?: string;
           };
+          if (body.code === "issue_limit_reached") {
+            showIssueLimitUpgradePrompt();
+            return false;
+          }
           if (body.code === "agent_unavailable") {
             setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
             return false;
@@ -450,6 +487,27 @@ export function AgentCreatePanel({
                 min: body.min_version || versionCheck.min,
               }),
             );
+            return false;
+          }
+          if (anchorCommentId && (
+            body.code === "source_context_changed"
+            || body.code === "anchor_comment_deleted"
+            || body.code === "source_issue_deleted"
+          )) {
+            await refetchSourceContext?.();
+            setError(sourceContextFailureMessage(e) ?? tIssues(($) => $.source_context.error_source_changed));
+            return false;
+          }
+          if (anchorCommentId && body.code === "source_context_quick_create_unsupported") {
+            setError(tIssues(($) => $.source_context.error_agent_unsupported));
+            return false;
+          }
+          if (anchorCommentId && body.code === "source_context_server_unsupported") {
+            setError(tIssues(($) => $.source_context.error_server_unsupported));
+            return false;
+          }
+          if (anchorCommentId && body.code === "source_context_too_large") {
+            setError(sourceContextFailureMessage(e) ?? tIssues(($) => $.source_context.error_too_large));
             return false;
           }
         }
@@ -623,7 +681,9 @@ export function AgentCreatePanel({
           <ContentEditor
             ref={editorRef}
             defaultValue={initialPrompt}
-            placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
+            placeholder={anchorCommentId
+              ? t(($) => $.create_issue.agent.source_context_prompt_placeholder)
+              : t(($) => $.create_issue.agent.prompt_placeholder)}
             onUpdate={(md) => {
               setHasContent(md.trim().length > 0);
               setAgent({ prompt: md });
@@ -637,6 +697,18 @@ export function AgentCreatePanel({
           {isDragOver && <FileDropOverlay />}
         </div>
 
+        {anchorCommentId && (
+          <SourceContextPreviewCard
+            preview={sourcePreview}
+            loading={sourceContextLoading}
+            failed={sourceContextFailed}
+            error={sourceContextError}
+            onRetry={refetchSourceContext ? () => { void refetchSourceContext(); } : undefined}
+            constrainToParent
+            expanded={sourceContextExpanded}
+            onExpandedChange={onSourceContextExpandedChange}
+          />
+        )}
 
         {error && (
           <div className="px-5 pb-2 text-caption text-destructive">{error}</div>
@@ -811,7 +883,7 @@ export function AgentCreatePanel({
           <Button
             size="sm"
             onClick={submit}
-            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading}
+            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading || (!!anchorCommentId && !sourcePreview)}
             aria-disabled={gate.uploading || undefined}
             // Sending is a busy state too, not just uploading.
             aria-busy={gate.uploading || submitting || undefined}

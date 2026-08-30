@@ -156,6 +156,7 @@ function makeAdapter(
     back: vi.fn(),
     pathname: "/ws-1/runtimes",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     ...overrides,
   };

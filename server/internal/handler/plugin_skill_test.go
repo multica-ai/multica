@@ -52,9 +52,9 @@ func writePluginSkillFile(t *testing.T, root, key, content string) {
 
 func installSkillPlugin(t *testing.T, root, manifest string) string {
 	t.Helper()
-	source := withLocalPluginSourceIn(t, root, manifest)
+	versionID := withLocalPluginSourceIn(t, root, manifest)
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read"},
 	})
 	recorder := httptest.NewRecorder()
@@ -182,9 +182,9 @@ func TestPluginSkillWillNotOverwriteAHumanAuthoredSkill(t *testing.T) {
 
 	root := t.TempDir()
 	writePluginSkillFile(t, root, "pr-review", prReviewSkill)
-	source := withLocalPluginSourceIn(t, root, skillPluginManifest)
+	versionID := withLocalPluginSourceIn(t, root, skillPluginManifest)
 	body, _ := json.Marshal(map[string]any{
-		"source_url":     source,
+		"version_id":     versionID,
 		"granted_scopes": []string{"issues:read"},
 	})
 	recorder := httptest.NewRecorder()

@@ -20,8 +20,8 @@ func setupDirectChatSession(t *testing.T, ctx context.Context, title string) (ag
 	t.Helper()
 	agentID, runtimeID, daemonID = createRuntimeGuardAgent(t, ctx)
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, explicitly_created_at)
+		VALUES ($1, $2, $3, $4, now())
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID, title).Scan(&sessionID); err != nil {
 		t.Fatalf("setup: create chat session: %v", err)

@@ -48,6 +48,8 @@ import { buildTimeline } from "../../common/task-transcript";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
+import { useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -185,11 +187,11 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
+  const { isFollowing, onContentHeightChanged } = useStickToBottom(scrollContainerEl);
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -328,9 +330,20 @@ export function ChatMessageList({
         // than the viewport, so switching sessions always shows the latest reply.
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        atBottomThreshold={120}
-        atBottomStateChange={setIsNearBottom}
-        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+        // Follow rapid streamed output only while Virtuoso says the reader is
+        // at the live end. An in-flight smooth animation temporarily reports
+        // "not at bottom" on the next append and permanently drops the follow
+        // (#6697), so live growth must use an immediate scroll. `isFollowing`
+        // narrows this further: the reader may have scrolled away by input the
+        // 120px `atBottom` band forgives (see stick-to-bottom.ts).
+        followOutput={(atBottom) =>
+          !isFetchingOlderMessages && atBottom && isFollowing() ? "auto" : false
+        }
+        // `followOutput` never fires for a single row growing mid-stream, so
+        // content resizes route to the bottom-stick through Virtuoso's own
+        // height signal instead.
+        totalListHeightChanged={onContentHeightChanged}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();

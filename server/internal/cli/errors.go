@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,15 +31,25 @@ const (
 	KindNetworkRefused                  // connection refused
 	KindNetworkTLS                      // x509 / tls handshake failures
 	KindNetworkOffline                  // catch-all: host unreachable, reset, etc.
+	// KindNetworkStalled is a transfer that stopped producing bytes (see
+	// StallError). Distinct from KindNetworkTimeout because the remedy is
+	// different: a timeout says "this took too long", a stall says "this went
+	// quiet", and only the latter is unaffected by raising a time limit.
+	KindNetworkStalled
 
 	// HTTP status layer.
 	KindAuthRequired // 401
-	KindForbidden    // 403
-	KindNotFound     // 404
-	KindConflict     // 409
-	KindValidation   // 400 / 422
-	KindRateLimited  // 429
-	KindServerError  // 5xx
+	// KindTaskTokenRejected is a 401 on a task-scoped token. HTTPError.Kind()
+	// never returns it — the status code alone cannot tell the two apart — so
+	// it is selected in userMessage, where the credential the request actually
+	// sent is known. Exit classification is unchanged: still an auth failure.
+	KindTaskTokenRejected
+	KindForbidden   // 403
+	KindNotFound    // 404
+	KindConflict    // 409
+	KindValidation  // 400 / 422
+	KindRateLimited // 429
+	KindServerError // 5xx
 
 	// Anything we could not classify.
 	KindUnknown
@@ -56,7 +67,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled:
 		return true
 	default:
 		return false
@@ -78,8 +89,12 @@ func (k ErrorKind) String() string {
 		return "network_tls"
 	case KindNetworkOffline:
 		return "network_offline"
+	case KindNetworkStalled:
+		return "network_stalled"
 	case KindAuthRequired:
 		return "auth_required"
+	case KindTaskTokenRejected:
+		return "task_token_rejected"
 	case KindForbidden:
 		return "forbidden"
 	case KindNotFound:
@@ -183,6 +198,14 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindUnknown
 	}
 
+	// A stalled transfer is checked first: the guard implements it by
+	// canceling the request context, so the underlying error would otherwise
+	// read as a generic cancellation and lose the reason.
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return KindNetworkStalled
+	}
+
 	// Timeouts (context deadline or socket i/o timeout).
 	if errors.Is(err, context.DeadlineExceeded) {
 		return KindNetworkTimeout
@@ -254,6 +277,41 @@ func wrapTransport(req *http.Request, err error) error {
 	return &NetworkError{Kind: classifyNetworkError(err), Op: op, Err: err}
 }
 
+// wrapBodyRead classifies an error raised while reading or decoding a
+// response body.
+//
+// wrapTransport only sees errors from http.Client.Do, which returns as soon as
+// the response headers arrive. Everything that goes wrong afterwards — the
+// case #7498 actually reports, a body that never finishes arriving — surfaces
+// out of the JSON decoder instead, and used to reach the user as a raw
+// "context deadline exceeded ... while reading body". A transport failure is
+// still a transport failure when the decoder is the one that notices it; a
+// genuine malformed-JSON error is returned unchanged.
+//
+// io.ErrUnexpectedEOF is deliberately on the network side of that line. It is
+// what the decoder reports for a body that simply stops — a dropped
+// connection, a proxy cutting the response — which is vastly the more common
+// cause than a server that emits syntactically truncated JSON. Well-formed
+// nonsense (the ordinary server bug) raises *json.SyntaxError and is left
+// alone.
+func wrapBodyRead(req *http.Request, err error) error {
+	if err == nil {
+		return nil
+	}
+	var stalled *StallError
+	if errors.As(err, &stalled) {
+		return wrapTransport(req, err)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return wrapTransport(req, err)
+	}
+	return err
+}
+
 // Language is the language FormatError renders messages in.
 type Language int
 
@@ -287,6 +345,10 @@ var kindMessages = map[ErrorKind][2]string{
 		"Request timed out: the server did not respond in time. Check your network connection or try again later. You can raise the limit with MULTICA_HTTP_TIMEOUT.",
 		"请求超时：服务器未在规定时间内响应。请检查网络连接或稍后重试。可通过 MULTICA_HTTP_TIMEOUT 调高超时时间。",
 	},
+	KindNetworkStalled: {
+		"Transfer stalled: the connection stopped sending data before the response was complete. Check your network connection or try again. You can raise the no-progress budget with MULTICA_HTTP_STALL_TIMEOUT.",
+		"传输中断：响应尚未接收完毕，连接就停止发送数据。请检查网络连接或重试。可通过 MULTICA_HTTP_STALL_TIMEOUT 调高无进展等待时间。",
+	},
 	KindNetworkDNS: {
 		"Could not resolve the Multica server address. Check your network connection or the --server-url setting.",
 		"无法解析 Multica 服务器地址。请检查网络连接或 --server-url 配置。",
@@ -306,6 +368,10 @@ var kindMessages = map[ErrorKind][2]string{
 	KindAuthRequired: {
 		"Your session has expired or you are not signed in. Run `multica login` to sign in again. On a self-hosted or non-OAuth setup, ask your administrator for valid credentials.",
 		"登录已过期或尚未登录。请运行 `multica login` 重新登录。自托管或非 OAuth 场景请联系管理员获取有效凭证。",
+	},
+	KindTaskTokenRejected: {
+		"This task token was rejected and is no longer usable. Stop here: do not retry, and do not fall back to a profile or member credential, because anything done with one would run as that person rather than as this task. Only the runtime that started this task can supply a valid task token.",
+		"这个 task token 已被拒绝，不再可用。请到此为止：不要重试，也不要改用 profile 或成员凭证 —— 用它们执行的任何操作都会以那个成员的身份运行，而不是以这次 task 的身份运行。只有启动这次 task 的运行时才能提供有效的 task token。",
 	},
 	KindForbidden: {
 		"You do not have permission to access this resource. Check that you are in the right workspace, or ask an administrator to grant access.",
@@ -407,6 +473,21 @@ func userMessage(err error, lang Language) string {
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {
 		kind := httpErr.Kind()
+		// A 401 on a task token is not a login problem, and the generic copy
+		// below is the wrong instruction for whoever reads it: it says to sign
+		// in again or ask an administrator for valid credentials. An
+		// autonomous agent can act on that, and one did — after its task token
+		// stopped working mid-run it read the daemon owner's profile PAT and
+		// kept going under the member's identity (GH #7522).
+		//
+		// What the copy must not do is guess *why*. The usual cause is the
+		// task reaching a terminal state, but the same 401 covers a malformed
+		// token, one sent to the wrong server, and one dropped by an unrelated
+		// cleanup. "Stop" is true in every one of those cases; "the task
+		// finished" is not.
+		if kind == KindAuthRequired && httpErr.TaskScoped {
+			return messageFor(KindTaskTokenRejected, lang)
+		}
 		// Validation and conflict errors carry a useful server-provided
 		// message; surface it instead of the generic line. A body we cannot
 		// recognize still falls back to the template, so this never dumps a

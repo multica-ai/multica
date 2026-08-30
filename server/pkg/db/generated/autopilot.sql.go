@@ -300,7 +300,7 @@ SELECT
     $11,
     COALESCE($12::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
 type CreateAutopilotTaskParams struct {
@@ -407,6 +407,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.RegenerateQuickActionsFor,
 		&i.BranchName,
 		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
 	)
 	return i, err
 }
@@ -502,6 +503,28 @@ WHERE autopilot_id = $1
 // Application-layer cleanup run inside the autopilot delete transaction.
 func (q *Queries) DeleteAutopilotCollaboratorsForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAutopilotCollaboratorsForAutopilot, autopilotID)
+	return err
+}
+
+const deleteAutopilotSubscribersByMember = `-- name: DeleteAutopilotSubscribersByMember :exec
+DELETE FROM autopilot_subscriber AS s
+USING autopilot AS a
+WHERE s.autopilot_id = a.id
+  AND a.workspace_id = $1
+  AND s.user_type = 'member'
+  AND s.user_id = $2
+`
+
+type DeleteAutopilotSubscribersByMemberParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Autopilot subscribers carry no FK, so member removal must prune them in the
+// same application transaction. Scope through the autopilot's workspace: the
+// same user may remain subscribed to autopilots in another workspace.
+func (q *Queries) DeleteAutopilotSubscribersByMember(ctx context.Context, arg DeleteAutopilotSubscribersByMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotSubscribersByMember, arg.WorkspaceID, arg.UserID)
 	return err
 }
 
@@ -902,7 +925,7 @@ func (q *Queries) GetAutopilotRunByWebhookDelivery(ctx context.Context, webhookD
 }
 
 const getAutopilotTaskByRun = `-- name: GetAutopilotTaskByRun :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
 LIMIT 1
@@ -967,6 +990,7 @@ func (q *Queries) GetAutopilotTaskByRun(ctx context.Context, autopilotRunID pgty
 		&i.RegenerateQuickActionsFor,
 		&i.BranchName,
 		&i.DurableWorkDir,
+		&i.ChannelContextRevision,
 	)
 	return i, err
 }
@@ -1197,17 +1221,68 @@ func (q *Queries) ListAutopilotRuns(ctx context.Context, arg ListAutopilotRunsPa
 
 const listAutopilotSubscribers = `-- name: ListAutopilotSubscribers :many
 
-SELECT autopilot_id, user_type, user_id, created_at FROM autopilot_subscriber
-WHERE autopilot_id = $1
-ORDER BY created_at ASC, user_id ASC
+SELECT s.autopilot_id, s.user_type, s.user_id, s.created_at FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = $1
+  AND s.user_type = 'member'
+ORDER BY s.created_at ASC, s.user_id ASC
 `
 
 // =====================
 // Autopilot Subscribers
 // =====================
+// Only current workspace members are effective subscribers. The membership
+// join makes legacy rows left behind by older member-removal code inert on
+// both the detail response and the dispatch path, so clients never round-trip
+// a hidden departed member into an otherwise valid update.
 // ORDER BY created_at keeps chip rendering stable across refreshes.
 func (q *Queries) ListAutopilotSubscribers(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotSubscriber, error) {
 	rows, err := q.db.Query(ctx, listAutopilotSubscribers, autopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotSubscriber{}
+	for rows.Next() {
+		var i AutopilotSubscriber
+		if err := rows.Scan(
+			&i.AutopilotID,
+			&i.UserType,
+			&i.UserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAutopilotSubscribersForAutopilots = `-- name: ListAutopilotSubscribersForAutopilots :many
+SELECT s.autopilot_id, s.user_type, s.user_id, s.created_at FROM autopilot_subscriber AS s
+JOIN autopilot AS a ON a.id = s.autopilot_id
+JOIN member AS m
+  ON m.workspace_id = a.workspace_id
+ AND m.user_id = s.user_id
+WHERE s.autopilot_id = ANY($1::uuid[])
+  AND s.user_type = 'member'
+ORDER BY s.autopilot_id ASC, s.created_at ASC, s.user_id ASC
+`
+
+// Batch form of ListAutopilotSubscribers for the list endpoint, which must not
+// issue one query per row. The autopilot_subscriber primary key leads with
+// autopilot_id, so ANY($1) is index-supported and no extra index is needed.
+// The member join and ordering are identical to the single-autopilot query on
+// purpose: list and detail have to agree on who counts as a subscriber, or the
+// two projections disagree again (MUL-6680).
+func (q *Queries) ListAutopilotSubscribersForAutopilots(ctx context.Context, dollar_1 []pgtype.UUID) ([]AutopilotSubscriber, error) {
+	rows, err := q.db.Query(ctx, listAutopilotSubscribersForAutopilots, dollar_1)
 	if err != nil {
 		return nil, err
 	}

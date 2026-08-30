@@ -9,35 +9,22 @@
  *
  *   - Identity is bound by a MessagePort, not by `event.origin`. A surface runs
  *     in a sandboxed iframe with no `allow-same-origin`, so its origin is the
- *     opaque string "null" — every surface would look identical. The host hands
- *     each iframe its own port at init and only ever listens on that port, so
- *     "which plugin sent this" is answered by which channel it arrived on.
+ *     opaque string "null" — every surface would look identical. The generated
+ *     guest bootstrap creates one channel, and the host accepts its peer only
+ *     after source, protocol and single-use launch checks. From then on, "which
+ *     plugin sent this" is answered by which private channel it arrived on.
  *   - No credential crosses this boundary. The surface asks; the host performs
  *     the call on the user's session and returns the result.
  */
 
-export const BRIDGE_PROTOCOL_VERSION = 1;
-
-/** Marks the single window message that carries the port. */
-export const BRIDGE_INIT_MESSAGE = "multica:plugin-bridge-init";
+export const BRIDGE_PROTOCOL_VERSION = 2;
 
 /**
- * Posted by the surface to its embedder once its message listener is attached.
- *
- * The handshake has to start from the guest. A srcdoc frame can finish loading
- * before the embedder's React `onLoad` handler is even attached, so a host that
- * connects on load either misses the event entirely or sends the port before
- * anything is listening for it — both look identical from outside: a blank
- * panel. The host answers this signal instead, and matches `event.source`
- * against the iframe it created so another frame cannot claim the port.
+ * Installed by Multica's bootstrap before any plugin code executes. The guest
+ * creates this port; the trusted wrapper transfers its peer to the host only
+ * after the launch challenge and navigation policy have passed.
  */
-export const BRIDGE_READY_MESSAGE = "multica:plugin-surface-ready";
-
-export type BridgeInitMessage = {
-  type: typeof BRIDGE_INIT_MESSAGE;
-  version: number;
-  theme: ThemeTokens;
-};
+export const BRIDGE_PORT_GLOBAL = "__multicaPluginBridgePortV2";
 
 /** Design tokens the host pushes so a surface matches the product it sits in. */
 export type ThemeTokens = Record<string, string>;

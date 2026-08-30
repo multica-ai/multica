@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -166,9 +167,16 @@ type bindTestTasks struct {
 	promoted int
 }
 
-func (*bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool) (db.AgentTaskQueue, error) {
+func (*bindTestTasks) EnqueueChannelChatTask(context.Context, db.ChatSession, pgtype.UUID, bool, int64, pgtype.UUID, int64) (db.AgentTaskQueue, error) {
 	return db.AgentTaskQueue{}, nil
 }
+func (*bindTestTasks) PrepareChatTaskEnqueue(context.Context, pgtype.UUID, pgtype.UUID) (service.PreparedChatTaskEnqueue, error) {
+	return service.PreparedChatTaskEnqueue{}, nil
+}
+func (*bindTestTasks) EnqueuePreparedChannelChatTaskInTx(context.Context, pgx.Tx, db.ChatSession, pgtype.UUID, bool, int64, service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error) {
+	return db.AgentTaskQueue{}, nil
+}
+func (*bindTestTasks) FinalizeChatTaskEnqueue(context.Context, db.AgentTaskQueue) {}
 func (b *bindTestTasks) PromoteChannelChatTasksIfMediaReady(context.Context, pgtype.UUID) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

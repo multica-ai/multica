@@ -39,10 +39,11 @@ func HostCapabilities() Capabilities {
 		// offered to an agent as an MCP tool and the agent decides. The
 		// daemon-side server that renders it is daemon/plugin_hook_mcp.go.
 		HookTriggers: map[string]bool{
-			TriggerUI:     true,
-			TriggerManual: true,
-			TriggerEvent:  true,
-			TriggerAgent:  true,
+			TriggerUI:       true,
+			TriggerManual:   true,
+			TriggerEvent:    true,
+			TriggerAgent:    true,
+			TriggerSchedule: true,
 		},
 		// http calls one declared endpoint; mcp adopts an external MCP server's
 		// tools, which is why it ships with an approval step that pins them by

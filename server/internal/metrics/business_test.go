@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -180,8 +181,9 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordEntitlementCache("hit")
 	m.RecordEntitlementRefresh("success", 0.01)
 	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
-	m.RecordEntitlementVersionRegression("refresh")
+	m.RecordEntitlementVersionRegression()
 	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -205,7 +207,12 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	m := NewBusinessMetrics()
 	m.RecordRuntimeGCDeleted()
 	m.RecordRuntimeGCFailed()
+	m.RecordRuntimeGCSkipped(RuntimeGCSkipNonTerminalTask)
 	m.SetRuntimeGCBlocked(3)
+	m.SetRuntimeGCBacklog(RuntimeGCBacklogActiveAgent, 2)
+	m.SetRuntimeGCBacklog(RuntimeGCBacklogNonTerminalTask, 3)
+	m.SetRuntimeGCBacklog(RuntimeGCBacklogWorkspaceMismatch, 1)
+	m.SetRuntimeGCBacklog(RuntimeGCBacklogEligible, 4)
 	m.RecordRuntimeGCBlockedObservationFailed()
 
 	if got := testutil.ToFloat64(m.runtimeGCDeleted); got != 1 {
@@ -214,11 +221,43 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	if got := testutil.ToFloat64(m.runtimeGCFailed); got != 1 {
 		t.Fatalf("runtime GC failed = %v, want 1", got)
 	}
+	if got := testutil.ToFloat64(m.runtimeGCSkipped.WithLabelValues(RuntimeGCSkipNonTerminalTask)); got != 1 {
+		t.Fatalf("runtime GC skipped = %v, want 1", got)
+	}
 	if got := testutil.ToFloat64(m.runtimeGCBlocked); got != 3 {
 		t.Fatalf("runtime GC blocked = %v, want 3", got)
 	}
+	for reason, want := range map[string]float64{
+		RuntimeGCBacklogActiveAgent:       2,
+		RuntimeGCBacklogNonTerminalTask:   3,
+		RuntimeGCBacklogWorkspaceMismatch: 1,
+		RuntimeGCBacklogEligible:          4,
+	} {
+		if got := testutil.ToFloat64(m.runtimeGCBacklog.WithLabelValues(reason)); got != want {
+			t.Fatalf("runtime GC backlog %s = %v, want %v", reason, got, want)
+		}
+	}
 	if got := testutil.ToFloat64(m.runtimeGCBlockedObservationFailed); got != 1 {
 		t.Fatalf("runtime GC blocked observation failures = %v, want 1", got)
+	}
+}
+
+func TestBusinessMetricsRuntimeSweepStage(t *testing.T) {
+	m := NewBusinessMetrics()
+	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, 250*time.Millisecond, 3, 1)
+	m.ObserveRuntimeSweepStage("unbounded-user-value", time.Second, -1, -1)
+
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues(RuntimeSweepStageLiveness)); got != 3 {
+		t.Fatalf("runtime liveness candidate rows = %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepRowsChanged.WithLabelValues(RuntimeSweepStageLiveness)); got != 1 {
+		t.Fatalf("runtime liveness changed rows = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.runtimeSweepCandidateRows.WithLabelValues("other")); got != 0 {
+		t.Fatalf("normalized other candidate rows = %v, want 0", got)
+	}
+	if got := testutil.CollectAndCount(m.runtimeSweepStageDuration); got != 2 {
+		t.Fatalf("runtime sweep duration series = %d, want 2", got)
 	}
 }
 

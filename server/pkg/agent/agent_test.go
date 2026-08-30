@@ -130,7 +130,7 @@ func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 // disconnected. detectCLIVersion must bound the probe and return an error so
 // the registration loop isolates the broken runtime and the rest still
 // register. The script also leaves an orphaned child holding the stdout pipe
-// open after the parent is killed, exercising the cmd.WaitDelay path.
+// open after the parent is killed, exercising the process-tree collector path.
 func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("relies on a /bin/sh hang script")
@@ -141,7 +141,7 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	pidFile := filepath.Join(dir, "child.pid")
 	// The CLI hangs forever (`wait`) and backgrounds a child that inherits and
 	// holds our stdout pipe open even after the parent is killed on timeout —
-	// the exact case cmd.WaitDelay must cover. The child records its PID so we
+	// the exact case RunCollect must cover. The child records its PID so we
 	// can reap it in Cleanup instead of leaking a 60s `sleep` into CI.
 	body := fmt.Sprintf("#!/bin/sh\nsleep 60 &\necho $! > %q\nwait\n", pidFile)
 	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {

@@ -67,7 +67,7 @@ func TestChannelMessageFromCallback_P2PMentionIsProseNotACommand(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ name, content string }{
 		{"issue directive after a colleague's name", "@李雷 /issue 帮我问问他"},
-		{"fresh-session directive after a colleague's name", "@李雷 /new 的排期你问一下"},
+		{"fresh-session directive after a colleague's name", "@李雷 /clear 的排期你问一下"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

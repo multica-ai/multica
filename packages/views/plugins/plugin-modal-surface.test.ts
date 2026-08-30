@@ -12,7 +12,7 @@ function installation(overrides: Partial<PluginInstallation> = {}): PluginInstal
     plugin_key: "com.example.one",
     name: "Example",
     version: "1.0.0",
-    source_url: "https://example.com/multica.plugin.json",
+    package_version_id: "version-1",
     enabled: true,
     granted_scopes: [],
     config_schema: [],

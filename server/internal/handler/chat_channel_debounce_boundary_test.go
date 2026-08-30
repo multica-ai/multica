@@ -99,7 +99,8 @@ func TestChannelChat_ReplyLandingInsideDebounceWindowStillAnswersTheNextMessage(
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	_, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel debounce boundary")
+	agentID, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel debounce boundary")
+	seedChannelBindingOfChatType(t, ctx, agentID, sessionID, "wecom", "p2p", "", "")
 
 	// Turn 1: message in, window expires, task claimed and running.
 	appendChannelUserMessage(t, ctx, sessionID, "测试下")

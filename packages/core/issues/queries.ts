@@ -177,7 +177,21 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
+  sourceContextPreview: (wsId: string, anchorCommentId: string) =>
+    ["source-context", "preview", wsId, anchorCommentId] as const,
 };
+
+export function sourceContextPreviewOptions(
+  wsId: string,
+  anchorCommentId: string | null | undefined,
+) {
+  return queryOptions({
+    queryKey: issueKeys.sourceContextPreview(wsId, anchorCommentId ?? ""),
+    queryFn: () => api.getCommentSubIssuePreview(anchorCommentId!),
+    enabled: !!anchorCommentId,
+    staleTime: 0,
+  });
+}
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,

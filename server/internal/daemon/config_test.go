@@ -760,6 +760,140 @@ func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog pins the merge: the
+// in-flight-tool budget is no longer an independent constant, so an operator
+// who raises the idle budget cannot accidentally leave tool calls capped at a
+// lower, invisible ceiling.
+func TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+
+	load := func(t *testing.T) Config {
+		t.Helper()
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := load(t)
+	if cfg.AgentIdleWatchdog != DefaultAgentIdleWatchdog {
+		t.Fatalf("AgentIdleWatchdog = %s, want default %s", cfg.AgentIdleWatchdog, DefaultAgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != cfg.AgentIdleWatchdog {
+		t.Fatalf("AgentToolWatchdog = %s, want it to track AgentIdleWatchdog %s", cfg.AgentToolWatchdog, cfg.AgentIdleWatchdog)
+	}
+
+	// Raising only the idle budget must carry the tool budget with it.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "6h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour || cfg.AgentToolWatchdog != 6*time.Hour {
+		t.Fatalf("idle=%s tool=%s, want both 6h", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+
+	// An explicit tool override still wins, so "tools may run longer than the
+	// model may think" stays expressible.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "12h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour {
+		t.Fatalf("AgentIdleWatchdog = %s, want 6h", cfg.AgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != 12*time.Hour {
+		t.Fatalf("AgentToolWatchdog = %s, want 12h from env", cfg.AgentToolWatchdog)
+	}
+
+	// Zero keeps its distinct meaning: never force-stop while a tool is in
+	// flight. It must NOT be re-derived from the idle budget.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "0")
+	cfg = load(t)
+	if cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("AgentToolWatchdog = %s, want 0 from env", cfg.AgentToolWatchdog)
+	}
+
+	// Disabling the suite disables both.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "0")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 0 || cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("idle=%s tool=%s, want both 0", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+}
+
+// TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog pins the fix for
+// the gap the 2h change left behind: Codex's own semantic-inactivity timer is
+// not tool-aware, so if it keeps a 10m ceiling it kills a quiet build long
+// before the daemon budget that was supposed to protect it, and the raised
+// budget is a lie for Codex users.
+func TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	for _, key := range []string{
+		"MULTICA_AGENT_IDLE_WATCHDOG",
+		"MULTICA_AGENT_TOOL_WATCHDOG",
+		"MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT",
+	} {
+		t.Setenv(key, "")
+	}
+
+	load := func(t *testing.T) Config {
+		t.Helper()
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := load(t)
+	if cfg.CodexSemanticInactivityTimeout != DefaultAgentIdleWatchdog {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the idle budget %s", cfg.CodexSemanticInactivityTimeout, DefaultAgentIdleWatchdog)
+	}
+
+	// Raising the idle budget carries Codex with it.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "6h")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 6*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want 6h", got)
+	}
+
+	// A wider tool budget wins: this timer cannot see that a tool is in flight,
+	// so it has to be sized like the larger of the two or it re-creates the very
+	// bug being fixed, one tier up.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "9h")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 9*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the wider tool budget 9h", got)
+	}
+
+	// A tool budget of 0 means "never force-stop during a tool", which this
+	// timer cannot express; it falls back to the idle budget rather than
+	// silently running unbounded.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "0")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 6*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the idle budget 6h when the tool budget is unbounded", got)
+	}
+
+	// The explicit env still wins over the derivation.
+	t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", "20m")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 20*time.Minute {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want 20m from env", got)
+	}
+
+	// Disabling the watchdog suite has never disabled this timer; Codex keeps
+	// its own built-in default rather than becoming unbounded.
+	t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", "")
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "0")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+	if got := load(t).CodexSemanticInactivityTimeout; got != DefaultCodexSemanticInactivityTimeout {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the codex built-in %s when watchdogs are off", got, DefaultCodexSemanticInactivityTimeout)
+	}
+}
+
 func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
 	stageFakeAgent(t)
 	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "")

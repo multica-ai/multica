@@ -59,6 +59,7 @@ function adapter(): NavigationAdapter {
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (path) => `https://app.example${path}`,
   };
 }

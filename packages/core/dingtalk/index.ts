@@ -1,5 +1,8 @@
 export {
   dingtalkKeys,
   dingtalkInstallationsOptions,
-  dingtalkGroupRoutesOptions,
+  dingtalkGroupsOptions,
+  dingtalkAgentGroupsOptions,
+  dingtalkInactiveGroupsOptions,
+  dingtalkAgentInactiveGroupsOptions,
 } from "./queries";

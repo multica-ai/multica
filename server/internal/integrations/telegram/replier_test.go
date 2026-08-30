@@ -127,6 +127,7 @@ func TestReplyCoversCommandAndIssueOutcomes(t *testing.T) {
 
 	for _, res := range []engine.Result{
 		{Outcome: engine.OutcomeFreshPending},
+		{Outcome: engine.OutcomeChatStarted},
 		{Outcome: engine.OutcomeIssueUsage},
 		{Outcome: engine.OutcomeIngested, IssueID: issueID, IssueIdentifier: "MUL-7", IssueTitle: "Title", IssueDuplicate: true},
 		{Outcome: engine.OutcomeDropped, DropReason: engine.DropReasonNonWorkspaceMember},
@@ -135,7 +136,7 @@ func TestReplyCoversCommandAndIssueOutcomes(t *testing.T) {
 		r.Reply(context.Background(), inst, msg, res)
 	}
 
-	want := []string{msgFreshPending, msgIssueUsage, issueDuplicateText(engine.Result{IssueID: issueID, IssueIdentifier: "MUL-7", IssueTitle: "Title"}), msgIssueNotMember, msgIssueDisabled}
+	want := []string{msgFreshPending, msgChatStarted, msgIssueUsage, issueDuplicateText(engine.Result{IssueID: issueID, IssueIdentifier: "MUL-7", IssueTitle: "Title"}), msgIssueNotMember, msgIssueDisabled}
 	if len(got) != len(want) {
 		t.Fatalf("got %d replies, want %d: %+v", len(got), len(want), got)
 	}

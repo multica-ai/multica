@@ -711,3 +711,73 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 		t.Fatalf("expected recovered transcript reply to be emitted as MessageText, got %#v", messages)
 	}
 }
+
+// fakeAgyMarkdownReplyScript streams a blank-line-separated markdown reply to
+// stdout — a heading and a list, exactly the shape that renders as literal
+// `###`/`-` in chat when the streamed text loses its newlines (#6149).
+func fakeAgyMarkdownReplyScript() string {
+	return `#!/bin/sh
+cat <<'AGYREPLY'
+Intro line.
+
+### Heading
+
+- item one
+- item two
+AGYREPLY
+exit 0
+`
+}
+
+// TestAntigravityBackendStreamPreservesNewlines is the regression guard for
+// #6149: the daemon concatenates streamed MessageText with no separator
+// (pendingText.WriteString), so the adapter must emit the line breaks itself.
+// Before the fix each line was streamed without its "\n", so the reconstructed
+// task_message text glued every block onto one line and block markdown
+// (headings, lists) rendered as literal text.
+func TestAntigravityBackendStreamPreservesNewlines(t *testing.T) {
+	t.Parallel()
+
+	const wantReply = "Intro line.\n\n### Heading\n\n- item one\n- item two"
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte(fakeAgyMarkdownReplyScript()))
+
+	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	// Reconstruct the persisted text the way the daemon does: concatenate every
+	// streamed MessageText with no separator.
+	var streamed strings.Builder
+	for msg := range session.Messages {
+		if msg.Type == MessageText {
+			streamed.WriteString(msg.Content)
+		}
+	}
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	if got := streamed.String(); got != wantReply {
+		t.Fatalf("streamed task_message text lost its line breaks (#6149):\n got  %q\n want %q", got, wantReply)
+	}
+}

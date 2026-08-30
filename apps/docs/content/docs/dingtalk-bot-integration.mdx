@@ -1,138 +1,98 @@
 ---
-title: DingTalk Bot integration
-description: Connect a Multica agent to your own DingTalk app — create a Stream-mode robot in the DingTalk Open Platform, copy its AppKey + AppSecret, paste them into Multica, then DM it, @-mention it in a group, or type /issue from inside DingTalk.
+title: DingTalk Bot
+description: Connect an agent to DingTalk and give it work directly in DMs or group chats.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Connect any [agent](/agents) to a DingTalk bot and your team can work with it from inside DingTalk — DM the bot, @-mention it in a group, send it screenshots, or type `/issue` to file a [Multica issue](/issues) without opening the app.
-
-DingTalk support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
-
-DingTalk uses a **bring-your-own-app (BYO)** model: a workspace admin creates a DingTalk app, adds a Stream-mode robot to it, and pastes its credentials into Multica. The agent selected during setup is the robot's default for DMs and newly discovered groups. The same robot can join multiple groups, and each group can then be routed to a different agent. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
-
-The whole setup is below and takes about five minutes. You'll end up with two credentials to paste into Multica:
-
-- an **AppKey** — the app's client id
-- an **AppSecret** — the app's client secret
-
-## Set up your DingTalk app
-
-### 1. Create the app and add a Stream-mode robot
-
-1. Go to the [DingTalk Open Platform](https://open-dev.dingtalk.com) and create an **enterprise internal app** (企业内部应用).
-2. Open the app and add the **robot** (机器人) capability.
-3. In the robot settings, set the **message-receiving mode** to **Stream mode** (Stream 模式 / 推送模式). This is what lets the bot connect out over a long-lived push connection instead of receiving a webhook.
-
-This is everything Multica needs at the platform level — it connects out over Stream mode, so you don't configure any public address:
-
-| Setting | Why it's there |
-|---|---|
-| **Enterprise internal app** | The app container that owns the robot and issues the AppKey / AppSecret credentials. |
-| **Robot capability** | Creates the bot identity that gets @-mentioned and posts replies. |
-| **Stream mode** | The bot connects out over a long-lived Stream connection — **no public webhook / URL needed**. |
-| **Robot send permission** | Lets the bot send messages back into DingTalk (the agent's replies and proactive messages). |
-| **Message-read scopes** | So the bot receives 1:1 messages and the group messages that @-mention it. |
-
-There is **no webhook URL and no OAuth redirect URL**, because the robot runs over Stream mode and BYO doesn't use OAuth.
+After connecting an [agent](/agents) to DingTalk, members of the agent's workspace can DM the Bot, @-mention it in a group, or use the `/issue` command to create a Multica [issue](/issues) directly. Conversations and run records are saved to the Multica workspace.
 
 <Callout type="info">
-DingTalk has no native typing / reaction indicator, so — unlike Slack — the bot instead posts a short "working on it" acknowledgement when it starts, and the full reply follows once the agent is done. A quick burst of messages is coalesced into a single acknowledgement.
+The DingTalk integration is [community-maintained](/community-maintained) and has no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
 </Callout>
 
-### 2. Grant the robot its permissions
 
-Grant the robot the scopes it needs so it can **receive messages** and **send messages back** (the robot message-send permission). Without the send permission the agent can run but its reply can't be delivered.
+## Connect the Bot
 
-### 3. Copy the AppKey and AppSecret
+The agent's creator or a workspace owner/admin can connect the agent to DingTalk. Agents and DingTalk Bots have a one-to-one connection.
 
-Open the app's **凭证与基础信息** (Credentials & Basic Information) and copy:
+## 1. Create a Stream-mode robot
 
-- the **AppKey** — this is your app's **client id**
-- the **AppSecret** — this is your app's **client secret**
+1. Create an **enterprise internal app** in the [DingTalk Open Platform](https://open-dev.dingtalk.com).
+2. Enable the robot capability and set **Message Receiving Mode** to **Stream Mode**.
 
-### 4. Connect it in Multica
+## 2. Grant permissions to the robot
 
-1. Open the agent in **Agents → _your agent_** → the **Integrations** tab (or the **Integrations** section in the left sidebar).
+The **Robot Message Sending** permission (`qyapi_robot_sendmsg`) is added by default. To show the Bot's name in Multica, manually add the **DingTalk Group Basic Information Management** permission (`qyapi_chat_manage`).
+
+## 3. Get the application credentials
+
+Open **Credentials & Basic Information** page and copy the **Client ID (AppKey)** and **Client Secret (AppSecret)**.
+
+## 4. Connect the agent to DingTalk
+
+1. Return to Multica and open **Agents → _your agent_ → Capabilities → Integrations**.
 2. Click **Connect DingTalk**.
-3. Paste the **AppKey** and the **AppSecret**, then click **Connect**.
-4. The agent shows **Connected to DingTalk**. The bot is now listening over its own Stream connection.
+3. Enter the **AppKey** and **AppSecret**, then submit.
 
-<Callout type="warning">
-Both credentials must be from the **same** DingTalk app, and that app is installed only once in a Multica workspace. Connecting it as a second installation or in another workspace is refused. The installation's agent remains the default for DMs; group routes may target other agents without reconnecting the app.
-</Callout>
+## 5. Link your DingTalk and Multica accounts
 
-<Callout type="info">
-Want one robot to serve **multiple agents**? Add it to each DingTalk group, @-mention it once so Multica discovers the group, then choose that group's agent under **Settings → Integrations → DingTalk → Group routing**. Install separate DingTalk apps only when you want separate bot identities or separate DM agents.
-</Callout>
+DM the Bot in DingTalk or @-mention it in a group to trigger a linking request. You will receive a link in your DM with the Bot; it is valid for about 15 minutes. Open the link. When the success message appears, account linking is complete.
 
-## What the integration does
 
-| Surface | Behavior |
-|---|---|
-| **Agent → Integrations** | Owners and admins see **Connect DingTalk**; once connected it flips to a **Connected to DingTalk** badge with a **Disconnect** control. |
-| **DM the bot** | A workspace member messages the bot in a 1:1 chat. The conversation becomes a Multica [chat](/chat) session with the agent; every message is read. |
-| **@-mention in a group** | Add the bot to the group and @-mention it. The first mention discovers the group and uses the robot's default agent; an owner or admin can then select a different agent under **Group routing**. Only mentioning messages are read — the bot does not listen to the whole group. |
-| **Send images** | Images in a DM, or sent alongside a group @-mention, land in the conversation for the agent to see — PNG, JPEG, GIF, WebP, or BMP, up to 4 images per message and 10 MB each. Each image is copied into Multica storage, so it stays visible in the chat after DingTalk's temporary link expires. Images sent with `/issue` go to the created issue instead of the chat turn. Files and voice messages aren't supported. |
-| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images sent in the same DingTalk message are attached to the created issue. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
-| **`/new` command** | Starting a message with `/new <your message>` runs that message without prior conversation context. Sending `/new` by itself records the same fresh-start intent for your next non-empty message without creating an empty turn, and the bot confirms when that intent is ready. The pending intent remains active until a later chat task is successfully queued. The conversation history remains intact. |
-| **Reply** | The agent's answer is posted back into the same 1:1 chat or group. |
+## Give the agent work in DingTalk
 
-## Use the bot (members)
+### Direct messages
 
-### First message: link your account
+Send the Bot a message. When the agent finishes the work, it replies with the result in the DM.
 
-The first time you @-mention or DM the bot, it replies with a **link your account** prompt pointing at the in-product **/dingtalk/bind** page. Tap the link, sign in to Multica, and your DingTalk identity is bound to your Multica membership — this is what lets the agent act as you (e.g. `/issue` files under your name). The link is single-use and expires in about 15 minutes; just message the bot again for a fresh one.
+### Group chats
 
-<Callout type="warning">
-Only **members of the workspace** can use the bot. If you aren't a member, or you skip the identity link, the bot won't run — your message is dropped (recorded for audit, without its contents).
-</Callout>
+Add the Bot to a DingTalk group, then send `@your-bot <message>`. You must @-mention the Bot again in every follow-up. The Bot processes only messages that @-mention it.
 
-### Chat and commands
+### Send images
 
-- **In a group** — add the bot to the group, then `@your-bot <your message>`. Re-mention it for each follow-up (the bot only reads messages that mention it).
-- **In a 1:1 chat** — open the bot and message it directly; no mention needed, every message is read.
-- **Send images** — send screenshots or photos, with or without text; they show up in the conversation for the agent to work with. PNG, JPEG, GIF, WebP, or BMP; up to 4 images per message, 10 MB each.
-- **File an issue** — send `/issue the login redirect is broken on Safari`; add the description on following lines if needed. Multica creates the issue synchronously, attaches images from that message to it, and posts its ID and title back into the chat.
-- **Start fresh** — send `/new <your message>` to run that message without prior context, or send `/new` by itself to apply the fresh start to your next non-empty message. A bare `/new` gets a confirmation, and its pending intent remains active until a later chat task is successfully queued. Neither form removes the existing conversation history.
+Direct messages and group chats both support messages containing text and images. Supported image formats are PNG, JPEG, GIF, WebP, and BMP. Each message can contain up to 4 images, with a maximum size of 10 MB per image. Files and voice messages are not currently supported.
 
-## Manage and disconnect
+### Create an issue with `/issue`
 
-Workspace-wide management lives in **Settings → Integrations**:
+Send `/issue <title>` or `/issue <title>{newline}<detailed description>` to create a new Multica issue and automatically assign it to the agent connected to the Bot. Images in the same message are also added to the issue as attachments. Unlike regular chat messages, the `/issue` command leaves no record in Multica [Chat](/chat).
 
-- **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
-- **Group routing** lists every group discovered by a bot. Owners and admins can select one fixed agent per group; all members can see the current routes.
-- Every route change starts a new chat session for the selected agent. Routing Agent A → Agent B → Agent A does not resume A's earlier session. Archiving an assigned agent preserves the route but pauses processing with an unavailable notice until that agent is restored or the group is reassigned.
-- **Disconnect** is **owner / admin only**. It stops the bot from receiving DingTalk messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
+### Start a new Chat with `/new`
 
-## Permissions
+Send `/new` to create a new empty Multica Chat and route later DingTalk messages to it. Send `/new <message>` to create the Chat and use that message as its first turn. The previous Chat remains stored and usable in Multica.
 
-- **Connect / disconnect** require workspace **owner** or **admin**.
-- **Talking to the bot** requires being a workspace member with a linked DingTalk identity. Everyone else is dropped.
-- Message bodies for dropped messages are never stored — only a drop reason, for audit.
+### Clear the current context with `/clear`
 
-## Self-host setup
+Send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message. Send `/clear <message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica.
 
-On Multica Cloud the integration is already available — skip this section.
+## Manage connections
 
-For self-host, DingTalk is **off until you set an at-rest encryption key**. The key encrypts each app's AppSecret before it reaches the database; the AppKey remains the installation's non-secret routing identifier. BYO needs **no** OAuth client id/secret at the deployment level — each installation uses the credentials the admin pastes.
+- On **Agents → _your agent_ → Capabilities → Integrations**, the agent's creator and workspace owners/admins can connect the agent to DingTalk or disconnect it. Once connected, this page shows the Bot's name, DingTalk groups where it has successfully processed messages, and its activity status data in those groups. Any workspace member with read access to the agent can see this information. Groups with no successfully processed messages in the last 90 days are placed under **Long inactive** and loaded when expanded.
+- **Settings → Integrations** lists every DingTalk-connected agent in the current workspace that the viewer can read, along with the Bot's activity status data in DingTalk groups. Workspace owners/admins can also disconnect any listed agent from DingTalk. After disconnection, the Bot stops receiving messages, while the installation record is retained for audit. Workspace owners/admins can also forget a group. This removes the group from the list without deleting conversations or messages. The group reappears if a workspace member with a linked DingTalk account later @mentions the Bot there and Multica accepts the message.
 
-1. Generate a 32-byte key and set it on the API server:
 
-   ```dotenv
-   MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
-   ```
+## Self-hosting setup
 
-   For example: `openssl rand -base64 32`.
+Multica Cloud users can skip this section. A self-hosted deployment must first set a key for encrypting the DingTalk `AppSecret`:
 
-2. Restart the API. Until the key is set, **Settings → Integrations** shows a "DingTalk integration not enabled" notice and the **Connect DingTalk** entry points stay hidden.
+```dotenv
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+```
 
-<Callout type="info">
-The key must decode to exactly 32 bytes — `openssl rand -base64 32` does this. Treat it as a long-lived secret: rotating or losing it makes already-stored credentials undecryptable, forcing every bot to reconnect. The "link your account" link is built from your web app URL (`MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`) — a normal deployment already sets this, so there's nothing extra to configure.
-</Callout>
+Generate one with:
+
+```bash
+openssl rand -base64 32
+```
+
+Restart the API service, then connect DingTalk. Keep this key permanently: if it is changed or lost, existing tokens cannot be decrypted and the connection must be set up again.
+
+Account-linking URLs use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` when it is unset. The URL must point to a Multica address that members can access.
+
 
 ## Next
 
-- [Chat integrations](/channels) — how the channel engine, sessions, and authorization work
+- [Chat integrations](/channels) — how the Channel engine, sessions, and authorization work
 - [Agents](/agents) · [Chat](/chat) · [Issues](/issues)
-- [Environment variables](/environment-variables) — full self-host configuration reference
+- [Environment variables](/environment-variables) — complete self-hosting configuration reference

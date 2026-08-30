@@ -186,7 +186,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
                           ▼
    ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
    │   Next.js    │──>│   Go 后端    │──>│   PostgreSQL     │
-   │    前端      │<──│  (Chi + WS)  │<──│   (pgvector)     │
+   │    前端      │<──│  (Chi + WS)  │<──│   (17)           │
    └──────────────┘   └──────┬───────┘   └──────────────────┘
                              │  通过 WebSocket 下发 task
                       ┌──────┴───────┐
@@ -205,7 +205,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 桌面端 | Electron，复用 Web 的 UI 包 |
 | 移动端 | Expo / React Native (iOS) |
 | 后端 | Go (Chi router, sqlc, gorilla/websocket) |
-| 数据库 | PostgreSQL 17 + pgvector |
+| 数据库 | PostgreSQL 17（`pgcrypto` + `pg_trgm`） |
 | 智能体运行时 | 本地守护进程拉起上面 23 种智能体 CLI 中的任意一个 |
 
 ---

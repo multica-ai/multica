@@ -64,12 +64,17 @@ var agentGitExcludePatterns = []string{
 	".deveco",
 	"CODEBUDDY.md",
 	".codebuddy",
+	".pi",
+	".omp",
 }
 
 const repoCacheGitTimeout = 10 * time.Minute
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
+	// A daemon can outlive the checkout it was launched from. Run Git from the
+	// filesystem root instead of inheriting a cwd that may have been deleted.
+	cmd.Dir = filepath.VolumeName(os.TempDir()) + string(os.PathSeparator)
 	cmd.Env = gitEnv()
 	return cmd
 }
@@ -829,8 +834,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		return nil, fmt.Errorf("cannot resolve default branch for %s: bare cache at %s has no usable refs (origin/* is empty or ambiguous and bare HEAD has no match). The cache may be corrupted; delete it and retry", params.RepoURL, barePath)
 	}
 
-	// Build branch name: agent/{sanitized-name}/{short-task-id}
-	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	// Build branch name: agent/{sanitized-name}/{task-id}
+	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), taskKey(params.TaskID))
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
@@ -1782,7 +1787,26 @@ func sanitizeName(name string) string {
 	return s
 }
 
+// taskKeyLen mirrors execenv.taskKeyLen — see that constant for why the
+// segment is short: a branch name becomes a path under .git/refs/heads/ inside
+// the task checkout, and Windows enforces MAX_PATH there.
+const taskKeyLen = 12
+
+// taskKey returns the git-safe branch segment identifying a task: the LAST
+// taskKeyLen hex chars of the id. Mirrors execenv.taskKey — a UUIDv7's LEADING
+// 8 hex chars are timestamp bits that only advance every ~65.5s, so taking the
+// front gave two concurrently created tasks the same branch name (#7326). The
+// tail is random.
+func taskKey(uuid string) string {
+	s := strings.ReplaceAll(uuid, "-", "")
+	if len(s) > taskKeyLen {
+		return s[len(s)-taskKeyLen:]
+	}
+	return s
+}
+
 // shortID returns the first 8 characters of a UUID string (dashes stripped).
+// Display and logging only — see taskKey for anything that must be unique.
 func shortID(uuid string) string {
 	s := strings.ReplaceAll(uuid, "-", "")
 	if len(s) > 8 {

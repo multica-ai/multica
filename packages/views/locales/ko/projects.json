@@ -61,7 +61,7 @@
     "icon_tooltip": "아이콘 변경",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
-    "sidebar_tooltip": "사이드바 열기/닫기",
+    "sidebar_tooltip": "오른쪽 사이드바 열기/닫기",
     "copy_link": "링크 복사",
     "delete_action": "프로젝트 삭제",
     "section_properties": "속성",

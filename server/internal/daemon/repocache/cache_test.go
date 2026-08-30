@@ -3,6 +3,7 @@ package repocache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -116,6 +117,54 @@ func TestRunGitOutputTimesOut(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "timed out after 0s") {
 		t.Fatalf("runGitOutputWithTimeout error = %v, want timeout context", err)
+	}
+}
+
+func TestNewGitCommandUsesStableWorkingDirectory(t *testing.T) {
+	cmd := newGitCommand("--version")
+	if cmd.Dir == "" {
+		t.Fatal("newGitCommand Dir is empty; Git would inherit the daemon working directory")
+	}
+	if !filepath.IsAbs(cmd.Dir) {
+		t.Fatalf("newGitCommand Dir = %q, want an absolute path", cmd.Dir)
+	}
+	if info, err := os.Stat(cmd.Dir); err != nil {
+		t.Fatalf("newGitCommand Dir = %q is unavailable: %v", cmd.Dir, err)
+	} else if !info.IsDir() {
+		t.Fatalf("newGitCommand Dir = %q is not a directory", cmd.Dir)
+	}
+}
+
+func TestSyncSurvivesDeletedProcessWorkingDirectory(t *testing.T) {
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	originalCWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get original working directory: %v", err)
+	}
+	deletedRoot := t.TempDir()
+	deletedCWD := filepath.Join(deletedRoot, "worktree")
+	if err := os.Mkdir(deletedCWD, 0o755); err != nil {
+		t.Fatalf("create disposable working directory: %v", err)
+	}
+	if err := os.Chdir(deletedCWD); err != nil {
+		t.Fatalf("chdir to disposable working directory: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(originalCWD); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	}()
+	if err := os.RemoveAll(deletedRoot); err != nil {
+		t.Skipf("platform does not allow removing the process working directory: %v", err)
+	}
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-deleted-cwd", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("Sync with deleted process working directory failed: %v", err)
+	}
+	if cachedPath := cache.Lookup("ws-deleted-cwd", sourceRepo); !isBareRepo(cachedPath) {
+		t.Fatalf("expected synced bare repo, got %q", cachedPath)
 	}
 }
 
@@ -1056,14 +1105,14 @@ func TestCreateWorktreeExcludesOpenCodeSkills(t *testing.T) {
 	}
 }
 
-// TestCreateWorktreeExcludesCodebuddySidecars is the regression guard for
+// TestCreateWorktreeExcludesAgentSidecars is the regression guard for
 // PR #5224's review feedback: once the daemon started writing
 // .codebuddy/skills/ and CODEBUDDY.md into the task workdir (instead of
 // reusing Claude's .claude/CLAUDE.md, which were already excluded), the
 // repo-cache worktree needed the new CodeBuddy sidecar paths added to
 // .git/info/exclude too — otherwise these daemon-injected files show up in
 // `git status` and risk being committed by the agent.
-func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
+func TestCreateWorktreeExcludesAgentSidecars(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
 	cacheRoot := t.TempDir()
@@ -1091,6 +1140,11 @@ func TestCreateWorktreeExcludesCodebuddySidecars(t *testing.T) {
 	}
 	if !strings.Contains(exclude, "CODEBUDDY.md\n") {
 		t.Fatalf("expected .git/info/exclude to contain CODEBUDDY.md, got:\n%s", exclude)
+	}
+	for _, pattern := range []string{".pi\n", ".omp\n"} {
+		if !strings.Contains(exclude, pattern) {
+			t.Fatalf("expected .git/info/exclude to contain %q, got:\n%s", pattern, exclude)
+		}
 	}
 }
 
@@ -2154,5 +2208,42 @@ func TestBarePathIsIndependentOfExistence(t *testing.T) {
 	}
 	if cache.Lookup("ws-1", "https://example.com/acme/widgets.git") != "" {
 		t.Error("Lookup must still report an uncached repo as absent")
+	}
+}
+
+// TestTaskKeyMatchesExecenvContract pins this package's copy of the task-segment
+// rule. execenv, repocache and the agent handler each carry one — execenv owns
+// the canonical taskKey, and the handler has a contract test against
+// PredictRootDir, but this copy had none and could drift silently.
+//
+// Both properties matter. The segment must come from the id's random TAIL:
+// UUIDv7 leads with a millisecond timestamp, so a leading slice is identical
+// for every task created in the same ~65.5s window, which gave two concurrent
+// tasks of one agent the same branch name (#7326). And it must stay SHORT: a
+// branch name becomes a path under .git/refs/heads/ inside the task checkout,
+// where Windows enforces MAX_PATH.
+func TestTaskKeyMatchesExecenvContract(t *testing.T) {
+	t.Parallel()
+	const id = "01a01ec0-e69d-7000-8000-0123456789ab"
+	if got, want := taskKey(id), "0123456789ab"; got != want {
+		t.Fatalf("taskKey(%q) = %q, want %q — the segment must be the random tail, not the timestamp head", id, got, want)
+	}
+	if got := taskKey(id); len(got) != taskKeyLen {
+		t.Fatalf("taskKey len = %d, want %d — long segments overflow MAX_PATH on Windows", len(got), taskKeyLen)
+	}
+	if got := taskKey("abc"); got != "abc" {
+		t.Fatalf("taskKey on a sub-length input = %q, want it returned as-is", got)
+	}
+}
+
+// TestBranchNameDistinctForSharedUUIDv7Prefix is the branch-name half of the
+// #7326 regression: two tasks created inside one timestamp window must not ask
+// git for the same ref.
+func TestBranchNameDistinctForSharedUUIDv7Prefix(t *testing.T) {
+	t.Parallel()
+	a := fmt.Sprintf("agent/%s/%s", sanitizeName("Windows Codex"), taskKey("01a01ec0-e69d-7000-8000-000000000001"))
+	b := fmt.Sprintf("agent/%s/%s", sanitizeName("Windows Codex"), taskKey("01a01ec0-f014-7000-8000-000000000002"))
+	if a == b {
+		t.Fatalf("both tasks resolved to branch %q", a)
 	}
 }

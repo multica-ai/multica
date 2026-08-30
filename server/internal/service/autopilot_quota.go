@@ -37,11 +37,14 @@ func (e *AutopilotQuotaExceededError) Error() string {
 // AutopilotQuotaUsage is the workspace-scoped, policy-neutral API model.
 // A disabled/malformed decision returns Enabled=false and leaves all facts nil.
 type AutopilotQuotaUsage struct {
-	Enabled       bool
-	Action        string
-	Used          *int64
-	Reserved      *int64
-	Limit         *int64
+	Enabled  bool
+	Action   string
+	Used     *int64
+	Reserved *int64
+	Total    *int64
+	Limit    *int64
+	// Reached is nil while observing because observe never rejects a run.
+	Reached       *bool
 	PeriodStart   *time.Time
 	PeriodEnd     *time.Time
 	ResetAt       *time.Time
@@ -314,9 +317,16 @@ func (s *AutopilotService) AutopilotQuotaUsage(ctx context.Context, workspaceID 
 			blockedCounts = make(map[string]int64)
 		}
 	}
+	total := period.UsedCount + period.ReservedCount
+	var reached *bool
+	if policy.action == entitlement.ActionEnforce {
+		value := total >= policy.limit
+		reached = &value
+	}
 	return AutopilotQuotaUsage{
 		Enabled: true, Action: string(policy.action),
-		Used: &period.UsedCount, Reserved: &period.ReservedCount, Limit: &policy.limit,
+		Used: &period.UsedCount, Reserved: &period.ReservedCount, Total: &total,
+		Limit: &policy.limit, Reached: reached,
 		PeriodStart: &policy.periodStart, PeriodEnd: &policy.periodEnd, ResetAt: &policy.resetAt,
 		BlockedCounts: blockedCounts,
 	}, nil

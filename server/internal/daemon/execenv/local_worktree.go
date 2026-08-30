@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -51,21 +50,16 @@ const (
 	// multi-gigabyte copy.
 	maxUntrackedFiles = 2000
 	maxUntrackedBytes = 200 << 20 // 200 MiB
+
+	// stashCaptureAttempts / stashCaptureRetryDelay bound the retry on the
+	// dirty-state capture. The contention this rides out is a user tool
+	// holding .git/index.lock for the length of one git command, so the total
+	// window (0.1s + 0.2s + 0.4s + 0.8s ≈ 1.5s) is sized for that and not for
+	// a wedged lock — a stale index.lock is a repo the user has to fix, and
+	// waiting minutes on it would only delay telling them so.
+	stashCaptureAttempts   = 5
+	stashCaptureRetryDelay = 100 * time.Millisecond
 )
-
-// gitRootLocks serialises git admin operations per repository. Concurrent
-// `git worktree add` / `remove` / `prune` on one repo race on the same
-// lockfiles (worktrees/, packed-refs.lock, config.lock), and unlike a fetch
-// these are fast, so a plain mutex costs nothing. Keyed by the repo root so
-// tasks on different repos never wait on each other.
-var gitRootLocks sync.Map // gitRoot -> *sync.Mutex
-
-func lockGitRoot(gitRoot string) func() {
-	v, _ := gitRootLocks.LoadOrStore(gitRoot, &sync.Mutex{})
-	mu := v.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
-}
 
 // LocalWorktreeParams describes the worktree Prepare should build for a
 // local_directory task running in worktree mode.
@@ -169,10 +163,17 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 
 	worktreePath := filepath.Join(params.EnvRoot, localWorktreeDirName)
 
-	// Everything below mutates the repo's worktree admin state, so take the
-	// per-repo lock first — including the stale-path cleanup, which runs `git
-	// worktree remove` and would otherwise race a sibling task's `worktree add`.
-	unlock := lockGitRoot(gitRoot)
+	// Everything below either mutates the repo's worktree admin state or needs
+	// its index lock, so take the per-repo lock first. That covers the
+	// stale-path cleanup, which runs `git worktree remove` and would otherwise
+	// race a sibling task's `worktree add`, and the `git stash create` capture
+	// below — the step that actually lost this race in production, because the
+	// lock used to be in-process only while every prepare runs in its own
+	// helper process (#7434).
+	unlock, err := lockGitRoot(gitRoot, logger)
+	if err != nil {
+		return nil, err
+	}
 	defer unlock()
 
 	if _, statErr := os.Stat(worktreePath); statErr == nil {
@@ -202,7 +203,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// a repo with no user.email configured: writing a commit object needs a
 	// committer, and without them the user's uncommitted work would be dropped
 	// on a technicality.
-	stashSHA, stashErr := runGitTrimmed(gitRoot, append(commitIdentityArgs(gitRoot), "stash", "create")...)
+	stashSHA, stashErr := captureDirtyState(gitRoot, logger)
 	if stashErr != nil {
 		// Fail closed. The promise of this mode is that the agent reasons about
 		// the code the user actually has; silently starting from HEAD instead
@@ -213,7 +214,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			"so the worktree would not match what you have on disk: %w", gitRoot, stashErr)
 	}
 
-	branch := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	branch := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), taskKey(params.TaskID))
 	actualBranch, err := addLocalWorktree(gitRoot, worktreePath, branch, headSHA)
 	if err != nil {
 		return nil, err
@@ -339,10 +340,19 @@ func (w *LocalWorktree) Finalize(logger *slog.Logger) (LocalWorktreeOutcome, err
 	if w == nil {
 		return LocalWorktreeOutcome{}, nil
 	}
-	unlock := lockGitRoot(w.GitRoot)
-	defer unlock()
-
 	outcome := LocalWorktreeOutcome{Branch: w.Branch}
+
+	unlock, err := lockGitRoot(w.GitRoot, logger)
+	if err != nil {
+		// Nothing has been committed or removed yet, so the agent's work is
+		// still sitting in the worktree. Report it as preserved rather than
+		// naming a branch that does not carry it.
+		outcome.Branch = ""
+		outcome.PreservedPath = w.Path
+		return outcome, fmt.Errorf("could not lock %q to finalize branch %s: %w; "+
+			"the work is preserved in the worktree at %s", w.GitRoot, w.Branch, err, w.Path)
+	}
+	defer unlock()
 
 	// Something before the commit went wrong in a way that would make the
 	// delivered branch misleading. Commit nothing and keep the worktree: the
@@ -428,7 +438,17 @@ func (w *LocalWorktree) Discard(logger *slog.Logger) {
 	if w == nil {
 		return
 	}
-	unlock := lockGitRoot(w.GitRoot)
+	unlock, err := lockGitRoot(w.GitRoot, logger)
+	if err != nil {
+		// Best-effort by contract: every step below only logs on failure. The
+		// registration this leaves behind is pruned by the next prepare on
+		// this repo, which is the same self-heal path a crashed daemon uses.
+		if logger != nil {
+			logger.Warn("execenv: could not lock the repository to discard the task worktree",
+				"git_root", w.GitRoot, "path", w.Path, "branch", w.Branch, "error", err)
+		}
+		return
+	}
 	defer unlock()
 	removeLocalWorktreeDir(w.GitRoot, w.Path, logger)
 	deleteBranch(w.GitRoot, w.Branch, logger)
@@ -584,6 +604,75 @@ func resolveGitRoot(dir string) (string, error) {
 		root = resolved
 	}
 	return filepath.Clean(root), nil
+}
+
+// captureDirtyState builds the commit object that carries the user's tracked
+// edits, retrying a lost index-lock race instead of failing the task over it.
+//
+// lockGitRoot already excludes Multica's own tasks, but the repository belongs
+// to the user: an editor's auto-fetch, a git hook, a `git status` in another
+// terminal or a background `git gc` can hold .git/index.lock at any moment,
+// and the window is milliseconds. That is a transient condition worth waiting
+// out — before this retry it ended the whole task, and nothing re-dispatched
+// it.
+//
+// Retrying is safe because `stash create` has no side effects to repeat: it
+// writes a commit object and returns its sha, leaving the index, the refs and
+// the working tree exactly as they were. A failed attempt leaves nothing
+// behind, and a repeated one just writes an identical object.
+func captureDirtyState(gitRoot string, logger *slog.Logger) (string, error) {
+	args := append(commitIdentityArgs(gitRoot), "stash", "create")
+	started := time.Now()
+	delay := stashCaptureRetryDelay
+
+	var lastErr error
+	for attempt := 1; attempt <= stashCaptureAttempts; attempt++ {
+		sha, err := runGitTrimmed(gitRoot, args...)
+		if err == nil {
+			if attempt > 1 && logger != nil {
+				logger.Info("execenv: captured the uncommitted changes after retrying",
+					"git_root", gitRoot, "attempts", attempt, "elapsed", time.Since(started))
+			}
+			return sha, nil
+		}
+		lastErr = err
+		if attempt == stashCaptureAttempts {
+			break
+		}
+		if logger != nil {
+			logger.Debug("execenv: capture attempt failed, retrying",
+				"git_root", gitRoot, "attempt", attempt, "error", err)
+		}
+		time.Sleep(delay)
+		delay *= 2
+	}
+
+	return "", fmt.Errorf("git stash create failed %d times over %s%s: %w",
+		stashCaptureAttempts, time.Since(started).Round(time.Millisecond), indexLockHint(gitRoot), lastErr)
+}
+
+// indexLockHint names the index lock when it is what blocked us.
+//
+// git is silent on this failure — losing the index lock in `stash create`
+// produces exit status 1 with NOTHING on stderr — so surfacing git's output is
+// not enough on its own, and the bare exit status is what made this class of
+// failure undiagnosable in the field. Looking for the lock file gives the
+// message the one fact that actually points somewhere.
+//
+// Advisory only: the holder may have released it between git's attempt and
+// ours, in which case we say nothing extra and the wrapped error still carries
+// whatever git did report.
+func indexLockHint(gitRoot string) string {
+	gitDir, err := gitDirFor(gitRoot)
+	if err != nil {
+		return ""
+	}
+	lock := filepath.Join(gitDir, "index.lock")
+	if _, statErr := os.Stat(lock); statErr != nil {
+		return ""
+	}
+	return fmt.Sprintf(" (another process is holding %s — usually an editor, a git hook,"+
+		" or a git command running in that repository)", lock)
 }
 
 // addLocalWorktree creates the worktree, retrying once under a suffixed branch
@@ -759,7 +848,25 @@ func runGitStdout(dir string, args ...string) (string, error) {
 	cmd.WaitDelay = 5 * time.Second
 	out, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return "", withGitStderr(err)
 	}
 	return string(out), nil
+}
+
+// withGitStderr renders git's stderr into the error.
+//
+// cmd.Output() already captures stderr into ExitError.Stderr, but nothing ever
+// read it back out, so every failure from this path reached the user as a bare
+// "exit status 1" — git's own explanation was collected and then thrown away
+// at the point it was needed. Discarding stderr from the RESULT is deliberate
+// (see runGitTrimmed: a diagnostic line must never be mistaken for a value);
+// discarding it from the error was not.
+func withGitStderr(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if msg := strings.TrimSpace(string(exitErr.Stderr)); msg != "" {
+			return fmt.Errorf("%s: %w", msg, err)
+		}
+	}
+	return err
 }

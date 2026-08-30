@@ -621,8 +621,8 @@ func TestPrepareWorktreeModeUsesPerIssueCodexSessionStore(t *testing.T) {
 
 	// Two turns on the same issue, different task IDs — the shape of a
 	// follow-up comment.
-	first := prepareTurn("aaaa1111-2222-3333-4444-555566667777")
-	second := prepareTurn("bbbb1111-2222-3333-4444-555566667777")
+	first := prepareTurn("aaaa1111-2222-3333-4444-5555666677aa")
+	second := prepareTurn("bbbb1111-2222-3333-4444-5555666677bb")
 
 	sessionsOf := func(env *Environment) string {
 		t.Helper()
@@ -640,7 +640,7 @@ func TestPrepareWorktreeModeUsesPerIssueCodexSessionStore(t *testing.T) {
 			firstSessions, secondSessions)
 	}
 	// And it must be the stable per-issue store, not a task-local directory.
-	if strings.Contains(firstSessions, shortID("aaaa1111-2222-3333-4444-555566667777")) {
+	if strings.Contains(firstSessions, taskKey("aaaa1111-2222-3333-4444-5555666677aa")) {
 		t.Errorf("sessions dir is task-scoped (%s); it will not survive the next turn", firstSessions)
 	}
 }

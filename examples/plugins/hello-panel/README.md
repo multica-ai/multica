@@ -17,14 +17,20 @@ boring — it should demonstrate the contract, not the framework of the week.
 
 ## Running it
 
-The manifest and `ui/main.js` must be served over public HTTPS from the same
-directory, because `entry` resolves relative to the manifest URL and Multica
-never re-hosts plugin code. Install by pasting the manifest URL into
-**Settings → Plugins**.
+Zip this folder — the manifest plus every file it names — and upload it in
+**Settings → Plugins**. You need no server of your own: Multica stores the
+artifact, serves the panel script from it, and binds your installation to that
+one immutable version.
 
-`MULTICA_PLUGIN_DIR` installs (`local:hello-panel`) are for developing the
-manifest itself: the install and consent flow work, but the panel cannot load a
-script from the server's filesystem and says so instead of rendering blank.
+`ui/main.js` is one file with no `import`. That is the contract, not a
+simplification for the example: Multica serves the entry inside one generated
+document with no module graph, so a bare module specifier has nowhere to
+resolve. Bundle your dependencies in.
+
+While you are iterating, `MULTICA_PLUGIN_DIR` publishes straight from disk
+instead of asking you to zip and upload after every edit. It still produces an
+ordinary version — re-publishing an unchanged version number lands as
+`1.0.0+dev.N` — so a panel always runs code somebody consented to.
 
 ## Note on scopes
 

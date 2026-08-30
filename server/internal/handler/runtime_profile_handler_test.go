@@ -191,6 +191,49 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 }
 
+func TestDeleteRuntimeProfile_WorkspaceMismatchReturnsStructuredConflict(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Workspace Mismatch Profile", "codex", "workspace-mismatch-codex")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "Workspace Mismatch Runtime", "codex")
+	agentID := createArchivedWorkspaceMismatchedAgent(t, runtimeID, "Profile Workspace Mismatch Agent")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != "runtime_delete_workspace_mismatch" {
+		t.Fatalf("code = %q, want runtime_delete_workspace_mismatch", body.Code)
+	}
+
+	var profileRows, runtimeRows int
+	var boundRuntime string
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM runtime_profile WHERE id = $1`, profileID).Scan(&profileRows); err != nil {
+		t.Fatalf("count profile rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&boundRuntime); err != nil {
+		t.Fatalf("read mismatched agent binding: %v", err)
+	}
+	if profileRows != 1 || runtimeRows != 1 || boundRuntime != runtimeID {
+		t.Fatalf("workspace mismatch mutated data: profile rows=%d runtime rows=%d agent runtime=%q", profileRows, runtimeRows, boundRuntime)
+	}
+}
+
 func TestDeleteRuntimeProfile_MissingProfileWithOrphanRuntimesCleansUp(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

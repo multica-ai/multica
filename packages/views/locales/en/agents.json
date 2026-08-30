@@ -34,6 +34,7 @@
     "queued": "Queued",
     "idle": "Idle"
   },
+  "presence_status_aria": "Status: {{status}}",
   "archived": {
     "active_link": "Active agents",
     "title": "Archived agents"
@@ -227,6 +228,8 @@
     "model_managed_by_runtime": "Managed by runtime",
     "model_search_placeholder": "Search or type a model ID",
     "model_discovering": "Discovering models…",
+    "model_discovery_failed_title": "Could not list this runtime's models.",
+    "model_discovery_failed_hint": "Type a model ID above to enter one manually.",
     "model_empty": "No models available",
     "model_empty_with_dot": "No models available.",
     "model_custom_tooltip": "Use \"{{value}}\" as a custom model id",
@@ -440,6 +443,19 @@
       "select_image_toast": "Please select an image file.",
       "upload_failed_toast": "Avatar upload failed"
     }
+  },
+  "conversation_starters": {
+    "label": "Conversation starters",
+    "hint": "Up to three examples, shown when someone opens a new chat with this agent. Selecting one fills the composer without sending it.",
+    "add": "Add suggestion",
+    "item_label": "Suggestion {{number}} label",
+    "prompt_label": "Suggestion {{number}} prompt",
+    "label_placeholder": "Review a pull request",
+    "prompt_placeholder": "Review the open pull request, summarize the risks, and recommend next steps.",
+    "incomplete": "Complete or remove each suggestion before saving.",
+    "remove": "Remove suggestion {{number}}",
+    "preview_label": "Preview of a new chat",
+    "preview_defaults": "These are the built-in defaults. Add a suggestion above to replace all three."
   },
   "tab_body": {
     "common": {
@@ -671,7 +687,7 @@
     },
     "integrations": {
       "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
-      "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
+      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "status": {
@@ -844,6 +860,7 @@
     "usage_chip_title": "Tokens and estimated cost for this run",
     "details_branch": "Branch",
     "details_reason": "Reason",
+    "details_diagnostics": "Technical details",
     "copy_branch": "Copy branch name",
     "lane_model": "Model",
     "lane_tool": "Tools",
@@ -877,11 +894,43 @@
     "tool_kind_misc": "Other"
   },
   "task_failure": {
-    "agent_error": "Agent execution error",
-    "timeout": "Task timed out",
-    "runtime_offline": "Daemon offline",
-    "runtime_recovery": "Daemon restarted",
-    "manual": "Cancelled by user"
+    "cancelled_by_system": "Cancelled by the system",
+    "reasons": {
+      "queued_expired": "Expired in queue",
+      "runtime_offline": "Daemon offline",
+      "runtime_reconnect_timeout": "Daemon did not reconnect in time",
+      "runtime_recovery": "Daemon restarted",
+      "timeout": "Task timed out",
+      "iteration_limit": "Hit the iteration limit",
+      "agent_blocked": "Waiting on human input",
+      "api_invalid_request": "Rejected by the model API",
+      "skill_bundle_unavailable": "Couldn't download the agent's skills",
+      "runtime_cli_timeout": "Local runtime CLI timed out",
+      "invalid_task_identity": "Task identity mismatch",
+      "agent_error_provider_auth_or_access": "Provider auth failed",
+      "agent_error_provider_quota_limit": "Provider quota exhausted",
+      "agent_error_provider_capacity_or_rate_limit": "Rate limited by provider",
+      "agent_error_provider_server_error": "Provider server error",
+      "agent_error_provider_network": "Network error reaching provider",
+      "agent_error_process_failure": "Agent process crashed",
+      "agent_error_empty_or_unparseable_output": "Agent returned no usable output",
+      "agent_error_agent_timeout": "Agent timed out",
+      "agent_error_context_overflow": "Context window exceeded",
+      "agent_error_missing_config": "Missing API key or configuration",
+      "agent_error_model_not_found_or_unavailable": "Model unavailable",
+      "agent_error_runtime_version_unsupported": "Runner CLI version unsupported",
+      "agent_error_runtime_missing_executable": "Runner CLI not installed",
+      "agent_error_unknown": "Agent execution error",
+      "agent_fallback_message": "Agent returned a fallback message",
+      "codex_resume_oversized": "Session too large to resume",
+      "idle_watchdog": "Agent stopped after inactivity",
+      "local_directory_error": "Local directory error",
+      "cancelled": "Cancelled by the system",
+      "agent_error": "Agent execution error",
+      "codex_semantic_inactivity": "Codex semantic inactivity timeout",
+      "manual": "Cancelled by user",
+      "user_cancelled": "Cancelled by user"
+    }
   },
   "last_active": {
     "today": "Today",

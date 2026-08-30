@@ -42,7 +42,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
-import { cancelReasonLabel } from "../../agents/components/tabs/task-failure";
+import { cancelReasonLabel, failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
@@ -56,7 +56,7 @@ import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes"
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
 import {
-  createNewestFirstFollow,
+  createLiveEndFollow,
   FOLLOW_EDGE_THRESHOLD,
   LINE_SCROLL_PX,
 } from "./transcript-follow";
@@ -333,7 +333,7 @@ export function AgentTranscriptDialog({
   // controller (see transcript-follow.ts for the model); this component only
   // wires DOM events to it. A stable instance, never re-rendered by scroll
   // traffic.
-  const followCtl = useMemo(() => createNewestFirstFollow(), []);
+  const followCtl = useMemo(() => createLiveEndFollow(), []);
   const detachScrollerRef = useRef<(() => void) | null>(null);
 
   const handleScrollerRef = useCallback(
@@ -341,30 +341,55 @@ export function AgentTranscriptDialog({
       detachScrollerRef.current?.();
       detachScrollerRef.current = null;
       if (!(el instanceof HTMLElement)) return;
+      let inputFrame: number | null = null;
+      const stageInput = (delta: number) => {
+        followCtl.input(delta);
+        if (inputFrame !== null) cancelAnimationFrame(inputFrame);
+        inputFrame = requestAnimationFrame(() => {
+          inputFrame = null;
+          followCtl.endInputFrame();
+        });
+      };
       const onWheel = (e: WheelEvent) => {
         const scale =
           e.deltaMode === 1 ? LINE_SCROLL_PX : e.deltaMode === 2 ? el.clientHeight : 1;
-        followCtl.input(e.deltaY * scale);
+        stageInput(e.deltaY * scale);
       };
+      let touchId: number | null = null;
       let lastTouchY: number | null = null;
+      const trackedTouch = (touches: TouchList) =>
+        Array.from(touches).find((touch) => touch.identifier === touchId);
       const onTouchStart = (e: TouchEvent) => {
-        lastTouchY = e.touches[0]?.clientY ?? null;
+        if (touchId !== null) return;
+        const touch = e.changedTouches[0] ?? e.touches[0];
+        if (!touch) return;
+        touchId = touch.identifier;
+        lastTouchY = touch.clientY;
+        followCtl.touchStart();
       };
       const onTouchMove = (e: TouchEvent) => {
-        const y = e.touches[0]?.clientY;
-        if (y === undefined) return;
+        const touch = trackedTouch(e.touches);
+        if (!touch) return;
         // Finger moving up scrolls the content down (away from the live end).
-        if (lastTouchY !== null) followCtl.input(lastTouchY - y);
-        lastTouchY = y;
+        if (lastTouchY !== null) stageInput(lastTouchY - touch.clientY);
+        lastTouchY = touch.clientY;
+      };
+      const onTouchEnd = (e: TouchEvent) => {
+        if (touchId === null || trackedTouch(e.touches)) return;
+        touchId = null;
+        lastTouchY = null;
+        followCtl.touchEnd();
       };
       const onKeyDown = (e: KeyboardEvent) => {
         // Only keys aimed at the scroller itself; Space/arrows bubbling from
         // row controls are not scroll intent.
         if (e.target !== el) return;
-        if (e.key === "ArrowDown") followCtl.input(LINE_SCROLL_PX);
-        else if (e.key === "ArrowUp") followCtl.input(-LINE_SCROLL_PX);
-        else if (e.key === "PageDown" || e.key === " ") followCtl.input(el.clientHeight);
-        else if (e.key === "PageUp") followCtl.input(-el.clientHeight);
+        if (e.key === "ArrowDown") stageInput(LINE_SCROLL_PX);
+        else if (e.key === "ArrowUp") stageInput(-LINE_SCROLL_PX);
+        else if (e.key === "PageDown") stageInput(el.clientHeight);
+        // Shift+Space pages up — toward this list's live end.
+        else if (e.key === " ") stageInput(e.shiftKey ? -el.clientHeight : el.clientHeight);
+        else if (e.key === "PageUp") stageInput(-el.clientHeight);
         else if (e.key === "End") followCtl.disengage();
       };
       // Scrollbar drags hit the scroller element itself; clicks on row
@@ -388,14 +413,20 @@ export function AgentTranscriptDialog({
       el.addEventListener("wheel", onWheel, { passive: true });
       el.addEventListener("touchstart", onTouchStart, { passive: true });
       el.addEventListener("touchmove", onTouchMove, { passive: true });
+      el.addEventListener("touchend", onTouchEnd, { passive: true });
+      el.addEventListener("touchcancel", onTouchEnd, { passive: true });
       el.addEventListener("keydown", onKeyDown);
       el.addEventListener("mousedown", onPointerDown);
       window.addEventListener("mouseup", onPointerUp, { capture: true });
       el.addEventListener("scroll", onScroll, { passive: true });
       detachScrollerRef.current = () => {
+        if (inputFrame !== null) cancelAnimationFrame(inputFrame);
+        followCtl.endInputFrame();
         el.removeEventListener("wheel", onWheel);
         el.removeEventListener("touchstart", onTouchStart);
         el.removeEventListener("touchmove", onTouchMove);
+        el.removeEventListener("touchend", onTouchEnd);
+        el.removeEventListener("touchcancel", onTouchEnd);
         el.removeEventListener("keydown", onKeyDown);
         el.removeEventListener("mousedown", onPointerDown);
         window.removeEventListener("mouseup", onPointerUp, { capture: true });
@@ -403,6 +434,7 @@ export function AgentTranscriptDialog({
         // The scroller can detach mid-drag (listEpoch remount); a stuck
         // held-mouse flag would suppress enforcement forever.
         followCtl.pointerUp();
+        followCtl.touchEnd();
       };
     },
     [followCtl],
@@ -715,10 +747,13 @@ export function AgentTranscriptDialog({
         // A server-cancelled run (worktree claim gate, preserved-work
         // delivery) carries a persisted reason the user must act on; surface
         // it on the badge instead of a bare "Cancelled". User-initiated
-        // cancels have no reason and keep the plain label.
-        const cancelReason = cancelReasonLabel(task);
+        // cancels have no reason and keep the plain label. The badge carries
+        // no `title`: the raw `task.error` behind it is untranslated
+        // operator prose (#7411) and belongs in Run details, not in hover
+        // text on a status pill.
+        const cancelReason = cancelReasonLabel(task, t);
         return (
-          <span className={cn(base, "bg-muted text-muted-foreground")} title={task.error ?? undefined}>
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
             <XCircle className="h-3 w-3" />
             {cancelReason
               ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
@@ -785,10 +820,23 @@ export function AgentTranscriptDialog({
   // this figure, same as on the other usage surfaces.
   useCustomPricingStore((s) => s.pricings);
   const usage = summarizeTaskUsage(task.usage);
+  // Two separate things, deliberately not one string (#7411):
+  //   • `reasonLabel` — the localized reason, derived from the stable
+  //     `failure_reason` enum. This is the user-facing explanation.
+  //   • `task.error` — the raw diagnostic the server/daemon persisted, in
+  //     English, for classification and logs. Kept readable (it is how you
+  //     find "which worktree holds my preserved work" and "which machine
+  //     needs upgrading") but labelled as a technical detail rather than
+  //     presented as the reason, and never merged into the localized text.
+  const reasonLabel =
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason, t)
+      : cancelReasonLabel(task, t);
   const hasRunDetails =
     !!runtimeInfo ||
     !!workdirCopyTarget?.relativePath ||
     !!task.branch_name ||
+    !!reasonLabel ||
     !!task.error ||
     !!createdLabel ||
     !!startedLabel ||
@@ -936,14 +984,13 @@ export function AgentTranscriptDialog({
                           copyTitle={t(($) => $.transcript.copy_branch)}
                         />
                       )}
-                      {/* The full persisted error, for failed AND
-                          server-cancelled runs — this is where "which
-                          worktree holds my preserved work" and "which
-                          machine needs upgrading" are actually readable. */}
-                      {task.error && (
+                      {/* The localized reason, from the stable
+                          `failure_reason` enum — this is the explanation, and
+                          it reads in the user's language. */}
+                      {reasonLabel && (
                         <RunDetailRow
                           label={t(($) => $.transcript.details_reason)}
-                          value={task.error}
+                          value={reasonLabel}
                         />
                       )}
                       {createdLabel && (
@@ -954,6 +1001,23 @@ export function AgentTranscriptDialog({
                       )}
                       {completedLabel && (
                         <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                      {/* The raw persisted diagnostic, last and behind its own
+                          divider. It is English prose written by the server
+                          and daemon for logs and classification, so it is
+                          labelled "Technical details" — a translated heading
+                          over untranslated content — rather than shown as the
+                          run's reason (#7411). Still the place where "which
+                          worktree holds my preserved work" is readable. */}
+                      {task.error && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_diagnostics)}
+                            value={task.error}
+                            mono
+                          />
+                        </>
                       )}
                       {usage && (
                         <>
@@ -1172,7 +1236,7 @@ export function AgentTranscriptDialog({
                 }
                 atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
                 atTopThreshold={FOLLOW_EDGE_THRESHOLD}
-                atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
+                atTopStateChange={(atTop) => followCtl.onAtEdgeChange(atTop)}
                 scrollerRef={handleScrollerRef}
                 computeItemKey={(_, row) => row.seq}
                 components={LIST_COMPONENTS}

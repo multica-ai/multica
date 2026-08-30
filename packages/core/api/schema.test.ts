@@ -281,6 +281,40 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("comment source-context sub-issues", () => {
+    it("uses the dedicated endpoint for agent creation", async () => {
+      stubFetchJson({ task_id: "task-1" }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "sha256:digest:issue",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).resolves.toEqual({ task_id: "task-1" });
+      expect(fetch).toHaveBeenCalledWith(
+        "https://api.example.test/api/comments/comment-1/sub-issues",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+
+    it.each([404, 405])("maps server status %s to source_context_server_unsupported", async (status) => {
+      stubFetchJson({ error: "not found" }, status);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.createCommentSubIssue("comment-1", {
+        mode: "agent",
+        capture_token: "token",
+        quick_create: { agent_id: "agent-1", prompt: "new work" },
+      })).rejects.toMatchObject({ body: { code: "source_context_server_unsupported" } });
+    });
+
+    it("rejects a malformed source-context retry response", async () => {
+      stubFetchJson({ id: 42 }, 202);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.retrySourceContextQuickCreate("task-1")).rejects.toThrow(
+        "Invalid source-context retry response",
+      );
+    });
+  });
+
   describe("searchIssues", () => {
     it("falls back to an empty result when the response is malformed", async () => {
       stubFetchJson({ issues: "not-an-array", total: 0 });
@@ -382,31 +416,47 @@ describe("ApiClient schema fallback", () => {
       expect(res.installations).toHaveLength(1);
       expect(res.configured).toBe(true);
       expect(res.install_supported).toBeUndefined();
-      expect(res.group_routing_supported).toBeUndefined();
+      expect(res.installations[0]?.agent_available).toBeUndefined();
     });
 
-    it("parses the new-server group-routing capability", async () => {
+    it("preserves the orphaned-Agent marker from a new server", async () => {
       stubFetchJson({
-        installations: [{
-          id: "dt-1",
-          status: "active",
-          bound_dingtalk_user_ids: ["staff-1001"],
-        }],
+        installations: [
+          { id: "dt-orphan", status: "active", agent_available: false },
+        ],
         configured: true,
-        install_supported: true,
-        group_routing_supported: true,
       });
       const client = new ApiClient("https://api.example.test");
       const res = await client.listDingTalkInstallations("ws-1");
-      expect(res.group_routing_supported).toBe(true);
+      expect(res.installations[0]?.agent_available).toBe(false);
+    });
+
+    it("parses linked DingTalk identities from a new-server row", async () => {
+      stubFetchJson({
+        installations: [
+          {
+            id: "dt-1",
+            status: "active",
+            bound_dingtalk_user_ids: ["staff-1001"],
+          },
+        ],
+        configured: true,
+        install_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
       expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual(["staff-1001"]);
     });
 
-    it("defaults missing or malformed linked-identity IDs to an empty list", async () => {
+    it("defaults missing or malformed linked identities to an empty list", async () => {
       stubFetchJson({
         installations: [
           { id: "dt-old", status: "active" },
-          { id: "dt-broken", status: "active", bound_dingtalk_user_ids: "staff-1001" },
+          {
+            id: "dt-broken",
+            status: "active",
+            bound_dingtalk_user_ids: "staff-1001",
+          },
         ],
         configured: true,
       });
@@ -414,52 +464,6 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual([]);
       expect(res.installations[1]?.bound_dingtalk_user_ids).toEqual([]);
-    });
-  });
-
-  describe("listDingTalkGroupRoutes", () => {
-    it("falls back to an empty list when the response is malformed", async () => {
-      stubFetchJson({ routes: "not-an-array" });
-      const client = new ApiClient("https://api.example.test");
-      await expect(client.listDingTalkGroupRoutes("ws-1")).resolves.toEqual({ routes: [] });
-    });
-
-    it("defaults fields missing from an older or partial route row", async () => {
-      stubFetchJson({ routes: [{ id: "route-1", agent_id: "agent-2" }] });
-      const client = new ApiClient("https://api.example.test");
-      const res = await client.listDingTalkGroupRoutes("ws-1");
-      expect(res.routes[0]).toMatchObject({
-        id: "route-1",
-        agent_id: "agent-2",
-        conversation_title: "",
-        installation_id: "",
-      });
-    });
-  });
-
-  describe("updateDingTalkGroupRoute", () => {
-    it("falls back safely on a malformed PATCH response and sends the scoped request", async () => {
-      stubFetchJson({ id: 42, agent_id: { wrong: "shape" } });
-      const client = new ApiClient("https://api.example.test");
-      await expect(
-        client.updateDingTalkGroupRoute("ws-1", "route-1", { agent_id: "agent-2" }),
-      ).resolves.toEqual({
-        id: "",
-        workspace_id: "",
-        installation_id: "",
-        conversation_id: "",
-        conversation_title: "",
-        agent_id: "",
-        discovered_at: "",
-        updated_at: "",
-      });
-      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/dingtalk/group-routes/route-1",
-        expect.objectContaining({
-          method: "PATCH",
-          body: JSON.stringify({ agent_id: "agent-2" }),
-        }),
-      );
     });
   });
 
@@ -503,6 +507,143 @@ describe("ApiClient schema fallback", () => {
         installation_id: "",
         telegram_user_id: "",
       });
+    });
+  });
+
+  describe("listDingTalkGroups", () => {
+    it("preserves bot activity metadata for each group relationship", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [
+              {
+                installation_id: "inst-1",
+                agent_id: "agent-1",
+                bot_name: "Release Bot",
+                bot_identity_issue: "",
+                last_active_at: "2026-08-19T08:00:00Z",
+                mention_count: 18,
+              },
+            ],
+          },
+        ],
+        group_discovery_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.groups[0]?.bots[0]).toMatchObject({
+        last_active_at: "2026-08-19T08:00:00Z",
+        mention_count: 18,
+      });
+    });
+
+    it("uses an agent-scoped endpoint for Agent detail group visibility", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listAgentDingTalkGroups("agent-1");
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/agents/agent-1/dingtalk/groups",
+        expect.any(Object),
+      );
+    });
+
+    it("requests one inactive installation page and can forget an observation", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listDingTalkGroups("ws-1", {
+        activity: "inactive",
+        installationId: "inst-1",
+        offset: 20,
+        limit: 10,
+      });
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/groups?activity=inactive&installation_id=inst-1&offset=20&limit=10",
+        expect.any(Object),
+      );
+
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await client.forgetDingTalkGroup("ws-1", "inst-1", "cid/encoded");
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/installations/inst-1/groups/cid%2Fencoded",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("treats an older backend's missing endpoint as an empty group list", async () => {
+      stubFetchJson({ error: "not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("treats an older backend's admin-only group inventory as unsupported for members", async () => {
+      stubFetchJson({ error: "forbidden" }, 403);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("does not hide a real group-list server failure", async () => {
+      stubFetchJson({ error: "unavailable" }, 503);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).rejects.toMatchObject({
+        status: 503,
+      });
+    });
+
+    it("falls back to an empty group list when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("defaults additive bot identity fields and isolates a malformed bot list", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [{ installation_id: "inst-1", agent_id: "agent-1" }],
+          },
+          {
+            conversation_id: "cid-old-server",
+            bots: "not-an-array",
+          },
+        ],
+        group_discovery_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.group_discovery_supported).toBe(true);
+      expect(res.groups).toEqual([
+        {
+          conversation_id: "cid-platform",
+          conversation_title: "Platform",
+          bots: [
+            {
+              installation_id: "inst-1",
+              agent_id: "agent-1",
+              bot_name: "",
+              bot_identity_issue: "",
+            },
+          ],
+        },
+        {
+          conversation_id: "cid-old-server",
+          conversation_title: "",
+          bots: [],
+        },
+      ]);
     });
   });
 
@@ -568,6 +709,17 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listChildIssues("issue-1");
       expect(res).toEqual({ issues: [] });
+    });
+  });
+
+  describe("getChildIssueProgress", () => {
+    it("validates the response before query selectors iterate it", async () => {
+      stubFetchJson({ progress: "invalid" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.getChildIssueProgress()).resolves.toEqual({
+        progress: [],
+      });
     });
   });
 
@@ -806,56 +958,6 @@ describe("ApiClient schema fallback", () => {
       });
     });
 
-    it("parses workspace entitlements into camelCase without fabricating Free", async () => {
-      stubFetchJson({
-        workspace_id: "workspace-1",
-        plan: "pro",
-        status: "active",
-        seats: 4,
-        issue_window: null,
-        autopilot_runs: null,
-        current_period_end: "2026-09-13T00:00:00Z",
-        snapshot_expires_at: null,
-        version: 7,
-      });
-      const client = new ApiClient("https://api.example.test");
-
-      await expect(
-        client.getWorkspaceSubscriptionEntitlements(),
-      ).resolves.toEqual({
-        workspaceId: "workspace-1",
-        plan: "pro",
-        status: "active",
-        seats: 4,
-        issueWindow: null,
-        autopilotRuns: null,
-        currentPeriodEnd: "2026-09-13T00:00:00Z",
-        snapshotExpiresAt: null,
-        version: 7,
-      });
-
-      stubFetchJson({ plan: "free", seats: "unknown" });
-      await expect(client.getWorkspaceSubscriptionEntitlements()).resolves.toBeNull();
-    });
-
-    it("accepts an empty workspace entitlement snapshot", async () => {
-      stubFetchJson({
-        workspace_id: "workspace-1",
-        plan: "free",
-        status: "inactive",
-        seats: 0,
-        issue_window: 1000,
-        autopilot_runs: 100,
-        snapshot_expires_at: null,
-        version: 0,
-      });
-      const client = new ApiClient("https://api.example.test");
-
-      await expect(
-        client.getWorkspaceSubscriptionEntitlements(),
-      ).resolves.toMatchObject({ seats: 0, plan: "free" });
-    });
-
     it("sends the Checkout idempotency key in the header and body", async () => {
       stubFetchJson(
         {
@@ -916,9 +1018,8 @@ describe("ApiClient schema fallback", () => {
     it("parses seat reconciliation into camelCase", async () => {
       stubFetchJson({
         workspace_id: "workspace-1",
-        billed_seats: 5,
-        actual_seats: 4,
-        action: "scheduled_decrease",
+        action: "restored_high_water",
+        version: 8,
       });
       const client = new ApiClient("https://api.example.test");
 
@@ -926,9 +1027,8 @@ describe("ApiClient schema fallback", () => {
         client.reconcileWorkspaceSubscriptionSeats(),
       ).resolves.toEqual({
         workspaceId: "workspace-1",
-        billedSeats: 5,
-        actualSeats: 4,
-        action: "scheduled_decrease",
+        action: "restored_high_water",
+        version: 8,
       });
     });
   });
@@ -970,23 +1070,64 @@ describe("workspace subscription contract", () => {
     plan: "pro",
     status: "active",
     seats: 3,
-    issue_window: null,
-    autopilot_runs: null,
+    limits: {
+      issue_count: { mode: "unlimited" },
+      autopilot_runs: { mode: "unlimited" },
+    },
     current_period_end: "2026-09-01T00:00:00Z",
     snapshot_expires_at: null,
     version: 7,
   };
 
+  it("maps limited issue usage and accepts a no-content unlimited response", async () => {
+    stubFetchJson({
+      used: 11,
+      limit: 17,
+    });
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getIssueLimitUsage()).resolves.toEqual({
+      used: 11,
+      limit: 17,
+    });
+
+    stubFetchJson({ used: 11 });
+    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(null, { status: 204 })),
+    );
+    await expect(client.getIssueLimitUsage()).resolves.toBeNull();
+  });
+
   it("maps a full summary to camelCase without inventing values", async () => {
     stubFetchJson({
       entitlement,
       billing_interval: "year",
-      actual_seats: 3,
-      billed_seats: 5,
-      pending_seat_quantity: 3,
+      human_members: 3,
+      seat_capacity: {
+        purchased: 5,
+        used: 3,
+        reserved: 2,
+        available: 0,
+        overcommitted: false,
+        version: 11,
+        pending_quantity: 3,
+        active_purchase: {
+          request_id: "22222222-2222-2222-2222-222222222222",
+          target_seats: 7,
+          status: "processing",
+        },
+      },
       cancel_at_period_end: true,
       grace_until: "2026-09-08T00:00:00Z",
       has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+      },
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -995,35 +1136,68 @@ describe("workspace subscription contract", () => {
     expect(summary?.entitlement.plan).toBe("pro");
     expect(summary?.entitlement.version).toBe(7);
     expect(summary?.billingInterval).toBe("year");
-    expect(summary?.billedSeats).toBe(5);
-    expect(summary?.pendingSeatQuantity).toBe(3);
+    expect(summary?.humanMembers).toBe(3);
+    expect(summary?.seatCapacity?.purchased).toBe(5);
+    expect(summary?.seatCapacity?.pendingQuantity).toBe(3);
+    expect(summary?.seatCapacity?.used).toBe(3);
+    expect(summary?.seatCapacity?.reserved).toBe(2);
+    expect(summary?.seatCapacity?.available).toBe(0);
+    expect(summary?.seatCapacity?.version).toBe(11);
+    expect(summary?.seatCapacity?.activePurchase).toEqual({
+      requestId: "22222222-2222-2222-2222-222222222222",
+      targetSeats: 7,
+      status: "processing",
+      expiresAt: null,
+    });
     expect(summary?.cancelAtPeriodEnd).toBe(true);
     expect(summary?.graceUntil).toBe("2026-09-08T00:00:00Z");
     expect(summary?.hasStripeCustomer).toBe(true);
+    expect(summary?.availableActions).toEqual({
+      checkout: false,
+      portal: true,
+      purchaseSeats: false,
+    });
   });
 
-  it("keeps a paid summary readable when optional fields are absent", async () => {
-    // A cloud that predates the optional seat/cancellation fields still has to
-    // produce a usable Pro summary rather than failing the whole read.
-    stubFetchJson({ entitlement, actual_seats: 3 });
+  it("represents canceled subscriptions without current seat capacity", async () => {
+    stubFetchJson({
+      entitlement: { ...entitlement, plan: "free", status: "canceled" },
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: {
+        checkout: true,
+        portal: true,
+        purchase_seats: false,
+      },
+    });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
 
-    expect(summary?.entitlement.plan).toBe("pro");
-    expect(summary?.billingInterval).toBeNull();
-    expect(summary?.billedSeats).toBeNull();
-    expect(summary?.pendingSeatQuantity).toBeNull();
-    expect(summary?.cancelAtPeriodEnd).toBe(false);
-    expect(summary?.graceUntil).toBeNull();
-    // Absent means "no Stripe customer known", which is the safe reading: the
-    // caller hides Portal rather than offering a control that would 404.
-    expect(summary?.hasStripeCustomer).toBe(false);
+    expect(summary?.entitlement.plan).toBe("free");
+    expect(summary?.entitlement.status).toBe("canceled");
+    expect(summary?.humanMembers).toBe(3);
+    expect(summary?.seatCapacity).toBeNull();
+    expect(summary?.hasStripeCustomer).toBe(true);
   });
 
   it("preserves unknown plans and statuses instead of coercing them", async () => {
     stubFetchJson({
       entitlement: { ...entitlement, plan: "business", status: "paused" },
-      actual_seats: 9,
+      billing_interval: null,
+      human_members: 9,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: false,
+      available_actions: {
+        checkout: false,
+        portal: false,
+        purchase_seats: false,
+      },
     });
     const client = new ApiClient("https://api.example.test");
     const summary = await client.getWorkspaceSubscriptionSummary();
@@ -1033,7 +1207,7 @@ describe("workspace subscription contract", () => {
   });
 
   it("returns null — never a Free-looking shape — for a malformed summary", async () => {
-    stubFetchJson({ entitlement: { plan: "pro" }, actual_seats: "many" });
+    stubFetchJson({ entitlement: { plan: "pro" }, human_members: "many" });
     const client = new ApiClient("https://api.example.test");
     expect(await client.getWorkspaceSubscriptionSummary()).toBeNull();
   });
@@ -1061,7 +1235,17 @@ describe("workspace subscription contract", () => {
   it("accepts additive cloud fields on summary and prices", async () => {
     stubFetchJson({
       entitlement: { ...entitlement, trial_ends_at: "2026-10-01T00:00:00Z" },
-      actual_seats: 3,
+      billing_interval: "month",
+      human_members: 3,
+      seat_capacity: null,
+      cancel_at_period_end: false,
+      grace_until: null,
+      has_stripe_customer: true,
+      available_actions: {
+        checkout: false,
+        portal: true,
+        purchase_seats: false,
+      },
       future_field: { nested: true },
     });
     const client = new ApiClient("https://api.example.test");
@@ -1115,5 +1299,74 @@ describe("workspace subscription contract", () => {
     const client = new ApiClient("https://api.example.test");
 
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("maps seat purchase previews and confirmations without trusting client totals", async () => {
+    stubFetchJson({
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      purchase_version: 9,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      quoted_at: "2026-08-21T06:00:00Z",
+    });
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.previewWorkspaceSeatPurchase({ additionalSeats: 2 }),
+    ).resolves.toEqual({
+      currentSeats: 5,
+      additionalSeats: 2,
+      resultingSeats: 7,
+      purchaseVersion: 9,
+      currency: "usd",
+      prorationAmount: 425,
+      nextInvoiceAmount: 14000,
+      quotedAt: "2026-08-21T06:00:00Z",
+    });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchase-preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ additional_seats: 2 }),
+      }),
+    );
+
+    stubFetchJson({
+      request_id: "33333333-3333-3333-3333-333333333333",
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      status: "submitted",
+    }, 202);
+    await expect(
+      client.purchaseWorkspaceSeats({
+        additionalSeats: 2,
+        expectedCurrentSeats: 5,
+        expectedPurchaseVersion: 9,
+        acceptedProrationAmount: 425,
+        currency: "usd",
+        idempotencyKey: "seat-request-1",
+      }),
+    ).resolves.toMatchObject({ resultingSeats: 7, status: "submitted" });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchases",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          additional_seats: 2,
+          expected_current_seats: 5,
+          expected_purchase_version: 9,
+          accepted_proration_amount: 425,
+          currency: "usd",
+          idempotency_key: "seat-request-1",
+        }),
+        headers: expect.objectContaining({ "Idempotency-Key": "seat-request-1" }),
+      }),
+    );
   });
 });

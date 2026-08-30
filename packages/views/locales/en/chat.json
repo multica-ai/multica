@@ -150,10 +150,21 @@
     "returning_subtitle": "Try asking",
     "chat_with_named": "Chat with {{name}}"
   },
-  "starter_prompts": {
-    "list_open": "List my open tasks by priority",
-    "summarize_today": "Summarize what I did today",
-    "plan_next": "Plan what to work on next"
+  "conversation_starters": {
+    "aria_label": "Conversation starters",
+    "capabilities": {
+      "label": "What can you help with?",
+      "prompt": "What are you best at helping with? Give me a concise overview."
+    },
+    "first_task": {
+      "label": "Suggest a first task",
+      "prompt": "Suggest three useful tasks I could delegate to you."
+    },
+    "recommend": {
+      "label": "Recommend an action",
+      "prompt": "Review what you know about my workspace and recommend a useful first action."
+    },
+    "customize": "Customize starters"
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",
@@ -195,6 +206,7 @@
       "retrying": "Retrying",
       "queued": "Queued",
       "waiting_local_directory": "Waiting for local directory",
+      "waiting_local_directory_reason": "Waiting for {{reason}}",
       "starting_up": "Starting up",
       "thinking": "Thinking",
       "typing": "Typing"

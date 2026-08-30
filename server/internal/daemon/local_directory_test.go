@@ -965,3 +965,249 @@ func TestValidateExecutionModeAcceptsKnownModes(t *testing.T) {
 		t.Errorf("nil assignment should validate, got %v", err)
 	}
 }
+
+// TestLocalDirectoryLockExempt pins the discriminator itself. IsLeaderTask is
+// listed explicitly because it is the flag the original carve-out keyed on, and
+// the whole defect in issue #7344 was that it is false on every chat task the
+// server has ever inserted.
+func TestLocalDirectoryLockExempt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		task Task
+		want bool
+	}{
+		{"chat task", Task{ChatSessionID: "sess-1"}, true},
+		{"chat task dispatched in the leader role", Task{ChatSessionID: "sess-1", IsLeaderTask: true}, true},
+		{"issue task", Task{IssueID: "issue-1"}, false},
+		{"issue task in the leader role", Task{IssueID: "issue-1", IsLeaderTask: true}, false},
+		{"autopilot task", Task{AutopilotRunID: "run-1"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := localDirectoryLockExempt(tc.task); got != tc.want {
+				t.Fatalf("localDirectoryLockExempt = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestChatTaskSkipsPathMutexButKeepsAssignment is the regression test for issue
+// #7344 and for the trap in the obvious one-line fix for it.
+//
+// Two properties, and BOTH have to hold. A chat turn must not queue on the path
+// mutex — that is the reported bug. But it must still resolve an assignment,
+// because that same value is what puts the agent in the user's directory and
+// what stamps the GC meta; freeing the lock by returning no assignment would
+// have moved chat out of the repo it was asked about.
+func TestChatTaskSkipsPathMutexButKeepsAssignment(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: tmp, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+
+	worker := Task{ID: "worker-task", IssueID: "issue-1", ProjectResources: resources}
+	chat := Task{ID: "chat-task", ChatSessionID: "sess-1", ProjectResources: resources}
+
+	// Property 1: the chat task still binds to the user's directory.
+	chatAssignment, err := localDirectoryAssignmentForTask(chat, daemonID)
+	if err != nil {
+		t.Fatalf("chat assignment: %v", err)
+	}
+	if chatAssignment == nil {
+		t.Fatal("chat assignment is nil: the chat turn would run outside the user's directory")
+	}
+	if chatAssignment.AbsPath != tmp {
+		t.Fatalf("chat assignment path = %q, want %q", chatAssignment.AbsPath, tmp)
+	}
+	if chatAssignment.UsesWorktree() {
+		t.Fatal("chat assignment reports worktree mode for an in_place resource")
+	}
+
+	// The exempt path never calls the server, but a REGRESSION would: it would
+	// park and post waiting_local_directory. Wiring a real client is what makes
+	// that regression fail with the message below instead of a nil-client panic.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg:                Config{DaemonID: daemonID},
+		client:             NewClient(srv.URL),
+		localPathLocks:     NewLocalPathLocker(),
+		logger:             slog.Default(),
+		cancelPollInterval: time.Hour,
+	}
+
+	// The coding task takes the lock and keeps it for the rest of the test —
+	// this is the 20-minute build the chat turn used to queue behind.
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	if abort {
+		t.Fatal("worker lock acquisition aborted")
+	}
+	if release == nil {
+		t.Fatal("worker lock acquisition returned nil release")
+	}
+	defer release()
+	if got := d.localPathLocks.Holder(chatAssignment.RealPath); got != worker.ID {
+		t.Fatalf("holder = %q, want %q", got, worker.ID)
+	}
+
+	// Property 2: the chat task walks straight past the held lock. Run it off
+	// the test goroutine so a regression reports as a failure here instead of
+	// hanging until the package-wide test timeout.
+	type acquireResult struct {
+		release func()
+		abort   bool
+	}
+	done := make(chan acquireResult, 1)
+	go func() {
+		chatRelease, chatAbort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+		done <- acquireResult{release: chatRelease, abort: chatAbort}
+	}()
+
+	select {
+	case got := <-done:
+		if got.abort {
+			t.Fatal("chat lock acquisition aborted")
+		}
+		if got.release != nil {
+			t.Fatal("chat lock acquisition returned a release callback: it took the mutex")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("chat task blocked on the path mutex held by a coding task (issue #7344)")
+	}
+
+	// And it left the holder alone on the way past.
+	if got := d.localPathLocks.Holder(chatAssignment.RealPath); got != worker.ID {
+		t.Fatalf("holder after chat skip = %q, want %q", got, worker.ID)
+	}
+}
+
+// TestChatTaskOnWorktreeResourceKeepsAssignment guards the interaction between
+// the two exemptions: worktree mode is checked first, so a chat task on a
+// worktree resource must still come back with an assignment (its worktree is
+// built from it) rather than falling through to the chat carve-out's nil.
+func TestChatTaskOnWorktreeResourceKeepsAssignment(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{
+		LocalPath:     tmp,
+		DaemonID:      daemonID,
+		ExecutionMode: localDirectoryModeWorktree,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	chat := Task{
+		ID:               "chat-task",
+		ChatSessionID:    "sess-1",
+		ProjectResources: []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw}},
+	}
+
+	assignment, err := localDirectoryAssignmentForTask(chat, daemonID)
+	if err != nil {
+		t.Fatalf("chat assignment: %v", err)
+	}
+	if assignment == nil {
+		t.Fatal("chat assignment on a worktree resource is nil")
+	}
+	if !assignment.UsesWorktree() {
+		t.Fatal("assignment lost worktree mode")
+	}
+
+	d := &Daemon{
+		cfg:            Config{DaemonID: daemonID},
+		localPathLocks: NewLocalPathLocker(),
+		logger:         slog.Default(),
+	}
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+	if abort {
+		t.Fatal("chat lock acquisition aborted")
+	}
+	if release != nil {
+		t.Fatal("worktree chat task took the path mutex")
+	}
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
+		t.Fatalf("holder = %q, want empty", got)
+	}
+}
+
+// TestIssueTasksStillSerialiseOnPathMutex is the negative control: the
+// exemption must not have widened into "nobody locks any more". Two issue tasks
+// on one in_place directory still take turns.
+func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: tmp, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+	first := Task{ID: "issue-task-1", IssueID: "issue-1", ProjectResources: resources}
+	second := Task{ID: "issue-task-2", IssueID: "issue-2", ProjectResources: resources}
+
+	// Parking calls back to the server to flip the row into
+	// waiting_local_directory, so this daemon — unlike the exempt-path ones
+	// above, which never reach contention — needs a real client.
+	var waitCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasSuffix(req.URL.Path, "/wait-local-directory") {
+			waitCalls.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		cfg:                Config{DaemonID: daemonID},
+		client:             NewClient(srv.URL),
+		localPathLocks:     NewLocalPathLocker(),
+		logger:             slog.Default(),
+		cancelPollInterval: time.Hour, // never poll; the test drives cancellation itself
+	}
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), first, slog.Default())
+	if abort || release == nil {
+		t.Fatalf("first issue task failed to take the lock (abort=%v)", abort)
+	}
+
+	// The second task must park rather than barge in. Cancelling the context is
+	// how we observe "it was waiting" without needing the first task to finish.
+	ctx, cancel := context.WithCancel(context.Background())
+	blocked := make(chan struct{})
+	go func() {
+		defer close(blocked)
+		secondRelease, _ := d.acquireLocalDirectoryLockIfNeeded(ctx, second, slog.Default())
+		if secondRelease != nil {
+			secondRelease()
+		}
+	}()
+
+	select {
+	case <-blocked:
+		t.Fatal("second issue task did not wait for the path mutex")
+	case <-time.After(200 * time.Millisecond):
+		// Still parked, which is the point.
+	}
+	cancel()
+	<-blocked
+	if waitCalls.Load() == 0 {
+		t.Error("waiting task never reported waiting_local_directory to the server")
+	}
+	release()
+}

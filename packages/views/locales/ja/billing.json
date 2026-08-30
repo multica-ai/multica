@@ -96,7 +96,7 @@
       "retry_autopilots": "自動化の使用量を再取得",
       "upgrade": "Pro にアップグレード",
       "manage": "請求を管理",
-      "refresh_seats": "席数を更新",
+      "add_seats": "席を追加",
       "cancel": "キャンセル",
       "continue_to_stripe": "Stripe に進む"
     },
@@ -109,9 +109,7 @@
       "checkout_failed": "Checkout を作成できませんでした。しばらくしてから再試行してください。",
       "portal_response": "サーバー応答を読み取れないため Billing Portal を開けませんでした。",
       "portal_unavailable": "このワークスペースでは Billing Portal を利用できません。現在のプランを更新しました。",
-      "portal_failed": "Billing Portal を開けませんでした。しばらくしてから再試行してください。",
-      "reconcile_response": "席数は更新されましたが、結果を読み取れませんでした。ページを再読み込みして確認してください。",
-      "reconcile_failed": "席数を更新できませんでした。メンバー変更は保存済みで、定期照合は引き続き再試行されます。"
+      "portal_failed": "Billing Portal を開けませんでした。しばらくしてから再試行してください。"
     },
     "return": {
       "cancel_title": "Checkout をキャンセルしました",
@@ -144,10 +142,6 @@
       "canceled_title": "サブスクリプションはキャンセル済みです",
       "canceled_description": "上のプランバッジは、このワークスペースに現在適用されているプランを示します。"
     },
-    "read_only": {
-      "title": "請求情報の閲覧のみ",
-      "description": "ワークスペースのプランと上限を確認できます。サブスクリプションの購入と管理は owner と admin のみ実行できます。"
-    },
     "current": {
       "title": "現在のプラン",
       "plan": "ワークスペースプラン",
@@ -169,8 +163,6 @@
       "pro_for_team_other": "{{count}}席で Pro を利用",
       "price_loading": "サブスクリプション価格を読み込んでいます",
       "unit_price": "1席あたり {{price}}",
-      "estimated_monthly_total": "月払いの見積合計：{{price}}",
-      "estimated_yearly_total": "年払いの見積合計：{{price}}",
       "price_at_checkout": "購入前にサーバーがユーザーメンバーを再集計します。お支払い前に Stripe Checkout で正式な席単価と合計金額を確認できます。"
     },
     "management": {
@@ -182,13 +174,12 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "description": "上限は現在の entitlement、自動化の使用量はサーバーのクォータ集計に基づきます。",
-      "issues": "最近のタスク",
-      "issues_description": "Free では最近アクティブなタスクを利用できます。Pro には件数制限がありません。",
-      "autopilots": "成功した自動化",
-      "autopilots_description": "Free の上限は UTC の暦月ごとにリセットされます。Pro は無制限です。",
+      "description": "上限と使用量は、サーバーの現在の entitlement とクォータ集計に基づきます。",
+      "issues": "Issue 数",
+      "issues_description": "現在の Issue 使用量とサーバーから返された有効な上限です。",
+      "autopilots": "自動化の実行",
+      "autopilots_description": "現在の自動化使用量とサーバーから返されたリセット時刻です。",
       "unlimited": "無制限",
-      "unavailable": "利用できません",
       "per_month": "月 {{count}} 回",
       "usage_loading": "自動化の使用量を読み込み中",
       "usage_label": "自動化クォータの使用量",
@@ -201,11 +192,15 @@
     },
     "seats": {
       "title": "席数",
-      "description": "現在のユーザーメンバーはそれぞれ Pro の 1 席として数えられます。エージェントと保留中の招待は含まれません。",
-      "human_members": "現在のユーザーメンバー",
-      "human_members_description": "メンバー変更後に更新すると、Cloud Billing が Stripe の quantity を照合します。",
-      "billed": "請求席数",
-      "billed_description": "Stripe 請求に現在保存されている席数です。",
+      "description": "購入済みの席は現在のユーザーメンバーと保留中の招待に使われます。エージェントは席を使用しません。",
+      "human_members": "使用中の席",
+      "human_members_description": "購入済みの容量を使用している確認済みユーザーメンバーです。メンバー変更後に更新できます。",
+      "billed": "購入済みの席",
+      "billed_description": "Stripe で現在購入済みの席数です。",
+      "pending_invitations": "保留中の招待",
+      "pending_invitations_description": "有効な招待は、承認または期限切れまで購入済みの席を予約します。",
+      "available": "利用可能な席",
+      "available_description": "メンバーが使用せず、招待にも予約されていない購入済みの席です。",
       "pending": "変更予定の席数",
       "pending_description": "Cloud Billing が次の期間に対して報告した、より少ない席数です。",
       "seat_count_other": "{{count}}席",
@@ -215,9 +210,38 @@
       "unavailable": "利用できません",
       "summary_loading": "サブスクリプションの席数詳細を読み込み中",
       "summary_unavailable_title": "一部の席数詳細を利用できません",
-      "summary_unavailable_description": "現在のプランは表示できますが、請求席数と変更予定の席数を読み込めませんでした。",
-      "updated": "席数を更新しました",
-      "reconciled": "現在のメンバー: {{actual}} · 請求席数: {{billed}}"
+      "summary_unavailable_description": "現在のプランは表示できますが、購入済みの席数と変更予定の席数を読み込めませんでした。",
+      "members_over_capacity_title": "メンバー数が購入済みの席数を超えています",
+      "members_over_capacity_description": "このワークスペースには {{actual}} 人のメンバーがいますが、購入済みの席は {{purchased}} 席です。さらに招待する前に席を追加するか、メンバーを削除してください。",
+      "occupancy_over_capacity_description": "このワークスペースは購入済み {{purchased}} 席に対して {{occupied}} 席を占有しています（メンバー {{members}} 人、保留中の招待 {{reserved}} 件）。さらに招待する前に席を追加する、メンバーを削除する、または保留中の招待を取り消してください。",
+      "updated": "席数の購入を送信しました"
+    },
+    "seat_purchase": {
+      "title": "席を追加",
+      "description": "追加する席数を入力してください。確定前に最新の Stripe 見積もりを表示します。",
+      "additional_label": "追加する席数",
+      "additional_hint": "新しい合計ではなく、追加する数を入力してください。",
+      "preview_loading": "見積もりを更新中...",
+      "preview_unreadable": "見積もりを読み取れませんでした。席数を変更するか、再試行してください。",
+      "preview_failed": "見積もりは一時的に利用できません。しばらくしてから再試行してください。",
+      "capacity_out_of_sync": "Stripe の席数が請求記録と一致していません。再度購入する前にサポートへお問い合わせください。",
+      "in_progress": "別の席購入を処理中です。完了をお待ちください。長時間完了しない場合はサポートにお問い合わせください。",
+      "purchase_unreadable": "購入レスポンスを読み取れませんでした。この見積もりを再試行すると、同じ購入リクエストが再利用されます。",
+      "purchase_failed": "席を追加できませんでした。同じ見積もりで再試行するか、期限切れの場合は更新してください。",
+      "payment_failed": "支払いを完了できませんでした。Stripe で支払い方法を更新してから、新しい見積もりを取得してください。",
+      "quote_changed": "席数または見積もりが変更されました。更新後の見積もりを確認してください。",
+      "seats_after": "購入後の席数",
+      "charge_today": "本日の見積請求額",
+      "next_invoice": "次回更新時の見積額",
+      "tax_notice": "税金、クレジット、最終請求内容は Stripe が決定します。Stripe がサブスクリプション更新を確認後、新しい席を利用できます。",
+      "confirm_other": "{{count}}席を追加",
+      "pending_title": "席購入を処理中",
+      "pending_description_other": "Stripe が {{count}}席へのサブスクリプション更新を確認しています。",
+      "delayed_title": "席の確認に時間がかかっています",
+      "delayed_description": "自動確認を停止しました。購入はまだ完了する可能性があります。別の購入を始める前に、後でもう一度確認するかサポートへお問い合わせください。",
+      "delayed_description_with_expiry": "自動確認を停止しました。{{date}} を過ぎても保留中の場合は、ページを再読み込みしてから新しい見積もりを取得してください。保留状態が続く場合はサポートへお問い合わせください。",
+      "submitted_other": "{{count}}席の購入を送信しました。Stripe の確認後に新しい容量が表示されます。",
+      "error_title": "見積もりを更新できません"
     },
     "confirm": {
       "title": "Stripe Checkout に進みますか？",

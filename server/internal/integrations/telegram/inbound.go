@@ -61,9 +61,9 @@ func inboundFromUpdate(u Update, botID int64, botUsername string) (channel.Inbou
 	cleaned := normalizeText(text, botUsername)
 	commandText := cleaned
 	forceFresh := false
-	if body, fresh := engine.ParseFreshSessionCommand(cleaned); fresh {
-		cleaned = body
-		forceFresh = true
+	if control, ok := engine.ParseControlCommand(cleaned); ok {
+		cleaned = control.Body
+		forceFresh = control.Kind == engine.ControlCommandFreshSession
 	}
 	agentText := cleaned
 	quotedHuman := m.ReplyToMessage != nil && m.ReplyToMessage.From != nil && !m.ReplyToMessage.From.IsBot
@@ -190,7 +190,7 @@ func mentionsBot(m *Message, botUsername string) bool {
 }
 
 // normalizeText strips the bot mention token while retaining shared commands
-// such as /new and /issue for the engine's command parser.
+// such as /clear and /issue for the engine's command parser.
 func normalizeText(text, botUsername string) string {
 	cleaned := text
 	if botUsername != "" {

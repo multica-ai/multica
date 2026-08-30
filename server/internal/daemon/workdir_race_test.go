@@ -94,7 +94,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-runtask"
 	taskID := "task-runtask-after-mkdir"
-	expectedEnvRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	expectedEnvRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 	expectedWorkDir := filepath.Join(expectedEnvRoot, "workdir")
 
 	var (
@@ -168,7 +168,7 @@ func TestRunTask_InjectsPrivateTaskTempDir(t *testing.T) {
 	workspacesRoot := filepath.Join(t.TempDir(), strings.Repeat("long-workspaces-root-", 3))
 	workspaceID := "ws-private-temp"
 	taskID := "task-private-temp-with-long-id-that-would-overflow-socket-paths"
-	envRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	envRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 
 	captureFile := filepath.Join(t.TempDir(), "agent-env.txt")
 	fakeBin := filepath.Join(t.TempDir(), "claude")
@@ -344,11 +344,14 @@ func TestTaskTempBaseDir(t *testing.T) {
 
 	t.Run("configured base creates private 0700 task dir", func(t *testing.T) {
 		t.Setenv("MULTICA_AGENT_TEMP_BASE", validBase)
-		dir, err := ensureTaskTempDir("root", "ws", "task")
+		dir, lock, err := ensureTaskTempDir("root", "ws", "task")
 		if err != nil {
 			t.Fatalf("ensureTaskTempDir(): %v", err)
 		}
-		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		t.Cleanup(func() {
+			execenv.ReleaseTaskTempLock(lock)
+			_ = os.RemoveAll(dir)
+		})
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("stat task temp dir: %v", err)
@@ -379,8 +382,9 @@ func TestTaskTempBaseDir(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MULTICA_AGENT_TEMP_BASE", tc.base)
-			dir, err := ensureTaskTempDir("root", "ws", "task")
+			dir, lock, err := ensureTaskTempDir("root", "ws", "task")
 			if err == nil {
+				execenv.ReleaseTaskTempLock(lock)
 				_ = os.RemoveAll(dir)
 				if tc.base == readOnlyBase {
 					t.Skip("process can write to the read-only fixture")
@@ -784,7 +788,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	workspaceID := "ws-active-during-complete"
 	taskID := "task-active-during-complete"
-	expectedEnvRoot := execenv.PredictRootDir(workspacesRoot, workspaceID, taskID)
+	expectedEnvRoot := execenv.PredictRootDir(execenv.RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 
 	var (
 		completeCalled   atomic.Bool
@@ -820,7 +824,7 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	// the outer guard added in handleTask, the deferred unmark would bring
 	// isActiveEnvRoot back to false before reportTaskResult fires.
 	d.runner = taskRunnerFunc(func(_ context.Context, tk Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
-		predicted := execenv.PredictRootDir(d.cfg.WorkspacesRoot, tk.WorkspaceID, tk.ID)
+		predicted := execenv.PredictRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, tk))
 		d.markActiveEnvRoot(predicted)
 		defer d.unmarkActiveEnvRoot(predicted)
 		return TaskResult{
