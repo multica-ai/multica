@@ -1079,7 +1079,12 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 
 const (
 	maxPropertiesFilterDefinitions = 20
-	maxPropertiesFilterValues      = 50
+	// The cap must exceed the largest member set the UI can produce in one
+	// definition: 50 select options or scalar observed values, plus the
+	// scalar input's unlisted value, plus the "__none__" sentinel — 52 — so
+	// checking every offered checkbox cannot build a filter the server then
+	// rejects on every issues query.
+	maxPropertiesFilterValues = 64
 	// noPropertyValue is the filter value that means "unset" — it compiles to a
 	// key-absence predicate instead of a jsonb containment pattern. The string
 	// cannot collide with a real option id (select option ids are UUIDs and

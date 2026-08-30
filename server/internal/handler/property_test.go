@@ -1259,8 +1259,9 @@ func TestIssuePropertyFacetScalarTypes(t *testing.T) {
 	withNumLiteral := createPropertyTestIssue(t, "scalar facet num literal")
 	withDate := createPropertyTestIssue(t, "scalar facet date")
 	withURL := createPropertyTestIssue(t, "scalar facet url")
+	withLiteralNone := createPropertyTestIssue(t, "scalar facet literal none")
 	unset := createPropertyTestIssue(t, "scalar facet unset")
-	for _, id := range []string{withUpper, withLower, withNum, withNumLiteral, withDate, withURL, unset} {
+	for _, id := range []string{withUpper, withLower, withNum, withNumLiteral, withDate, withURL, withLiteralNone, unset} {
 		if w := setIssuePropertyRaw(t, id, marker.ID, markerOpt); w.Code != http.StatusOK {
 			t.Fatalf("seed marker: %d %s", w.Code, w.Body.String())
 		}
@@ -1270,6 +1271,9 @@ func TestIssuePropertyFacetScalarTypes(t *testing.T) {
 	}
 	if w := setIssuePropertyRaw(t, withLower, text.ID, "alpha"); w.Code != http.StatusOK {
 		t.Fatalf("seed text lower: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, withLiteralNone, text.ID, "__none__"); w.Code != http.StatusOK {
+		t.Fatalf("seed literal none: %d %s", w.Code, w.Body.String())
 	}
 	if w := setIssuePropertyRaw(t, withNum, num.ID, 3.5); w.Code != http.StatusOK {
 		t.Fatalf("seed number: %d %s", w.Code, w.Body.String())
@@ -1294,15 +1298,48 @@ func TestIssuePropertyFacetScalarTypes(t *testing.T) {
 	filters := map[string]any{"properties": map[string][]string{marker.ID: {markerOpt}}}
 
 	// Text groups by the exact stored string: "Alpha" and "alpha" are distinct
-	// observed values with correct per-key counts (case-sensitive by design),
-	// and every issue without the key lands in "__none__".
+	// observed values with correct per-key counts (case-sensitive by design).
+	// The literal "__none__" text value is a real value whose key is present,
+	// so it is neither an observed row (the sentinel is reserved) nor part of
+	// the absence count — the 5 unset issues are withNum, withNumLiteral,
+	// withDate, withURL, unset.
 	textCounts := scalarFacetCounts(t, text.ID, filters)
 	if textCounts["Alpha"] != 1 || textCounts["alpha"] != 1 || textCounts["__none__"] != 5 {
 		t.Fatalf("text facet counts wrong: %v", textCounts)
 	}
+	// Exactly ONE "__none__" row may ever come back: the value arm excludes the
+	// sentinel so the literal value cannot join the absence arm. Asserted on
+	// the raw row list — the counts map would hide a duplicate behind
+	// last-write-wins.
+	rawRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableFacets(rawRecorder, newRequest(http.MethodPost, "/api/issues/table/facets", map[string]any{
+		"query": map[string]any{
+			"scope":   map[string]any{"kind": "workspace"},
+			"filters": filters,
+			"sort":    map[string]any{"field": "position", "direction": "asc"},
+		},
+		"facets":        []map[string]any{{"kind": "property", "property_id": text.ID}},
+		"include_total": false,
+	}))
+	if rawRecorder.Code != http.StatusOK {
+		t.Fatalf("raw text facet: expected 200, got %d: %s", rawRecorder.Code, rawRecorder.Body.String())
+	}
+	var rawResp issueTableFacetsResponse
+	if err := json.NewDecoder(rawRecorder.Body).Decode(&rawResp); err != nil {
+		t.Fatalf("decode raw text facet: %v", err)
+	}
+	noneRows := 0
+	for _, value := range rawResp.Facets[0].Values {
+		if value.Key == "__none__" {
+			noneRows++
+		}
+	}
+	if noneRows != 1 {
+		t.Fatalf("expected exactly one __none__ facet row, got %d: %+v", noneRows, rawResp.Facets[0].Values)
+	}
 	// Number canonicalizes through ::numeric: 3.5 and raw 3.50 are one facet.
 	numCounts := scalarFacetCounts(t, num.ID, filters)
-	if len(numCounts) != 2 || numCounts["3.5"] != 2 || numCounts["__none__"] != 5 {
+	if len(numCounts) != 2 || numCounts["3.5"] != 2 || numCounts["__none__"] != 6 {
 		t.Fatalf("number facet counts wrong: %v", numCounts)
 	}
 	if _, split := numCounts["3.50"]; split {
@@ -1310,12 +1347,39 @@ func TestIssuePropertyFacetScalarTypes(t *testing.T) {
 	}
 	// Date and url list their stored strings.
 	dateCounts := scalarFacetCounts(t, date.ID, filters)
-	if dateCounts["2026-08-19"] != 1 || dateCounts["__none__"] != 6 {
+	if dateCounts["2026-08-19"] != 1 || dateCounts["__none__"] != 7 {
 		t.Fatalf("date facet counts wrong: %v", dateCounts)
 	}
 	urlCounts := scalarFacetCounts(t, url.ID, filters)
-	if urlCounts["https://example.com"] != 1 || urlCounts["__none__"] != 6 {
+	if urlCounts["https://example.com"] != 1 || urlCounts["__none__"] != 7 {
 		t.Fatalf("url facet counts wrong: %v", urlCounts)
+	}
+}
+
+// TestParsePropertiesFilterValueCap pins the per-definition member cap: the
+// filter menu can now offer 50 observed values plus an unlisted input value
+// plus the "__none__" sentinel — 52 members — and checking everything offered
+// must not build a filter the server then rejects on every issues query.
+func TestParsePropertiesFilterValueCap(t *testing.T) {
+	defID := uuid.NewString()
+	members := func(n int) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = fmt.Sprintf(`"v%d"`, i)
+		}
+		return strings.Join(parts, ",")
+	}
+
+	w := httptest.NewRecorder()
+	if _, ok := parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[%s,"__none__"]}`, defID, members(51))); !ok {
+		t.Fatalf("52-member filter (50 values + unlisted + sentinel) rejected: %s", w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	if _, ok := parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[%s]}`, defID, members(65))); ok {
+		t.Fatalf("65-member filter accepted above the cap")
+	}
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 above the cap, got %d", w.Code)
 	}
 }
 

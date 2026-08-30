@@ -22,7 +22,7 @@ import {
   viewStoreSlice,
 } from "@multica/core/issues/stores/view-store";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import type { Issue, IssueProperty, IssuePropertyValues } from "@multica/core/types";
+import type { Issue, IssueProperty, IssuePropertyValues, IssueTableFacetsResponse } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { IssueFilterMenu } from "./issues-header";
 
@@ -87,7 +87,11 @@ function issueWithProperties(id: string, properties: IssuePropertyValues): Issue
   };
 }
 
-function renderFilterMenu(props: IssueProperty[], scopedIssues?: Issue[]) {
+function renderFilterMenu(
+  props: IssueProperty[],
+  scopedIssues?: Issue[],
+  tableFacetCounts?: IssueTableFacetsResponse,
+) {
   setApiInstance({
     listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
     listProperties: async () => ({ properties: props }),
@@ -117,6 +121,7 @@ function renderFilterMenu(props: IssueProperty[], scopedIssues?: Issue[]) {
         <IssueFilterMenu
           trigger={<button type="button">Filter</button>}
           scopedIssues={scopedIssues}
+          tableFacetCounts={tableFacetCounts}
         />
       </ViewStoreProvider>
     </QueryClientProvider>,
@@ -263,5 +268,57 @@ describe("IssueFilterMenu scalar property filter", () => {
     // The committed member is the equality string, which matches the stored
     // jsonb number on both the server and the client matcher.
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["3.5"] });
+  });
+
+  it("an unchanged blur or Enter commit does not drop checkbox-selected members", async () => {
+    // Regression (adversarial review): the blur commit rewrote the whole set
+    // from the draft, so checking "alpha" and "beta" and then merely clicking
+    // the input and away silently dropped "beta".
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [
+      issueWithProperties("i-1", { [PROP]: "alpha" }),
+      issueWithProperties("i-2", { [PROP]: "alpha" }),
+      issueWithProperties("i-3", { [PROP]: "beta" }),
+    ]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /beta/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+
+    // The input shows the first member ("alpha"); blurring it unchanged and
+    // pressing Enter must both be no-ops.
+    fireEvent.blur(screen.getByRole("textbox"));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+    await userEvent.type(screen.getByRole("textbox"), "{Enter}");
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha", "beta"] });
+  });
+
+  it("renders observed values from server facets and ignores the legacy __set__ bucket", async () => {
+    // A new menu against an OLD backend receives the pre-per-value shape: the
+    // two-bucket "__set__"/"__none__" response. "__set__" must not surface as
+    // a row, the per-value rows must render, and the "No value" count must
+    // still come through.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")], [], {
+      facets: [
+        {
+          kind: "property",
+          property_id: PROP,
+          values: [
+            { key: "__set__", count: 3 },
+            { key: "alpha", count: 2 },
+            { key: "__none__", count: 7 },
+          ],
+        },
+      ],
+    } as unknown as IssueTableFacetsResponse);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("menuitemcheckbox", { name: /alpha/ })).toHaveTextContent("2");
+    expect(screen.queryByRole("menuitemcheckbox", { name: /__set__/ })).toBeNull();
+    expect(screen.getByRole("menuitemcheckbox", { name: /No value/ })).toHaveTextContent("7");
+
+    // Toggling a server-facet value commits the same bare equality member.
+    await userEvent.click(screen.getByRole("menuitemcheckbox", { name: /alpha/ }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["alpha"] });
   });
 });

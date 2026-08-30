@@ -779,6 +779,11 @@ function PropertyFilterOptions({
     const locked = fixedIds !== undefined && fixedIds.size > 0;
     const commitValue = (raw: string) => {
       const value = raw.trim();
+      // An unchanged commit is a no-op: blur fires when the user merely clicks
+      // elsewhere in the menu, and rewriting the set from a draft that equals
+      // the committed value would silently drop the members the observed-value
+      // checkboxes added.
+      if (value === scalarValue) return;
       // NO_PROPERTY_VALUE is the reserved "no value" sentinel — it cannot be
       // filtered as a literal value. The value and "No value" compose like
       // every other property type: committing a value replaces only the value
@@ -826,8 +831,11 @@ function PropertyFilterOptions({
           />
         </div>
         {/* Observed values toggle exactly like select options: each one is a
-            bare-string member of the same OR-set, so committing an unlisted
-            value through the input composes with them and the counts stay
+            bare-string member of the same OR-set as the input's value and
+            "No value". A value commit from the input replaces the committed
+            scalar members wholesale — checkbox state updates visibly in this
+            menu; an unchanged blur/Enter commit is a no-op (see commitValue)
+            so checkbox selections are never dropped silently. The counts stay
             clickable discovery rather than a separate filter mode. */}
         {observedValues.map(([value, count]) => {
           const checked = selected.includes(value);

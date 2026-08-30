@@ -274,10 +274,18 @@ GROUP BY a.id`, compiled.where)
 				valueKey = fmt.Sprintf("trim_scale((i.properties ->> %s)::numeric)::text", propertyKey)
 				jsonbType = "number"
 			}
-			query = fmt.Sprintf(`(SELECT %s AS facet_key, COUNT(*)::bigint AS facet_count FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = '%s' GROUP BY 1 ORDER BY 2 DESC, 1 ASC LIMIT %d)
+			// A text property may legally store the literal "__none__". The
+			// sentinel must be emitted exactly once by the absence arm below —
+			// the value arm excludes it so the two arms can never both produce a
+			// "__none__" row (the client's map merge is last-write-wins and the
+			// handler sort is unstable, which made the displayed "No value"
+			// count flip between the literal's count and the absence count).
+			// The literal stays unlisted: it cannot be filtered as a value (the
+			// input refuses it) and it is not "no value" (the key is present).
+			query = fmt.Sprintf(`(SELECT %s AS facet_key, COUNT(*)::bigint AS facet_count FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = '%s' AND i.properties ->> %s <> '%s' GROUP BY 1 ORDER BY 2 DESC, 1 ASC LIMIT %d)
 UNION ALL
 (SELECT '__none__', COUNT(*)::bigint FROM issue i WHERE %s AND NOT (i.properties ? %s))`,
-				valueKey, compiled.where, propertyKey, jsonbType, scalarPropertyFacetLimit, compiled.where, propertyKey)
+				valueKey, compiled.where, propertyKey, jsonbType, propertyKey, noPropertyValue, scalarPropertyFacetLimit, compiled.where, propertyKey)
 		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
 		case "checkbox":
