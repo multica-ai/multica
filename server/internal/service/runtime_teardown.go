@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service/toolaction"
+	"github.com/multica-ai/multica/server/internal/service/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -141,6 +144,20 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	}
 	if err := pruneRuntimeSystemAgentChatDraftRestores(ctx, qtx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up chat draft restores: %w", err)
+	}
+	allAgents, err := qtx.ListAllAgentsAnyKind(ctx, runtime.WorkspaceID)
+	if err != nil {
+		return out, fmt.Errorf("list runtime system agents for tool policy cleanup: %w", err)
+	}
+	actionRecorder := toolaction.NewSQLService(qtx)
+	cleanupAt := time.Now().UTC()
+	for _, agent := range allAgents {
+		if agent.Kind != "system" || !agent.RuntimeID.Valid || agent.RuntimeID != runtimeID {
+			continue
+		}
+		if err := toolpolicy.CleanupAgent(ctx, qtx, actionRecorder, runtime.WorkspaceID, agent.ID, cleanupAt); err != nil {
+			return out, fmt.Errorf("clean up system agent tool policy: %w", err)
+		}
 	}
 	if err := qtx.DeleteSystemAgentsByRuntime(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up system agents: %w", err)

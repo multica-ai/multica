@@ -2024,6 +2024,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.Get("/tool-policy", h.GetAgentToolPolicy)
+					r.With(handler.RequireHumanActor).Put("/tool-policy", h.ReplaceAgentToolPolicy)
+					r.Get("/tool-actions", h.ListAgentToolActions)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
