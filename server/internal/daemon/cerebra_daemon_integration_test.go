@@ -457,3 +457,89 @@ func TestOpenCodeToOllamaFailover(t *testing.T) {
 	fmt.Println("========================================================================================================================")
 }
 
+
+// TestAnyRuntimeWorks verifies that Cerebra routes correctly regardless of which
+// runtime or provider prefix a user has connected — opencode, openclaw, claude,
+// kimi, grok, qoder, hermes, or any unknown future runtime.
+func TestAnyRuntimeWorks(t *testing.T) {
+	ctx := context.Background()
+	classifier := cerebra.HeuristicClassifier{}
+	policy := &cerebra.Policy{}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	fmt.Println("\n========================================================================================================================")
+	fmt.Println("              CEREBRA UNIVERSAL RUNTIME COMPATIBILITY — Any Provider, Any Runtime")
+	fmt.Println("========================================================================================================================")
+
+	runtimeSetups := []struct {
+		name    string
+		catalog []string
+	}{
+		{
+			name:    "OpenCode (opencode/)",
+			catalog: []string{"opencode/mimo-v2.5-free", "opencode/nemotron-3.5-lightning-free", "opencode/nemotron-3-ultra-free"},
+		},
+		{
+			name:    "OpenClaw (openclaw/)",
+			catalog: []string{"openclaw/qwen2.5-coder:1.5b", "openclaw/qwen2.5-coder:14b", "openclaw/deepseek-r1:70b"},
+		},
+		{
+			name:    "Claude Runtime (claude/)",
+			catalog: []string{"claude/claude-3-5-haiku-20241022", "claude/claude-3-5-sonnet-20241022", "claude/claude-opus-4-5"},
+		},
+		{
+			name:    "Kimi Runtime (kimi/)",
+			catalog: []string{"kimi/kimi-k1-flash", "kimi/kimi-k1-5", "kimi/kimi-k2"},
+		},
+		{
+			name:    "Grok Runtime (grok/)",
+			catalog: []string{"grok/grok-3-mini-fast", "grok/grok-3", "grok/grok-3-ultra"},
+		},
+		{
+			name:    "Hermes Runtime (hermes/)",
+			catalog: []string{"hermes/hermes-3-llama-3.1-8b", "hermes/hermes-3-llama-3.1-70b", "hermes/hermes-3-llama-3.1-405b"},
+		},
+		{
+			name: "Unknown Custom Runtime + OpenRouter proxy",
+			catalog: []string{
+				"openrouter/anthropic/claude-3-haiku", // proxy — last resort
+				"openrouter/openai/gpt-4o",            // proxy — last resort
+				"myfirmruntime/gpt-4o-mini-custom",    // unknown direct runtime
+				"myfirmruntime/gpt-4o-custom",
+				"myfirmruntime/o1-custom",
+			},
+		},
+	}
+
+	allPass := true
+	for _, setup := range runtimeSetups {
+		tierMap := cerebra.BuildTierMapFromCatalog(setup.catalog)
+		runtimes := []cerebra.RuntimeEntry{{RuntimeID: "rt", TierMap: tierMap}}
+		router := cerebra.NewRouter(classifier, policy, cerebra.NewSessionStore(0), cerebra.NewUnavailabilityStore(0), logger, nil)
+
+		sRes := router.Route(ctx, "What is the folder structure?", cerebra.TaskMeta{}, runtimes, "fallback")
+		dRes := router.Route(ctx, "Debug and fix the race condition in auth handler.", cerebra.TaskMeta{}, runtimes, "fallback")
+		hRes := router.Route(ctx, "Architect a distributed consensus engine.", cerebra.TaskMeta{}, runtimes, "fallback")
+
+		tiersOk := sRes.Tier == cerebra.TierSimple && dRes.Tier == cerebra.TierStandard && hRes.Tier == cerebra.TierHeavy
+		modelsOk := sRes.Model != "" && dRes.Model != "" && hRes.Model != ""
+
+		icon := "✅"
+		if !tiersOk || !modelsOk {
+			icon = "❌"
+			allPass = false
+			t.Errorf("[%s] simple=%s(%s) std=%s(%s) heavy=%s(%s)",
+				setup.name, sRes.Tier, sRes.Model, dRes.Tier, dRes.Model, hRes.Tier, hRes.Model)
+		}
+		fmt.Printf("%s %-42s simple=%-35s std=%-35s heavy=%s\n",
+			icon, setup.name+":", sRes.Model, dRes.Model, hRes.Model)
+	}
+
+	fmt.Println("========================================================================================================================")
+	if allPass {
+		fmt.Println("  RESULT: ✅ All runtimes routed correctly — Cerebra is 100% runtime-agnostic")
+	} else {
+		fmt.Println("  RESULT: ❌ Some runtimes failed — see t.Errorf above")
+	}
+	fmt.Println("========================================================================================================================")
+}

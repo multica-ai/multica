@@ -204,55 +204,40 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 	return tierMap
 }
 
+// filterPreferredPool separates candidates into two buckets:
+//   - direct: any runtime or provider where the user has a direct connection
+//     (opencode, claude, kimi, grok, openclaw, qoder, hermes, or any other runtime)
+//   - proxy: public aggregator proxies (openrouter) which are last resort
+//
+// Local Ollama is treated as a direct provider — it is on the user's machine and
+// requires no external network. All direct providers are returned together with no
+// further ranking between them; the tier-selection functions (selectBestSimpleModel,
+// selectBestStandardModel, selectBestHeavyModel) pick the best within that pool by
+// capability heuristics, which is the right signal regardless of runtime name.
 func filterPreferredPool(candidates []string) []string {
 	if len(candidates) == 0 {
 		return nil
 	}
 
-	// Tier 1: Direct authenticated cloud providers (user has connected API key)
-	var authenticatedCloud []string
-	// Tier 2: Local Ollama (free, private, always available)
-	var localOllama []string
-	// Tier 3: OpenCode direct runtime models (authenticated runtime, not openrouter proxies)
-	var openCodeDirect []string
-	// Tier 4: OpenRouter public aggregator proxies
-	var proxyCandidates []string
-
-	authenticatedPrefixes := []string{"google/", "anthropic/", "openai/", "azure/", "bedrock/", "vertex/"}
+	var direct []string
+	var proxy []string
 
 	for _, c := range candidates {
 		lower := strings.ToLower(c)
+		// OpenRouter is a public proxy aggregator — treat as last resort.
+		// Any other prefix (opencode/, claude/, kimi/, grok/, openclaw/, ollama/, google/,
+		// anthropic/, openai/, or any custom runtime) is a direct provider.
 		if strings.HasPrefix(lower, "openrouter/") || strings.Contains(lower, "/openrouter/") {
-			proxyCandidates = append(proxyCandidates, c)
-		} else if strings.HasPrefix(lower, "ollama/") {
-			localOllama = append(localOllama, c)
+			proxy = append(proxy, c)
 		} else {
-			isAuthenticated := false
-			for _, prefix := range authenticatedPrefixes {
-				if strings.HasPrefix(lower, prefix) {
-					isAuthenticated = true
-					break
-				}
-			}
-			if isAuthenticated {
-				authenticatedCloud = append(authenticatedCloud, c)
-			} else {
-				openCodeDirect = append(openCodeDirect, c)
-			}
+			direct = append(direct, c)
 		}
 	}
 
-	// Return highest priority non-empty pool
-	if len(authenticatedCloud) > 0 {
-		return authenticatedCloud
+	if len(direct) > 0 {
+		return direct
 	}
-	if len(localOllama) > 0 {
-		return localOllama
-	}
-	if len(openCodeDirect) > 0 {
-		return openCodeDirect
-	}
-	return proxyCandidates
+	return proxy
 }
 
 func getBaseModelName(model string) string {
