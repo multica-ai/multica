@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -139,13 +140,19 @@ func deriveDynamicRuntimeTierMap(ctx context.Context, provider string, runtimeCm
 		}
 	}
 
+	// 3. Always include provider fallback catalog models so tier classification has complete coverage
+	fallbackMap := deriveRuntimeTierMap(provider)
+	for _, m := range fallbackMap {
+		modelIDs = append(modelIDs, m)
+	}
+
 	if len(modelIDs) > 0 {
 		tierMap := cerebra.BuildTierMapFromCatalog(modelIDs)
 		if len(tierMap) > 0 {
 			return map[cerebra.Tier]string(tierMap)
 		}
 	}
-	return deriveRuntimeTierMap(provider)
+	return fallbackMap
 }
 
 // deriveRuntimeTierMap provides static fallback catalogs for known providers
