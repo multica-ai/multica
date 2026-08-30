@@ -86,4 +86,46 @@ func TestVCSReferenceOnlyRepairMigrationRestoresPartialSchema(t *testing.T) {
 	if err := conn.QueryRow(ctx, `SELECT reference_only FROM issue_vcs_pull_request`).Scan(&referenceOnly); err != nil {
 		t.Fatalf("read reference_only after rollback: %v", err)
 	}
+
+	if _, err := conn.Exec(ctx, `
+		DROP TABLE issue_vcs_pull_request;
+		CREATE TABLE issue_vcs_pull_request (
+			issue_id UUID NOT NULL,
+			pull_request_id UUID NOT NULL,
+			reference_only BOOLEAN NOT NULL DEFAULT FALSE,
+			PRIMARY KEY (issue_id, pull_request_id)
+		);
+		INSERT INTO issue_vcs_pull_request (issue_id, pull_request_id, reference_only)
+		VALUES
+			('00000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000004', FALSE),
+			('00000000-0000-0000-0000-000000000005', '00000000-0000-0000-0000-000000000006', TRUE);
+	`); err != nil {
+		t.Fatalf("create healthy VCS link schema: %v", err)
+	}
+
+	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.down.sql")
+
+	var referenceOnlyValues []bool
+	if err := conn.QueryRow(ctx, `
+		SELECT array_agg(reference_only ORDER BY issue_id)
+		FROM issue_vcs_pull_request
+	`).Scan(&referenceOnlyValues); err != nil {
+		t.Fatalf("read healthy reference_only values: %v", err)
+	}
+	if len(referenceOnlyValues) != 2 || referenceOnlyValues[0] || !referenceOnlyValues[1] {
+		t.Fatalf("healthy reference_only values = %v, want [false true]", referenceOnlyValues)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT is_nullable, column_default
+		FROM information_schema.columns
+		WHERE table_schema = $1
+		  AND table_name = 'issue_vcs_pull_request'
+		  AND column_name = 'reference_only'
+	`, vcsReferenceOnlyRepairMigrationTestSchema).Scan(&nullable, &defaultValue); err != nil {
+		t.Fatalf("inspect healthy reference_only column: %v", err)
+	}
+	if nullable != "NO" || defaultValue != "false" {
+		t.Fatalf("healthy reference_only metadata = (nullable %s, default %s), want (NO, false)", nullable, defaultValue)
+	}
 }
