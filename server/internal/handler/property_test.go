@@ -1521,4 +1521,36 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	expect(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"})+"&open_only=true", hasAll)
 	expect(noneOrAfter+"&open_only=true", hasAll, empty)
 	notPresent(noneOrAfter+"&open_only=true", hasText)
+
+	// The table-rows endpoint is the third serving path for the properties
+	// filter: members arrive as raw JSON in issueTableFiltersRequest, go
+	// through the byte-exact fingerprint canonicalization, and compile via the
+	// same parsePropertiesFilterParam the list endpoints use. Pin the path
+	// with operator members ANDed across two definitions.
+	rowsRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableRows(rowsRecorder, newRequest(http.MethodPost, "/api/issues/table/rows", map[string]any{
+		"query": map[string]any{
+			"scope": map[string]any{"kind": "workspace"},
+			"filters": map[string]any{
+				"properties": map[string]any{
+					num.ID:  []any{map[string]any{"op": "gte", "value": "15"}},
+					text.ID: []any{map[string]any{"op": "contains", "value": "world"}},
+				},
+			},
+			"sort": map[string]any{"field": "position", "direction": "asc"},
+		},
+		"group":     map[string]any{"kind": "none"},
+		"hierarchy": map[string]any{"enabled": false},
+		"page":      map[string]any{"limit": 10},
+	}))
+	if rowsRecorder.Code != http.StatusOK {
+		t.Fatalf("table rows with operator members: %d %s", rowsRecorder.Code, rowsRecorder.Body.String())
+	}
+	var rowsResponse issueTableRowsResponse
+	if err := json.NewDecoder(rowsRecorder.Body).Decode(&rowsResponse); err != nil {
+		t.Fatalf("decode rows: %v", err)
+	}
+	if rowsResponse.Total != 1 || len(rowsResponse.Rows) != 1 || rowsResponse.Rows[0].Issue.ID != hasAll {
+		t.Fatalf("table rows operator filter wrong: total=%d rows=%d", rowsResponse.Total, len(rowsResponse.Rows))
+	}
 }
