@@ -1303,3 +1303,222 @@ func createPropertyTestMember(t *testing.T) string {
 	}
 	return userID
 }
+
+func TestParsePropertiesFilterOperatorUnit(t *testing.T) {
+	defID := uuid.NewString()
+	w := httptest.NewRecorder()
+	var args []any
+	addArg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	// A contains member compiles to the operator pattern (with the LIKE
+	// wildcards escaped) and renders as an ILIKE predicate, never as a
+	// containment pattern or the no-value marker.
+	groups, ok := parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[{"op":"contains","value":"50%% off"}]}`, defID))
+	if !ok {
+		t.Fatalf("contains parse failed: %s", w.Body.String())
+	}
+	if len(groups) != 1 || len(groups[0]) != 1 {
+		t.Fatalf("expected one group with one alternative, got %d / %d", len(groups), len(groups[0]))
+	}
+	if _, isMarker := parseNoPropertyValuePattern(groups[0][0]); isMarker {
+		t.Fatalf("operator alternative misdetected as the no-value marker")
+	}
+	pattern, isOp := parseOperatorPattern(groups[0][0])
+	if !isOp || pattern.Op != "contains" || pattern.Def != defID {
+		t.Fatalf("expected contains operator pattern, got %+v isOp=%v", pattern, isOp)
+	}
+	if pattern.Value != `50\% off` {
+		t.Fatalf("contains value not LIKE-escaped: %q", pattern.Value)
+	}
+	args = nil
+	sql := propertiesFilterPredicate(groups, addArg)
+	if !strings.Contains(sql, "ILIKE") || strings.Contains(sql, "@>") {
+		t.Fatalf("contains predicate wrong: %s", sql)
+	}
+
+	// Numeric ops validate their value and render the typed comparison.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[{"op":"gte","value":"3.5"}]}`, defID))
+	if !ok {
+		t.Fatalf("gte parse failed: %s", w.Body.String())
+	}
+	args = nil
+	sql = propertiesFilterPredicate(groups, addArg)
+	if !strings.Contains(sql, "::numeric >= $") {
+		t.Fatalf("gte predicate wrong: %s", sql)
+	}
+	// The bound must arrive as a number bind param, not a string.
+	last := args[len(args)-1]
+	if num, isFloat := last.(float64); !isFloat || num != 3.5 {
+		t.Fatalf("gte bind arg must be 3.5 as a number, got %T %v", last, last)
+	}
+
+	// Date ops render the lexicographic string comparison.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[{"op":"before","value":"2026-02-01"}]}`, defID))
+	if !ok {
+		t.Fatalf("before parse failed: %s", w.Body.String())
+	}
+	args = nil
+	sql = propertiesFilterPredicate(groups, addArg)
+	if !strings.Contains(sql, "= 'string' AND") || !strings.Contains(sql, "< $") {
+		t.Fatalf("before predicate wrong: %s", sql)
+	}
+
+	// An operator composes OR-style with legacy equality members and the
+	// no-value sentinel in one group.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":["3.5",{"op":"lt","value":"10"},"__none__"]}`, defID))
+	if !ok {
+		t.Fatalf("mixed parse failed: %s", w.Body.String())
+	}
+	// "3.5" expands to 3 containment forms, the operator is 1, the marker 1.
+	if len(groups[0]) != 5 {
+		t.Fatalf("expected 5 alternatives, got %d", len(groups[0]))
+	}
+
+	// Invalid members are rejected with a 400.
+	for name, raw := range map[string]string{
+		"unknown op":    `{"op":"regex","value":"x"}`,
+		"empty value":   `{"op":"contains","value":""}`,
+		"non-numeric":   `{"op":"gt","value":"abc"}`,
+		"NaN":           `{"op":"lt","value":"NaN"}`,
+		"bad date":      `{"op":"before","value":"02/01/2026"}`,
+		"missing value": `{"op":"contains"}`,
+	} {
+		w = httptest.NewRecorder()
+		_, ok := parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":[%s]}`, defID, raw))
+		if ok {
+			t.Fatalf("%s: expected rejection", name)
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d", name, w.Code)
+		}
+	}
+}
+
+func TestListIssuesPropertyFilterOperators(t *testing.T) {
+	text := createTestProperty(t, map[string]any{"name": "OT" + uuid.NewString()[:8], "type": "text"})
+	num := createTestProperty(t, map[string]any{"name": "ON" + uuid.NewString()[:8], "type": "number"})
+	date := createTestProperty(t, map[string]any{"name": "OD" + uuid.NewString()[:8], "type": "date"})
+
+	marker := uuid.NewString()[:8]
+	helloWorld := "Alpha " + marker + " World"
+	percentDone := "100% done " + marker
+	hasText := createPropertyTestIssue(t, "op text")
+	hasAll := createPropertyTestIssue(t, "op all")
+	empty := createPropertyTestIssue(t, "op empty")
+	if w := setIssuePropertyRaw(t, hasText, text.ID, percentDone); w.Code != http.StatusOK {
+		t.Fatalf("seed text: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasText, date.ID, "2026-01-10"); w.Code != http.StatusOK {
+		t.Fatalf("seed text date: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasAll, text.ID, helloWorld); w.Code != http.StatusOK {
+		t.Fatalf("seed text2: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasAll, num.ID, 15); w.Code != http.StatusOK {
+		t.Fatalf("seed num: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasAll, date.ID, "2026-03-01"); w.Code != http.StatusOK {
+		t.Fatalf("seed date: %d %s", w.Code, w.Body.String())
+	}
+
+	listIssues := func(query string) (int, []IssueResponse) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.ListIssues(w, newRequest("GET", "/api/issues"+query, nil))
+		if w.Code != http.StatusOK {
+			return w.Code, nil
+		}
+		var resp struct {
+			Issues []IssueResponse `json:"issues"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp)
+		return w.Code, resp.Issues
+	}
+	opQuery := func(defID string, members ...any) string {
+		buf, _ := json.Marshal(map[string]any{defID: members})
+		return "?limit=50&properties=" + url.QueryEscape(string(buf))
+	}
+	expect := func(query string, want ...string) {
+		t.Helper()
+		code, got := listIssues(query)
+		if code != http.StatusOK {
+			t.Fatalf("ListIssues%s: expected 200, got %d", query, code)
+		}
+		present := map[string]bool{}
+		for _, issue := range got {
+			present[issue.ID] = true
+		}
+		for _, id := range want {
+			if !present[id] {
+				t.Fatalf("query %s missed issue %s", query, id)
+			}
+		}
+		// Every returned issue must carry a matching value for the filtered
+		// definition (or none, when "__none__" is a member) — checked by the
+		// negative assertions at each call site.
+		return
+	}
+	notPresent := func(query, id string) {
+		t.Helper()
+		_, got := listIssues(query)
+		for _, issue := range got {
+			if issue.ID == id {
+				t.Fatalf("query %s unexpectedly matched issue %s", query, id)
+			}
+		}
+	}
+
+	// contains is case-insensitive and matches fragments.
+	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"}), hasAll)
+	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"}), hasText)
+	// The % in the needle is a literal percent, not a wildcard.
+	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "% done"}), hasText)
+	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "% done"}), hasAll)
+
+	// Numeric comparison matches stored jsonb numbers only.
+	expect(opQuery(num.ID, map[string]any{"op": "gt", "value": "10"}), hasAll)
+	notPresent(opQuery(num.ID, map[string]any{"op": "gt", "value": "10"}), hasText)
+	expect(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"}), hasAll)
+	notPresent(opQuery(num.ID, map[string]any{"op": "lte", "value": "5"}), hasAll)
+
+	// Date comparison is chronological.
+	expect(opQuery(date.ID, map[string]any{"op": "before", "value": "2026-02-01"}), hasText)
+	notPresent(opQuery(date.ID, map[string]any{"op": "before", "value": "2026-02-01"}), hasAll)
+	expect(opQuery(date.ID, map[string]any{"op": "after", "value": "2026-02-01"}), hasAll)
+	notPresent(opQuery(date.ID, map[string]any{"op": "after", "value": "2026-02-01"}), hasText)
+
+	// An operator composes OR-style with the no-value sentinel.
+	noneOrAfter := opQuery(date.ID, map[string]any{"op": "after", "value": "2026-02-01"}, "__none__")
+	expect(noneOrAfter, hasAll, empty)
+	notPresent(noneOrAfter, hasText)
+
+	// AND across definitions still applies: text contains "world" AND
+	// number <= 5 matches nothing.
+	both, _ := json.Marshal(map[string]any{
+		text.ID: []any{map[string]any{"op": "contains", "value": "world"}},
+		num.ID:  []any{map[string]any{"op": "lte", "value": "5"}},
+	})
+	notPresent("?limit=50&properties="+url.QueryEscape(string(both)), hasAll)
+
+	// Malformed operators are rejected outright.
+	for name, member := range map[string]map[string]any{
+		"unknown op":  {"op": "regex", "value": "x"},
+		"empty value": {"op": "contains", "value": ""},
+		"bad number":  {"op": "gt", "value": "15x"},
+		"bad date":    {"op": "before", "value": "March 1"},
+	} {
+		if code, _ := listIssues(opQuery(num.ID, member)); code != http.StatusBadRequest {
+			t.Fatalf("%s: expected 400, got %d", name, code)
+		}
+	}
+
+	// The static ListOpenIssues unroll agrees with the dynamic predicates.
+	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"}) + "&open_only=true", hasAll)
+	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"})+"&open_only=true", hasText)
+	expect(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"})+"&open_only=true", hasAll)
+	expect(noneOrAfter+"&open_only=true", hasAll, empty)
+	notPresent(noneOrAfter+"&open_only=true", hasText)
+}
