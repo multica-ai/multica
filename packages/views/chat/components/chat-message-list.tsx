@@ -52,7 +52,7 @@ import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import { useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
-import { splitTimeline, extractCopyText } from "../lib/copy-text";
+import { splitTimeline, extractCopyText, timelineFinalMatchesContent } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
 import { useT } from "../../i18n";
 
@@ -564,23 +564,32 @@ function AssistantMessage({
 
   // The persisted row's own answer text renders only when the timeline
   // is empty; with a timeline, the answer must come from the timeline's
-  // trailing text (`final` — text after the last non-text item). When that
-  // tail is missing — a daemon tail-flush that failed to persist, the answer
-  // text sandwiched before a later thinking/tool frame, or a hole in the
-  // client's task-messages cache — the turn otherwise renders elapsed +
-  // quick actions but NO reply. extractCopyText already falls back to
-  // message.content for exactly this shape; the render path now does too.
-  const { final: finalTimelineItems } = useMemo(
+  // trailing text (`final` — text after the last non-text item). When the
+  // final text disagrees with message.content — an empty final (daemon
+  // tail-flush that failed to persist, the answer sandwiched before a later
+  // thinking/tool frame, a hole in the client's task-messages cache) or a
+  // non-empty final that is a truncated prefix of / entirely inconsistent
+  // with content (the real final answer never persisted; a mid-run narration
+  // frame sits after the last non-text item) — content is authoritative:
+  // replace the final text segment with it so the detail view's last sentence
+  // matches the list preview. The process fold is preserved either way.
+  // extractCopyText already falls back to message.content for exactly these
+  // shapes; the render path now does too.
+  const { preface, middle, final: finalTimelineItems } = useMemo(
     () => splitTimeline(timeline),
     [timeline],
   );
   const isNoResponse = message?.message_kind === "no_response";
-  const missingFinalText =
-    !!message &&
-    timeline.length > 0 &&
-    finalTimelineItems.length === 0 &&
-    !isNoResponse &&
-    (message.content?.trim().length ?? 0) > 0;
+  const finalFallbackReason: "empty_final" | "final_mismatch" | null = (() => {
+    if (!message || isNoResponse || timeline.length === 0) return null;
+    // Streaming rows (no persisted message yet) and turns without an answer
+    // to fall back to keep the plain render.
+    if ((message.content?.trim().length ?? 0) === 0) return null;
+    if (finalTimelineItems.length === 0) return "empty_final";
+    return timelineFinalMatchesContent(finalTimelineItems, message.content)
+      ? null
+      : "final_mismatch";
+  })();
 
   // Count every visibly-rendered turn that needed the fallback — this is the
   // direct measure of the user-facing missing-final-text symptom, whichever upstream path
@@ -589,7 +598,7 @@ function AssistantMessage({
   // invisible again.
   const missingFinalTelemetryFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!missingFinalText || !message) return;
+    if (!finalFallbackReason || !message) return;
     if (missingFinalTelemetryFor.current === message.id) return;
     missingFinalTelemetryFor.current = message.id;
     captureEvent("assistant_reply_missing_final_text", {
@@ -597,8 +606,9 @@ function AssistantMessage({
       task_id: message.task_id ?? null,
       message_kind: message.message_kind ?? "message",
       timeline_items: timeline.length,
+      reason: finalFallbackReason,
     });
-  }, [missingFinalText, message, timeline.length]);
+  }, [finalFallbackReason, message, timeline.length]);
 
   // Failure bubble path: when the server's FailTask wrote a failure
   // chat_message (failure_reason set), render a destructive bubble with the
@@ -622,7 +632,14 @@ function AssistantMessage({
     <div className="w-full space-y-1.5">
       {timeline.length > 0 && (
         <TimelineView
-          items={timeline}
+          items={
+            finalFallbackReason
+              ? // Fallback active: the final text segment is replaced by
+                // message.content below — drop the tail so it is not rendered
+                // twice (or rendered stale). Preface + middle (the fold) stay.
+                [...preface, ...middle]
+              : timeline
+          }
           attachments={message?.attachments}
           phase={phase}
           isStreaming={!message}
@@ -638,10 +655,10 @@ function AssistantMessage({
           phase="settled"
           className="leading-relaxed"
         />
-      ) : missingFinalText ? (
-        // Fallback: the timeline carried no trailing text but the
-        // persisted row has the authoritative answer — render it rather than
-        // leaving the turn blank.
+      ) : finalFallbackReason && message ? (
+        // Fallback: the timeline's trailing text is empty or disagrees
+        // with the persisted row — render the authoritative message.content
+        // rather than a blank or stale answer.
         <RichContent
           content={message.content}
           attachments={message.attachments}

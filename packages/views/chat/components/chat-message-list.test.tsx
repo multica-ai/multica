@@ -667,7 +667,11 @@ describe("ChatMessageList missing final text fallback", () => {
     expect(vi.mocked(captureEvent)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(captureEvent)).toHaveBeenCalledWith(
       "assistant_reply_missing_final_text",
-      expect.objectContaining({ message_id: "m-is90", task_id: TASK_ID }),
+      expect.objectContaining({
+        message_id: "m-is90",
+        task_id: TASK_ID,
+        reason: "empty_final",
+      }),
     );
 
     // A re-render of the same row (quick-actions patch, task:message tick)
@@ -706,5 +710,62 @@ describe("ChatMessageList missing final text fallback", () => {
     );
     await screen.findByText(ANSWER);
     expect(vi.mocked(captureEvent)).not.toHaveBeenCalled();
+  });
+
+  it("does not fire telemetry when final matches content modulo whitespace", async () => {
+    renderIs90(
+      {},
+      [
+        taskMsg(0, "tool_use", { tool: "Bash", input: { command: "ls" } }),
+        taskMsg(1, "tool_result", { tool: "Bash", output: "ok" }),
+        taskMsg(2, "text", { content: ANSWER + "\n\n" }),
+      ],
+    );
+    expect(await screen.findByText(ANSWER)).toBeInTheDocument();
+    expect(screen.getAllByText(ANSWER)).toHaveLength(1);
+    expect(vi.mocked(captureEvent)).not.toHaveBeenCalled();
+  });
+
+  it("renders content replacing a truncated final (strict prefix of content)", async () => {
+    const FULL = "Summary: the synthetic fallback answer renders end to end.";
+    renderIs90(
+      { content: FULL },
+      [
+        taskMsg(0, "tool_use", { tool: "Bash", input: { command: "ls" } }),
+        taskMsg(1, "tool_result", { tool: "Bash", output: "ok" }),
+        // Daemon tail-flush lost the last chunks: the timeline's trailing
+        // text is only a strict prefix of the persisted content.
+        taskMsg(2, "text", { content: "Summary: the" }),
+      ],
+    );
+    // The authoritative full answer renders, and the truncated tail does not
+    // survive as a separate duplicate fragment.
+    expect(await screen.findByText(FULL)).toBeInTheDocument();
+    expect(screen.queryByText("Summary: the")).toBeNull();
+    expect(vi.mocked(captureEvent)).toHaveBeenCalledWith(
+      "assistant_reply_missing_final_text",
+      expect.objectContaining({ message_id: "m-is90", reason: "final_mismatch" }),
+    );
+  });
+
+  it("renders content replacing an inconsistent final and keeps the fold", async () => {
+    const NARRATION = "Synthetic narration frame left over from a mid-run checkpoint.";
+    const ANSWER_ZH = "Summary: the synthetic fallback answer renders end to end.";
+    renderIs90(
+      { content: ANSWER_ZH },
+      [
+        taskMsg(0, "tool_use", { tool: "Bash", input: { command: "ls" } }),
+        taskMsg(1, "text", { content: NARRATION }),
+      ],
+    );
+    // The persisted answer wins; the stale surviving narration frame is
+    // replaced, while the process fold stays.
+    expect(await screen.findByText(ANSWER_ZH)).toBeInTheDocument();
+    expect(screen.queryByText(NARRATION)).toBeNull();
+    expect(screen.getByText("1 step")).toBeInTheDocument();
+    expect(vi.mocked(captureEvent)).toHaveBeenCalledWith(
+      "assistant_reply_missing_final_text",
+      expect.objectContaining({ message_id: "m-is90", reason: "final_mismatch" }),
+    );
   });
 });
