@@ -1,0 +1,8 @@
+{
+  "title": "運用コントロール",
+  "description": "人による承認、実行状態、プロバイダー機能",
+  "summary": { "intercepted": "インターセプトした呼び出し", "pending": "承認待ち", "failed": "失敗したアクション", "gaps": "機能カバレッジ", "gap_count_other": "機能ギャップ {{count}} 件" },
+  "approvals": { "title": "人による承認キュー", "empty": "承認待ちはありません。", "fields": "リクエストフィールド", "metadata_warning": "メタデータのみです。引数値やシークレットは表示されません。", "approve": "承認", "deny": "拒否" },
+  "capabilities": { "title": "運用機能", "available": "利用可能", "unavailable": "利用不可" },
+  "policy": { "tab": "ツールポリシー", "default_deny": "デフォルト拒否", "metadata_warning": "ルールはトランスポート、サーバー、ツール、スキーマの ID と完全一致します。このエディターはメタデータのみを表示し、引数やシークレットを公開しません。", "transport": "トランスポート", "managed_mcp": "管理対象 MCP", "managed_native": "管理対象ネイティブ", "server_key": "サーバーキー", "tool_name": "ツール名", "schema_digest": "スキーマダイジェスト", "effect": "効果", "allow": "許可", "require_approval": "承認必須", "remove_rule": "ルールを削除", "add_rule": "ルールを追加", "save": "ポリシーを保存", "saving": "保存中...", "load_failed": "ツールポリシーを読み込めませんでした。", "save_failed": "ツールポリシーを保存できませんでした。" }
+}

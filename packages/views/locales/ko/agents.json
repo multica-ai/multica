@@ -271,6 +271,7 @@
     "settings": "설정",
     "general": "일반",
     "access": "접근 권한",
+    "tool_policy": "도구 정책",
     "page_navigation_aria": "에이전트 페이지",
     "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",

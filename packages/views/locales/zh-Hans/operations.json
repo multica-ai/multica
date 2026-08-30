@@ -1,0 +1,8 @@
+{
+  "title": "运营控制",
+  "description": "人工审批、执行健康状况和提供商能力",
+  "summary": { "intercepted": "已拦截调用", "pending": "待审批", "failed": "失败操作", "gaps": "能力覆盖", "gap_count_other": "{{count}} 个能力缺口" },
+  "approvals": { "title": "人工审批队列", "empty": "没有待审批项目。", "fields": "请求字段", "metadata_warning": "仅显示元数据。此处绝不显示参数值或密钥。", "approve": "批准", "deny": "拒绝" },
+  "capabilities": { "title": "运营能力", "available": "可用", "unavailable": "不可用" },
+  "policy": { "tab": "工具策略", "default_deny": "默认拒绝", "metadata_warning": "规则精确匹配传输、服务器、工具和架构身份。此编辑器仅显示元数据，绝不公开参数或密钥。", "transport": "传输", "managed_mcp": "托管 MCP", "managed_native": "托管原生", "server_key": "服务器键", "tool_name": "工具名称", "schema_digest": "架构摘要", "effect": "效果", "allow": "允许", "require_approval": "需要审批", "remove_rule": "删除规则", "add_rule": "添加规则", "save": "保存策略", "saving": "正在保存...", "load_failed": "无法加载工具策略。", "save_failed": "无法保存工具策略。" }
+}

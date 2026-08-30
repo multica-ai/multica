@@ -1,0 +1,45 @@
+{
+  "title": "Operations",
+  "description": "Human approvals, execution health, and provider capabilities",
+  "summary": {
+    "intercepted": "Intercepted invocations",
+    "pending": "Pending approvals",
+    "failed": "Failed actions",
+    "gaps": "Capability coverage",
+    "gap_count_one": "{{count}} capability gap",
+    "gap_count_other": "{{count}} capability gaps"
+  },
+  "approvals": {
+    "title": "Human approval queue",
+    "empty": "No pending approvals.",
+    "fields": "Request fields",
+    "metadata_warning": "Metadata only. Argument values and secrets are never shown here.",
+    "approve": "Approve",
+    "deny": "Deny"
+  },
+  "capabilities": {
+    "title": "Operational capabilities",
+    "available": "Available",
+    "unavailable": "Unavailable"
+  },
+  "policy": {
+    "tab": "Tool policy",
+    "default_deny": "Default deny",
+    "metadata_warning": "Rules match exact transport, server, tool, and schema identities. This editor shows metadata only and never exposes arguments or secrets.",
+    "transport": "Transport",
+    "managed_mcp": "Managed MCP",
+    "managed_native": "Managed native",
+    "server_key": "Server key",
+    "tool_name": "Tool name",
+    "schema_digest": "Schema digest",
+    "effect": "Effect",
+    "allow": "Allow",
+    "require_approval": "Require approval",
+    "remove_rule": "Remove rule",
+    "add_rule": "Add rule",
+    "save": "Save policy",
+    "saving": "Saving...",
+    "load_failed": "Tool policy could not be loaded.",
+    "save_failed": "Tool policy could not be saved."
+  }
+}

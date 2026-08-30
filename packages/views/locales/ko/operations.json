@@ -1,0 +1,8 @@
+{
+  "title": "운영 제어",
+  "description": "사람 승인, 실행 상태 및 공급자 기능",
+  "summary": { "intercepted": "차단된 호출", "pending": "대기 중인 승인", "failed": "실패한 작업", "gaps": "기능 범위", "gap_count_other": "기능 격차 {{count}}개" },
+  "approvals": { "title": "사람 승인 대기열", "empty": "대기 중인 승인이 없습니다.", "fields": "요청 필드", "metadata_warning": "메타데이터만 표시됩니다. 인수 값과 비밀은 표시되지 않습니다.", "approve": "승인", "deny": "거부" },
+  "capabilities": { "title": "운영 기능", "available": "사용 가능", "unavailable": "사용 불가" },
+  "policy": { "tab": "도구 정책", "default_deny": "기본 거부", "metadata_warning": "규칙은 전송, 서버, 도구 및 스키마 ID를 정확히 일치시킵니다. 이 편집기는 메타데이터만 표시하며 인수나 비밀을 노출하지 않습니다.", "transport": "전송", "managed_mcp": "관리형 MCP", "managed_native": "관리형 네이티브", "server_key": "서버 키", "tool_name": "도구 이름", "schema_digest": "스키마 다이제스트", "effect": "효과", "allow": "허용", "require_approval": "승인 필요", "remove_rule": "규칙 제거", "add_rule": "규칙 추가", "save": "정책 저장", "saving": "저장 중...", "load_failed": "도구 정책을 불러올 수 없습니다.", "save_failed": "도구 정책을 저장할 수 없습니다." }
+}

@@ -280,6 +280,7 @@
     "settings": "Settings",
     "general": "General",
     "access": "Access",
+    "tool_policy": "Tool policy",
     "page_navigation_aria": "Agent page",
     "section_navigation_aria": "Agent section",
     "activity": "Activity",
