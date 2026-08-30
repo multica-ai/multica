@@ -554,37 +554,17 @@ func writeWorkflowQuickCreate(b *strings.Builder) {
 	b.WriteString("- If the CLI returns an error, exit with that error as the only output. Do not retry.\n\n")
 }
 
-// AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary,
-// shared verbatim by the runtime brief (writeWorkflowAutopilot) and the
-// per-turn prompt (daemon.buildAutopilotPrompt). Both land in the same context
-// window; MUL-5696 found the two hand-maintained copies had drifted into an
-// unconditional ban on one surface and a conditional one on the other.
+// AutopilotIssueCommandsGuard is the run-only autopilot issue-command boundary.
+// The runtime brief is its single emission point; the per-turn prompt defers to
+// this stable, higher-priority copy. MUL-5696 found that two hand-maintained
+// copies had drifted into conflicting instructions.
 const AutopilotIssueCommandsGuard = "Do not run `multica issue get`, `multica issue comment add`, or `multica issue status` for this run unless the autopilot instructions explicitly tell you to create or update an issue"
 
-// writeWorkflowAutopilot emits the autopilot run-only workflow.
-func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
+// writeWorkflowAutopilot emits only stable run-only policy. Per-run Autopilot
+// data belongs to daemon.buildAutopilotPrompt so it appears once, at user-turn
+// priority, without changing the runtime brief's cache prefix (issue #7773).
+func writeWorkflowAutopilot(b *strings.Builder) {
 	b.WriteString("**This task was triggered by an Autopilot in run-only mode.** There is no assigned Multica issue for this run.\n\n")
-	fmt.Fprintf(b, "- Autopilot run ID: `%s`\n", ctx.AutopilotRunID)
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Autopilot ID: `%s`\n", ctx.AutopilotID)
-	}
-	if ctx.AutopilotTitle != "" {
-		fmt.Fprintf(b, "- Autopilot title: %s\n", ctx.AutopilotTitle)
-	}
-	if ctx.AutopilotSource != "" {
-		fmt.Fprintf(b, "- Trigger source: %s\n", ctx.AutopilotSource)
-	}
-	if ctx.AutopilotTriggerPayload != "" {
-		fmt.Fprintf(b, "- Trigger payload:\n\n```json\n%s\n```\n", ctx.AutopilotTriggerPayload)
-	}
-	if strings.TrimSpace(ctx.AutopilotDescription) != "" {
-		b.WriteString("\nAutopilot instructions:\n\n")
-		b.WriteString(ctx.AutopilotDescription)
-		b.WriteString("\n\n")
-	}
-	if ctx.AutopilotID != "" {
-		fmt.Fprintf(b, "- Run `multica autopilot get %s --output json` if you need the full autopilot configuration\n", ctx.AutopilotID)
-	}
 	b.WriteString("- Complete the autopilot instructions directly\n")
 	b.WriteString("- " + AutopilotIssueCommandsGuard + "\n\n")
 }
@@ -952,7 +932,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:
-		writeWorkflowAutopilot(&b, ctx)
+		writeWorkflowAutopilot(&b)
 	case kindIssue:
 		writeWorkflowIssue(&b, ctx)
 	}

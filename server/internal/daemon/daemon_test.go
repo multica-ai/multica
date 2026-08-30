@@ -1093,6 +1093,10 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		AutopilotTitle:       "Daily dependency check",
 		AutopilotDescription: "Check dependencies and report outdated packages.",
 		AutopilotSource:      "manual",
+		AutopilotTriggerPayload: json.RawMessage(`{
+			"repository": "multica-ai/multica",
+			"action": "scheduled"
+		}`),
 	}, "claude")
 
 	for _, want := range []string{
@@ -1100,6 +1104,8 @@ func TestBuildPromptAutopilotRunOnly(t *testing.T) {
 		"Autopilot run ID: run-1",
 		"Daily dependency check",
 		"Check dependencies and report outdated packages.",
+		"Trigger source: manual",
+		`"repository": "multica-ai/multica"`,
 		"multica autopilot get autopilot-1 --output json",
 	} {
 		if !strings.Contains(prompt, want) {

@@ -1973,6 +1973,20 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 			// stated by the per-turn chat prompt and never here.
 			c.ChatChannelDeliversFiles = true
 		}},
+		{"autopilot-run", func(c *TaskContextForEnv) {
+			if c.AutopilotRunID != "" {
+				c.AutopilotRunID = "run-2"
+			}
+		}},
+		{"autopilot-config", func(c *TaskContextForEnv) {
+			if c.AutopilotRunID != "" {
+				c.AutopilotID = "ap-2"
+				c.AutopilotTitle = "Different title"
+				c.AutopilotDescription = "Different instructions"
+				c.AutopilotSource = "webhook"
+				c.AutopilotTriggerPayload = `{"request":{"receivedAt":"2026-08-30T00:00:00Z"}}`
+			}
+		}},
 	}
 
 	for kindName, baseCtx := range kinds {

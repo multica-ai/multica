@@ -2614,9 +2614,8 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 
 	for _, want := range []string{
 		"Autopilot in run-only mode",
-		"Autopilot run ID: `run-1`",
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
+		"Complete the autopilot instructions directly",
+		AutopilotIssueCommandsGuard,
 		"Your final assistant output is captured automatically as the autopilot run result",
 	} {
 		if !strings.Contains(s, want) {
@@ -2625,6 +2624,11 @@ func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
 	}
 
 	for _, absent := range []string{
+		"Autopilot run ID: `run-1`",
+		"autopilot-1",
+		"Daily dependency check",
+		"Check dependencies and report outdated packages.",
+		"Trigger source: manual",
 		"Run `multica issue get",
 		"Final results MUST be delivered via `multica issue comment add`",
 	} {
