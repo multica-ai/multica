@@ -48,6 +48,7 @@ func TestPlatformCursorInvocation_RewritesCmdLauncherToPowerShellFile(t *testing
 		"-p", "line1\nline2\nline3",
 		"--output-format", "stream-json",
 		"--yolo",
+		"--trust",
 		"--workspace", `C:\some\workspace`,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

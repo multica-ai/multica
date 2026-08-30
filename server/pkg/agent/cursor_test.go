@@ -31,6 +31,7 @@ func TestBuildCursorArgs(t *testing.T) {
 		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
+		"--trust",
 		"--workspace", "/tmp/work",
 		"--model", "composer-1.5",
 	}
@@ -67,7 +68,7 @@ func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs(ExecOptions{}, slog.Default())
-	expected := []string{"-p", "--output-format", "stream-json", "--yolo"}
+	expected := []string{"-p", "--output-format", "stream-json", "--yolo", "--trust"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -98,12 +99,13 @@ func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	t.Parallel()
 
 	args := buildCursorArgs(ExecOptions{
-		CustomArgs: []string{"--extra", "val", "--yolo", "--output-format", "text"},
+		CustomArgs: []string{"--extra", "val", "--yolo", "--trust", "--output-format", "text"},
 	}, slog.Default())
 
-	// --extra val should be present; --yolo and --output-format should be filtered out
+	// --extra val should be present; --yolo, --trust and --output-format should be filtered out
 	hasExtra := false
 	hasBlockedYolo := false
+	hasBlockedTrust := false
 	hasBlockedFormat := false
 	for i, a := range args {
 		if a == "--extra" && i+1 < len(args) && args[i+1] == "val" {
@@ -112,9 +114,13 @@ func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	}
 	// Count occurrences of --yolo (should be exactly 1 — the hardcoded one)
 	yoloCount := 0
+	trustCount := 0
 	for _, a := range args {
 		if a == "--yolo" {
 			yoloCount++
+		}
+		if a == "--trust" {
+			trustCount++
 		}
 		if a == "text" {
 			hasBlockedFormat = true
@@ -123,11 +129,17 @@ func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	if yoloCount > 1 {
 		hasBlockedYolo = true
 	}
+	if trustCount > 1 {
+		hasBlockedTrust = true
+	}
 	if !hasExtra {
 		t.Fatalf("expected --extra val in args, got %v", args)
 	}
 	if hasBlockedYolo {
 		t.Fatalf("--yolo from custom args should be filtered, got %v", args)
+	}
+	if hasBlockedTrust {
+		t.Fatalf("--trust from custom args should be filtered, got %v", args)
 	}
 	if hasBlockedFormat {
 		t.Fatalf("--output-format from custom args should be filtered, got %v", args)

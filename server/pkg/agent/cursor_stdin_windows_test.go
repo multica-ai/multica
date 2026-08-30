@@ -171,7 +171,7 @@ func assertPromptSurvivesShim(t *testing.T) {
 	}
 	// The content-free flags must still survive the same hop.
 	gotArgv := string(argvRaw)
-	for _, want := range []string{"-p", "--output-format", "stream-json", "--yolo"} {
+	for _, want := range []string{"-p", "--output-format", "stream-json", "--yolo", "--trust"} {
 		if !strings.Contains(gotArgv, want) {
 			t.Errorf("expected %q to reach the native child; argv was %q", want, gotArgv)
 		}

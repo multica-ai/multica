@@ -13,7 +13,7 @@ import (
 )
 
 // TestCursorExecuteParsesRecordedStream replays a stream captured from a real
-// `cursor-agent -p --output-format stream-json --yolo` run (2026.07.20-8cc9c0b,
+// `cursor-agent -p --output-format stream-json --yolo --trust` run (2026.07.20-8cc9c0b,
 // the exact invocation the daemon uses) and pins every observable step of it.
 //
 // The regression it guards: reasoning and tool calls arrive as TOP-LEVEL
