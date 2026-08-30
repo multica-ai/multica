@@ -193,14 +193,14 @@ func BuildTierMapFromCatalog(availableModels []string) TierMap {
 
 func isZeroCostModel(model string) bool {
 	lower := strings.ToLower(model)
-	return strings.HasPrefix(lower, "ollama/") || strings.HasPrefix(lower, "google/gemini") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
+	return strings.HasPrefix(lower, "ollama/") || strings.Contains(lower, ":free") || strings.Contains(lower, "-free") || strings.Contains(lower, "/free")
 }
 
 func selectBestSimpleModel(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
 	}
-	// 1. Separate zero-cost (free/local/gemini) from paid candidates to avoid credit drain
+	// 1. Separate zero-cost (free/local) from paid candidates to avoid credit drain
 	var freeCandidates []string
 	var paidCandidates []string
 	for _, c := range candidates {
@@ -239,11 +239,14 @@ func selectBestSimpleModel(candidates []string) string {
 		return bestCandidate
 	}
 
-	// 3. Prefer fast free cloud models (flash-lite, flash, mimo, mini, nano, haiku)
+	// 3. Prefer fast lightweight models (mini, nano, mimo, haiku, lite, flash)
+	simpleTags := []string{"mini", "nano", "mimo", "haiku", "lite", "flash", "small", "tiny"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "flash-lite") || strings.Contains(lower, "mini") || strings.Contains(lower, "nano") || strings.Contains(lower, "mimo") || strings.Contains(lower, "haiku") {
-			return c
+		for _, tag := range simpleTags {
+			if strings.Contains(lower, tag) {
+				return c
+			}
 		}
 	}
 	return searchPool[0]
@@ -268,24 +271,28 @@ func selectBestStandardModel(candidates []string) string {
 		searchPool = paidCandidates
 	}
 
-	// 1. Prefer Google Gemini Flash or local Ollama coding models
+	// 1. Prefer mid-sized coding parameter models (7B - 14B)
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "gemini-2.5-flash") || strings.Contains(lower, "gemini-2.0-flash") || strings.Contains(lower, "gemini-flash") {
+		if size, ok := extractParamSizeInBillions(c); ok && size >= 7.0 && size <= 16.0 {
 			return c
 		}
 	}
+
+	// 2. Prefer local Ollama models
 	for _, c := range searchPool {
 		if strings.HasPrefix(strings.ToLower(c), "ollama/") {
 			return c
 		}
 	}
 
-	// 2. Prefer balanced coding / instruct models
+	// 3. Prefer balanced coding / instruct model indicators
+	standardTags := []string{"coder", "code", "sonnet", "instruct", "lightning", "standard"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "sonnet") || strings.Contains(lower, "coder") || strings.Contains(lower, "lightning") || strings.Contains(lower, "3.5") || strings.Contains(lower, "70b") {
-			return c
+		for _, tag := range standardTags {
+			if strings.Contains(lower, tag) {
+				return c
+			}
 		}
 	}
 	return searchPool[0]
@@ -310,17 +317,21 @@ func selectBestHeavyModel(candidates []string) string {
 		searchPool = paidCandidates
 	}
 
-	// 1. Prefer Google Gemini Pro or frontier reasoning models (pro, r1, ultra, opus, o1, o3, 70b, 405b)
+	// 1. Prefer large parameter models (>= 30B, e.g. 32B, 70B, 405B)
 	for _, c := range searchPool {
-		lower := strings.ToLower(c)
-		if strings.Contains(lower, "gemini-2.5-pro") || strings.Contains(lower, "gemini-pro") {
+		if size, ok := extractParamSizeInBillions(c); ok && size >= 30.0 {
 			return c
 		}
 	}
+
+	// 2. Prefer frontier reasoning tags
+	heavyTags := []string{"r1", "ultra", "pro", "opus", "o1", "o3", "max", "large", "reasoning"}
 	for _, c := range searchPool {
 		lower := strings.ToLower(c)
-		if strings.Contains(lower, "r1") || strings.Contains(lower, "ultra") || strings.Contains(lower, "opus") || strings.Contains(lower, "o1") || strings.Contains(lower, "o3") {
-			return c
+		for _, tag := range heavyTags {
+			if strings.Contains(lower, tag) {
+				return c
+			}
 		}
 	}
 	return searchPool[0]
