@@ -346,5 +346,3 @@ func selectBestHeavyModel(candidates []string) string {
 
 	return searchPool[0]
 }
-
-

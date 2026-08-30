@@ -226,4 +226,3 @@ func routeBeforeDispatch(
 	result := router.Route(ctx, prompt, meta, runtimes, agentDefaultModel)
 	return result.Model
 }
-
