@@ -129,16 +129,17 @@ func (gate *stubRemoteMCPInvocationGate) CheckCapability(string, string) error {
 }
 
 type recordingManagedMCPControlPlane struct {
-	stages      []string
-	supported   bool
-	rule        managedMCPPolicyRule
-	ruleErr     error
-	approval    managedMCPApproval
-	approvalErr error
-	consumeErr  error
-	startedErr  error
-	terminalErr error
-	identity    managedMCPToolIdentity
+	stages             []string
+	supported          bool
+	rule               managedMCPPolicyRule
+	ruleErr            error
+	approval           managedMCPApproval
+	approvalErr        error
+	consumeErr         error
+	startedErr         error
+	terminalErr        error
+	identity           managedMCPToolIdentity
+	terminalContextErr error
 }
 
 func (control *recordingManagedMCPControlPlane) SupportsCapability(string, string) bool {
@@ -170,9 +171,36 @@ func (control *recordingManagedMCPControlPlane) CommitStarted(_ context.Context,
 	return grant, control.startedErr
 }
 
-func (control *recordingManagedMCPControlPlane) CommitTerminalAndTaskMessage(context.Context, remoteMCPInvocationGrant, remoteMCPInvocationResult) error {
+func (control *recordingManagedMCPControlPlane) CommitTerminalAndTaskMessage(ctx context.Context, _ remoteMCPInvocationGrant, _ remoteMCPInvocationResult) error {
 	control.stages = append(control.stages, "terminal")
+	control.terminalContextErr = ctx.Err()
 	return control.terminalErr
+}
+
+func TestRemoteMCPProxyCommitsCancelledInvocationWithDetachedContext(t *testing.T) {
+	control := managedMCPTestControl()
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	upstream.Close()
+	endpoint, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := &remoteMCPProxy{
+		taskID: "task", provider: "claude", endpoint: endpoint, client: upstream.Client(), path: "/capability",
+		semaphore: make(chan struct{}, remoteMCPMaxConcurrency), invocationGate: newManagedMCPInvocationGate(control),
+		connection: remotemcp.Connection{ContributionKey: "fixture", Transport: "http", ApprovedTools: []remotemcp.Tool{{Name: "allowed", SchemaDigest: control.rule.SchemaDigest}}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	request := httptest.NewRequest(http.MethodPost, "/capability", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"allowed","arguments":{}}}`)).WithContext(ctx)
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+	if got := strings.Join(control.stages, ","); got != "capability,allowlist,approval,consume,started,terminal" {
+		t.Fatalf("gate order = %s", got)
+	}
+	if control.terminalContextErr != nil {
+		t.Fatalf("terminal audit inherited cancelled request context: %v", control.terminalContextErr)
+	}
 }
 
 func managedMCPTestControl() *recordingManagedMCPControlPlane {

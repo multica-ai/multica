@@ -325,7 +325,9 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		if !invocationStarted {
 			return nil
 		}
-		return proxy.invocationGate.Finish(request.Context(), invocationGrant, remoteMCPInvocationResult{
+		auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(request.Context()), 5*time.Second)
+		defer cancelAudit()
+		return proxy.invocationGate.Finish(auditCtx, invocationGrant, remoteMCPInvocationResult{
 			OutcomeCode: outcomeCode, ErrorClass: errorClass, ResultBytes: resultBytes,
 			DurationMS: time.Since(started).Milliseconds(),
 		})
@@ -473,7 +475,10 @@ func (proxy *remoteMCPProxy) ServeHTTP(w http.ResponseWriter, request *http.Requ
 		}
 	}
 	if invocationStarted {
-		if err := proxy.invocationGate.Finish(request.Context(), invocationGrant, remoteMCPInvocationResult{OutcomeCode: "succeeded", ResultBytes: int32(len(responseBody)), DurationMS: time.Since(started).Milliseconds()}); err != nil {
+		auditCtx, cancelAudit := context.WithTimeout(context.WithoutCancel(request.Context()), 5*time.Second)
+		err := proxy.invocationGate.Finish(auditCtx, invocationGrant, remoteMCPInvocationResult{OutcomeCode: "succeeded", ResultBytes: int32(len(responseBody)), DurationMS: time.Since(started).Milliseconds()})
+		cancelAudit()
+		if err != nil {
 			resultClass = "audit_failure"
 			writeRemoteMCPError(w, rpcRequest.ID, -32008, "Remote MCP terminal audit commit failed")
 			return
