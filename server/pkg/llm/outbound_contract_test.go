@@ -39,9 +39,10 @@ func (c *countingHTTPClient) Do(req *http.Request) (*http.Response, error) {
 // layer — agent runs reach a model by their own path, which no variable here
 // governs. See the package doc.)
 //
-// Both consumers of this package send private chat content upstream — the
-// first message of a chat session (auto-titling) and the tail of a conversation
-// (follow-up questions). "Leave the LLM variables empty" is the documented
+// All consumers of this package send private content upstream — the first
+// message of a chat session (auto-titling), the tail of a conversation (chat
+// follow-up questions), or issue context and an agent comment (issue comment
+// follow-up actions). "Leave the LLM variables empty" is the documented
 // answer for an operator whose policy forbids that (.env.example, the docs
 // environment-variables pages, and GitHub issue #7162), so the behaviour has to
 // be a tested guarantee rather than something that happens to be true today.
@@ -125,6 +126,7 @@ const openAISDKImportPrefix = "github.com/openai/openai-go"
 var documentedConsumers = map[string]string{
 	"internal/handler/chat_title.go":                  "chat auto-titling: the first user message of a new chat session",
 	"internal/service/chat_quick_actions_generate.go": "chat follow-up questions: the tail of the conversation",
+	"internal/service/issue_comment_follow_ups.go":    "issue comment follow-up actions: issue context and the latest agent comment",
 }
 
 // clientCallSurface is every method on Client that can produce an upstream
