@@ -1416,6 +1416,7 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	text := createTestProperty(t, map[string]any{"name": "OT" + uuid.NewString()[:8], "type": "text"})
 	num := createTestProperty(t, map[string]any{"name": "ON" + uuid.NewString()[:8], "type": "number"})
 	date := createTestProperty(t, map[string]any{"name": "OD" + uuid.NewString()[:8], "type": "date"})
+	box := createTestProperty(t, map[string]any{"name": "OB" + uuid.NewString()[:8], "type": "checkbox"})
 	multi := createTestProperty(t, map[string]any{
 		"name": "OM" + uuid.NewString()[:8], "type": "multi_select",
 		"config": map[string]any{"options": []map[string]any{
@@ -1444,6 +1445,9 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	}
 	if w := setIssuePropertyRaw(t, hasAll, date.ID, "2026-03-01"); w.Code != http.StatusOK {
 		t.Fatalf("seed date: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasAll, box.ID, true); w.Code != http.StatusOK {
+		t.Fatalf("seed checkbox: %d %s", w.Code, w.Body.String())
 	}
 	if w := setIssuePropertyRaw(t, hasAll, multi.ID, []string{multi.Config.Options[0].ID}); w.Code != http.StatusOK {
 		t.Fatalf("seed multi-select: %d %s", w.Code, w.Body.String())
@@ -1507,6 +1511,9 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	containsNumber := opQuery(num.ID, map[string]any{"op": "contains", "value": "15"})
 	notPresent(containsNumber, hasAll)
 	notPresent(containsNumber+"&open_only=true", hasAll)
+	containsBoolean := opQuery(box.ID, map[string]any{"op": "contains", "value": "true"})
+	notPresent(containsBoolean, hasAll)
+	notPresent(containsBoolean+"&open_only=true", hasAll)
 	containsArray := opQuery(multi.ID, map[string]any{"op": "contains", "value": multi.Config.Options[0].ID[:8]})
 	notPresent(containsArray, hasAll)
 	notPresent(containsArray+"&open_only=true", hasAll)
