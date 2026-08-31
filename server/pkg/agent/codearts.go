@@ -783,7 +783,7 @@ func discoverCodeArtsModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		cmd := runtimeCmd.exec(runCtx, args...)
 		hideAgentWindow(cmd)
 		cmd.Env = buildCodeArtsEnv(nil)
-		out, _ := cmd.Output()
+		out, _ := outputOwned(cmd, runtimeCmd.logger)
 		models := parseOpenCodeModels(string(out))
 		for i := range models {
 			models[i].Thinking = nil
