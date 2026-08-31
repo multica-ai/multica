@@ -6,10 +6,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // GetTaskRoutingLog returns the Cerebra routing evidence for a task.
+
 // Route: GET /api/tasks/{taskId}/routing-log
 func (h *Handler) GetTaskRoutingLog(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
