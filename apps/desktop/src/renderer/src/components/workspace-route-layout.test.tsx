@@ -101,7 +101,7 @@ vi.mock("@multica/views/layout", () => ({
 // SourceBackfillModal. We stub the real component with a marker that
 // renders only when the layout actually rendered it (and not e.g.
 // suppressed by overlayActive).
-vi.mock("@multica/views/onboarding", () => ({
+vi.mock("@multica/views/onboarding/source-backfill-modal", () => ({
   SourceBackfillModal: () => {
     state.modalRenders += 1;
     return <div data-testid={state.modalAriaLabel} />;

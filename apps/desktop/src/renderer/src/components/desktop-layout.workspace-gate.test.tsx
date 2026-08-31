@@ -100,7 +100,7 @@ vi.mock("@multica/views/search", () => ({
   SearchTrigger: () => null,
 }));
 
-vi.mock("@multica/views/chat", () => ({
+vi.mock("@multica/views/chat/floating-chat", () => ({
   FloatingChat: () => <div data-testid="floating-chat" />,
 }));
 

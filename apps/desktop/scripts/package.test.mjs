@@ -118,6 +118,7 @@ describe("deriveVersion (real git describe)", () => {
     run("config", "user.email", "test@multica.ai");
     run("config", "user.name", "test");
     run("config", "commit.gpgsign", "false");
+    run("config", "tag.gpgsign", "false");
     run("commit", "-q", "--allow-empty", "-m", "root");
     return { dir, run };
   }
