@@ -350,15 +350,22 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
 }
 
-// isTerminalChildStatus reports whether a child issue status counts as
-// "finished" for stage-barrier purposes. Cancelled counts as terminal: a
-// cancelled sibling will never complete, so it must not hold a stage open.
+// isChildCompletedStatus reports whether a child handed work back to its
+// parent. `in_review` is an agent-completion signal; `done` and `cancelled`
+// also close a stage because they require no further child work.
+func isChildCompletedStatus(status string) bool {
+	return status == "in_review" || status == "done" || status == "cancelled"
+}
+
+// isTerminalChildStatus is retained for callers that use the historic name.
+// A stage is complete when its children are ready for review, done, or
+// cancelled; a child agent conventionally enters in_review before acceptance.
 //
 // Takes a CANONICAL status. Callers that hold a raw `issue.status` must pass it
-// through terminalChildPredicate first, so a custom status in the done or
-// cancelled category closes a stage exactly like Done and Cancelled do.
+// through terminalChildPredicate first, so a custom completion status closes a
+// stage exactly like the built-in completion statuses do.
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return isChildCompletedStatus(status)
 }
 
 // terminalChildPredicate returns the terminal test for a sibling set, resolving

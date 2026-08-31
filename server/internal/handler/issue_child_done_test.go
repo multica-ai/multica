@@ -154,6 +154,45 @@ func TestChildDoneNotifiesParent(t *testing.T) {
 	}
 }
 
+// TestChildInReviewNotifiesParent keeps serial staged workflows moving when a
+// child agent hands work back for review. `in_review` is the normal agent
+// completion status, so it must close a one-child stage just like `done`.
+func TestChildInReviewNotifiesParent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("expected exactly 1 system comment on parent after in_review, got %d", got)
+	}
+}
+
+// TestChildInReviewThenDoneDoesNotRefire ensures accepting an already reviewed
+// child does not enqueue the parent a second time.
+func TestChildInReviewThenDoneDoesNotRefire(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	updateChildStatus(t, fx.child.ID, "done")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("expected one system comment after in_review then done, got %d", got)
+	}
+}
+
+func TestChildCompletedStatusIncludesReview(t *testing.T) {
+	for _, status := range []string{"in_review", "done", "cancelled"} {
+		if !isChildCompletedStatus(status) {
+			t.Errorf("%q should close a child stage", status)
+		}
+	}
+	for _, status := range []string{"backlog", "todo", "in_progress"} {
+		if isChildCompletedStatus(status) {
+			t.Errorf("%q must not close a child stage", status)
+		}
+	}
+}
+
 // TestChildDoneNotificationIsIdempotent — re-saving an already-done child
 // must NOT fire a second notification. UpdateIssue is called with the same
 // status='done' twice; only the first call is a transition and should
