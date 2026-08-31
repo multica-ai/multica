@@ -59,5 +59,9 @@
       "title": "Join our Discord",
       "dismiss": "Dismiss"
     }
+  },
+  "tab_history": {
+    "back": "Go back",
+    "forward": "Go forward"
   }
 }

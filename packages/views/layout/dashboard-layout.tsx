@@ -14,6 +14,7 @@ import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
+import { SessionHistoryControls } from "./session-history-controls";
 import { useSessionTabsEnabled } from "./session-tabs";
 
 // Compact web never renders session tabs (see useSessionTabsEnabled). Keep
@@ -89,10 +90,13 @@ export function DashboardLayout({
         <AppSidebar searchSlot={searchSlot} />
         {sessionTabs ? (
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <div className="relative z-10 h-12 shrink-0">
-              <Suspense fallback={null}>
-                <TabBar />
-              </Suspense>
+            <div className="relative z-10 flex h-12 shrink-0 items-center">
+              <SessionHistoryControls />
+              <div className="min-h-0 min-w-0 flex-1 self-stretch">
+                <Suspense fallback={null}>
+                  <TabBar />
+                </Suspense>
+              </div>
             </div>
             <SessionCanvas>{canvas}</SessionCanvas>
           </div>

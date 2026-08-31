@@ -59,5 +59,9 @@
       "title": "加入 Discord",
       "dismiss": "关闭"
     }
+  },
+  "tab_history": {
+    "back": "后退",
+    "forward": "前进"
   }
 }

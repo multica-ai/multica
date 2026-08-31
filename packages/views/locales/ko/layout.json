@@ -59,5 +59,9 @@
       "title": "Discord 참여하기",
       "dismiss": "닫기"
     }
+  },
+  "tab_history": {
+    "back": "뒤로",
+    "forward": "앞으로"
   }
 }
