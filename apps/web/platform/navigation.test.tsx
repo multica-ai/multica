@@ -188,11 +188,12 @@ describe("WebNavigationProvider session tabs", () => {
   });
 
   it("reports the fragment from the active session URL", async () => {
-    const { useTabStore } = await import("@multica/core/tabs");
-    useTabStore
-      .getState()
-      .navigateActiveSession("/acme/issues/MUL-1#comment-c1");
+    const adapter = renderAdapter();
 
-    expect(renderAdapter()().hash).toBe("#comment-c1");
+    await act(async () => {
+      adapter().push("/acme/issues/MUL-1#comment-c1");
+    });
+
+    expect(adapter().hash).toBe("#comment-c1");
   });
 });

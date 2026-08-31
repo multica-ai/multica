@@ -9,8 +9,16 @@ import {
 } from "@multica/core/tabs";
 import { useSessionTabsEnabled } from "@multica/views/layout/session-tabs";
 
-function locationUrl(pathname: string, search: string): string {
-  return `${pathname}${search}`;
+function locationUrl(pathname: string, search: string, hash = ""): string {
+  return `${pathname}${search}${hash}`;
+}
+
+function windowUrl(pathname: string, search: string): string {
+  return locationUrl(
+    pathname,
+    search ? `?${search}` : "",
+    window.location.hash,
+  );
 }
 
 /**
@@ -24,7 +32,6 @@ export function WebTabCoordinator() {
   const searchParams = useSearchParams();
   const sessionTabs = useSessionTabsEnabled();
   const search = searchParams.toString();
-  const url = locationUrl(pathname, search ? `?${search}` : "");
   const seeded = useRef(false);
 
   useEffect(() => {
@@ -32,8 +39,8 @@ export function WebTabCoordinator() {
     if (!slug) return;
     if (seeded.current) return;
     seeded.current = true;
-    useTabStore.getState().switchWorkspace(slug, url);
-  }, [pathname, url]);
+    useTabStore.getState().switchWorkspace(slug, windowUrl(pathname, search));
+  }, [pathname, search]);
 
   useEffect(() => {
     if (!sessionTabs) {
@@ -41,8 +48,9 @@ export function WebTabCoordinator() {
       if (!slug) return;
       const store = useTabStore.getState();
       const active = getActiveTab(store);
-      if (active?.url !== url) {
-        store.switchWorkspace(slug, url);
+      const current = windowUrl(pathname, search);
+      if (active?.url !== current) {
+        store.switchWorkspace(slug, current);
       }
       return;
     }
@@ -53,11 +61,12 @@ export function WebTabCoordinator() {
       const current = locationUrl(
         window.location.pathname,
         window.location.search,
+        window.location.hash,
       );
       if (active.url === current) return;
       router.replace(active.url);
     });
-  }, [sessionTabs, pathname, url, router]);
+  }, [sessionTabs, pathname, search, router]);
 
   return null;
 }

@@ -174,15 +174,15 @@ describe("brand Button variants resolve to brand colour in the real stylesheet",
       });
 
       it(`deepens one notch on hover, another when pressed (${theme})`, () => {
-        expect(bg(brand, { dark, hover: true })).toBe("hover:bg-brand/90");
+        expect(bg(brand, { dark, hover: true })).toBe("hover:bg-brand-hover");
         expect(bg(brand, { dark, hover: true, active: true })).toBe(
-          "active:bg-brand/85",
+          "active:bg-brand-pressed",
         );
       });
 
       it(`reads as hover, not as a colour change, while the popover is open (${theme})`, () => {
         expect(bg(brand, { dark, expanded: true })).toBe(
-          "aria-expanded:bg-brand/90",
+          "aria-expanded:bg-brand-hover",
         );
       });
 
