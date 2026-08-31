@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -356,6 +357,24 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	activePath, exists, resolvedList, agentsFromRegistry, cached, err := discoverOpenclawConfig(bin, timeout, opts)
 	if err != nil {
 		return OpenclawConfigResult{}, err
+	}
+	// **Self-include guard (issue #6630 second defect).** If the CLI
+	// resolves the active config to a file we ourselves write into envRoot
+	// — the per-task wrapper or the sanitized user snapshot — then
+	// $include'ing it would make the wrapper include itself and every task
+	// would fail with "Circular include detected". This happens when a
+	// stale OPENCLAW_CONFIG_PATH (e.g. a leftover workaround wrapper) or a
+	// re-run pointing at a previous task's envRoot reports our own file as
+	// the user's active config. Treat it as "no user config" (fresh-install
+	// branch) and warn loudly so the operator can clear the stale env var.
+	if exists && openclawIsOwnTaskFile(activePath, envRoot) {
+		if opts.Logger != nil {
+			opts.Logger.Warn("execenv: openclaw active config resolves to a multica-owned task file; omitting $include so the user's models and auth profiles will NOT be visible to this task (check OPENCLAW_CONFIG_PATH for a stale multica wrapper)",
+				"reported_path", activePath,
+				"env_root", envRoot)
+		}
+		exists = false
+		activePath = ""
 	}
 	if !exists && opts.Logger != nil {
 		// Not an error — a genuine fresh install lands here legitimately.
@@ -944,6 +963,42 @@ func appendOpenclawConfigFileCandidates(candidates []string, dir string) []strin
 // keying on the character rather than the host OS lets the Windows shape be
 // exercised from the normal Linux/macOS test job instead of only on a Windows
 // runner, the same trade isOpenclawShimPath makes above.
+// openclawIsOwnTaskFile reports whether path is one of the files this
+// package writes into envRoot: the per-task wrapper (openclawConfigFile)
+// or the sanitized user snapshot (openclawUserSnapshotFile). If the
+// openclaw CLI ever reports one of these as the *user's* active config,
+// $include'ing it would make the wrapper include itself and every task
+// would fail with "Circular include detected" — the second defect called
+// out in the #6630 thread, kept out of #6643. This happens when a stale
+// OPENCLAW_CONFIG_PATH (e.g. a leftover workaround wrapper) points at a
+// multica_workspaces/*/openclaw-config.json.
+func openclawIsOwnTaskFile(path, envRoot string) bool {
+	if path == "" || envRoot == "" {
+		return false
+	}
+	for _, name := range []string{openclawConfigFile, openclawUserSnapshotFile} {
+		if openclawPathEquals(path, filepath.Join(envRoot, name)) {
+			return true
+		}
+	}
+	return false
+}
+
+// openclawPathEquals compares two paths for identity, normalizing
+// separators and (on Windows) case. The daemon and the openclaw CLI share
+// a host, so the host's own filesystem semantics apply; we key on the
+// separator character rather than the host OS for the same reason
+// openclawTildeRest accepts both forms — the Windows shape stays
+// exercisable from the Linux/macOS test job.
+func openclawPathEquals(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
 func openclawTildeRest(path string) (string, bool) {
 	if path == "~" {
 		return "", true

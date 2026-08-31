@@ -2229,3 +2229,133 @@ func TestPrepareOpenclawConfigWarnsWhenActiveConfigMissing(t *testing.T) {
 		t.Errorf("IncludeRoot = %q, want empty", result.IncludeRoot)
 	}
 }
+
+// TestPrepareOpenclawConfigSkipsSelfInclude — the second defect called out
+// in the #6630 thread (kept out of #6643): nothing verified that the config
+// path discovered by `openclaw config file` isn't a file we ourselves write
+// into envRoot. If a stale OPENCLAW_CONFIG_PATH points at a previous task's
+// multica_workspaces/*/openclaw-config.json (or the sanitized snapshot), the
+// wrapper would emit `$include: [itself]` and every task would fail with
+// "Circular include detected". The guard must treat that as "no user config"
+// (fresh-install branch) and warn loudly.
+func TestPrepareOpenclawConfigSkipsSelfInclude(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := t.TempDir()
+
+	// The CLI resolves the active config to the per-task wrapper path we are
+	// about to write — e.g. a stale OPENCLAW_CONFIG_PATH left over from a
+	// workaround wrapper pointing at a previous task's
+	// multica_workspaces/*/openclaw-config.json. The stale file already
+	// exists on disk (that is what makes it the *active* config), so
+	// materialize it before prepare runs.
+	wrapperPath := filepath.Join(envRoot, openclawConfigFile)
+	if err := os.WriteFile(wrapperPath, []byte(`{"agents":{"defaults":{"workspace":"/old/task"}}}`), 0o600); err != nil {
+		t.Fatalf("write stale wrapper: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: wrapperPath + "\n"},
+	})
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin, Logger: logger})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	if _, ok := got["$include"]; ok {
+		t.Errorf("wrapper must not $include itself; got $include = %v", got["$include"])
+	}
+	if result.IncludeRoot != "" {
+		t.Errorf("IncludeRoot = %q, want empty (no cross-dir $include emitted)", result.IncludeRoot)
+	}
+
+	out := logs.String()
+	if !strings.Contains(out, "multica-owned task file") {
+		t.Errorf("self-include guard was not warned about; log was:\n%s", out)
+	}
+	// The prepared-config summary should record include_target=none so the
+	// consequence (no user models / auth) is visible at a glance.
+	if !strings.Contains(out, "include_target=none") {
+		t.Errorf("prepared-config log should record include_target=none; log was:\n%s", out)
+	}
+}
+
+// TestPrepareOpenclawConfigSkipsSelfIncludeSnapshot — same guard, but for the
+// sanitized user snapshot file. The snapshot lives in envRoot next to the
+// wrapper, so a stale OPENCLAW_CONFIG_PATH could equally point at it; the
+// wrapper must not $include that either.
+func TestPrepareOpenclawConfigSkipsSelfIncludeSnapshot(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := t.TempDir()
+
+	// Same guard, for the sanitized user snapshot file. The snapshot lives in
+	// envRoot next to the wrapper, so a stale OPENCLAW_CONFIG_PATH could
+	// equally point at it; the wrapper must not $include that either. The
+	// stale file already exists on disk, so materialize it first.
+	snapshotPath := filepath.Join(envRoot, openclawUserSnapshotFile)
+	if err := os.WriteFile(snapshotPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write stale snapshot: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: snapshotPath + "\n"},
+	})
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin, Logger: logger})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	got := mustReadJSON(t, result.ConfigPath)
+	if _, ok := got["$include"]; ok {
+		t.Errorf("wrapper must not $include the multica-owned snapshot; got $include = %v", got["$include"])
+	}
+	if result.IncludeRoot != "" {
+		t.Errorf("IncludeRoot = %q, want empty", result.IncludeRoot)
+	}
+	if !strings.Contains(logs.String(), "multica-owned task file") {
+		t.Errorf("self-include guard was not warned about; log was:\n%s", logs.String())
+	}
+}
+
+// TestOpenclawIsOwnTaskFile — unit coverage for the path-identity helper that
+// backs the self-include guard: the wrapper and snapshot names inside envRoot
+// are owned, everything else (including look-alikes in other directories and
+// plain user configs) is not. Uses host-native separators throughout, and the
+// Windows case-insensitivity branch is exercised by the existing Windows test
+// job.
+func TestOpenclawIsOwnTaskFile(t *testing.T) {
+	envRoot := t.TempDir()
+	wrapper := filepath.Join(envRoot, openclawConfigFile)
+	snapshot := filepath.Join(envRoot, openclawUserSnapshotFile)
+
+	cases := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"wrapper", wrapper, true},
+		{"snapshot", snapshot, true},
+		{"empty path", "", false},
+		{"empty envRoot", filepath.Join("", openclawConfigFile), false},
+		{"user config in envRoot", filepath.Join(envRoot, "openclaw.json"), false},
+		{"wrapper in other dir", filepath.Join(t.TempDir(), openclawConfigFile), false},
+		{"snapshot in other dir", filepath.Join(t.TempDir(), openclawUserSnapshotFile), false},
+		{"wrapper with extra suffix", wrapper + ".bak", false},
+		{"wrapper subdir", filepath.Join(envRoot, "sub", openclawConfigFile), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := openclawIsOwnTaskFile(tc.path, envRoot); got != tc.want {
+				t.Errorf("openclawIsOwnTaskFile(%q, %q) = %v, want %v", tc.path, envRoot, got, tc.want)
+			}
+		})
+	}
+}
