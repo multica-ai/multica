@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1154,6 +1156,16 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			}
 			if value == "true" || value == "false" {
 				if !appendAlt(value == "true") { // checkbox boolean
+					return nil, false
+				}
+			}
+			if num, err := strconv.ParseFloat(value, 64); err == nil &&
+				!math.IsNaN(num) && !math.IsInf(num, 0) {
+				// number property scalar: a numeric filter value must match the
+				// stored jsonb number, not the string form appended above. NaN /
+				// Infinity are skipped: they are not representable as JSON, so
+				// marshaling them would 400 the whole filter.
+				if !appendAlt(num) {
 					return nil, false
 				}
 			}

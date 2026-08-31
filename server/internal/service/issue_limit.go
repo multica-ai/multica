@@ -59,6 +59,26 @@ func ResolveIssueCountPolicy(ctx context.Context, provider entitlement.Provider,
 	return policy
 }
 
+// CheckIssueCreateCapacity performs a read-only admission preflight for flows
+// that do work before the issue transaction starts, such as agent quick create.
+// It is deliberately not a reservation: callers must still use
+// AllocateIssueNumber in the final create transaction to serialize concurrent
+// admissions against the workspace row.
+func CheckIssueCreateCapacity(ctx context.Context, q *db.Queries, provider entitlement.Provider, workspaceID pgtype.UUID) error {
+	policy := ResolveIssueCountPolicy(ctx, provider, workspaceID)
+	if policy.Action != entitlement.ActionEnforce {
+		return nil
+	}
+	used, err := CountIssueUsage(ctx, q, workspaceID, policy)
+	if err != nil {
+		return err
+	}
+	if used >= policy.Limit {
+		return &IssueLimitReachedError{Limit: policy.Limit, PolicyRevision: policy.PolicyRevision}
+	}
+	return nil
+}
+
 // AllocateIssueNumber serializes creates on the workspace row, then checks the
 // current number of issue rows inside the same transaction. The caller must
 // roll the transaction back on IssueLimitReachedError; that also rolls back

@@ -606,6 +606,7 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skills request: "+err.Error())
 		return
 	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkills)
 	writeJSON(w, http.StatusOK, req)
 }
 
@@ -690,6 +691,7 @@ func (h *Handler) InitiateImportLocalSkill(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to enqueue local skill import: "+err.Error())
 		return
 	}
+	h.requestDaemonPendingWork(rt.runtimeID, protocol.PendingWorkKindLocalSkillImport)
 	writeJSON(w, http.StatusOK, importReq)
 }
 

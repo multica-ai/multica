@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { Agent, AgentRuntime, AgentTask } from "../types";
 import {
@@ -106,10 +108,10 @@ describe("deriveAgentAvailability", () => {
     ).toBe("offline");
   });
 
-  it("collapses about_to_gc into offline (it's a runtime-card concern, not the dot)", () => {
+  it("collapses long_offline into offline (it's a runtime-card concern, not the dot)", () => {
     expect(
       deriveAgentAvailability(
-        // 6.5 days ago — past the 6-day about_to_gc threshold.
+        // 6.5 days ago — past the 6-day long_offline threshold.
         makeRuntime({ status: "offline", last_seen_at: "2026-04-21T00:00:00Z" }),
         NOW,
       ),

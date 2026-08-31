@@ -388,6 +388,8 @@ export function TelegramAgentBindButton({
               type="password"
               value={botToken}
               onChange={(e) => setBotToken(e.target.value)}
+              // Telegram token shape: a format hint, not copy.
+              // eslint-disable-next-line no-restricted-syntax
               placeholder="123456789:AA…"
               autoComplete="off"
               spellCheck={false}

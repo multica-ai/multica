@@ -21,6 +21,7 @@
       "name": "이름",
       "name_placeholder": "예: Code Review",
       "key_hint": "API와 CLI에서는 {{key}}로 참조합니다.",
+      "created": "상태를 만들었습니다. API와 CLI에서는 {{key}}로 참조합니다.",
       "category": "카테고리",
       "category_locked": "카테고리는 변경할 수 없습니다. 이미 이 상태인 태스크가 이에 의존합니다.",
       "description": "설명",
@@ -685,7 +686,7 @@
   },
   "delete_workspace_dialog": {
     "title": "워크스페이스 삭제",
-    "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 데이터가 영구 삭제됩니다.",
+    "description": "이 작업은 되돌릴 수 없습니다. 모든 태스크, 에이전트, 채팅, 실행 기록이 영구 삭제됩니다.",
     "type_to_confirm_prefix": "확인하려면 아래에",
     "type_to_confirm_suffix": "을(를) 입력하세요.",
     "cancel": "취소",

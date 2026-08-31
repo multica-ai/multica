@@ -325,6 +325,8 @@
     "add_sub_issues": "サブタスクを追加",
     "add_sub_issue_tooltip": "サブタスクを追加",
     "add_sub_issue_aria": "サブタスクを追加",
+    "select_all_sub_issues_aria": "すべてのサブタスクを選択",
+    "select_sub_issue_aria": "{{identifier}} を選択",
     "section_properties": "プロパティ",
     "section_parent_issue": "親タスク",
     "section_pull_requests": "Pull requests",

@@ -35,6 +35,10 @@
     "idle": "Idle"
   },
   "presence_status_aria": "Status: {{status}}",
+  "avatar_stack": {
+    "overflow_aria_one": "{{count}} more agent",
+    "overflow_aria_other": "{{count}} more agents"
+  },
   "archived": {
     "active_link": "Active agents",
     "title": "Archived agents"
@@ -587,6 +591,10 @@
       "dialog_headers_label": "HTTP headers",
       "dialog_add_header": "Add header",
       "dialog_remove_header": "Remove header",
+      "dialog_pair_key_placeholder": "Key",
+      "dialog_pair_value_placeholder": "Value",
+      "dialog_pair_key_aria": "{{label}} key {{index}}",
+      "dialog_pair_value_aria": "{{label}} value {{index}}",
       "dialog_native_json_hint": "This historical provider-native entry can be edited in JSON without changing its format.",
       "dialog_json_label": "Server configuration",
       "dialog_json_aria": "MCP server JSON configuration",

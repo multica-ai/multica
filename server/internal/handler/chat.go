@@ -1455,37 +1455,6 @@ func (h *Handler) ConsumeChatDraftRestore(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pruneRuntimeSystemAgentChatDraftRestores drops the pending draft restores of
-// every chat_session a runtime teardown is about to remove through the agent
-// cascade (chat_session.agent_id is ON DELETE CASCADE, migration 033).
-// chat_draft_restore has no FK (MUL-3515) and no reaper, so a restore left
-// behind keeps the user's prompt text forever, unreachable and undeletable.
-//
-// Every runtime/agent teardown path must call this in its own transaction and
-// BEFORE deleting the agent rows — the queries join through them. Only system
-// agents are in scope: since MUL-5559 a runtime delete unbinds its user agents
-// instead of deleting them, so their sessions and restores must survive.
-//
-// The sessions are locked before the sweep: that is the deleter half of the
-// mutual-exclusion protocol with FinalizeDeferredCancelledChat, which would
-// otherwise insert a restore this sweep can no longer see (see LockChatSession*
-// in chat.sql).
-//
-// The workspace teardown has its own copy of this shape (locks, then sweeps
-// inside the DeleteWorkspace CTE) because that statement's prune must stay in
-// the same statement as the workspace row it commits with.
-func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries, runtimeID pgtype.UUID) error {
-	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
-	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
-	// Builder drafts only ever hang off a system carrier, so they are pruned
-	// here and nowhere else — the archived-agent sweep above has none to find.
-	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)
-}
-
 // PendingChatTasksResponse is the aggregate view consumed by the FAB.
 type PendingChatTasksResponse struct {
 	Tasks []PendingChatTaskItem `json:"tasks"`

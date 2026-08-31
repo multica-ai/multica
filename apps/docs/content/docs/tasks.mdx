@@ -45,7 +45,7 @@ A task typically moves through these states:
 | `failed` | The run errored or was interrupted |
 | `cancelled` | The run was stopped manually |
 
-When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. A task left unclaimed for more than 2 hours by default ends as failed; the limit is adjustable via `MULTICA_TASK_QUEUED_TTL` ([Environment variables](/environment-variables)).
+When the runtime is online, a new task usually starts quickly; if the runtime goes offline after the task enters the queue, the task stays queued until it recovers. Queued work is not expired for waiting too long — a runtime that keeps heartbeating is busy, not gone, so its backlog is allowed to drain however long that takes. A queued task fails only when **both** are true: its runtime has been silent past the reconnect grace, **and** the task itself has been queued that long. The second condition matters when you assign work to a machine that is already asleep — the task still gets a full grace for you to bring it back, rather than failing straight away.
 
 <Callout type="info">
 If the system already knows the target runtime is offline before triggering, some immediate actions report that the run cannot start right now instead of creating a task nothing can claim.
@@ -94,7 +94,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
-| `queued_expired` | Queued past the unclaimed limit (2 hours by default, adjustable via `MULTICA_TASK_QUEUED_TTL`) with no runtime claiming it | Confirm the runtime is online, then retry |
+| `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the task had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `cancelled` | Stopped manually, or cancelled along with an archive or delete | Nothing to do |
 | `timeout` | Exceeded the daemon's configured execution time limit | Narrow the issue scope, or adjust the daemon's `agent_timeout` |
@@ -149,7 +149,7 @@ The numbers below reflect the server's default configuration, for quick cross-ch
 | State | Meaning | Timeout and consequence |
 | --- | --- | --- |
 | `deferred` | Scheduled to fire later | Enters `queued` at the scheduled time, then the rules below apply |
-| `queued` | Waiting for a runtime to claim it | Fails after **2 hours by default** unclaimed (limit settable via `MULTICA_TASK_QUEUED_TTL`); not retried automatically |
+| `queued` | Waiting for a runtime to claim it | Waits as long as its runtime keeps heartbeating, and in every case for at least one reconnect grace after being queued; fails only when both windows have passed, and is not retried automatically |
 | `dispatched` | Claimed; the tool is starting | Treated as failed after more than **5 minutes** in this state |
 | `waiting_local_directory` | Waiting for the local directory lock to release | No timeout of its own; returns to the startup flow once the directory is released |
 | `running` | The AI coding tool is executing | No fixed duration cap; liveness follows the runtime heartbeat — one every 15 seconds; a runtime that loses its heartbeat is marked offline within about 3 minutes at the latest, and its tasks fail with it |

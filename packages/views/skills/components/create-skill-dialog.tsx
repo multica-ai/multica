@@ -69,18 +69,17 @@ function seedAfterCreate(
 function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
   const { t } = useT("skills");
   const methods: {
-    key: Method;
+    key: Exclude<Method, "chooser">;
     icon: typeof Plus;
-    titleKey: "manual" | "local" | "url" | "runtime";
   }[] = [
-    { key: "manual", icon: Plus, titleKey: "manual" },
-    { key: "local", icon: FolderOpen, titleKey: "local" },
-    { key: "url", icon: Download, titleKey: "url" },
-    { key: "runtime", icon: HardDrive, titleKey: "runtime" },
+    { key: "manual", icon: Plus },
+    { key: "local", icon: FolderOpen },
+    { key: "url", icon: Download },
+    { key: "runtime", icon: HardDrive },
   ];
   return (
     <div className="grid gap-2 p-5">
-      {methods.map(({ key, icon: Icon, titleKey }) => (
+      {methods.map(({ key, icon: Icon }) => (
         <button
           key={key}
           type="button"
@@ -92,10 +91,10 @@ function MethodChooser({ onChoose }: { onChoose: (m: Method) => void }) {
           </div>
           <div className="min-w-0 flex-1">
             <div className="text-body font-medium">
-              {t(($) => $.create.method_card[`${titleKey}_title`])}
+              {t(($) => $.create.method[key].title)}
             </div>
             <div className="mt-0.5 text-caption text-muted-foreground">
-              {t(($) => $.create.method_card[`${titleKey}_desc`])}
+              {t(($) => $.create.method[key].desc)}
             </div>
           </div>
           <ChevronRight className="h-4 w-4 shrink-0 text-faint-foreground transition-colors group-hover:text-muted-foreground" />
@@ -455,20 +454,10 @@ function LocalForm({
   const scrollRef = useRef<HTMLDivElement>(null);
   const fadeStyle = useScrollFade(scrollRef);
 
+  // Import stays disabled until a valid selection exists, so an invalid one
+  // never reaches here — `prepareError` below already explains why.
   const submit = async () => {
-    if (!prepared || !prepared.ok) {
-      setError(
-        prepared && !prepared.ok
-          ? {
-              missing_skill_md: t(($) => $.create.local.missing_skill_md),
-              too_large: t(($) => $.create.local.too_large),
-              empty: t(($) => $.create.local.empty),
-              too_many_files: t(($) => $.create.local.too_many_files),
-            }[prepared.error]
-          : t(($) => $.create.local.pick_hint),
-      );
-      return;
-    }
+    if (!prepared?.ok) return;
     setLoading(true);
     setError("");
     try {
@@ -539,11 +528,32 @@ function LocalForm({
           </div>
         )}
 
-        {!preparing && !prepared && (
-          <p className="text-caption text-muted-foreground">
-            {t(($) => $.create.local.pick_hint)}
-          </p>
-        )}
+        {/* Source pickers belong in the body: four buttons in the footer
+            overflow the dialog width and clip Cancel (MUL-6794). */}
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={onChooseFolder}
+            disabled={loading || preparing}
+          >
+            <FolderOpen className="h-3 w-3" />
+            {t(($) => $.create.local.choose_folder)}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="w-full"
+            onClick={onChooseArchive}
+            disabled={loading || preparing}
+          >
+            <FileArchive className="h-3 w-3" />
+            {t(($) => $.create.local.choose_archive)}
+          </Button>
+        </div>
 
         {displayError && (
           <div
@@ -573,29 +583,9 @@ function LocalForm({
         </Button>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
-          onClick={onChooseArchive}
-          disabled={loading || preparing}
-        >
-          <FileArchive className="h-3 w-3" />
-          {t(($) => $.create.local.choose_archive)}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onChooseFolder}
-          disabled={loading || preparing}
-        >
-          <FolderOpen className="h-3 w-3" />
-          {t(($) => $.create.local.choose_folder)}
-        </Button>
-        <Button
-          type="button"
           size="sm"
           onClick={submit}
-          disabled={loading || preparing}
+          disabled={!prepared?.ok || loading || preparing}
         >
           {loading ? (
             <>
@@ -731,7 +721,7 @@ export function CreateSkillDialog({
       >
         {/* Header */}
         <div className="flex shrink-0 items-start justify-between gap-3 border-b px-5 pt-4 pb-3">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-start gap-2 min-w-0">
             {method !== "chooser" && (
               <Tooltip>
                 <TooltipTrigger
@@ -742,7 +732,7 @@ export function CreateSkillDialog({
                         resetLocal();
                         setMethod("chooser");
                       }}
-                      className="-ml-1 rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
+                      className="-ml-1 mt-px rounded-sm p-1 text-faint-foreground transition-colors hover:bg-accent/60 hover:text-muted-foreground"
                       aria-label={t(($) => $.create.back_aria)}
                     >
                       <ArrowLeft className="h-3.5 w-3.5" />

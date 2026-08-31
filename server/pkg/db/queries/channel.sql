@@ -1204,12 +1204,3 @@ SELECT EXISTS (
       AND workspace_id = @workspace_id
       AND url = @storage_url
 ) AS referenced;
-
--- name: CountChannelMediaPendingObjects :one
--- Ledger backlog gauge for the reconciler's observability. Tombstones are
--- reported separately: they are bounded bookkeeping for already-deleted
--- objects, not a backlog of objects awaiting reclaim.
-SELECT
-    count(*) FILTER (WHERE state <> 'tombstoned') AS pending_objects,
-    count(*) FILTER (WHERE state = 'tombstoned') AS tombstoned_objects
-FROM channel_media_pending_object;

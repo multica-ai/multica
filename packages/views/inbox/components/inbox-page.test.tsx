@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { ApiError } from "@multica/core/api";
 import type { InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { InboxPage } from "./inbox-page";
@@ -67,6 +68,11 @@ const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
 const retrySourceContextMutateAsync = vi.fn();
+const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
+
+vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
+  useIssueLimitUpgradePrompt: () => showIssueLimitUpgradePrompt,
+}));
 
 vi.mock("@multica/core/inbox/mutations", () => {
   const mutation = () => ({ mutate: vi.fn() });
@@ -220,6 +226,7 @@ function reset() {
   unarchiveMutate.mockClear();
   retrySourceContextMutateAsync.mockReset();
   retrySourceContextMutateAsync.mockResolvedValue({});
+  showIssueLimitUpgradePrompt.mockClear();
   modalState.modal = null;
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
@@ -474,6 +481,38 @@ describe("InboxPage", () => {
     await act(async () => undefined);
     expect(retrySourceContextMutateAsync).toHaveBeenCalledWith("task-1");
     expect(toast.success).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows issue-limit recovery when a source-context retry is rejected", async () => {
+    reset();
+    retrySourceContextMutateAsync.mockRejectedValue(
+      new ApiError(
+        "workspace has reached its issue limit",
+        402,
+        "Payment Required",
+        { code: "issue_limit_reached" },
+      ),
+    );
+    listData.active = [
+      item({
+        id: "source-context-limit",
+        issue_id: null,
+        type: "quick_create_failed",
+        details: {
+          task_id: "task-1",
+          source_context_id: "context-1",
+          original_prompt: "make a child",
+        },
+      }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent.click(screen.getByTestId("row"));
+    fireEvent.click(screen.getByTestId("retry-source-context"));
+
+    await act(async () => undefined);
+    expect(showIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("marks the opened notification read", () => {

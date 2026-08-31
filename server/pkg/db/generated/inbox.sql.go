@@ -78,17 +78,18 @@ WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $
   AND i.issue_id IN (
     SELECT id FROM issue
     WHERE workspace_id = $1
-      AND issue_effective_status(workspace_id, status) IN ('done', 'cancelled')
+      AND status = ANY($3::text[])
   )
 `
 
 type ArchiveCompletedInboxParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	RecipientID pgtype.UUID `json:"recipient_id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	RecipientID        pgtype.UUID `json:"recipient_id"`
+	TerminalStatusKeys []string    `json:"terminal_status_keys"`
 }
 
 func (q *Queries) ArchiveCompletedInbox(ctx context.Context, arg ArchiveCompletedInboxParams) (int64, error) {
-	result, err := q.db.Exec(ctx, archiveCompletedInbox, arg.WorkspaceID, arg.RecipientID)
+	result, err := q.db.Exec(ctx, archiveCompletedInbox, arg.WorkspaceID, arg.RecipientID, arg.TerminalStatusKeys)
 	if err != nil {
 		return 0, err
 	}

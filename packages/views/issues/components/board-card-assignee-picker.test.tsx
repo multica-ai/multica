@@ -97,6 +97,7 @@ const navigation: NavigationAdapter = {
   back: vi.fn(),
   pathname: "/acme/issues",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (path) => `https://app.example${path}`,
 };
 

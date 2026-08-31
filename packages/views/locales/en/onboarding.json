@@ -61,7 +61,8 @@
     "eyebrow": "Quick question",
     "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
     "submit": "Submit",
-    "hint_ready": "Looks good. Hit Submit when you're ready."
+    "hint_ready": "Looks good. Hit Submit when you're ready.",
+    "save_failed_toast": "Failed to save"
   },
   "questions": {
     "about_you": {

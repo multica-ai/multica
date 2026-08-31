@@ -44,6 +44,7 @@ vi.mock("../navigation", () => ({
   useNavigation: () => ({
     replace: mockReplace,
     searchParams: searchRef.current,
+    hash: "",
     pathname: "/billing/return",
   }),
 }));

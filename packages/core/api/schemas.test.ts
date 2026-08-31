@@ -167,6 +167,35 @@ describe("ChatSessionSchema", () => {
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  // A custom status key can be derived rather than readable — "客户确认" becomes
+  // `in_review_2` — so the display name travels with it. The field has to
+  // survive a server that predates it, since an issue that fails validation
+  // degrades to a stub rather than losing one field. (MUL-6749)
+  it("carries a custom status's display name", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, status: "in_review_2", status_name: "客户确认" }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.status_name).toBe("客户确认");
+  });
+  it("drops only a malformed status_name, keeping the issue and the list", () => {
+    for (const bad of [42, { name: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, status: "in_review_2", status_name: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.status).toBe("in_review_2");
+      expect(parsed.issues[0]?.status_name).toBeUndefined();
+    }
+  });
+  it("still parses an issue from a server that does not send status_name", () => {
+    const { status_name: _omitted, ...withoutName } = { ...baseIssue, status_name: "x" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
   it("keeps the issue while independently dropping a malformed source context", () => {
     const parsed = ListIssuesResponseSchema.parse({
       issues: [{ ...baseIssue, source_context: { snapshot: "bad" } }],
