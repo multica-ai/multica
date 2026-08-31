@@ -95,7 +95,7 @@ func TestCursorExecuteSendsPromptOnStdinNotArgv(t *testing.T) {
 
 	// The fixed, content-free flags must still be present.
 	joined := strings.Join(argv, " ")
-	for _, want := range []string{"-p", "--output-format", "stream-json", "--yolo"} {
+	for _, want := range []string{"-p", "--output-format", "stream-json", "--yolo", "--trust"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in argv, got %v", want, argv)
 		}
