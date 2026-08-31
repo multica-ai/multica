@@ -29,7 +29,7 @@ import (
 func TestIsolatedCheckoutIsCommittableOnWindows(t *testing.T) {
 	t.Parallel()
 	sourceRepo := createTestRepo(t)
-	cache := New(t.TempDir(), testLogger())
+	cache := New(t.TempDir(), testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestIsolatedCheckoutAcrossVolumesOnWindows(t *testing.T) {
 	workDir := tempDirOnOtherVolume(t, cacheRoot)
 
 	sourceRepo := createTestRepo(t)
-	cache := New(cacheRoot, testLogger())
+	cache := New(cacheRoot, testLogger(), 0)
 	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("sync failed: %v", err)
 	}
