@@ -6,6 +6,7 @@ import type { Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/cor
 import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
+import { getShortcutPlatform } from "@multica/core/shortcuts";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import {
   DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
@@ -2641,6 +2642,226 @@ describe("IssueDetail (shared)", () => {
         ),
       );
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Back-to-top / jump-to-bottom quick jump (#6959)
+// ---------------------------------------------------------------------------
+
+describe("IssueDetail top/bottom quick jump (#6959)", () => {
+  // This describe sits outside the shared one above, so it carries its own
+  // copy of the API mock defaults those tests rely on.
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockViewport.isMobile = false;
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    mockApiObj.listTimeline.mockResolvedValue(mockTimeline);
+    mockApiObj.listIssueReactions.mockResolvedValue([]);
+    mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+    mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
+    mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
+    mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
+    mockApiObj.listProperties.mockResolvedValue({ properties: [], total: 0 });
+    mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
+    mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
+    mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
+    mockApiObj.listMembers.mockResolvedValue([
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+    ]);
+    mockApiObj.listAgents.mockResolvedValue([]);
+    mockApiObj.getProject.mockReset();
+  });
+
+  const scrollContainerEl = () =>
+    document.querySelector<HTMLElement>("[data-tab-scroll-root]");
+
+  // jsdom has no layout: scrollHeight is 0 and clientHeight is 0. Stub the
+  // extent so the near-end gate has something to measure; a scrollTop strictly
+  // between the ends keeps both buttons visible, and clientHeight staying 0
+  // keeps the deep-link centering (which subtracts clientHeight/2) a no-op.
+  function stubScrollExtent(
+    el: HTMLElement,
+    { scrollTop = 500, scrollHeight = 1000 }: { scrollTop?: number; scrollHeight?: number } = {},
+  ) {
+    Object.defineProperty(el, "scrollHeight", {
+      configurable: true,
+      value: scrollHeight,
+    });
+    el.scrollTop = scrollTop;
+  }
+
+  // The global keydown handlers and the find hook treat a container with no
+  // client rects as off-screen and skip the key; jsdom reports empty rect
+  // lists, so fake a non-empty one for the visibility gate.
+  function stubVisibleRect(el: HTMLElement) {
+    Object.defineProperty(el, "getClientRects", {
+      configurable: true,
+      value: () => [
+        {
+          top: 0,
+          right: 100,
+          bottom: 100,
+          left: 0,
+          width: 100,
+          height: 100,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        },
+      ],
+    });
+  }
+
+  const topButton = () => screen.getByRole("button", { name: "Back to top" });
+  const bottomButton = () => screen.getByRole("button", { name: "Jump to bottom" });
+
+  it("mounts the button pair and keeps both hidden while the timeline rests at an end", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+
+    // jsdom metrics are zero → the document sits at BOTH ends → each button is
+    // mounted but aria-hidden (dropped from the a11y tree and tab order). The
+    // buttons are siblings of the scroll container (both ride the right-edge
+    // strip), so they live on `document`, not inside `[data-tab-scroll-root]`.
+    const top = document.querySelector('[aria-label="Back to top"]');
+    const bottom = document.querySelector('[aria-label="Jump to bottom"]');
+    expect(top).not.toBeNull();
+    expect(bottom).not.toBeNull();
+    expect(top).toHaveAttribute("aria-hidden", "true");
+    expect(bottom).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it("fades each button out when the timeline reaches its end", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+
+    stubScrollExtent(container, { scrollTop: 0, scrollHeight: 1000 });
+    fireEvent.scroll(container);
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="Back to top"]')).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+      expect(document.querySelector('[aria-label="Jump to bottom"]')).not.toHaveAttribute(
+        "aria-hidden",
+      );
+    });
+
+    stubScrollExtent(container, { scrollTop: 1000, scrollHeight: 1000 });
+    fireEvent.scroll(container);
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="Back to top"]')).not.toHaveAttribute(
+        "aria-hidden",
+      );
+      expect(document.querySelector('[aria-label="Jump to bottom"]')).toHaveAttribute(
+        "aria-hidden",
+        "true",
+      );
+    });
+  });
+
+  it("jumps to the top by zeroing the container's scrollTop", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+    stubScrollExtent(container);
+    fireEvent.scroll(container);
+    await waitFor(() => expect(topButton()).toBeVisible());
+
+    fireEvent.click(topButton());
+    expect(container.scrollTop).toBe(0);
+  });
+
+  it("jumps to the bottom through Virtuoso in the virtualized mode", async () => {
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+    stubScrollExtent(container);
+    fireEvent.scroll(container);
+    await waitFor(() => expect(bottomButton()).toBeVisible());
+
+    fireEvent.click(bottomButton());
+
+    // Double jump mirrors the posted-comment landing: first on estimated row
+    // heights, then once Virtuoso measures the real ones.
+    await waitFor(() => {
+      expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(scrollToIndexSpy).toHaveBeenNthCalledWith(1, {
+      index: 1,
+      align: "end",
+      offset: 0,
+    });
+    expect(scrollToIndexSpy).toHaveBeenNthCalledWith(2, {
+      index: 1,
+      align: "end",
+      offset: 0,
+    });
+    expect(scrollIntoViewSpy).not.toHaveBeenCalled();
+  });
+
+  it("jumps to the bottom by setting scrollTop when the timeline renders flat", async () => {
+    // A deep link forces the flat (non-virtualized) render — the same
+    // `isFlatTimeline` branch an open find bar takes.
+    renderIssueDetailWithHighlight("comment-2");
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+    // The deep-link landing drives scrollTop on mount; let its single rAF
+    // frame settle before we stub our own scroll geometry.
+    await waitFor(() => {
+      expect(
+        hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+      ).toBe(true);
+    });
+    stubScrollExtent(container, { scrollTop: 500, scrollHeight: 1000 });
+    fireEvent.scroll(container);
+    await waitFor(() => expect(bottomButton()).toBeVisible());
+
+    fireEvent.click(bottomButton());
+    expect(container.scrollTop).toBe(container.scrollHeight);
+  });
+
+  it("jumps on Mod+Home / Mod+End while the detail is on screen", async () => {
+    // The default chords are primary-chorded (Meta on macOS, Ctrl elsewhere);
+    // build the key event for whatever platform the runner detects.
+    const primary = getShortcutPlatform() === "macos" ? "metaKey" : "ctrlKey";
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+    stubScrollExtent(container);
+    stubVisibleRect(container);
+    fireEvent.scroll(container);
+    await waitFor(() => expect(bottomButton()).toBeVisible());
+
+    fireEvent.keyDown(document, { key: "Home", [primary]: true });
+    expect(container.scrollTop).toBe(0);
+
+    stubScrollExtent(container);
+    fireEvent.keyDown(document, { key: "End", [primary]: true });
+    await waitFor(() => {
+      expect(scrollToIndexSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(scrollToIndexSpy).toHaveBeenNthCalledWith(1, {
+      index: 1,
+      align: "end",
+      offset: 0,
+    });
+  });
+
+  it("does not fire the jump when the detail is not on screen", async () => {
+    const primary = getShortcutPlatform() === "macos" ? "metaKey" : "ctrlKey";
+    renderIssueDetail();
+    await screen.findByText("Implement authentication");
+    const container = scrollContainerEl()!;
+    container.scrollTop = 500;
+
+    // No visible-rect stub → the visibility gate swallows the chord.
+    fireEvent.keyDown(document, { key: "Home", [primary]: true });
+    expect(container.scrollTop).toBe(500);
   });
 });
 

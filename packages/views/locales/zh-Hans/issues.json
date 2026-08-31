@@ -396,6 +396,8 @@
     "unpin_tooltip": "从侧边栏取消固定",
     "thread_nav_label": "快速跳转到讨论",
     "thread_nav_resolved_label": "{{title}}（已解决）",
+    "scroll_to_top": "回到顶部",
+    "scroll_to_bottom": "跳到底部",
     "thread_nav": {
       "button_label_other": "讨论（{{count}}）",
       "search_placeholder": "搜索讨论或作者",

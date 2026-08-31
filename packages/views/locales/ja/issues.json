@@ -398,6 +398,8 @@
     "unpin_tooltip": "サイドバーのピン留めを解除",
     "thread_nav_label": "スレッドへ移動",
     "thread_nav_resolved_label": "{{title}}（解決済み）",
+    "scroll_to_top": "先頭へ戻る",
+    "scroll_to_bottom": "最下部へ移動",
     "thread_nav": {
       "button_label_other": "スレッド（{{count}}）",
       "search_placeholder": "スレッド・作成者を検索",

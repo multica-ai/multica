@@ -187,6 +187,14 @@
         "label": "스레드 내비게이터 열기",
         "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다."
       },
+      "scrollToTop": {
+        "label": "맨 위로 스크롤",
+        "description": "열려 있는 이슈의 타임라인을 맨 위로 스크롤합니다."
+      },
+      "scrollToBottom": {
+        "label": "맨 아래로 스크롤",
+        "description": "열려 있는 이슈의 타임라인을 맨 아래(최신 활동)로 스크롤합니다."
+      },
       "archiveInboxItem": {
         "label": "알림 보관",
         "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."

@@ -402,6 +402,8 @@
     "unpin_tooltip": "Unpin from sidebar",
     "thread_nav_label": "Jump to comment thread",
     "thread_nav_resolved_label": "{{title}} (resolved)",
+    "scroll_to_top": "Back to top",
+    "scroll_to_bottom": "Jump to bottom",
     "thread_nav": {
       "button_label_one": "Comment threads ({{count}})",
       "button_label_other": "Comment threads ({{count}})",
