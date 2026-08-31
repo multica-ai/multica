@@ -29,27 +29,10 @@ const (
 	defaultSamplerQueryTimeout = 500 * time.Millisecond
 	samplerRowLimit            = 100
 
-	// Active-user / active-workspace DB windows. Keep this DB-sampled path
-	// to the short window only: PR2's counters do not carry user/workspace
-	// IDs, so PromQL cannot derive distinct 1h/24h active estimates without
-	// adding high-cardinality labels. Long-window actives need a separate
-	// counter-derived aggregation, not expanding this sampler over history.
-	windowFiveMinutes = "5m"
-
 	// A running task is considered "stuck" once started_at is older
 	// than this. Matches the Grafana board threshold from MUL-2328.
 	stuckRunningInterval = "30 minutes"
 )
-
-// samplerWindows is the canonical list emitted on every scrape. The slice
-// (rather than ranging a map) is intentional: order is stable in
-// /metrics output, which keeps diffs readable and golden tests honest.
-var samplerWindows = []struct {
-	label string
-	d     time.Duration
-}{
-	{windowFiveMinutes, 5 * time.Minute},
-}
 
 // samplerQueries is the canonical query registry. The refresh deadline and
 // execution loop both derive from it so adding or removing a query cannot
@@ -58,8 +41,6 @@ var samplerQueries = []struct {
 	name string
 	run  func(*BusinessSamplerCollector, context.Context, pgx.Tx, *samplerSnapshot) error
 }{
-	{"active_users", (*BusinessSamplerCollector).queryActiveUsers},
-	{"active_workspaces", (*BusinessSamplerCollector).queryActiveWorkspaces},
 	{"task_queued", (*BusinessSamplerCollector).queryTaskQueued},
 	{"task_running", (*BusinessSamplerCollector).queryTaskRunning},
 	{"task_stuck", (*BusinessSamplerCollector).queryTaskStuck},
@@ -120,12 +101,10 @@ type BusinessSamplerCollector struct {
 	// the values are computed once per scrape from a fresh DB read; we
 	// never want stale series sticking around because a label has stopped
 	// appearing in the result set.
-	descActiveUsers      *prometheus.Desc
-	descActiveWorkspaces *prometheus.Desc
-	descTaskQueued       *prometheus.Desc
-	descTaskRunning      *prometheus.Desc
-	descTaskStuck        *prometheus.Desc
-	descWorkspaceTotal   *prometheus.Desc
+	descTaskQueued     *prometheus.Desc
+	descTaskRunning    *prometheus.Desc
+	descTaskStuck      *prometheus.Desc
+	descWorkspaceTotal *prometheus.Desc
 
 	mu       sync.Mutex
 	snapshot *samplerSnapshot
@@ -167,14 +146,6 @@ func NewBusinessSamplerCollector(opts *BusinessSamplerOptions) *BusinessSamplerC
 			Help:      "Per-query error count. Includes statement_timeout cancellations, which are the expected outcome of a hung database and the smoking gun for SET LOCAL working as intended.",
 		}, []string{"name"}),
 
-		descActiveUsers: prometheus.NewDesc(
-			"multica_active_users",
-			"Distinct users with chat / task activity in the rolling window. Sampled from the database; stale up to the sampler cache TTL.",
-			[]string{"window"}, nil),
-		descActiveWorkspaces: prometheus.NewDesc(
-			"multica_active_workspaces",
-			"Distinct workspaces with chat / task activity in the rolling window. Sampled from the database.",
-			[]string{"window"}, nil),
 		descTaskQueued: prometheus.NewDesc(
 			"multica_agent_task_queued",
 			"Current agent_task_queue rows in `queued` status by inferred source. Sampled from the database.",
@@ -212,8 +183,6 @@ func (c *BusinessSamplerCollector) Describe(ch chan<- *prometheus.Desc) {
 		return
 	}
 	for _, d := range []*prometheus.Desc{
-		c.descActiveUsers,
-		c.descActiveWorkspaces,
 		c.descTaskQueued,
 		c.descTaskRunning,
 		c.descTaskStuck,
@@ -267,13 +236,6 @@ func (c *BusinessSamplerCollector) maybeRefresh() *samplerSnapshot {
 // emit walks a snapshot and writes one prometheus.Metric per (desc, labels)
 // pair. Pure data-shaping; no DB or locking.
 func (c *BusinessSamplerCollector) emit(ch chan<- prometheus.Metric, snap *samplerSnapshot) {
-	for _, w := range samplerWindows {
-		ch <- prometheus.MustNewConstMetric(
-			c.descActiveUsers, prometheus.GaugeValue, snap.activeUsers[w.label], w.label)
-		ch <- prometheus.MustNewConstMetric(
-			c.descActiveWorkspaces, prometheus.GaugeValue, snap.activeWorkspaces[w.label], w.label)
-	}
-
 	// Always emit at least one zero-valued series for queued/running per
 	// known source so dashboards don't show "no data" right after a
 	// process restart. Real values overwrite the zero; missing sources
@@ -322,9 +284,6 @@ type taskRunningKey struct {
 type samplerSnapshot struct {
 	takenAt time.Time
 
-	activeUsers      map[string]float64
-	activeWorkspaces map[string]float64
-
 	taskQueued  map[string]float64
 	taskRunning map[taskRunningKey]float64
 	taskStuck   map[string]float64
@@ -335,12 +294,10 @@ type samplerSnapshot struct {
 
 func newSamplerSnapshot(t time.Time) *samplerSnapshot {
 	return &samplerSnapshot{
-		takenAt:          t,
-		activeUsers:      map[string]float64{},
-		activeWorkspaces: map[string]float64{},
-		taskQueued:       map[string]float64{},
-		taskRunning:      map[taskRunningKey]float64{},
-		taskStuck:        map[string]float64{},
+		takenAt:     t,
+		taskQueued:  map[string]float64{},
+		taskRunning: map[taskRunningKey]float64{},
+		taskStuck:   map[string]float64{},
 	}
 }
 

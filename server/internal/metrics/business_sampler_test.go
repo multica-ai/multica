@@ -41,9 +41,6 @@ func newTestSampler(t *testing.T, refresh func(ctx context.Context, now time.Tim
 
 func filledSnapshot(now time.Time) *samplerSnapshot {
 	snap := newSamplerSnapshot(now)
-	snap.activeUsers[windowFiveMinutes] = 7
-	snap.activeWorkspaces[windowFiveMinutes] = 3
-
 	snap.taskQueued["chat"] = 5
 	snap.taskQueued["issue"] = 2
 
@@ -76,8 +73,6 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 	body := rec.Body.String()
 
 	wantSubstrings := []string{
-		`multica_active_users{window="5m"} 7`,
-		`multica_active_workspaces{window="5m"} 3`,
 		`multica_agent_task_queued{source="chat"} 5`,
 		`multica_agent_task_queued{source="issue"} 2`,
 		// Zero series for sources that didn't appear in the snapshot.
@@ -94,10 +89,8 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 		}
 	}
 	for _, removed := range []string{
-		`multica_active_users{window="1h"}`,
-		`multica_active_users{window="24h"}`,
-		`multica_active_workspaces{window="1h"}`,
-		`multica_active_workspaces{window="24h"}`,
+		`multica_active_users`,
+		`multica_active_workspaces`,
 		`multica_runtime_online`,
 		`multica_runtime_heartbeat_age_seconds`,
 	} {
@@ -115,7 +108,7 @@ func TestBusinessSamplerSelfIntrospectionHistogramIsExposed(t *testing.T) {
 	c := newTestSampler(t, func(ctx context.Context, refreshAt time.Time) *samplerSnapshot {
 		return newSamplerSnapshot(refreshAt)
 	})
-	c.queryDuration.WithLabelValues("active_users").Observe(0.012)
+	c.queryDuration.WithLabelValues("task_queued").Observe(0.012)
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(c.Collectors()...)
@@ -123,7 +116,7 @@ func TestBusinessSamplerSelfIntrospectionHistogramIsExposed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	NewHandler(registry).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	body := rec.Body.String()
-	if !strings.Contains(body, `multica_business_sampler_query_seconds_count{name="active_users"} 1`) {
+	if !strings.Contains(body, `multica_business_sampler_query_seconds_count{name="task_queued"} 1`) {
 		t.Fatalf("query duration histogram missing\n%s", body)
 	}
 }
@@ -167,7 +160,7 @@ func TestBusinessSamplerCollectorCachesSnapshot(t *testing.T) {
 // TestBusinessSamplerCollectorBoundedCardinality is the cardinality canary.
 // Even with a malicious snapshot that mentions many distinct labels, the
 // sampler must collapse them into the BusinessMetrics whitelist plus
-// known-window zeros. This protects /metrics from a per-runtime or
+// known-label zero series. This protects /metrics from a per-runtime or
 // per-workspace explosion.
 func TestBusinessSamplerCollectorBoundedCardinality(t *testing.T) {
 	now := time.Date(2026, 6, 3, 12, 0, 0, 0, time.UTC)
@@ -226,6 +219,7 @@ func TestBusinessSamplerCollectorDisabledWithoutOptions(t *testing.T) {
 	body := rec.Body.String()
 	for _, forbidden := range []string{
 		"multica_active_users",
+		"multica_active_workspaces",
 		"multica_agent_task_queued",
 		"multica_agent_task_running",
 		"multica_business_sampler_query_seconds",
