@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "还没有自动化",
-      "hint": "为你的智能体安排周期性 task。从模板选一个，或从空白开始。"
+      "hint": "为你的智能体安排周期性工作任务。从模板选一个，或从空白开始。"
     },
     "scope_all": "全部",
     "no_matches": "没有匹配的自动化",
@@ -31,7 +31,7 @@
     "archived": "已归档"
   },
   "execution_mode": {
-    "create_issue": "创建任务",
+    "create_issue": "创建工作项",
     "run_only": "仅运行"
   },
   "relative_date": {
@@ -84,7 +84,7 @@
     "run_blocked_attribution": "未触发——无法确定本次运行的负责成员",
     "run_blocked_already_active": "未触发——最近已有一次运行覆盖了本次",
     "run_blocked_quota_exceeded": "未触发——本周期的运行额度已用尽",
-    "run_blocked_issue_limit_reached": "未触发——工作区任务总数已达到上限",
+    "run_blocked_issue_limit_reached": "未触发——工作区工作项总数已达到上限",
     "run_blocked_generic": "未触发——本次运行已被拦截",
     "section_properties": "属性",
     "section_triggers": "触发器",
@@ -128,7 +128,7 @@
     "owner_note": "创建者和工作区管理员始终拥有访问权限。"
   },
   "run_status": {
-    "issue_created": "已创建任务",
+    "issue_created": "已创建工作项",
     "running": "运行中",
     "skipped": "已跳过",
     "completed": "已完成",
@@ -141,7 +141,7 @@
     "api": "API"
   },
   "run": {
-    "issue_linked": "已关联任务",
+    "issue_linked": "已关联工作项",
     "view_log": "查看执行日志",
     "skipped_group": {
       "label": "已跳过",
@@ -259,7 +259,7 @@
     "sr_edit": "编辑自动化",
     "header_create": "新建自动化",
     "header_edit": "编辑自动化",
-    "subtitle": "周期性的 AI task",
+    "subtitle": "周期性的 AI 工作任务",
     "expand": "展开",
     "collapse": "收起",
     "close": "关闭",
@@ -290,7 +290,7 @@
     "no_project": "不关联项目",
     "section_output_mode": "输出模式",
     "section_subscribers": "订阅者",
-    "subscribers_hint": "每次跑出来的任务默认订阅",
+    "subscribers_hint": "每次跑出来的工作项默认订阅",
     "subscribers_empty": "暂无订阅者——添加成员后，每次触发都会通知到他",
     "subscribers_add": "添加订阅者",
     "subscribers_search_placeholder": "按名称搜索成员……",
@@ -321,12 +321,12 @@
     "error_assignee_required": "请选择运行该自动化的智能体或小队。",
     "output_modes": {
       "create_issue": {
-        "label": "创建任务",
-        "description": "每次运行都创建一个可追踪的任务"
+        "label": "创建工作项",
+        "description": "每次运行都创建一个可追踪的工作项"
       },
       "run_only": {
         "label": "仅运行",
-        "description": "静默运行，不创建任务"
+        "description": "静默运行，不创建工作项"
       }
     }
   },

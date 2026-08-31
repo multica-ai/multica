@@ -111,30 +111,30 @@ This is the **mandatory** glossary for every translation PR. It used to live at 
 
 Multica's product nouns split into two categories:
 
-- **Everyday noun** — the word a user would say out loud for it. **Translate fully**, whether or not it is a database entity: `issue` → 任务, `workspace` → 工作区, `project` → 项目.
+- **Everyday noun** — the word a user would say out loud for it. **Translate fully**, whether or not it is a database entity: `issue` → 工作项, `workspace` → 工作区, `project` → 项目.
 - **Multica-specific term** — a concept no local word carries (`skill`), or a schema-level identifier a user may have to type or match (`todo`, `in_progress`, `task_id`). Render as **lowercase English** so it reads like a type name.
 
 The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. They still carry the old English `issue` in prose and are being swept separately — follow the table below, not those pages, for this term.
 
-### `issue` is the product's task — translate it
+### `issue` and `task` are different nouns — translate both in Chinese
 
-`issue` is the English product name for the thing a user files and an agent works on. In every other locale it is **the everyday word for "task"**:
+`issue` is the English product name for the thing a user files and an agent works on. `task` is one agent execution run of that issue. Both are user-visible, and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word.
 
 | Entity | en | zh-Hans | ja | ko |
 | --- | --- | --- | --- | --- |
-| the filed unit of work (`issue`) | Issue | **任务** | **タスク** | **태스크** |
-| one agent execution run (`task`) | Task | `task` | **作業** | **작업** |
+| the filed unit of work (`issue`) | Issue | **工作项** | **タスク** | **태스크** |
+| one agent execution run (`task`) | Task | **工作任务** | **作業** | **작업** |
 
-Both nouns are user-visible and they are **not** the same thing — an issue can carry many runs. Never let one locale spell both with the same word, which is why the run keeps a visually distinct form in each locale.
+Chinese used to render `issue` as 任务 and leave `task` in English. That pair collides for Chinese users: 任务 is also how people read "Task", so the board entity and the agent run look like the same word. **工作项** / **工作任务** keeps both as everyday Chinese while remaining visually distinct.
 
 What does not move:
 
 - **API / DB fields** stay `issue` / `task` / `skill` everywhere: `issue_status`, `task_id`, `skill_uuid`.
 - **Code references and literal commands** stay English: `multica issue ...`, the `/issue` Slack and Lark slash command.
 - **`skill`** keeps lowercase English in Chinese text — a Multica-specific concept with no established Chinese term; titles may capitalize as `Skills`.
-- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常`, not `任务`.
+- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常`, not `工作项`.
 
-**Why `issue` is translated while `skill` is not**: users file and read issues all day, and "issue" has no meaning in Chinese, Japanese, or Korean outside of dev jargon. The everyday task word is what people already say for this. `skill` is a Multica-specific concept where no local word carries the meaning.
+**Why `issue` is translated while `skill` is not**: users file and read issues all day, and "issue" has no meaning in Chinese, Japanese, or Korean outside of dev jargon. Chinese names the filed unit of work 工作项 and the run 工作任务. `skill` is a Multica-specific concept where no local word carries the meaning.
 
 Other product nouns follow the same "translate what has a settled local word" test:
 
@@ -212,7 +212,7 @@ In UI, surface them in English (optionally `code-style` wrapped):
 
 Always put **a single space** between an English word (entity / brand / acronym) and surrounding Chinese:
 
-- "Create new issue" → "新建任务"（`任务` is Chinese, so no space)
+- "Create new issue" → "新建工作项"（`工作项` is Chinese, so no space)
 - "Assign to agent" → "分配给智能体"
 - "Configure runtime" → "配置运行时"
 - "Stop daemon" → "停止守护进程"
@@ -230,13 +230,14 @@ i18next uses `_one` / `_other`; Chinese has no grammatical number, only fill `_o
 
 // zh-Hans/issues.json
 {
-  "issue_count_other": "{{count}} 个任务"
+  "issue_count_other": "{{count}} 个工作项"
 }
 ```
 
 Common count formats:
 
-- `{{count}} issues` → `{{count}} 个任务`
+- `{{count}} issues` → `{{count}} 个工作项`
+- `{{count}} tasks` → `{{count}} 个工作任务`
 - `{{count}} agents` → `{{count}} 个智能体`
 - `{{count}} workspaces` → `{{count}} 个工作区`
 - `{{count}} comments` → `{{count}} 条评论`
@@ -301,7 +302,7 @@ See `auth.json` for the canonical example (the `web` section contains `prefer_de
 - **Error messages**: gentle but clear. "无法保存修改" beats "保存修改失败了！".
 - **Buttons**: verb first, 2–4 characters. "取消"、"保存修改"、"立即同步".
 - **Tooltips**: full short sentence. "复制链接到剪贴板".
-- **Placeholders**: example-style. "输入任务标题...".
+- **Placeholders**: example-style. "输入工作项标题...".
 
 ### Where to look when in doubt
 

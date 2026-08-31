@@ -1,17 +1,17 @@
 {
   "status_catalog_error": {
     "title": "状态列表加载失败",
-    "hint": "没有它就无法应用状态筛选，因此暂时不显示议题。",
+    "hint": "没有它就无法应用状态筛选，因此暂时不显示工作项。",
     "retry": "重试"
   },
   "source_context": {
-    "create_action": "从这条评论创建子任务",
+    "create_action": "从这条评论创建子工作项",
     "preview_loading": "正在加载来源上下文预览...",
     "preview_failed": "来源预览不可用，请刷新后再创建。",
-    "preview_anchor_deleted": "来源评论已被删除，无法再基于该评论创建子任务。",
-    "preview_issue_deleted": "来源任务已删除，无法再基于其评论创建子任务。",
+    "preview_anchor_deleted": "来源评论已被删除，无法再基于该评论创建子工作项。",
+    "preview_issue_deleted": "来源工作项已删除，无法再基于其评论创建子工作项。",
     "refresh": "刷新",
-    "preview_summary_other": "来自 {{identifier}} 的上下文 · 任务描述 + {{count}} 条评论",
+    "preview_summary_other": "来自 {{identifier}} 的上下文 · 工作项描述 + {{count}} 条评论",
     "thread_history": "已捕获的评论线程历史",
     "source_comment": "来源评论",
     "comment_change_added": "捕获后新增",
@@ -30,22 +30,22 @@
     "source_changed": "来源在捕获后发生变化",
     "source_check_failed": "暂时无法检查当前来源",
     "captured_context_available": "已捕获上下文仍可查看。",
-    "issue_deleted": "来源任务已删除",
-    "issue_deleted_after_capture": "来源任务在捕获后被删除",
+    "issue_deleted": "来源工作项已删除",
+    "issue_deleted_after_capture": "来源工作项在捕获后被删除",
     "change_sentence": "{{content}}。",
     "changed": "变化项：",
     "confirmed_changes": "已确认的变化项：",
     "label_spacing": "",
-    "change_subject_issue_title": "任务标题",
-    "change_subject_issue_description": "任务描述",
-    "change_subject_issue_attachments": "任务附件",
+    "change_subject_issue_title": "工作项标题",
+    "change_subject_issue_description": "工作项描述",
+    "change_subject_issue_attachments": "工作项附件",
     "change_subject_comment_thread": "讨论",
-    "issue_attachments": "任务附件变化：",
+    "issue_attachments": "工作项附件变化：",
     "issue_attachment_added_count": "新增 {{count}}",
     "issue_attachment_replaced_count": "替换 {{count}}",
     "issue_attachment_removed_count": "移除 {{count}}",
-    "show_issue_attachment_details": "查看任务附件详情",
-    "hide_issue_attachment_details": "收起任务附件详情",
+    "show_issue_attachment_details": "查看工作项附件详情",
+    "hide_issue_attachment_details": "收起工作项附件详情",
     "issue_attachment_added_label": "新增：",
     "issue_attachment_replaced_label": "替换：",
     "issue_attachment_removed_label": "移除：",
@@ -58,7 +58,7 @@
     "author_left_workspace": "已不在工作区",
     "error_source_changed": "来源已发生变化。请检查刷新后的预览，再次提交。",
     "error_agent_unsupported": "此智能体运行时需要更新后才能使用已捕获上下文。请切换到手动模式或更新运行时。",
-    "error_server_unsupported": "服务端需要更新后才能创建带已捕获上下文的子任务。",
+    "error_server_unsupported": "服务端需要更新后才能创建带已捕获上下文的子工作项。",
     "error_too_large": "要捕获的来源上下文超过了服务端限制。",
     "error_comment_limit": "来源评论线程历史至少包含 {{count}} 条评论，上限为 256 条。",
     "error_text_limit": "来源文本为 {{size}} 字节，上限为 1 MiB。",
@@ -66,7 +66,7 @@
     "error_attachment_size_limit": "来源附件合计 {{size}} 字节，上限为 500 MiB。"
   },
   "revision": {
-    "conflict": "任务或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
+    "conflict": "工作项或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
     "compare_title": "标题存在并发修改，请比较两个版本。",
     "compare_description": "描述存在并发修改，请比较两个版本。",
     "compare_comment": "评论存在并发修改，请比较两个版本。",
@@ -76,11 +76,11 @@
     "use_server": "使用最新版本"
   },
   "page": {
-    "breadcrumb_title": "任务",
+    "breadcrumb_title": "工作项",
     "breadcrumb_workspace_fallback": "工作区",
-    "empty_title": "还没有任务",
-    "empty_hint": "创建一个任务开始使用。",
-    "move_failed": "移动任务失败"
+    "empty_title": "还没有工作项",
+    "empty_hint": "创建一个工作项开始使用。",
+    "move_failed": "移动工作项失败"
   },
   "status": {
     "backlog": "待规划",
@@ -104,11 +104,11 @@
   },
   "scope": {
     "all_label": "全部",
-    "all_description": "工作区内的全部任务",
+    "all_description": "工作区内的全部工作项",
     "members_label": "成员",
-    "members_description": "分配给成员的任务",
+    "members_description": "分配给成员的工作项",
     "agents_label": "智能体",
-    "agents_description": "分配给智能体的任务"
+    "agents_description": "分配给智能体的工作项"
   },
   "filters": {
     "tooltip": "筛选",
@@ -137,7 +137,7 @@
     "members_group": "成员",
     "agents_group": "智能体",
     "squads_group": "小队",
-    "issue_count_other": "{{count}} 个任务",
+    "issue_count_other": "{{count}} 个工作项",
     "reset": "重置全部筛选",
     "chip_remove": "移除{{name}}筛选",
     "chip_status_count_other": "{{count}} 个状态",
@@ -159,7 +159,7 @@
     "descending_title": "降序",
     "group_status": "状态",
     "group_assignee": "负责人",
-    "group_parent": "父级任务",
+    "group_parent": "父级工作项",
     "group_project": "项目",
     "sort_manual": "手动",
     "sort_status": "状态",
@@ -176,8 +176,8 @@
     "card_due_date": "截止日期",
     "card_project": "项目",
     "card_labels": "标签",
-    "card_child_progress": "子任务进度",
-    "show_sub_issues": "显示子任务"
+    "card_child_progress": "子工作项进度",
+    "show_sub_issues": "显示子工作项"
   },
   "view": {
     "tooltip_board": "看板视图",
@@ -193,22 +193,22 @@
     "swimlane": "泳道"
   },
   "table": {
-    "select_all": "选择所有可见任务",
+    "select_all": "选择所有可见工作项",
     "select_issue": "选择 {{identifier}}",
     "sort_ascending": "升序",
     "sort_descending": "降序",
-    "toggle_sub_issues": "展开或折叠子任务",
-    "rename_title": "重命名任务",
+    "toggle_sub_issues": "展开或折叠子工作项",
+    "rename_title": "重命名工作项",
     "empty_value": "空",
-    "quick_create_placeholder": "添加任务…",
+    "quick_create_placeholder": "添加工作项…",
     "quick_create_submit": "添加",
-    "quick_create_failed": "创建任务失败",
+    "quick_create_failed": "创建工作项失败",
     "no_value": "未设置",
     "unassigned": "未分配",
-    "empty": "当前视图没有匹配的任务。",
-    "search_placeholder": "搜索标题或任务编号…",
+    "empty": "当前视图没有匹配的工作项。",
+    "search_placeholder": "搜索标题或工作项编号…",
     "search_clear": "清除搜索",
-    "load_failed": "加载任务失败。",
+    "load_failed": "加载工作项失败。",
     "load_failed_retry": "重试",
     "load_more_failed_retry": "加载更多失败——重试",
     "load_more": "加载更多",
@@ -217,25 +217,25 @@
     "value_unavailable": "不可用的值",
     "group_property_unavailable": "用于分组的属性已不可用，分组已清除。",
     "hierarchy": "层级",
-    "hierarchy_description": "将子任务嵌套显示在父任务下方",
+    "hierarchy_description": "将子工作项嵌套显示在父工作项下方",
     "group_label": "分组",
     "group_active": "分组：{{group}}",
     "group_none": "不分组",
     "export": "导出",
     "export_all": "导出全部",
     "export_selected": "导出已选择（{{count}}）",
-    "export_success": "已导出 {{count}} 个任务",
-    "export_failed": "导出任务失败",
+    "export_success": "已导出 {{count}} 个工作项",
+    "export_failed": "导出工作项失败",
     "columns": {
       "section": "列",
-      "system_section": "任务属性",
+      "system_section": "工作项属性",
       "property_section": "自定义属性",
       "search_placeholder": "搜索列…",
       "no_results": "没有匹配的列",
       "add": "添加列",
       "hide": "隐藏列",
       "reorder": "重新排列 {{column}} 列",
-      "title": "任务",
+      "title": "工作项",
       "identifier": "编号",
       "status": "状态",
       "priority": "优先级",
@@ -246,7 +246,7 @@
       "due_date": "截止日期",
       "created_at": "创建时间",
       "updated_at": "更新时间",
-      "child_progress": "子任务进度",
+      "child_progress": "子工作项进度",
       "creator": "创建者"
     },
     "calculation": {
@@ -259,76 +259,76 @@
     }
   },
   "gantt": {
-    "header_issue": "任务",
+    "header_issue": "工作项",
     "zoom_day": "日",
     "zoom_week": "周",
     "zoom_month": "月",
     "show_completed": "显示已完成",
-    "empty": "暂无已排期的任务 — 给任意任务设置开始或截止日期，即可显示在时间轴上。",
+    "empty": "暂无已排期的工作项 — 给任意工作项设置开始或截止日期，即可显示在时间轴上。",
     "inverted_dates_warning": "开始日期晚于截止日期——已按区间最小/最大端绘制。"
   },
   "actor_issues": {
     "scope": {
       "assigned": {
         "label": "已分配",
-        "description": "分配给这个成员或智能体的任务"
+        "description": "分配给这个成员或智能体的工作项"
       },
       "created": {
         "label": "已创建",
-        "description": "这个成员或智能体创建的任务"
+        "description": "这个成员或智能体创建的工作项"
       }
     },
     "empty": {
       "assigned": {
-        "title": "没有已分配的任务",
-        "description": "分配到这里的任务会显示在此视图中。"
+        "title": "没有已分配的工作项",
+        "description": "分配到这里的工作项会显示在此视图中。"
       },
       "created": {
-        "title": "没有已创建的任务",
-        "description": "由这里创建的任务会显示在此视图中。"
+        "title": "没有已创建的工作项",
+        "description": "由这里创建的工作项会显示在此视图中。"
       }
     },
-    "search_placeholder": "搜索任务...",
-    "search_empty": "没有匹配的任务。"
+    "search_placeholder": "搜索工作项...",
+    "search_empty": "没有匹配的工作项。"
   },
   "list": {
-    "empty_status": "无任务",
-    "add_issue_tooltip": "新建任务"
+    "empty_status": "无工作项",
+    "add_issue_tooltip": "新建工作项"
   },
   "swimlane": {
     "no_parent": "无父级",
     "other_parents": "其他父级",
     "no_project": "无项目",
     "no_assignee": "未分配",
-    "open_parent": "打开父级任务",
+    "open_parent": "打开父级工作项",
     "toggle_collapse": "切换泳道"
   },
   "board": {
     "hidden_columns_label": "隐藏的列",
     "hide_column": "隐藏列",
     "show_column": "显示列",
-    "add_issue_tooltip": "新建任务",
-    "empty_column": "无任务",
-    "empty_grouping": "没有匹配的任务",
+    "add_issue_tooltip": "新建工作项",
+    "empty_column": "无工作项",
+    "empty_grouping": "没有匹配的工作项",
     "no_value": "未设置",
     "ordered_by": "按{{field}}排序"
   },
   "detail": {
-    "not_found": "这个任务不存在或已在该工作区被删除。",
+    "not_found": "这个工作项不存在或已在该工作区被删除。",
     "breadcrumb_project_unknown": "未知项目",
     "back": "返回",
-    "title_placeholder": "任务标题",
+    "title_placeholder": "工作项标题",
     "desc_placeholder": "添加描述...",
-    "current_issue": "当前任务",
-    "sub_issues_label": "子任务",
-    "sub_issue_of": "属于父任务",
-    "add_sub_issues": "添加子任务",
-    "add_sub_issue_tooltip": "添加子任务",
-    "add_sub_issue_aria": "添加子任务",
-    "select_all_sub_issues_aria": "全选子任务",
+    "current_issue": "当前工作项",
+    "sub_issues_label": "子工作项",
+    "sub_issue_of": "属于父工作项",
+    "add_sub_issues": "添加子工作项",
+    "add_sub_issue_tooltip": "添加子工作项",
+    "add_sub_issue_aria": "添加子工作项",
+    "select_all_sub_issues_aria": "全选子工作项",
     "select_sub_issue_aria": "选择 {{identifier}}",
     "section_properties": "属性",
-    "section_parent_issue": "父任务",
+    "section_parent_issue": "父工作项",
     "section_pull_requests": "Pull Request",
     "section_metadata": "元数据",
     "section_details": "详情",
@@ -337,7 +337,7 @@
     "quick_action_runs_as": "由 {{name}} 执行",
     "quick_action_target_fallback": "该智能体",
     "quick_action_queued": "{{name}} 已开始处理",
-    "quick_action_coalesced": "已加入 {{name}} 当前的 task",
+    "quick_action_coalesced": "已加入 {{name}} 当前的工作任务",
     "quick_action_deferred": "{{name}} 当前离线，上线后开始",
     "quick_action_blocked": "无法触发 {{name}}",
     "quick_action_posted": "评论已发布",
@@ -345,7 +345,7 @@
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",
     "pull_requests_loading": "加载中...",
-    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本任务的 identifier 即可自动关联。",
+    "pull_requests_empty": "还没有关联的 PR。在 PR 的分支名、标题或正文里引用本工作项的 identifier 即可自动关联。",
     "pull_request_state_open": "Open",
     "pull_request_state_draft": "Draft",
     "pull_request_state_merged": "Merged",
@@ -383,11 +383,11 @@
     "subscribe": "订阅",
     "unsubscribe": "取消订阅",
     "delegated_subscription_badge": "由智能体代你关注",
-    "delegated_subscription_hint": "你的智能体代你创建了这个任务，因此你在关注它。待评审、完成或受阻时会通知你。",
-    "unsubscribe_this": "取消订阅此任务",
-    "unsubscribe_subtree": "取消订阅此任务及其子任务",
-    "unsubscribe_subtree_failed": "取消订阅子任务失败，请重试。",
-    "unsubscribe_subtree_unsupported": "当前服务端还不支持取消订阅子任务，请在下次更新后再试。",
+    "delegated_subscription_hint": "你的智能体代你创建了这个工作项，因此你在关注它。待评审、完成或受阻时会通知你。",
+    "unsubscribe_this": "取消订阅此工作项",
+    "unsubscribe_subtree": "取消订阅此工作项及其子工作项",
+    "unsubscribe_subtree_failed": "取消订阅子工作项失败，请重试。",
+    "unsubscribe_subtree_unsupported": "当前服务端还不支持取消订阅子工作项，请在下次更新后再试。",
     "no_subscribers_results": "未找到结果",
     "change_subscribers_placeholder": "更改订阅者...",
     "members_group": "成员",
@@ -418,30 +418,30 @@
     },
     "sidebar_tooltip": "切换右侧边栏",
     "find": {
-      "placeholder": "在任务中查找...",
+      "placeholder": "在工作项中查找...",
       "count": "{{current}}/{{total}}",
       "no_matches": "无匹配结果",
       "previous": "上一个",
       "next": "下一个",
       "close": "关闭查找"
     },
-    "update_failed": "更新任务失败",
+    "update_failed": "更新工作项失败",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",
     "project_directory_path_copied": "已复制项目目录路径",
-    "project_directory_path_copied_with_branch": "已复制项目目录路径 — 任务改动位于 {{branch}} 分支",
+    "project_directory_path_copied_with_branch": "已复制项目目录路径 — 改动位于 {{branch}} 分支",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
-    "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地智能体运行过",
-    "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
+    "workdir_path_unavailable": "暂无本地 workdir — 这个工作项还没被本地智能体运行过",
+    "unsubscribe_subtree_succeeded": "已取消订阅此工作项及其子工作项。",
     "subscription_update_failed": "无法更新订阅状态，请重试。"
   },
   "timeline": {
     "loading": "加载中…"
   },
   "activity": {
-    "created": "创建了这个任务",
-    "self_assigned": "把这个任务分配给了自己",
+    "created": "创建了这个工作项",
+    "self_assigned": "把这个工作项分配给了自己",
     "assigned_to": "分配给 {{name}}",
     "removed_assignee": "移除了负责人",
     "changed_assignee": "更改了负责人",
@@ -451,10 +451,10 @@
     "start_date_removed": "移除了开始日期",
     "due_date_set": "截止日期设为 {{date}}",
     "due_date_removed": "移除了截止日期",
-    "title_renamed": "把这个任务从\"{{from}}\"重命名为\"{{to}}\"",
+    "title_renamed": "把这个工作项从\"{{from}}\"重命名为\"{{to}}\"",
     "description_updated": "更新了描述",
-    "task_completed_other": "完成了 task（{{count}} 次）",
-    "task_failed_other": "task 失败（{{count}} 次）",
+    "task_completed_other": "完成了工作任务（{{count}} 次）",
+    "task_failed_other": "工作任务失败（{{count}} 次）",
     "squad_leader_evaluated": "评估了小队触发",
     "squad_leader_action": "已评估并采取了操作",
     "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
@@ -539,21 +539,21 @@
   },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",
-    "hover_header_tasks_other": "{{count}} 个 task 工作中",
+    "hover_header_tasks_other": "{{count}} 个工作任务工作中",
     "hover_header_queued_other": "{{count}} 个智能体排队中",
     "status_running": "正在工作",
     "status_queued": "排队中",
     "empty_hover": "当前没有智能体在工作",
     "unknown_hover": "工作中的智能体：尚未加载",
-    "filter_active_label": "正在查看有智能体在工作的任务",
-    "tasks_count_other": "{{count}} 个 task",
+    "filter_active_label": "正在查看有智能体在工作的工作项",
+    "tasks_count_other": "{{count}} 个工作任务",
     "chip_agents_working_other": "{{count}} 个智能体工作中",
-    "issues_count_other": "{{count}} 个任务",
+    "issues_count_other": "{{count}} 个工作项",
     "chip_agents_working_unknown": "工作中的智能体：—"
   },
   "filtered_empty": {
-    "title": "没有符合筛选条件的任务",
-    "hint": "调整或清除筛选条件，就能看到这个视图里的任务。",
+    "title": "没有符合筛选条件的工作项",
+    "hint": "调整或清除筛选条件，就能看到这个视图里的工作项。",
     "clear_button": "清除筛选"
   },
   "agent_live": {
@@ -566,20 +566,20 @@
     "transcript_button": "查看记录",
     "stop_button": "停止",
     "stop_tooltip": "停止智能体",
-    "cancel_failed": "取消 task 失败"
+    "cancel_failed": "取消工作任务失败"
   },
   "execution_log": {
     "section": "执行日志",
     "show_past": "显示历史运行（{{count}}）",
     "hide_past": "隐藏历史运行（{{count}}）",
-    "cancel_task_tooltip": "取消 task",
-    "cancel_task_aria": "取消 task",
-    "retry_task_tooltip": "重试 task",
-    "retry_task_aria": "重试 task",
-    "retry_failed": "重试 task 失败",
+    "cancel_task_tooltip": "取消工作任务",
+    "cancel_task_aria": "取消工作任务",
+    "retry_task_tooltip": "重试工作任务",
+    "retry_task_aria": "重试工作任务",
+    "retry_failed": "重试工作任务失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
     "transcript_tooltip": "查看记录",
-    "cancel_failed": "取消 task 失败",
+    "cancel_failed": "取消工作任务失败",
     "trigger_retry": "重试",
     "trigger_retry_attempt": "重试 #{{attempt}}",
     "trigger_retry_attempt_prefix": "重试 #{{attempt}} · ",
@@ -608,12 +608,12 @@
       "source_backfill": "回填的归因",
       "source_unattributed": "未解析到责任成员"
     },
-    "usage_total_tooltip": "这个任务的 token 用量——点击查看每次运行的明细"
+    "usage_total_tooltip": "这个工作项的 token 用量——点击查看每次运行的明细"
   },
   "usage_detail": {
     "title": "用量明细",
     "subtitle_other": "{{identifier}} · {{count}} 次运行",
-    "empty": "这个任务还没有任何一次运行记录到 token 用量。",
+    "empty": "这个工作项还没有任何一次运行记录到 token 用量。",
     "kpi_cost": "费用",
     "kpi_cost_hint_other": "{{count}} 次失败运行占 {{pct}}%",
     "kpi_cache": "缓存节省",
@@ -637,11 +637,11 @@
     "note_estimate": "费用按各模型公开价目估算；供应商回报实际费用时以回报值为准。"
   },
   "terminate_dialog": {
-    "title": "确定停止该 task？",
-    "body": "task 会被取消且无法恢复。",
-    "running_note": " 进行中的 task 可能需要几秒才能完全停止。",
+    "title": "确定停止该工作任务？",
+    "body": "工作任务会被取消且无法恢复。",
+    "running_note": " 进行中的工作任务可能需要几秒才能完全停止。",
     "keep": "保留运行",
-    "confirm": "停止 task"
+    "confirm": "停止工作任务"
   },
   "batch": {
     "selected": "已选择 {{count}} 个",
@@ -649,17 +649,17 @@
     "priority": "优先级",
     "assignee": "负责人",
     "delete": "删除",
-    "update_success_other": "已更新 {{count}} 个任务",
-    "update_failed": "更新任务失败",
-    "delete_success_other": "已删除 {{count}} 个任务",
-    "delete_failed": "删除任务失败",
-    "delete_dialog_title_other": "删除 {{count}} 个任务？",
-    "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
-    "delete_dialog_warning": "任何工作区成员都可以删除任务。",
+    "update_success_other": "已更新 {{count}} 个工作项",
+    "update_failed": "更新工作项失败",
+    "delete_success_other": "已删除 {{count}} 个工作项",
+    "delete_failed": "删除工作项失败",
+    "delete_dialog_title_other": "删除 {{count}} 个工作项？",
+    "delete_dialog_desc_other": "此操作无法撤销，所选工作项及其全部关联数据都会被永久删除。",
+    "delete_dialog_warning": "任何工作区成员都可以删除工作项。",
     "cancel": "取消"
   },
   "card": {
-    "update_failed": "更新任务失败",
+    "update_failed": "更新工作项失败",
     "updated_ago": "更新于 {{time}}"
   },
   "actions": {
@@ -684,12 +684,12 @@
     "copy_workdir_path": "复制本地 workdir 路径",
     "copy_project_directory_path": "复制项目目录路径",
     "relations": "关系",
-    "create_sub_issue": "创建子任务",
-    "set_parent_issue": "设置父任务...",
-    "remove_parent_issue": "移除父任务",
-    "remove_parent_issue_success": "已移除父任务",
-    "add_sub_issue": "添加子任务...",
-    "delete_issue": "删除任务"
+    "create_sub_issue": "创建子工作项",
+    "set_parent_issue": "设置父工作项...",
+    "remove_parent_issue": "移除父工作项",
+    "remove_parent_issue_success": "已移除父工作项",
+    "add_sub_issue": "添加子工作项...",
+    "delete_issue": "删除工作项"
   },
   "pickers": {
     "custom_property": {
@@ -735,7 +735,7 @@
     }
   },
   "labels_panel": {
-    "intro": "创建和管理标签，用于在工作区内分类任务。",
+    "intro": "创建和管理标签，用于在工作区内分类工作项。",
     "new_placeholder": "新标签名称...",
     "new_aria": "新标签名称",
     "add_action": "添加",
@@ -750,7 +750,7 @@
     "cancel_aria": "取消",
     "delete_dialog_title": "删除标签？",
     "delete_dialog_desc_prefix": "标签 ",
-    "delete_dialog_desc_suffix": " 会从全部任务上移除，无法撤销。",
+    "delete_dialog_desc_suffix": " 会从全部工作项上移除，无法撤销。",
     "delete_dialog_cancel": "取消",
     "delete_dialog_confirm": "删除",
     "create_failed": "创建标签失败",
@@ -759,7 +759,7 @@
   },
   "backlog_hint": {
     "title": "智能体在 backlog 状态下暂停",
-    "description": "这个任务处于待规划状态，被分配的智能体会等待。准备启动时把它移到 todo。",
+    "description": "这个工作项处于待规划状态，被分配的智能体会等待。准备启动时把它移到 todo。",
     "row_backlog_label": "backlog",
     "row_backlog_hint": "智能体保持暂停",
     "row_todo_label": "todo",
@@ -767,15 +767,15 @@
   },
   "save_view": {
     "title": "保存为视图",
-    "hint_workspace": "基于工作区全部任务创建",
-    "hint_my_any": "基于「我的任务 · 全部」创建",
-    "hint_my_assigned": "基于「我的任务 · 分配给我」创建",
-    "hint_my_created": "基于「我的任务 · 我创建的」创建",
-    "hint_my_involved": "基于「我的任务 · 我参与的」创建",
+    "hint_workspace": "基于工作区全部工作项创建",
+    "hint_my_any": "基于「我的工作项 · 全部」创建",
+    "hint_my_assigned": "基于「我的工作项 · 分配给我」创建",
+    "hint_my_created": "基于「我的工作项 · 我创建的」创建",
+    "hint_my_involved": "基于「我的工作项 · 我参与的」创建",
     "hint_project": "基于项目「{{title}}」创建，仅在该项目页面可用",
-    "hint_project_agents": "基于项目「{{title}}」中智能体负责的任务创建，仅在该项目页面可用",
-    "hint_project_members": "基于项目「{{title}}」中成员负责的任务创建，仅在该项目页面可用",
-    "my_private_note": "我的任务视图仅自己可见",
+    "hint_project_agents": "基于项目「{{title}}」中智能体负责的工作项创建，仅在该项目页面可用",
+    "hint_project_members": "基于项目「{{title}}」中成员负责的工作项创建，仅在该项目页面可用",
+    "my_private_note": "我的工作项视图仅自己可见",
     "name_label": "名称",
     "visibility_label": "可见性",
     "visibility_private": "仅自己可见",
@@ -796,8 +796,8 @@
     "update": "保存修改",
     "toast_updated": "视图已更新",
     "toast_conflict": "视图已被他人修改，请重新打开后再试",
-    "hint_workspace_members": "基于工作区中成员负责的任务创建",
-    "hint_workspace_agents": "基于工作区中智能体负责的任务创建",
+    "hint_workspace_members": "基于工作区中成员负责的工作项创建",
+    "hint_workspace_agents": "基于工作区中智能体负责的工作项创建",
     "scope_label_workspace": "负责人类型",
     "scope_label_my": "与我的关系",
     "variant_all": "不限负责人",
