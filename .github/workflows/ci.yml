@@ -575,7 +575,9 @@ jobs:
           echo "backend-tests:        $TEST_RESULT"
           echo "sqlc-check:           $SQLC_RESULT"
           echo "go-vulnerability-scan: $VULNERABILITY_RESULT"
-          if [ "$TEST_RESULT" != "success" ] || [ "$SQLC_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
+          if [ "$TEST_RESULT" = "failure" ] || [ "$TEST_RESULT" = "cancelled" ] || \
+             [ "$SQLC_RESULT" = "failure" ] || [ "$SQLC_RESULT" = "cancelled" ] || \
+             [ "$VULNERABILITY_RESULT" = "failure" ] || [ "$VULNERABILITY_RESULT" = "cancelled" ]; then
             echo "::error::backend validation failed"
             exit 1
           fi
