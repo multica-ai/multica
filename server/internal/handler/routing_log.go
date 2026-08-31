@@ -53,7 +53,7 @@ func (h *Handler) PutRuntimeTierModelMap(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
 		return
