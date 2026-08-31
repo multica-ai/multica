@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-25
+// Snapshot: 2026-08-31
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -76,10 +76,9 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-flash-lite-latest": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
   "gemini-omni-flash-preview": { input: 1.5, output: 17.5, cacheRead: 1.5, cacheWrite: 1.5 },
   "gemini-robotics-er-1.6-preview": { input: 1, output: 5, cacheRead: 1, cacheWrite: 1 },
-  "github-copilot/gemini-3.6-flash": { input: 1.5, output: 7.5, cacheRead: 0.15, cacheWrite: 1.5 },
-  "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.2 },
-  "github-copilot/gpt-5.6-sol": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
-  "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
+  "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
+  "github-copilot/gpt-5.6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
+  "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
   "github-copilot/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
   "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0 },
@@ -95,6 +94,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
+  "glm-5.3-flash": { input: 0.075, output: 0.25, cacheRead: 0.015, cacheWrite: 0 },
   "glm-5v-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
   "google/gemini-flash-latest": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "google/gemini-flash-lite-latest": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
@@ -142,7 +142,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "grok-4.5": { input: 2, output: 6, cacheRead: 0.3, cacheWrite: 2 },
   "grok-4.6": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "grok-build-0.1": { input: 1, output: 2, cacheRead: 0.2, cacheWrite: 1 },
-  "hy3": { input: 0.0175, output: 0.0725, cacheRead: 0.004375, cacheWrite: 0.0175 },
+  "hy3": { input: 0.14, output: 0.58, cacheRead: 0.035, cacheWrite: 0.14 },
+  "hy4-preview": { input: 0.834, output: 2.501, cacheRead: 0.042, cacheWrite: 0.834 },
   "kimi-k2": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
   "kimi-k2-0711-preview": { input: 0.6, output: 2.5, cacheRead: 0.15, cacheWrite: 0.6 },
   "kimi-k2-0905-preview": { input: 0.6, output: 2.5, cacheRead: 0.15, cacheWrite: 0.6 },
@@ -183,8 +184,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.3": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
+  "opencode-go/glm-5.3-flash": { input: 0.075, output: 0.25, cacheRead: 0.015, cacheWrite: 0.075 },
   "opencode-go/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
-  "opencode-go/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode-go/minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },
   "opencode/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
   "opencode/deepseek-v4-pro": { input: 1.74, output: 3.84, cacheRead: 0.145, cacheWrite: 1.74 },
@@ -200,7 +201,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "opencode/gpt-5.1": { input: 1.07, output: 8.5, cacheRead: 0.107, cacheWrite: 1.07 },
   "opencode/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "opencode/gpt-5.6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
-  "opencode/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode/kimi-k2-thinking": { input: 0.4, output: 2.5, cacheRead: 0.4, cacheWrite: 0.4 },
   "opencode/kimi-k2.5": { input: 0.6, output: 3, cacheRead: 0.08, cacheWrite: 0.6 },
   "qwen3-coder": { input: 0.45, output: 1.8, cacheRead: 0.45, cacheWrite: 0.45 },
@@ -208,6 +208,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "qwen3.6-plus": { input: 0.5, output: 3, cacheRead: 0.05, cacheWrite: 0.625 },
   "qwen3.7-max": { input: 2.5, output: 7.5, cacheRead: 0.5, cacheWrite: 3.125 },
   "qwen3.7-plus": { input: 0.4, output: 1.6, cacheRead: 0.04, cacheWrite: 0.5 },
+  "qwen3.8-flash": { input: 0.15, output: 0.47, cacheRead: 0.016, cacheWrite: 0.2 },
   "qwen3.8-max": { input: 2, output: 6, cacheRead: 0.25, cacheWrite: 2.5 },
   "text-embedding-3-large": { input: 0.13, output: 0, cacheRead: 0.13, cacheWrite: 0.13 },
   "text-embedding-3-small": { input: 0.02, output: 0, cacheRead: 0.02, cacheWrite: 0.02 },
