@@ -191,15 +191,26 @@ exit 1
 }
 
 func TestCursorExecuteReportsScannerOverflow(t *testing.T) {
+	// Not t.Parallel(): the fixture streams ~agentStreamMaxLineBytes of
+	// subprocess stdout. Under the package default -parallel that competes
+	// with siblings for memory and /tmp IO; a tight execute timeout then
+	// flakes on CI (VAN-127). Scanner overflow semantics are also covered
+	// without subprocess cost in stream_scanner_test.go; this test pins the
+	// cursor execute error surface only.
+	//
 	// The oversized event is sized from agentStreamMaxLineBytes so raising
 	// the shared cap cannot silently turn this into a plain oversized-line
-	// pass that never reaches the overflow branch.
+	// pass that never reaches the overflow branch. Pre-generating the payload
+	// in Go and cat-ing it avoids the dd|tr pipeline that amplified the
+	// flake under parallel load.
+	overflowPath := filepath.Join(t.TempDir(), "overflow.line")
+	writeScannerOverflowLine(t, overflowPath, agentStreamMaxLineBytes+1)
 	script := fmt.Sprintf(`#!/bin/sh
 printf '%%s\n' '{"type":"system","subtype":"init","session_id":"sess-overflow"}'
-dd if=/dev/zero bs=1048576 count=%d 2>/dev/null | tr '\000' x
+cat %q
 printf '\n'
-`, agentStreamMaxLineBytes/(1024*1024)+1)
-	result := executeFakeCursor(t, script)
+`, overflowPath)
+	result := executeFakeCursor(t, script, 30*time.Second)
 
 	if result.Status != "failed" {
 		t.Fatalf("status = %q, want failed; error=%q", result.Status, result.Error)
@@ -272,8 +283,44 @@ exit 1
 	}
 }
 
-func executeFakeCursor(t *testing.T, script string) Result {
+// writeScannerOverflowLine writes size bytes without a trailing newline.
+func writeScannerOverflowLine(tb testing.TB, path string, size int) {
+	tb.Helper()
+	if size <= 0 {
+		tb.Fatalf("overflow line size = %d, want > 0", size)
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		tb.Fatalf("open overflow line %s: %v", path, err)
+	}
+	chunk := make([]byte, 1024*1024)
+	for i := range chunk {
+		chunk[i] = 'x'
+	}
+	remaining := size
+	for remaining > 0 {
+		n := remaining
+		if n > len(chunk) {
+			n = len(chunk)
+		}
+		if _, err := f.Write(chunk[:n]); err != nil {
+			_ = f.Close()
+			tb.Fatalf("write overflow line %s: %v", path, err)
+		}
+		remaining -= n
+	}
+	if err := f.Close(); err != nil {
+		tb.Fatalf("close overflow line %s: %v", path, err)
+	}
+}
+
+func executeFakeCursor(t *testing.T, script string, timeout ...time.Duration) Result {
 	t.Helper()
+
+	execTimeout := 5 * time.Second
+	if len(timeout) > 0 && timeout[0] > 0 {
+		execTimeout = timeout[0]
+	}
 
 	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
 	writeTestExecutable(t, fakePath, []byte(script))
@@ -282,7 +329,7 @@ func executeFakeCursor(t *testing.T, script string) Result {
 	if err != nil {
 		t.Fatalf("New(cursor): %v", err)
 	}
-	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: execTimeout})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
