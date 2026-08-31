@@ -21,6 +21,7 @@ func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
 		{input: "Qoder", want: "qoder"},
 		{input: "QODERCLICN", want: "qoderclicn"},
 		{input: "TraeCLI", want: "traecli"},
+		{input: "ZCode", want: "zcode"},
 		{input: "Reasonix", want: "reasonix"},
 		{input: "DSH", want: "dsh"},
 		{input: "Dim", want: "dim"},

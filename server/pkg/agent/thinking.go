@@ -829,6 +829,15 @@ var acpCatalogThinkingProviders = map[string]bool{
 	// config surface. Its catalog is per model — see
 	// annotateACPThinkingForSessionModel.
 	"reasonix": true,
+	// zcode (via the zcode-acp-server bridge): session/new advertises option
+	// id `thought` (category `thought_level`) with the per-model vocabulary
+	// the runtime itself resolves from the enabled provider's
+	// reasoning.variants — verified live: GLM-5.3 offers low/high/max
+	// (default max), GLM-5-Turbo enabled/off, glm-5.1 enabled/disabled — and
+	// set_config_option dispatches to the runtime's session/setThoughtLevel.
+	// Tokens pass through verbatim, so the picker shows the levels the
+	// session's model actually understands.
+	"zcode": true,
 	// hermes covers two unrelated binaries, and membership here is safe only
 	// because the catalog decides per session which one answered:
 	//

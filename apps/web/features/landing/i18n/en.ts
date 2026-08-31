@@ -101,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 23 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 24 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 23 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 24 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZCode \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 23 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 24 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZCode). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 23 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 24 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, and ZCode. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -1425,7 +1425,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.39",
         date: "2026-07-06",
-        title: "Qoder and Trae CLI as custom runtime bases, plus squad and stability fixes",
+        title: "Qoder, Trae CLI, and ZCode as custom runtime bases, plus squad and stability fixes",
         changes: [],
         features: [
           "You can now build custom runtime profiles on top of Qoder, including for Qoder CN users.",
