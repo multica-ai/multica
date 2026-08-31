@@ -34,6 +34,14 @@ describe("deriveRuntimeHealth", () => {
     ).toBe("online");
   });
 
+  it("returns online when status is draining (NEX-38)", () => {
+    // A draining runtime keeps heartbeating while finishing in-flight work, so
+    // it must not read as recently_lost / offline.
+    expect(
+      deriveRuntimeHealth(makeRuntime({ status: "draining", last_seen_at: null }), FIXED_NOW),
+    ).toBe("online");
+  });
+
   it("returns recently_lost when offline less than 5 minutes", () => {
     expect(
       deriveRuntimeHealth(

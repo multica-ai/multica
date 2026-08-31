@@ -8,6 +8,8 @@ import {
   ScrollText,
   LogIn,
   Info,
+  ShieldAlert,
+  Undo2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -23,20 +25,23 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { toast } from "sonner";
+import { useT } from "@multica/views/i18n";
 import { DaemonPanel } from "./daemon-panel";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonStatus } from "../../../shared/daemon-types";
-import { DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
+import { DAEMON_STATE_COLORS, DAEMON_STATE_LABELS } from "../../../shared/daemon-types";
 
 /**
  * Desktop-only controls for the daemon embedded in this Electron app. The
  * shared runtimes page renders this inside the selected local machine header.
  */
 export function DaemonRuntimeActions() {
+  const { t } = useT("runtimes");
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [panelOpen, setPanelOpen] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [confirmForceStop, setConfirmForceStop] = useState(false);
 
   const wsId = useWorkspaceId();
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
@@ -59,6 +64,14 @@ export function DaemonRuntimeActions() {
         (t) =>
           localRuntimeIds.has(t.runtime_id) &&
           (t.status === "running" || t.status === "dispatched"),
+      ),
+    [snapshot, localRuntimeIds],
+  );
+
+  const queuedTasks = useMemo(
+    () =>
+      snapshot.filter(
+        (t) => localRuntimeIds.has(t.runtime_id) && t.status === "queued",
       ),
     [snapshot, localRuntimeIds],
   );
@@ -97,6 +110,36 @@ export function DaemonRuntimeActions() {
     }
   }, [affectedTasks.length, performStop]);
 
+  const handleDrain = useCallback(async () => {
+    setActionLoading(true);
+    const result = await window.daemonAPI.drain("drain");
+    if (!result.success) {
+      setActionLoading(false);
+      toast.error("Failed to start safe shutdown", {
+        description: result.error,
+      });
+    }
+  }, []);
+
+  const handleDrainAbort = useCallback(async () => {
+    setActionLoading(true);
+    const result = await window.daemonAPI.drain("abort");
+    if (!result.success) {
+      setActionLoading(false);
+      toast.error("Failed to cancel safe shutdown", {
+        description: result.error,
+      });
+    }
+  }, []);
+
+  const performForceStop = useCallback(async () => {
+    setActionLoading(true);
+    const result = await window.daemonAPI.drain("finish_then_stop");
+    if (!result.success) {
+      toast.error("Failed to shut down daemon", { description: result.error });
+    }
+  }, []);
+
   const handleRestart = useCallback(async () => {
     setActionLoading(true);
     const result = await window.daemonAPI.restart();
@@ -127,6 +170,7 @@ export function DaemonRuntimeActions() {
   }, []);
 
   const isRunning = status.state === "running";
+  const isDraining = status.state === "draining";
   // The daemon runs somewhere the app can't drive (e.g. inside WSL2): the
   // lifecycle CLI acts on the host process namespace and can't reach it. Hide
   // Stop/Restart so they don't silently no-op, mirroring the Settings tab. The
@@ -167,12 +211,69 @@ export function DaemonRuntimeActions() {
                 </Button>
                 <Button
                   size="sm"
+                  variant="outline"
+                  onClick={handleDrain}
+                  disabled={actionLoading}
+                >
+                  <ShieldAlert className="size-3.5 mr-1.5" />
+                  {t(($) => $.drainAction)}
+                </Button>
+                <Button
+                  size="sm"
                   variant="destructive"
                   onClick={handleStopClick}
                   disabled={actionLoading}
                 >
                   <Square className="size-3.5 mr-1.5" />
                   Stop
+                </Button>
+              </>
+            )}
+          </>
+        )}
+
+        {isDraining && (
+          <>
+            <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+              <span
+                className={`size-1.5 shrink-0 rounded-full ${DAEMON_STATE_COLORS[status.state]}`}
+              />
+              <span>{t(($) => $.stateDraining)}</span>
+              <span className="tabular-nums">
+                {t(($) => $.drainInlineHint, {
+                  inflight: affectedTasks.length,
+                  queued: queuedTasks.length,
+                })}
+              </span>
+            </span>
+            <Button size="sm" variant="ghost" onClick={() => setPanelOpen(true)}>
+              <ScrollText className="size-3.5 mr-1.5" />
+              View logs
+            </Button>
+            {externallyManaged ? (
+              <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+                <Info className="size-3.5 shrink-0" />
+                Managed outside the app
+              </span>
+            ) : (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDrainAbort}
+                  disabled={actionLoading}
+                >
+                  <Undo2 className="size-3.5 mr-1.5" />
+                  {t(($) => $.drainCancel)}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setConfirmForceStop(true)}
+                  disabled={actionLoading}
+                >
+                  <Square className="size-3.5 mr-1.5" />
+                  {t(($) => $.drainForceStop)}
                 </Button>
               </>
             )}
@@ -243,6 +344,17 @@ export function DaemonRuntimeActions() {
           void performStop();
         }}
       />
+
+      <DrainForceStopDialog
+        open={confirmForceStop}
+        onOpenChange={setConfirmForceStop}
+        affectedCount={affectedTasks.length}
+        queuedCount={queuedTasks.length}
+        onConfirm={() => {
+          setConfirmForceStop(false);
+          void performForceStop();
+        }}
+      />
     </>
   );
 }
@@ -288,6 +400,63 @@ function StopConfirmDialog({
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
             Stop daemon
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Second-confirm shown when the user picks "Shut down now" while the daemon is
+ * draining. Unlike a plain stop, draining is about finishing in-flight work —
+ * force-stopping mid-drain interrupts those tasks, so we spell out the damage
+ * and, when queued tasks exist, warn that they'll be left to time out (they are
+ * never reassigned — see NEX-38 decision one).
+ */
+function DrainForceStopDialog({
+  open,
+  onOpenChange,
+  affectedCount,
+  queuedCount,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  affectedCount: number;
+  queuedCount: number;
+  onConfirm: () => void;
+}) {
+  const { t } = useT("runtimes");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm" showCloseButton={false}>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+          </div>
+          <DialogHeader className="flex-1 gap-1">
+            <DialogTitle className="text-body font-semibold">
+              {t(($) => $.drainConfirmTitle, { count: affectedCount })}
+            </DialogTitle>
+            <DialogDescription className="text-caption leading-relaxed">
+              {t(($) => $.drainDescription)}
+              {queuedCount > 0 && (
+                <>
+                  {" "}
+                  {t(($) => $.drainQueuedHint, { count: queuedCount })}
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            {t(($) => $.drainCancel)}
+          </Button>
+          <Button variant="destructive" onClick={onConfirm}>
+            {t(($) => $.drainForceStop)}
           </Button>
         </DialogFooter>
       </DialogContent>

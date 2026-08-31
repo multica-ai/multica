@@ -105,6 +105,14 @@
       "description": "6 日以上 heartbeat がありません。このホストを復旧しない場合は、紐づくエージェントを別のランタイムに再割り当てするか、このランタイムを削除してください。"
     }
   },
+  "drainAction": "安全なシャットダウン",
+  "drainCancel": "安全なシャットダウンをキャンセル",
+  "drainForceStop": "今すぐシャットダウン",
+  "stateDraining": "シャットダウン準備中",
+  "drainInlineHint": "実行中タスク {{inflight}} · 待機タスク {{queued}}",
+  "drainConfirmTitle": "実行中のタスク {{count}} 件を中断します。",
+  "drainQueuedHint": "待機中のタスク {{count}} 件はタイムアウトまで維持されます。",
+  "drainDescription": "新しいタスクは受け付けず、実行中のタスクが完了すると自動でシャットダウンします。",
   "detail": {
     "all_runtimes": "すべてのランタイム",
     "read_only": "読み取り専用",

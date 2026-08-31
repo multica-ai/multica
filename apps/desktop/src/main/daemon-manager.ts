@@ -20,6 +20,7 @@ import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
+  DaemonDrainAction,
 } from "../shared/daemon-types";
 import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
@@ -149,6 +150,10 @@ function sendStatus(status: DaemonStatus): void {
 
 interface HealthPayload {
   status?: string;
+  /** Daemon three-state: running / draining / stopped (NEX-38). The daemon
+   *  keeps reporting `status: "running"` while draining — readiness is
+   *  orthogonal to the drain state, so the two fields are both read. */
+  state?: string;
   pid?: number;
   /** Daemon's runtime.GOOS. Absent on daemons older than the #3916 fix. */
   os?: string;
@@ -355,7 +360,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
   }
 
   return {
-    state: "running",
+    state: data.state === "draining" ? "draining" : "running",
     pid: data.pid,
     uptime: data.uptime,
     daemonId: data.daemon_id,
@@ -820,7 +825,9 @@ function successfulRuntimeProbe(
 
 async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
   const health = await fetchHealth();
-  if (health.state === "running") {
+  // A draining daemon still hosts its runtimes (heartbeats keep flowing), so
+  // count them as online for the probe.
+  if (health.state === "running" || health.state === "draining") {
     return successfulRuntimeProbe(health.agents ?? [], true);
   }
 
@@ -1003,6 +1010,42 @@ async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   return startDaemon();
 }
 
+/**
+ * Drive the daemon's safe-shutdown (drain) state machine over its `/drain`
+ * health endpoint (NEX-38). Unlike stop/restart this is a direct HTTP call to
+ * the daemon itself, not the CLI — so it works even for an externally-managed
+ * daemon (WSL2 etc.) whose process the host CLI can't reach, and it must not
+ * run through `lifecycleBlockedByForeignDaemon`. The renderer already hides
+ * the drain buttons for externally-managed daemons to match the CLI-driven
+ * toggles (#3916).
+ */
+async function drainDaemon(
+  action: DaemonDrainAction,
+): Promise<{ success: boolean; error?: string }> {
+  const active = await ensureActiveProfile();
+  if (!active) return { success: true };
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const res = await fetch(`http://127.0.0.1:${active.port}/drain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      return { success: false, error: `Daemon rejected drain (HTTP ${res.status})` };
+    }
+    return { success: true };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 async function pollOnce(): Promise<void> {
   const status = await fetchHealth();
   currentState = status.state;
@@ -1157,6 +1200,9 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
   ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
   ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
+  ipcMain.handle("daemon:drain", (_e, action: DaemonDrainAction) =>
+    withGuard(() => drainDaemon(action)),
+  );
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
   // The host's OS name, available regardless of daemon state. The Runtimes
@@ -1200,9 +1246,11 @@ export function setupDaemonManager(
     const bin = await resolveCliBinary();
     if (!bin) return;
     const health = await fetchHealth();
-    if (health.state === "running") {
-      // Daemon is up but may be running an older CLI than the one we just
-      // bundled. Restart it so the new binary actually takes effect.
+    if (daemonStatusAlive(health.state)) {
+      // Daemon is up (running, starting, or draining) but may be running an
+      // older CLI than the one we just bundled. Restart it so the new binary
+      // actually takes effect. Draining counts as alive — don't spawn a second
+      // daemon over it.
       await ensureRunningDaemonVersionMatches();
       return;
     }
