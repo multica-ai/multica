@@ -1373,6 +1373,30 @@ func createWorktreeContext(ctx context.Context, gitRoot, worktreePath, branchNam
 	}
 
 	err := runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+	if err != nil && isStaleWorktreeRegistrationError(err) {
+		// Stale registration (#7404): a previous run's worktree directory
+		// was deleted while its registration remained in the bare cache.
+		// The registration is prunable — prune and retry once with the SAME
+		// branch name. The branch did not collide; suffixing here would leak
+		// a branch on every cycle of a fixed-slug periodic job. This path is
+		// independent of the branch-collision retry below and must not fall
+		// through into it.
+		if pruneErr := runGitContext(ctx, "-C", gitRoot, "worktree", "prune"); pruneErr == nil {
+			// A failed `worktree add -b` creates the branch ref BEFORE
+			// hitting the stale-registration check, so the retry must reuse
+			// the existing branch when it is present — otherwise the -b
+			// retry collides with the branch the failed attempt left behind.
+			if gitRefExistsContext(ctx, gitRoot, "refs/heads/"+branchName) {
+				if out, retryErr := runGitCombinedOutputContext(ctx, "-C", gitRoot, "worktree", "add", worktreePath, branchName); retryErr != nil {
+					err = fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), retryErr)
+				} else {
+					err = nil
+				}
+			} else {
+				err = runWorktreeAddContext(ctx, gitRoot, worktreePath, branchName, baseRef)
+			}
+		}
+	}
 	if err != nil && isBranchCollisionError(err) {
 		// Branch name collision: append timestamp and retry once.
 		branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
@@ -1407,6 +1431,18 @@ func isBranchCollisionError(err error) bool {
 	msg := strings.ToLower(err.Error())
 	// Git's message is "fatal: a branch named 'X' already exists".
 	return strings.Contains(msg, "a branch named")
+}
+
+// isStaleWorktreeRegistrationError returns true if err is git's
+// "missing but already registered worktree" failure: the worktree directory
+// was removed without `git worktree remove` or `prune`, leaving a prunable
+// registration behind. Deliberately separate from isBranchCollisionError —
+// recovery here is prune-and-retry-same-branch, not suffix-and-retry.
+func isStaleWorktreeRegistrationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already registered worktree")
 }
 
 // isGitWorktree checks if a path is an existing git worktree.
