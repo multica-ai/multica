@@ -4,6 +4,17 @@ import { describe, expect, it } from "vitest";
 import { ProviderLogo } from "./provider-logo";
 
 describe("ProviderLogo", () => {
+  it("renders the dedicated CodeArts icon", () => {
+    const { container } = render(
+      <ProviderLogo provider="codearts" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector('img[alt="CodeArts"]');
+
+    expect(logo?.getAttribute("src")).toBeTruthy();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("keeps the official Reasonix artwork", () => {
     const logoSvg = readFileSync("runtimes/components/reasonix-logo.svg", "utf8");
 

@@ -628,6 +628,9 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
 		t.Fatalf("CodexHandshakeTimeout = %s, want default %s", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != DefaultCodexThreadHandshakeTimeout {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want default %s", cfg.CodexThreadHandshakeTimeout, DefaultCodexThreadHandshakeTimeout)
+	}
 
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "47s")
 
@@ -641,6 +644,24 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != 47*time.Second {
 		t.Fatalf("CodexHandshakeTimeout = %s, want 47s from env", cfg.CodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != 47*time.Second {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 47s env override", cfg.CodexThreadHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "1d")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with day-unit env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 24*time.Hour {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 24h from 1d env", cfg.CodexHandshakeTimeout)
+	}
+	if cfg.CodexThreadHandshakeTimeout != 24*time.Hour {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 24h env override", cfg.CodexThreadHandshakeTimeout)
+	}
 
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "0")
 	cfg, err = LoadConfig(Overrides{
@@ -653,6 +674,9 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
 		t.Fatalf("CodexHandshakeTimeout = %s, want default %s for zero env", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != DefaultCodexThreadHandshakeTimeout {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want default %s for zero env", cfg.CodexThreadHandshakeTimeout, DefaultCodexThreadHandshakeTimeout)
+	}
 
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:             "http://localhost:8080",
@@ -664,6 +688,9 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 	if cfg.CodexHandshakeTimeout != 12*time.Second {
 		t.Fatalf("CodexHandshakeTimeout = %s, want 12s from override", cfg.CodexHandshakeTimeout)
+	}
+	if cfg.CodexThreadHandshakeTimeout != 12*time.Second {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 12s override", cfg.CodexThreadHandshakeTimeout)
 	}
 }
 

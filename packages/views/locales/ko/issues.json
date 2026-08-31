@@ -325,6 +325,8 @@
     "add_sub_issues": "하위 태스크 추가",
     "add_sub_issue_tooltip": "하위 태스크 추가",
     "add_sub_issue_aria": "하위 태스크 추가",
+    "select_all_sub_issues_aria": "모든 하위 태스크 선택",
+    "select_sub_issue_aria": "{{identifier}} 선택",
     "section_properties": "속성",
     "section_parent_issue": "상위 태스크",
     "section_pull_requests": "Pull requests",

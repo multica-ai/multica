@@ -207,6 +207,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Antigravity CLI](https://antigravity.google/docs/cli-install) | `agy` | Google Antigravity CLI |
 | [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) | `codebuddy` | Tencent CodeBuddy Code (reads `CODEBUDDY.md`, not `CLAUDE.md`) |
+| [Huawei Cloud CodeArts](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0001.html) | `codearts` | Huawei Cloud coding agent (OpenCode-compatible JSON protocol) |
 | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) | `deveco` | OpenHarmony DevEco Code |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
@@ -252,7 +253,7 @@ Daemon behavior is configured via flags or environment variables:
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as the idle watchdog (Codex's timer is not tool-aware, so it tracks the larger of the idle / tool budgets) |
 | Codex first-turn no-progress timeout | — | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` (keeps the built-in `60s` ceiling) |
-| Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` |
+| Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start` and `thread/resume`: `60s` (an explicit value overrides both budgets globally) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
@@ -308,6 +309,8 @@ Agent-specific overrides:
 | `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
 | `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
 | `MULTICA_CODEBUDDY_ARGS` | Default extra arguments for CodeBuddy runs |
+| `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
+| `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_DEVECO_PATH` | Custom path to the `deveco` binary |
 | `MULTICA_DEVECO_MODEL` | Override the DevEco Code model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |

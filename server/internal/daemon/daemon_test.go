@@ -1954,7 +1954,7 @@ func TestExecuteAndDrain_PinsWhenRolloutAppearsAfterStatus(t *testing.T) {
 	t.Fatalf("expected the codex session to be pinned once its rollout appeared mid-run, got %+v", rec.snapshot())
 }
 
-func TestGateResumeToReusedWorkdir(t *testing.T) {
+func TestGateResumeToReachableSession(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -2019,7 +2019,7 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// gateResumeToReusedWorkdir compares directory IDENTITY, not path
+			// gateResumeToReachableSession compares directory IDENTITY, not path
 			// spelling, so the table's paths have to exist on disk. Mapping
 			// them under one temp root preserves each case's same/different
 			// relationship while making them real.
@@ -2039,10 +2039,10 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reused := gateResumeToReusedWorkdir(&task, &taskCtx, envDir, !tt.sessionHomeUnreachable, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, slog.Default())
 
-			if reused != tt.wantReused {
-				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
+			if reachable != tt.wantReused {
+				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
 			}
 			if task.PriorSessionID != tt.wantSession {
 				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
@@ -2057,6 +2057,122 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
 			}
 		})
+	}
+}
+
+func TestGatePiResumeToSessionFile(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"pi", "omp"} {
+		t.Run(provider, func(t *testing.T) {
+			t.Parallel()
+
+			base := t.TempDir()
+			priorDir := filepath.Join(base, "prior-workdir")
+			envDir := filepath.Join(base, "fresh-workdir")
+			for _, dir := range []string{priorDir, envDir} {
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatalf("create %s: %v", dir, err)
+				}
+			}
+
+			sessionFile := filepath.Join(base, "pi-session.jsonl")
+			if err := os.WriteFile(sessionFile, []byte("{}\n"), 0o644); err != nil {
+				t.Fatalf("create session file: %v", err)
+			}
+
+			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, slog.Default())
+
+			if !reachable {
+				t.Fatal("Pi-family session file should remain reachable across workdirs")
+			}
+			if task.PriorSessionID != sessionFile {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, sessionFile)
+			}
+			if !taskCtx.PriorSessionResumed {
+				t.Fatal("PriorSessionResumed was cleared for a reachable Pi-family session")
+			}
+			if taskCtx.PriorSessionResumeUnavailable {
+				t.Fatal("reachable Pi-family session was reported unavailable")
+			}
+		})
+	}
+}
+
+func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name  string
+		setup func(t *testing.T, path string)
+	}{
+		{name: "missing"},
+		{
+			name: "empty",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.WriteFile(path, nil, 0o644); err != nil {
+					t.Fatalf("create empty session: %v", err)
+				}
+			},
+		},
+		{
+			name: "directory",
+			setup: func(t *testing.T, path string) {
+				t.Helper()
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatalf("create session directory: %v", err)
+				}
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			base := t.TempDir()
+			workDir := filepath.Join(base, "workdir")
+			if err := os.MkdirAll(workDir, 0o755); err != nil {
+				t.Fatalf("create workdir: %v", err)
+			}
+			sessionPath := filepath.Join(base, "session.jsonl")
+			if test.setup != nil {
+				test.setup(t, sessionPath)
+			}
+			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
+
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, slog.Default())
+
+			if reachable {
+				t.Fatalf("%s Pi session was treated as reachable", test.name)
+			}
+			if task.PriorSessionID != "" {
+				t.Fatalf("PriorSessionID = %q, want empty", task.PriorSessionID)
+			}
+			if taskCtx.PriorSessionResumed {
+				t.Fatalf("PriorSessionResumed stayed true for a %s Pi session", test.name)
+			}
+			if !taskCtx.PriorSessionResumeUnavailable {
+				t.Fatalf("%s Pi session was not reported unavailable", test.name)
+			}
+		})
+	}
+}
+
+func TestProviderUsesPiSessionFileFollowsBuiltinRuntimeDescriptors(t *testing.T) {
+	t.Parallel()
+
+	if !providerUsesPiSessionFile("pi") {
+		t.Fatal("pi protocol family did not use Pi session-file reachability")
+	}
+	for _, desc := range agent.BuiltinRuntimes {
+		want := desc.ProtocolFamily == "pi"
+		if got := providerUsesPiSessionFile(desc.ID); got != want {
+			t.Errorf("providerUsesPiSessionFile(%q) = %v, want %v for protocol family %q", desc.ID, got, want, desc.ProtocolFamily)
+		}
 	}
 }
 
@@ -2620,6 +2736,12 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			want:           true,
 		},
 		{
+			name:           "temporarily busy resume retries without declaring the session dead",
+			result:         agent.Result{Status: "failed", Error: "session already in use", ResumeRejectedTransient: true},
+			priorSessionID: "healthy-id",
+			want:           true,
+		},
+		{
 			// The reported bug: the session belongs to another provider
 			// account and the backend echoes the requested id back on the
 			// rejection, so SessionID stays non-empty. The backend still
@@ -2993,7 +3115,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -5506,8 +5628,8 @@ func TestExecuteAndDrain_RedactsNestedToolInputBeforeSending(t *testing.T) {
 // session-shaped (a fresh session resolves it), yet it must NOT count as one
 // of the "fresh session is not the answer" buckets — in particular not
 // missing-config — or the in-turn fresh-session retry on the five
-// ResumeRejectionUndetectable backends (antigravity, copilot, cursor, deveco,
-// opencode) would silently stop firing and the dead session would be resumed
+// ResumeRejectionUndetectable backends (antigravity, codearts, copilot, cursor,
+// deveco, opencode) would silently stop firing and the dead session would be resumed
 // into the same provider error forever.
 func TestFreshSessionMayHelp(t *testing.T) {
 	t.Parallel()

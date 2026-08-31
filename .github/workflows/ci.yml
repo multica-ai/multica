@@ -655,7 +655,7 @@ jobs:
         # still reports cleanup as unconfirmed, and that a descendant holding
         # inherited stdout neither keeps Result blocked nor survives cleanup.
         # -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree|TestCodeArtsWindowsCancellationTerminatesDescendants)$' -count=1 -timeout=5m
 
       - name: Test bounded CLI output collection on Windows
         if: ${{ needs.changes.outputs.backend == 'true' }}

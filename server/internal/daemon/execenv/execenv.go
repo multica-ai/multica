@@ -336,7 +336,7 @@ type Environment struct {
 	// GC reclaimed between turns, a switched Hermes profile and an operator's
 	// `rm` all mount cleanly onto nothing. The daemon reads THIS, not the store
 	// path, as the answer to "can a prior session id still resolve here?" — see
-	// gateResumeToReusedWorkdir.
+	// gateResumeToReachableSession.
 	HermesSessionHistoryPresent bool
 	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
 	// (set only for the qwenpaw provider). It is populated with the bound skills

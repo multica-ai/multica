@@ -35,6 +35,9 @@
     "idle": "アイドル"
   },
   "presence_status_aria": "ステータス: {{status}}",
+  "avatar_stack": {
+    "overflow_aria_other": "他 {{count}} 件のエージェント"
+  },
   "archived": {
     "active_link": "アクティブなエージェント",
     "title": "アーカイブ済みエージェント"
@@ -469,6 +472,10 @@
       "dialog_headers_label": "HTTP ヘッダー",
       "dialog_add_header": "ヘッダーを追加",
       "dialog_remove_header": "ヘッダーを削除",
+      "dialog_pair_key_placeholder": "キー",
+      "dialog_pair_value_placeholder": "値",
+      "dialog_pair_key_aria": "{{label}}：キー {{index}}",
+      "dialog_pair_value_aria": "{{label}}：値 {{index}}",
       "dialog_native_json_hint": "過去の Provider ネイティブ形式です。形式を変更せず JSON で編集できます。",
       "dialog_json_label": "単一 Server 設定",
       "dialog_json_aria": "MCP Server JSON 設定",

@@ -11,6 +11,11 @@ import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 import enEditor from "../../locales/en/editor.json";
 import enIssues from "../../locales/en/issues.json";
+import zhCommon from "../../locales/zh-Hans/common.json";
+import zhAuth from "../../locales/zh-Hans/auth.json";
+import zhSettings from "../../locales/zh-Hans/settings.json";
+import zhEditor from "../../locales/zh-Hans/editor.json";
+import zhIssues from "../../locales/zh-Hans/issues.json";
 
 const TEST_RESOURCES = {
   en: {
@@ -20,11 +25,26 @@ const TEST_RESOURCES = {
     editor: enEditor,
     issues: enIssues,
   },
+  "zh-Hans": {
+    common: zhCommon,
+    auth: zhAuth,
+    settings: zhSettings,
+    editor: zhEditor,
+    issues: zhIssues,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
   return (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+function ZhI18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="zh-Hans" resources={TEST_RESOURCES}>
       {children}
     </I18nProvider>
   );
@@ -688,6 +708,26 @@ describe("createMentionSuggestion", () => {
     expect(screen.getByText("Recently viewed")).toBeInTheDocument();
     expect(screen.getByText("MUL-1")).toBeInTheDocument();
     expect(screen.getByText("Roadmap")).toBeInTheDocument();
+  });
+
+  it("localizes agent and squad badges", () => {
+    render(
+      <ZhI18nWrapper>
+        <MentionList
+          items={[
+            { id: "a1", label: "Aegis", type: "agent" },
+            { id: "s1", label: "Core team", type: "squad" },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </ZhI18nWrapper>,
+    );
+
+    expect(screen.getByText("智能体")).toBeInTheDocument();
+    expect(screen.getByText("小队")).toBeInTheDocument();
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Squad")).not.toBeInTheDocument();
   });
 
   it("includes squads with a runnable leader in the mention list", () => {

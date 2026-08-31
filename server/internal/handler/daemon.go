@@ -85,7 +85,7 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return db.AgentRuntime{}, false
 	}
-	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUID)
 	if err != nil {
 		if isNotFound(err) {
 			writeError(w, http.StatusNotFound, "runtime not found")
@@ -942,7 +942,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 	for i, rid := range req.RuntimeIDs {
 		// Look up the runtime and verify ownership.
-		rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUIDs[i])
+		rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceDaemonAPI, runtimeUUIDs[i])
 		if err != nil {
 			slog.Warn("deregister: runtime not found", "runtime_id", rid, "error", err)
 			continue
@@ -1087,7 +1087,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	lookupStart := time.Now()
-	rt, lookupErr := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
+	rt, lookupErr := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceHeartbeatHTTP, runtimeUUID)
 	runtimeLookupMs = time.Since(lookupStart).Milliseconds()
 	if lookupErr != nil {
 		// Only pgx.ErrNoRows means the runtime row is gone. Daemon reads this
@@ -1172,7 +1172,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if err != nil {
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
 	}
-	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
+	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceHeartbeatWS, runtimeUUID)
 	if err != nil {
 		if isNotFound(err) {
 			return &protocol.DaemonHeartbeatAckPayload{
@@ -1837,6 +1837,28 @@ func (h *Handler) rejectClaimSourceLoad(ctx context.Context, task *db.AgentTaskQ
 	}
 }
 
+// rejectClaimSkillLoad settles a claim whose agent skills could not be read.
+// It mirrors rejectClaimSourceLoad's transient branch — preserve the
+// just-dispatched task so the stale-dispatched reclaim redelivers it — because
+// this is the same kind of failure: a transient read on the claim-build path.
+//
+// Dispatching with whatever loaded is not the safer half-measure it looks
+// like. LoadAgentSkills reads the whole skill set in two queries, so a failure
+// means every skill loses its supporting files or the agent loses every skill,
+// and the ref hashes sent to the daemon are computed over that same truncated
+// content — so the daemon validates the bundle, caches it, and the agent runs
+// with rules silently missing. There is no ErrNoRows branch to mirror: an
+// agent with no skills is a legitimate empty result, not a missing row.
+func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *claimBuildFailure {
+	slog.Error("task claim: agent skill load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+	return &claimBuildFailure{
+		outcome: "error_skill_load",
+		status:  http.StatusInternalServerError,
+		message: "failed to load agent skills",
+	}
+}
+
 // rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
 // the workspace that OWNS the task's context (issue / chat session / autopilot
 // / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
@@ -2165,11 +2187,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
 	}
 	if useSkillRefs {
-		_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+		if err != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
+		}
 		agentSkillCount = len(skillRefs)
 		resp.Agent.SkillRefs = skillRefs
 	} else {
-		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		skills, err := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		if err != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
+		}
 		agentSkillCount = len(skills)
 		builtinSkills := h.TaskService.BuiltinSkills()
 		builtinSkillCount = len(builtinSkills)
@@ -3420,19 +3448,35 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	bundles, _ := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
-	allowed := make(map[string]service.AgentSkillData, len(bundles))
-	for _, bundle := range bundles {
-		allowed[bundle.Source+"\x00"+bundle.ID] = bundle
-	}
-
-	resolved := make([]service.AgentSkillData, 0, len(req.Skills))
+	// Validate before reading: a malformed ref is rejected the same way it
+	// always was, now without paying for a load first.
+	wanted := make([]service.AgentSkillBundleRef, 0, len(req.Skills))
 	for _, ref := range req.Skills {
 		if ref.ID == "" || ref.Source == "" || ref.Hash == "" {
 			writeError(w, http.StatusBadRequest, "invalid skill ref")
 			return
 		}
-		bundle, ok := allowed[ref.Source+"\x00"+ref.ID]
+		wanted = append(wanted, service.AgentSkillBundleRef{ID: ref.ID, Source: ref.Source})
+	}
+
+	// Load ONLY what was asked for. The daemon resolves one skill per request,
+	// so serving these out of the agent's full bundle set meant reading and
+	// hashing every skill the agent has, once per request, to return one of
+	// them — quadratic in skill count across a cold dispatch.
+	allowed, err := h.TaskService.LoadRequestedAgentSkillBundles(r.Context(), task.AgentID, wanted)
+	if err != nil {
+		// 5xx, not a partial answer: the daemon's resolve retry can recover a
+		// transient read, and a bundle assembled from a failed read would pass
+		// its client-side validation and be cached as if it were complete.
+		slog.Error("resolve skill bundles: load agent skills failed",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load skill bundles")
+		return
+	}
+
+	resolved := make([]service.AgentSkillData, 0, len(req.Skills))
+	for _, ref := range req.Skills {
+		bundle, ok := allowed[service.AgentSkillBundleKey(ref.Source, ref.ID)]
 		if !ok {
 			writeError(w, http.StatusNotFound, "skill bundle not found")
 			return
@@ -4320,7 +4364,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
 			if !runtimeProviderLoaded {
-				if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+				if rt, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceTask, task.RuntimeID); err == nil {
 					runtimeProvider = normalizeProvider(rt.Provider)
 				} else {
 					slog.Warn("load runtime provider for usage backfill failed",

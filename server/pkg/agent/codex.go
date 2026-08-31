@@ -59,7 +59,12 @@ const (
 	// while keeping the fast-fail value (MUL-5542).
 	defaultCodexFirstTurnNoProgressTimeout = 60 * time.Second
 	defaultCodexHandshakeTimeout           = 30 * time.Second
-	codexVersionDiagnosticTimeout          = 2 * time.Second
+	// thread/start and thread/resume may refresh the model catalog, initialize
+	// MCP integrations, and restore persisted history. Field evidence shows
+	// healthy calls crossing the 30s budget used for local initialize, so keep
+	// their default separate without slowing failures for lightweight RPCs.
+	defaultCodexThreadHandshakeTimeout = 60 * time.Second
+	codexVersionDiagnosticTimeout      = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
 	// a context-cancel kill. A clean exit lets codex run its shutdown path and
@@ -947,10 +952,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
-	handshakeTimeout := opts.HandshakeTimeout
-	if handshakeTimeout <= 0 {
-		handshakeTimeout = defaultCodexHandshakeTimeout
-	}
+	handshakeTimeout, threadHandshakeTimeout := resolveCodexHandshakeTimeouts(opts)
 	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
@@ -1108,16 +1110,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	turnDone := make(chan bool, 1) // true = aborted
 
 	c := &codexClient{
-		cfg:                  b.cfg,
-		stdin:                stdin,
-		pending:              make(map[int]*pendingRPC),
-		processDone:          make(chan struct{}),
-		handshakeTimeout:     handshakeTimeout,
-		pid:                  cmd.Process.Pid,
-		attempt:              attempt,
-		activeLaunches:       activeLaunches,
-		notificationProtocol: "unknown",
-		acceptNotification:   turnNotificationGate.accept,
+		cfg:                    b.cfg,
+		stdin:                  stdin,
+		pending:                make(map[int]*pendingRPC),
+		processDone:            make(chan struct{}),
+		handshakeTimeout:       handshakeTimeout,
+		threadHandshakeTimeout: threadHandshakeTimeout,
+		pid:                    cmd.Process.Pid,
+		attempt:                attempt,
+		activeLaunches:         activeLaunches,
+		notificationProtocol:   "unknown",
+		acceptNotification:     turnNotificationGate.accept,
 		onDiscardedNotification: func(string, map[string]any) {
 			// Any app-server notification proves the process made semantic
 			// progress, even when it is intentionally excluded from the active
@@ -1398,9 +1401,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		threadID, resumed, err := c.startOrResumeThread(runCtx, opts, b.cfg.Logger)
 		if err != nil {
 			var handshakeErr *codexHandshakeTimeoutError
-			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/start"
+			timedOut := errors.As(err, &handshakeErr) && isCodexThreadSetupRPC(handshakeErr.Method)
 			if timedOut {
-				// A timed-out thread/start has an uncertain provider outcome. Kill
+				// A timed-out thread setup has an uncertain provider outcome. Kill
 				// the whole process group before waiting so a leader that exits on
 				// EOF cannot leave detached-stdio descendants behind.
 				signalProcessGroup(cmd, syscall.SIGKILL)
@@ -1409,18 +1412,18 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
 			finalError = err.Error()
-			if c.threadStartSent {
+			if c.threadSetupMethod != "" {
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
 				b.cfg.Logger.Warn("codex lifecycle",
-					"phase", "thread_start_failure",
+					"phase", strings.ReplaceAll(c.threadSetupMethod, "/", "_")+"_failure",
 					"task_id", b.cfg.TaskID,
 					"runtime_id", b.cfg.RuntimeID,
 					"pid", cmd.Process.Pid,
 					"attempt", attempt,
 					"active_launches", activeLaunches,
-					"method", "thread/start",
-					"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
-					"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+					"method", c.threadSetupMethod,
+					"latency", time.Since(c.threadSetupStarted).Round(time.Millisecond).String(),
+					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 					"cleanup_confirmed", cleanupConfirmed,
 					"reaped", cleanupConfirmed,
 					"retry_safe", false,
@@ -1761,6 +1764,24 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
+func resolveCodexHandshakeTimeouts(opts ExecOptions) (time.Duration, time.Duration) {
+	handshakeTimeout := opts.HandshakeTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = defaultCodexHandshakeTimeout
+	}
+	threadHandshakeTimeout := opts.ThreadHandshakeTimeout
+	if threadHandshakeTimeout <= 0 {
+		if opts.HandshakeTimeout > 0 {
+			// Backward compatibility: an explicit legacy override historically
+			// bounded every startup RPC, including thread setup.
+			threadHandshakeTimeout = opts.HandshakeTimeout
+		} else {
+			threadHandshakeTimeout = defaultCodexThreadHandshakeTimeout
+		}
+	}
+	return handshakeTimeout, threadHandshakeTimeout
+}
+
 // The continuity notice this backend prepends is supplied by the caller via
 // ExecOptions.ResumeContinuityNotice rather than written here. It used to be a
 // constant in this file that mirrored the daemon's, which meant two hand-kept
@@ -1812,9 +1833,31 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		// resume must honour the live config, not the stored one.
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
 		applyCodexServiceTier(resumeParams, opts.ServiceTier)
+		c.threadSetupMethod = "thread/resume"
+		c.threadSetupStarted = time.Now()
+		logger.Info("codex lifecycle",
+			"phase", "thread_resume_sent",
+			"task_id", c.cfg.TaskID,
+			"runtime_id", c.cfg.RuntimeID,
+			"pid", c.pid,
+			"attempt", c.attempt,
+			"active_launches", c.activeLaunches,
+			"method", c.threadSetupMethod,
+		)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				logger.Info("codex lifecycle",
+					"phase", "thread_resume_response",
+					"task_id", c.cfg.TaskID,
+					"runtime_id", c.cfg.RuntimeID,
+					"pid", c.pid,
+					"attempt", c.attempt,
+					"active_launches", c.activeLaunches,
+					"method", c.threadSetupMethod,
+					"latency", time.Since(c.threadSetupStarted).Round(time.Millisecond).String(),
+					"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
+				)
 				return threadID, true, nil
 			}
 			logger.Warn("codex thread/resume returned no thread ID; falling back to thread/start", "prior_thread_id", priorThreadID)
@@ -1850,8 +1893,8 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
 	applyCodexServiceTier(startParams, opts.ServiceTier)
-	c.threadStartSent = true
-	c.threadStartStarted = time.Now()
+	c.threadSetupMethod = "thread/start"
+	c.threadSetupStarted = time.Now()
 	logger.Info("codex lifecycle",
 		"phase", "thread_start_sent",
 		"task_id", c.cfg.TaskID,
@@ -1859,7 +1902,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"pid", c.pid,
 		"attempt", c.attempt,
 		"active_launches", c.activeLaunches,
-		"method", "thread/start",
+		"method", c.threadSetupMethod,
 	)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
@@ -1877,8 +1920,8 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"attempt", c.attempt,
 		"active_launches", c.activeLaunches,
 		"method", "thread/start",
-		"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
-		"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+		"latency", time.Since(c.threadSetupStarted).Round(time.Millisecond).String(),
+		"latency_ms", time.Since(c.threadSetupStarted).Milliseconds(),
 	)
 	c.trySetThreadName(ctx, threadID, opts.ThreadName, logger)
 	return threadID, false, nil
@@ -2135,24 +2178,25 @@ func describeCodexSemanticActivity(msg Message) string {
 // ── codexClient: JSON-RPC 2.0 transport ──
 
 type codexClient struct {
-	cfg                Config
-	stdin              interface{ Write([]byte) (int, error) }
-	mu                 sync.Mutex
-	nextID             int
-	pending            map[int]*pendingRPC
-	processDone        chan struct{}
-	processErr         error
-	handshakeTimeout   time.Duration
-	pid                int
-	attempt            int
-	activeLaunches     int64
-	threadStartSent    bool
-	threadStartStarted time.Time
-	threadID           string
-	turnID             string
-	onMessage          func(Message)
-	onSemanticActivity func(description string)
-	onTurnDone         func(aborted bool)
+	cfg                    Config
+	stdin                  interface{ Write([]byte) (int, error) }
+	mu                     sync.Mutex
+	nextID                 int
+	pending                map[int]*pendingRPC
+	processDone            chan struct{}
+	processErr             error
+	handshakeTimeout       time.Duration
+	threadHandshakeTimeout time.Duration
+	pid                    int
+	attempt                int
+	activeLaunches         int64
+	threadSetupMethod      string
+	threadSetupStarted     time.Time
+	threadID               string
+	turnID                 string
+	onMessage              func(Message)
+	onSemanticActivity     func(description string)
+	onTurnDone             func(aborted bool)
 	// onFinalAnswer fires only for an agent message the app-server itself
 	// labelled `phase: "final_answer"` — the turn's deliverable, as opposed to
 	// the intermediate agent messages that narrate work between tool calls.
@@ -2293,6 +2337,22 @@ func isCodexHandshakeRPC(method string) bool {
 	}
 }
 
+func isCodexThreadSetupRPC(method string) bool {
+	return method == "thread/start" || method == "thread/resume"
+}
+
+func (c *codexClient) handshakeTimeoutFor(method string) time.Duration {
+	switch method {
+	case "thread/start", "thread/resume":
+		if c.threadHandshakeTimeout > 0 {
+			return c.threadHandshakeTimeout
+		}
+		return c.handshakeTimeout
+	default:
+		return c.handshakeTimeout
+	}
+}
+
 func codexRequestContextError(ctx context.Context) error {
 	var handshakeErr *codexHandshakeTimeoutError
 	if errors.As(context.Cause(ctx), &handshakeErr) {
@@ -2307,9 +2367,9 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	}
 	requestCtx := ctx
 	cancelRequest := func() {}
-	if c.handshakeTimeout > 0 && isCodexHandshakeRPC(method) {
-		timeoutErr := &codexHandshakeTimeoutError{Method: method, Timeout: c.handshakeTimeout}
-		requestCtx, cancelRequest = context.WithTimeoutCause(ctx, c.handshakeTimeout, timeoutErr)
+	if timeout := c.handshakeTimeoutFor(method); timeout > 0 && isCodexHandshakeRPC(method) {
+		timeoutErr := &codexHandshakeTimeoutError{Method: method, Timeout: timeout}
+		requestCtx, cancelRequest = context.WithTimeoutCause(ctx, timeout, timeoutErr)
 	}
 	defer cancelRequest()
 

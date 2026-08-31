@@ -56,10 +56,6 @@ const (
 	// 500 preserves a theoretical capacity of 12,000 candidates per day; the
 	// round timeout remains the hard bound on actual work.
 	runtimeGCBatchSize = 500
-	// runtimeGCBacklogScanLimit bounds the observability query as well. The
-	// reason-bucket gauges sample at most this many oldest stale runtimes rather
-	// than turning a safety signal into an unbounded recurring scan.
-	runtimeGCBacklogScanLimit = 1000
 	// runtimeGCTickTimeout bounds each independent hourly GC round so lock
 	// contention cannot occupy its worker indefinitely.
 	runtimeGCTickTimeout = 15 * time.Second
@@ -398,52 +394,6 @@ func gcRuntimes(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Q
 func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, metrics *obsmetrics.BusinessMetrics, publisher runtimeGCEventPublisher, budget time.Duration) (stats runtimeSweepStageStats) {
 	gcCtx, cancelGC := context.WithTimeout(ctx, budget)
 	defer cancelGC()
-
-	blockedCtx, cancelBlocked := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(blockedCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelBlocked()
-	if err != nil {
-		slog.Warn("runtime GC: failed to count task-blocked runtimes", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		metrics.SetRuntimeGCBlocked(blocked)
-		if blocked > 0 {
-			slog.Debug("runtime GC: stale runtimes blocked by non-terminal tasks",
-				"count", blocked, "count_capped", blocked == runtimeGCBacklogScanLimit)
-		}
-	}
-
-	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	backlog, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(countCtx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelCount()
-	if err != nil {
-		slog.Warn("runtime GC: failed to classify stale runtime backlog", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		for _, reason := range []string{
-			obsmetrics.RuntimeGCBacklogActiveAgent,
-			obsmetrics.RuntimeGCBacklogNonTerminalTask,
-			obsmetrics.RuntimeGCBacklogWorkspaceMismatch,
-			obsmetrics.RuntimeGCBacklogEligible,
-		} {
-			metrics.SetRuntimeGCBacklog(reason, 0)
-		}
-		var sampled int64
-		for _, row := range backlog {
-			metrics.SetRuntimeGCBacklog(row.Reason, row.Count)
-			sampled += row.Count
-		}
-		if sampled > 0 {
-			slog.Debug("runtime GC: classified stale runtime backlog",
-				"sampled", sampled, "sample_capped", sampled == runtimeGCBacklogScanLimit)
-		}
-	}
 
 	listCtx, cancelList := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
 	candidates, err := queries.ListStaleOfflineRuntimeGCCandidates(listCtx, db.ListStaleOfflineRuntimeGCCandidatesParams{
