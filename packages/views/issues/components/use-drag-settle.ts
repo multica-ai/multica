@@ -101,9 +101,17 @@ export function useDragSettle(
    * Engage the settle lock and return the `onSettled` callback to hand to the
    * move mutation. The callback releases the lock and triggers a single resync.
    */
+  const settleGenerationRef = useRef(0);
   const beginSettle = useCallback(() => {
     isSettlingRef.current = true;
+    // The release now runs AFTER the move's table refetch lands (the
+    // mutation parks it — see useUpdateIssue.onSettled), so a second drop
+    // can engage the lock while the first release is still in flight. The
+    // generation stamp keeps that late release from unlocking the newer
+    // settle and resyncing its optimistic move away.
+    const generation = ++settleGenerationRef.current;
     return () => {
+      if (settleGenerationRef.current !== generation) return;
       isSettlingRef.current = false;
       setSettleVersion((v) => v + 1);
     };
