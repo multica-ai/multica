@@ -412,6 +412,8 @@ export function SlackAgentBindButton({
                 data-testid="slack-byo-bot-token"
                 value={botToken}
                 onChange={(e) => setBotToken(e.target.value)}
+                // Slack token prefix: a format hint, not copy.
+                // eslint-disable-next-line no-restricted-syntax
                 placeholder="xoxb-…"
                 autoComplete="off"
                 spellCheck={false}
@@ -428,6 +430,8 @@ export function SlackAgentBindButton({
                 data-testid="slack-byo-app-token"
                 value={appToken}
                 onChange={(e) => setAppToken(e.target.value)}
+                // Slack token prefix: a format hint, not copy.
+                // eslint-disable-next-line no-restricted-syntax
                 placeholder="xapp-…"
                 autoComplete="off"
                 spellCheck={false}

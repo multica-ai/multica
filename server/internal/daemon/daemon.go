@@ -1977,6 +1977,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		// Derived from the watchdog budget too (Codex's own timer is not
+		// tool-aware), so it needs the same treatment as tool_watchdog: without
+		// it the effective Codex budget is invisible until a timeout fires.
+		"codex_semantic_inactivity", d.cfg.CodexSemanticInactivityTimeout,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
@@ -2640,7 +2644,8 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older
 	// server returning 404) must never fail registration — the daemon simply
 	// continues with the built-in runtimes it already collected. A profile
-	// whose command_name is not on PATH is skipped (the host doesn't have it).
+	// whose command_name is neither on PATH nor already discovered for the same
+	// protocol family is skipped (the host doesn't have it).
 	//
 	// profileSig is a content hash of the workspace's profile list captured
 	// here so an on-demand server notification can skip re-registration when
@@ -2729,14 +2734,14 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 
 // appendProfileRuntimes fetches the workspace's enabled custom runtime
 // profiles (MUL-3284) and appends a runtime registration entry for each one
-// whose command_name resolves on this host's PATH. For each resolved profile
+// whose command_name resolves on this host. For each resolved profile
 // it records the absolute command path and fixed args keyed by profile_id (via
 // recordProfileLaunch) so runTask can later launch the custom executable for a
 // claimed task.
 //
 // Best-effort by contract: any error fetching profiles (older server, network
 // blip) is logged and swallowed — registration proceeds with the built-in
-// runtimes already collected. A profile whose command is not on PATH is
+// runtimes already collected. A profile whose command cannot be resolved is
 // skipped with an Info log (this host simply doesn't have that command).
 //
 // The registration entry mirrors the built-in shape: name = display_name
@@ -2791,9 +2796,11 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// that isn't on the daemon's PATH, or selects between multiple
 		// installs on the same host. A configured-but-unusable override
 		// (deleted/moved/non-executable) is logged and falls back to PATH
-		// rather than registering a runtime that can't launch. When neither
-		// the override nor PATH resolves, the profile is skipped (existing
-		// behavior).
+		// and then to the matching provider command already discovered at
+		// daemon startup. The latter matters for GUI-launched daemons whose
+		// environment cannot resolve a CLI directly even though built-in
+		// discovery found it through a login shell or provider install path.
+		// When none of those sources resolves, the profile is skipped.
 		var resolved string
 		var failureReason string
 		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
@@ -2811,23 +2818,31 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		if resolved == "" {
 			r, err := lookPath(profile.CommandName)
 			if err != nil {
-				// Host doesn't have this command — expected on hosts that aren't
-				// provisioned for this profile. Skip without failing.
-				d.logger.Info("skip custom runtime profile: command not found on PATH",
-					"workspace_id", workspaceID, "profile_id", profile.ID,
-					"command_name", profile.CommandName, "error", err)
-				if failureReason != "" {
-					failureReason += "; "
+				if discovered, ok := d.agents()[profile.ProtocolFamily]; ok && discovered.Command == profile.CommandName && discovered.Path != "" {
+					resolved = discovered.Path
+					d.logger.Info("custom runtime profile: using discovered provider command path",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"protocol_family", profile.ProtocolFamily, "command_path", resolved)
+				} else {
+					// Host doesn't have this command — expected on hosts that aren't
+					// provisioned for this profile. Skip without failing.
+					d.logger.Info("skip custom runtime profile: command not found on PATH or provider discovery",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"command_name", profile.CommandName, "error", err)
+					if failureReason != "" {
+						failureReason += "; "
+					}
+					failureReason += "command not found on PATH or provider discovery: " + profile.CommandName
+					*failedProfiles = append(*failedProfiles, map[string]string{
+						"profile_id":   profile.ID,
+						"command_name": profile.CommandName,
+						"reason":       failureReason,
+					})
+					continue
 				}
-				failureReason += "command not found on PATH: " + profile.CommandName
-				*failedProfiles = append(*failedProfiles, map[string]string{
-					"profile_id":   profile.ID,
-					"command_name": profile.CommandName,
-					"reason":       failureReason,
-				})
-				continue
+			} else {
+				resolved = r
 			}
-			resolved = r
 		}
 		// Best-effort version detection; an empty version is acceptable. The
 		// probe carries the profile's fixed_args so a wrapper reports the
@@ -3990,11 +4005,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 //
 // The HTTP heartbeat is used on purpose rather than queueing a WS frame: the
 // hint arrives on the read pump, the WS write path may be backed up or tearing
-// down, and this is a human-interactive, low-frequency path (a user opened a
-// model picker) where one extra request is cheaper than a missed wakeup. Note it
-// intentionally bypasses the wsHeartbeatRecentlyAcked suppression that the
-// scheduled HTTP tick honours — that suppression exists to avoid duplicate
-// periodic writes, not to block an explicitly requested pull.
+// down, and this is a human-interactive, low-frequency path where one extra
+// request is cheaper than a missed wakeup. Note it intentionally bypasses the
+// wsHeartbeatRecentlyAcked suppression that the scheduled HTTP tick honours —
+// that suppression exists to avoid duplicate periodic writes, not to block an
+// explicitly requested pull.
 func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	if runtimeID == "" {
 		return
@@ -4022,10 +4037,10 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		d.pendingWorkMu.Unlock()
 		return
 	}
-	// Rate limit per runtime. The hint is caller-triggered (any workspace member
-	// hitting the list-models endpoint), so without a floor a request loop would
-	// become a heartbeat amplifier. A suppressed hint costs nothing but the
-	// pre-existing wait for the scheduled heartbeat.
+	// Rate limit per runtime. The hint is caller-triggered by interactive model
+	// or capability endpoints, so without a floor a request loop would become a
+	// heartbeat amplifier. A suppressed hint costs nothing but the pre-existing
+	// wait for the scheduled heartbeat.
 	if last, ok := d.pendingWorkLastRun[runtimeID]; ok && time.Since(last) < pendingWorkHintMinInterval {
 		d.pendingWorkMu.Unlock()
 		d.logger.Debug("pending work hint throttled", "runtime_id", runtimeID, "kind", kind)
@@ -4040,10 +4055,12 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		d.pendingWorkMu.Unlock()
 	}()
 
-	// Root context: handleHeartbeatActions hands this ctx to the actual work
-	// (model discovery shells out to a CLI, for up to ~40s on the slowest
-	// provider — see agent.hermesDiscoveryTimeout), so it must outlive this
-	// function. Only the heartbeat request itself is time-bounded.
+	// Root context: handleHeartbeatActions hands this ctx to the actual work, so
+	// it must outlive this function. Capability discovery and local-skill imports
+	// are normally quick filesystem operations, while model discovery may shell
+	// out to a CLI for up to ~40s on the slowest provider (see
+	// agent.hermesDiscoveryTimeout). Only the heartbeat request itself is
+	// time-bounded.
 	ctx := d.recoveryContext()
 	if ctx.Err() != nil {
 		return
@@ -4127,6 +4144,19 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	if catalog.Fallback {
 		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
 			"runtime_id", rt.ID, "provider", rt.Provider, "path", execPath, "count", len(models))
+	}
+	if rt.Provider == "codearts" && len(models) == 0 {
+		if home, homeErr := os.UserHomeDir(); homeErr == nil {
+			configuredModels, configErr := loadCodeArtsConfiguredModels(home)
+			if configErr != nil {
+				d.logger.Warn("CodeArts custom model discovery failed",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "error", configErr)
+			} else if len(configuredModels) > 0 {
+				models = configuredModels
+				d.logger.Info("CodeArts model discovery used user-configured providers",
+					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "count", len(models))
+			}
+		}
 	}
 
 	// Wire format matches handler.ModelEntry. Use a struct (not
@@ -5660,6 +5690,7 @@ func taskRootDirParams(workspacesRoot string, task Task) execenv.RootDirParams {
 // this map at init so their display names stay in lockstep with the
 // descriptor.
 var runtimeDisplayNameOverrides = map[string]string{
+	"codearts":   "CodeArts",
 	"dsh":        "DeepSeek Harness",
 	"traecli":    "Trae",
 	"grok":       "Grok",
@@ -5717,16 +5748,22 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
-// gateResumeToReusedWorkdir clears the task's prior session unless this run
+// gateResumeToReachableSession clears the task's prior session unless this run
 // can actually reach the store the session lives in, and reports whether that
-// held. CLI backends key their session stores to the cwd (Claude Code looks
-// sessions up under ~/.claude/projects/<encoded-cwd>/), so a session id from a
-// different workdir can never resolve: the CLI exits within a second and the
-// run fails before doing any work — permanently, because the failed run
-// records no session and the next claim serves the same stale pointer again.
-// This fires whenever the prior workdir no longer exists (GC'd after the issue
-// went done, daemon reinstall, manual cleanup) and execenv.Reuse fell back to a
-// fresh Prepare (GitHub #3854).
+// held. Most CLI backends key their session stores to the cwd (Claude Code
+// looks sessions up under ~/.claude/projects/<encoded-cwd>/), so a session id
+// from a different workdir can never resolve: the CLI exits within a second
+// and the run fails before doing any work — permanently, because the failed
+// run records no session and the next claim serves the same stale pointer
+// again. This fires whenever the prior workdir no longer exists (GC'd after
+// the issue went done, daemon reinstall, manual cleanup) and execenv.Reuse fell
+// back to a fresh Prepare (GitHub #3854).
+//
+// Pi and OMP are the exception. Their opaque session id is an absolute JSONL
+// path under ~/.multica/pi-sessions, and the backend passes that path directly
+// to --session. The transcript remains resumable when only the task workdir
+// changes, so binding it to workdir reuse discards healthy conversation history
+// and forces the model to reconstruct it through `multica chat history`.
 //
 // A matching workdir is not sufficient on its own. Hermes keys its sessions to
 // HERMES_HOME — the per-task overlay under envRoot — not to the cwd, and the
@@ -5741,8 +5778,8 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // HermesSessionStore) — and false drops the resume with the same disclosure as
 // a workdir mismatch.
 // sameExistingDir reports whether two paths name the same existing directory.
-// False when either cannot be stat'd, which is the safe answer here: an absent
-// prior workdir means there is nothing to resume from.
+// False when either cannot be stat'd, which is the safe answer for cwd-keyed
+// providers: an absent prior workdir means there is nothing to resume from.
 func sameExistingDir(a, b string) bool {
 	if a == "" || b == "" {
 		return false
@@ -5758,15 +5795,21 @@ func sameExistingDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
-	// Compare the directories, not the spelling. Reuse runs in the canonical
-	// path it validated and locked, which need not be character-identical to
-	// the PriorWorkDir the server sent — a symlinked workspaces root is enough
-	// to make them differ. A string compare would then silently drop the prior
-	// session on every follow-up task in that installation.
-	reused := task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
-	if !reused && task.PriorSessionID != "" {
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable bool, taskLog *slog.Logger) bool {
+	var reachable bool
+	if providerUsesPiSessionFile(provider) {
+		reachable = piSessionFilePresent(task.PriorSessionID)
+	} else {
+		// Compare the directories, not the spelling. Reuse runs in the canonical
+		// path it validated and locked, which need not be character-identical to
+		// the PriorWorkDir the server sent — a symlinked workspaces root is enough
+		// to make them differ. A string compare would then silently drop the prior
+		// session on every follow-up task in that installation.
+		reachable = task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
+	}
+	if !reachable && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: session store not reachable from this run",
+			"provider", provider,
 			"session_id", task.PriorSessionID,
 			"prior_workdir", task.PriorWorkDir,
 			"workdir", envWorkDir,
@@ -5781,7 +5824,27 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 		taskCtx.PriorSessionResumeUnavailable = true
 		task.PriorSessionResumeUnavailable = true
 	}
-	return reused
+	return reachable
+}
+
+func providerUsesPiSessionFile(provider string) bool {
+	if provider == "pi" {
+		return true
+	}
+	desc, ok := agent.BuiltinRuntimeByID(provider)
+	return ok && desc.ProtocolFamily == "pi"
+}
+
+// piSessionFilePresent proves there is persisted history to resume. It does
+// not claim the transcript is idle: the Pi backend takes an exclusive lock for
+// the complete child-process lifetime and reports a busy resume as rejected so
+// runTask falls back to its existing one-shot fresh-session path.
+func piSessionFilePresent(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	info, err := os.Stat(sessionID)
+	return err == nil && info.Mode().IsRegular() && info.Size() > 0
 }
 
 // sessionHomeReachable reports whether a session recorded by a prior task on
@@ -5803,9 +5866,8 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 //   - With no store, the transcript is the overlay's own task-local file, which
 //     survives exactly when this run reused the prior task's env root.
 //
-// Every other provider is keyed by cwd (or resolves its own store), so the
-// workdir comparison in gateResumeToReusedWorkdir remains the whole answer and
-// this returns true.
+// Every other provider is keyed by cwd or handles its independently addressed
+// store in gateResumeToReachableSession, so this predicate returns true.
 func sessionHomeReachable(provider string, env *execenv.Environment, envReused bool) bool {
 	if provider != "hermes" {
 		return true
@@ -5900,7 +5962,7 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
 // rollout is not actually present in the task's CODEX_HOME sessions. A reused
-// workdir keeps PriorSessionID (gateResumeToReusedWorkdir), but Codex session
+// workdir keeps PriorSessionID (gateResumeToReachableSession), but Codex session
 // isolation (MUL-4424) means the rollout may be missing: a migrated legacy home
 // that could not locate it, or a local_directory task whose shared history was
 // pruned. Codex would then silently thread/start from scratch, so we clear the
@@ -7323,13 +7385,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
+	resumeReachable := gateResumeToReachableSession(&task, &taskCtx, provider, env.WorkDir, sessionHomeReachable(provider, env, envReused), taskLog)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
 	// generated below if it isn't, so we never tell the agent it is continuing a
 	// conversation Codex will silently restart from scratch.
-	if reused {
+	if resumeReachable {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
 	}
 
@@ -7519,7 +7581,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"provider", provider,
 		"workdir", env.WorkDir,
 		"model", model,
-		"reused", reused,
+		"resume_reachable", resumeReachable,
 	)
 	if task.PriorSessionID != "" {
 		taskLog.Info("resuming session", "session_id", task.PriorSessionID)
@@ -7555,7 +7617,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration
-	if provider == "opencode" {
+	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
 	execOpts := agent.ExecOptions{
@@ -7567,6 +7629,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
@@ -7679,7 +7742,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
-		retiredSessionID = task.PriorSessionID
+		if !result.ResumeRejectedTransient {
+			retiredSessionID = task.PriorSessionID
+		}
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 
 		// Rebuild cold-session context before the single retry. The prior
@@ -7979,9 +8044,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // how this went wrong before:
 //
 //  1. Would a fresh session even fix this? Only if the resume itself was
-//     refused — the transcript is gone, or it belongs to another provider
-//     account. result.ResumeRejected is the backend's positive evidence of
-//     that, and where a backend can produce it, it is the whole answer.
+//     refused — permanently because the transcript is gone or belongs to
+//     another provider account, or transiently because another live run owns
+//     it. result.ResumeRejected and result.ResumeRejectedTransient are the
+//     backend's positive evidence of those two cases. Both allow a fresh retry,
+//     but only the permanent signal retires the prior session from later
+//     lookups.
 //     Answering by exclusion alone would invert the burden of proof: the
 //     failures a new session cures are a small enumerable set, while the
 //     ones it cannot are open-ended. A network drop, a 429, a quota trip or
@@ -7995,7 +8063,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 //     Not every backend can answer, though, and a false ResumeRejected means
 //     different things depending on who produced it: "checked, not a
 //     rejection" from a capable backend, "could not tell" from one of the
-//     five in agent.ResumeRejectionUndetectable. That is why provider is a
+//     backends in agent.ResumeRejectionUndetectable. That is why provider is a
 //     parameter — without it the compatibility branch below would silently
 //     apply to every backend, second-guessing capable ones by exclusion.
 //
@@ -8012,7 +8080,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 		return false
 	}
 	// Positive evidence: the backend proved the resume was refused.
-	if result.ResumeRejected {
+	if result.ResumeRejected || result.ResumeRejectedTransient {
 		return true
 	}
 	// Positive evidence of a different kind: the resume was NOT refused —
@@ -8074,14 +8142,14 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	if !agent.ResumeRejectionUndetectable(provider) {
 		return false
 	}
-	// antigravity, copilot, cursor, deveco and opencode scrape SessionID out
+	// antigravity, codearts, copilot, cursor, deveco and opencode scrape SessionID out
 	// of stream output and have no rejection string captured anywhere, so an
 	// empty SessionID is the only thing they can offer. It proves no session
 	// was established this run, which is exactly what the gate relied on for
 	// every backend before ResumeRejected existed; keeping it preserves their
 	// recovery instead of silently removing it.
 	//
-	// Inventing rejection phrases for these five would be the alternative,
+	// Inventing rejection phrases for these backends would be the alternative,
 	// and it is worse: no real output has been captured for any of them, and
 	// a false positive discards a recoverable session pointer.
 	return result.SessionID == "" && freshSessionMayHelp(result.Error)

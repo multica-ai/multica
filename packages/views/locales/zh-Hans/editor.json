@@ -73,6 +73,8 @@
     "group_users": "用户",
     "group_issues": "任务",
     "all_members": "所有成员",
+    "agent_badge": "智能体",
+    "squad_badge": "小队",
     "searching": "搜索中...",
     "no_results": "无结果",
     "group_current": "当前页面",
@@ -84,10 +86,11 @@
     "no_skills_configured": "暂无配置的技能",
     "no_results": "没有匹配的技能",
     "commands": {
-      "note": "添加备注——不触发任何 Agent"
+      "note": "添加备注——不触发任何智能体"
     }
   },
   "code_block": {
+    "html_preview": "HTML 预览",
     "copy_code": "复制代码",
     "show_preview": "显示预览",
     "show_source": "显示源码",
@@ -108,6 +111,7 @@
     "title_aria_label": "标题"
   },
   "mermaid": {
+    "diagram_label": "Mermaid 图表",
     "render_error": "无法渲染 Mermaid 图。",
     "rendering": "渲染中…",
     "viewer_title": "图表",

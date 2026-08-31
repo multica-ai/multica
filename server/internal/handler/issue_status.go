@@ -40,6 +40,16 @@ type IssueStatusResponse struct {
 	UpdatedAt   string  `json:"updated_at"`
 }
 
+// terminalIssueStatusKeys resolves the concrete status keys whose categories
+// carry terminal behavior. Callers pass the result into indexed status
+// predicates instead of resolving the category once per issue row.
+func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
+		issuestatus.Done,
+		issuestatus.Cancelled,
+	})
+}
+
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
 	return IssueStatusResponse{
 		ID:          uuidToString(s.ID),

@@ -56,10 +56,6 @@ const (
 	// 500 preserves a theoretical capacity of 12,000 candidates per day; the
 	// round timeout remains the hard bound on actual work.
 	runtimeGCBatchSize = 500
-	// runtimeGCBacklogScanLimit bounds the observability query as well. The
-	// reason-bucket gauges sample at most this many oldest stale runtimes rather
-	// than turning a safety signal into an unbounded recurring scan.
-	runtimeGCBacklogScanLimit = 1000
 	// runtimeGCTickTimeout bounds each independent hourly GC round so lock
 	// contention cannot occupy its worker indefinitely.
 	runtimeGCTickTimeout = 15 * time.Second
@@ -85,22 +81,6 @@ const (
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
 	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
-	// defaultTaskQueuedTTL expires tasks that have been sitting in 'queued'
-	// for longer than this without ever being claimed. This is the cleanup
-	// arm of the MUL-1899 backlog fix: even with the dispatch-time
-	// admission gate that blocks new enqueues against offline runtimes,
-	// tasks already on the queue when a runtime drops off (or that lost
-	// the race against a runtime that went offline mid-tick) need a
-	// time-bounded exit. The 2h default was chosen under the historical
-	// assumption that it sits conservatively above any reasonable "queued
-	// behind a long-running task" window for an online runtime, so the sweep
-	// drains the historical 87k autopilot backlog within ~24h without
-	// expiring legitimately-pending work. That assumption breaks down for
-	// self-hosted deployments whose runtimes have low task concurrency: a
-	// single slow task can hold the rest of the queue for longer than 2
-	// hours; raise it via MULTICA_TASK_QUEUED_TTL in that case to avoid
-	// queued_expired failures.
-	defaultTaskQueuedTTL = 2 * time.Hour
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
 	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
@@ -173,7 +153,7 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration, queuedTTL time.Duration) {
+func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
 	runPeriodicSweep(ctx, sweepInterval, func() {
 		// These stages retain the existing cadence and ordering in PR1 so the
 		// rollout changes no business predicate or recovery semantics. Runtime
@@ -183,7 +163,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
-		sweepExpiredQueuedTasks(ctx, queries, taskSvc, queuedTTL)
+		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 	})
@@ -415,52 +395,6 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 	gcCtx, cancelGC := context.WithTimeout(ctx, budget)
 	defer cancelGC()
 
-	blockedCtx, cancelBlocked := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(blockedCtx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelBlocked()
-	if err != nil {
-		slog.Warn("runtime GC: failed to count task-blocked runtimes", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		metrics.SetRuntimeGCBlocked(blocked)
-		if blocked > 0 {
-			slog.Debug("runtime GC: stale runtimes blocked by non-terminal tasks",
-				"count", blocked, "count_capped", blocked == runtimeGCBacklogScanLimit)
-		}
-	}
-
-	countCtx, cancelCount := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
-	backlog, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(countCtx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	cancelCount()
-	if err != nil {
-		slog.Warn("runtime GC: failed to classify stale runtime backlog", "error", err)
-		metrics.RecordRuntimeGCBlockedObservationFailed()
-	} else {
-		for _, reason := range []string{
-			obsmetrics.RuntimeGCBacklogActiveAgent,
-			obsmetrics.RuntimeGCBacklogNonTerminalTask,
-			obsmetrics.RuntimeGCBacklogWorkspaceMismatch,
-			obsmetrics.RuntimeGCBacklogEligible,
-		} {
-			metrics.SetRuntimeGCBacklog(reason, 0)
-		}
-		var sampled int64
-		for _, row := range backlog {
-			metrics.SetRuntimeGCBacklog(row.Reason, row.Count)
-			sampled += row.Count
-		}
-		if sampled > 0 {
-			slog.Debug("runtime GC: classified stale runtime backlog",
-				"sampled", sampled, "sample_capped", sampled == runtimeGCBacklogScanLimit)
-		}
-	}
-
 	listCtx, cancelList := context.WithTimeout(gcCtx, runtimeGCOperationTimeout)
 	candidates, err := queries.ListStaleOfflineRuntimeGCCandidates(listCtx, db.ListStaleOfflineRuntimeGCCandidatesParams{
 		StaleSeconds: offlineRuntimeTTLSeconds,
@@ -675,21 +609,22 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	return
 }
 
-// sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for
-// longer than the TTL. Companion to the dispatch-time admission gate added
-// in MUL-1899: that gate prevents new doomed enqueues; this gate drains the
-// historical backlog and catches the race where a runtime goes offline AFTER
-// a task is already queued. Capped to queuedExpireBatchSize per tick so a
-// big backlog can't monopolise the DB.
-func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, queuedTTL time.Duration) (stats runtimeSweepStageStats) {
+// sweepExpiredQueuedTasks fails queued tasks whose runtime has stopped proving
+// it is alive. Companion to the dispatch-time admission gate added in MUL-1899:
+// that gate prevents new doomed enqueues; this one retires work already queued
+// against a runtime that then went away. It deliberately does NOT expire on
+// queue age — a heartbeating runtime is busy, not dead, and MUL-6558 showed a
+// wall clock killing healthy work behind a slow queue. Capped to
+// queuedExpireBatchSize per tick so a big backlog can't monopolise the DB.
+func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, reconnectGrace time.Duration) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageQueuedExpiry, startedAt, stats)
 	}()
 
 	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTL.Seconds(),
-		MaxPerTick: queuedExpireBatchSize,
+		ReconnectGraceSecs: reconnectGrace.Seconds(),
+		MaxPerTick:         queuedExpireBatchSize,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to expire stale queued tasks", "error", err)

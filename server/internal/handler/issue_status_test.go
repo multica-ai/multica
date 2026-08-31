@@ -413,13 +413,31 @@ func TestIssueWriteStoresCanonicalStatusKey(t *testing.T) {
 }
 
 // TestCustomTerminalStatusCountsAsTerminalInSQL covers the SQL-side consumers
-// the Go resolver cannot reach. Before issue_effective_status existed, each of
-// these read the status literal, so a custom status in the `done` category
-// still counted as open for the duplicate guard and was missed by sub-issue and
-// project completion counts.
+// the Go resolver cannot reach. Terminal categories are expanded once into
+// concrete keys so custom done statuses preserve their behavior without a
+// per-row issue_effective_status call.
 func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 	ctx := context.Background()
 	createTestCustomStatus(t, "gate_approved_s", issuestatus.Done)
+	createTestCustomStatus(t, "gate_archived_s", issuestatus.Done)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue_status
+		SET archived_at = now()
+		WHERE workspace_id = $1 AND key = 'gate_archived_s'`, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("archive custom terminal status: %v", err)
+	}
+	terminalStatusKeys, err := issuestatus.ExpandCategories(
+		ctx,
+		testHandler.Queries,
+		parseUUID(testWorkspaceID),
+		[]string{issuestatus.Done, issuestatus.Cancelled},
+	)
+	if err != nil {
+		t.Fatalf("expand terminal status categories: %v", err)
+	}
+	if !slices.Contains(terminalStatusKeys, "gate_archived_s") {
+		t.Fatalf("expanded terminal keys %v do not include archived custom status", terminalStatusKeys)
+	}
 
 	mkIssue := func(title, status string) pgtype.UUID {
 		t.Helper()
@@ -443,10 +461,35 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		title := "sql terminal duplicate probe"
 		mkIssue(title, "gate_approved_s")
 		if _, err := testHandler.Queries.FindActiveDuplicateIssue(ctx, db.FindActiveDuplicateIssueParams{
-			WorkspaceID:     parseUUID(testWorkspaceID),
-			NormalizedTitle: title,
+			WorkspaceID:        parseUUID(testWorkspaceID),
+			TerminalStatusKeys: terminalStatusKeys,
+			NormalizedTitle:    title,
 		}); err == nil {
 			t.Error("an issue on a custom done status must not count as an active duplicate")
+		}
+	})
+
+	t.Run("open issue listing excludes it", func(t *testing.T) {
+		customDoneID := mkIssue("sql open-list custom done", "gate_approved_s")
+		openID := mkIssue("sql open-list active", "todo")
+		unknownID := parseUUID(dbfx.Issue(t, "sql open-list unknown legacy status", testutil.Cols{
+			"status": "legacy_unknown",
+		}))
+		rows, err := testHandler.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
+			WorkspaceID:        parseUUID(testWorkspaceID),
+			TerminalStatusKeys: terminalStatusKeys,
+		})
+		if err != nil {
+			t.Fatalf("ListOpenIssues: %v", err)
+		}
+		var sawCustomDone, sawOpen, sawUnknown bool
+		for _, row := range rows {
+			sawCustomDone = sawCustomDone || row.ID == customDoneID
+			sawOpen = sawOpen || row.ID == openID
+			sawUnknown = sawUnknown || row.ID == unknownID
+		}
+		if sawCustomDone || !sawOpen || !sawUnknown {
+			t.Fatalf("open listing customDone/open/unknown = %v/%v/%v, want false/true/true", sawCustomDone, sawOpen, sawUnknown)
 		}
 	})
 
@@ -467,8 +510,18 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 				t.Fatalf("attach to project: %v", err)
 			}
 		}
+		foreignWorkspaceID := dbfx.Workspace(t, "Foreign project stats", fmt.Sprintf("foreign-project-stats-%d", time.Now().UnixNano()))
+		dbfx.Issue(t, "foreign workspace issue with mismatched project", testutil.Cols{
+			"workspace_id": foreignWorkspaceID,
+			"project_id":   uuidToString(projectID),
+			"status":       "todo",
+		})
 
-		stats, err := testHandler.Queries.GetProjectIssueStats(ctx, []pgtype.UUID{projectID})
+		stats, err := testHandler.Queries.GetProjectIssueStats(ctx, db.GetProjectIssueStatsParams{
+			WorkspaceID:        parseUUID(testWorkspaceID),
+			ProjectIds:         []pgtype.UUID{projectID},
+			TerminalStatusKeys: terminalStatusKeys,
+		})
 		if err != nil {
 			t.Fatalf("GetProjectIssueStats: %v", err)
 		}
@@ -492,7 +545,10 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 			}
 		}
 
-		rows, err := testHandler.Queries.ChildIssueProgress(ctx, parseUUID(testWorkspaceID))
+		rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
+			WorkspaceID:        parseUUID(testWorkspaceID),
+			TerminalStatusKeys: terminalStatusKeys,
+		})
 		if err != nil {
 			t.Fatalf("ChildIssueProgress: %v", err)
 		}

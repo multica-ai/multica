@@ -60,7 +60,7 @@ The daemon sends a heartbeat every 15 seconds. The server combines heartbeats an
 
 When a runtime is offline:
 
-- Tasks already queued wait for the runtime to recover, for up to 2 hours by default (adjustable via `MULTICA_TASK_QUEUED_TTL`, see [Environment variables](/environment-variables)).
+- Tasks already queued wait for the runtime to recover. They fail only once it has stopped heartbeating for longer than the reconnect grace **and** the task has itself been queued that long, so a runtime that is merely busy keeps its backlog, and work assigned to an already-offline runtime still gets a full grace to wait.
 - Tasks that were running fail; eligible issue or chat tasks can retry automatically.
 - When the daemon starts again, it re-registers its runtimes and reclaims tasks that did not end cleanly last time.
 - A runtime offline for more than 7 days with no agents bound to it (including archived ones) is cleaned up automatically.

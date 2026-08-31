@@ -35,6 +35,9 @@
     "idle": "유휴"
   },
   "presence_status_aria": "상태: {{status}}",
+  "avatar_stack": {
+    "overflow_aria_other": "에이전트 {{count}}개 더"
+  },
   "archived": {
     "active_link": "활성 에이전트",
     "title": "보관된 에이전트"
@@ -477,6 +480,10 @@
       "dialog_headers_label": "HTTP 헤더",
       "dialog_add_header": "헤더 추가",
       "dialog_remove_header": "헤더 제거",
+      "dialog_pair_key_placeholder": "키",
+      "dialog_pair_value_placeholder": "값",
+      "dialog_pair_key_aria": "{{label}} 키 {{index}}",
+      "dialog_pair_value_aria": "{{label}} 값 {{index}}",
       "dialog_native_json_hint": "기존 Provider 네이티브 형식입니다. 형식을 변경하지 않고 JSON으로 편집할 수 있습니다.",
       "dialog_json_label": "단일 Server 설정",
       "dialog_json_aria": "MCP Server JSON 설정",
