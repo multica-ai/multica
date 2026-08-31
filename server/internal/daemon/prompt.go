@@ -310,6 +310,48 @@ func buildQuickCreatePrompt(task Task) string {
 	return b.String()
 }
 
+// writeExplicitlySelectedSkills validates durable slash markers against the
+// Skills materialized for this exact task, then emits canonical names. Labels
+// in user-authored Markdown are display text only and never trusted.
+func writeExplicitlySelectedSkills(
+	b *strings.Builder,
+	agent *AgentData,
+	markdowns ...string,
+) {
+	if agent == nil || len(agent.Skills) == 0 {
+		return
+	}
+	available := make(map[string]string, len(agent.Skills))
+	for _, skill := range agent.Skills {
+		available[skill.ID] = skill.Name
+	}
+
+	seen := make(map[string]struct{})
+	selected := make([]string, 0)
+	for _, markdown := range markdowns {
+		for _, ref := range ExtractSlashSkills(markdown) {
+			name, ok := available[ref.ID]
+			if !ok {
+				continue
+			}
+			if _, ok := seen[ref.ID]; ok {
+				continue
+			}
+			seen[ref.ID] = struct{}{}
+			selected = append(selected, name)
+		}
+	}
+	if len(selected) == 0 {
+		return
+	}
+
+	b.WriteString("Explicitly selected skills:\n")
+	for _, name := range selected {
+		fmt.Fprintf(b, "- %s\n", name)
+	}
+	b.WriteString("\n")
+}
+
 // buildCommentPrompt constructs a prompt for comment-triggered tasks.
 // The triggering comment content is embedded directly so the agent cannot
 // miss it, even when stale output files exist in a reused workdir.
@@ -409,6 +451,16 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise. The comment prohibition is conditional on that call SUCCEEDING: if it exits non-zero, your decision has no trace anywhere, so post exactly ONE short comment stating the outcome and the error instead of exiting silently. That failure comment is this turn's only comment — it does not license a second one.\n\n", task.IssueID)
 		}
 	}
+	selectedSkillMarkdown := make([]string, 0, len(task.CoalescedComments)+1)
+	if task.TriggerAuthorType == "member" {
+		selectedSkillMarkdown = append(selectedSkillMarkdown, task.TriggerCommentContent)
+	}
+	for _, comment := range task.CoalescedComments {
+		if comment.AuthorType == "member" {
+			selectedSkillMarkdown = append(selectedSkillMarkdown, comment.Content)
+		}
+	}
+	writeExplicitlySelectedSkills(&b, task.Agent, selectedSkillMarkdown...)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	// Comment-reading pointer. Warm path with new comments: issue-wide
 	// since-delta count, but steer the agent to read the triggering thread
@@ -575,37 +627,7 @@ func buildChatPrompt(task Task) string {
 		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
 		b.WriteString("\n")
 	}
-	if task.Agent != nil && len(task.Agent.Skills) > 0 {
-		refs := ExtractSlashSkills(task.ChatMessage)
-		if len(refs) > 0 {
-			agentSkills := make(map[string]string, len(task.Agent.Skills))
-			for _, s := range task.Agent.Skills {
-				agentSkills[s.ID] = s.Name
-			}
-
-			selected := make([]string, 0, len(refs))
-			seen := make(map[string]struct{}, len(refs))
-			for _, ref := range refs {
-				name, ok := agentSkills[ref.ID]
-				if !ok {
-					continue
-				}
-				if _, ok := seen[ref.ID]; ok {
-					continue
-				}
-				seen[ref.ID] = struct{}{}
-				selected = append(selected, name)
-			}
-
-			if len(selected) > 0 {
-				b.WriteString("Explicitly selected skills:\n")
-				for _, name := range selected {
-					fmt.Fprintf(&b, "- %s\n", name)
-				}
-				b.WriteString("\n")
-			}
-		}
-	}
+	writeExplicitlySelectedSkills(&b, task.Agent, task.ChatMessage)
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

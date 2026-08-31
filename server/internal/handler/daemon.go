@@ -1753,7 +1753,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(resp.WorkspaceID),
 			UserID:      rt.OwnerID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
+		}, deliveredCommentIDs, commentBackedTask, resp.selectedSkillIDs, daemonTokens...)
 		if ferr != nil {
 			slog.Error("batch claim: finalize task claim failed; requeueing claim",
 				"task_id", uuidToString(task.ID), "error", ferr)
@@ -2163,18 +2163,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// place a claimed task's agent payload is assembled.
 	if agent.SystemKey.String == service.MikaSystemKey {
 		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
-	}
-	if useSkillRefs {
-		_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
-		agentSkillCount = len(skillRefs)
-		resp.Agent.SkillRefs = skillRefs
-	} else {
-		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills()
-		builtinSkillCount = len(builtinSkills)
-		skills = append(skills, builtinSkills...)
-		resp.Agent.Skills = skills
 	}
 	if !claimResponseAgentIdentityMatches(resp) {
 		responseAgentID := ""
@@ -3014,6 +3002,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 	}
 
+	// Skill selection is payload-scoped, so hydrate it only after the task's
+	// exact chat/comment input and owning workspace have both been resolved.
+	// This keeps a `/skill` pick one-run-only while attached Skills and built-ins
+	// retain their existing always-available behavior.
+	var skillFailure *claimBuildFailure
+	agentSkillCount, builtinSkillCount, skillFailure = h.applyClaimTaskSkills(
+		r.Context(), *task, &resp, useSkillRefs,
+	)
+	if skillFailure != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, skillFailure
+	}
+
 	// Surface a bounded snapshot of the same agent's other in-flight issue
 	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
 	// This is advisory context, not a queue gate: cross-issue parallelism and
@@ -3340,7 +3340,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
+	}, deliveredCommentIDs, commentBackedTask, resp.selectedSkillIDs, daemonTokens...)
 	if ferr != nil {
 		outcome = "error_claim_finalize"
 		slog.Error("task claim: failed to finalize token and comment delivery receipt",
@@ -3420,7 +3420,11 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	bundles, _ := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+	bundles, err := h.taskSkillBundlesForResolve(r.Context(), task, parseUUID(taskWorkspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load skill bundles")
+		return
+	}
 	allowed := make(map[string]service.AgentSkillData, len(bundles))
 	for _, bundle := range bundles {
 		allowed[bundle.Source+"\x00"+bundle.ID] = bundle

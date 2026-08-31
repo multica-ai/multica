@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ func TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue(t *testing.T) {
 	// A delivered id outside the task's plan (no trigger/coalesced match) makes
 	// SetTaskDeliveredCommentIDs match zero rows → FinalizeTaskClaim errors.
 	bogus := util.MustParseUUID("11111111-1111-1111-1111-111111111111")
+	selectedSkill := util.MustParseUUID("22222222-2222-2222-2222-222222222222")
 	_, ferr := svc.FinalizeTaskClaim(ctx, task, db.CreateTaskTokenParams{
 		TokenHash:   fmt.Sprintf("finalize-fail-hash-%d", time.Now().UnixNano()),
 		TaskID:      task.ID,
@@ -43,7 +46,7 @@ func TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue(t *testing.T) {
 		WorkspaceID: util.MustParseUUID(workspaceID),
 		UserID:      util.MustParseUUID(userID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, []pgtype.UUID{bogus}, true)
+	}, []pgtype.UUID{bogus}, true, []pgtype.UUID{selectedSkill})
 	if ferr == nil {
 		t.Fatal("expected FinalizeTaskClaim to fail for an out-of-plan delivery receipt")
 	}
@@ -59,6 +62,13 @@ func TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue(t *testing.T) {
 	if tokenCount != 0 {
 		t.Fatalf("expected token rolled back, found %d task_token rows", tokenCount)
 	}
+	var selectedGrantPersisted bool
+	if err := pool.QueryRow(ctx, `SELECT context ? 'selected_skill_ids' FROM agent_task_queue WHERE id = $1`, taskID).Scan(&selectedGrantPersisted); err != nil {
+		t.Fatalf("read selected Skill grant: %v", err)
+	}
+	if selectedGrantPersisted {
+		t.Fatal("selected Skill grant survived failed claim finalization")
+	}
 
 	// The exact dispatched claim is released back to queued.
 	if _, err := svc.RequeueTaskAfterClaimFailure(ctx, task); err != nil {
@@ -70,6 +80,83 @@ func TestFinalizeTaskClaimFailureRollsBackTokenThenRequeue(t *testing.T) {
 	}
 	if status != "queued" {
 		t.Fatalf("task status = %s, want queued after requeue", status)
+	}
+}
+
+func TestFinalizeTaskClaimWithoutSelectedSkillsPreservesContext(t *testing.T) {
+	tests := []struct {
+		name              string
+		initialContext    string
+		wantObject        bool
+		wantSelectedCount int
+	}{
+		{name: "ordinary object skips grant CAS", initialContext: `{"keep":"value"}`, wantObject: true, wantSelectedCount: -1},
+		{name: "stale grant is cleared safely", initialContext: `{"keep":"value","selected_skill_ids":["22222222-2222-2222-2222-222222222222"]}`, wantObject: true, wantSelectedCount: 0},
+		{name: "legacy non-object context remains claimable", initialContext: `null`, wantObject: false, wantSelectedCount: -1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			pool := newTaskClaimRacePool(t)
+			svc := NewTaskService(db.New(pool), pool, nil, events.New())
+			queries := db.New(pool)
+
+			taskID, userID, workspaceID := dispatchedCommentTaskFixture(t, ctx, pool)
+			if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET context = $2::jsonb WHERE id = $1`, taskID, tt.initialContext); err != nil {
+				t.Fatalf("seed task context: %v", err)
+			}
+			task, err := queries.GetAgentTask(ctx, util.MustParseUUID(taskID))
+			if err != nil {
+				t.Fatalf("load task: %v", err)
+			}
+
+			if _, err := svc.FinalizeTaskClaim(ctx, task, db.CreateTaskTokenParams{
+				TokenHash:   fmt.Sprintf("finalize-empty-skill-%s-%d", strings.ReplaceAll(tt.name, " ", "-"), time.Now().UnixNano()),
+				TaskID:      task.ID,
+				AgentID:     task.AgentID,
+				WorkspaceID: util.MustParseUUID(workspaceID),
+				UserID:      util.MustParseUUID(userID),
+				ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+			}, nil, false, nil); err != nil {
+				t.Fatalf("FinalizeTaskClaim with no selected Skills: %v", err)
+			}
+
+			var raw []byte
+			if err := pool.QueryRow(ctx, `SELECT context FROM agent_task_queue WHERE id = $1`, taskID).Scan(&raw); err != nil {
+				t.Fatalf("read task context: %v", err)
+			}
+			if !tt.wantObject {
+				if string(raw) != "null" {
+					t.Fatalf("non-object context = %s, want null", raw)
+				}
+				return
+			}
+			var object map[string]json.RawMessage
+			if err := json.Unmarshal(raw, &object); err != nil {
+				t.Fatalf("decode preserved context: %v", err)
+			}
+			if string(object["keep"]) != `"value"` {
+				t.Fatalf("pre-existing context key lost: %s", raw)
+			}
+			selectedRaw, present := object["selected_skill_ids"]
+			if tt.wantSelectedCount < 0 {
+				if present {
+					t.Fatalf("empty grant unexpectedly added a context key: %s", raw)
+				}
+				return
+			}
+			var selected []string
+			if !present {
+				t.Fatalf("stale grant key was not cleared: %s", raw)
+			}
+			if err := json.Unmarshal(selectedRaw, &selected); err != nil {
+				t.Fatalf("decode selected skill ids: %v", err)
+			}
+			if len(selected) != tt.wantSelectedCount {
+				t.Fatalf("selected skill count = %d, want %d", len(selected), tt.wantSelectedCount)
+			}
+		})
 	}
 }
 

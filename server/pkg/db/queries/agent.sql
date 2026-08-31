@@ -317,10 +317,11 @@ LIMIT 5;
 -- head_sha stamps the commit under review into the task's context JSONB so the
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
--- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
--- issues with no linked PR. Issue-linked tasks never hit quick-create context
--- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
--- key rides harmlessly alongside.
+-- initial_selected_skill_ids freezes the member-authored `/skill` markers from
+-- an issue's exact create payload for its first run. Empty inputs, together
+-- with an empty head_sha, leave context NULL. Issue-linked tasks never hit
+-- quick-create context parsing (parseQuickCreateContext short-circuits on
+-- IssueID.Valid), so these keys ride harmlessly alongside.
 -- id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
 -- enqueues cluster in a narrow contiguous primary-key range instead of
 -- scattering across the B-tree. On a table with existing v4 ids, that range
@@ -345,7 +346,15 @@ SELECT
     sqlc.narg(squad_id),
     CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
-        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
+          OR cardinality(COALESCE(sqlc.narg('initial_selected_skill_ids')::uuid[], ARRAY[]::uuid[])) > 0
+        THEN jsonb_strip_nulls(jsonb_build_object(
+            'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
+            'selected_skill_ids', CASE
+                WHEN cardinality(COALESCE(sqlc.narg('initial_selected_skill_ids')::uuid[], ARRAY[]::uuid[])) > 0
+                THEN to_jsonb(COALESCE(sqlc.narg('initial_selected_skill_ids')::uuid[], ARRAY[]::uuid[]))
+                ELSE NULL
+            END
+        ))
         ELSE NULL
     END,
     sqlc.narg(originator_user_id),
@@ -388,6 +397,11 @@ SELECT
     sqlc.narg(squad_id),
     jsonb_strip_nulls(jsonb_build_object(
         'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
+        'selected_skill_ids', CASE
+            WHEN cardinality(COALESCE(sqlc.narg('initial_selected_skill_ids')::uuid[], ARRAY[]::uuid[])) > 0
+            THEN to_jsonb(COALESCE(sqlc.narg('initial_selected_skill_ids')::uuid[], ARRAY[]::uuid[]))
+            ELSE NULL
+        END,
         'channel_issue_media_pending', TRUE
     )),
     sqlc.narg(originator_user_id),
@@ -860,6 +874,26 @@ WHERE id = @task_id
          )
   )
 RETURNING delivered_comment_ids;
+
+-- name: SetTaskClaimSelectedSkillIDs :one
+-- Freeze the workspace Skills explicitly selected in the exact payload this
+-- claim is about to deliver. Keeping the grant in the task's server-owned
+-- context lets the later bundle resolver authorize the same IDs without
+-- trusting a daemon-supplied ref or re-reading mutable chat/comment bodies.
+UPDATE agent_task_queue
+SET context = jsonb_set(
+    COALESCE(context, '{}'::jsonb),
+    '{selected_skill_ids}',
+    to_jsonb(COALESCE(@selected_skill_ids::uuid[], ARRAY[]::uuid[])),
+    true
+)
+WHERE id = @task_id
+  AND runtime_id = @runtime_id
+  AND status = 'dispatched'
+  AND started_at IS NULL
+  AND dispatched_at = @dispatched_at
+  AND (context IS NULL OR jsonb_typeof(context) = 'object')
+RETURNING context;
 
 -- name: RequeueAgentTaskAfterClaimFailure :one
 -- Claim finalization (task token + optional comment receipt) failed before any

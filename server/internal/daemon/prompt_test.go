@@ -1022,6 +1022,35 @@ func TestBuildChatPromptSlashSkills(t *testing.T) {
 	})
 }
 
+func TestBuildCommentPromptSlashSkills(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-1",
+		TriggerCommentID:      "comment-2",
+		TriggerCommentContent: "please [/review](slash://skill/skill-review)",
+		TriggerAuthorType:     "member",
+		CoalescedComments: []CoalescedCommentData{
+			{ID: "comment-agent", AuthorType: "agent", Content: "[/hidden](slash://skill/skill-hidden)"},
+			{ID: "comment-1", AuthorType: "member", Content: "also [/deploy](slash://skill/skill-deploy)"},
+		},
+		Agent: &AgentData{Skills: []SkillData{
+			{ID: "skill-review", Name: "architecture-sweep"},
+			{ID: "skill-deploy", Name: "autotrigger"},
+			{ID: "skill-hidden", Name: "agent-escalation"},
+		}},
+	}
+
+	out := buildCommentPrompt(task, "codex")
+	if !strings.Contains(out, "Explicitly selected skills:\n- architecture-sweep\n- autotrigger\n") {
+		t.Fatalf("comment prompt missing selected Skills block:\n%s", out)
+	}
+	if strings.Count(out, "Explicitly selected skills:") != 1 {
+		t.Fatalf("comment prompt emitted duplicate selected Skills blocks:\n%s", out)
+	}
+	if strings.Contains(out, "- agent-escalation\n") {
+		t.Fatalf("comment prompt trusted an agent-authored Skill marker:\n%s", out)
+	}
+}
+
 // TestBuildPromptDefaultScansRootsFirst pins that the catch-all fallback
 // prompt (no trigger comment, no chat, no autopilot, no quick-create)
 // starts assignment-triggered comment catch-up with a bounded roots scan and

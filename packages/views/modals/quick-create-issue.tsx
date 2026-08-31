@@ -681,6 +681,7 @@ export function AgentCreatePanel({
           <ContentEditor
             ref={editorRef}
             defaultValue={initialPrompt}
+            enableSlashCommands
             placeholder={anchorCommentId
               ? t(($) => $.create_issue.agent.source_context_prompt_placeholder)
               : t(($) => $.create_issue.agent.prompt_placeholder)}

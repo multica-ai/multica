@@ -192,8 +192,8 @@ interface ContentEditorBaseProps {
   enableSlashCommands?: boolean;
   /**
    * Which `/` menu to show when enableSlashCommands is true: "skill" (default)
-   * lists the active agent's skills (chat); "command" shows the fixed built-in
-   * command menu (issue comments), e.g. /note.
+   * lists Workspace Skills (chat); "command" adds Quick Actions and built-ins
+   * such as /note (issue comments) to the same Workspace Skill library.
    */
   slashCommandMode?: "skill" | "command";
   /**

@@ -92,6 +92,50 @@ function type(editor: Editor, text: string): void {
   }
 }
 
+/**
+ * Chrome routes the first printable key after a handled select-all/delete
+ * through a native keydown, then calls `handleTextInput` with the still-stale
+ * AllSelection range before reconciling the DOM insertion transaction.
+ */
+function typeFromKeyDownAndTextInput(editor: Editor, text: string): void {
+  for (const ch of text) {
+    const event = new KeyboardEvent("keydown", {
+      key: ch,
+      bubbles: true,
+      cancelable: true,
+    });
+    editor.view.dom.dispatchEvent(event);
+    const { from, to } = editor.state.selection;
+    const armingPlugin = editor.state.plugins.find((plugin) =>
+      (plugin as unknown as { key: string }).key.startsWith(
+        "suggestionTriggerArming",
+      ),
+    );
+    armingPlugin?.props.handleTextInput?.call(
+      armingPlugin,
+      editor.view,
+      from,
+      to,
+      ch,
+      () => editor.state.tr.insertText(ch),
+    );
+    editor.view.dispatch(editor.state.tr.insertText(ch));
+  }
+}
+
+/** Keep ProseMirror's stale AllSelection while moving only the live DOM caret. */
+function placeDomCaretAtStart(editor: Editor): void {
+  editor.view.dom.focus();
+  const range = document.createRange();
+  // Chrome anchors the caret on the contenteditable root after it removes the
+  // selected slash; the schema-preserved empty paragraph is still its child.
+  range.setStart(editor.view.dom, 0);
+  range.collapse(true);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+}
+
 function picker(editor: Editor, pluginKey: PluginKey = key) {
   const state = pluginKey.getState(editor.state);
   return { active: state?.active, query: state?.query };
@@ -154,6 +198,18 @@ describe("suggestion trigger arming", () => {
       expect(picker(editor).active).toBe(false);
     });
 
+    it("does not reuse an uncommitted keydown arm for a later paste", () => {
+      const editor = makeEditor();
+      editor.commands.focus("end");
+      editor.view.dom.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }),
+      );
+
+      paste(editor, "/usr/local/bin");
+
+      expect(picker(editor, slashKey).active).toBe(false);
+    });
+
     it("text already in the document when the editor mounts", () => {
       // No paste at all — a loaded draft, an undo, a collaborative edit. Tiptap
       // matches on document content alone, so this opened the picker too.
@@ -187,6 +243,25 @@ describe("suggestion trigger arming", () => {
       type(editor, "/shi");
 
       expect(picker(editor, slashKey)).toEqual({ active: true, query: "shi" });
+    });
+
+    it("reopens after select-all deletion with Chrome's stale input range", () => {
+      const editor = makeEditor();
+      editor.commands.focus("end");
+      type(editor, "/");
+      expect(picker(editor, slashKey).active).toBe(true);
+
+      editor.commands.selectAll();
+      editor.commands.deleteSelection();
+      placeDomCaretAtStart(editor);
+      expect(editor.state.selection.toJSON().type).toBe("all");
+      expect(picker(editor, slashKey).active).toBe(false);
+
+      typeFromKeyDownAndTextInput(editor, "/");
+
+      expect(editor.getText()).toBe("/");
+      expect(isTriggerArmedAt(editor, 1)).toBe(true);
+      expect(picker(editor, slashKey)).toEqual({ active: true, query: "" });
     });
 
     it("keeps multi-word queries alive, so allowSpaces issue search survives", () => {

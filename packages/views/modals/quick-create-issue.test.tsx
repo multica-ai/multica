@@ -324,7 +324,7 @@ vi.mock("../editor", async () => {
   const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
     "../editor/use-composer-submit",
   );
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, enableSlashCommands }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder sits
@@ -363,6 +363,7 @@ vi.mock("../editor", async () => {
         <textarea
           value={value}
           placeholder={placeholder}
+          data-slash-commands={enableSlashCommands ? "skill" : "off"}
           onChange={(e) => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
@@ -554,6 +555,16 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("enables Workspace Skill slash suggestions in the create-task prompt", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(
+      screen.getByPlaceholderText(
+        'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+      ),
+    ).toHaveAttribute("data-slash-commands", "skill");
   });
 
   it("restores unfinished actor, project, priority, and due-date selections after remount", async () => {

@@ -354,6 +354,10 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
+	// selectedSkillIDs is the validated, same-workspace grant frozen with claim
+	// finalization. It never crosses the wire directly; Agent.SkillRefs/Skills
+	// carry the executable bundles while the task context authorizes resolution.
+	selectedSkillIDs     []pgtype.UUID
 	ID                   string                 `json:"id"`
 	AgentID              string                 `json:"agent_id"`
 	RuntimeID            string                 `json:"runtime_id"`

@@ -345,7 +345,7 @@ vi.mock("../editor", async () => {
   const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
     "../editor/use-composer-submit",
   );
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments, enableSlashCommands }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     // Mirrors the real editor's `uploading` node attrs: the placeholder is in
@@ -381,6 +381,7 @@ vi.mock("../editor", async () => {
           value={value}
           placeholder={placeholder}
           data-attachments-count={attachments?.length ?? 0}
+          data-slash-commands={enableSlashCommands ? "skill" : "off"}
           onChange={(e) => {
             valueRef.current = e.target.value;
             setValue(e.target.value);
@@ -714,6 +715,15 @@ describe("CreateIssueModal", () => {
     renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
     expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute("data-size", "sm");
+  });
+
+  it("enables Workspace Skill slash suggestions in the manual description", () => {
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByPlaceholderText("Add description...")).toHaveAttribute(
+      "data-slash-commands",
+      "skill",
+    );
   });
 
   it("shows success feedback with a direct path to the new issue", async () => {
