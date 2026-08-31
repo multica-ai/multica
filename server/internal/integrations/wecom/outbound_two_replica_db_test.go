@@ -373,6 +373,10 @@ func (d *sharedDedupe) Release(_ context.Context, key string) {
 	delete(d.held, key)
 }
 
+// ClaimBudget is a fake's budget: small, because it is what sizes the outcome
+// grace these tests wait out and nothing here talks to a real server.
+func (d *sharedDedupe) ClaimBudget() time.Duration { return 20 * time.Millisecond }
+
 func (d *sharedDedupe) Held(_ context.Context, key string) (bool, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -540,24 +544,24 @@ func TestRelay_ShedsRatherThanStalls(t *testing.T) {
 	const depth = 4
 	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
 	router.SetMetrics(mx)
-	// Attached but never started: nothing drains, so the queue fills. Attached
-	// because the reply drop belongs to a replica that COULD have sent it —
-	// on one holding no socket the holder still delivers and a drop here would
-	// count the same reply twice.
+	// Attached but never started: nothing drains, so the queue fills.
 	router.Attach(&ownsSocketHandler{owns: true})
 	body, _ := json.Marshal(relayFrame{Kind: relayKindReply, InstallationID: "inst-1"})
 	for i := 0; i < depth; i++ {
 		router.DeliverWecomOutbound("inst-1", body, "ev")
 	}
-	if got := mx.get("outbound_dropped:relay_overflow"); got != 0 {
+	if got := mx.get("relay_shed"); got != 0 {
 		t.Fatalf("shed %d frames while the queue still had room for them", got)
 	}
 	router.DeliverWecomOutbound("inst-1", body, "ev")
-	if got := mx.get("outbound_dropped:relay_overflow"); got != 1 {
-		t.Fatalf("outbound_dropped:relay_overflow = %d, want 1 — the frame past the depth must be shed and counted", got)
-	}
 	if got := mx.get("relay_shed:reply"); got != 1 {
-		t.Fatalf("relay_shed:reply = %d, want 1 — the admission decision has its own unit", got)
+		t.Fatalf("relay_shed:reply = %d, want 1 — the frame past the depth must be shed and counted", got)
+	}
+	// The admission decision is ALL it records. Whether that shed cost the user
+	// the reply is settled once, later, by the publisher's outcome watch — no
+	// replica can tell from here. See TestRelayShed_NeverMovesTheReplyCounter.
+	if got := mx.get("outbound_dropped"); got != 0 {
+		t.Fatalf("outbound_dropped = %d, want 0 — a shed is an admission decision, not a reply outcome", got)
 	}
 }
 
@@ -571,9 +575,6 @@ func TestRelay_AnInboxPushShedDoesNotMoveTheReplyCounters(t *testing.T) {
 	const depth = 2
 	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
 	router.SetMetrics(mx)
-	// Holding the socket, so the reply counter stays still because of the KIND
-	// rule under test here and not merely because this replica could not have
-	// sent it anyway.
 	router.Attach(&ownsSocketHandler{owns: true})
 	body, _ := json.Marshal(relayFrame{Kind: relayKindInbox, InstallationID: "inst-1"})
 	for i := 0; i < depth+3; i++ {

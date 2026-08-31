@@ -90,6 +90,11 @@ type DedupeStore interface {
 	// learns, after the fact, whether ANY replica took a delivery it routed —
 	// see RelayOutbound.watchOutcomes.
 	Held(ctx context.Context, key string) (bool, error)
+	// ClaimBudget is the longest ONE round trip above may take. The store
+	// states it because the store enforces it: outcomeGrace pays this budget
+	// once per offer, and a copy of the number kept by the dispatcher would be
+	// free to drift from the timeout actually applied.
+	ClaimBudget() time.Duration
 }
 
 // minDedupeTTL floors the claim lifetime. The invariant the claim upholds is
@@ -163,15 +168,6 @@ type RelayConfig struct {
 	// not sat out. Small on purpose: the common reason a re-offer succeeds is
 	// that the move has already finished.
 	RetryBackoff time.Duration
-
-	// ClaimTimeout is how long ONE claim round trip may take, and it sizes the
-	// outcome grace: the chain makes one claim per offer, so the grace has to
-	// carry that cost per attempt rather than once. It is a field because the
-	// bound belongs to the claim store rather than to the dispatcher — the
-	// production store's own is claimTimeout, which is this field's default
-	// and which TestRelayClaimTimeout_MatchesTheStoreItSizes pins against
-	// drift. Tests shrink it to keep the grace a test's worth of time.
-	ClaimTimeout time.Duration
 }
 
 const (
@@ -201,9 +197,6 @@ func (c RelayConfig) withDefaults() RelayConfig {
 	}
 	if c.RetryBackoff <= 0 {
 		c.RetryBackoff = defaultRelayRetryBackoff
-	}
-	if c.ClaimTimeout <= 0 {
-		c.ClaimTimeout = claimTimeout
 	}
 	return c
 }
@@ -451,23 +444,6 @@ func (r *RelayOutbound) Start(ctx context.Context) {
 	go r.watchOutcomes(ctx)
 }
 
-// ownsSocketNow answers "could this replica send that installation's frame
-// right now", and false when no handler is attached yet.
-//
-// The non-blocking receive is what makes r.handler safe to read here. Attach
-// writes the field before closing ready, so a receive that succeeds happens
-// after that write; a receive that does not tells us there is no handler to
-// ask. Callers include the shard read loop, which must never block and which
-// runs before Attach during boot.
-func (r *RelayOutbound) ownsSocketNow(installationID string) bool {
-	select {
-	case <-r.ready:
-		return r.handler.ownsSocket(installationID)
-	default:
-		return false
-	}
-}
-
 // handlerReady blocks until Attach has run, and reports whether there is a
 // handler to deliver with at all.
 func (r *RelayOutbound) handlerReady(ctx context.Context) bool {
@@ -644,21 +620,24 @@ func (r *RelayOutbound) delayFor(attempts int) (time.Duration, bool) {
 	return r.retryPlan[attempts], true
 }
 
-// shed records a frame dropped for want of queue space. Only a REPLY moves the
-// reply drop counter: an inbox push counted there would make the delivered /
-// dropped ratio track socket placement rather than outcomes, which is the same
-// unit error the relayed-inbox path already avoids.
+// shed records a frame refused for want of queue space. It is an ADMISSION
+// decision and nothing more: relay_shed, labelled by kind, on whichever
+// replica refused it.
 //
-// And only a reply THIS replica could have sent. Every replica reads every
-// frame, so a shed on one that holds no socket costs the user nothing — the
-// holder still has its own copy. Counting it anyway reports the same reply as
-// delivered and dropped at once, and once per replica that happened to be
-// full. relay_shed stays unconditional: that one is the local admission
-// signal, and a queue overflowing is worth seeing wherever it happens.
+// It deliberately does not touch the reply counters. Every replica reads every
+// frame, so no replica can tell from here whether a shed cost the user
+// anything — the one that sheds may not be the one that would have sent it,
+// and during a lease handoff two replicas can hold a sender at once, so even
+// "do I hold the socket" is not proof of being the only one who could. Each
+// replica answering that question for itself is what produced one reply
+// counted as delivered and dropped at the same time.
+//
+// So the reply outcome stays with the single owner that can settle it after
+// the fact: the publisher's watchOutcomes, which asks whether ANY replica ever
+// claimed the delivery and counts the loss once if none did. A shed that
+// really did cost the user the reply reaches that owner as an unclaimed
+// delivery, and is counted there.
 func (r *RelayOutbound) shed(item queued, why string) {
-	if item.frame.Kind == relayKindReply && r.ownsSocketNow(item.frame.InstallationID) {
-		r.mx().RecordOutboundDropped(string(dropRelayOverflow))
-	}
 	r.mx().RecordRelayShed(item.frame.Kind)
 	r.logger.Warn("wecom relay: shedding a routed delivery, "+why,
 		"kind", item.frame.Kind,
@@ -845,13 +824,17 @@ type pendingOutcome struct {
 // round trip each of those offers pays for.
 func (r *RelayOutbound) outcomeGrace() time.Duration {
 	// One claim round trip per OFFER, not one for the chain. Every re-offer
-	// makes its own Claim call and each can burn the full claimTimeout, so a
+	// makes its own Claim call and each can burn the store's full claim budget, so a
 	// grace built from the backoffs plus a single round trip expires while the
 	// chain is still running against a slow store — and the watcher then
 	// records a loss that the next attempt contradicts by delivering. Sizing
 	// it for the worst case costs a later settle on a healthy store, which is
 	// the harmless direction.
-	total := r.cfg.ClaimTimeout * time.Duration(len(r.retryPlan)+1)
+	budget := defaultClaimBudget
+	if r.dedupe != nil {
+		budget = r.dedupe.ClaimBudget()
+	}
+	total := budget * time.Duration(len(r.retryPlan)+1)
 	for _, d := range r.retryPlan {
 		total += d
 	}
@@ -946,7 +929,9 @@ func (r *RelayOutbound) settle(ctx context.Context, p pendingOutcome) {
 		"chat_session_id", p.sessionID,
 		"installation_id", p.instID,
 		"task_id", p.taskID,
-		"detail", "routed to the replicas and no replica held a live connection")
+		"detail", "routed to the replicas and none took the delivery: either no replica "+
+			"held a live connection, or the one that did could not admit the frame "+
+			"(see outbound_relay_shed_total)")
 }
 
 // awaitOutcome enrolls a routed reply for the check above. Never blocks: the

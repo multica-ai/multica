@@ -16,10 +16,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // ---------------------------------------------------------------------------
-// 1. A shed belongs to the replica that could have sent it
+// 1. A shed is an admission decision, never a reply outcome
 // ---------------------------------------------------------------------------
 
 // ownsSocketHandler holds the socket, or does not, and records nothing else.
@@ -42,86 +44,73 @@ func (h *ownsSocketHandler) sent() []relayFrame {
 	return append([]relayFrame(nil), h.calls...)
 }
 
-// A frame goes to EVERY replica, so a full queue on one that holds no socket
-// costs the user nothing — the holder still has its own copy and still sends.
-// Counting a reply drop there reports the same reply as delivered and dropped
-// at once, and once more for every further replica that happened to be full.
+// shedRouter is a router wired to shed: depth 1, never started, so the first
+// frame fills the only slot and the second has nowhere to go. No timing.
+func shedRouter(t *testing.T, owns bool) (*RelayOutbound, *countingMetrics) {
+	t.Helper()
+	r := NewRelayOutbound(&fanoutRelay{}, nil, RelayConfig{Shards: 1, QueueDepth: 1}, slog.Default())
+	mx := newCountingMetrics()
+	r.SetMetrics(mx)
+	r.Attach(&ownsSocketHandler{owns: owns})
+	return r, mx
+}
+
+func shedTwice(t *testing.T, r *RelayOutbound, kind string) {
+	t.Helper()
+	body, err := json.Marshal(relayFrame{Kind: kind, InstallationID: "inst-1", Content: "答案"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	r.DeliverWecomOutbound("inst-1", body, "ev-1") // fills the queue
+	r.DeliverWecomOutbound("inst-1", body, "ev-2") // shed
+}
+
+// No replica can decide a reply's fate from a shed, so none of them may move
+// the reply counter — not even the one holding the socket.
 //
-// relay_shed is the counter that should move: a queue overflowing is a real
-// local admission event, worth seeing wherever it happens.
-func TestRelayShed_OnAReplicaThatHoldsNoSocketIsNotAReplyLoss(t *testing.T) {
+// Every replica reads every frame. The one that sheds may not be the one that
+// would have sent it, and during a lease handoff two replicas can hold a
+// sender at once, so "do I hold the socket" is not proof of being the only one
+// who could. Each replica answering for itself is what produced one reply
+// counted as delivered and dropped at the same time. The publisher's
+// watchOutcomes is the single owner that settles it after the fact.
+func TestRelayShed_NeverMovesTheReplyCounter(t *testing.T) {
 	t.Parallel()
-	// Depth 1 and never started: the first frame fills the only slot and the
-	// second has nowhere to go. No timing involved.
-	router := NewRelayOutbound(&fanoutRelay{}, nil,
-		RelayConfig{Shards: 1, QueueDepth: 1}, slog.Default())
-	mx := newCountingMetrics()
-	router.SetMetrics(mx)
-	router.Attach(&ownsSocketHandler{owns: false})
+	for _, tc := range []struct {
+		name string
+		owns bool
+	}{
+		{"holding the socket", true},
+		{"holding no socket", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r, mx := shedRouter(t, tc.owns)
+			shedTwice(t, r, relayKindReply)
 
-	body, _ := json.Marshal(relayFrame{Kind: relayKindReply, InstallationID: "inst-1", Content: "答案"})
-	router.DeliverWecomOutbound("inst-1", body, "ev-1") // fills the queue
-	router.DeliverWecomOutbound("inst-1", body, "ev-2") // shed
-
-	if got := mx.get("relay_shed:" + relayKindReply); got != 1 {
-		t.Errorf("relay_shed = %d, want 1 — the local admission decision still happened", got)
-	}
-	if got := mx.get("outbound_dropped"); got != 0 {
-		t.Errorf("outbound_dropped = %d, want 0 — this replica was never going to send that reply, "+
-			"so shedding it cost the user nothing and the holder still counts the delivery", got)
-	}
-}
-
-// The other half: when the shedding replica IS the holder, the reply really is
-// gone and the drop counter has to say so.
-func TestRelayShed_OnTheHolderIsAReplyLoss(t *testing.T) {
-	t.Parallel()
-	router := NewRelayOutbound(&fanoutRelay{}, nil,
-		RelayConfig{Shards: 1, QueueDepth: 1}, slog.Default())
-	mx := newCountingMetrics()
-	router.SetMetrics(mx)
-	router.Attach(&ownsSocketHandler{owns: true})
-
-	body, _ := json.Marshal(relayFrame{Kind: relayKindReply, InstallationID: "inst-1", Content: "答案"})
-	router.DeliverWecomOutbound("inst-1", body, "ev-1")
-	router.DeliverWecomOutbound("inst-1", body, "ev-2")
-
-	if got := mx.get("outbound_dropped:" + string(dropRelayOverflow)); got != 1 {
-		t.Errorf("outbound_dropped:%s = %d, want 1 — the replica holding the socket shed it, "+
-			"so nobody sent it", dropRelayOverflow, got)
+			if got := mx.get("relay_shed:" + relayKindReply); got != 1 {
+				t.Errorf("relay_shed = %d, want 1 — the admission decision still happened", got)
+			}
+			if got := mx.get("outbound_dropped"); got != 0 {
+				t.Errorf("outbound_dropped = %d, want 0 — a shed is not a reply outcome; "+
+					"the publisher's outcome watch settles that, once", got)
+			}
+		})
 	}
 }
 
-// An inbox push never moves the reply counters on either replica: its unit is
-// not an agent reply. This is the rule shed already had, kept honest alongside
-// the new ownership condition.
-func TestRelayShed_AnInboxPushNeverMovesTheReplyCounter(t *testing.T) {
+// An inbox push moves relay_shed under its own label and nothing else: its
+// unit is not an agent reply.
+func TestRelayShed_AnInboxPushIsLabelledSeparately(t *testing.T) {
 	t.Parallel()
-	router := NewRelayOutbound(&fanoutRelay{}, nil,
-		RelayConfig{Shards: 1, QueueDepth: 1}, slog.Default())
-	mx := newCountingMetrics()
-	router.SetMetrics(mx)
-	router.Attach(&ownsSocketHandler{owns: true})
-
-	body, _ := json.Marshal(relayFrame{Kind: relayKindInbox, InstallationID: "inst-1", Content: "通知"})
-	router.DeliverWecomOutbound("inst-1", body, "ev-1")
-	router.DeliverWecomOutbound("inst-1", body, "ev-2")
+	r, mx := shedRouter(t, true)
+	shedTwice(t, r, relayKindInbox)
 
 	if got := mx.get("relay_shed:" + relayKindInbox); got != 1 {
 		t.Errorf("relay_shed:%s = %d, want 1", relayKindInbox, got)
 	}
-	if got := mx.get("outbound_dropped"); got != 0 {
-		t.Errorf("outbound_dropped = %d, want 0 — an inbox push is not an agent reply", got)
-	}
-}
-
-// ownsSocketNow is read from the shard reader, which runs before Attach during
-// boot. It must answer false rather than panic on a nil handler.
-func TestRelayOwnsSocketNow_IsFalseBeforeAttach(t *testing.T) {
-	t.Parallel()
-	router := NewRelayOutbound(&fanoutRelay{}, nil, RelayConfig{Shards: 1}, slog.Default())
-	if router.ownsSocketNow("inst-1") {
-		t.Fatal("ownsSocketNow = true with no handler attached")
+	if got := mx.get("relay_shed:"+relayKindReply) + mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("reply counters moved by %d on an inbox push, want 0", got)
 	}
 }
 
@@ -129,15 +118,24 @@ func TestRelayOwnsSocketNow_IsFalseBeforeAttach(t *testing.T) {
 // 2. The outcome grace carries one claim round trip PER OFFER
 // ---------------------------------------------------------------------------
 
+// budgetStore is a DedupeStore that only exists to state a budget.
+type budgetStore struct {
+	DedupeStore
+	budget time.Duration
+}
+
+func (b budgetStore) ClaimBudget() time.Duration { return b.budget }
+
 // The re-offer chain makes a claim on every attempt, not once for the whole
-// chain, and each of those can burn the full ClaimTimeout. A grace built from
-// the backoffs plus a single round trip therefore expires while the chain is
-// still running against a slow store — and the watcher records
-// no_live_connection for a reply the very next attempt then delivers, so one
-// reply moves both counters.
+// chain, and each of those can burn the full budget. A grace built from the
+// backoffs plus a single round trip therefore expires while the chain is still
+// running against a slow store — and the watcher records no_live_connection
+// for a reply the very next attempt then delivers, so one reply moves both
+// counters.
 func TestRelayOutcomeGrace_CoversAClaimRoundTripPerOffer(t *testing.T) {
 	t.Parallel()
-	r := NewRelayOutbound(nil, nil, RelayConfig{}, slog.Default())
+	const budget = 2 * time.Second
+	r := NewRelayOutbound(nil, budgetStore{budget: budget}, RelayConfig{}, slog.Default())
 
 	var chain time.Duration
 	for _, d := range r.retryPlan {
@@ -145,24 +143,37 @@ func TestRelayOutcomeGrace_CoversAClaimRoundTripPerOffer(t *testing.T) {
 	}
 	// Worst case the chain can actually take: every backoff, plus a claim that
 	// times out on the first offer and on each re-offer.
-	worst := chain + r.cfg.ClaimTimeout*time.Duration(len(r.retryPlan)+1)
+	worst := chain + budget*time.Duration(len(r.retryPlan)+1)
 
 	if r.outcomeGrace() < worst {
 		t.Fatalf("outcome grace %s is shorter than the %s a fully timed-out chain can take "+
 			"(%d offers × %s claim + %s of backoff) — the watch would call a reply lost while "+
 			"it was still being retried, and the retry would then deliver it",
-			r.outcomeGrace(), worst, len(r.retryPlan)+1, r.cfg.ClaimTimeout, chain)
+			r.outcomeGrace(), worst, len(r.retryPlan)+1, budget, chain)
 	}
 }
 
-// ClaimTimeout sizes the grace but the bound belongs to the claim store, so the
-// default has to be the store's own. Nothing links them at compile time; this
-// is what catches the drift.
-func TestRelayClaimTimeout_MatchesTheStoreItSizes(t *testing.T) {
+// The grace is sized from the budget the STORE enforces, not from a number the
+// dispatcher keeps for itself — that is the whole reason ClaimBudget is on the
+// interface. A store with a different bound must move the grace with it.
+func TestRelayOutcomeGrace_TracksTheStoresOwnBudget(t *testing.T) {
 	t.Parallel()
-	if got := (RelayConfig{}).withDefaults().ClaimTimeout; got != claimTimeout {
-		t.Fatalf("default ClaimTimeout = %s, but redisDedupe bounds a round trip at %s — "+
-			"the outcome grace is sized from the wrong number", got, claimTimeout)
+	small := NewRelayOutbound(nil, budgetStore{budget: 10 * time.Millisecond}, RelayConfig{}, slog.Default())
+	large := NewRelayOutbound(nil, budgetStore{budget: 10 * time.Second}, RelayConfig{}, slog.Default())
+	if small.outcomeGrace() >= large.outcomeGrace() {
+		t.Fatalf("grace did not follow the store's budget: 10ms store gave %s, 10s store gave %s",
+			small.outcomeGrace(), large.outcomeGrace())
+	}
+}
+
+// The production store's default is what the dispatcher inherits when a
+// deployment does not override it.
+func TestRedisDedupe_DefaultsToTheDocumentedClaimBudget(t *testing.T) {
+	t.Parallel()
+	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"}) // never dialled
+	t.Cleanup(func() { rdb.Close() })
+	if got := NewRedisDedupe(rdb, 0, slog.Default()).ClaimBudget(); got != defaultClaimBudget {
+		t.Fatalf("ClaimBudget() = %s, want the documented default %s", got, defaultClaimBudget)
 	}
 }
 

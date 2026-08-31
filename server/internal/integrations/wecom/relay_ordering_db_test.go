@@ -39,6 +39,11 @@ import (
 // each test so one run cannot see another's claims.
 const wecomRelayTestRedisDB = 12
 
+// testClaimBudget is the claim round trip these tests give the real store. It
+// sizes outcomeGrace (once per offer), so the production 2s would make the
+// outcome-watch tests below sleep for a quarter minute apiece.
+const testClaimBudget = 20 * time.Millisecond
+
 func wecomTestRedis(t *testing.T) *redis.Client {
 	t.Helper()
 	url := os.Getenv("REDIS_TEST_URL")
@@ -190,13 +195,12 @@ func TestRelay_ARetriedReplyKeepsItsPlaceInLine(t *testing.T) {
 	second := seedSiblingTurn(t, pool, first)
 
 	relay := &fanoutRelay{}
-	dedupe := &blipOnce{DedupeStore: NewRedisDedupe(rdb, slog.Default())}
+	dedupe := &blipOnce{DedupeStore: NewRedisDedupe(rdb, testClaimBudget, slog.Default())}
 
 	// One shard, so both replies are provably on the same worker: with the
 	// default eight the two installations would be the same anyway, but a
 	// single queue says so rather than relying on the hash.
-	cfg := RelayConfig{Shards: 1, LeaseSettle: 400 * time.Millisecond, RetryBackoff: 20 * time.Millisecond,
-		ClaimTimeout: 20 * time.Millisecond}
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 400 * time.Millisecond, RetryBackoff: 20 * time.Millisecond}
 	holder := newRelayReplicaWith(t, pool, first.instID, true, relay, dedupe, cfg)
 	publisher := newRelayReplicaWith(t, pool, first.instID, false, relay, dedupe, cfg)
 
@@ -324,13 +328,10 @@ func TestRelay_AReplyNoReplicaCouldSendIsCountedOnce(t *testing.T) {
 	turn := seedBoundTurn(t, pool)
 
 	relay := &fanoutRelay{}
-	dedupe := NewRedisDedupe(rdb, slog.Default())
+	dedupe := NewRedisDedupe(rdb, testClaimBudget, slog.Default())
 	// A short chain so the grace the watch waits out is a test's worth of time
 	// rather than a lease poll's.
-	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond,
-		// The grace carries one claim round trip per offer, so a production
-		// 2s budget would put this test to sleep for a quarter minute.
-		ClaimTimeout: 20 * time.Millisecond}
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond}
 
 	// Neither replica holds the socket: both are mid-reconnect, which is the
 	// residual window SELF_HOSTING.md describes.
@@ -365,11 +366,8 @@ func TestRelay_ADeliveredReplyIsCountedOnceAndNotAlsoLost(t *testing.T) {
 	turn := seedBoundTurn(t, pool)
 
 	relay := &fanoutRelay{}
-	dedupe := NewRedisDedupe(rdb, slog.Default())
-	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond,
-		// The grace carries one claim round trip per offer, so a production
-		// 2s budget would put this test to sleep for a quarter minute.
-		ClaimTimeout: 20 * time.Millisecond}
+	dedupe := NewRedisDedupe(rdb, testClaimBudget, slog.Default())
+	cfg := RelayConfig{Shards: 1, LeaseSettle: 120 * time.Millisecond, RetryBackoff: 20 * time.Millisecond}
 	holder := newRelayReplicaWith(t, pool, turn.instID, true, relay, dedupe, cfg)
 	publisher := newRelayReplicaWith(t, pool, turn.instID, false, relay, dedupe, cfg)
 

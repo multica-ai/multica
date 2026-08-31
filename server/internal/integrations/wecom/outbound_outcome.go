@@ -67,19 +67,6 @@ const (
 	// the user got nothing at all. A reply whose words already landed is
 	// settled before this gate and never reaches it.
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
-
-	// dropRelayOverflow — a routed REPLY was shed because this replica's
-	// dispatch queue was full. Shedding rather than blocking is deliberate:
-	// the caller is the shared realtime shard reader, and stalling it would
-	// hold up browser traffic, daemon wakeups and every other bot on that
-	// shard. A sustained rate here means one bot cannot keep up and is
-	// starving the queue it shares.
-	//
-	// Replies only. The same queue carries inbox notifications, and those are
-	// counted on RecordRelayShed instead — this counter's unit is one agent
-	// reply owed to a user, and an inbox push filed here would make the
-	// delivered/dropped ratio track socket placement rather than outcomes.
-	dropRelayOverflow dropReason = "relay_overflow"
 )
 
 // skipReason names a completion this adapter was never going to deliver. Kept

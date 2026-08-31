@@ -488,7 +488,7 @@ func main() {
 					leaseSettle = 0
 				}
 				wecomRelayOutbound = wecom.NewRelayOutbound(wecomRelay,
-					wecom.NewRedisDedupe(relayWriteRedis, slog.Default()),
+					wecom.NewRedisDedupe(relayWriteRedis, 0, slog.Default()),
 					wecom.RelayConfig{
 						ReplayGrace: relayConfig.ReplayGrace,
 						LeaseSettle: leaseSettle,
