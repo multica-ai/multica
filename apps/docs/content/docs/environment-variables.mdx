@@ -172,6 +172,8 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC and connect-state signing secret |
 | GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
+| GitHub | `GITHUB_API_URL` | REST API root for the App-authenticated calls; defaults to `https://api.github.com`, set it to `https://github.example.com/api/v3` for GitHub Enterprise Server or to an internal proxy fronting the GitHub API |
+| GitHub | `GITHUB_GRAPHQL_URL` | GraphQL endpoint for PR-card CI and mergeability; defaults to `https://api.github.com/graphql`, set it to `https://github.example.com/api/graphql` for GitHub Enterprise Server, which serves GraphQL outside the REST root |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |
