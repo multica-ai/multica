@@ -73,6 +73,7 @@ import {
   isPendingCustomRuntimeWarning,
   pendingRuntimeCommandName,
 } from "./pending-runtime";
+import { hoverRevealRowOpacity } from "@multica/ui/lib/pointer-affordances";
 import { useT, useTimeAgo } from "../../i18n";
 
 // The machine detail's runtimes table on the shared ListGrid. Paradigm
@@ -588,7 +589,7 @@ export function RuntimeRowMenu({
             <button
               type="button"
               aria-label={t(($) => $.list.row_actions_aria)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+              className={`flex size-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${hoverRevealRowOpacity} data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground`}
             >
               <MoreHorizontal className="size-4" />
             </button>

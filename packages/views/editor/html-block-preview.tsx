@@ -24,6 +24,7 @@ import {
   Eye,
   Maximize2,
 } from "lucide-react";
+import { hoverRevealCodeOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import {
@@ -73,7 +74,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
   return (
     <div className={cn("code-block-wrapper group/code relative my-3", className)}>
       <div
-        className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
+        className={cn("absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 transition-opacity", hoverRevealCodeOpacity)}
       >
         <span className="text-caption text-muted-foreground select-none">{HTML_LANGUAGE_LABEL}</span>
         <button

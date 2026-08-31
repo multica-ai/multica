@@ -4,6 +4,7 @@ import { Copy, Check } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@multica/ui/components/ui/button"
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip"
+import { hoverRevealOpacity } from '@multica/ui/lib/pointer-affordances'
 import { cn } from '@multica/ui/lib/utils'
 import { copyText } from '../lib/clipboard'
 import {
@@ -193,7 +194,7 @@ export function CodeBlock({
                 variant="ghost"
                 size="icon-xs"
                 onClick={handleCopy}
-                className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                className={cn(hoverRevealOpacity, "transition-opacity text-muted-foreground hover:text-foreground")}
                 aria-label={t(($) => $.copy_code)}
               >
                 {copied ? (

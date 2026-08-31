@@ -241,7 +241,7 @@ function RunDetailRow({
           {copied ? (
             <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
           ) : (
-            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100" />
           )}
         </span>
       </button>

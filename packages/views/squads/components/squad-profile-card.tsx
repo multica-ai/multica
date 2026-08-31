@@ -85,7 +85,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
         {!isArchived && (
           <AppLink
             href={p.squadDetail(squad.id)}
-            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
+            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-100 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100"
           >
             {t(($) => $.profile_card.detail_link)}
           </AppLink>

@@ -156,7 +156,7 @@ export function InboxListItem({
                 e.stopPropagation();
                 onAction();
               }}
-              className="hidden rounded p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)]:group-hover:inline-flex [@media(hover:hover)]:group-focus-within:inline-flex"
+              className="hidden rounded p-0.5 text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring [@media(hover:hover)_and_(pointer:fine)]:group-hover:inline-flex [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:inline-flex"
             >
               <ActionIcon className="h-3.5 w-3.5" />
             </button>

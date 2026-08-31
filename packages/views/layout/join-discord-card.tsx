@@ -52,12 +52,13 @@ export function JoinDiscordCard() {
         </span>
       </a>
       {/* Revealed on hover/focus so the resting row stays quiet. Coarse
-          pointers get no hover, so keep it permanently visible there. */}
+          pointers (and iPadOS synthetic hover) always see it — pair hover
+          with pointer:fine, not hover:none. */}
       <button
         type="button"
         aria-label={t(($) => $.sidebar.discord_card.dismiss)}
         onClick={dismiss}
-        className="absolute inset-y-0 right-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-0 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 group-hover/discord:opacity-100 [@media(hover:none)]:opacity-100"
+        className="absolute inset-y-0 right-1 my-auto flex size-6 cursor-pointer items-center justify-center rounded-sm text-muted-foreground opacity-100 ring-sidebar-ring transition-opacity hover:bg-sidebar-accent hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/discord:opacity-100"
       >
         <X className="size-3.5" />
       </button>

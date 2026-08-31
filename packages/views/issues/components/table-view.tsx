@@ -70,6 +70,7 @@ import {
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { hoverRevealHeaderOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -443,8 +444,8 @@ function SortableColumnHeader({
           type="button"
           aria-label={reorderLabel}
           className={cn(
-            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground opacity-0 hover:bg-accent hover:text-muted-foreground group-hover/header:opacity-100 focus-visible:opacity-100",
-            isDragging ? "cursor-grabbing opacity-100" : "cursor-grab",
+            "-ml-2 mr-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-muted-foreground focus-visible:opacity-100",
+            isDragging ? "cursor-grabbing opacity-100" : cn("cursor-grab", hoverRevealHeaderOpacity),
           )}
           {...attributes}
           {...listeners}
@@ -763,7 +764,7 @@ export function InlineTitle({
             * pointer while it is somewhere else entirely. The fade still
             * follows the row's hover colour, since that is what the cell is
             * painted with when they appear. */}
-          <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-0 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] group-hover/title:pointer-events-auto group-hover/title:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100">
+          <span className="pointer-events-auto absolute inset-y-0 right-0 flex items-center gap-0.5 bg-gradient-to-l from-background from-70% to-transparent pr-1 pl-8 opacity-100 transition-opacity group-hover:from-[color-mix(in_oklab,var(--muted)_50%,var(--background))] focus-within:pointer-events-auto focus-within:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/title:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover/title:opacity-100">
             <button
               type="button"
               aria-label={createSubIssueLabel}

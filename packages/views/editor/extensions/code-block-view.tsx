@@ -4,6 +4,7 @@ import { useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
 import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
+import { hoverRevealCodeOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useDebouncedValue } from "../../common/use-debounced-value";
@@ -80,7 +81,7 @@ function CodeBlockView({ node }: NodeViewProps) {
       )}
       <div
         contentEditable={false}
-        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
+        className={cn("code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 transition-opacity", hoverRevealCodeOpacity)}
       >
         {language && (
           <span className="text-caption text-muted-foreground select-none">

@@ -1519,7 +1519,7 @@ function SessionDropdown({
             </div>
           ) : (
             <div className="flex shrink-0 items-center">
-              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)]:group-hover/history-row:hidden [@media(hover:hover)]:group-focus-within/history-row:hidden">
+              <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:group-hover/history-row:hidden [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/history-row:hidden">
                 {isRunning && <Loader2 className="size-3 animate-spin" />}
                 {showCompleted && !isRunning && <Check className="size-3 text-emerald-500" />}
                 {showUnread && !isRunning && !showCompleted && (
@@ -1537,7 +1537,7 @@ function SessionDropdown({
                 label={t(($) => $.session_history.row_actions_aria)}
                 groups={[rowActions]}
               />
-              <div className="hidden h-7 items-center gap-0.5 [@media(hover:hover)]:group-hover/history-row:flex [@media(hover:hover)]:group-focus-within/history-row:flex">
+              <div className="hidden h-7 items-center gap-0.5 [@media(hover:hover)_and_(pointer:fine)]:group-hover/history-row:flex [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/history-row:flex">
                 {rowActions.map((action) => (
                   <button
                     key={action.key}

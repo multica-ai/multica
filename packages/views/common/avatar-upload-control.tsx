@@ -264,14 +264,20 @@ export function AvatarUploadControl({
         <AvatarFallback variant={variant} name={name} size={size} />
       )}
 
-      {!disabled && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
-          {busy ? (
-            <Loader2 className="h-5 w-5 animate-spin text-white" />
-          ) : (
-            <Camera className="h-5 w-5 text-white" />
-          )}
+      {!disabled && busy && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+          <Loader2 className="h-5 w-5 animate-spin text-white" />
         </div>
+      )}
+      {!disabled && !busy && (
+        <>
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-visible:opacity-100">
+            <Camera className="h-5 w-5 text-white" />
+          </div>
+          <div className="pointer-events-none absolute right-0 bottom-0 flex size-[36%] min-h-3.5 min-w-3.5 items-center justify-center rounded-full bg-black/55 text-white [@media(hover:hover)_and_(pointer:fine)]:hidden">
+            <Camera className="size-[55%]" />
+          </div>
+        </>
       )}
     </button>
   );

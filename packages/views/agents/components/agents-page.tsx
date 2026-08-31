@@ -55,6 +55,10 @@ import {
 } from "@multica/ui/components/ui/list-grid";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
+  hoverRevealHeaderOpacity,
+  hoverRevealRowOpacity,
+} from "@multica/ui/lib/pointer-affordances";
+import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -348,7 +352,7 @@ function CheckboxCell({
           onToggle();
         }}
         className={`-m-1.5 flex items-center p-1.5 ${
-          checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
+          checked ? "" : hoverRevealRowOpacity
         }`}
       >
         <Checkbox
@@ -602,7 +606,7 @@ function AgentListHeader({
           className={`-m-1.5 flex items-center p-1.5 ${
             anySelected
               ? ""
-              : "opacity-0 transition-opacity group-hover/header:opacity-100"
+              : hoverRevealHeaderOpacity
           }`}
         >
           <Checkbox

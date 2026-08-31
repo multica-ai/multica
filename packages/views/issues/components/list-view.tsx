@@ -16,6 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
+import { hoverRevealHeaderOpacity } from "@multica/ui/lib/pointer-affordances";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
@@ -583,7 +584,7 @@ function StatusAccordionItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  className={`rounded-full text-muted-foreground transition-opacity ${hoverRevealHeaderOpacity}`}
                   onClick={() => {
                     const defaults = {
                       status,

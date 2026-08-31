@@ -331,7 +331,7 @@ export function DingTalkBotGroups({
               {canForget && (
                 <button
                   type="button"
-                  className="pointer-events-none shrink-0 text-micro text-muted-foreground opacity-0 underline-offset-2 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:text-foreground hover:underline focus-visible:pointer-events-auto focus-visible:opacity-100"
+                  className="pointer-events-auto shrink-0 text-micro text-muted-foreground opacity-100 underline-offset-2 transition-opacity [@media(hover:hover)_and_(pointer:fine)]:pointer-events-none [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:pointer-events-auto [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100 hover:text-foreground hover:underline focus-visible:pointer-events-auto focus-visible:opacity-100"
                   onClick={() => setForgetTarget(group)}
                 >
                   {t(($) => $.dingtalk.group_forget)}

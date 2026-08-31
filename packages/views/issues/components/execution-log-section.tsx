@@ -639,7 +639,7 @@ function RowStatus({
   return (
     <div
       title={title}
-      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-caption [@media(hover:hover)]:group-hover/execution-log-row:hidden"
+      className="flex h-7 shrink-0 items-center justify-end gap-1 overflow-hidden whitespace-nowrap text-caption [@media(hover:hover)_and_(pointer:fine)]:group-hover/execution-log-row:hidden"
     >
       {children}
     </div>
@@ -650,7 +650,7 @@ function RowStatus({
 // surfaces, it replaces the status column in place on row hover.
 function RowActions({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex h-7 items-center gap-0.5 [@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover/execution-log-row:flex">
+    <div className="flex h-7 items-center gap-0.5 [@media(hover:hover)_and_(pointer:fine)]:hidden [@media(hover:hover)_and_(pointer:fine)]:group-hover/execution-log-row:flex">
       {children}
     </div>
   );

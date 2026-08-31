@@ -272,9 +272,13 @@ describe("ChatThreadList compact row menu", () => {
       "[class*='group-hover/row']",
     )!;
 
-    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:hidden",
+    );
     expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
-    expect(strip.className).toContain("[@media(hover:hover)]:group-hover/row:flex");
+    expect(strip.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:group-hover/row:flex",
+    );
     expect(strip.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):group-/);
   });
 });

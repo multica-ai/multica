@@ -66,6 +66,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { hoverRevealRowOpacity } from "@multica/ui/lib/pointer-affordances";
 import {
   Select,
   SelectContent,
@@ -390,7 +391,7 @@ function CustomStatusRow({
         <button
           type="button"
           aria-label={t(($) => $.issue_statuses.actions.reorder, { name: entry.name })}
-          className="absolute left-0 top-1/2 flex w-4 -translate-y-1/2 cursor-grab justify-center text-faint-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
+          className={`absolute left-0 top-1/2 flex w-4 -translate-y-1/2 cursor-grab justify-center text-faint-foreground transition-opacity focus-visible:opacity-100 active:cursor-grabbing ${hoverRevealRowOpacity}`}
           {...attributes}
           {...listeners}
         >

@@ -60,7 +60,9 @@ describe("RowActionsMenu", () => {
 
     const trigger = screen.getByRole("button", { name: "Chat actions" });
 
-    expect(trigger.className).toContain("[@media(hover:hover)]:hidden");
+    expect(trigger.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:hidden",
+    );
     expect(trigger.className).not.toMatch(/(^|\s)(sm|md|lg|xl|2xl):hidden/);
   });
 

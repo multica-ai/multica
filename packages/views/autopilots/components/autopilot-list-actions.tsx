@@ -33,6 +33,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { hoverRevealRowOpacity } from "@multica/ui/lib/pointer-affordances";
 import { useT } from "../../i18n";
 import { useIntentNavigate } from "../../navigation";
 
@@ -170,7 +171,7 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
             <button
               type="button"
               aria-label={t(($) => $.actions.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+              className={`flex size-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground ${hoverRevealRowOpacity} data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground`}
             >
               <MoreHorizontal className="size-4" />
             </button>

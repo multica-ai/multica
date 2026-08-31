@@ -132,7 +132,7 @@ function ListGridHeaderCell({
         <Arrow
           className={cn(
             "size-3 shrink-0",
-            sorted ? "opacity-100" : "opacity-0 group-hover/sort:opacity-50",
+        sorted ? "opacity-100" : "opacity-50 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/sort:opacity-50",
           )}
         />
       </button>

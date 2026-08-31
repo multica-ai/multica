@@ -80,6 +80,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
+import { hoverRevealRowOpacity } from "@multica/ui/lib/pointer-affordances";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
@@ -334,7 +335,7 @@ function SquadRowActions({ squad }: { squad: Squad }) {
             <button
               type="button"
               aria-label={t(($) => $.page.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+              className={`flex size-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground ${hoverRevealRowOpacity} data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground`}
             >
               <MoreHorizontal className="size-4" />
             </button>

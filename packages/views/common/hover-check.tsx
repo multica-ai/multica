@@ -7,6 +7,10 @@ import { Check } from "lucide-react";
 // FILTER_ITEM_CLASS on the item (hides the built-in indicator and names the
 // hover group). Extracted from issues-header so every filter dropdown shares
 // one implementation.
+//
+// The empty box staying hover-only is intentional: the row itself is the
+// tap target once the menu is open, and selected items already show the
+// check. Coarse pointers do not need a second affordance here.
 
 export const FILTER_ITEM_CLASS =
   "group/fitem pr-1.5! [&>[data-slot=dropdown-menu-checkbox-item-indicator]]:hidden";

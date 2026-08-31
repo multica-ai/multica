@@ -65,7 +65,7 @@ html[lang|="ja"] {
                "Noto Sans CJK KR", sans-serif;
 }
 
-@source "../../../../../packages/ui/**/*.tsx";
+@source "../../../../../packages/ui/**/*.{ts,tsx}";
 @source "../../../../../packages/core/**/*.{ts,tsx}";
 @source "../../../../../packages/views/**/*.{ts,tsx}";
 @source "./**/*.tsx";

@@ -258,7 +258,9 @@ export function RunTimeline({
       <div
         className={cn(
           "absolute right-3 top-1 flex items-center gap-0.5 rounded-md border bg-surface/95 p-0.5 shadow-sm transition-opacity",
-          zoom > 1 ? "opacity-100" : "opacity-0 focus-within:opacity-100 group-hover/timeline:opacity-100",
+          zoom > 1
+            ? "opacity-100"
+            : "opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:focus-within:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/timeline:opacity-100",
         )}
       >
         <button

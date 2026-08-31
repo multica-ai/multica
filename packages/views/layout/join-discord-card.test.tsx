@@ -61,4 +61,14 @@ describe("JoinDiscordCard", () => {
     render(<JoinDiscordCard />);
     expect(screen.getByText("Join our Discord")).toBeInTheDocument();
   });
+
+  it("keeps dismiss tappable on coarse pointers, not only hover:none", () => {
+    render(<JoinDiscordCard />);
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+    expect(dismiss.className).toContain("opacity-100");
+    expect(dismiss.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:opacity-0",
+    );
+    expect(dismiss.className).not.toContain("[@media(hover:none)]");
+  });
 });

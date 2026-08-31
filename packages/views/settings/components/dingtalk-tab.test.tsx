@@ -461,9 +461,16 @@ describe("DingTalkTab", () => {
     const groupTitle = screen.getByText("Platform team");
     const forgetButton = screen.getByRole("button", { name: "Forget" });
     expect(groupTitle.parentElement?.contains(forgetButton)).toBe(true);
-    expect(forgetButton.classList).toContain("opacity-0");
-    expect(forgetButton.classList).toContain("group-hover:opacity-100");
-    expect(forgetButton.classList).toContain("group-focus-within:opacity-100");
+    expect(forgetButton.classList).toContain("opacity-100");
+    expect(forgetButton.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:opacity-0",
+    );
+    expect(forgetButton.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100",
+    );
+    expect(forgetButton.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100",
+    );
     expect(
       screen.getByRole("heading", { name: "Recent groups", level: 4 }),
     ).toBeTruthy();

@@ -110,6 +110,7 @@ import { useFormatRelativeDate } from "./labels";
 import { ProjectStatusBadge, ProjectPriorityBadge } from "./project-badge";
 import { ProjectLeadPicker } from "./project-lead-picker";
 import { PAGE_GUTTER, PAGE_TOOLBAR } from "../../layout/page-header";
+import { hoverRevealRowOpacity, hoverRevealHeaderOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 
 // Sort order maps for the enum columns (header sort needs a total order).
@@ -252,7 +253,7 @@ function ProjectRowActions({
             <button
               type="button"
               aria-label={t(($) => $.page.row_menu)}
-              className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-accent-foreground group-hover/row:opacity-100 data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground"
+              className={`flex size-7 items-center justify-center rounded-md text-muted-foreground transition-opacity hover:bg-accent hover:text-accent-foreground ${hoverRevealRowOpacity} data-popup-open:bg-accent data-popup-open:opacity-100 data-popup-open:text-accent-foreground`}
             >
               <MoreHorizontal className="size-4" />
             </button>
@@ -353,7 +354,7 @@ function CheckboxCell({
         }}
         onAuxClick={stopRowNavigation}
         className={`-m-1.5 flex items-center p-1.5 ${
-          checked ? "" : "opacity-0 transition-opacity group-hover/row:opacity-100"
+          checked ? "" : hoverRevealRowOpacity
         }`}
       >
         <Checkbox checked={checked} tabIndex={-1} className="pointer-events-none" />
@@ -503,7 +504,7 @@ function ProjectTableHeader({
           aria-pressed={allSelected}
           onClick={onToggleAll}
           className={`-m-1.5 flex items-center p-1.5 ${
-            anySelected ? "" : "opacity-0 transition-opacity group-hover/header:opacity-100"
+            anySelected ? "" : hoverRevealHeaderOpacity
           }`}
         >
           <Checkbox

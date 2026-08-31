@@ -4,6 +4,10 @@ import { memo, type Ref } from "react";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  coarseAlwaysFineRowHoverBlock,
+  fineOnlyUntilRowHoverHidden,
+} from "@multica/ui/lib/pointer-affordances";
 import { AppLink } from "../../navigation";
 import type { Issue, Project,
   IssueProperty,
@@ -92,14 +96,14 @@ function ListRowContent({
         >
           <PriorityIcon
             priority={issue.priority}
-            className={selected ? "hidden" : "group-hover/row:hidden"}
+            className={selected ? "hidden" : fineOnlyUntilRowHoverHidden}
           />
           <input
             type="checkbox"
             checked={selected}
             onChange={() => toggle(issue.id)}
             className={`absolute inset-0 cursor-pointer accent-primary ${
-              selected ? "" : "hidden group-hover/row:block"
+              selected ? "" : coarseAlwaysFineRowHoverBlock
             }`}
           />
         </div>

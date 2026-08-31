@@ -713,7 +713,7 @@ function TaskRow({
           neither destination is privileged — issue detail and transcript
           are equally valid follow-ups. focus-within keeps the slot
           reachable for keyboard users. */}
-      <div className="ml-2 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-within:opacity-100">
+      <div className="ml-2 flex shrink-0 items-center gap-0.5 opacity-100 transition-opacity duration-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within:opacity-100">
         {hasIssue && (
           <Tooltip>
             <TooltipTrigger

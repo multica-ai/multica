@@ -131,6 +131,7 @@ import {
   useRestoredViewState,
   useViewStateWriter,
 } from "../../platform";
+import { hoverRevealRowOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 
@@ -737,7 +738,7 @@ function SubIssueRow({
                 "transition-opacity",
                 selected
                   ? "opacity-0"
-                  : "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
+                  : "opacity-0 [@media(hover:hover)_and_(pointer:fine)]:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-hover/row:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/row:opacity-0",
               )}
             />
           )}
@@ -752,7 +753,7 @@ function SubIssueRow({
               "absolute inset-0 cursor-pointer accent-primary transition-opacity",
               selected
                 ? "opacity-100"
-                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+                : cn(hoverRevealRowOpacity, "focus-visible:opacity-100"),
             )}
           />
         </div>
@@ -2541,7 +2542,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 title={t(($) => $.actions.remove_parent_issue)}
                 aria-label={t(($) => $.actions.remove_parent_issue)}
                 onClick={() => actions.removeParent()}
-                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                className="shrink-0 rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover:opacity-100"
               >
                 <Unlink className="h-3.5 w-3.5" />
               </button>
@@ -3220,7 +3221,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       "ml-1 cursor-pointer accent-primary transition-opacity",
                       someChildrenSelected
                         ? "opacity-100"
-                        : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
+                        : "opacity-100 [@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/sub-issues:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />
                   <div className="ml-auto flex items-center gap-0.5">

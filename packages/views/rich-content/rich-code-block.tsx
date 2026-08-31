@@ -25,6 +25,7 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
+import { hoverRevealCodeOpacity } from "@multica/ui/lib/pointer-affordances";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
@@ -135,7 +136,7 @@ export function CodeBlockShell({
 
   return (
     <div className="code-block-wrapper group/code relative my-3">
-      <div className="absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100">
+      <div className={cn("absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 transition-opacity", hoverRevealCodeOpacity)}>
         {language && (
           <span className="text-caption text-muted-foreground select-none">
             {language}

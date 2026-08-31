@@ -97,12 +97,14 @@ describe("ActiveTaskRow", () => {
 
     expect(status.parentElement?.className).toContain("flex h-7");
     expect(status.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:hidden",
+      "[@media(hover:hover)_and_(pointer:fine)]:group-hover/execution-log-row:hidden",
     );
     expect(transcriptButton.parentElement?.className).toContain("flex h-7");
-    expect(transcriptButton.parentElement?.className).toContain("[@media(hover:hover)]:hidden");
     expect(transcriptButton.parentElement?.className).toContain(
-      "[@media(hover:hover)]:group-hover/execution-log-row:flex",
+      "[@media(hover:hover)_and_(pointer:fine)]:hidden",
+    );
+    expect(transcriptButton.parentElement?.className).toContain(
+      "[@media(hover:hover)_and_(pointer:fine)]:group-hover/execution-log-row:flex",
     );
   });
 });
