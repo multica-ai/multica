@@ -60,9 +60,11 @@ type Metrics interface {
 	RecordOutboundDelivered()
 	// RecordOutboundDropped — one reply the adapter owed a user and did not
 	// deliver, labelled with why (outbound_outcome.go's closed reason set).
-	// Some reasons are ordinary — a question typed in the web UI on a
-	// WeCom-bound session is not deliverable here and never was — so this is
-	// read as a breakdown, not as an error total.
+	// Every reason here leaves somebody in WeCom waiting on an answer that is
+	// not coming, so this IS an error total and the label says which failure it
+	// was. The ordinary outcomes — a question typed in the web UI on a
+	// WeCom-bound session, an installation revoked between trigger and reply —
+	// are not counted here; RecordOutboundSkipped has them.
 	RecordOutboundDropped(reason string)
 	// RecordOutboundSkipped — a completion this adapter was never going to
 	// deliver, because it was not owed to a WeCom user in the first place. Kept

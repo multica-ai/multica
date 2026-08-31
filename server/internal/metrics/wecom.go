@@ -32,14 +32,18 @@ import "github.com/prometheus/client_golang/prometheus"
 // there: the two connection failures reach the Supervisor as a returned error
 // and are logged with installation_id, while a blocked ingest queue is
 // counted and nothing else — the counter says some bot is behind, not which.
-// The outbound pair answers a different question from the connection ones, and
-// it is the question GH #7215 and #6890 were filed as: a reply was produced,
-// the transcript has it, and the WeCom chat stayed quiet. Several unrelated
-// causes end that way — no socket in this process, a turn that originated in
-// the web UI, a revoked installation, a frame the platform refused — and from
-// the chat they are one symptom. Delivered is the denominator: without it, a
-// drop rate of zero and a bot nobody messaged look identical, which is the
-// same ambiguity the connection counters exist to remove.
+// The outbound counters answer a different question from the connection ones,
+// and it is the question GH #7215 and #6890 were filed as: a reply was
+// produced, the transcript has it, and the WeCom chat stayed quiet. Several
+// unrelated causes end that way and from the chat they are one symptom, so
+// each is counted where an operator can act on it: a frame the platform
+// refused, or no socket for this installation in this process, is a drop; a
+// turn that originated in the web UI, or an installation revoked between
+// trigger and reply, was never owed to WeCom and is a skip; a frame whose
+// verdict never came back may already be on the user's screen and is
+// unconfirmed, not a drop. Delivered is the denominator: without it, a drop
+// rate of zero and a bot nobody messaged look identical, which is the same
+// ambiguity the connection counters exist to remove.
 //
 // reason is a closed set (wecom/outbound_outcome.go). It is the only label
 // here, and it stays bounded by construction — no installation, workspace or
