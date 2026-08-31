@@ -74,6 +74,20 @@ func TestSkillBundleCacheRejectsCorruptBundle(t *testing.T) {
 	}
 }
 
+func TestValidateSkillBundleAcceptsCanonicalNestedPath(t *testing.T) {
+	bundle := testSkillBundle()
+	bundle.Files[0].Path = "templates/template.html"
+	ref := skillRefFromBundle(bundle)
+	bundle.Hash = ref.Hash
+	bundle.SizeBytes = ref.SizeBytes
+	bundle.Files[0].SHA256 = ref.Files[0].SHA256
+	bundle.Files[0].SizeBytes = ref.Files[0].SizeBytes
+
+	if !validateSkillBundle(ref, bundle) {
+		t.Fatal("canonical nested file path should produce a valid bundle")
+	}
+}
+
 func testSkillBundle() SkillData {
 	bundle := SkillData{
 		ID:      "skill-1",

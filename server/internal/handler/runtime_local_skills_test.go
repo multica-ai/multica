@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -653,6 +654,88 @@ func TestReportLocalSkillImportResult_RejectsCrossWorkspaceDaemonToken(t *testin
 	testHandler.ReportLocalSkillImportResult(w, reportReq)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRuntimeLocalSkillImportFilesCanonicalizesWindowsPaths(t *testing.T) {
+	files, err := runtimeLocalSkillImportFiles([]CreateSkillFileRequest{
+		{Path: `templates\template.html`, Content: "template"},
+		{Path: "references/example.md", Content: "example"},
+	})
+	if err != nil {
+		t.Fatalf("runtimeLocalSkillImportFiles: %v", err)
+	}
+
+	want := []CreateSkillFileRequest{
+		{Path: "templates/template.html", Content: "template"},
+		{Path: "references/example.md", Content: "example"},
+	}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("files = %#v, want %#v", files, want)
+	}
+}
+
+func TestRuntimeLocalSkillImportFilesRejectsUnsafePaths(t *testing.T) {
+	unsafe := []string{
+		"",
+		"\x00",
+		"file\x00.txt",
+		"/absolute.txt",
+		`C:\absolute.txt`,
+		`C:relative.txt`,
+		`\\server\share\file.txt`,
+		"../outside.txt",
+		`..\outside.txt`,
+		`safe\..\outside.txt`,
+	}
+	input := make([]CreateSkillFileRequest, 0, len(unsafe)+1)
+	for _, filePath := range unsafe {
+		input = append(input, CreateSkillFileRequest{Path: filePath, Content: "unsafe"})
+	}
+	input = append(input, CreateSkillFileRequest{Path: "safe/nested.txt", Content: "safe"})
+
+	files, err := runtimeLocalSkillImportFiles(input)
+	if err != nil {
+		t.Fatalf("runtimeLocalSkillImportFiles: %v", err)
+	}
+	want := []CreateSkillFileRequest{{Path: "safe/nested.txt", Content: "safe"}}
+	if !reflect.DeepEqual(files, want) {
+		t.Fatalf("files = %#v, want %#v", files, want)
+	}
+}
+
+func TestRuntimeLocalSkillImportFilesRejectsCanonicalPathCollisions(t *testing.T) {
+	_, err := runtimeLocalSkillImportFiles([]CreateSkillFileRequest{
+		{Path: `templates\template.html`, Content: "windows"},
+		{Path: "templates/template.html", Content: "posix"},
+	})
+	if err == nil {
+		t.Fatal("expected canonical path collision to fail")
+	}
+}
+
+func TestRuntimeLocalSkillImport_CanonicalizesWindowsFilePath(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	name := fmt.Sprintf("windows-path-import-%d", time.Now().UnixNano())
+	got := runLocalSkillImport(t, runtimeID,
+		map[string]any{"skill_key": "windows-path-skill"},
+		reportBundleBody(name, "Windows path import", "# Windows Path", map[string]string{
+			`templates\template.html`: "template",
+		}),
+	)
+
+	if got.Status != RuntimeLocalSkillCompleted {
+		t.Fatalf("status = %s, want completed (error=%q)", got.Status, got.Error)
+	}
+	if got.Skill == nil || len(got.Skill.Files) != 1 {
+		t.Fatalf("imported files = %#v, want one file", got.Skill)
+	}
+	if got.Skill.Files[0].Path != "templates/template.html" {
+		t.Fatalf("file path = %q, want canonical slash path", got.Skill.Files[0].Path)
 	}
 }
 
