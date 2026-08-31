@@ -79,7 +79,9 @@ export function isFilterablePropertyType(type: string): boolean {
 }
 
 /** Single-valued scalar properties: text / number / date / url. */
-export function isScalarPropertyType(type: string): boolean {
+export type ScalarIssuePropertyType = Extract<IssuePropertyType, "text" | "number" | "date" | "url">;
+
+export function isScalarPropertyType(type: string): type is ScalarIssuePropertyType {
   return type === "text" || type === "url" || type === "number" || type === "date";
 }
 
@@ -208,6 +210,14 @@ export const PROPERTY_FILTER_OPS: readonly PropertyFilterOp[] = [
   "after",
 ];
 
+/** Mathematical symbols shared by the scalar filter picker and active chips. */
+export const PROPERTY_FILTER_OP_SYMBOLS: Partial<Record<PropertyFilterOp, string>> = {
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+};
+
 export function isKnownPropertyFilterOp(op: string): op is PropertyFilterOp {
   return (PROPERTY_FILTER_OPS as readonly string[]).includes(op);
 }
@@ -243,13 +253,20 @@ export function isPropertyOperatorFilter(value: unknown): value is PropertyOpera
 /**
  * Ops the filter menu offers per scalar property type, in display order.
  * "is" (equality) is not in the list — it is the default and commits a bare
- * string, so every pre-operator flow stays untouched.
+ * string, so every pre-operator flow stays untouched. Non-scalar entries are
+ * intentionally empty: keeping the record exhaustive forces each future
+ * property type to make an explicit operator decision.
  */
-export const PROPERTY_FILTER_OPS_BY_TYPE: Record<string, PropertyFilterOp[]> = {
+export const PROPERTY_FILTER_OPS_BY_TYPE: Record<IssuePropertyType, readonly PropertyFilterOp[]> = {
   text: ["contains"],
-  url: ["contains"],
   number: ["gt", "gte", "lt", "lte"],
+  select: [],
+  multi_select: [],
   date: ["before", "after"],
+  checkbox: [],
+  url: ["contains"],
+  actor: [],
+  multi_actor: [],
 };
 
 export interface CreatePropertyRequest {

@@ -75,7 +75,7 @@ import type {
   IssueTableFacetsResponse,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -672,19 +672,10 @@ function LabelSubContent({
  * "this property is me" stays one click away.
  */
 
-/** Comparison operators render as math symbols in every locale; the word
- *  operators (contains / before / after) come from the locale files. */
-const SCALAR_OP_SYMBOLS: Partial<Record<PropertyFilterOp, string>> = {
-  gt: ">",
-  gte: "≥",
-  lt: "<",
-  lte: "≤",
-};
-
-// Keyboard guard for the inline operator buttons — same contract as the
+// Keyboard guard for the inline operator radios — same contract as the
 // scalar input below: Escape/Tab belong to the menu (close / move focus);
-// every other key, including the Enter that activates a focused button, must
-// not bubble into the popup's typeahead / list-navigation handlers.
+// every other navigation or selection key must not bubble into the popup's
+// typeahead / list-navigation handlers.
 function stopScalarMenuKeys(event: React.KeyboardEvent) {
   if (event.key === "Escape" || event.key === "Tab") return;
   event.stopPropagation();
@@ -713,7 +704,6 @@ function PropertyFilterOptions({
   const actorProperty = isActorPropertyType(property.type);
   // Scalar properties (text / number / date / url) have no option list — the
   // filter menu shows a value input plus "No value".
-  const scalarProperty = isScalarPropertyType(property.type);
   const { data: actorMembers = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: actorProperty,
@@ -794,7 +784,7 @@ function PropertyFilterOptions({
     noValueOption,
   ];
 
-  if (scalarProperty) {
+  if (isScalarPropertyType(property.type)) {
     const placeholder =
       property.type === "url"
         ? t(($) => $.pickers.custom_property.url_placeholder)
@@ -814,7 +804,7 @@ function PropertyFilterOptions({
       if (op === "contains") return t(($) => $.pickers.custom_property.op_contains);
       if (op === "before") return t(($) => $.pickers.custom_property.op_before);
       if (op === "after") return t(($) => $.pickers.custom_property.op_after);
-      return SCALAR_OP_SYMBOLS[op] ?? op;
+      return PROPERTY_FILTER_OP_SYMBOLS[op] ?? op;
     };
     const opButtons: { op: PropertyFilterOp | "is"; label: string }[] = [
       {
@@ -858,25 +848,38 @@ function PropertyFilterOptions({
     return (
       <>
         {opButtons.length > 1 && (
-          <div className="flex flex-wrap gap-1 px-2 pt-1.5">
+          <div
+            role="radiogroup"
+            aria-label={t(($) => $.pickers.custom_property.operator_label)}
+            className="flex flex-wrap gap-1 px-2 pt-1.5"
+          >
             {opButtons.map(({ op, label }) => {
               const active = effectiveOp === op;
               return (
-                <button
+                <label
                   key={op}
-                  type="button"
-                  disabled={locked}
-                  aria-pressed={active}
-                  onClick={() => applyOp(op)}
-                  onKeyDown={stopScalarMenuKeys}
-                  className={`h-6 rounded-md px-1.5 text-caption transition-colors ${
-                    active
-                      ? "bg-accent font-medium text-foreground"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                  }`}
+                  className={locked ? "cursor-not-allowed" : "cursor-pointer"}
                 >
-                  {label}
-                </button>
+                  <input
+                    type="radio"
+                    name={`property-filter-op-${property.id}`}
+                    value={op}
+                    checked={active}
+                    disabled={locked}
+                    onChange={() => applyOp(op)}
+                    onKeyDown={stopScalarMenuKeys}
+                    className="peer sr-only"
+                  />
+                  <span
+                    className={`inline-flex h-6 items-center rounded-md px-1.5 text-caption transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring ${
+                      active
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </label>
               );
             })}
           </div>

@@ -21,7 +21,7 @@ import { memberListOptions, agentListOptions, squadListOptions } from "@multica/
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
-import { isActorPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, type PropertyFilterValue } from "@multica/core/types";
+import { isActorPropertyType, isScalarPropertyType, parseActorRef, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, type PropertyFilterValue } from "@multica/core/types";
 import {
   type ActorFilterValue,
   type FilterDimension,
@@ -475,8 +475,7 @@ function useFilterChips(
         if (member.op === "after") {
           return t(($) => $.filters.chip_op_after, { value: member.value });
         }
-        const symbol =
-          member.op === "gt" ? ">" : member.op === "gte" ? "≥" : member.op === "lt" ? "<" : "≤";
+        const symbol = PROPERTY_FILTER_OP_SYMBOLS[member.op] ?? member.op;
         return `${symbol} ${member.value}`;
       }
       if (actorProperty) {

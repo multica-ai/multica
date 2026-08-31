@@ -550,7 +550,7 @@ describe("property filters", () => {
 
 // Scalar operator members (#7692): the matrix mirrors the server predicates in
 // server/internal/handler/property.go — contains is a case-insensitive
-// substring over the text form, gt/gte/lt/lte match stored numbers only, and
+// substring over stored strings only, gt/gte/lt/lte match stored numbers, and
 // before/after compare "YYYY-MM-DD" strings lexicographically. A missing key
 // never matches an operator, matching the server's NULL ->> semantics.
 describe("scalar operator filters", () => {
@@ -562,6 +562,8 @@ describe("scalar operator filters", () => {
   const withText = makeIssue({ id: "T", properties: { [textId]: "Hello World" } });
   const withUrl = makeIssue({ id: "U", properties: { [urlId]: "https://example.com/Repo" } });
   const withNum = makeIssue({ id: "N", properties: { [numId]: 3.5 } });
+  const withBool = makeIssue({ id: "B", properties: { [textId]: true } });
+  const withArray = makeIssue({ id: "A", properties: { [textId]: ["opt-alpha", "opt-beta"] } });
   const withDate = makeIssue({ id: "D", properties: { [dateId]: "2026-03-01" } });
   const unset = makeIssue({ id: "X" });
 
@@ -582,6 +584,12 @@ describe("scalar operator filters", () => {
     // before the operator runs, so it cannot catch an empty-needle match-all.
     // The server rejects empty operator values; the matcher agrees.
     expect(matches(withText, textId, { op: "contains", value: "" })).toBe(false);
+  });
+
+  it("contains never stringifies non-string stored values", () => {
+    expect(matches(withNum, numId, { op: "contains", value: "3.5" })).toBe(false);
+    expect(matches(withBool, textId, { op: "contains", value: "true" })).toBe(false);
+    expect(matches(withArray, textId, { op: "contains", value: "alpha" })).toBe(false);
   });
 
   it("number comparisons match stored numbers with the bound as a string", () => {

@@ -186,7 +186,11 @@ describe("IssueFilterMenu scalar property filter", () => {
     const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
     await openPropertySubmenu("Note");
 
-    await userEvent.click(screen.getByRole("button", { name: "contains" }));
+    expect(screen.getByRole("radiogroup", { name: "Filter operator" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "is" })).toBeChecked();
+    const contains = screen.getByRole("radio", { name: "contains" });
+    await userEvent.click(contains);
+    expect(contains).toBeChecked();
     await userEvent.type(screen.getByRole("textbox"), "hello{Enter}");
 
     expect(store.getState().propertyFilters).toEqual({
@@ -199,7 +203,7 @@ describe("IssueFilterMenu scalar property filter", () => {
     await openPropertySubmenu("Note");
 
     await userEvent.type(screen.getByRole("textbox"), "hello");
-    await userEvent.click(screen.getByRole("button", { name: "contains" }));
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
 
     expect(store.getState().propertyFilters).toEqual({
       [PROP]: [{ op: "contains", value: "hello" }],
@@ -211,12 +215,12 @@ describe("IssueFilterMenu scalar property filter", () => {
     await openPropertySubmenu("Note");
 
     await userEvent.type(screen.getByRole("textbox"), "hello");
-    await userEvent.click(screen.getByRole("button", { name: "contains" }));
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
     expect(store.getState().propertyFilters).toEqual({
       [PROP]: [{ op: "contains", value: "hello" }],
     });
 
-    await userEvent.click(screen.getByRole("button", { name: "is" }));
+    await userEvent.click(screen.getByRole("radio", { name: "is" }));
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
   });
 });

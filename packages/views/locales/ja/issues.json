@@ -702,6 +702,7 @@
       "op_contains": "含む",
       "op_before": "以前",
       "op_after": "以後",
+      "operator_label": "フィルター演算子",
       "true_label": "はい",
       "false_label": "いいえ",
       "value_placeholder": "値を入力…",

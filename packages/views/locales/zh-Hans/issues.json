@@ -711,7 +711,8 @@
       "op_is": "等于",
       "op_contains": "包含",
       "op_before": "早于",
-      "op_after": "晚于"
+      "op_after": "晚于",
+      "operator_label": "筛选运算符"
     },
     "filter_options_aria": "筛选选项",
     "no_results": "无结果",

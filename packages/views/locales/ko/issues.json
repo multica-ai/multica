@@ -702,6 +702,7 @@
       "op_contains": "포함",
       "op_before": "이전",
       "op_after": "이후",
+      "operator_label": "필터 연산자",
       "true_label": "예",
       "false_label": "아니요",
       "value_placeholder": "값 입력…",

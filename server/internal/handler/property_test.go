@@ -1335,7 +1335,8 @@ func TestParsePropertiesFilterOperatorUnit(t *testing.T) {
 	}
 	args = nil
 	sql := propertiesFilterPredicate(groups, addArg)
-	if !strings.Contains(sql, "ILIKE") || strings.Contains(sql, "@>") {
+	if !strings.Contains(sql, "jsonb_typeof") || !strings.Contains(sql, "= 'string'") ||
+		!strings.Contains(sql, "ILIKE") || strings.Contains(sql, "@>") {
 		t.Fatalf("contains predicate wrong: %s", sql)
 	}
 
@@ -1346,13 +1347,15 @@ func TestParsePropertiesFilterOperatorUnit(t *testing.T) {
 	}
 	args = nil
 	sql = propertiesFilterPredicate(groups, addArg)
-	if !strings.Contains(sql, "::numeric >= $") {
+	if !strings.Contains(sql, "CASE WHEN") || !strings.Contains(sql, "::numeric END >= $") ||
+		!strings.Contains(sql, "::numeric)") {
 		t.Fatalf("gte predicate wrong: %s", sql)
 	}
-	// The bound must arrive as a number bind param, not a string.
+	// The canonical decimal stays a string bind and is explicitly cast to
+	// numeric, matching the static open_only path without float8 demotion.
 	last := args[len(args)-1]
-	if num, isFloat := last.(float64); !isFloat || num != 3.5 {
-		t.Fatalf("gte bind arg must be 3.5 as a number, got %T %v", last, last)
+	if value, isString := last.(string); !isString || value != "3.5" {
+		t.Fatalf("gte bind arg must be canonical string 3.5, got %T %v", last, last)
 	}
 
 	// ParseFloat accepts forms Postgres ::numeric rejects (hex-float,
@@ -1413,6 +1416,13 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	text := createTestProperty(t, map[string]any{"name": "OT" + uuid.NewString()[:8], "type": "text"})
 	num := createTestProperty(t, map[string]any{"name": "ON" + uuid.NewString()[:8], "type": "number"})
 	date := createTestProperty(t, map[string]any{"name": "OD" + uuid.NewString()[:8], "type": "date"})
+	multi := createTestProperty(t, map[string]any{
+		"name": "OM" + uuid.NewString()[:8], "type": "multi_select",
+		"config": map[string]any{"options": []map[string]any{
+			{"name": "Alpha", "color": "#3b82f6"},
+			{"name": "Beta", "color": "#22c55e"},
+		}},
+	})
 
 	marker := uuid.NewString()[:8]
 	helloWorld := "Alpha " + marker + " World"
@@ -1434,6 +1444,9 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	}
 	if w := setIssuePropertyRaw(t, hasAll, date.ID, "2026-03-01"); w.Code != http.StatusOK {
 		t.Fatalf("seed date: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, hasAll, multi.ID, []string{multi.Config.Options[0].ID}); w.Code != http.StatusOK {
+		t.Fatalf("seed multi-select: %d %s", w.Code, w.Body.String())
 	}
 
 	listIssues := func(query string) (int, []IssueResponse) {
@@ -1489,6 +1502,14 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	// The % in the needle is a literal percent, not a wildcard.
 	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "% done"}), hasText)
 	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "% done"}), hasAll)
+	// contains is string-only even when a hand-edited URL applies it to another
+	// property type. jsonb ->> would otherwise stringify both values and match.
+	containsNumber := opQuery(num.ID, map[string]any{"op": "contains", "value": "15"})
+	notPresent(containsNumber, hasAll)
+	notPresent(containsNumber+"&open_only=true", hasAll)
+	containsArray := opQuery(multi.ID, map[string]any{"op": "contains", "value": multi.Config.Options[0].ID[:8]})
+	notPresent(containsArray, hasAll)
+	notPresent(containsArray+"&open_only=true", hasAll)
 
 	// Numeric comparison matches stored jsonb numbers only.
 	expect(opQuery(num.ID, map[string]any{"op": "gt", "value": "10"}), hasAll)
@@ -1528,7 +1549,7 @@ func TestListIssuesPropertyFilterOperators(t *testing.T) {
 	}
 
 	// The static ListOpenIssues unroll agrees with the dynamic predicates.
-	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"}) + "&open_only=true", hasAll)
+	expect(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"})+"&open_only=true", hasAll)
 	notPresent(opQuery(text.ID, map[string]any{"op": "contains", "value": "world"})+"&open_only=true", hasText)
 	expect(opQuery(num.ID, map[string]any{"op": "gte", "value": "15"})+"&open_only=true", hasAll)
 	expect(noneOrAfter+"&open_only=true", hasAll, empty)

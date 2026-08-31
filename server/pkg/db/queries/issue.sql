@@ -389,19 +389,20 @@ WHERE i.workspace_id = $1
                AND i.properties ->> (alt.pattern ->> 'def') IS NOT NULL
                AND (
                  (alt.pattern ->> '__op__' = 'contains'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
                   AND (i.properties ->> (alt.pattern ->> 'def')) ILIKE '%' || (alt.pattern ->> 'value') || '%')
                  OR (alt.pattern ->> '__op__' = 'gt'
-                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
-                  AND (i.properties ->> (alt.pattern ->> 'def'))::numeric > (alt.pattern ->> 'value')::numeric)
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END > (alt.pattern ->> 'value')::numeric)
                  OR (alt.pattern ->> '__op__' = 'gte'
-                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
-                  AND (i.properties ->> (alt.pattern ->> 'def'))::numeric >= (alt.pattern ->> 'value')::numeric)
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END >= (alt.pattern ->> 'value')::numeric)
                  OR (alt.pattern ->> '__op__' = 'lt'
-                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
-                  AND (i.properties ->> (alt.pattern ->> 'def'))::numeric < (alt.pattern ->> 'value')::numeric)
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END < (alt.pattern ->> 'value')::numeric)
                  OR (alt.pattern ->> '__op__' = 'lte'
-                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
-                  AND (i.properties ->> (alt.pattern ->> 'def'))::numeric <= (alt.pattern ->> 'value')::numeric)
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END <= (alt.pattern ->> 'value')::numeric)
                  OR (alt.pattern ->> '__op__' = 'before'
                   AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
                   AND i.properties ->> (alt.pattern ->> 'def') < (alt.pattern ->> 'value'))

@@ -65,8 +65,8 @@ export const NO_PROPERTY_VALUE = "__none__";
  * server-side operator predicates in `parsePropertiesFilterParam`
  * (`server/internal/handler/property.go`):
  *
- * - `contains` is a case-insensitive substring test over the value's text
- *   form (the server's `ILIKE '%…%'`), so "Foo" and "foo" agree.
+ * - `contains` is a case-insensitive substring test over stored strings only
+ *   (the server's guarded `ILIKE '%…%'`), so "Foo" and "foo" agree.
  * - `gt`/`gte`/`lt`/`lte` only match numeric stored values — the server
  *   guards with `jsonb_typeof(...) = 'number'`, so a text value is a miss
  *   here too.
@@ -91,11 +91,9 @@ export function issueValueMatchesOperator(
       // saved-view blobs.
       if (needle === "") return false;
       if (typeof value === "string") return value.toLowerCase().includes(needle);
-      if (typeof value === "number" || typeof value === "boolean") {
-        return String(value).toLowerCase().includes(needle);
-      }
-      // Array values are option-id bags — the menu never offers contains on
-      // them, so don't pretend their rendered form is meaningful text.
+      // Numbers, booleans, and arrays never match. Although jsonb ->> can
+      // serialize them, contains is deliberately a text/url operator on both
+      // the server and the client.
       return false;
     }
     case "gt":

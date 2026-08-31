@@ -1332,17 +1332,22 @@ func operatorPatternPredicate(pattern propertyOperatorPattern, addArg func(any) 
 	defArg := addArg(pattern.Def)
 	switch pattern.Op {
 	case "contains":
-		// Value is ILIKE-escaped at parse time; NULL (missing key) never
-		// satisfies ILIKE, so absent properties are excluded — same as
-		// containment.
-		return fmt.Sprintf("(i.properties ->> %s) ILIKE '%%' || %s || '%%'", defArg, addArg(pattern.Value))
+		// Value is ILIKE-escaped at parse time. Restrict substring matching to
+		// stored strings: ->> also serializes numbers, booleans, and arrays, while
+		// the client matcher intentionally treats contains as a text/url operator.
+		return fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND (i.properties ->> %s) ILIKE '%%' || %s || '%%')",
+			defArg, defArg, addArg(pattern.Value))
 	case "gt", "gte", "lt", "lte":
+		// Bind the canonical decimal as numeric on every serving path. CASE makes
+		// the jsonb type guard structural instead of relying on SQL qualifier
+		// evaluation order before the cast.
 		num, err := strconv.ParseFloat(pattern.Value, 64)
-		if err != nil {
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
 			return "FALSE"
 		}
-		return fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'number' AND (i.properties ->> %s)::numeric %s %s)",
-			defArg, defArg, propertyFilterOps[pattern.Op], addArg(num))
+		canonical := strconv.FormatFloat(num, 'f', -1, 64)
+		return fmt.Sprintf("(CASE WHEN jsonb_typeof(i.properties -> %s) = 'number' THEN (i.properties ->> %s)::numeric END %s %s::numeric)",
+			defArg, defArg, propertyFilterOps[pattern.Op], addArg(canonical))
 	case "before", "after":
 		return fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND i.properties ->> %s %s %s)",
 			defArg, defArg, propertyFilterOps[pattern.Op], addArg(pattern.Value))

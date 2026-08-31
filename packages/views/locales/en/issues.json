@@ -733,6 +733,7 @@
       "op_contains": "contains",
       "op_before": "before",
       "op_after": "after",
+      "operator_label": "Filter operator",
       "true_label": "Yes",
       "false_label": "No",
       "value_placeholder": "Enter value…",
