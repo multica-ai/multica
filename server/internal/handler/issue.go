@@ -3546,6 +3546,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if statusKeyForGuard != "" && statusKeyForGuard != prevIssue.Status {
+		if err := h.invokePreStatusHook(r.Context(), prevIssue.WorkspaceID, prevIssue, statusKeyForGuard, actorType, actorID); err != nil {
+			if writeGovernanceHookError(w, err) {
+				return
+			}
+			slog.Warn("pre-status hook failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id)...)
+			writeError(w, http.StatusInternalServerError, "governance hook check failed")
+			return
+		}
+	}
+
 	var issue db.Issue
 	attachmentsChanged := false
 	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
@@ -3584,7 +3596,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// (resolved earlier when pre-status hook ran)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -4128,6 +4140,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updated := 0
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID)
@@ -4286,6 +4299,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		if batchStatusKey != "" && batchStatusKey != prevIssue.Status {
+			if err := h.invokePreStatusHook(r.Context(), prevIssue.WorkspaceID, prevIssue, batchStatusKey, actorType, actorID); err != nil {
+				if writeGovernanceHookError(w, err) {
+					return
+				}
+				slog.Warn("pre-status hook failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+				writeError(w, http.StatusInternalServerError, "governance hook check failed")
+				return
+			}
+		}
+
 		var issue db.Issue
 		if req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
@@ -4318,7 +4342,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&

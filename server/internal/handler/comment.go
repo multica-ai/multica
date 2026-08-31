@@ -1871,6 +1871,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// entity-encode Markdown syntax characters (>, ", &, <) and corrupt the
 	// source. See issue #1303 / discussion in MUL-1119, MUL-1125.
 
+	if err := h.invokePreCommentHook(r.Context(), issue.WorkspaceID, issue, authorType, authorID, req.Content); err != nil {
+		if writeGovernanceHookError(w, err) {
+			return
+		}
+		slog.Warn("pre-comment hook failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "governance hook check failed")
+		return
+	}
+
 	// parent_id stores the exact comment being replied to. Thread-level behavior
 	// (for example auto-unresolving a resolved thread) resolves the root
 	// separately so storing a reply-to-reply does not destroy the direct-parent
@@ -3342,6 +3351,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
 				return
 			}
+		}
+		if err := h.invokePreCommentHook(r.Context(), issue.WorkspaceID, issue, actorType, actorID, req.Content); err != nil {
+			if writeGovernanceHookError(w, err) {
+				return
+			}
+			slog.Warn("pre-comment hook failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+			writeError(w, http.StatusInternalServerError, "governance hook check failed")
+			return
 		}
 	}
 
