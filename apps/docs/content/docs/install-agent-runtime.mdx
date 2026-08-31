@@ -18,6 +18,7 @@ Multica currently detects these commands:
 | Antigravity CLI | `agy` | [Antigravity install and sign-in](https://antigravity.google/docs/cli-install) |
 | Claude Code | `claude` | [Claude Code quickstart](https://code.claude.com/docs/en/quickstart) |
 | CodeBuddy Code | `codebuddy` | [CodeBuddy quickstart](https://www.codebuddy.ai/docs/cli/quickstart) |
+| CodeArts | `codearts` | [CodeArts CLI quickstart](https://support.huaweicloud.com/qs-codeartssnap/codeartsagent_qs_0004.html) |
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [Install Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [Install Cursor CLI](https://docs.cursor.com/en/cli/installation) |
@@ -45,6 +46,8 @@ Multica currently detects these commands:
 ## 2. Sign in on your machine
 
 After installing, launch the tool once in a terminal on its own and complete its sign-in or model provider setup. If the tool cannot complete requests in the terminal, the daemon's invocations fail the same way.
+
+For CodeArts, verify the non-interactive path with `codearts run --model provider/model "Reply OK"`, not only the TUI. The current CodeArts CLI can let a custom provider work in the TUI while `run`, `models`, and `serve` still require [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html). Multica can discover custom models from `~/.codeartsdoer/codearts_cli.json` or `.jsonc`, but task execution uses `codearts run` and therefore follows its authorization requirements.
 
 For Reasonix, run `reasonix setup` and configure a default provider and model before starting the daemon.
 

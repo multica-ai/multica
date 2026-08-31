@@ -82,6 +82,7 @@
     "copy_failed_toast": "Copy failed",
     "loading_older": "Loading older messages…",
     "quick_actions_heading": "Follow-up questions",
+    "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
     "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
   },

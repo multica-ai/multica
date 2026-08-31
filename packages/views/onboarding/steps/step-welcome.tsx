@@ -365,7 +365,13 @@ function StatusFooter({
   status: IssueStatus;
   timestamp?: string;
 }) {
-  const cfg = STATUS_CONFIG[statusCategoryOfKey(status)];
+  // The illustration's statuses are hard-coded BUILT-IN keys, so the label
+  // resolves from i18n exactly the way `useStatusLabel` does for real issues
+  // (MUL-6243) — `STATUS_CONFIG` still owns the icon color, but its `.label`
+  // is the server's English seed and must never reach the screen.
+  const { t } = useT("issues");
+  const category = statusCategoryOfKey(status);
+  const cfg = STATUS_CONFIG[category];
   return (
     <div className="mt-3 flex items-center gap-2 text-caption">
       <span
@@ -378,7 +384,7 @@ function StatusFooter({
             status === "in_progress" && "animate-pulse",
           )}
         />
-        {cfg.label}
+        {t(($) => $.status[category])}
       </span>
       {timestamp && (
         <>

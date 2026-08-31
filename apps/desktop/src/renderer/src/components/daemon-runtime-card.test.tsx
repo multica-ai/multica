@@ -64,3 +64,12 @@ describe("DaemonRuntimeActions — externally managed daemon (#3916)", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("DaemonRuntimeActions — recovery budget", () => {
+  it("offers a manual Start when automatic recovery is paused", async () => {
+    stubDaemonAPI({ state: "recovery_paused" });
+    render(<DaemonRuntimeActions />);
+
+    expect(await screen.findByText("Start")).toBeInTheDocument();
+  });
+});

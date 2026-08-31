@@ -267,8 +267,8 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 // path: that function handles the runtime brief inside CLAUDE.md /
 // AGENTS.md, this one handles the sidecar tree
 // (.agent_context/, .multica/, .claude/skills/, .github/skills/,
-// .opencode/skills/, skills/, .pi/skills/, .omp/mcp.json,
-// .omp/skills/, .cursor/skills/,
+// .opencode/skills/, .codeartsdoer/skills/, skills/, .pi/skills/,
+// .omp/mcp.json, .omp/skills/, .cursor/skills/,
 // .kimi/skills/, .reasonix/skills/, .kiro/skills/, .agents/skills/, fallback
 // .agent_context/skills/). The two together restore the workdir to
 // byte-exact pre-task state.

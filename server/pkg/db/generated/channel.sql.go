@@ -407,28 +407,6 @@ func (q *Queries) CopyChannelTaskDelivery(ctx context.Context, arg CopyChannelTa
 	return err
 }
 
-const countChannelMediaPendingObjects = `-- name: CountChannelMediaPendingObjects :one
-SELECT
-    count(*) FILTER (WHERE state <> 'tombstoned') AS pending_objects,
-    count(*) FILTER (WHERE state = 'tombstoned') AS tombstoned_objects
-FROM channel_media_pending_object
-`
-
-type CountChannelMediaPendingObjectsRow struct {
-	PendingObjects    int64 `json:"pending_objects"`
-	TombstonedObjects int64 `json:"tombstoned_objects"`
-}
-
-// Ledger backlog gauge for the reconciler's observability. Tombstones are
-// reported separately: they are bounded bookkeeping for already-deleted
-// objects, not a backlog of objects awaiting reclaim.
-func (q *Queries) CountChannelMediaPendingObjects(ctx context.Context) (CountChannelMediaPendingObjectsRow, error) {
-	row := q.db.QueryRow(ctx, countChannelMediaPendingObjects)
-	var i CountChannelMediaPendingObjectsRow
-	err := row.Scan(&i.PendingObjects, &i.TombstonedObjects)
-	return i, err
-}
-
 const createChannelBindingToken = `-- name: CreateChannelBindingToken :one
 
 INSERT INTO channel_binding_token (

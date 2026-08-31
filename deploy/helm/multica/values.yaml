@@ -205,20 +205,3 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
-
-# -----------------------------------------------------------------------------
-# Monitoring
-# -----------------------------------------------------------------------------
-monitoring:
-  prometheusRule:
-    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
-    # disabled by default so minimal self-host installs without that CRD still
-    # render and install.
-    enabled: false
-    additionalLabels: {}
-    samplerQueryErrorsFor: 5m
-    samplerQueryLatencyFor: 10m
-    seatCapacityDeadLetteredFor: 5m
-    seatCapacityPendingAgeSeconds: 900
-    seatCapacityPendingFor: 5m
-    severity: warning
