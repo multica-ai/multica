@@ -47,7 +47,6 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
-	CerebraRouting,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -59,10 +58,7 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 }
 
 func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
-	if flags == nil {
-		return true
-	}
-	return flags.IsEnabled(ctx, PluginsV1, true)
+	return flags.IsEnabled(ctx, PluginsV1, false)
 }
 
 // CerebraRoutingEnabled reports whether Cerebra model routing is enabled.
@@ -76,8 +72,7 @@ func CerebraRoutingEnabled(ctx context.Context, flags *featureflag.Service) bool
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
 	out := make(map[string]bool, len(frontendPublicFlags)+3)
 	for _, key := range frontendPublicFlags {
-		defaultValue := key == PluginsV1 || key == CerebraRouting
-		out[key] = flags.IsEnabled(ctx, key, defaultValue)
+		out[key] = flags.IsEnabled(ctx, key, false)
 	}
 	out[agentBuilderCompat] = true
 	out[agentSkillTogglesCompat] = true

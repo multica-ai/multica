@@ -56,12 +56,6 @@ func TestCustomIssueStatusesIsNotPublished(t *testing.T) {
 	}
 }
 
-func TestPluginsV1DefaultsOn(t *testing.T) {
-	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
-	if !flags[PluginsV1] {
-		t.Fatal("plugins_v1 must default to enabled")
-	}
-}
 
 func TestPluginSubFlagsAreNotPublished(t *testing.T) {
 	flags := EvaluateFrontendPublicFlags(context.Background(), nil)
