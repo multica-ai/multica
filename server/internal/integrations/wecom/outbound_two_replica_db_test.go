@@ -540,7 +540,11 @@ func TestRelay_ShedsRatherThanStalls(t *testing.T) {
 	const depth = 4
 	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
 	router.SetMetrics(mx)
-	// Never Start and never Attach: nothing drains, so the queue fills.
+	// Attached but never started: nothing drains, so the queue fills. Attached
+	// because the reply drop belongs to a replica that COULD have sent it —
+	// on one holding no socket the holder still delivers and a drop here would
+	// count the same reply twice.
+	router.Attach(&ownsSocketHandler{owns: true})
 	body, _ := json.Marshal(relayFrame{Kind: relayKindReply, InstallationID: "inst-1"})
 	for i := 0; i < depth; i++ {
 		router.DeliverWecomOutbound("inst-1", body, "ev")
@@ -567,6 +571,10 @@ func TestRelay_AnInboxPushShedDoesNotMoveTheReplyCounters(t *testing.T) {
 	const depth = 2
 	router := NewRelayOutbound(nil, nil, RelayConfig{QueueDepth: depth}, slog.Default())
 	router.SetMetrics(mx)
+	// Holding the socket, so the reply counter stays still because of the KIND
+	// rule under test here and not merely because this replica could not have
+	// sent it anyway.
+	router.Attach(&ownsSocketHandler{owns: true})
 	body, _ := json.Marshal(relayFrame{Kind: relayKindInbox, InstallationID: "inst-1"})
 	for i := 0; i < depth+3; i++ {
 		router.DeliverWecomOutbound("inst-1", body, "ev")

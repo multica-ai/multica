@@ -163,6 +163,15 @@ type RelayConfig struct {
 	// not sat out. Small on purpose: the common reason a re-offer succeeds is
 	// that the move has already finished.
 	RetryBackoff time.Duration
+
+	// ClaimTimeout is how long ONE claim round trip may take, and it sizes the
+	// outcome grace: the chain makes one claim per offer, so the grace has to
+	// carry that cost per attempt rather than once. It is a field because the
+	// bound belongs to the claim store rather than to the dispatcher — the
+	// production store's own is claimTimeout, which is this field's default
+	// and which TestRelayClaimTimeout_MatchesTheStoreItSizes pins against
+	// drift. Tests shrink it to keep the grace a test's worth of time.
+	ClaimTimeout time.Duration
 }
 
 const (
@@ -192,6 +201,9 @@ func (c RelayConfig) withDefaults() RelayConfig {
 	}
 	if c.RetryBackoff <= 0 {
 		c.RetryBackoff = defaultRelayRetryBackoff
+	}
+	if c.ClaimTimeout <= 0 {
+		c.ClaimTimeout = claimTimeout
 	}
 	return c
 }
@@ -439,6 +451,23 @@ func (r *RelayOutbound) Start(ctx context.Context) {
 	go r.watchOutcomes(ctx)
 }
 
+// ownsSocketNow answers "could this replica send that installation's frame
+// right now", and false when no handler is attached yet.
+//
+// The non-blocking receive is what makes r.handler safe to read here. Attach
+// writes the field before closing ready, so a receive that succeeds happens
+// after that write; a receive that does not tells us there is no handler to
+// ask. Callers include the shard read loop, which must never block and which
+// runs before Attach during boot.
+func (r *RelayOutbound) ownsSocketNow(installationID string) bool {
+	select {
+	case <-r.ready:
+		return r.handler.ownsSocket(installationID)
+	default:
+		return false
+	}
+}
+
 // handlerReady blocks until Attach has run, and reports whether there is a
 // handler to deliver with at all.
 func (r *RelayOutbound) handlerReady(ctx context.Context) bool {
@@ -619,8 +648,15 @@ func (r *RelayOutbound) delayFor(attempts int) (time.Duration, bool) {
 // reply drop counter: an inbox push counted there would make the delivered /
 // dropped ratio track socket placement rather than outcomes, which is the same
 // unit error the relayed-inbox path already avoids.
+//
+// And only a reply THIS replica could have sent. Every replica reads every
+// frame, so a shed on one that holds no socket costs the user nothing — the
+// holder still has its own copy. Counting it anyway reports the same reply as
+// delivered and dropped at once, and once per replica that happened to be
+// full. relay_shed stays unconditional: that one is the local admission
+// signal, and a queue overflowing is worth seeing wherever it happens.
 func (r *RelayOutbound) shed(item queued, why string) {
-	if item.frame.Kind == relayKindReply {
+	if item.frame.Kind == relayKindReply && r.ownsSocketNow(item.frame.InstallationID) {
 		r.mx().RecordOutboundDropped(string(dropRelayOverflow))
 	}
 	r.mx().RecordRelayShed(item.frame.Kind)
@@ -641,7 +677,17 @@ func (r *RelayOutbound) drainRemaining(ctx context.Context, q chan queued, lines
 	drainCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.cfg.DrainBudget)
 	defer cancel()
 	if first != nil {
-		r.perform(drainCtx, *first)
+		// Join the back of its installation's line rather than jump it. This
+		// frame was taken off the queue AFTER whatever is parked at that
+		// line's head, and sending it first would invert two answers in the
+		// user's chat — the exact reordering offer() exists to prevent, undone
+		// on the way out. With no line for that installation there is nothing
+		// to overtake.
+		if h := lines[first.frame.InstallationID]; h != nil {
+			h.items = append(h.items, *first)
+		} else {
+			r.perform(drainCtx, *first)
+		}
 	}
 	for inst, h := range lines {
 		for _, item := range h.items {
@@ -795,10 +841,17 @@ type pendingOutcome struct {
 
 // outcomeGrace is how long a routed reply is given to find a holder before the
 // publisher concludes nobody had one. It has to outlast the WHOLE re-offer
-// chain — a reply still being retried is in flight, not lost — plus one claim
-// round trip on top.
+// chain — a reply still being retried is in flight, not lost — plus the claim
+// round trip each of those offers pays for.
 func (r *RelayOutbound) outcomeGrace() time.Duration {
-	total := claimTimeout
+	// One claim round trip per OFFER, not one for the chain. Every re-offer
+	// makes its own Claim call and each can burn the full claimTimeout, so a
+	// grace built from the backoffs plus a single round trip expires while the
+	// chain is still running against a slow store — and the watcher then
+	// records a loss that the next attempt contradicts by delivering. Sizing
+	// it for the worst case costs a later settle on a healthy store, which is
+	// the harmless direction.
+	total := r.cfg.ClaimTimeout * time.Duration(len(r.retryPlan)+1)
 	for _, d := range r.retryPlan {
 		total += d
 	}
