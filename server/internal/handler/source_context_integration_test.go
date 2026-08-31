@@ -11,9 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/entitlement"
+	"github.com/multica-ai/multica/server/internal/entitlement/entitlementtest"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -29,6 +34,119 @@ func TestWriteSourceContextErrorHidesInternalDetails(t *testing.T) {
 	}
 	if !strings.Contains(recorder.Body.String(), "failed to capture source context") {
 		t.Fatalf("generic source-context error missing: %s", recorder.Body.String())
+	}
+}
+
+func TestRetrySourceContextQuickCreateReturnsIssueLimitRecovery(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL AND archived_at IS NULL
+		ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load retry test agent: %v", err)
+	}
+	contextID := uuid.NewString()
+	payload, err := json.Marshal(service.QuickCreateContext{
+		Type:            service.QuickCreateContextType,
+		Prompt:          "retry source context at issue limit",
+		RequesterID:     testUserID,
+		WorkspaceID:     testWorkspaceID,
+		SourceContextID: contextID,
+	})
+	if err != nil {
+		t.Fatalf("marshal retry context: %v", err)
+	}
+	number := int(time.Now().UnixNano()%100000) + 9_200_000
+	var sourceIssueID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id, number)
+		VALUES ($1, 'retry limit source', 'member', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, testUserID, number).Scan(&sourceIssueID); err != nil {
+		t.Fatalf("insert retry source issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context WHERE id = $1`, contextID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE rerun_of_task_id = $1 OR id = $1`, taskID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, sourceIssueID)
+	})
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, context,
+			originator_user_id, accountable_user_id
+		)
+		SELECT $1, runtime_id, 'failed', 0, $2, $3, $3
+		FROM agent WHERE id = $1
+		RETURNING id
+	`, agentID, payload, testUserID).Scan(&taskID); err != nil {
+		t.Fatalf("insert failed source-context task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue_source_context (
+			id, workspace_id, origin_task_id, source_issue_id, anchor_comment_id,
+			captured_by_user_id, snapshot_version, snapshot, capture_digest, state
+		) VALUES ($1, $2, $3, $4, gen_random_uuid(), $5, 1, '{}'::jsonb, 'digest', 'pending')
+	`, contextID, testWorkspaceID, taskID, sourceIssueID, testUserID); err != nil {
+		t.Fatalf("insert pending source context: %v", err)
+	}
+	var issueCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&issueCount); err != nil {
+		t.Fatalf("count issues before retry: %v", err)
+	}
+	stub := entitlementtest.New()
+	stub.Set(uuid.MustParse(testWorkspaceID), entitlement.GateIssueCount, entitlement.Decision{
+		Gate:           entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &issueCount},
+		PolicyRevision: 43,
+	})
+	priorProvider := testHandler.TaskService.Entitlements
+	testHandler.TaskService.Entitlements = stub
+	t.Cleanup(func() {
+		testHandler.TaskService.Entitlements = priorProvider
+	})
+
+	recorder := httptest.NewRecorder()
+	request := withURLParam(newRequest(http.MethodPost, "/api/tasks/"+taskID+"/retry-source-context", nil), "taskId", taskID)
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      util.MustParseUUID(testUserID),
+		WorkspaceID: util.MustParseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load retry caller membership: %v", err)
+	}
+	request = request.WithContext(middleware.SetMemberContext(request.Context(), testWorkspaceID, member))
+	testHandler.RetrySourceContextQuickCreate(recorder, request)
+	if recorder.Code != http.StatusPaymentRequired {
+		t.Fatalf("source-context retry at limit = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var body struct {
+		Code           string `json:"code"`
+		Limit          int    `json:"limit"`
+		PolicyRevision int    `json:"policy_revision"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode retry issue-limit response: %v", err)
+	}
+	if body.Code != "issue_limit_reached" || body.Limit != issueCount || body.PolicyRevision != 43 {
+		t.Fatalf("retry issue-limit response = %+v", body)
+	}
+	var children int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE rerun_of_task_id = $1`, taskID).Scan(&children); err != nil {
+		t.Fatalf("count retry children: %v", err)
+	}
+	if children != 0 {
+		t.Fatalf("retry child count = %d, want 0", children)
+	}
+	var originTaskID string
+	if err := testPool.QueryRow(ctx, `SELECT origin_task_id FROM issue_source_context WHERE id = $1`, contextID).Scan(&originTaskID); err != nil {
+		t.Fatalf("load pending context after rejection: %v", err)
+	}
+	if originTaskID != taskID {
+		t.Fatalf("pending context moved to %s, want original task %s", originTaskID, taskID)
 	}
 }
 
@@ -211,6 +329,82 @@ func TestCommentSourceContextLifecycle(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE comment SET content = 'earlier sibling context', revision = revision + 1, updated_at = now() WHERE id = $1`, earlierSiblingID); err != nil {
 		t.Fatalf("restore earlier thread comment: %v", err)
 	}
+
+	t.Run("full workspace skips source attachment copies and enqueue", func(t *testing.T) {
+		var agentID string
+		if err := testPool.QueryRow(ctx, `
+			SELECT id FROM agent
+			WHERE workspace_id = $1 AND runtime_id = $2 AND archived_at IS NULL
+			ORDER BY created_at ASC LIMIT 1
+		`, testWorkspaceID, testRuntimeID).Scan(&agentID); err != nil {
+			t.Fatalf("load source-context test agent: %v", err)
+		}
+		var originalMetadata string
+		if err := testPool.QueryRow(ctx, `SELECT metadata::text FROM agent_runtime WHERE id = $1`, testRuntimeID).Scan(&originalMetadata); err != nil {
+			t.Fatalf("load original runtime metadata: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `
+			UPDATE agent_runtime
+			SET metadata = '{"cli_version":"0.4.3","capabilities":["source_context_quick_create_v1"]}'::jsonb
+			WHERE id = $1
+		`, testRuntimeID); err != nil {
+			t.Fatalf("enable source-context capability: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `UPDATE agent_runtime SET metadata = $1::jsonb WHERE id = $2`, originalMetadata, testRuntimeID)
+		})
+
+		var issueCount int
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&issueCount); err != nil {
+			t.Fatalf("count issues before source-context limit check: %v", err)
+		}
+		stub := entitlementtest.New()
+		stub.Set(uuid.MustParse(testWorkspaceID), entitlement.GateIssueCount, entitlement.Decision{
+			Gate:           entitlement.Gate{Action: entitlement.ActionEnforce, Limit: &issueCount},
+			PolicyRevision: 41,
+		})
+		priorHandlerProvider := testHandler.Entitlements
+		priorTaskProvider := testHandler.TaskService.Entitlements
+		testHandler.Entitlements = stub
+		testHandler.TaskService.Entitlements = stub
+		t.Cleanup(func() {
+			testHandler.Entitlements = priorHandlerProvider
+			testHandler.TaskService.Entitlements = priorTaskProvider
+		})
+
+		beforeReads, beforeUploads := store.streamCopyCalls()
+		prompt := "source context must not enqueue while the workspace is full"
+		fullRecorder := httptest.NewRecorder()
+		fullRequest := withURLParam(newRequest(http.MethodPost, "/api/comments/"+selectedID+"/sub-issues", map[string]any{
+			"mode":          "agent",
+			"capture_token": preview.CaptureToken,
+			"quick_create": map[string]any{
+				"agent_id": agentID,
+				"prompt":   prompt,
+			},
+		}), "commentId", selectedID)
+		testHandler.CreateCommentSubIssue(fullRecorder, fullRequest)
+		if fullRecorder.Code != http.StatusPaymentRequired {
+			t.Fatalf("full source-context create = %d: %s", fullRecorder.Code, fullRecorder.Body.String())
+		}
+		var body struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(fullRecorder.Body.Bytes(), &body); err != nil || body.Code != "issue_limit_reached" {
+			t.Fatalf("full source-context response = %+v, err=%v", body, err)
+		}
+		afterReads, afterUploads := store.streamCopyCalls()
+		if afterReads != beforeReads || afterUploads != beforeUploads {
+			t.Fatalf("source attachments copied before rejection: reads %d->%d uploads %d->%d", beforeReads, afterReads, beforeUploads, afterUploads)
+		}
+		var queued int
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE context->>'prompt' = $1`, prompt).Scan(&queued); err != nil {
+			t.Fatalf("count full source-context tasks: %v", err)
+		}
+		if queued != 0 {
+			t.Fatalf("full source-context task count = %d, want 0", queued)
+		}
+	})
 
 	// A damaged cross-issue parent chain is rejected instead of truncated.
 	var foreignIssueID, foreignRootID string

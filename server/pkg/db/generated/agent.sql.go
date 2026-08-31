@@ -3299,6 +3299,18 @@ WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued'
       AND created_at < now() - make_interval(secs => $1::double precision)
+      AND (
+          runtime_id IS NULL
+          OR NOT EXISTS (
+              SELECT 1 FROM agent_runtime r WHERE r.id = agent_task_queue.runtime_id
+          )
+          OR EXISTS (
+              SELECT 1 FROM agent_runtime r
+              WHERE r.id = agent_task_queue.runtime_id
+                AND COALESCE(r.last_seen_at, r.updated_at) <
+                    now() - make_interval(secs => $1::double precision)
+          )
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue retry_parent
           WHERE retry_parent.id = agent_task_queue.parent_task_id
@@ -3311,13 +3323,23 @@ WITH victims AS (
 UPDATE agent_task_queue t
 SET status = 'failed',
     completed_at = now(),
-    error = 'task expired in queue',
+    error = 'runtime unavailable while task was queued',
     failure_reason = 'queued_expired',
     prepare_lease_expires_at = NULL
 FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
+  AND (
+      t.runtime_id IS NULL
+      OR NOT EXISTS (SELECT 1 FROM agent_runtime r WHERE r.id = t.runtime_id)
+      OR EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = t.runtime_id
+            AND COALESCE(r.last_seen_at, r.updated_at) <
+                now() - make_interval(secs => $1::double precision)
+      )
+  )
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue retry_parent
       WHERE retry_parent.id = t.parent_task_id
@@ -3327,19 +3349,56 @@ RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t
 `
 
 type ExpireStaleQueuedTasksParams struct {
-	TtlSecs    float64 `json:"ttl_secs"`
-	MaxPerTick int32   `json:"max_per_tick"`
+	ReconnectGraceSecs float64 `json:"reconnect_grace_secs"`
+	MaxPerTick         int32   `json:"max_per_tick"`
 }
 
-// Fails tasks that have been sitting in 'queued' for longer than the TTL.
-// This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
-// new dispatch-time admission gate that refuses to enqueue when the runtime
-// is offline, we still need to drain the historical 87k+ doomed rows and
-// handle edge cases where a runtime goes offline AFTER a task is already
-// queued (the admission check protects new enqueues, not in-flight queue
-// depth). A retry created by runtime_offline is exempt: it deliberately waits
-// for that runtime to reconnect, so time spent in this recovery state must not
-// consume the generic queue TTL.
+// Fails queued tasks whose runtime can no longer prove it is alive.
+//
+// This used to be a pure wall clock: queued for longer than a TTL (default 2h)
+// meant failed. That conflated "nobody is coming for this task" with "the
+// queue ahead of it is long", and the second one is not a failure. MUL-6558
+// was exactly that — a self-hosted runtime with low task concurrency held its
+// own queue past 2h and healthy work died as queued_expired. The TTL knob
+// added then (MULTICA_TASK_QUEUED_TTL) only moved the cliff; it did not stop
+// a busy runtime from eventually crossing it.
+//
+// So the question is not "how long has this waited" but "is anything still
+// able to pick it up". A runtime that keeps heartbeating is busy, not dead,
+// and its backlog must be allowed to drain however long that takes. The
+// liveness signal is the same one FailTasksForOfflineRuntimes uses for
+// dispatched/running rows, so a daemon going down now retires its queued and
+// its in-flight work on one clock instead of two.
+//
+// The row must ALSO have been queued for a full grace of its own. Enqueue binds
+// a task to agent.runtime_id without checking that the runtime is up, so
+// runtime liveness alone would fail a task the instant it is assigned to a
+// runtime that has been offline a while — a laptop closed overnight would turn
+// "assign this issue" into a failure inside one 30s sweep tick instead of
+// waiting for the machine to come back. Requiring the task's own age keeps the
+// promise the name makes: a queued task gets one full reconnect grace before it
+// is given up on, counted from when it started waiting. It also bounds the
+// scan, which would otherwise re-evaluate the runtime subquery against every
+// queued row on every tick.
+//
+// Heartbeat age is read directly rather than gated on runtime.status='online',
+// so a row stuck at 'online' with a long-dead heartbeat still releases its
+// queue.
+//
+// The runtime_id IS NULL / missing-runtime arms are fail-closed defence, not
+// live paths: the schema already excludes both. runtime_id was NOT NULL from
+// migration 004 until 251 replaced it with CHECK (runtime_id IS NOT NULL OR
+// completed_at IS NOT NULL), which every insert and update is checked against
+// (NOT VALID only skips the backfill scan), so no queued row can be unbound.
+// A dangling reference is impossible because agent_task_queue_runtime_id_fkey
+// (migration 004) is ON DELETE CASCADE: deleting a runtime removes the rows
+// referencing it rather than orphaning them, and the normal delete path
+// (migration 251, MUL-5559) explicitly unbinds history tasks first in the same
+// transaction. They are kept so a future schema change cannot silently strand
+// rows that have no liveness signal at all.
+//
+// A retry created by runtime_offline is exempt: it deliberately waits for that
+// runtime to reconnect, and FailExpiredRuntimeReconnectRetries owns its exit.
 //
 // Concurrency safety: the daemon's claim path may race with this sweeper to
 // transition the same row out of 'queued'. We protect against that two
@@ -3347,7 +3406,7 @@ type ExpireStaleQueuedTasksParams struct {
 //  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
 //     currently being claimed (or otherwise locked) is skipped — no lock
 //     contention with the dispatch path, and we won't queue up behind it.
-//  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
+//  2. The outer UPDATE re-checks status='queued' AND the liveness predicate at
 //     apply time. If a daemon claimed the row between selection and update
 //     (e.g. lock released after the claim transaction commits), the row is
 //     already 'dispatched'/'running' and the WHERE clause filters it out
@@ -3357,7 +3416,7 @@ type ExpireStaleQueuedTasksParams struct {
 // the DB when the backlog is large — the sweeper drains the rest on
 // subsequent ticks.
 func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.ReconnectGraceSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
@@ -5636,6 +5695,9 @@ JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
 JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
 JOIN issue source_issue ON source_issue.id = source.issue_id
 JOIN agent source_agent ON source_agent.id = source.agent_id
+LEFT JOIN issue_status source_status
+  ON source_status.workspace_id = source_issue.workspace_id
+ AND source_status.key = source_issue.status
 WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
@@ -5648,7 +5710,7 @@ WHERE recovery.author_type = 'system'
   AND source.autopilot_run_id IS NULL
   AND source.issue_id IS NOT NULL
   AND source.agent_id <> failed.agent_id
-  AND issue_effective_status(source_issue.workspace_id, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  AND COALESCE(source_status.category, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
   AND source_agent.archived_at IS NULL
   AND source_agent.runtime_id IS NOT NULL
   AND source_agent.workspace_id = source_issue.workspace_id

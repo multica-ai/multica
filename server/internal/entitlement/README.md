@@ -7,11 +7,10 @@ switches.
 
 Production wiring has one boundary: setting `MULTICA_CLOUD_URL` connects this
 consumer as well as the other managed Cloud clients. An empty URL performs no
-HTTP request, and the autopilot consumer does not access its quota tables; the
-issue-window consumer likewise keeps its legacy SQL and performs no window
-read. Self-hosted deployments therefore retain the legacy paths. Request
-timeout and stale grace use bounded code defaults instead of deployment
-configuration.
+HTTP request, issue creation does not count rows, and the autopilot consumer
+does not access its quota tables. Self-hosted deployments therefore retain the
+unlimited paths. Request timeout and stale grace use bounded code defaults
+instead of deployment configuration.
 
 ## Contract
 
@@ -51,6 +50,28 @@ cached `enforce` is downgraded to `observe`; after the grace, the result is
 also bounds Cloud request rate when an outage returns errors immediately; cold
 failures are cached only as `off` and never as policy.
 
+## Issue count limit
+
+The `issue_count` gate limits the total number of rows in a workspace's
+`issue` table. It does not use `workspace.issue_counter`: that counter only
+allocates monotonically increasing display numbers, while deleting an issue
+must release one unit of capacity.
+
+Issue creation resolves the Cloud instruction before opening a transaction.
+Inside the transaction, incrementing the workspace issue counter locks the
+workspace row, serializing concurrent admission; a bounded `CountIssuesUpTo`
+read then admits only when the current row count is below Cloud's limit. A
+blocked create rolls back the counter increment with the rest of the
+transaction. The usage read is also bounded and samples at most `limit + 1`
+rows, with overflow protection for the maximum integer limit.
+
+Entitlement lookup, refresh, expiry, and policy-validation failures are
+fail-open: the consumer skips the count and issue creation proceeds. The local
+`observe` degradation is likewise normalized to `off` by this consumer; the
+shared entitlement decision metric still records the stale observation. Once
+a valid `enforce` instruction enters the transaction, ordinary database errors
+still abort that transaction rather than creating a partially persisted issue.
+
 The client itself has no background goroutine and introduces no startup
 dependency; the autopilot consumer owns its policy-neutral accounting and
 recovery lifecycle separately. Cloud remains the only place that determines
@@ -58,33 +79,3 @@ the effective policy from subscription facts and authoritative limits.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.
-
-## Recently-created issue window
-
-The `issue_window` gate limits reads, not creation. Its base set is the
-workspace's newest `limit` rows by immutable `issue.number DESC`; deleted
-numbers may leave gaps, so implementations always use an indexed `LIMIT` and
-never derive a threshold from `workspace.issue_counter`. Every ancestor of a
-base issue is added so clients do not receive orphaned child references.
-Supplemental ancestors do not consume the base limit and do not make their
-other children visible.
-
-`last_activity_at` remains an independent issue activity/sort field. Comments,
-edits, archive-like status changes, and restores do not change membership in
-the creation window. No activity backfill is required for this gate.
-
-`off` preserves the original queries. `observe` preserves responses and records
-whether the response would contain a hidden issue. `enforce` filters list,
-search, table, children, Inbox, plugin, and agent-context reads through the same
-recursive set. A same-workspace direct read outside the set returns HTTP 402
-with `issue_outside_creation_window`; cross-workspace identifiers are resolved
-inside the requested workspace first and remain indistinguishable 404s. The
-bounded `/api/issues/window-usage` probe scans at most `limit + 1` entries from
-the existing unique `(workspace_id, number)` index.
-
-The two failure stages intentionally differ. An unavailable, stale, or
-malformed Cloud decision degrades through `observe` to `off`, so it never
-creates a new read-path dependency. After a valid `enforce` decision exists,
-however, a database failure while evaluating the visible set fails closed: the
-server cannot prove that the requested issue is allowed. `observe` evaluation
-errors remain fail-open and are recorded as telemetry only.

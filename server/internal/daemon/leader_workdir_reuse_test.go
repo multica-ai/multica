@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -469,7 +471,7 @@ func TestLockReusablePriorEnvRootNeverWritesOutsideWorkspacesRoot(t *testing.T) 
 			d := &Daemon{logger: discardLogger()}
 			d.cfg.WorkspacesRoot = workspacesRoot
 
-			claim, _, _, ok := d.lockReusablePriorEnvRoot(Task{
+			claim, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), Task{
 				ID:           "01a01ec0-e69d-7000-8000-0123456789ab",
 				WorkspaceID:  "ws-1",
 				AgentID:      "agent-1",
@@ -533,7 +535,7 @@ func TestLockReusablePriorEnvRootLocksAValidatedRoot(t *testing.T) {
 	d := &Daemon{logger: discardLogger()}
 	d.cfg.WorkspacesRoot = root
 
-	claim, canonical, _, ok := d.lockReusablePriorEnvRoot(task, nil, "")
+	claim, canonical, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
 	if !ok {
 		t.Fatal("a fully provenanced managed workdir was refused for reuse")
 	}
@@ -559,17 +561,215 @@ func TestLockReusablePriorEnvRootLocksAValidatedRoot(t *testing.T) {
 	}
 
 	// A concurrent continuation of the same task must not get the same root.
-	if second, _, _, ok := d.lockReusablePriorEnvRoot(task, nil, ""); ok {
+	if second, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, ""); ok {
 		second.Release()
 		t.Fatal("two continuations locked the same prior workdir at once")
 	}
 
 	claim.Release()
-	again, _, _, ok := d.lockReusablePriorEnvRoot(task, nil, "")
+	again, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
 	if !ok {
 		t.Fatal("prior workdir stayed locked after release")
 	}
 	again.Release()
+}
+
+// TestLockReusablePriorEnvRootWaitsOutTheDyingPredecessor is MUL-6880.
+//
+// Editing a comment cancels the run it triggered and enqueues the replacement
+// in the same request. The server considers the predecessor finished the moment
+// it writes 'cancelled', and its serialization fence lets the replacement be
+// claimed; the PROCESS is still exiting, and it holds .task_lock for another
+// few seconds. Declining on sight cost the workdir, and with it the provider
+// session living in it — the agent came back with no memory of the
+// conversation being edited.
+//
+// The predecessor here lets go while the successor is waiting, which is what
+// happens in production once the daemon's cancel poll fires.
+func TestLockReusablePriorEnvRootWaitsOutTheDyingPredecessor(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "0123456789ab", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-reuse")
+	task.PriorWorkDir = workDir
+
+	d := &Daemon{logger: discardLogger(), envRootBusyWait: 10 * time.Second}
+	d.cfg.WorkspacesRoot = root
+
+	// The predecessor, still holding its lock when the successor starts.
+	predecessor, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
+	if !ok {
+		t.Fatal("could not set up the predecessor's claim")
+	}
+
+	const exitAfter = 300 * time.Millisecond
+	go func() {
+		time.Sleep(exitAfter)
+		predecessor.Release()
+	}()
+
+	start := time.Now()
+	claim, canonical, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
+	waited := time.Since(start)
+	if !ok {
+		t.Fatal("the successor abandoned the workdir its predecessor was still exiting from: that is the lost session")
+	}
+	defer claim.Release()
+	if canonical == "" {
+		t.Fatal("accepted reuse without returning the canonical workdir")
+	}
+	if waited < exitAfter {
+		t.Fatalf("took the lock after %s, before the predecessor let go of it — the test is not exercising the wait", waited)
+	}
+}
+
+// The other half: the wait is a budget, not a promise. A predecessor that never
+// lets go — wedged, SIGKILL lost, or a lock held by something else on a shared
+// workspaces root — must end in the same fresh environment as before, a few
+// seconds later, and never in a task that waits forever.
+func TestLockReusablePriorEnvRootStopsWaitingWhenTheLockNeverFrees(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "0123456789ab", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-reuse")
+	task.PriorWorkDir = workDir
+
+	const budget = 300 * time.Millisecond
+	d := &Daemon{logger: discardLogger(), envRootBusyWait: budget}
+	d.cfg.WorkspacesRoot = root
+
+	held, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
+	if !ok {
+		t.Fatal("could not set up the holder's claim")
+	}
+	defer held.Release()
+
+	start := time.Now()
+	second, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
+	waited := time.Since(start)
+	if ok {
+		second.Release()
+		t.Fatal("two continuations locked the same prior workdir at once")
+	}
+	if waited < budget {
+		t.Fatalf("gave up after %s, before spending the %s budget", waited, budget)
+	}
+}
+
+// A daemon shutting down must not be held up by the wait.
+func TestLockReusablePriorEnvRootStopsWaitingWhenTheContextEnds(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "0123456789ab", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
+
+	task := leaderReuseTestTask("task-reuse")
+	task.PriorWorkDir = workDir
+
+	d := &Daemon{logger: discardLogger(), envRootBusyWait: time.Hour}
+	d.cfg.WorkspacesRoot = root
+
+	held, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
+	if !ok {
+		t.Fatal("could not set up the holder's claim")
+	}
+	defer held.Release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+	start := time.Now()
+	second, _, _, ok, err := d.lockReusablePriorEnvRoot(ctx, task, nil, "")
+	if ok {
+		second.Release()
+		t.Fatal("took a lock that was never released")
+	}
+	if waited := time.Since(start); waited > 30*time.Second {
+		t.Fatalf("waited %s after the context ended", waited)
+	}
+	// A cancelled run is its own outcome. Reported as a plain "no reuse" it
+	// reads as "the lock stayed busy", which sends the caller on to prepare a
+	// fresh environment for a task that no longer exists.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation reported as %v, want it to carry context.Canceled", err)
+	}
+	cancel()
+}
+
+// TestRunTaskCancelledWaitingForThePriorWorkdirStopsInsteadOfPreparing is the
+// caller-level half of the same rule. The inner function reporting the
+// cancellation only matters if runTask acts on it: flattened into "no reuse", a
+// cancelled run would go on to prepare a whole fresh environment — repo
+// checkout included — for work nobody is waiting for, and would file the one
+// cancellation under "budget exhausted" in the very logs the 15s budget is
+// meant to be judged by.
+func TestRunTaskCancelledWaitingForThePriorWorkdirStopsInsteadOfPreparing(t *testing.T) {
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+
+	first := leaderReuseTestTask("task-first")
+	firstResult, err := d.runTask(context.Background(), first, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatalf("first runTask: %v", err)
+	}
+
+	// The predecessor, still holding its env root when the successor starts.
+	d.envRootBusyWait = time.Hour
+	second := leaderReuseTestTask("task-second")
+	second.PriorSessionID = firstResult.SessionID
+	second.PriorWorkDir = firstResult.WorkDir
+	held, _, _, ok, err := d.lockReusablePriorEnvRoot(context.Background(), second, nil, "")
+	if err != nil || !ok {
+		t.Fatalf("could not hold the prior env root: ok=%v err=%v", ok, err)
+	}
+	defer held.Release()
+
+	var logs bytes.Buffer
+	d.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+	defer cancel()
+
+	if _, err = d.runTask(ctx, second, "claude", 0, d.logger); !errors.Is(err, context.Canceled) {
+		t.Fatalf("runTask returned %v, want the cancellation that ended the wait", err)
+	}
+
+	// Prepare writes .managed_env.json into the env root it builds, so its
+	// absence is the proof that no fresh environment was prepared.
+	freshRoot, err := execenv.ResolveRootDir(taskRootDirParams(d.cfg.WorkspacesRoot, second))
+	if err != nil {
+		t.Fatalf("resolve the successor's env root: %v", err)
+	}
+	switch _, statErr := os.Stat(filepath.Join(freshRoot, ".managed_env.json")); {
+	case statErr == nil:
+		t.Fatal("prepared a fresh environment for a cancelled run")
+	case !os.IsNotExist(statErr):
+		t.Fatalf("stat managed env provenance: %v", statErr)
+	}
+
+	got := logs.String()
+	if strings.Contains(got, "still in use after waiting for it") {
+		t.Fatalf("a cancelled run was logged as budget exhausted, which is the number the budget is judged by:\n%s", got)
+	}
+	if !strings.Contains(got, "the run was cancelled") {
+		t.Fatalf("the cancellation went unlogged:\n%s", got)
+	}
 }
 
 // TestLockReusablePriorEnvRootSurvivesRetargetAfterValidation is the TOCTOU
@@ -610,7 +810,7 @@ func TestLockReusablePriorEnvRootSurvivesRetargetAfterValidation(t *testing.T) {
 	}
 	t.Cleanup(func() { reuseLockTestHook = nil })
 
-	claim, _, _, ok := d.lockReusablePriorEnvRoot(task, nil, "")
+	claim, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
 	if claim != nil {
 		claim.Release()
 	}
@@ -656,7 +856,7 @@ func TestLockReusablePriorEnvRootRejectsIdentitySwap(t *testing.T) {
 	}
 	t.Cleanup(func() { reuseLockTestHook = nil })
 
-	claim, used, _, ok := d.lockReusablePriorEnvRoot(task, nil, "")
+	claim, used, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
 	if claim != nil {
 		claim.Release()
 	}
@@ -724,7 +924,7 @@ func TestLockReusablePriorEnvRootSurvivesWorkspacesRootSwap(t *testing.T) {
 	}
 	t.Cleanup(func() { reuseLockTestHook = nil })
 
-	claim, _, _, ok := d.lockReusablePriorEnvRoot(task, nil, "")
+	claim, _, _, ok, _ := d.lockReusablePriorEnvRoot(context.Background(), task, nil, "")
 	if claim != nil {
 		claim.Release()
 	}

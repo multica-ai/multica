@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -293,6 +295,29 @@ func TestSlashHandle_EnqueueFailureIsInternalError(t *testing.T) {
 	}
 	if *captured != slashInternalErrorText {
 		t.Fatalf("expected internal-error reply, got %q", *captured)
+	}
+}
+
+func TestSlashHandle_IssueLimitReachedIsActionable(t *testing.T) {
+	q := &fakeSlashQueries{
+		inst:    activeSlashInstallation(),
+		binding: db.ChannelUserBinding{MulticaUserID: slashTestUUID(9)},
+	}
+	tasks := &fakeQuickCreate{err: &service.IssueLimitReachedError{Limit: 100, PolicyRevision: 7}}
+	p, captured, _ := newTestSlashProcessor(q, tasks, &fakeBindingMinter{})
+	var logs bytes.Buffer
+	p.logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	p.Handle(context.Background(), issueSlashCmd())
+
+	if tasks.calls != 1 {
+		t.Fatalf("expected the enqueue to be attempted once, got %d", tasks.calls)
+	}
+	if *captured != slashIssueLimitText {
+		t.Fatalf("expected issue-limit reply, got %q", *captured)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("expected issue-limit rejection not to emit a warning, got %q", logs.String())
 	}
 }
 

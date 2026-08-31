@@ -341,3 +341,54 @@ func TestPriceForModelAliasNoFalseBorrowing(t *testing.T) {
 		}
 	}
 }
+
+// TestPriceForModelAliasContextTagStripping pins the `[1m]` context-variant
+// suffix normalization across every rule, including the anchored Codex / Grok /
+// Kimi rules that do not carry a per-rule optional bracket group. Claude Code
+// (and other harnesses) append a context-window tag such as `[1m]` to the
+// model id; it is the same SKU at the same tier, so the row must price instead
+// of falling into the unpriced bucket in RecordLLMUsage. Mirrors the frontend's
+// `stripContextTag` (`\[[^\]]+\]$`) in packages/views/runtimes/utils.ts.
+func TestPriceForModelAliasContextTagStripping(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "grok-4.5[1m]",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
+		},
+		{
+			model: "gpt-5.6-luna[1m]",
+			want:  ModelPrice{Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
+		},
+		{
+			model: "kimi-k3[1m]",
+			want:  ModelPrice{Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// The tag stripper is anchored at end-of-string with a non-empty tag, so it
+	// must not turn these misses into hits: a trailing bracket that is not a
+	// complete end-of-string tag, and an empty tag, both stay unmapped — the
+	// same guard the frontend keeps.
+	for _, model := range []string{
+		"grok-4.5[1m]-extra",
+		"gpt-5.6-luna[]",
+		"kimi-k3[",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}

@@ -71,7 +71,6 @@ type workerTestQueries struct {
 	claimAvailable  bool
 	invitation      db.WorkspaceInvitation
 	invitationError error
-	stats           []db.SeatCapacityOutboxStatsRow
 	deferredUntil   pgtype.Timestamptz
 	deferredUntils  []pgtype.Timestamptz
 
@@ -178,10 +177,6 @@ func (q *workerTestQueries) ExistsPendingSeatCapacityConfirmForMember(context.Co
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.pendingConfirm, nil
-}
-
-func (q *workerTestQueries) SeatCapacityOutboxStats(context.Context) ([]db.SeatCapacityOutboxStatsRow, error) {
-	return q.stats, nil
 }
 
 func (q *workerTestQueries) TransitionClaimedSeatCapacityIntent(_ context.Context, arg db.TransitionClaimedSeatCapacityIntentParams) (int64, error) {

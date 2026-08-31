@@ -142,10 +142,6 @@
       "canceled_title": "구독이 취소되었습니다",
       "canceled_description": "위 요금제 배지는 이 워크스페이스에 현재 적용되는 요금제를 보여 줍니다."
     },
-    "read_only": {
-      "title": "결제 정보 읽기 전용",
-      "description": "워크스페이스 요금제와 한도를 볼 수 있습니다. 구독 구매와 관리는 owner와 admin만 할 수 있습니다."
-    },
     "current": {
       "title": "현재 요금제",
       "plan": "워크스페이스 요금제",
@@ -167,8 +163,6 @@
       "pro_for_team_other": "사용자 좌석 {{count}}개에 Pro 적용",
       "price_loading": "구독 가격을 불러오는 중",
       "unit_price": "사용자 좌석당 {{price}}",
-      "estimated_monthly_total": "예상 월간 합계: {{price}}",
-      "estimated_yearly_total": "예상 연간 합계: {{price}}",
       "price_at_checkout": "구매 전에 서버가 사용자 멤버를 다시 계산합니다. 결제 전 Stripe Checkout에서 공식 좌석당 가격과 총액을 확인할 수 있습니다."
     },
     "management": {
@@ -180,13 +174,12 @@
     },
     "limits": {
       "title": "사용량 및 한도",
-      "description": "한도는 현재 entitlement에서, 자동화 사용량은 서버 쿼터 집계에서 가져옵니다.",
-      "issues": "최근 태스크",
-      "issues_description": "Free에서는 최근 활성 태스크를 이용할 수 있습니다. Pro에는 범위 제한이 없습니다.",
-      "autopilots": "성공한 자동화",
-      "autopilots_description": "Free 한도는 UTC 기준 매월 초기화됩니다. Pro는 무제한입니다.",
+      "description": "한도와 사용량은 서버의 현재 entitlement와 쿼터 집계에서 가져옵니다.",
+      "issues": "Issue 수",
+      "issues_description": "현재 Issue 사용량과 서버에서 반환한 유효 한도입니다.",
+      "autopilots": "자동화 실행",
+      "autopilots_description": "현재 자동화 사용량과 서버에서 반환한 초기화 시각입니다.",
       "unlimited": "무제한",
-      "unavailable": "사용할 수 없음",
       "per_month": "월 {{count}}회",
       "usage_loading": "자동화 사용량 불러오는 중",
       "usage_label": "자동화 쿼터 사용량",

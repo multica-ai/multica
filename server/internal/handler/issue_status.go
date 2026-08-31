@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -37,6 +38,16 @@ type IssueStatusResponse struct {
 	ArchivedAt  *string `json:"archived_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+}
+
+// terminalIssueStatusKeys resolves the concrete status keys whose categories
+// carry terminal behavior. Callers pass the result into indexed status
+// predicates instead of resolving the category once per issue row.
+func (h *Handler) terminalIssueStatusKeys(ctx context.Context, workspaceID pgtype.UUID) ([]string, error) {
+	return issuestatus.ExpandCategories(ctx, h.Queries, workspaceID, []string{
+		issuestatus.Done,
+		issuestatus.Cancelled,
+	})
 }
 
 func issueStatusToResponse(s db.IssueStatus) IssueStatusResponse {
@@ -155,28 +166,31 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An explicit key wins; otherwise derive one from the name so the common
-	// case is a single field. Either way it is validated against the reserved
-	// built-in keys and the storage pattern.
-	var key string
+	// An explicit key wins and is checked here, against the reserved built-in
+	// names and the storage pattern. Without one the key is DERIVED from the
+	// display name, which needs the catalog and so happens under the lock in
+	// createIssueStatusEntry.
+	var explicitKey string
 	if strings.TrimSpace(req.Key) != "" {
-		key, err = issuestatus.ValidateKey(req.Key)
-	} else {
-		key, err = issuestatus.SlugifyKey(name)
-	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+		explicitKey, err = issuestatus.ValidateKey(req.Key)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 
-	entry, err := h.Queries.CreateIssueStatusEntry(r.Context(), db.CreateIssueStatusEntryParams{
+	entry, badRequest, err := h.createIssueStatusEntry(r.Context(), wsUUID, db.CreateIssueStatusEntryParams{
 		WorkspaceID: wsUUID,
-		Key:         key,
+		Key:         explicitKey,
 		Name:        name,
 		Description: req.Description,
 		Category:    req.Category,
 		Color:       strings.ToLower(color),
 	})
+	if badRequest != "" {
+		writeError(w, http.StatusBadRequest, badRequest)
+		return
+	}
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "a status with this key or name already exists")
@@ -188,6 +202,69 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publishIssueStatusChanged(workspaceID, member, "created")
 	writeJSON(w, http.StatusCreated, issueStatusToResponse(entry))
+}
+
+// createIssueStatusEntry writes one catalog row, deriving arg.Key from the
+// display name when it arrives empty.
+//
+// Derivation READS the catalog to choose a key nothing already owns, so the
+// read and the insert have to be a single atomic step: two admins creating a
+// Chinese-named in_review status at the same instant would otherwise both
+// compute `in_review_2`, and the loser would be told a key they never typed was
+// already taken. The EXCLUSIVE catalog lock — the same one archive takes —
+// serializes them.
+//
+// EVERY create takes that lock, including one that supplies its own key.
+// Excluding those would leave the race half-closed: an explicit-key insert of
+// `in_review_2` could still land between a derive's catalog read and its
+// insert, and the derive — a UI request with no key field to blame — would come
+// back 409. The lock is only contended by catalog writes, which are rare admin
+// actions, so serializing them costs nothing worth keeping the hole for.
+//
+// A non-empty second return is a caller error the handler reports as 400,
+// distinct from a nil-error success and from an infrastructure failure.
+func (h *Handler) createIssueStatusEntry(ctx context.Context, workspaceID pgtype.UUID, arg db.CreateIssueStatusEntryParams) (db.IssueStatus, string, error) {
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.IssueStatus{}, "", err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if err := qtx.LockIssueStatusCatalog(ctx, workspaceID); err != nil {
+		return db.IssueStatus{}, "", err
+	}
+
+	if arg.Key == "" {
+		// IncludeArchived, because idx_issue_status_workspace_key is NOT a
+		// partial index: a retired status still owns its key, so reusing it
+		// would fail on insert instead of producing a second candidate.
+		entries, err := qtx.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+			WorkspaceID:     workspaceID,
+			IncludeArchived: true,
+		})
+		if err != nil {
+			return db.IssueStatus{}, "", err
+		}
+		taken := make(map[string]bool, len(entries))
+		for _, e := range entries {
+			taken[e.Key] = true
+		}
+		key, err := issuestatus.DeriveKey(arg.Name, arg.Category, taken)
+		if err != nil {
+			return db.IssueStatus{}, err.Error(), nil
+		}
+		arg.Key = key
+	}
+
+	entry, err := qtx.CreateIssueStatusEntry(ctx, arg)
+	if err != nil {
+		return db.IssueStatus{}, "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.IssueStatus{}, "", err
+	}
+	return entry, "", nil
 }
 
 // UpdateIssueStatus edits a custom status's presentation. Built-in statuses are

@@ -146,14 +146,17 @@ function CreateIssueDialogBody({
           // against both screen edges on a 430px viewport (MUL-6236). Restore
           // the margin here and let the `sm:` widths take over above 640px.
           "!w-full !max-w-[calc(100vw-1.5rem)]",
-          // Match manual mode's explicit heights. Both endpoints are numeric,
-          // so the existing transition can interpolate the height instead of
-          // jumping from an intrinsic `auto` size to `h-5/6`.
+          // Source-context create needs numeric collapsed/expanded endpoints
+          // so its preview transition can interpolate the height. Ordinary
+          // quick create has no expanding preview and keeps its original
+          // content-driven height, capped for mobile browser chrome.
           isExpanded
             ? "!h-5/6 sm:!max-w-4xl"
-            : sourceContextExpanded
-              ? "!h-5/6 sm:!max-w-2xl"
-              : "!h-96 sm:!max-w-xl",
+            : sourceContextData
+              ? sourceContextExpanded
+                ? "!h-5/6 sm:!max-w-2xl"
+                : "!h-96 sm:!max-w-xl"
+              : "!max-h-[80dvh] sm:!max-w-xl",
         )
       : cn(
           manualDialogContentClass(isExpanded),

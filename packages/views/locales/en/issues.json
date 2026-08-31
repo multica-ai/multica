@@ -328,6 +328,8 @@
     "add_sub_issues": "Add sub-issues",
     "add_sub_issue_tooltip": "Add sub-issue",
     "add_sub_issue_aria": "Add sub-issue",
+    "select_all_sub_issues_aria": "Select all sub-issues",
+    "select_sub_issue_aria": "Select {{identifier}}",
     "section_properties": "Properties",
     "section_parent_issue": "Parent issue",
     "section_pull_requests": "Pull requests",
@@ -689,9 +691,7 @@
   },
   "card": {
     "update_failed": "Failed to update issue",
-    "updated_ago": "Updated {{time}}",
-    "child_progress_restricted_one": "{{count}} restricted",
-    "child_progress_restricted_other": "{{count}} restricted"
+    "updated_ago": "Updated {{time}}"
   },
   "actions": {
     "status": "Status",

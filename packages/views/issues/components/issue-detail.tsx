@@ -7,6 +7,7 @@ import {
   statusCategoryOfKey,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
+import { priorityLabel } from "../utils/priority-label";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
@@ -62,7 +63,7 @@ import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
+import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
@@ -283,13 +284,6 @@ function statusLabel(
     return t(($) => $.status[statusCategoryOfKey(status)]);
   }
   return status;
-}
-
-function priorityLabel(priority: string, t: ActivityT): string {
-  if (priority in PRIORITY_CONFIG) {
-    return t(($) => $.priority[priority as IssuePriority]);
-  }
-  return priority;
 }
 
 function formatActivity(
@@ -751,7 +745,9 @@ function SubIssueRow({
             type="checkbox"
             checked={selected}
             onChange={() => toggleSelected(child.id)}
-            aria-label={`Select ${child.identifier}`}
+            aria-label={t(($) => $.detail.select_sub_issue_aria, {
+              identifier: child.identifier,
+            })}
             className={cn(
               "absolute inset-0 cursor-pointer accent-primary transition-opacity",
               selected
@@ -2950,44 +2946,44 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               localLabel={t(($) => $.revision.local_version)}
               serverValue={issue.title}
               localValue={titleConflictDraft}
-              actions={(
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const draft = titleConflictDraft.trim();
-                      if (!draft) return;
-                      handleUpdateField(
-                        { title: draft, title_base: issue.title },
-                        {
-                          onSuccess: (serverIssue) => {
-                            setTitleConflictDraft(null);
-                            titleBaseRef.current = serverIssue.title;
-                          },
+              serverAction={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    // Local-only: the server already holds this title, so
+                    // discarding writes nothing. The remount is what puts it
+                    // back into the editor (see titleResetToken).
+                    setTitleConflictDraft(null);
+                    titleBaseRef.current = issue.title;
+                    setTitleResetToken((token) => token + 1);
+                  }}
+                >
+                  {t(($) => $.revision.use_server)}
+                </Button>
+              )}
+              localAction={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const draft = titleConflictDraft.trim();
+                    if (!draft) return;
+                    handleUpdateField(
+                      { title: draft, title_base: issue.title },
+                      {
+                        onSuccess: (serverIssue) => {
+                          setTitleConflictDraft(null);
+                          titleBaseRef.current = serverIssue.title;
                         },
-                      );
-                    }}
-                  >
-                    {t(($) => $.revision.keep_local)}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      // Local-only: the server already holds this title, so
-                      // discarding writes nothing. The remount is what puts it
-                      // back into the editor (see titleResetToken).
-                      setTitleConflictDraft(null);
-                      titleBaseRef.current = issue.title;
-                      setTitleResetToken((token) => token + 1);
-                    }}
-                  >
-                    {t(($) => $.revision.use_server)}
-                  </Button>
-                </div>
+                      },
+                    );
+                  }}
+                >
+                  {t(($) => $.revision.keep_local)}
+                </Button>
               )}
             />
           ) : null}
@@ -3102,52 +3098,52 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 localLabel={t(($) => $.revision.local_version)}
                 serverValue={issue.description || ""}
                 localValue={descriptionConflictDraft}
-                actions={(
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        handleUpdateField(
-                          {
-                            description: descriptionConflictDraft,
-                            description_base: issue.description || "",
-                            attachment_ids:
-                              descriptionAttachmentIdsRef.current.length > 0
-                                ? descriptionAttachmentIdsRef.current
-                                : undefined,
+                serverAction={(
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      // The editor is dirty — that is why this conflict
+                      // exists — so the `value` prop cannot land: ContentEditor
+                      // deliberately refuses to clobber unsaved bytes.
+                      // adoptContent is the explicit "take this content"
+                      // channel and applies without emitting an update, so
+                      // discarding never writes.
+                      descEditorRef.current?.adoptContent(issue.description || "");
+                      descriptionAttachmentIdsRef.current = [];
+                      pendingDescriptionSaveRef.current = null;
+                      setDescriptionConflictDraft(null);
+                    }}
+                  >
+                    {t(($) => $.revision.use_server)}
+                  </Button>
+                )}
+                localAction={(
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleUpdateField(
+                        {
+                          description: descriptionConflictDraft,
+                          description_base: issue.description || "",
+                          attachment_ids:
+                            descriptionAttachmentIdsRef.current.length > 0
+                              ? descriptionAttachmentIdsRef.current
+                              : undefined,
+                        },
+                        {
+                          onSuccess: () => {
+                            setDescriptionConflictDraft(null);
                           },
-                          {
-                            onSuccess: () => {
-                              setDescriptionConflictDraft(null);
-                            },
-                          },
-                        );
-                      }}
-                    >
-                      {t(($) => $.revision.keep_local)}
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        // The editor is dirty — that is why this conflict
-                        // exists — so the `value` prop cannot land: ContentEditor
-                        // deliberately refuses to clobber unsaved bytes.
-                        // adoptContent is the explicit "take this content"
-                        // channel and applies without emitting an update, so
-                        // discarding never writes.
-                        descEditorRef.current?.adoptContent(issue.description || "");
-                        descriptionAttachmentIdsRef.current = [];
-                        pendingDescriptionSaveRef.current = null;
-                        setDescriptionConflictDraft(null);
-                      }}
-                    >
-                      {t(($) => $.revision.use_server)}
-                    </Button>
-                  </div>
+                        },
+                      );
+                    }}
+                  >
+                    {t(($) => $.revision.keep_local)}
+                  </Button>
                 )}
               />
             ) : null}
@@ -3219,7 +3215,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
                     }}
                     onChange={handleToggleSelectAllChildren}
-                    aria-label="Select all sub-issues"
+                    aria-label={t(($) => $.detail.select_all_sub_issues_aria)}
                     className={cn(
                       "ml-1 cursor-pointer accent-primary transition-opacity",
                       someChildrenSelected

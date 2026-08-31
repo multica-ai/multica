@@ -54,7 +54,7 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 	agentServers := map[string]any{}
 	if servers, ok := nestedRuntimeMcpMap(agentDocument, "mcpServers"); ok {
 		agentServers = servers
-	} else if provider == "opencode" {
+	} else if provider == "opencode" || provider == "codearts" {
 		// Older OpenCode agents may store the provider-native top-level `mcp`
 		// map. Its individual entries can still flow through the existing
 		// OpenCode adapter when placed under the canonical mcpServers envelope.
@@ -76,6 +76,22 @@ func mergeRuntimeAndAgentMcpConfig(provider string, agentConfig json.RawMessage)
 		return nil, fmt.Errorf("marshal merged MCP config: %w", err)
 	}
 	return raw, nil
+}
+
+// codeArtsUserConfigPath returns the first CodeArts user config file present,
+// following the official launcher's codearts_cli.json/codearts_cli.jsonc order.
+func codeArtsUserConfigPath(home string) string {
+	configDir := filepath.Join(home, ".codeartsdoer")
+	candidates := []string{
+		filepath.Join(configDir, "codearts_cli.json"),
+		filepath.Join(configDir, "codearts_cli.jsonc"),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return candidates[0]
 }
 
 // codebuddyUserMcpConfigPath returns the user-scope MCP config file CodeBuddy
@@ -253,6 +269,8 @@ func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) 
 	switch provider {
 	case "claude":
 		path, key, format = filepath.Join(home, ".claude.json"), "mcpServers", "json"
+	case "codearts":
+		path, key, format = codeArtsUserConfigPath(home), "mcp", "jsonc"
 	// codebuddy is deliberately absent. CodeBuddy loads its own user, project
 	// and local scopes on every launch (codebuddy.go never passes
 	// --strict-mcp-config), and a managed entry already wins a same-name
@@ -379,6 +397,8 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 	switch provider {
 	case "claude":
 		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
+	case "codearts":
+		path, key, source, format = codeArtsUserConfigPath(home), "mcp", "User config", "jsonc"
 	case "codebuddy":
 		path, key, source, format = codebuddyUserMcpConfigPath(home), "mcpServers", "User config", "jsonc"
 	case "kimi":
@@ -415,6 +435,17 @@ func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary
 			path = filepath.Join(stateDir, "openclaw.json")
 		}
 		key, source, format = "mcp.servers", "User config", "json"
+	case "omp":
+		// Inventory scope: omp discovers servers from a multi-level precedence
+		// chain (.omp/mcp.json, .omp/.mcp.json, profile/user-level configs, and
+		// third-party tool configs such as .claude.json, .cursor/mcp.json,
+		// .vscode/mcp.json, and project-root mcp.json/.mcp.json). This inventory
+		// reads only ~/.omp/agent/mcp.json — the user-scope entry point — so a
+		// user who clears every server in the UI may still inherit servers from
+		// lower-precedence sources. This matches the simplification other
+		// providers already make and avoids sending full tool-chain state over
+		// the wire.
+		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
 	default:
 		return []runtimeLocalMcpServerSummary{}, false, nil
 	}

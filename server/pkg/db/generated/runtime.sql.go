@@ -132,43 +132,6 @@ func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgty
 	return count, err
 }
 
-const countStaleOfflineRuntimesBlockedByTasks = `-- name: CountStaleOfflineRuntimesBlockedByTasks :one
-SELECT count(*) FROM (
-  SELECT 1 FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => $1::double precision)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM agent
-      WHERE agent.runtime_id = agent_runtime.id
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM agent_task_queue
-      WHERE agent_task_queue.runtime_id = agent_runtime.id
-        AND agent_task_queue.completed_at IS NULL
-    )
-  LIMIT $2::int
-) AS blocked_runtimes
-`
-
-type CountStaleOfflineRuntimesBlockedByTasksParams struct {
-	StaleSeconds float64 `json:"stale_seconds"`
-	MaxRows      int32   `json:"max_rows"`
-}
-
-// Bounded observability sample of runtimes that are otherwise GC-eligible but
-// retain a non-terminal task. In particular, deferred tasks have no generic
-// TTL, so silently filtering them from the candidate batch would hide a
-// permanently-starved runtime. The count saturates at max_rows so this
-// recurring safety signal cannot become an unbounded backlog scan.
-func (q *Queries) CountStaleOfflineRuntimesBlockedByTasks(ctx context.Context, arg CountStaleOfflineRuntimesBlockedByTasksParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countStaleOfflineRuntimesBlockedByTasks, arg.StaleSeconds, arg.MaxRows)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countTasksByRuntime = `-- name: CountTasksByRuntime :one
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1
 `
@@ -576,6 +539,8 @@ SELECT EXISTS (
       SELECT 1
       FROM agent
       WHERE agent.runtime_id = agent_runtime.id
+        AND agent.kind = 'user'
+        AND agent.archived_at IS NULL
     )
 ) AS eligible
 `
@@ -737,6 +702,8 @@ WHERE status = 'offline'
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
   )
   AND NOT EXISTS (
     SELECT 1

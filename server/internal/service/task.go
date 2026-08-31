@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/chattitle"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -43,6 +44,9 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// Entitlements supplies Cloud's workspace-scoped issue-count instruction.
+	// Nil keeps self-hosted and isolated test services unlimited.
+	Entitlements entitlement.Provider
 	// SourceContextStorage is used only by the bounded 30-day cleanup pass for
 	// terminal quick-create captures. Nil disables it where storage is absent.
 	SourceContextStorage SourceContextObjectStore
@@ -921,7 +925,7 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 	}
 
 	if task.RuntimeID.Valid {
-		if rt, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID); err == nil {
+		if rt, err := s.runtimeLookup().Get(ctx, task.RuntimeID); err == nil {
 			tc.WorkspaceID = util.UUIDToString(rt.WorkspaceID)
 			tc.RuntimeMode = rt.RuntimeMode
 			tc.Provider = rt.Provider
@@ -1522,6 +1526,9 @@ func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Contex
 }
 
 func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
+	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("preflight quick-create issue capacity: %w", err)
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1691,6 +1698,9 @@ func (s *TaskService) RetrySourceContextQuickCreate(ctx context.Context, workspa
 	}
 	if canInvoke != nil && !canInvoke(agent) {
 		return nil, ErrRerunInvokeNotAllowed
+	}
+	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
+		return nil, fmt.Errorf("preflight quick-create issue capacity: %w", err)
 	}
 	overlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
 
@@ -3175,10 +3185,11 @@ func (s *TaskService) RebroadcastCancelledTask(ctx context.Context, taskID pgtyp
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 }
 
-func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) {
+func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) bool {
 	var (
 		task    db.AgentTaskQueue
 		payload protocol.ChatCancelFinalizedPayload
+		changed bool
 		settled bool
 	)
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
@@ -3211,6 +3222,7 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 		if err != nil {
 			return fmt.Errorf("claim deferred chat finalize: %w", err)
 		}
+		changed = true
 		task = claimed
 		if sessionGone {
 			// The session cascaded away (its FK NULLs the column below anyway):
@@ -3308,12 +3320,13 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			"task_id", util.UUIDToString(taskID),
 			"error", err,
 		)
-		return
+		return false
 	}
 	if !settled || payload.Outcome == "" {
-		return
+		return changed
 	}
 	s.broadcastChatCancelFinalized(ctx, task, payload)
+	return changed
 }
 
 func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.AgentTaskQueue, payload protocol.ChatCancelFinalizedPayload) {
@@ -5717,6 +5730,7 @@ const (
 // replays from terminally exhausted outbox entries so operators never mistake
 // a bounded stop for a successful replay.
 type DelegatedFailureRecoverySweepResult struct {
+	Scanned   int
 	Replayed  int
 	Exhausted int
 }
@@ -6193,6 +6207,7 @@ func (s *TaskService) RecoverPendingDelegatedFailures(ctx context.Context, maxPe
 	if err != nil {
 		return result, fmt.Errorf("list pending delegated failure recoveries: %w", err)
 	}
+	result.Scanned = len(pending)
 
 	errs := make([]error, 0)
 	for _, comment := range pending {
@@ -6309,35 +6324,166 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 }
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
-func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
+//
+// A read failure is REPORTED, never swallowed into a shorter skill set. Both
+// reads are all-or-nothing for the agent's entire skill set — the file load
+// covers every skill in one query — so a swallowed error does not degrade the
+// payload, it silently replaces it: every skill loses its supporting files, or
+// the agent loses every skill. Nothing downstream can tell that apart from an
+// agent that genuinely has none, because the bundle hash is computed over
+// whatever did load, so the daemon's own validation passes and the agent
+// starts on rules it is missing. Callers must settle the failure (preserve the
+// claim for redelivery, or 5xx the resolve) instead of dispatching that.
+func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, error) {
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
-	if err != nil || len(skills) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("list agent skills: %w", err)
+	}
+	if len(skills) == 0 {
+		return nil, nil
+	}
+	return s.skillsWithFiles(ctx, skills)
+}
+
+// skillsWithFiles loads the files of every given skill in ONE round trip
+// instead of one query per skill, and assembles the result in the order the
+// skills were given. Shared by the claim-time full load and the resolve-time
+// scoped load so the two cannot drift on skill order, per-skill file order, or
+// the nil (not empty) file list of a skill that has none.
+func (s *TaskService) skillsWithFiles(ctx context.Context, skills []db.Skill) ([]AgentSkillData, error) {
+	skillIDs := make([]pgtype.UUID, len(skills))
+	for i, sk := range skills {
+		skillIDs[i] = sk.ID
+	}
+	// Group by skill_id in a single linear pass — the query orders by
+	// skill_id, path.
+	files, err := s.Queries.ListSkillFilesBySkillIDs(ctx, skillIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list skill files for %d skills: %w", len(skills), err)
+	}
+	filesBySkill := make(map[string][]AgentSkillFileData, len(skills))
+	for _, f := range files {
+		id := util.UUIDToString(f.SkillID)
+		filesBySkill[id] = append(filesBySkill[id], AgentSkillFileData{Path: f.Path, Content: f.Content})
 	}
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{
+		result = append(result, AgentSkillData{
 			ID:          util.UUIDToString(sk.ID),
 			Name:        sk.Name,
 			Description: sk.Description,
 			Content:     sk.Content,
-		}
-		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
-		for _, f := range files {
-			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
-		}
-		result = append(result, data)
+			Files:       filesBySkill[util.UUIDToString(sk.ID)],
+		})
 	}
-	return result
+	return result, nil
 }
 
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
-func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
-	skills := s.LoadAgentSkills(ctx, agentID)
+// It fails closed on a workspace-skill read error for the reason in
+// LoadAgentSkills: a bundle set built from a partial read is indistinguishable
+// from a correct one.
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData, error) {
+	skills, err := s.LoadAgentSkills(ctx, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
 	skills = append(skills, s.BuiltinSkills()...)
-	return BuildAgentSkillBundles(skills)
+	bundles, refs := BuildAgentSkillBundles(skills)
+	return bundles, refs, nil
+}
+
+// BuiltinSkillID is the ref id a builtin skill is addressed by. Builtins have
+// no database row, so their identity is their name — this is the one place
+// that turns a name into that identity, for both the bundle builder that hands
+// the id out and the resolver that looks one back up.
+func BuiltinSkillID(name string) string { return "builtin:" + name }
+
+// AgentSkillBundleKey is the (source, id) identity a daemon skill ref resolves
+// by. Source is part of the key because a builtin and a workspace skill are
+// different bundles even when they share a name.
+func AgentSkillBundleKey(source, id string) string { return source + "\x00" + id }
+
+// AgentSkillBundleRef is one skill a daemon is asking to resolve.
+type AgentSkillBundleRef struct {
+	ID     string
+	Source string
+}
+
+// LoadRequestedAgentSkillBundles returns bundles for EXACTLY the refs given,
+// keyed by AgentSkillBundleKey. A ref the agent cannot see is simply absent
+// from the map — the junction predicate in ListAgentSkillsByIDs is the
+// authorization, so "no row" and "not allowed" are the same answer and the
+// caller reports both as not-found.
+//
+// This exists because the daemon resolves one skill per request (GH #4505, so
+// each download gets its own size-scaled deadline and caches independently).
+// Serving those out of the agent's full bundle set made the server redo the
+// whole agent on every request: N requests, each reading and hashing all N
+// skills to return one. Loading only what was asked for makes that linear,
+// which is why the resolve path must not reuse LoadAgentSkillBundles.
+func (s *TaskService) LoadRequestedAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, refs []AgentSkillBundleRef) (map[string]AgentSkillData, error) {
+	requestedIDs := make([]pgtype.UUID, 0, len(refs))
+	seenWorkspace := make(map[string]struct{}, len(refs))
+	wantBuiltin := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		switch ref.Source {
+		case skillbundle.SourceBuiltin:
+			wantBuiltin[ref.ID] = struct{}{}
+		case skillbundle.SourceWorkspace:
+			if _, ok := seenWorkspace[ref.ID]; ok {
+				continue
+			}
+			id, err := util.ParseUUID(ref.ID)
+			if err != nil {
+				// An unparseable id matches no row, which is the same outcome
+				// as an id the agent does not have. Skipping it keeps one
+				// malformed ref from failing the refs alongside it.
+				continue
+			}
+			seenWorkspace[ref.ID] = struct{}{}
+			requestedIDs = append(requestedIDs, id)
+		}
+		// Any other source has no server-side producer, so it resolves to
+		// nothing and the caller reports not-found.
+	}
+
+	var requested []AgentSkillData
+	if len(requestedIDs) > 0 {
+		skills, err := s.Queries.ListAgentSkillsByIDs(ctx, db.ListAgentSkillsByIDsParams{
+			AgentID:  agentID,
+			SkillIds: requestedIDs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list agent skills by ids: %w", err)
+		}
+		if len(skills) > 0 {
+			// Same fail-closed rule as LoadAgentSkills: a failed file read
+			// would produce a bundle that hashes and validates like a complete
+			// one, so it must never be served.
+			loaded, err := s.skillsWithFiles(ctx, skills)
+			if err != nil {
+				return nil, err
+			}
+			requested = append(requested, loaded...)
+		}
+	}
+	if len(wantBuiltin) > 0 {
+		for _, builtin := range s.BuiltinSkills() {
+			if _, ok := wantBuiltin[BuiltinSkillID(builtin.Name)]; ok {
+				requested = append(requested, builtin)
+			}
+		}
+	}
+
+	bundles, _ := BuildAgentSkillBundles(requested)
+	resolved := make(map[string]AgentSkillData, len(bundles))
+	for _, bundle := range bundles {
+		resolved[AgentSkillBundleKey(bundle.Source, bundle.ID)] = bundle
+	}
+	return resolved, nil
 }
 
 func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {
@@ -6354,7 +6500,7 @@ func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentS
 			}
 		}
 		if id == "" && source == skillbundle.SourceBuiltin {
-			id = "builtin:" + skill.Name
+			id = BuiltinSkillID(skill.Name)
 		}
 		skill.Source = source
 		skill.ID = id
@@ -6736,7 +6882,7 @@ func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue,
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"issue":          IssueToMapWithCategory(ctx, s.Queries, issue, prefix),
+			"issue":          IssueToMapResolved(ctx, s.Queries, issue, prefix),
 			"status_changed": prevStatus != issue.Status,
 			"prev_status":    prevStatus,
 		},
@@ -6897,13 +7043,19 @@ func builtInStatusCategory(status string) string {
 	return ""
 }
 
-// IssueToMapWithCategory is IssueToMap with an AUTHORITATIVE status_category,
-// resolved through the catalog so a custom status is not emitted with a blank
-// one. Background events go through here; clients treat this payload as a
-// complete issue and bucket it by category. (MUL-6243)
-func IssueToMapWithCategory(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
+// IssueToMapResolved is IssueToMap with an AUTHORITATIVE status_category and
+// status_name, both resolved through the catalog so a custom status is not
+// emitted with blanks. Background events go through here; clients treat this
+// payload as a complete issue and bucket it by category. (MUL-6243)
+//
+// Both fields come from ONE catalog read. Resolving them separately would
+// double the query on every event carrying a custom status, and the HTTP
+// rendering already shares a single read through its Resolver. (MUL-6749)
+func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
 	m := IssueToMap(issue, issuePrefix)
-	m["status_category"] = issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
+	category, name := issuestatus.EffectiveAndName(ctx, q, issue.WorkspaceID, issue.Status)
+	m["status_category"] = category
+	m["status_name"] = name
 	return m
 }
 
@@ -6919,7 +7071,12 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		// Mirrors handler.IssueResponse.StatusCategory: a built-in status IS
 		// its own category, so this resolves with no catalog lookup. Empty for
 		// a custom status, which consumers resolve via the catalog. (MUL-6243)
-		"status_category":  builtInStatusCategory(issue.Status),
+		"status_category": builtInStatusCategory(issue.Status),
+		// Mirrors handler.IssueResponse.StatusName. A built-in carries no name
+		// — clients localize those from the key — and a CUSTOM one is filled in
+		// by IssueToMapResolved, which has the catalog. Emitted unconditionally
+		// so this rendering cannot lose a key the HTTP one carries. (MUL-6749)
+		"status_name":      "",
 		"priority":         issue.Priority,
 		"assignee_type":    util.TextToPtr(issue.AssigneeType),
 		"assignee_id":      util.UUIDToPtr(issue.AssigneeID),

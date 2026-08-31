@@ -142,10 +142,6 @@
       "canceled_title": "サブスクリプションはキャンセル済みです",
       "canceled_description": "上のプランバッジは、このワークスペースに現在適用されているプランを示します。"
     },
-    "read_only": {
-      "title": "請求情報の閲覧のみ",
-      "description": "ワークスペースのプランと上限を確認できます。サブスクリプションの購入と管理は owner と admin のみ実行できます。"
-    },
     "current": {
       "title": "現在のプラン",
       "plan": "ワークスペースプラン",
@@ -167,8 +163,6 @@
       "pro_for_team_other": "{{count}}席で Pro を利用",
       "price_loading": "サブスクリプション価格を読み込んでいます",
       "unit_price": "1席あたり {{price}}",
-      "estimated_monthly_total": "月払いの見積合計：{{price}}",
-      "estimated_yearly_total": "年払いの見積合計：{{price}}",
       "price_at_checkout": "購入前にサーバーがユーザーメンバーを再集計します。お支払い前に Stripe Checkout で正式な席単価と合計金額を確認できます。"
     },
     "management": {
@@ -180,13 +174,12 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "description": "上限は現在の entitlement、自動化の使用量はサーバーのクォータ集計に基づきます。",
-      "issues": "最近のタスク",
-      "issues_description": "Free では最近アクティブなタスクを利用できます。Pro には件数制限がありません。",
-      "autopilots": "成功した自動化",
-      "autopilots_description": "Free の上限は UTC の暦月ごとにリセットされます。Pro は無制限です。",
+      "description": "上限と使用量は、サーバーの現在の entitlement とクォータ集計に基づきます。",
+      "issues": "Issue 数",
+      "issues_description": "現在の Issue 使用量とサーバーから返された有効な上限です。",
+      "autopilots": "自動化の実行",
+      "autopilots_description": "現在の自動化使用量とサーバーから返されたリセット時刻です。",
       "unlimited": "無制限",
-      "unavailable": "利用できません",
       "per_month": "月 {{count}} 回",
       "usage_loading": "自動化の使用量を読み込み中",
       "usage_label": "自動化クォータの使用量",

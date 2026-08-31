@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,70 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.37",
+          date: "2026-08-31",
+          title: "더 빠른 Issue 목록, 더 안정적인 장시간 태스크, 더 완전한 다국어 표시",
+          changes: [],
+          features: [
+            "Huawei Cloud CodeArts를 기본 에이전트 런타임으로 사용할 수 있습니다.",
+            "모델을 고르고 이전 세션을 이어가며, MCP와 로컬 스킬도 함께 쓸 수 있습니다.",
+            "iPad에 Multica를 네이티브로 설치할 수 있고, 화면 방향도 자유롭습니다.",
+            "여러 대의 서버에 셀프 호스팅해도 WeCom 봇 답장이 제대로 전달됩니다.",
+            "보내지 못한 WeCom 답장의 건수와 이유를 확인할 수 있습니다.",
+          ],
+          improvements: [
+            "큰 워크스페이스에서도 Issue 목록이 더 빠르게 열립니다.",
+            "스킬이 많아도 에이전트가 더 빠르게 시작합니다.",
+            "온보딩, 스쿼드, 에디터, 상태, 우선순위 표현이 각 언어에서 자연스러워졌습니다.",
+            "에이전트 출력에 파일 경로가 그대로 보이고, 잘못 가려지지 않습니다.",
+            "셀프 호스팅 서버가 백그라운드에서 데이터베이스에 주는 부담이 줄었습니다.",
+            "연결이 멈춰도 셀프 호스팅 서버가 계속 응답합니다.",
+          ],
+          fixes: [
+            "채팅이 최신 답장에 머물고, 출력 중에 튀거나 깜빡이지 않습니다.",
+            "좁은 화면에서도 Analytics 순위를 옆으로 스크롤할 수 있고 잘리지 않습니다.",
+            "Codex 세션이 준비 도중에 멈추지 않고 안정적으로 시작합니다.",
+            "내 컴퓨터의 데몬이 쉬고 있어도 로컬 스킬을 불러올 수 있습니다.",
+            "데스크톱 앱이 예기치 않게 멈춘 데몬을 다시 살립니다.",
+            "휴대폰의 Issue 헤더가 다시 간결해지고, 아바타와 터치 영역은 그대로입니다.",
+            "예전 버전에서 셀프 호스팅을 업그레이드해도 수동 조치가 필요 없습니다.",
+            "작업 폴더가 바뀌어도 Pi와 Oh My Pi 세션이 이어집니다.",
+            "워크스페이스를 삭제할 때 실제로 지워지는 것만 안내합니다.",
+            "오래 실행되는 태스크와 대기 중인 태스크가 기다렸다는 이유로 취소되지 않습니다.",
+          ],
+        },
+        {
+          version: "0.4.36",
+          date: "2026-08-28",
+          title: "사용자 지정 속성 필터, 스킬 가져오기, Oh My Pi의 MCP 지원",
+          changes: [],
+          features: [
+            "텍스트, 숫자, 날짜, URL 사용자 지정 속성으로 Issue를 필터링할 수 있습니다.",
+            "값이 아직 없는 Issue만 골라 볼 수도 있습니다.",
+            "필터 메뉴, 패싯, 저장한 보기에서도 그대로 쓸 수 있습니다.",
+            "로컬 폴더, .skill, .zip 파일을 가져와 스킬을 만들 수 있습니다.",
+            "가져오기 전에 내용을 미리 보고, 이름 충돌도 먼저 확인할 수 있습니다.",
+            "Oh My Pi 에이전트도 에이전트 화면에서 MCP를 설정해 사용할 수 있습니다.",
+          ],
+          improvements: [
+            "런타임은 정말 안전할 때만 회수되어 실행 중에 사라지지 않습니다.",
+            "오래 오프라인인 런타임은 현재 상태를 그대로 알려줍니다.",
+            "에이전트의 긴 단계는 최대 2시간까지 대기할 수 있습니다.",
+            "CLI가 Issue 목록의 한 페이지 한도와 다음 페이지 방법을 알려줍니다.",
+          ],
+          fixes: [
+            "데스크톱에서 복사하거나 공유한 링크가 어떤 브라우저와 기기에서도 열립니다.",
+            "시작한 폴더가 삭제되어도 저장소 가져오기와 업데이트가 계속 됩니다.",
+            "긴 컨텍스트 모델의 실행 비용이 정확해져 사용량이 누락되지 않습니다.",
+            "영문자가 없는 사용자 지정 Issue 상태도 어디서나 올바른 이름으로 표시됩니다.",
+            "편집이 충돌하면 각 선택 버튼이 해당 내용 바로 아래에 놓입니다.",
+            "Lark 답장이 인증 정보 만료로 멈추지 않습니다.",
+            "Quick Create의 초안 높이가 내용에 맞게 조절됩니다.",
+            "OpenClaw 실행이 시간 초과 시 완전히 멈추고 프로세스가 남지 않습니다.",
+            "OpenClaw 설정 확인이 성공했는데도 실패로 표시되지 않습니다.",
+          ],
+        },
         {
           version: "0.4.35",
           date: "2026-08-26",

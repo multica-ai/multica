@@ -34,7 +34,7 @@ func TestDefaultConfigIsDisabledAndPerformsNoIO(t *testing.T) {
 	if client.Enabled() {
 		t.Fatal("zero Config must be disabled")
 	}
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonDisabled || calls.Load() != 0 {
 		t.Fatalf("decision = %+v, calls = %d", decision, calls.Load())
 	}
@@ -81,7 +81,7 @@ func TestGateFetchesMachinePolicyWithoutHumanIdentity(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL, nil)
-	decision := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	decision := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if decision.Gate.Action != ActionEnforce || decision.Gate.Limit == nil || *decision.Gate.Limit != testIssueLimit ||
 		decision.Reason != ReasonRefreshed || decision.PolicyRevision != 7 || decision.SubscriptionVersion != 3 {
 		t.Fatalf("decision = %+v", decision)
@@ -98,9 +98,9 @@ func TestGateCachesByWorkspaceAndClonesResults(t *testing.T) {
 	client := newTestClient(t, server.URL, nil)
 	workspaceID := uuid.New()
 
-	first := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	first := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	*first.Gate.Limit = 999
-	second := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	second := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	autopilot := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
 	if second.Reason != ReasonCacheFresh || second.Gate.Limit == nil || *second.Gate.Limit != testIssueLimit {
 		t.Fatalf("cached decision = %+v", second)
@@ -134,7 +134,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			results <- client.Gate(context.Background(), workspaceID, GateIssueWindow)
+			results <- client.Gate(context.Background(), workspaceID, GateIssueCount)
 		}()
 	}
 	close(start)
@@ -181,14 +181,14 @@ func TestCancelledLeaderDoesNotCancelSharedRefresh(t *testing.T) {
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	leaderResult := make(chan Decision, 1)
 	go func() {
-		leaderResult <- client.Gate(leaderCtx, workspaceID, GateIssueWindow)
+		leaderResult <- client.Gate(leaderCtx, workspaceID, GateIssueCount)
 	}()
 	<-requestStarted
 
 	cancelLeader()
 	followerResult := make(chan Decision, 1)
 	go func() {
-		followerResult <- client.Gate(context.Background(), workspaceID, GateIssueWindow)
+		followerResult <- client.Gate(context.Background(), workspaceID, GateIssueCount)
 	}()
 	close(release)
 
@@ -210,7 +210,7 @@ func TestWorkspaceIsolationAndBoundedLRUEviction(t *testing.T) {
 		workspaceID := strings.TrimPrefix(r.URL.Path, "/api/v1/internal/entitlement-policies/")
 		policy := samplePolicy(1, 0, 60, ActionEnforce)
 		limit := limits[workspaceID]
-		policy.Gates[string(GateIssueWindow)] = wireGate{Action: string(ActionEnforce), Limit: &limit}
+		policy.Gates[string(GateIssueCount)] = wireGate{Action: string(ActionEnforce), Limit: &limit}
 		writePolicy(t, w, policy)
 	}))
 	defer server.Close()
@@ -220,7 +220,7 @@ func TestWorkspaceIsolationAndBoundedLRUEviction(t *testing.T) {
 		workspaceID uuid.UUID
 		wantLimit   int
 	}{{workspaceA, 11}, {workspaceB, 22}, {workspaceA, 11}} {
-		decision := client.Gate(context.Background(), tc.workspaceID, GateIssueWindow)
+		decision := client.Gate(context.Background(), tc.workspaceID, GateIssueCount)
 		if decision.Gate.Limit == nil || *decision.Gate.Limit != tc.wantLimit {
 			t.Fatalf("workspace %s decision = %+v", tc.workspaceID, decision)
 		}
@@ -243,14 +243,14 @@ func TestColdFailuresFailOpen(t *testing.T) {
 		{"oversized response", bodyHandler(http.StatusOK, strings.Repeat("x", maxResponseBodySize+1)), ReasonInvalidPolicy},
 		{"unknown schema", policyHandler(func(p *wirePolicy) { p.SchemaVersion = 2 }), ReasonInvalidPolicy},
 		{"unknown action", policyHandler(func(p *wirePolicy) {
-			gate := p.Gates[string(GateIssueWindow)]
+			gate := p.Gates[string(GateIssueCount)]
 			gate.Action = "future"
-			p.Gates[string(GateIssueWindow)] = gate
+			p.Gates[string(GateIssueCount)] = gate
 		}), ReasonInvalidPolicy},
 		{"cloud observe action", policyHandler(func(p *wirePolicy) {
-			gate := p.Gates[string(GateIssueWindow)]
+			gate := p.Gates[string(GateIssueCount)]
 			gate.Action = string(ActionObserve)
-			p.Gates[string(GateIssueWindow)] = gate
+			p.Gates[string(GateIssueCount)] = gate
 		}), ReasonInvalidPolicy},
 		{"missing gate", policyHandler(func(p *wirePolicy) { delete(p.Gates, string(GateAutopilotRuns)) }), ReasonInvalidPolicy},
 		{"excessive TTL", policyHandler(func(p *wirePolicy) { p.ValidForSeconds = 301 }), ReasonInvalidPolicy},
@@ -270,7 +270,7 @@ func TestColdFailuresFailOpen(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 			client := newTestClient(t, server.URL, nil)
-			decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+			decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 			if decision.Gate.Action != ActionOff || decision.Reason != tt.wantReason {
 				t.Fatalf("decision = %+v", decision)
 			}
@@ -301,7 +301,7 @@ func TestTimeoutFailsOpenWithinIndependentBound(t *testing.T) {
 	client.timeout = 20 * time.Millisecond
 
 	started := time.Now()
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 		t.Fatalf("decision = %+v", decision)
 	}
@@ -323,7 +323,7 @@ func TestInternalPolicyClientDoesNotFollowRedirect(t *testing.T) {
 	defer origin.Close()
 	client := newTestClient(t, origin.URL, nil)
 
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 		t.Fatalf("decision = %+v", decision)
 	}
@@ -345,7 +345,7 @@ func TestFastFailuresAreRateLimitedPerWorkspace(t *testing.T) {
 	workspaceID := uuid.New()
 
 	for range 2 {
-		decision := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+		decision := client.Gate(context.Background(), workspaceID, GateIssueCount)
 		if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 			t.Fatalf("decision = %+v", decision)
 		}
@@ -354,7 +354,7 @@ func TestFastFailuresAreRateLimitedPerWorkspace(t *testing.T) {
 		t.Fatalf("HTTP calls during retry suppression = %d, want 1", calls.Load())
 	}
 	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if calls.Load() != 2 {
 		t.Fatalf("HTTP calls after retry suppression = %d, want 2", calls.Load())
 	}
@@ -376,11 +376,11 @@ func TestObserverRecordsCacheRefreshDecisionAndDegradation(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 	fail.Store(true)
 	clock = clock.Add(6 * time.Second)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 
 	cache, refresh, decisions, _ := observer.snapshot()
 	if strings.Join(cache, ",") != "miss,hit,expired" {
@@ -389,7 +389,7 @@ func TestObserverRecordsCacheRefreshDecisionAndDegradation(t *testing.T) {
 	if strings.Join(refresh, ",") != "ok,5xx" {
 		t.Fatalf("refresh observations = %v", refresh)
 	}
-	if strings.Join(decisions, ",") != "issue_window/enforce/refreshed,issue_window/enforce/cache_fresh,issue_window/observe/stale" {
+	if strings.Join(decisions, ",") != "issue_count/enforce/refreshed,issue_count/enforce/cache_fresh,issue_count/observe/stale" {
 		t.Fatalf("decision observations = %v", decisions)
 	}
 }
@@ -414,18 +414,18 @@ func TestExpiredPolicyNeverEnforcesAndIgnoresCloudClock(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	fresh := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	fresh := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if fresh.Gate.Action != ActionEnforce {
 		t.Fatalf("fresh = %+v", fresh)
 	}
 	fail.Store(true)
 	clock = clock.Add(6 * time.Second)
-	stale := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	stale := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if stale.Gate.Action != ActionObserve || stale.Gate.Limit == nil || *stale.Gate.Limit != testIssueLimit || stale.Reason != ReasonStale {
 		t.Fatalf("stale = %+v", stale)
 	}
 	clock = clock.Add(10 * time.Second)
-	expired := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	expired := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if expired.Gate.Action != ActionOff || expired.Reason != ReasonUnavailable {
 		t.Fatalf("expired = %+v", expired)
 	}
@@ -450,12 +450,12 @@ func TestSubscriptionVersionSwitchReplacesExpiredSnapshot(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
+	if got := client.Gate(context.Background(), workspaceID, GateIssueCount); got.Gate.Action != ActionEnforce {
 		t.Fatalf("initial = %+v", got)
 	}
 	subscriptionVersion.Store(2)
 	clock = clock.Add(6 * time.Second)
-	got := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	got := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if got.Gate.Action != ActionOff || got.PolicyRevision != 1 || got.SubscriptionVersion != 2 || got.Reason != ReasonRefreshed {
 		t.Fatalf("switched = %+v", got)
 	}
@@ -476,7 +476,7 @@ func TestSubscriptionVersionRegressionCannotOverwriteWorkspaceCache(t *testing.T
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	initial := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	initial := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if initial.Gate.Action != ActionEnforce {
 		t.Fatalf("initial = %+v", initial)
 	}
@@ -484,7 +484,7 @@ func TestSubscriptionVersionRegressionCannotOverwriteWorkspaceCache(t *testing.T
 	policy = samplePolicy(1, 3, 5, ActionOff)
 	mu.Unlock()
 	clock = clock.Add(6 * time.Second)
-	regressed := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	regressed := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if regressed.Gate.Action != ActionObserve || regressed.PolicyRevision != 1 || regressed.SubscriptionVersion != 4 {
 		t.Fatalf("regressed = %+v", regressed)
 	}
@@ -508,19 +508,19 @@ func TestSubscriptionVersionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	initial := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	initial := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if initial.SubscriptionVersion != 2 || initial.Reason != ReasonRefreshed {
 		t.Fatalf("initial = %+v", initial)
 	}
 	subscriptionVersion.Store(1)
 	clock = clock.Add(71 * time.Second)
-	recovered := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	recovered := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if recovered.SubscriptionVersion != 1 || recovered.Reason != ReasonRefreshed {
 		t.Fatalf("recovered = %+v", recovered)
 	}
 
 	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	cached := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	cached := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if cached.SubscriptionVersion != 1 || cached.Reason != ReasonCacheFresh || calls.Load() != 2 {
 		t.Fatalf("cached = %+v, HTTP calls = %d", cached, calls.Load())
 	}
@@ -538,7 +538,7 @@ func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 		workspaceID uuid.UUID
 		gate        GateName
 		reason      Reason
-	}{{uuid.Nil, GateIssueWindow, ReasonInvalidWorkspace}, {uuid.New(), GateName("future_gate"), ReasonUnknownGate}}
+	}{{uuid.Nil, GateIssueCount, ReasonInvalidWorkspace}, {uuid.New(), GateName("future_gate"), ReasonUnknownGate}}
 	for _, tt := range tests {
 		decision := client.Gate(context.Background(), tt.workspaceID, tt.gate)
 		if decision.Gate.Action != ActionOff || decision.Reason != tt.reason {
@@ -582,7 +582,7 @@ func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, is
 		ValidUntil:          time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
 		ValidForSeconds:     validForSeconds,
 		Gates: map[string]wireGate{
-			string(GateIssueWindow): issueGate,
+			string(GateIssueCount): issueGate,
 			string(GateAutopilotRuns): {
 				Action: string(ActionEnforce), Limit: &autopilotLimit,
 				PeriodStart: &periodStart, PeriodEnd: &periodEnd, ResetAt: &periodEnd,

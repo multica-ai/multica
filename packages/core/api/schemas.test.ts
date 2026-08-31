@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
-  ChildIssueProgressResponseSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -99,40 +98,6 @@ const baseIssue = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-describe("ChildIssueProgressResponseSchema", () => {
-  it("keeps older server responses compatible when visibility fields are absent", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{ parent_issue_id: "parent-1", total: 3, done: 1 }],
-    });
-    expect(parsed.progress[0]).toEqual({ parent_issue_id: "parent-1", total: 3, done: 1 });
-  });
-
-  it("parses full and visible progress independently", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{
-        parent_issue_id: "parent-1",
-        total: 10,
-        done: 3,
-        visible_total: 4,
-        visible_done: 3,
-        hidden_total: 6,
-      }],
-    });
-    expect(parsed.progress[0]?.hidden_total).toBe(6);
-    expect(parsed.progress[0]?.visible_total).toBe(4);
-  });
-
-  it("falls back instead of exposing malformed progress to installed clients", () => {
-    const fallback = { progress: [] };
-    expect(parseWithFallback(
-      { progress: [{ parent_issue_id: "parent-1", total: "many", done: 1 }] },
-      ChildIssueProgressResponseSchema,
-      fallback,
-      { endpoint: "GET /api/issues/child-progress" },
-    )).toEqual(fallback);
-  });
-});
-
 describe("ChatSessionSchema", () => {
   const baseSession = {
     id: "chat-1",
@@ -201,8 +166,36 @@ describe("ChatSessionSchema", () => {
     expect(parsed[1]?.last_message?.message_kind).toBe("onboarding_opening");
   });
 });
-
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  // A custom status key can be derived rather than readable — "客户确认" becomes
+  // `in_review_2` — so the display name travels with it. The field has to
+  // survive a server that predates it, since an issue that fails validation
+  // degrades to a stub rather than losing one field. (MUL-6749)
+  it("carries a custom status's display name", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, status: "in_review_2", status_name: "客户确认" }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.status_name).toBe("客户确认");
+  });
+  it("drops only a malformed status_name, keeping the issue and the list", () => {
+    for (const bad of [42, { name: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, status: "in_review_2", status_name: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.status).toBe("in_review_2");
+      expect(parsed.issues[0]?.status_name).toBeUndefined();
+    }
+  });
+  it("still parses an issue from a server that does not send status_name", () => {
+    const { status_name: _omitted, ...withoutName } = { ...baseIssue, status_name: "x" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
   it("keeps the issue while independently dropping a malformed source context", () => {
     const parsed = ListIssuesResponseSchema.parse({
       issues: [{ ...baseIssue, source_context: { snapshot: "bad" } }],

@@ -325,6 +325,8 @@
     "add_sub_issues": "하위 태스크 추가",
     "add_sub_issue_tooltip": "하위 태스크 추가",
     "add_sub_issue_aria": "하위 태스크 추가",
+    "select_all_sub_issues_aria": "모든 하위 태스크 선택",
+    "select_sub_issue_aria": "{{identifier}} 선택",
     "section_properties": "속성",
     "section_parent_issue": "상위 태스크",
     "section_pull_requests": "Pull requests",
@@ -658,8 +660,7 @@
   },
   "card": {
     "update_failed": "태스크를 업데이트하지 못했습니다",
-    "updated_ago": "{{time}} 수정됨",
-    "child_progress_restricted_other": "하위 태스크 {{count}}개 제한됨"
+    "updated_ago": "{{time}} 수정됨"
   },
   "actions": {
     "status": "상태",

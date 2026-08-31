@@ -164,8 +164,9 @@ type WorkspaceSetRefreshNotifier interface {
 }
 
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
-// daemon so a queued heartbeat-carried request (model discovery) is picked up
-// immediately instead of on the daemon's next scheduled tick (MUL-5444).
+// daemon so a queued heartbeat-carried request (model discovery, capability
+// discovery, or local-skill import) is picked up immediately instead of on the
+// daemon's next scheduled tick (MUL-5444).
 // Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
 // (multi-node, fans out through Redis).
 type DaemonPendingWorkNotifier interface {
@@ -173,13 +174,9 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
-	Queries   *db.Queries
-	DB        dbExecutor
-	TxStarter txStarter
-	// issueTableWindowCache is initialized only on the request-local Handler
-	// copy used by a repeatable-read table request. It lets facets reuse one
-	// visible-id snapshot without adding mutable state to the shared Handler.
-	issueTableWindowCache  *issueTableWindowCache
+	Queries                *db.Queries
+	DB                     dbExecutor
+	TxStarter              txStarter
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
@@ -190,7 +187,7 @@ type Handler struct {
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
-	// preserves the self-hosted and pre-rollout behavior without extra reads.
+	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
 	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
 	// disabled preserves self-hosted behavior.
@@ -986,9 +983,6 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
-		if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
-			return db.Issue{}, false
-		}
 		return issue, true
 	}
 
@@ -1010,9 +1004,6 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
-		return db.Issue{}, false
-	}
-	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
 		return db.Issue{}, false
 	}
 	return issue, true
@@ -1184,9 +1175,6 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 
 	if item.RecipientType != "member" || uuidToString(item.RecipientID) != userID {
 		writeError(w, http.StatusNotFound, "inbox item not found")
-		return db.InboxItem{}, false
-	}
-	if item.IssueID.Valid && !h.authorizeIssueWindow(w, r, item.IssueID, item.WorkspaceID, "inbox") {
 		return db.InboxItem{}, false
 	}
 	return item, true

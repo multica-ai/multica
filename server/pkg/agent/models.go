@@ -214,6 +214,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverOpenCodeModels(ctx, runtimeCmd))
 		})
+	case "codearts":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCodeArtsModels(ctx, runtimeCmd))
+		})
 	case "deveco":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverDevecoModels(ctx, runtimeCmd))
@@ -2578,6 +2582,17 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 
 	// Try JSON modes first. Different openclaw builds expose the
 	// flag under different names; trying a couple is cheap.
+	//
+	// outputOwned, and this loop already has the salvage built in: a lingering
+	// `openclaw-config` helper makes Wait report exec.ErrWaitDelay with the
+	// catalog in the buffer, and `err != nil && len(out) == 0` lets a populated
+	// buffer through to the parse. The parse is the real gate — a truncated list
+	// does not unmarshal, so a short catalog cannot be mistaken for the real one.
+	//
+	// Not the collector in run_collect_quiet.go: it returns on the direct child's
+	// exit, and a wrapper that exits before the real CLI has printed would have
+	// its catalog killed mid-write. Pipe EOF is the signal that no more output is
+	// coming. See detectCLIVersion.
 	for _, jsonArgs := range [][]string{
 		{"agents", "list", "--json"},
 		{"agents", "list", "--output", "json"},

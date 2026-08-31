@@ -556,21 +556,26 @@ function CommentRevisionConflict({
       localLabel={t(($) => $.revision.local_version)}
       serverValue={serverContent}
       localValue={localContent}
-      actions={(
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={saving}
-            onClick={onKeepLocal}
-          >
-            {t(($) => $.revision.keep_local)}
-          </Button>
-          <Button type="button" size="sm" variant="ghost" onClick={onUseServer}>
-            {t(($) => $.revision.use_server)}
-          </Button>
-        </div>
+      serverAction={(
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={onUseServer}
+        >
+          {t(($) => $.revision.use_server)}
+        </Button>
+      )}
+      localAction={(
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={saving}
+          onClick={onKeepLocal}
+        >
+          {t(($) => $.revision.keep_local)}
+        </Button>
       )}
     />
   );

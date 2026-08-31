@@ -67,7 +67,7 @@ function shortDaemonId(id: string | null): string | null {
 }
 
 // 30s tick keeps derived runtime health honest as time-based windows
-// (recently_lost → offline → about_to_gc) cross thresholds without any new
+// (recently_lost → offline → long_offline) cross thresholds without any new
 // query data arriving. Agent presence has no time windows anymore, so it
 // doesn't need this — but useWorkspacePresenceMap is the dependency we
 // already mounted on this page, and that's wired to query data, not `now`.

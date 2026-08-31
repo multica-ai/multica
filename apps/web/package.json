@@ -1,15 +1,16 @@
 {
   "name": "@multica/web",
-  "version": "0.4.35",
+  "version": "0.4.37",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "sh -c 'next dev --webpack --port \"${FRONTEND_PORT:-3000}\"'",
-    "build": "fumadocs-mdx && next build --webpack",
+    "build": "next build --webpack",
     "start": "next start",
-    "typecheck": "fumadocs-mdx && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "mdx": "fumadocs-mdx",
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {

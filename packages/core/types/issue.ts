@@ -172,6 +172,15 @@ export interface Issue {
    * (MUL-6243)
    */
   status_category?: IssueStatusCategory;
+  /**
+   * A CUSTOM status's display name, carried beside the key. Empty for the 7
+   * built-ins, which are localized from the key — prefer `useStatusLabel`,
+   * which handles both and stays correct when an admin renames a status.
+   *
+   * Optional only for compatibility with a server that predates it; a current
+   * server always sends the field. (MUL-6749)
+   */
+  status_name?: string;
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;

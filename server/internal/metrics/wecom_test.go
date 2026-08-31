@@ -157,3 +157,67 @@ func wecomValueOf(m *dto.Metric) float64 {
 	}
 	return 0
 }
+
+// TestWecomOutboundMetricsAreExported covers the EXPORTED contract, not the
+// adapter's test double: the names Prometheus will scrape, the reason label,
+// and that every collector is actually registered. A dashboard reads these
+// strings; a rename that only the double knows about is a silent outage of
+// whatever alert watches them.
+func TestWecomOutboundMetricsAreExported(t *testing.T) {
+	m := NewWecomMetrics()
+	reg := prometheus.NewRegistry()
+	for _, c := range m.Collectors() {
+		if err := reg.Register(c); err != nil {
+			t.Fatalf("register: %v", err)
+		}
+	}
+
+	m.RecordOutboundDelivered()
+	m.RecordOutboundDropped("no_live_connection")
+	m.RecordOutboundSkipped("origin_not_channel")
+	m.RecordAttachmentDelivered()
+	m.RecordAttachmentDropped("platform_refused")
+	m.RecordAttachmentDeliveryShed()
+	m.RecordOutboundUnconfirmed("ack_timeout")
+	m.RecordAttachmentUnconfirmed("write_attempted")
+
+	got, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	seen := map[string]bool{}
+	labels := map[string]string{}
+	for _, mf := range got {
+		seen[mf.GetName()] = true
+		for _, mm := range mf.GetMetric() {
+			for _, l := range mm.GetLabel() {
+				labels[mf.GetName()+"/"+l.GetName()] = l.GetValue()
+			}
+		}
+	}
+	for _, want := range []string{
+		"multica_wecom_outbound_delivered_total",
+		"multica_wecom_outbound_dropped_total",
+		"multica_wecom_outbound_skipped_total",
+		"multica_wecom_outbound_attachment_delivered_total",
+		"multica_wecom_outbound_attachment_dropped_total",
+		"multica_wecom_outbound_attachment_delivery_shed_total",
+		"multica_wecom_outbound_unconfirmed_total",
+		"multica_wecom_outbound_attachment_unconfirmed_total",
+	} {
+		if !seen[want] {
+			t.Errorf("%s was not exported", want)
+		}
+	}
+	for name, want := range map[string]string{
+		"multica_wecom_outbound_dropped_total/reason":                "no_live_connection",
+		"multica_wecom_outbound_skipped_total/reason":                "origin_not_channel",
+		"multica_wecom_outbound_attachment_dropped_total/reason":     "platform_refused",
+		"multica_wecom_outbound_unconfirmed_total/reason":            "ack_timeout",
+		"multica_wecom_outbound_attachment_unconfirmed_total/reason": "write_attempted",
+	} {
+		if labels[name] != want {
+			t.Errorf("%s = %q, want %q", name, labels[name], want)
+		}
+	}
+}

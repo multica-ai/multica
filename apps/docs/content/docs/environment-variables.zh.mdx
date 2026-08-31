@@ -42,7 +42,6 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
 | `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途 task 的宽限时间；低于 `150s` 时按 `150s` 处理 |
-| `MULTICA_TASK_QUEUED_TTL` | `2h` | task 在队列中无人认领的最长时长，超过后以 `queued_expired` 失败；低并发运行时可能合理地排在长任务之后，此时应调大 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -227,12 +226,12 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳间隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发执行任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 没有输出且没有工具执行时的静默上限 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 单个工具调用持续静默的上限 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 语义静默阈值 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 启动握手上限 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
@@ -272,8 +271,8 @@ multica config show
 | `poll_interval` | `30s` | 执行任务轮询间隔 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
-| `codex_semantic_inactivity_timeout` | `10m` | Codex 语义静默阈值 |
-| `codex_handshake_timeout` | `30s` | Codex app-server 握手上限 |
+| `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |
+| `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |

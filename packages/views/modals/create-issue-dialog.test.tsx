@@ -136,11 +136,11 @@ describe("CreateIssueDialog sizing", () => {
     expect(contentClass()).toContain("sm:!max-w-xl");
   });
 
-  it("uses the same explicit collapsed height as manual mode", () => {
+  it("keeps the ordinary agent dialog content-driven", () => {
     render(<CreateIssueDialog onClose={vi.fn()} initialMode="agent" />);
 
-    expect(contentClass()).toContain("!h-96");
-    expect(contentClass()).not.toContain("!max-h-[80dvh]");
+    expect(contentClass()).toContain("!max-h-[80dvh]");
+    expect(contentClass()).not.toContain("!h-96");
   });
 
   it("hands manual mode its own sizing", () => {

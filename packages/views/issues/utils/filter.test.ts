@@ -399,10 +399,15 @@ describe("property filters", () => {
   const sevId = "prop-severity";
   const platId = "prop-platforms";
   const doneId = "prop-done";
+  const numId = "prop-estimate";
   const critical = makeIssue({ id: "P1", properties: { [sevId]: "opt-critical" } });
   const minor = makeIssue({ id: "P2", properties: { [sevId]: "opt-minor", [platId]: ["opt-ios", "opt-web"] } });
   const unset = makeIssue({ id: "P3" });
   const checked = makeIssue({ id: "P4", properties: { [doneId]: true } });
+  const estimate = makeIssue({ id: "P5", properties: { [numId]: 3.5 } });
+  const wholeNumber = makeIssue({ id: "P6", properties: { [numId]: 1 } });
+  const textId = "prop-note";
+  const textNote = makeIssue({ id: "P7", properties: { [textId]: "hello" } });
 
   it("select values match by option id (OR within the definition)", () => {
     const result = filterIssues([critical, minor, unset], {
@@ -460,6 +465,58 @@ describe("property filters", () => {
       propertyFilters: { [sevId]: ["opt-minor"], [doneId]: [NO_PROPERTY_VALUE] },
     });
     expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("number values match by their string form", () => {
+    const result = filterIssues([estimate, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [numId]: ["3.5"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P5"]);
+  });
+
+  it("number values match non-canonical numeric forms like the server", () => {
+    // Server containment matches the stored jsonb number, so "3.50" and "1"
+    // must match 3.5 and 1 here too.
+    expect(
+      filterIssues([estimate, wholeNumber, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [numId]: ["3.50"] },
+      }).map((i) => i.id),
+    ).toEqual(["P5"]);
+    expect(
+      filterIssues([estimate, wholeNumber, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [numId]: ["1"] },
+      }).map((i) => i.id),
+    ).toEqual(["P6"]);
+  });
+
+  it("number no-value matches issues without the property", () => {
+    const result = filterIssues([estimate, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [numId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P3"]);
+  });
+
+  it("text values match by exact string", () => {
+    const result = filterIssues([textNote, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [textId]: ["hello"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P7"]);
+  });
+
+  it("a literal __none__ text value does not match a No-value filter", () => {
+    // The server's key-absence predicate excludes it; this path must agree.
+    const literalNone = makeIssue({ id: "P8", properties: { [textId]: NO_PROPERTY_VALUE } });
+    expect(
+      filterIssues([literalNone, unset], {
+        ...NO_FILTER,
+        propertyFilters: { [textId]: [NO_PROPERTY_VALUE] },
+      }).map((i) => i.id),
+    ).toEqual(["P3"]);
   });
 
   it("ANDs across definitions", () => {

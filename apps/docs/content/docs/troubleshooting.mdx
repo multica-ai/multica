@@ -67,7 +67,7 @@ Open the issue's **execution log** and check the task's current status and what 
 3. Does the agent still have concurrency headroom?
 4. Does the daemon still have global execution capacity?
 
-An agent runs at most 6 tasks concurrently by default; a single daemon runs at most 20. At the limit, new tasks stay in the queue until a running one finishes. Tasks also keep queueing while the runtime is offline; they only fail after going unclaimed for more than 2 hours by default (raise the limit with `MULTICA_TASK_QUEUED_TTL`, see [Environment variables](/environment-variables)).
+An agent runs at most 6 tasks concurrently by default; a single daemon runs at most 20. At the limit, new tasks stay in the queue until a running one finishes. Tasks also keep queueing while the runtime is offline; they only fail once that runtime has stopped heartbeating for longer than the reconnect grace and the task has itself waited that long, so a long queue behind a busy runtime is never expired for waiting, and assigning work to a machine that is already offline still leaves a full grace to bring it back.
 
 ```bash
 multica daemon status --output json

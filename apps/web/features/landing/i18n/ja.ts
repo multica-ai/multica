@@ -118,7 +118,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           {
             title: "初回起動時に自動検出",
             description:
-              "Multica は Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI という23種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
+              "Multica は Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw という26種類の対応ツールをスキャンし、見つかったものをそれぞれランタイムとして登録します。",
           },
         ],
       },
@@ -139,7 +139,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           title: "CLI をインストールしてマシンを接続",
           description:
-            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、23種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
+            "multica setup を実行すると、OAuth の手順を案内し、デーモンを起動し、26種類の対応コーディングツール(Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw)をスキャンします。すでにインストール済みのものは、自動的にランタイムとして登録されます。",
         },
         {
           title: "最初のエージェントを作成",
@@ -193,7 +193,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica はどのコーディングエージェントに対応していますか?",
           answer:
-            "Multica は、Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI の23種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
+            "Multica は、Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw の26種類のコーディングツールに標準対応しています。デーモンが、すでにインストール済みの CLI を自動検出し、それぞれをランタイムとして登録します。オープンソースなので、独自のバックエンドを追加することもできます。",
         },
         {
           question: "セルフホストが必須ですか、それともクラウド版もありますか?",
@@ -269,6 +269,70 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         fixes: "バグ修正",
       },
       entries: [
+        {
+          version: "0.4.37",
+          date: "2026-08-31",
+          title: "より速い Issue 一覧、より安定した長時間タスク、より充実した多言語表示",
+          changes: [],
+          features: [
+            "Huawei Cloud CodeArts を標準のエージェント ランタイムとして使えます。",
+            "モデルを選び、前のセッションを再開し、MCP やローカルのスキルも使えます。",
+            "iPad に Multica をネイティブでインストールでき、画面の向きも自由です。",
+            "複数のサーバーでセルフホストしていても、WeCom ボットの返信が届きます。",
+            "送れなかった WeCom の返信の件数と理由を確認できます。",
+          ],
+          improvements: [
+            "大きなワークスペースでも Issue の一覧が速く開きます。",
+            "スキルが多くても、エージェントの起動が速くなりました。",
+            "オンボーディング、スクワッド、エディター、ステータス、優先度の表記が各言語で自然になりました。",
+            "エージェントの出力にファイルのパスがそのまま表示され、誤って隠れません。",
+            "セルフホストのサーバーが、バックグラウンドでデータベースにかける負荷が減りました。",
+            "接続が滞っても、セルフホストのサーバーは応答を続けます。",
+          ],
+          fixes: [
+            "チャットが最新の返信に留まり、表示中に跳ねたりちらついたりしません。",
+            "狭い画面でも Analytics のランキングを横にスクロールでき、切れません。",
+            "Codex のセッションが、準備の途中で止まらず確実に始まります。",
+            "手元のデーモンが待機中でも、ローカルのスキルを読み込めます。",
+            "デスクトップ版が、予期せず止まったデーモンを復帰させます。",
+            "スマートフォンの Issue のヘッダーが再び引き締まり、アイコンと押しやすさはそのままです。",
+            "古いバージョンからのセルフホストの更新が、手作業なしで終わります。",
+            "作業フォルダーが変わっても、Pi と Oh My Pi のセッションが続きます。",
+            "ワークスペースを削除するとき、実際に消えるものだけを案内します。",
+            "長く動くタスクや待機中のタスクが、待っただけで取り消されなくなりました。",
+          ],
+        },
+        {
+          version: "0.4.36",
+          date: "2026-08-28",
+          title: "カスタム プロパティの絞り込み、スキルのインポート、Oh My Pi の MCP 対応",
+          changes: [],
+          features: [
+            "テキスト、数値、日付、URL のカスタム プロパティで Issue を絞り込めます。",
+            "値がまだ入っていない Issue だけを表示することもできます。",
+            "絞り込みメニュー、ファセット、保存したビューでもそのまま使えます。",
+            "ローカルフォルダー、.skill、.zip からスキルを新規作成できます。",
+            "取り込む前に中身をプレビューでき、名前の重複も事前に分かります。",
+            "Oh My Pi のエージェントも、エージェント画面から MCP を設定して使えます。",
+          ],
+          improvements: [
+            "ランタイムは本当に安全なときだけ回収され、実行の途中で消えません。",
+            "長時間オフラインのランタイムは、いまの状態をそのまま表示します。",
+            "エージェントの長い処理は、最大 2 時間まで待機できます。",
+            "CLI が Issue 一覧の 1 ページの上限とページ送りの方法を示します。",
+          ],
+          fixes: [
+            "デスクトップ版でコピー・共有したリンクが、どのブラウザーや端末でも開けます。",
+            "起動したフォルダーが削除されていても、リポジトリの取得と更新ができます。",
+            "長いコンテキストのモデルの費用が正しく計算され、使用量が漏れません。",
+            "英字を含まないカスタム Issue ステータスも、どこでも正しい名前で表示されます。",
+            "編集が競合したとき、どちらを選ぶボタンもそれぞれの内容の下に並びます。",
+            "Lark の返信が、認証情報の期限切れで止まらなくなりました。",
+            "Quick Create の下書きの高さが、内容に合わせて調整されます。",
+            "OpenClaw はタイムアウト時に完全に停止し、プロセスが残りません。",
+            "OpenClaw の設定確認が、成功しているのに失敗と出なくなりました。",
+          ],
+        },
         {
           version: "0.4.35",
           date: "2026-08-26",

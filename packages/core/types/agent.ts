@@ -112,6 +112,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "codearts",
   "deveco",
   "openclaw",
   "hermes",
@@ -861,6 +862,19 @@ export interface CreateSkillRequest {
   content?: string;
   config?: Record<string, unknown>;
   files?: { path: string; content: string }[];
+}
+
+/** Structured body of POST /api/skills/import when uploading an archive. */
+export interface SkillImportResult {
+  status: "created" | "updated" | "conflict" | "skipped" | "failed";
+  reason?: string;
+  skill?: Skill;
+  existing_skill?: {
+    id: string;
+    name: string;
+    created_by?: string;
+    can_overwrite?: boolean;
+  };
 }
 
 export interface UpdateSkillRequest {
