@@ -11,6 +11,9 @@ export const localeLabels: Record<Locale, string> = {
   "zh-Hans": "\u4e2d\u6587",
   ko: "\ud55c\uad6d\uc5b4",
   ja: "\u65e5\u672c\u8a9e",
+  // The landing dictionary has no French variant yet, so `locales` above still
+  // offers four languages; this label only satisfies the Record type.
+  fr: "FR",
 };
 
 export function toLandingDictionaryLocale(

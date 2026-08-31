@@ -1,0 +1,108 @@
+{
+  "title": "Statistiques",
+  "tab_usage": "Consommation",
+  "header": {
+    "timezone_and_updated": "{{tz}} · mis à jour {{time}}",
+    "refresh": "Actualiser"
+  },
+  "filter": {
+    "project_label": "Projet",
+    "all_projects": "Tous les projets",
+    "period_label": "Période"
+  },
+  "kpi": {
+    "cost_label": "Coût · {{days}} j",
+    "tokens_label": "Tokens · {{days}} j",
+    "tokens_hint": "Entrée {{input}} · Sortie {{output}}",
+    "run_time_label": "Temps d'exécution · {{days}} j",
+    "run_time_hint": "Sur {{tasks}} tâches",
+    "tasks_label": "Tâches · {{days}} j",
+    "tasks_hint": "{{failed}} en échec"
+  },
+  "dim": {
+    "label": "Dimension",
+    "daily": "Quotidien",
+    "weekly": "Hebdomadaire"
+  },
+  "daily": {
+    "title_cost": "Coût quotidien",
+    "title_tokens": "Tokens quotidiens",
+    "title_time": "Temps d'exécution quotidien",
+    "title_tasks": "Tâches quotidiennes",
+    "title_errors": "Erreurs quotidiennes",
+    "metric_cost": "Coût",
+    "metric_tokens": "Tokens",
+    "metric_time": "Temps",
+    "metric_tasks": "Tâches",
+    "no_data": "Aucune consommation sur cette fenêtre.",
+    "metric_label": "Métrique"
+  },
+  "weekly": {
+    "title_cost": "Coût hebdomadaire",
+    "title_tokens": "Tokens hebdomadaires",
+    "title_time": "Temps d'exécution hebdomadaire",
+    "title_tasks": "Tâches hebdomadaires",
+    "title_errors": "Erreurs hebdomadaires",
+    "partial_label": "{{range}} (partiel · {{covered}} / 7 jours)"
+  },
+  "errors": {
+    "kpi_failed_label": "Tâches en échec · {{days}} j",
+    "kpi_failed_hint": "Sur {{total}} exécutions",
+    "kpi_rate_label": "Taux d'échec · {{days}} j",
+    "kpi_agents_label": "Agents touchés · {{days}} j",
+    "kpi_agents_hint": "Pire : {{name}} · {{count}}",
+    "tooltip_rate": "Taux d'erreur",
+    "class": {
+      "auth": "Authentification",
+      "rate_limit": "Limite de débit",
+      "timeout": "Délai dépassé",
+      "provider": "Fournisseur",
+      "runtime": "Runtime",
+      "agent": "Agent",
+      "other": "Autre"
+    },
+    "title": "Erreurs",
+    "summary": "{{failed}} exécutions sur {{total}} en échec · {{rate}}",
+    "mix_title": "Répartition des échecs · {{failed}}",
+    "mix_label": "Répartition des échecs",
+    "codes_label": "Codes d'erreur",
+    "by_agent": "Principaux fautifs",
+    "sort_label": "Classer les fautifs par",
+    "sort_failed": "Échecs",
+    "sort_rate": "Taux",
+    "header_agent": "Agent",
+    "header_failed": "Échecs",
+    "header_runs": "Exécutions",
+    "header_rate": "Taux",
+    "other_agents": "Autres agents",
+    "low_sample": "Moins de {{count}} exécutions sur cette fenêtre — ce taux n'est pas significatif.",
+    "no_data": "Aucune exécution en échec sur cette fenêtre.",
+    "show_reasons": "Afficher les codes d'erreur",
+    "hide_reasons": "Masquer les codes d'erreur",
+    "show_all": "Afficher les {{count}}",
+    "show_less": "Afficher le top {{count}}"
+  },
+  "leaderboard": {
+    "title": "Classement",
+    "caption": "{{count}} agents",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} supprimés",
+    "sort_label": "Classer les agents par",
+    "deleted_agents": "Agents supprimés",
+    "other_agents": "Autres agents",
+    "header_agent": "Agent",
+    "header_tokens": "Tokens",
+    "header_cost": "Coût",
+    "header_time": "Temps",
+    "header_tasks": "Tâches",
+    "show_all": "Tout afficher",
+    "show_less": "Afficher le top {{count}}",
+    "no_data": "Aucune activité d'agent sur cette fenêtre."
+  },
+  "empty": {
+    "title": "Aucune consommation pour l'instant",
+    "body": "Dès que des agents exécuteront des tâches ici, leur consommation de tokens et leur temps d'exécution apparaîtront dans cette vue."
+  },
+  "duration": {
+    "less_than_minute": "<1 min"
+  }
+}
