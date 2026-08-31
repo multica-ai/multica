@@ -255,6 +255,8 @@ describe("MermaidDiagram inline presentation", () => {
   it("renders the diagram in an empty sandbox at its natural size", async () => {
     render(<MermaidDiagram chart={CHART} />);
 
+    expect(screen.getByLabelText("Mermaid diagram")).toBeInTheDocument();
+
     const frame = await waitFor(() => {
       const found = document.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
       expect(found).not.toBeNull();
@@ -264,6 +266,7 @@ describe("MermaidDiagram inline presentation", () => {
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.style.width).toBe("1000px");
     expect(frame.style.height).toBe("500px");
+    expect(frame.title).toBe("Mermaid diagram");
   });
 
   it("copies the source straight from the inline toolbar", async () => {
