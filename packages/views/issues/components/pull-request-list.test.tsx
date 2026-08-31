@@ -227,6 +227,41 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.queryByText("Ready to merge")).not.toBeInTheDocument();
   });
 
+  // --- Merge queue ----------------------------------------------------------
+
+  it("renders 'In merge queue' instead of the blocked state a queued PR reports", async () => {
+    // GitHub reports a queued PR as open + blocked, which read as "nothing is
+    // happening here" — the exact opposite of a PR on its way in.
+    mockPRs = [makePR({ merge_state_status: "blocked", merge_queue_state: "queued" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("In merge queue")).toBeInTheDocument();
+    expect(screen.queryByText("Blocked")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Merge queue blocked' for an unmergeable queue entry", async () => {
+    mockPRs = [makePR({ merge_queue_state: "unmergeable" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Merge queue blocked")).toBeInTheDocument();
+  });
+
+  it("keeps showing the conflict for a PR the queue is about to evict", async () => {
+    mockPRs = [makePR({ mergeable: "conflicting", merge_queue_state: "queued" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Has merge conflicts")).toBeInTheDocument();
+    expect(screen.queryByText("In merge queue")).not.toBeInTheDocument();
+  });
+
+  it("shows no queue element for a backend that does not report one", async () => {
+    mockPRs = [makePR({ merge_state_status: "clean" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Ready to merge")).toBeInTheDocument();
+    expect(screen.queryByText("In merge queue")).not.toBeInTheDocument();
+  });
+
   // --- The two elements are independent ------------------------------------
 
   it("shows a failed CI element and a conflict element together", async () => {

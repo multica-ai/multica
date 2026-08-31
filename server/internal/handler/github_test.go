@@ -222,6 +222,35 @@ func TestIssuePullRequestResponseHidesUnavailableSnapshot(t *testing.T) {
 	}
 }
 
+func TestIssuePullRequestResponseMergeQueueState(t *testing.T) {
+	row := db.ListPullRequestsByIssueRow{
+		State:               "open",
+		HeadSha:             "A",
+		SnapshotHeadSha:     "A",
+		SnapshotFetchedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
+		ApiMergeStateStatus: pgtype.Text{String: "BLOCKED", Valid: true},
+		ApiMergeQueueState:  pgtype.Text{String: "AWAITING_CHECKS", Valid: true},
+	}
+
+	resp := issuePullRequestRowToResponse(row, true)
+	if resp.MergeQueueState == nil || *resp.MergeQueueState != "awaiting_checks" {
+		t.Fatalf("merge queue state not exposed lowercased: %+v", resp.MergeQueueState)
+	}
+
+	// A PR that is not queued must report no queue state at all — an empty
+	// string would read as a queue entry to any client checking for presence.
+	row.ApiMergeQueueState = pgtype.Text{}
+	if resp := issuePullRequestRowToResponse(row, true); resp.MergeQueueState != nil {
+		t.Fatalf("unqueued PR reported a queue state: %q", *resp.MergeQueueState)
+	}
+
+	// The queue state is snapshot data and follows the same availability gate.
+	row.ApiMergeQueueState = pgtype.Text{String: "QUEUED", Valid: true}
+	if resp := issuePullRequestRowToResponse(row, false); resp.MergeQueueState != nil {
+		t.Fatalf("disabled snapshot feature leaked a queue state: %q", *resp.MergeQueueState)
+	}
+}
+
 func TestVerifyWebhookSignature(t *testing.T) {
 	secret := "shared-secret"
 	body := []byte(`{"action":"opened"}`)

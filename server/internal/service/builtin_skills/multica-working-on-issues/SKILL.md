@@ -108,8 +108,8 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
 - `mergeable_state` — mirrors GitHub (`clean` / `dirty` surfaced; other values
   round-trip as unknown; retained for compatibility).
 - GitHub API snapshot fields: `snapshot_available`, `mergeable`,
-  `merge_state_status`, `checks_rollup`, `checks_total`, `checks_passed`,
-  `checks_failed`, `checks_running`, `failed_check_names`,
+  `merge_state_status`, `merge_queue_state`, `checks_rollup`, `checks_total`,
+  `checks_passed`, `checks_failed`, `checks_running`, `failed_check_names`,
   `snapshot_fetched_at`, and `snapshot_stale`. `snapshot_available == true`
   means the feature is enabled and the snapshot matches the PR's current head.
   Only then does `checks_rollup == null` mean "no checks"; false means the
