@@ -175,6 +175,12 @@ func buildInbound(e slackevents.EventsAPIEvent, p buildInboundParams, mentionRe 
 		reply = &channel.ReplyCtx{MessageID: p.threadTS, RootID: p.threadTS}
 	}
 	text := cleanText(p.text, mentionRe)
+	if forwarded := forwardedMessageText(e); forwarded != "" {
+		if text != "" {
+			text += "\n\n"
+		}
+		text += "Forwarded message:\n" + forwarded
+	}
 	return channel.InboundMessage{
 		EventID:        p.ts,
 		MessageID:      p.ts,
@@ -192,6 +198,41 @@ func buildInbound(e slackevents.EventsAPIEvent, p buildInboundParams, mentionRe 
 		},
 		Raw: raw,
 	}
+}
+
+type forwardedAttachment struct {
+	slack.Attachment
+	IsMessageUnfurl bool `json:"is_msg_unfurl"`
+}
+
+// forwardedMessageText extracts only message unfurls from Slack's raw event;
+// slack.Attachment does not expose the is_msg_unfurl discriminator.
+func forwardedMessageText(e slackevents.EventsAPIEvent) string {
+	callback, ok := e.Data.(*slackevents.EventsAPICallbackEvent)
+	if !ok || callback.InnerEvent == nil {
+		return ""
+	}
+	var event struct {
+		Attachments []forwardedAttachment `json:"attachments"`
+	}
+	if err := json.Unmarshal(*callback.InnerEvent, &event); err != nil {
+		return ""
+	}
+	parts := make([]string, 0, len(event.Attachments))
+	for _, attachment := range event.Attachments {
+		if !attachment.IsMessageUnfurl {
+			continue
+		}
+		text := attachmentText(attachment.Attachment)
+		if text == "" {
+			continue
+		}
+		if author := strings.TrimSpace(attachment.AuthorName); author != "" {
+			text = author + ":\n" + text
+		}
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // cleanText strips a leading/embedded bot mention token and trims surrounding
