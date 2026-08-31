@@ -18,6 +18,7 @@ export type InboxItemType =
   | "task_failed"
   | "agent_blocked"
   | "agent_completed"
+  | "autopilot_anomaly"
   | "reaction_added"
   | "quick_create_done"
   | "quick_create_failed"

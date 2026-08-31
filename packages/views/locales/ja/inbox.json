@@ -67,6 +67,7 @@
     "task_failed": "作業失敗",
     "agent_blocked": "エージェントがブロック",
     "agent_completed": "エージェントが完了",
+    "autopilot_anomaly": "オートパイロット異常",
     "reaction_added": "リアクションあり",
     "quick_create_done": "エージェントで作成",
     "quick_create_failed": "エージェントでの作成に失敗",

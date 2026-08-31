@@ -31,6 +31,7 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     task_failed: t(($) => $.types.task_failed),
     agent_blocked: t(($) => $.types.agent_blocked),
     agent_completed: t(($) => $.types.agent_completed),
+    autopilot_anomaly: t(($) => $.types.autopilot_anomaly),
     reaction_added: t(($) => $.types.reaction_added),
     quick_create_done: t(($) => $.types.quick_create_done),
     quick_create_failed: t(($) => $.types.quick_create_failed),

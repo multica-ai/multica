@@ -67,6 +67,7 @@
     "task_failed": "작업 실패함",
     "agent_blocked": "에이전트 막힘",
     "agent_completed": "에이전트 완료됨",
+    "autopilot_anomaly": "오토파일럿 이상",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
     "quick_create_failed": "에이전트 생성 실패",
