@@ -251,7 +251,7 @@ vi.mock("@multica/core/runtimes", () => ({
 }));
 
 
-vi.mock("../issues/components/pickers/assignee-picker", () => ({
+vi.mock("../issues/components/pickers/can-assign-agent", () => ({
   canAssignAgent: () => true,
 }));
 

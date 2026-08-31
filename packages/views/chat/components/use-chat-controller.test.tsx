@@ -98,7 +98,7 @@ vi.mock("@multica/core/projects/queries", () => ({
 // Steerable per test: the invoke rule is what decides whether an OPEN session's
 // agent is still runnable. Default true so every existing case is unaffected.
 const invokableAgentIds = vi.hoisted(() => ({ current: null as string[] | null }));
-vi.mock("@multica/views/issues/components", () => ({
+vi.mock("@multica/views/issues/components/pickers/can-assign-agent", () => ({
   canAssignAgent: (agent: { id: string }) =>
     invokableAgentIds.current === null ||
     invokableAgentIds.current.includes(agent.id),
