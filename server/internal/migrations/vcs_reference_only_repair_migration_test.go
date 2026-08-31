@@ -57,8 +57,8 @@ func TestVCSReferenceOnlyRepairMigrationRestoresPartialSchema(t *testing.T) {
 		t.Fatalf("create partial VCS link schema: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "442_vcs_reference_only_repair.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "442_vcs_reference_only_repair.up.sql")
 
 	var referenceOnly bool
 	if err := conn.QueryRow(ctx, `SELECT reference_only FROM issue_vcs_pull_request`).Scan(&referenceOnly); err != nil {
@@ -82,7 +82,7 @@ func TestVCSReferenceOnlyRepairMigrationRestoresPartialSchema(t *testing.T) {
 		t.Fatalf("reference_only metadata = (nullable %s, default %s), want (NO, false)", nullable, defaultValue)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "442_vcs_reference_only_repair.down.sql")
 	if err := conn.QueryRow(ctx, `SELECT reference_only FROM issue_vcs_pull_request`).Scan(&referenceOnly); err != nil {
 		t.Fatalf("read reference_only after rollback: %v", err)
 	}
@@ -103,8 +103,8 @@ func TestVCSReferenceOnlyRepairMigrationRestoresPartialSchema(t *testing.T) {
 		t.Fatalf("create healthy VCS link schema: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.up.sql")
-	applyMigrationFile(t, ctx, conn.Conn(), "441_vcs_reference_only_repair.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "442_vcs_reference_only_repair.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "442_vcs_reference_only_repair.down.sql")
 
 	var referenceOnlyValues []bool
 	if err := conn.QueryRow(ctx, `
