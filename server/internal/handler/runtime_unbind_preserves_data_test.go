@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -18,6 +19,43 @@ import (
 // their task history all disappeared — while the confirmation dialog said
 // "archive". Each test below pins one thing that must now survive, plus the two
 // invariants that keep the new flow safe.
+
+func TestPublishRuntimeTeardown_UsesAutomaticGCActorAndRefreshAction(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "GC Event Runtime")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "GC Event Agent")
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	bus := events.New()
+	var published []events.Event
+	bus.SubscribeAll(func(event events.Event) { published = append(published, event) })
+	publisher := *testHandler
+	publisher.Bus = bus
+	publisher.TaskService = nil
+
+	publisher.PublishRuntimeTeardown(ctx, service.RuntimeTeardownResult{UnboundAgents: []db.Agent{agent}}, testWorkspaceID, "system", "", "runtime_gc", false)
+	publisher.PublishRuntimeRefresh(testWorkspaceID, "system", "", "runtime_gc")
+
+	if len(published) != 2 {
+		t.Fatalf("published events=%d, want agent update and one runtime refresh", len(published))
+	}
+	if published[0].Type != protocol.EventAgentStatus || published[0].ActorType != "system" || published[0].ActorID != "" {
+		t.Fatalf("unexpected agent event: %+v", published[0])
+	}
+	if published[1].Type != protocol.EventDaemonRegister || published[1].ActorType != "system" || published[1].ActorID != "" {
+		t.Fatalf("unexpected runtime event: %+v", published[1])
+	}
+	payload, ok := published[1].Payload.(map[string]any)
+	if !ok || payload["action"] != "runtime_gc" {
+		t.Fatalf("runtime refresh payload=%v, want runtime_gc action", published[1].Payload)
+	}
+}
 
 // TestUnbindAgentsAndDeleteRuntime_KeepsChatHistory: the agent's chat sessions
 // and messages cascade from the agent row, so hard-deleting it destroyed every

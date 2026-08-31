@@ -368,6 +368,10 @@ func skillsDirPath(workDir, provider string) string {
 		// without those, OpenCode walks from the daemon's inherited PWD and
 		// misses .opencode/skills + AGENTS.md entirely (MUL-2416).
 		return filepath.Join(workDir, ".opencode", "skills")
+	case "codearts":
+		// CodeArts Agent discovers project skills from its provider-owned
+		// .codeartsdoer/skills directory.
+		return filepath.Join(workDir, ".codeartsdoer", "skills")
 	case "deveco":
 		// DevEco Code (Huawei's OpenCode fork) natively discovers project
 		// skills from .deveco/skills/ in the workdir, mirroring OpenCode's

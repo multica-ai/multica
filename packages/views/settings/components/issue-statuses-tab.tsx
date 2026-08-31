@@ -524,7 +524,22 @@ function StatusEditorDialog({
         category: draft.category,
         color: draft.color,
       },
-      { onSuccess: () => onOpenChange(false), onError },
+      {
+        onSuccess: (created) => {
+          onOpenChange(false);
+          // The key is derived server-side and is the only handle the API and
+          // the CLI accept, so creation has to say what it minted. A name with
+          // no ASCII to slug gets one that cannot be guessed back from the name
+          // — "客户确认" becomes `in_review_2` (MUL-6749) — so staying silent
+          // would leave the admin no way to learn it short of reopening the
+          // row. The dialog is already closing; a toast is the one surface
+          // still visible.
+          if (created?.key) {
+            toast.success(t(($) => $.issue_statuses.editor.created, { key: created.key }));
+          }
+        },
+        onError,
+      },
     );
   };
 

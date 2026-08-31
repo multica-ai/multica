@@ -35,6 +35,9 @@
     "idle": "空闲"
   },
   "presence_status_aria": "状态：{{status}}",
+  "avatar_stack": {
+    "overflow_aria_other": "还有 {{count}} 个智能体"
+  },
   "archived": {
     "active_link": "活跃智能体",
     "title": "已归档智能体"
@@ -71,7 +74,7 @@
     "last_active": "最近活跃",
     "model": "模型",
     "created": "创建时间",
-    "owner": "Owner",
+    "owner": "owner",
     "access": "访问权限"
   },
   "row": {
@@ -99,7 +102,7 @@
     "archive": "归档",
     "set_access": "设置访问范围",
     "set_access_dialog_title": "设置访问范围",
-    "set_access_applies_to": "将应用于 {{count}} 个 agent。",
+    "set_access_applies_to": "将应用于 {{count}} 个智能体。",
     "set_access_skipped": "{{count}} 个已跳过(不是你所有)。",
     "set_access_dialog_confirm": "应用",
     "set_access_bulk_partial": "已应用 {{succeeded}} 个;{{failed}} 个失败(保持当前状态)。",
@@ -196,7 +199,7 @@
   "overview": {
     "agent_context": "智能体",
     "access": "访问权限",
-    "attention_title": "Task 需要处理",
+    "attention_title": "task 需要处理",
     "attention_queued_other": "运行时不可用，当前有 {{count}} 个 task 正在排队。"
   },
   "skill_attach": {
@@ -256,7 +259,7 @@
     "page_navigation_aria": "智能体页面",
     "section_navigation_aria": "智能体分区",
     "activity": "动态",
-    "tasks": "Tasks",
+    "tasks": "task",
     "instructions": "指令",
     "skills": "Skills",
     "environment": "环境变量",
@@ -294,7 +297,7 @@
       },
       "ai": {
         "title": "通过 AI 创建",
-        "description": "描述你想要的结果。Agent Builder 会提出关键问题并实时生成草稿。"
+        "description": "描述你想要的结果。智能体构建器会提出关键问题并实时生成草稿。"
       }
     },
     "sections": {
@@ -325,17 +328,17 @@
       }
     },
     "builder": {
-      "setup_title": "为 Agent Builder 选择运行时",
+      "setup_title": "为智能体构建器选择运行时",
       "setup_description": "所选的在线运行时将用于创建对话，并默认成为新智能体的运行时。",
       "start": "开始对话",
       "connect_runtime": "连接运行时",
-      "start_failed": "无法启动 Agent Builder。",
+      "start_failed": "无法启动智能体构建器。",
       "send_failed": "无法发送消息。",
       "stop_failed": "无法停止当前生成任务。",
       "switch_runtime_failed": "切换运行时失败，对话仍在原来的运行时上执行。",
       "switch_runtime_pending": "停止当前回复后即可切换运行时。",
       "switch_runtime_success": "已切换运行时。配置草稿保留，后续对话将在新运行时上重新开始一段模型会话。",
-      "chat_title": "Agent Builder",
+      "chat_title": "智能体构建器",
       "chat_hint": "通过对话梳理需求，并持续完善右侧配置。",
       "runtime_online": "运行时在线",
       "runtime_offline": "运行时离线",
@@ -397,7 +400,7 @@
     "runtime_none": "暂无可用运行时",
     "runtime_cloud_badge": "云端",
     "runtime_private_badge": "私有",
-    "runtime_private_locked_tooltip": "私有运行时——只有 runtime 所有者可在其上创建智能体。如果需要共享，请联系所有者切换为\"公开\"。",
+    "runtime_private_locked_tooltip": "私有运行时——只有运行时所有者可在其上创建智能体。如果需要共享，请联系所有者切换为\"公开\"。",
     "runtime_search_placeholder": "搜索机器…",
     "runtime_no_results": "没有匹配的机器",
     "runtime_group_online": "{{online}}/{{total}} 在线",
@@ -576,6 +579,10 @@
       "dialog_headers_label": "HTTP Headers",
       "dialog_add_header": "添加 Header",
       "dialog_remove_header": "移除 Header",
+      "dialog_pair_key_placeholder": "键",
+      "dialog_pair_value_placeholder": "值",
+      "dialog_pair_key_aria": "{{label}}：键 {{index}}",
+      "dialog_pair_value_aria": "{{label}}：值 {{index}}",
       "dialog_native_json_hint": "这是历史 Provider 原生格式，将继续以 JSON 原样编辑，不会自动转换。",
       "dialog_json_label": "单个 Server 配置",
       "dialog_json_aria": "MCP Server JSON 配置",
@@ -585,7 +592,7 @@
       "dialog_add_action": "添加 Server",
       "dialog_update_action": "保存修改",
       "delete_dialog_title": "删除 MCP Server？",
-      "delete_dialog_description": "{{name}} 将不再提供给该智能体；Runtime 中的 Server 不受影响。",
+      "delete_dialog_description": "{{name}} 将不再提供给该智能体；运行时中的 Server 不受影响。",
       "delete_action": "删除 Server",
       "invalid_json": "JSON 无效：{{error}}",
       "save_failed_toast": "保存 MCP 配置失败",
@@ -593,28 +600,28 @@
       "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
     },
     "composio_mcp": {
-      "subtitle": "勾选 toolkit，只在你自己（这个 agent 的创建者）直接或通过下级 agent 链路触发这个 agent 时，才把它挂载为 MCP server。",
+      "subtitle": "勾选 toolkit，只在你自己（这个智能体的创建者）直接或通过下级智能体链路触发这个智能体时，才把它挂载为 MCP server。",
       "loading": "正在加载你的连接…",
       "load_failed": "无法加载你已连接的应用，请稍后重试。",
       "empty_title": "还没有已连接的应用",
       "empty_hint": "你还没连接任何第三方服务。先去授权一个，再回到这里勾选允许。",
       "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
       "connected": "已连接",
-      "toggle_aria": "允许该 agent 使用 {{toolkit}}",
+      "toggle_aria": "允许该智能体使用 {{toolkit}}",
       "saving": "正在保存…",
       "save_failed_toast": "保存失败，请重试",
       "redacted_title": "已配置——对你隐藏",
-      "redacted_hint": "只有该 agent 的创建者才能查看或修改它可使用的应用。",
+      "redacted_hint": "只有该智能体的创建者才能查看或修改它可使用的应用。",
       "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
       "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
     },
     "runtime_config": {
-      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在 daemon 进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway——适合 daemon 宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
+      "intro": "选择 OpenClaw 运行时执行该智能体每一回合的方式。Local 模式让智能体直接在守护进程内运行；Gateway 模式则把每一回合转发到一个 OpenClaw Gateway——适合守护进程宿主只是轻量协调机、希望真正算力落在更强的远端机器上的场景。",
       "mode_label": "路由模式",
       "mode_local": "Local",
       "mode_gateway": "Gateway",
-      "mode_local_hint": "默认。daemon 调用 `openclaw agent --local …`，智能体循环跑在本机。",
-      "mode_gateway_hint": "daemon 连接 OpenClaw Gateway。端点字段留空则继承 daemon 宿主 `~/.openclaw/openclaw.json` 里的配置。",
+      "mode_local_hint": "默认。守护进程调用 `openclaw agent --local …`，智能体循环跑在本机。",
+      "mode_gateway_hint": "守护进程连接 OpenClaw Gateway。端点字段留空则继承守护进程宿主 `~/.openclaw/openclaw.json` 里的配置。",
       "gateway_legend": "Gateway 端点",
       "host_label": "Host",
       "host_placeholder": "gw.internal",
@@ -932,7 +939,7 @@
     "direction_asc": "升序",
     "direction_desc": "降序",
     "section_columns": "列",
-    "section_owner": "Owner",
+    "section_owner": "owner",
     "section_model": "模型"
   },
   "actions": {

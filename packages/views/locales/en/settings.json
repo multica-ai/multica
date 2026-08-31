@@ -21,6 +21,7 @@
       "name": "Name",
       "name_placeholder": "e.g. Code Review",
       "key_hint": "Referred to as {{key}} by the API and the CLI.",
+      "created": "Status created. The API and the CLI refer to it as {{key}}.",
       "category": "Category",
       "category_locked": "Category cannot be changed — issues already on this status depend on it.",
       "description": "Description",
@@ -687,7 +688,7 @@
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
-    "description": "This cannot be undone. All issues, agents, and data will be permanently removed.",
+    "description": "This cannot be undone. All issues, agents, chats, and task history will be permanently removed.",
     "type_to_confirm_prefix": "To confirm, type",
     "type_to_confirm_suffix": " below.",
     "cancel": "Cancel",

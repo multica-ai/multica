@@ -61,7 +61,8 @@
     "eyebrow": "ちょっと質問",
     "lede": "ひとつだけ質問です。Multica がどんな方に役立っているかを把握するのに役立ちます。答えたらすぐ作業に戻れます。",
     "submit": "送信",
-    "hint_ready": "OK です。準備ができたら送信を押してください。"
+    "hint_ready": "OK です。準備ができたら送信を押してください。",
+    "save_failed_toast": "保存できませんでした"
   },
   "questions": {
     "about_you": {

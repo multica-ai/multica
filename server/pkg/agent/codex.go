@@ -2073,7 +2073,7 @@ func detectCodexVersionForDiagnostics(ctx context.Context, runtimeCmd Command, e
 		}
 		return "unknown"
 	}
-	version := extractVersionLine(string(data))
+	version, _ := extractVersionLine(string(data))
 	if strings.TrimSpace(version) == "" {
 		return "unknown"
 	}

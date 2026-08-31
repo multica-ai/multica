@@ -61,15 +61,21 @@ var agentGitExcludePatterns = []string{
 	"AGENTS.md",
 	".claude",
 	".opencode",
+	".codeartsdoer",
 	".deveco",
 	"CODEBUDDY.md",
 	".codebuddy",
+	".pi",
+	".omp",
 }
 
 const repoCacheGitTimeout = 10 * time.Minute
 
 func newGitCommand(args ...string) *exec.Cmd {
 	cmd := exec.Command("git", args...)
+	// A daemon can outlive the checkout it was launched from. Run Git from the
+	// filesystem root instead of inheriting a cwd that may have been deleted.
+	cmd.Dir = filepath.VolumeName(os.TempDir()) + string(os.PathSeparator)
 	cmd.Env = gitEnv()
 	return cmd
 }

@@ -271,6 +271,23 @@ func jwtSecretBootError(jwtSecret, appEnv string) error {
 	return auth.ValidateJWTSecret(jwtSecret)
 }
 
+// newMainHTTPServer builds the public HTTP server with the production timeout
+// defaults. These values are load-bearing safety settings, not cosmetic tuning,
+// so they live in one helper that main() and the config regression test share.
+//
+// Bound header reads to stop Slowloris; IdleTimeout is looser than the
+// metrics/profiling servers' 30s for keep-alive-heavy CLI and daemon clients.
+// ReadTimeout and WriteTimeout are deliberately left zero so WebSocket upgrades
+// (/ws, /api/daemon/ws) on this listener aren't killed mid-connection.
+func newMainHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+}
+
 func main() {
 	logger.Init()
 	// Warn about missing configuration
@@ -621,10 +638,7 @@ func main() {
 		LLMMaxRetries:       llmMaxRetries,
 	})
 
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: r,
-	}
+	srv := newMainHTTPServer(":"+port, r)
 	profilingServer := profiling.NewServer()
 
 	// Start background workers.
@@ -656,16 +670,14 @@ func main() {
 		)
 		runtimeReconnectGrace = minimumRuntimeReconnectGrace
 	}
-	// MULTICA_TASK_QUEUED_TTL lets self-hosted deployments that legitimately
-	// hold queued work behind long-running tasks — e.g. a runtime with low
-	// task concurrency — raise the built-in 2h queued expiry without losing
-	// work to queued_expired failures.
-	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace,
-		envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL))
+	// Queued work now expires on the same runtime-liveness signal as in-flight
+	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
+	// backlog, and a departed one retires everything it owned at once.
+	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.
-	go runRuntimeGCSweeper(sweepCtx, pool, queries, taskSvc.Metrics, bus)
+	go runRuntimeGCSweeper(sweepCtx, pool, queries, taskSvc.Metrics, h)
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)

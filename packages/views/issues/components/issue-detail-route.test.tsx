@@ -37,6 +37,7 @@ function wrapper({ children }: { children: ReactNode }) {
     back: vi.fn(),
     pathname: "/acme/issues/x",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   };
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
@@ -139,6 +140,7 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
             back: vi.fn(),
             pathname: "/acme/issues/ZZZ-134",
             searchParams: new URLSearchParams(),
+            hash: "",
             getShareableUrl: (p: string) => `https://app.multica.com${p}`,
           }}
         >
@@ -160,6 +162,7 @@ describe("IssueDetailRoute with an identifier that names no issue", () => {
             back: vi.fn(),
             pathname: "/acme/issues/ZZZ-134",
             searchParams: new URLSearchParams(),
+            hash: "",
             getShareableUrl: (p: string) => `https://app.multica.com${p}`,
           }}
         >

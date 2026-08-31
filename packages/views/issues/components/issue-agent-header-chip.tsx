@@ -178,7 +178,7 @@ function ActiveChip({
               // header. Queued-only state stays calm (no beam) to reserve the
               // motion for work that is genuinely in flight.
               className={cn(
-                "flex h-7 max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
                 anyRunning && "border-beam bg-brand/5",
               )}
             />
@@ -191,7 +191,10 @@ function ActiveChip({
             opacity={anyRunning ? "full" : "half"}
           />
           <span
-            className={`min-w-0 truncate text-caption ${anyRunning ? "text-info" : "text-muted-foreground"}`}
+            className={cn(
+              "hidden min-w-0 truncate text-caption md:inline",
+              anyRunning ? "text-info" : "text-muted-foreground",
+            )}
           >
             {label}
           </span>

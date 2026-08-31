@@ -464,6 +464,45 @@ func (q *Queries) ListSkillFiles(ctx context.Context, skillID pgtype.UUID) ([]Sk
 	return items, nil
 }
 
+const listSkillFilesBySkillIDs = `-- name: ListSkillFilesBySkillIDs :many
+SELECT id, skill_id, path, content, created_at, updated_at FROM skill_file
+WHERE skill_id = ANY($1::uuid[])
+ORDER BY skill_id, path ASC
+`
+
+// Batch variant of ListSkillFiles: loads every file for a set of skills in one
+// round trip so LoadAgentSkills doesn't issue one query per skill on the
+// task-claim hot path. Ordered by skill_id so the caller can group in a single
+// linear pass. Like ListSkillFiles it returns full file bodies — callers that
+// only need metadata must use ListSkillFileMetadata instead. Uses
+// idx_skill_file_skill.
+func (q *Queries) ListSkillFilesBySkillIDs(ctx context.Context, skillIds []pgtype.UUID) ([]SkillFile, error) {
+	rows, err := q.db.Query(ctx, listSkillFilesBySkillIDs, skillIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SkillFile{}
+	for rows.Next() {
+		var i SkillFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.SkillID,
+			&i.Path,
+			&i.Content,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSkillSummariesByWorkspace = `-- name: ListSkillSummariesByWorkspace :many
 SELECT id, workspace_id, name, description, config, created_by, created_at, updated_at
 FROM skill

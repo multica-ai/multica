@@ -146,11 +146,6 @@ backend:
     cloudfrontDomain: ""
     cloudfrontKeyPairId: ""
     localUploadBaseUrl: http://api.multica.dev.lan
-    # How long a task may sit in the queue unclaimed before failing with
-    # `queued_expired`; raise it when a runtime's low task concurrency lets
-    # tasks legitimately wait behind long-running work.
-    # Accepts a positive duration and empty/unset falls back to the server default of 2h.
-    taskQueuedTTL: 2h
   resources:
     requests:
       cpu: 100m

@@ -55,6 +55,17 @@ SELECT * FROM skill_file
 WHERE skill_id = $1
 ORDER BY path ASC;
 
+-- name: ListSkillFilesBySkillIDs :many
+-- Batch variant of ListSkillFiles: loads every file for a set of skills in one
+-- round trip so LoadAgentSkills doesn't issue one query per skill on the
+-- task-claim hot path. Ordered by skill_id so the caller can group in a single
+-- linear pass. Like ListSkillFiles it returns full file bodies — callers that
+-- only need metadata must use ListSkillFileMetadata instead. Uses
+-- idx_skill_file_skill.
+SELECT * FROM skill_file
+WHERE skill_id = ANY(sqlc.arg('skill_ids')::uuid[])
+ORDER BY skill_id, path ASC;
+
 -- name: ListSkillFileMetadata :many
 -- Metadata-only variant of ListSkillFiles: path, byte size and content hash
 -- without the body. Same reason as ListSkillSummariesByWorkspace — a skill

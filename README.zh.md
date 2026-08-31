@@ -11,7 +11,7 @@
 **智能体，也在看板上。**
 
 Multica 是一个开源的团队工作区。你像给同事派活一样，把任务交给 AI 编码智能体——它自己接手、边做边
-汇报、卡住了主动说，做完交回来给你审。可自部署，支持 23 种智能体 CLI，不绑定任何厂商。
+汇报、卡住了主动说，做完交回来给你审。可自部署，支持 26 种智能体 CLI，不绑定任何厂商。
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/multica-ai/multica?style=flat)](https://github.com/multica-ai/multica/releases)
@@ -49,7 +49,7 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 *Claude Code、Codex、Cursor、Kimi——不用挑一个，全都招进来。*
 
-- **[23 种智能体 CLI](#运行时) →** Claude Code、Codex、Cursor、Copilot、Kimi、OpenCode 等等。
+- **[26 种智能体 CLI](#运行时) →** Claude Code、Codex、Cursor、Copilot、Kimi、OpenCode 等等。
 - **[智能体也是队友](https://multica.ai/docs/agents) →** 起个名字、选个提供方、配台运行时，它就上了看板，跟其他同事没两样。
 - **[小队](https://multica.ai/docs/squads) →** 人和智能体混编成队，leader 决定谁来接活。
 - **[Skills](https://multica.ai/docs/skills) →** 解决过一次的问题沉淀下来，全团队的智能体都能复用。
@@ -155,7 +155,8 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | Qwen Code | `qwen` | QwenPaw | `qwenpaw` |
 | Reasonix | `reasonix` | Trae CLI | `traecli` |
 | DeepSeek Harness | `dsh` | Oh-My-Pi | `omp` |
-| Dim | `dim` | | |
+| MiniMax Code | `mcode` | Dim | `dim` |
+| 华为云 CodeArts | `codearts` | | |
 
 怎么装、怎么登录：[安装智能体运行时](https://multica.ai/docs/install-agent-runtime) ·
 [AI 编程工具对照](https://multica.ai/docs/providers)
@@ -195,7 +196,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
                              │  拉起
                       ┌──────┴───────────────────────────────┐
                       │  Claude Code · Codex · Cursor · …    │
-                      │  （上面 23 种运行时里的任意一种）    │
+                      │  （上面 26 种运行时里的任意一种）    │
                       └──────────────────────────────────────┘
 ```
 
@@ -206,7 +207,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 移动端 | Expo / React Native (iOS) |
 | 后端 | Go (Chi router, sqlc, gorilla/websocket) |
 | 数据库 | PostgreSQL 17（`pgcrypto` + `pg_trgm`） |
-| 智能体运行时 | 本地守护进程拉起上面 23 种智能体 CLI 中的任意一个 |
+| 智能体运行时 | 本地守护进程拉起上面 26 种智能体 CLI 中的任意一个 |
 
 ---
 

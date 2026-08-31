@@ -6324,35 +6324,68 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 }
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
-func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
+//
+// A read failure is REPORTED, never swallowed into a shorter skill set. Both
+// reads are all-or-nothing for the agent's entire skill set — the file load
+// covers every skill in one query — so a swallowed error does not degrade the
+// payload, it silently replaces it: every skill loses its supporting files, or
+// the agent loses every skill. Nothing downstream can tell that apart from an
+// agent that genuinely has none, because the bundle hash is computed over
+// whatever did load, so the daemon's own validation passes and the agent
+// starts on rules it is missing. Callers must settle the failure (preserve the
+// claim for redelivery, or 5xx the resolve) instead of dispatching that.
+func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, error) {
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
-	if err != nil || len(skills) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("list agent skills: %w", err)
+	}
+	if len(skills) == 0 {
+		return nil, nil
+	}
+
+	// Load every skill's files in one round trip instead of one query per
+	// skill (N+1 on the task-claim hot path). Group by skill_id in a single
+	// linear pass — the query orders by skill_id, path.
+	skillIDs := make([]pgtype.UUID, len(skills))
+	for i, sk := range skills {
+		skillIDs[i] = sk.ID
+	}
+	files, err := s.Queries.ListSkillFilesBySkillIDs(ctx, skillIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list skill files for %d skills: %w", len(skills), err)
+	}
+	filesBySkill := make(map[string][]AgentSkillFileData, len(skills))
+	for _, f := range files {
+		id := util.UUIDToString(f.SkillID)
+		filesBySkill[id] = append(filesBySkill[id], AgentSkillFileData{Path: f.Path, Content: f.Content})
 	}
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{
+		result = append(result, AgentSkillData{
 			ID:          util.UUIDToString(sk.ID),
 			Name:        sk.Name,
 			Description: sk.Description,
 			Content:     sk.Content,
-		}
-		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
-		for _, f := range files {
-			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
-		}
-		result = append(result, data)
+			Files:       filesBySkill[util.UUIDToString(sk.ID)],
+		})
 	}
-	return result
+	return result, nil
 }
 
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
-func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
-	skills := s.LoadAgentSkills(ctx, agentID)
+// It fails closed on a workspace-skill read error for the reason in
+// LoadAgentSkills: a bundle set built from a partial read is indistinguishable
+// from a correct one.
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData, error) {
+	skills, err := s.LoadAgentSkills(ctx, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
 	skills = append(skills, s.BuiltinSkills()...)
-	return BuildAgentSkillBundles(skills)
+	bundles, refs := BuildAgentSkillBundles(skills)
+	return bundles, refs, nil
 }
 
 func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {
@@ -6751,7 +6784,7 @@ func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue,
 		ActorType:   "system",
 		ActorID:     "",
 		Payload: map[string]any{
-			"issue":          IssueToMapWithCategory(ctx, s.Queries, issue, prefix),
+			"issue":          IssueToMapResolved(ctx, s.Queries, issue, prefix),
 			"status_changed": prevStatus != issue.Status,
 			"prev_status":    prevStatus,
 		},
@@ -6912,13 +6945,19 @@ func builtInStatusCategory(status string) string {
 	return ""
 }
 
-// IssueToMapWithCategory is IssueToMap with an AUTHORITATIVE status_category,
-// resolved through the catalog so a custom status is not emitted with a blank
-// one. Background events go through here; clients treat this payload as a
-// complete issue and bucket it by category. (MUL-6243)
-func IssueToMapWithCategory(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
+// IssueToMapResolved is IssueToMap with an AUTHORITATIVE status_category and
+// status_name, both resolved through the catalog so a custom status is not
+// emitted with blanks. Background events go through here; clients treat this
+// payload as a complete issue and bucket it by category. (MUL-6243)
+//
+// Both fields come from ONE catalog read. Resolving them separately would
+// double the query on every event carrying a custom status, and the HTTP
+// rendering already shares a single read through its Resolver. (MUL-6749)
+func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Issue, issuePrefix string) map[string]any {
 	m := IssueToMap(issue, issuePrefix)
-	m["status_category"] = issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
+	category, name := issuestatus.EffectiveAndName(ctx, q, issue.WorkspaceID, issue.Status)
+	m["status_category"] = category
+	m["status_name"] = name
 	return m
 }
 
@@ -6934,7 +6973,12 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		// Mirrors handler.IssueResponse.StatusCategory: a built-in status IS
 		// its own category, so this resolves with no catalog lookup. Empty for
 		// a custom status, which consumers resolve via the catalog. (MUL-6243)
-		"status_category":  builtInStatusCategory(issue.Status),
+		"status_category": builtInStatusCategory(issue.Status),
+		// Mirrors handler.IssueResponse.StatusName. A built-in carries no name
+		// — clients localize those from the key — and a CUSTOM one is filled in
+		// by IssueToMapResolved, which has the catalog. Emitted unconditionally
+		// so this rendering cannot lose a key the HTTP one carries. (MUL-6749)
+		"status_name":      "",
 		"priority":         issue.Priority,
 		"assignee_type":    util.TextToPtr(issue.AssigneeType),
 		"assignee_id":      util.UUIDToPtr(issue.AssigneeID),
