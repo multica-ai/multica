@@ -17,19 +17,25 @@ import { ChatMessageList } from "./chat-message-list";
 // the browser (clamps), input-led moves model the reader.
 
 // Virtuoso cannot render rows in jsdom's zero-height viewport. The stub keeps
-// the row count visible, surfaces `followOutput` verdicts as attributes, and
+// the row count visible, surfaces `followOutput` verdicts as attributes,
 // captures `totalListHeightChanged` so the harness can report content growth
-// the way the real Virtuoso does.
+// the way the real Virtuoso does, and answers `scrollToIndex` by moving the
+// scroller to the bottom — the real component's job, and the only route the
+// bottom-stick may take (MUL-6879).
 let reportContentHeightChanged: (() => void) | undefined;
+let pinCalls: unknown[] = [];
+let scrollToLastItemEnd: (() => void) | undefined;
 
 vi.mock("react-virtuoso", () => ({
   Virtuoso: ({
+    ref,
     data,
     itemContent,
     computeItemKey,
     followOutput,
     totalListHeightChanged,
   }: {
+    ref?: { current: unknown } | ((handle: unknown) => void);
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
@@ -37,6 +43,14 @@ vi.mock("react-virtuoso", () => ({
     totalListHeightChanged?: () => void;
   }) => {
     reportContentHeightChanged = totalListHeightChanged;
+    const handle = {
+      scrollToIndex: (location: unknown) => {
+        pinCalls.push(location);
+        scrollToLastItemEnd?.();
+      },
+    };
+    if (typeof ref === "function") ref(handle);
+    else if (ref) ref.current = handle;
     return (
       <div
         data-testid="virtuoso-rows"
@@ -95,6 +109,8 @@ beforeEach(() => {
   animationFrames = new Map();
   nextAnimationFrameId = 1;
   reportContentHeightChanged = undefined;
+  pinCalls = [];
+  scrollToLastItemEnd = undefined;
   now = 0;
   vi.spyOn(Date, "now").mockImplementation(() => now);
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
@@ -168,12 +184,17 @@ interface Scroller {
   shiftSpaceFromRowControl(): void;
   /** The browser scrolls the list itself (answering a key), no input seen. */
   browserScrollsListUp(px: number): void;
+  /** Every `scrollToIndex` the bottom-stick asked Virtuoso for. */
+  pinCalls(): unknown[];
+  /** Writes to `scrollTop` from outside Virtuoso — always a bug (MUL-6879). */
+  directScrollTopWrites(): number;
 }
 
 function scroller(el: HTMLElement, initialContent = 2000): Scroller {
   const state = { scrollTop: 0, contentHeight: initialContent, viewportHeight: VIEWPORT };
   // Open at the bottom, matching Virtuoso's `initialTopMostItemIndex: LAST`.
   state.scrollTop = Math.max(0, state.contentHeight - state.viewportHeight);
+  let directScrollTopWrites = 0;
 
   Object.defineProperties(el, {
     scrollHeight: { configurable: true, get: () => state.contentHeight },
@@ -182,10 +203,19 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
       configurable: true,
       get: () => state.scrollTop,
       set: (value: number) => {
+        directScrollTopWrites++;
         state.scrollTop = value;
       },
     },
   });
+
+  // What the mock Virtuoso does for `scrollToIndex({ index: "LAST", align:
+  // "end" })`: the list moves its own scroller. Nothing else may write
+  // scrollTop, so this bypasses the counted setter.
+  scrollToLastItemEnd = () => {
+    state.scrollTop = Math.max(0, state.contentHeight - state.viewportHeight);
+  };
+  pinCalls = [];
 
   const scrollEvent = () => {
     act(() => {
@@ -312,6 +342,12 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
       state.scrollTop -= px;
       scrollEvent();
     },
+    pinCalls() {
+      return pinCalls;
+    },
+    directScrollTopWrites() {
+      return directScrollTopWrites;
+    },
   };
 }
 
@@ -370,6 +406,25 @@ describe("ChatMessageList auto-scroll", () => {
 
     expect(rowCount()).toBe(rowsBefore);
     expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  // MUL-6879: the pin used to write `scrollTop = scrollHeight - clientHeight`
+  // on the container. In a virtualised list that height is an estimate over
+  // the unrendered rows, so the pin landed Virtuoso somewhere it then
+  // re-measured, moving the estimate — and the next height change pinned
+  // again. The loop swallowed the reader's wheel scrolls, leaving the list
+  // shaking and immovable. Corrections must go through Virtuoso.
+  it("corrects through Virtuoso rather than writing scrollTop on the container", () => {
+    const { scroll } = renderStreamingChat();
+
+    scroll.grow(180);
+    scroll.shrinkViewport(72);
+
+    expect(scroll.pinCalls()).toEqual([
+      { index: "LAST", align: "end" },
+      { index: "LAST", align: "end" },
+    ]);
+    expect(scroll.directScrollTopWrites()).toBe(0);
   });
 
   it("keeps the newest content clear of a composer that grew", () => {

@@ -1417,6 +1417,10 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"verify readiness",
 				"URL, logs, and stop instructions",
 				"survival as best-effort, not guaranteed",
+				"Never terminate `multica` or `multica.exe` by executable name",
+				"exact child PID you started",
+				"`multica daemon status --output json`",
+				"never kill it if it is the reported daemon PID",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)

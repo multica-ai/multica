@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { Virtuoso, type Components } from "react-virtuoso";
+import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -191,7 +191,17 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const { isFollowing, onContentHeightChanged } = useStickToBottom(scrollContainerEl);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // The bottom-stick corrects through Virtuoso, never by writing `scrollTop`
+  // on the container: `scrollHeight` is an estimate over the unrendered rows,
+  // so the pixel bottom moves as Virtuoso measures (see stick-to-bottom.ts).
+  const pinToLiveEnd = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
+  }, []);
+  const { isFollowing, onContentHeightChanged } = useStickToBottom(
+    scrollContainerEl,
+    pinToLiveEnd,
+  );
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -316,6 +326,7 @@ export function ChatMessageList({
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
       <Virtuoso
+        ref={virtuosoRef}
         customScrollParent={scrollContainerEl}
         data={renderItems}
         firstItemIndex={firstIndex}

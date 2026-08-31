@@ -52,16 +52,66 @@ type Metrics interface {
 	// engine is not keeping up with one bot's traffic, and past a point
 	// WeCom stops seeing the socket drained and replaces the connection.
 	RecordCallbackQueueBlocked()
+
+	// RecordOutboundDelivered — one reply reached the user. It is the
+	// denominator: without it a flat drop counter cannot be told apart from a
+	// quiet day, and "the bot went silent" is exactly the report that cannot
+	// afford that ambiguity.
+	RecordOutboundDelivered()
+	// RecordOutboundDropped — one reply the adapter owed a user and did not
+	// deliver, labelled with why (outbound_outcome.go's closed reason set).
+	// Every reason here leaves somebody in WeCom waiting on an answer that is
+	// not coming, so this IS an error total and the label says which failure it
+	// was. The ordinary outcomes — a question typed in the web UI on a
+	// WeCom-bound session, an installation revoked between trigger and reply —
+	// are not counted here; RecordOutboundSkipped has them.
+	RecordOutboundDropped(reason string)
+	// RecordOutboundSkipped — a completion this adapter was never going to
+	// deliver, because it was not owed to a WeCom user in the first place. Kept
+	// apart from dropped on purpose: counting a web-UI question's answer as a
+	// failed WeCom delivery makes ordinary web usage look like an outage.
+	RecordOutboundSkipped(reason string)
+
+	// RecordAttachmentDelivered / RecordAttachmentDropped count FILES, one per
+	// file, while the three above count REPLIES, one per reply. The two units
+	// are separate because a reply whose words arrived and whose file did not
+	// is a delivered reply with a failed attachment, and collapsing that into
+	// one number can only lie in one direction or the other.
+	RecordAttachmentDelivered()
+	RecordAttachmentDropped(reason string)
+
+	// RecordAttachmentDeliveryShed counts a SCHEDULING decision: one delivery
+	// attempt refused admission before the lookup ran. Its own unit because at
+	// that point nothing knows whether the turn carries zero files or five —
+	// counting it as file drops fabricates cardinality in both directions.
+	RecordAttachmentDeliveryShed()
+
+	// RecordOutboundUnconfirmed / RecordAttachmentUnconfirmed — the outcome is
+	// UNKNOWN: the frame reached the wire (or the wait for its verdict was cut
+	// short) and the message may already be in front of the user. Its own pair
+	// because folding it into dropped would inflate a definite failure rate
+	// with sends that probably succeeded, and an operator paging on the drop
+	// rate would be paged for deliveries that happened.
+	RecordOutboundUnconfirmed(reason string)
+	RecordAttachmentUnconfirmed(reason string)
 }
 
 // nopMetrics is what the constructor falls back to. A nil sink must never be a
 // nil-pointer dereference on the read loop.
 type nopMetrics struct{}
 
-func (nopMetrics) RecordConnectFailure()       {}
-func (nopMetrics) RecordAuthFailure()          {}
-func (nopMetrics) RecordCallbackQueued()       {}
-func (nopMetrics) RecordCallbackQueueBlocked() {}
+func (nopMetrics) RecordConnectFailure()              {}
+func (nopMetrics) RecordAuthFailure()                 {}
+func (nopMetrics) RecordCallbackQueued()              {}
+func (nopMetrics) RecordCallbackQueueBlocked()        {}
+func (nopMetrics) RecordOutboundDelivered()           {}
+func (nopMetrics) RecordOutboundDropped(string)       {}
+func (nopMetrics) RecordOutboundSkipped(string)       {}
+func (nopMetrics) RecordAttachmentDelivered()         {}
+func (nopMetrics) RecordAttachmentDropped(string)     {}
+func (nopMetrics) RecordAttachmentDeliveryShed()      {}
+func (nopMetrics) RecordOutboundUnconfirmed(string)   {}
+func (nopMetrics) RecordAttachmentUnconfirmed(string) {}
 
 // orNopMetrics turns an unset sink into one that is safe to call.
 func orNopMetrics(m Metrics) Metrics {

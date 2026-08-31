@@ -140,6 +140,9 @@ type attachmentTarget struct {
 	InstallationID pgtype.UUID
 	ChatID         string
 	ChatType       int
+	// SessionID is carried only so a delivery that fails minutes later can
+	// still name the conversation it belonged to in the log and the counter.
+	SessionID string
 }
 
 // OutboundOption configures the chat-done subscriber at construction.
@@ -162,7 +165,12 @@ func (o *Outbound) mayCarryAttachments(e events.Event) bool {
 // deliverAttachments hands the answer's files to a goroutine of their own, if
 // there are any to hand over. It is called after the words are out, and
 // returns immediately.
-func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
+// carriesTheReply says the files ARE this reply's substance — the agent said
+// nothing and bound a file instead. When it is true nothing has recorded a
+// reply outcome yet and this path owes exactly one; when it is false the words
+// already landed and the reply's outcome is settled, so only the per-file
+// counters move here.
+func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget, carriesTheReply bool) {
 	if o.objects == nil || o.senders == nil {
 		return
 	}
@@ -189,6 +197,15 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 	// have carried none is the false alarm the post-lookup gate exists to
 	// avoid.
 	if !o.admitAttachmentDelivery() {
+		// A scheduling refusal, counted under its own unit, and NOTHING else:
+		// the comment above is literal — this gate runs before the lookup, so
+		// it knows neither how many files the turn carries nor whether it
+		// carries any at all. A per-file counter fed from here fabricates
+		// cardinality, and a reply outcome asserted from here fabricates the
+		// reply: an empty completion with zero bound files would be counted
+		// as a dropped reply when the lookup would have classified it as
+		// nothing_to_say. What cannot be known here is not recorded here.
+		o.attachmentShed()
 		o.logger.Warn("wecom outbound: attachment delivery not admitted, too many already running",
 			"installation_id", uuidStringPub(to.InstallationID),
 			"admitted", maxAdmittedAttachmentDeliveries)
@@ -198,7 +215,7 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 		defer o.releaseAttachmentAdmission()
 		ctx, cancel := context.WithTimeout(context.Background(), attachmentBudget)
 		defer cancel()
-		o.sendAttachments(ctx, messageID, workspaceID, to)
+		o.sendAttachments(ctx, messageID, workspaceID, to, carriesTheReply)
 	})
 }
 
@@ -215,7 +232,15 @@ func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget) {
 // one can only be reported honestly by something that already knows a file was
 // waiting. Rationing this stage ahead of the lookup would either stay silent
 // about a file that was dropped or warn about a file that never existed.
-func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, to attachmentTarget) {
+func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID pgtype.UUID, to attachmentTarget, carriesTheReply bool) {
+	// replyFailed records this reply's single outcome, but only when the files
+	// ARE the reply. When words already landed the reply is settled and only
+	// the per-file counters move.
+	replyFailed := func(reason dropReason, err error) {
+		if carriesTheReply {
+			o.droppedFor(ctx, to.SessionID, "chat:done", reason, err)
+		}
+	}
 	rows, err := o.q.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{
 		ChatMessageID: messageID,
 		WorkspaceID:   workspaceID,
@@ -224,9 +249,14 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		o.logger.WarnContext(ctx, "wecom outbound: attachment lookup failed",
 			"error", err, "chat_message_id", uuidStringPub(messageID))
 		o.tellUser(ctx, to, mediaLookupFailedText)
+		replyFailed(dropTransport, err)
 		return
 	}
 	if len(rows) == 0 {
+		// mayCarryAttachments said there might be one; there was not.
+		if carriesTheReply {
+			o.skippedFor(ctx, to.SessionID, skipNothingToSay)
+		}
 		return
 	}
 	// Past here a file is known to be waiting, so every way out of this
@@ -237,6 +267,13 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	// wait for it, and unlike admission it can name what was dropped, so the
 	// user hears about it.
 	if !o.claimAttachmentSlot() {
+		// Unlike admission, the rows are known here, so the accounting can be
+		// exact: one drop per file that will not be sent, and — when the files
+		// were the reply — the reply's own outcome.
+		for range rows {
+			o.attachmentDropped(ctx, dropAttachmentNotAdmitted, nil)
+		}
+		replyFailed(dropAttachmentNotAdmitted, nil)
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
 			"installation_id", uuidStringPub(to.InstallationID),
 			"attachments", len(rows),
@@ -254,11 +291,17 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 	case attachmentSlots <- struct{}{}:
 		defer func() { <-attachmentSlots }()
 	case <-ctx.Done():
+		// The rows are known here, so every one of them settles: nothing was
+		// sent, which is the one case that is provably local.
+		for range rows {
+			o.attachmentDropped(ctx, dropTransport, ctx.Err())
+		}
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery gave up waiting for a slot",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
 		// Deliberately on a fresh context: the one that expired is the reason
 		// we are here, and reusing it would drop the sentence too.
 		o.tellUser(context.WithoutCancel(ctx), to, mediaSendFailedText)
+		replyFailed(dropTransport, ctx.Err())
 		return
 	}
 
@@ -271,16 +314,40 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		// the socket that is missing. The log is the only place this can go.
 		o.logger.WarnContext(ctx, "wecom outbound: no live connection for attachment delivery",
 			"installation_id", uuidStringPub(to.InstallationID), "attachments", len(rows))
+		for range rows {
+			o.attachmentDropped(ctx, dropNoConnection, nil)
+		}
+		replyFailed(dropNoConnection, nil)
 		return
 	}
 	failed, unknown := 0, 0
+	// replyReason aggregates the DEFINITE per-file reasons for the reply's own
+	// outcome, under worseDropReason's precedence — so a single refused file
+	// surfaces as platform_refused on the reply too. Unknown outcomes stay out
+	// of it: a file that may have arrived must not turn the reply into a
+	// definite drop.
+	var replyReason dropReason
+	var replyUnconfirmed string
 	for _, row := range rows {
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
 		case deliveryDefinitelyFailed:
 			failed++
+			r := classifyDrop(err)
+			o.attachmentDropped(ctx, r, err)
+			replyReason = worseDropReason(replyReason, r)
 		case deliveryUnknown:
 			unknown++
+			// Not a failure: the frame may well have arrived. Filed under its
+			// own counter so the drop rate stays a rate of definite drops.
+			r := unconfirmedReason(err)
+			if r == "" {
+				r = "ack_timeout" // sendOutcome and unconfirmedReason share a set; belt and braces
+			}
+			o.attachmentUnconfirmed(ctx, r, err)
+			replyUnconfirmed = worseUnconfirmedReason(replyUnconfirmed, r)
+		default:
+			o.attachmentDelivered()
 		}
 		if err != nil {
 			// The object's URL stays out of the log: it is an address that
@@ -292,6 +359,21 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 				"attachment_id", uuidStringPub(row.ID),
 				"content_type", row.ContentType,
 				"size_bytes", row.SizeBytes)
+		}
+	}
+	if carriesTheReply {
+		// The files were the answer. Three honest endings: any file arrived —
+		// delivered; none arrived and at least one failure is definite — a
+		// drop under the worst definite reason; nothing definite either way —
+		// unconfirmed, because calling a maybe-delivered reply a drop points
+		// the operator at a resend the user may already have.
+		switch {
+		case failed+unknown < len(rows):
+			o.delivered()
+		case failed > 0:
+			o.droppedFor(ctx, to.SessionID, "chat:done", replyReason, nil)
+		default:
+			o.unconfirmedFor(ctx, to.SessionID, "chat:done", replyUnconfirmed, nil)
 		}
 	}
 	// The answer is already on the user's screen and it may well refer to a

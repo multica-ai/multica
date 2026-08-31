@@ -46,12 +46,6 @@ export function isAtLiveEnd(m: ScrollMetrics): boolean {
   return distanceFromBottom(m) <= FOLLOW_EDGE_THRESHOLD;
 }
 
-/** Returns a downward-only scroll target, or `null` when no scrolling is needed. */
-export function bottomPinTarget(m: ScrollMetrics): number | null {
-  const target = Math.max(0, m.scrollHeight - m.clientHeight);
-  return target > m.scrollTop ? target : null;
-}
-
 export interface StickToBottom {
   /** For `followOutput`: the reader is still following the live end. */
   isFollowing(): boolean;
@@ -64,8 +58,24 @@ export interface StickToBottom {
  * end. Viewport resizes (the composer) are observed here; content resizes
  * (streaming) must be reported through `onContentHeightChanged`, because a
  * ResizeObserver on the container never sees its scroll extent.
+ *
+ * `pinToLiveEnd` applies the correction and MUST scroll through Virtuoso
+ * (`scrollToIndex` at the last row), never by writing `scrollTop` here. In a
+ * virtualised list `scrollHeight` covers unrendered rows with an ESTIMATE, so
+ * `scrollHeight - clientHeight` is not the bottom. Jumping there drops
+ * Virtuoso outside its rendered window; it measures the rows it lands on, the
+ * estimate moves, the "bottom" moves with it, and the next height change pins
+ * again — a correction that never converges. Worse, each of those jumps
+ * reaches the latch as displacement no input can account for, so the reader's
+ * own wheel scrolls are refused attribution and pinned away: the follow never
+ * releases and the list cannot be scrolled at all (MUL-6879). An index-based
+ * scroll to the last row is what Virtuoso's own `followOutput` does, and it
+ * converges because Virtuoso measures that row before deciding where to stop.
  */
-export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
+export function useStickToBottom(
+  scrollEl: HTMLElement | null,
+  pinToLiveEnd: () => void,
+): StickToBottom {
   const followRef = useRef<LiveEndFollow | null>(null);
   if (followRef.current === null) {
     followRef.current = createLiveEndFollow();
@@ -76,11 +86,11 @@ export function useStickToBottom(scrollEl: HTMLElement | null): StickToBottom {
   }
   const follow = followRef.current;
 
+  const pinRef = useRef(pinToLiveEnd);
+  pinRef.current = pinToLiveEnd;
   const pin = useCallback(() => {
-    if (!scrollEl) return;
-    const target = bottomPinTarget(scrollEl);
-    if (target !== null) scrollEl.scrollTop = target;
-  }, [scrollEl]);
+    pinRef.current();
+  }, []);
 
   // Content grew or the viewport resized — displacement with no scroll event,
   // so it can never promote staged reader input.

@@ -133,7 +133,8 @@ export function DaemonRuntimeActions() {
   // real guard is in the main process (stopDaemon/restartDaemon); this is the
   // matching UX. See #3916.
   const externallyManaged = status.externallyManaged === true;
-  const isStopped = status.state === "stopped";
+  const isStopped =
+    status.state === "stopped" || status.state === "recovery_paused";
   const isCliMissing = status.state === "cli_not_found";
   const isAuthExpired = status.state === "auth_expired";
   const isTransitioning =

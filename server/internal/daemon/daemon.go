@@ -4005,11 +4005,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 //
 // The HTTP heartbeat is used on purpose rather than queueing a WS frame: the
 // hint arrives on the read pump, the WS write path may be backed up or tearing
-// down, and this is a human-interactive, low-frequency path (a user opened a
-// model picker) where one extra request is cheaper than a missed wakeup. Note it
-// intentionally bypasses the wsHeartbeatRecentlyAcked suppression that the
-// scheduled HTTP tick honours — that suppression exists to avoid duplicate
-// periodic writes, not to block an explicitly requested pull.
+// down, and this is a human-interactive, low-frequency path where one extra
+// request is cheaper than a missed wakeup. Note it intentionally bypasses the
+// wsHeartbeatRecentlyAcked suppression that the scheduled HTTP tick honours —
+// that suppression exists to avoid duplicate periodic writes, not to block an
+// explicitly requested pull.
 func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	if runtimeID == "" {
 		return
@@ -4037,10 +4037,10 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		d.pendingWorkMu.Unlock()
 		return
 	}
-	// Rate limit per runtime. The hint is caller-triggered (any workspace member
-	// hitting the list-models endpoint), so without a floor a request loop would
-	// become a heartbeat amplifier. A suppressed hint costs nothing but the
-	// pre-existing wait for the scheduled heartbeat.
+	// Rate limit per runtime. The hint is caller-triggered by interactive model
+	// or capability endpoints, so without a floor a request loop would become a
+	// heartbeat amplifier. A suppressed hint costs nothing but the pre-existing
+	// wait for the scheduled heartbeat.
 	if last, ok := d.pendingWorkLastRun[runtimeID]; ok && time.Since(last) < pendingWorkHintMinInterval {
 		d.pendingWorkMu.Unlock()
 		d.logger.Debug("pending work hint throttled", "runtime_id", runtimeID, "kind", kind)
@@ -4055,10 +4055,12 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		d.pendingWorkMu.Unlock()
 	}()
 
-	// Root context: handleHeartbeatActions hands this ctx to the actual work
-	// (model discovery shells out to a CLI, for up to ~40s on the slowest
-	// provider — see agent.hermesDiscoveryTimeout), so it must outlive this
-	// function. Only the heartbeat request itself is time-bounded.
+	// Root context: handleHeartbeatActions hands this ctx to the actual work, so
+	// it must outlive this function. Capability discovery and local-skill imports
+	// are normally quick filesystem operations, while model discovery may shell
+	// out to a CLI for up to ~40s on the slowest provider (see
+	// agent.hermesDiscoveryTimeout). Only the heartbeat request itself is
+	// time-bounded.
 	ctx := d.recoveryContext()
 	if ctx.Err() != nil {
 		return

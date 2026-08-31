@@ -69,6 +69,10 @@ type Outbound struct {
 	// test can run it inline and observe the result deterministically.
 	spawn func(func())
 
+	// metrics counts what happened to each reply. Nil discards; see
+	// outbound_outcome.go for why the drop breakdown exists at all.
+	metrics Metrics
+
 	// Two counters bound attachment delivery, and they are two because one
 	// cannot be in both places at once.
 	//
@@ -132,9 +136,16 @@ func (o *Outbound) handleEvent(e events.Event) {
 	// publish call site. Fresh ctx with a tight timeout, same as Slack.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	// One place records an undelivered reply, so a drop is counted exactly
+	// once and always carries a reason. The branches inside processEvent that
+	// end a turn without an error of their own record themselves and return
+	// nil; everything that surfaces here is classified from the error.
 	if err := o.processEvent(ctx, e); err != nil {
-		o.logger.WarnContext(ctx, "wecom outbound: reply delivery failed",
-			"error", err, "chat_session_id", e.ChatSessionID)
+		if reason := unconfirmedReason(err); reason != "" {
+			o.unconfirmed(ctx, e, reason, err)
+		} else {
+			o.dropped(ctx, e, classifyDrop(err), err)
+		}
 	}
 }
 
@@ -150,7 +161,8 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the work away.
 	content := chatDoneContent(e.Payload)
 	if content == "" && !o.mayCarryAttachments(e) {
-		return nil // nothing to say, nothing to send
+		o.skipped(ctx, e, skipNothingToSay)
+		return nil
 	}
 	// Only bound, non-empty completions reach here, so classify the task
 	// origin before loading credentials or sending. A question asked in the
@@ -168,6 +180,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	// the room's message either.
 	taskID, ok := chatDoneTaskID(e)
 	if !ok {
+		o.dropped(ctx, e, dropTaskMissing, nil)
 		return nil
 	}
 	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
@@ -185,6 +198,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Cancelled and deleted while its completion was in flight.
+			o.dropped(ctx, e, dropTaskMissing, nil)
 			return nil
 		}
 		return fmt.Errorf("wecom: load agent task: %w", err)
@@ -194,6 +208,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("wecom: classify task input origin: %w", err)
 	}
 	if !deliver {
+		o.skipped(ctx, e, skipOriginNotChannel)
 		return nil
 	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
@@ -204,7 +219,8 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("wecom: load installation: %w", err)
 	}
 	if inst.Status != string(InstallationActive) {
-		return nil // revoked between trigger and reply
+		o.skipped(ctx, e, skipInstallationInactive) // revoked between trigger and reply
+		return nil
 	}
 	if o.senders == nil {
 		return errors.New("wecom: sender registry not configured")
@@ -220,7 +236,7 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		// file's header). Either way, buffering is wrong — the reply is stale
 		// by the time a socket returns — so we surface it to the caller's WARN
 		// rather than drop it silently.
-		return errors.New("wecom: connection not ready on this replica")
+		return errNoLiveConnection
 	}
 	chatType := aibotChatTypeFromChannel(channel.ChatType(binding.ChatType))
 	// Words first. An empty completion reaches here only because a file is
@@ -230,14 +246,19 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		if err := sender.sendTextCtx(ctx, binding.ChannelChatID, chatType, content); err != nil {
 			return err
 		}
+		o.delivered()
 	}
 	// Then whatever the agent produced alongside them, as its own message — a
 	// WeCom reply cannot carry a file inline.
+	// carriesTheReply is true when the files ARE the answer: an empty
+	// completion reached here only because one is bound to it, so nothing has
+	// been counted for this reply yet and the attachment path owes its outcome.
 	o.deliverAttachments(e, attachmentTarget{
 		InstallationID: binding.InstallationID,
 		ChatID:         binding.ChannelChatID,
 		ChatType:       chatType,
-	})
+		SessionID:      e.ChatSessionID,
+	}, content == "")
 	return nil
 }
 
