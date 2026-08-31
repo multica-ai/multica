@@ -10,15 +10,16 @@ const (
 	EventIssueAttachmentsChanged = "issue_attachments:changed"
 
 	// Comment events
-	EventCommentCreated       = "comment:created"
-	EventCommentUpdated       = "comment:updated"
-	EventCommentDeleted       = "comment:deleted"
-	EventCommentResolved      = "comment:resolved"
-	EventCommentUnresolved    = "comment:unresolved"
-	EventReactionAdded        = "reaction:added"
-	EventReactionRemoved      = "reaction:removed"
-	EventIssueReactionAdded   = "issue_reaction:added"
-	EventIssueReactionRemoved = "issue_reaction:removed"
+	EventCommentCreated          = "comment:created"
+	EventCommentUpdated          = "comment:updated"
+	EventCommentFollowUpsUpdated = "comment:follow_ups_updated"
+	EventCommentDeleted          = "comment:deleted"
+	EventCommentResolved         = "comment:resolved"
+	EventCommentUnresolved       = "comment:unresolved"
+	EventReactionAdded           = "reaction:added"
+	EventReactionRemoved         = "reaction:removed"
+	EventIssueReactionAdded      = "issue_reaction:added"
+	EventIssueReactionRemoved    = "issue_reaction:removed"
 
 	// Agent events
 	EventAgentStatus   = "agent:status"

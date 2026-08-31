@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TimelineEntry represents a single entry in the issue timeline, which can be
@@ -32,13 +33,14 @@ type TimelineEntry struct {
 	CommentType *string `json:"comment_type,omitempty"`
 	// Set only on comments produced by a quick action run. Unforgeable: there
 	// is no request field for it on the generic comment endpoint.
-	QuickActionID  *string              `json:"quick_action_id,omitempty"`
-	Reactions      []ReactionResponse   `json:"reactions,omitempty"`
-	Attachments    []AttachmentResponse `json:"attachments,omitempty"`
-	ResolvedAt     *string              `json:"resolved_at,omitempty"`
-	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
-	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
-	SourceTaskID   *string              `json:"source_task_id,omitempty"`
+	QuickActionID      *string                         `json:"quick_action_id,omitempty"`
+	SuggestedFollowUps []protocol.IssueCommentFollowUp `json:"suggested_follow_ups,omitempty"`
+	Reactions          []ReactionResponse              `json:"reactions,omitempty"`
+	Attachments        []AttachmentResponse            `json:"attachments,omitempty"`
+	ResolvedAt         *string                         `json:"resolved_at,omitempty"`
+	ResolvedByType     *string                         `json:"resolved_by_type,omitempty"`
+	ResolvedByID       *string                         `json:"resolved_by_id,omitempty"`
+	SourceTaskID       *string                         `json:"source_task_id,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
@@ -278,24 +280,29 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 		commentType := c.Type
 		updatedAt := timestampToString(c.UpdatedAt)
 		cid := uuidToString(c.ID)
+		var suggestedFollowUps []protocol.IssueCommentFollowUp
+		if len(c.SuggestedFollowUps) > 0 {
+			_ = json.Unmarshal(c.SuggestedFollowUps, &suggestedFollowUps)
+		}
 		out[i] = TimelineEntry{
-			Type:           "comment",
-			ID:             cid,
-			ActorType:      c.AuthorType,
-			ActorID:        uuidToString(c.AuthorID),
-			Content:        &content,
-			CommentType:    &commentType,
-			QuickActionID:  uuidToPtr(c.QuickActionID),
-			ParentID:       uuidToPtr(c.ParentID),
-			CreatedAt:      timestampToString(c.CreatedAt),
-			UpdatedAt:      &updatedAt,
-			Revision:       c.Revision,
-			Reactions:      reactions[cid],
-			Attachments:    attachments[cid],
-			ResolvedAt:     timestampToPtr(c.ResolvedAt),
-			ResolvedByType: textToPtr(c.ResolvedByType),
-			ResolvedByID:   uuidToPtr(c.ResolvedByID),
-			SourceTaskID:   uuidToPtr(c.SourceTaskID),
+			Type:               "comment",
+			ID:                 cid,
+			ActorType:          c.AuthorType,
+			ActorID:            uuidToString(c.AuthorID),
+			Content:            &content,
+			CommentType:        &commentType,
+			QuickActionID:      uuidToPtr(c.QuickActionID),
+			SuggestedFollowUps: suggestedFollowUps,
+			ParentID:           uuidToPtr(c.ParentID),
+			CreatedAt:          timestampToString(c.CreatedAt),
+			UpdatedAt:          &updatedAt,
+			Revision:           c.Revision,
+			Reactions:          reactions[cid],
+			Attachments:        attachments[cid],
+			ResolvedAt:         timestampToPtr(c.ResolvedAt),
+			ResolvedByType:     textToPtr(c.ResolvedByType),
+			ResolvedByID:       uuidToPtr(c.ResolvedByID),
+			SourceTaskID:       uuidToPtr(c.SourceTaskID),
 		}
 	}
 	return out

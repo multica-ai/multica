@@ -341,6 +341,7 @@
     "quick_action_deferred": "{{name}}이(가) 오프라인입니다. 온라인이 되면 시작합니다",
     "quick_action_blocked": "{{name}}을(를) 실행할 수 없습니다",
     "quick_action_posted": "댓글을 게시했습니다",
+    "follow_ups_heading": "다음 단계",
     "quick_action_blocked_title": "이 퀵 액션을 실행할 수 없습니다",
     "quick_action_blocked_body": "“{{name}}”은(는) 트리거 권한이 없는 에이전트로 실행됩니다. 워크스페이스 관리자에게 해당 에이전트를 팀에 공개하거나 공유 에이전트로 변경해 달라고 요청하세요.",
     "quick_action_blocked_ok": "확인",

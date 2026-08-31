@@ -806,6 +806,18 @@ export function useCreateComment(issueId: string) {
   });
 }
 
+export function useRunIssueCommentFollowUp(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, actionId }: { commentId: string; actionId: string }) =>
+      api.runIssueCommentFollowUp(issueId, commentId, actionId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+    },
+  });
+}
+
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

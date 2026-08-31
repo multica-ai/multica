@@ -41,12 +41,23 @@ const (
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
 
-// ChatQuickAction is a server-validated follow-up attached to one assistant
+// SuggestedFollowUp is a server-validated next step attached to one model
 // reply. Label is the concise chip text; Prompt is the full next user turn.
-type ChatQuickAction struct {
+type SuggestedFollowUp struct {
 	Label   string `json:"label"`
 	Prompt  string `json:"prompt"`
 	Primary bool   `json:"primary,omitempty"`
+}
+
+// ChatQuickAction keeps the existing chat wire name while sharing the generic
+// follow-up contract with issue comments.
+type ChatQuickAction = SuggestedFollowUp
+
+// IssueCommentFollowUp is a persisted issue-comment suggestion. ID is generated
+// by the server and is the only value clients send back when running it.
+type IssueCommentFollowUp struct {
+	ID string `json:"id"`
+	SuggestedFollowUp
 }
 
 // RPCRequestPayload is the generic daemon→server request envelope carried in a

@@ -344,6 +344,7 @@
     "quick_action_deferred": "{{name}} is offline — it will start once back online",
     "quick_action_blocked": "{{name}} could not be triggered",
     "quick_action_posted": "Comment posted",
+    "follow_ups_heading": "Next steps",
     "quick_action_blocked_title": "You can’t run this quick action",
     "quick_action_blocked_body": "“{{name}}” runs as an agent you’re not allowed to trigger. Ask a workspace admin to make that agent available to the team, or to point this action at a shared one.",
     "quick_action_blocked_ok": "Got it",

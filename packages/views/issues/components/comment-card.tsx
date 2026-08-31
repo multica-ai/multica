@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowUpRight, CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -40,6 +40,7 @@ import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useRunIssueCommentFollowUp } from "@multica/core/issues";
 import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
@@ -581,6 +582,85 @@ function CommentRevisionConflict({
   );
 }
 
+function CommentFollowUps({
+  issueId,
+  entry,
+  active,
+}: {
+  issueId: string;
+  entry: TimelineEntry;
+  active: boolean;
+}) {
+  const { t } = useT("issues");
+  const { getActorName } = useActorName();
+  const run = useRunIssueCommentFollowUp(issueId);
+  const actions = active && entry.actor_type === "agent"
+    ? (entry.suggested_follow_ups ?? []).slice(0, 3)
+    : [];
+  if (actions.length === 0) return null;
+
+  const targetName = getActorName(entry.actor_type, entry.actor_id);
+  const handleRun = async (actionId: string) => {
+    try {
+      const comment = await run.mutateAsync({ commentId: entry.id, actionId });
+      const outcome = comment.trigger_outcomes?.[0];
+      switch (outcome?.status) {
+        case "queued":
+          toast.success(t(($) => $.detail.quick_action_queued, { name: targetName }));
+          break;
+        case "coalesced":
+          toast.info(t(($) => $.detail.quick_action_coalesced, { name: targetName }));
+          break;
+        case "deferred":
+          toast.info(t(($) => $.detail.quick_action_deferred, { name: targetName }));
+          break;
+        case "blocked":
+          toast.error(t(($) => $.detail.quick_action_blocked, { name: targetName }));
+          break;
+        default:
+          toast.info(t(($) => $.detail.quick_action_posted));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  return (
+    <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="shrink-0 text-caption text-muted-foreground">
+          {t(($) => $.detail.follow_ups_heading)}
+        </span>
+        {actions.map((action) => (
+          <Tooltip key={action.id}>
+            <TooltipTrigger
+              render={(
+                <Button
+                  type="button"
+                  variant={action.primary ? "brandSubtle" : "outline"}
+                  size="sm"
+                  className="max-w-full rounded-full px-3"
+                  disabled={run.isPending}
+                  onClick={() => void handleRun(action.id)}
+                />
+              )}
+            >
+              {run.isPending && run.variables?.actionId === action.id ? (
+                <Loader2 className="animate-spin" aria-hidden="true" />
+              ) : null}
+              <span className="truncate">{action.label}</span>
+              {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap break-words">
+              {action.prompt}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
@@ -592,6 +672,7 @@ function CommentRow({
   canModerate = false,
   isResolution = false,
   isHighlighted = false,
+  showFollowUps = false,
   onEdit,
   onDelete,
   onToggleReaction,
@@ -606,6 +687,7 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
+  showFollowUps?: boolean;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
@@ -814,6 +896,9 @@ function CommentRow({
         <>
           <div className="pl-12 pr-4 max-md:pl-3 max-md:pr-3 pt-1 text-body leading-relaxed text-foreground">
             <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+            {showFollowUps && (entry.suggested_follow_ups?.length ?? 0) > 0 ? (
+              <CommentFollowUps issueId={issueId} entry={entry} active />
+            ) : null}
           </div>
           <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-12 pr-4 max-md:pl-3 max-md:pr-3" />
           {retryableAgentFailureComment(entry) && (
@@ -884,6 +969,8 @@ function CommentCardImpl({
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const allNestedReplies = replies;
+
+  const latestThreadCommentId = allNestedReplies.at(-1)?.id ?? entry.id;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
@@ -1152,6 +1239,9 @@ function CommentCardImpl({
               <>
                 <div className="pl-10 max-md:pl-0 text-body leading-relaxed text-foreground">
                   <ReadonlyContent content={entry.content ?? ""} attachments={entry.attachments} />
+                  {latestThreadCommentId === entry.id && (entry.suggested_follow_ups?.length ?? 0) > 0 ? (
+                    <CommentFollowUps issueId={issueId} entry={entry} active />
+                  ) : null}
                 </div>
                 <AttachmentList attachments={entry.attachments} content={entry.content} className="mt-1.5 pl-10 max-md:pl-0" />
                 {retryableAgentFailureComment(entry) && (
@@ -1205,6 +1295,7 @@ function CommentCardImpl({
                     canModerate={canModerate}
                     isResolution
                     isHighlighted={highlightedCommentId === resolutionReply.id}
+                    showFollowUps={latestThreadCommentId === resolutionReply.id}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
@@ -1245,6 +1336,7 @@ function CommentCardImpl({
                     canModerate={canModerate}
                     isResolution={reply.id === replyResolutionId}
                     isHighlighted={highlightedCommentId === reply.id}
+                    showFollowUps={latestThreadCommentId === reply.id}
                     onEdit={onEdit}
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
@@ -1283,4 +1375,4 @@ function CommentCardImpl({
 // every callback is stabilized via useCallback in use-issue-timeline.ts.
 const CommentCard = memo(CommentCardImpl);
 
-export { CommentCard, type CommentCardProps };
+export { CommentCard, CommentFollowUps, type CommentCardProps };

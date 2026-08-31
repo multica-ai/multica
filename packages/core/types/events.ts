@@ -16,6 +16,7 @@ export type WSEventType =
   | "issue:deleted"
   | "comment:created"
   | "comment:updated"
+  | "comment:follow_ups_updated"
   | "comment:deleted"
   | "comment:resolved"
   | "comment:unresolved"
@@ -226,6 +227,12 @@ export interface CommentCreatedPayload {
 export interface CommentUpdatedPayload {
   comment: Comment;
   issue_revision?: number;
+}
+
+export interface CommentFollowUpsUpdatedPayload {
+  issue_id: string;
+  comment_id: string;
+  suggested_follow_ups: import("./comment").SuggestedFollowUp[];
 }
 
 export interface CommentDeletedPayload {
@@ -564,6 +571,7 @@ export interface WSEventPayloadMap {
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
   "comment:updated": CommentUpdatedPayload;
+  "comment:follow_ups_updated": CommentFollowUpsUpdatedPayload;
   "comment:deleted": CommentDeletedPayload;
   "comment:resolved": CommentResolvedPayload;
   "comment:unresolved": CommentUnresolvedPayload;
