@@ -32,6 +32,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/mattermost"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -1111,6 +1112,54 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
 	}
 
+	// Mattermost integration. Same BYO shape as Slack and Telegram, with one
+	// self-hosting difference: an installation carries its own server URL, so
+	// there is no deployment-level API host to configure. The admin pastes the
+	// server URL plus a bot-account access token; inbound runs on one
+	// per-installation WebSocket connection supervised by the shared
+	// engine.Supervisor, resolvers sit on the generic channel_* tables, and the
+	// agent's reply is delivered as a single post on EventChatDone. Gated by
+	// MULTICA_MATTERMOST_SECRET_KEY (the at-rest token encryption key); when
+	// unset the handlers report the integration as unconfigured and no Factory
+	// is registered.
+	if mattermostKey, err := secretbox.LoadKey("MULTICA_MATTERMOST_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(mattermostKey)
+		if err != nil {
+			slog.Error("mattermost: secretbox.New failed; mattermost integration disabled", "error", err)
+		} else {
+			mattermostBindingSvc := mattermost.NewBindingTokenService(queries, pool)
+			h.MattermostBindingTokens = mattermostBindingSvc
+			mattermostReplier := mattermost.NewOutboundReplier(mattermost.OutboundReplierConfig{
+				Binding: mattermostBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/mattermost/bind) is a web-app page: app URL,
+				// not the API URL. Mirrors the Slack and Telegram repliers.
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
+			})
+			// No TypingNotifier: Mattermost's typing signal is a WebSocket
+			// action with no REST equivalent, so there is nothing this seam
+			// could call from the request path. See the adapter's design note.
+			channelRouter.Register(mattermost.TypeMattermost, mattermost.NewMattermostResolverSet(queries, pool, mattermostReplier))
+			mattermost.NewOutbound(queries, box.Open, nil, slog.Default()).Register(bus)
+
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// WebSocket connection per active Mattermost installation,
+			// authenticated with that installation's OWN bot access token.
+			mattermost.RegisterMattermost(channelRegistry, mattermost.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+
+			installSvc, ierr := mattermost.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("mattermost: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.MattermostInstall = installSvc
+			}
+			slog.Info("mattermost integration enabled (per-installation websocket)")
+		}
+	} else {
+		slog.Info("mattermost integration disabled (MULTICA_MATTERMOST_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1735,6 +1784,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
 				})
+
+				// Mattermost integration. Same admin/member split as Telegram:
+				// listing is member-visible; install + revoke are admin-only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/mattermost/installations", h.ListMattermostInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/mattermost/installations/{installationId}", h.RevokeMattermostInstallation)
+					r.Post("/mattermost/install", h.RegisterMattermostBot)
+				})
 			})
 		})
 
@@ -1762,6 +1823,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace-scoped, identity from the session, token proves only
 		// "this Telegram user id requested binding".
 		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
+		// Mattermost binding-token redemption. Same rationale: not
+		// workspace-scoped, identity from the session, token proves only
+		// "this Mattermost user id requested binding".
+		r.Post("/api/mattermost/binding/redeem", h.RedeemMattermostBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
