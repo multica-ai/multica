@@ -880,6 +880,40 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	}
 }
 
+func TestCreateIssueRejectsActiveDuplicateWithGeneratedTimestampSuffix(t *testing.T) {
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	var issueID string
+	defer func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE $2`, testWorkspaceID, "LAS Jira scan duplicate guard "+suffix+"%")
+	}()
+
+	baseTitle := "LAS Jira scan duplicate guard " + suffix
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": baseTitle + " - 2026-08-18 00:50",
+	})
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
+	var original IssueResponse
+	w.JSON(&original)
+	issueID = original.ID
+
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": baseTitle + " - 2026-08-18 01:00",
+	})
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
+	var conflict struct {
+		Code  string        `json:"code"`
+		Issue IssueResponse `json:"issue"`
+	}
+	w.JSON(&conflict)
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
+	}
+	if conflict.Issue.ID != issueID {
+		t.Fatalf("conflict issue = %s, want original %s", conflict.Issue.ID, issueID)
+	}
+}
+
 func TestCreateIssueAllowsDuplicateAfterCancelled(t *testing.T) {
 	ctx := context.Background()
 	title := fmt.Sprintf("Cancelled duplicate guard %d", time.Now().UnixNano())
