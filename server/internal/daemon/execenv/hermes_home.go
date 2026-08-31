@@ -355,6 +355,10 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 	return filepath.Join(root, "profiles", canon), true, nil
 }
 
+type hermesHomeOptions struct {
+	disableFigmaMCP bool
+}
+
 // prepareHermesHome builds the per-task HERMES_HOME compatibility overlay
 // described above. The daemon exports the given path as HERMES_HOME on the
 // hermes subprocess so the CLI discovers the bound skills natively.
@@ -379,7 +383,13 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // database task-local. The returned hermesSessionMount reports both what got
 // mounted and whether the store actually holds a transcript, so the caller never
 // tells a task it can resume history that is not there.
+// prepareHermesHome is the no-policy compatibility/test helper. Production
+// task paths use prepareHermesHomeWithOptions with policy derived from the task.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
+	return prepareHermesHomeWithOptions(hermesHome, sourceHome, sourceMustExist, workspaceSkills, env, memoryStore, sessionStore, hermesHomeOptions{}, logger)
+}
+
+func prepareHermesHomeWithOptions(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, opts hermesHomeOptions, logger *slog.Logger) (sessions hermesSessionMount, err error) {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
 		sharedHome = platformDefaultHermesHome()
@@ -426,7 +436,7 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := mirrorSharedHermesHome(sharedHome, hermesHome, logger); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("mirror shared hermes home: %w", err)
 	}
-	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, logger); err != nil {
+	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, opts, logger); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("derive hermes config: %w", err)
 	}
 	if err := writeDerivedHermesEnv(sharedHome, hermesHome); err != nil {
@@ -638,7 +648,7 @@ func linkSharedHermesEntry(src, dst string) error {
 // the point of the fix; only the user's global skills would be missing. The file
 // is written 0600 (it can hold inline api_key secrets) via atomic replace, so
 // reuse also repairs a prior file's permissions.
-func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]string, logger *slog.Logger) error {
+func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]string, opts hermesHomeOptions, logger *slog.Logger) error {
 	srcConfig := filepath.Join(sharedHome, "config.yaml")
 	dstConfig := filepath.Join(hermesHome, "config.yaml")
 
@@ -673,11 +683,17 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
+		if opts.disableFigmaMCP {
+			return fmt.Errorf("parse shared config for scheduled Figma isolation: %w", err)
+		}
 		logger.Warn("execenv: hermes-home config parse failed; copying verbatim", "error", err)
 		return writeFileAtomic(dstConfig, data, 0o600)
 	}
 	dirs := computeHermesExternalDirs(sharedHome, existingHermesExternalDirs(&doc), env)
 	if err := setHermesExternalDirs(&doc, dirs); err != nil {
+		if opts.disableFigmaMCP {
+			return fmt.Errorf("prepare shared config for scheduled Figma isolation: %w", err)
+		}
 		logger.Warn("execenv: hermes-home set external_dirs failed; copying verbatim", "error", err)
 		return writeFileAtomic(dstConfig, data, 0o600)
 	}
@@ -685,7 +701,184 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 	// Supermemory/Hindsight/etc. bank isn't shared across managed tasks; the
 	// built-in per-task memories/ dir is already isolated above.
 	disableHermesMemoryProvider(&doc)
+	if opts.disableFigmaMCP {
+		if err := disableHermesFigmaMCP(&doc); err != nil {
+			return err
+		}
+	}
 	return marshalYAMLToFile(&doc, dstConfig)
+}
+
+// disableHermesFigmaMCP disables only a host-configured Figma MCP entry in the
+// task-local derived config. Server names are case-insensitive; every other
+// server and every other field on the Figma entry remain unchanged.
+func disableHermesFigmaMCP(doc *yaml.Node) error {
+	top := yamlDocumentRoot(doc)
+	if top == nil {
+		return fmt.Errorf("scheduled Hermes config must be a mapping")
+	}
+	materializedTop, err := materializeHermesYAMLMapping(top)
+	if err != nil {
+		return fmt.Errorf("materialize scheduled Hermes config: %w", err)
+	}
+	if doc.Kind == yaml.DocumentNode {
+		doc.Content[0] = materializedTop
+	} else {
+		*doc = *materializedTop
+	}
+	top = materializedTop
+	servers := yamlMapValue(top, "mcp_servers")
+	if servers == nil {
+		return nil
+	}
+	servers, err = materializeHermesYAMLMapping(servers)
+	if err != nil {
+		return fmt.Errorf("materialize scheduled mcp_servers config: %w", err)
+	}
+	yamlSetMapValue(top, "mcp_servers", servers)
+	for i := 0; i+1 < len(servers.Content); i += 2 {
+		if !strings.EqualFold(servers.Content[i].Value, "figma") {
+			continue
+		}
+		server := servers.Content[i+1]
+		if server.Kind != yaml.MappingNode {
+			return fmt.Errorf("scheduled Figma MCP config must be a mapping")
+		}
+		yamlSetMapValue(server, "enabled", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: "false"})
+	}
+	return nil
+}
+
+// materializeHermesYAMLMapping resolves every alias under node, validates that
+// the result is a mapping, and expands YAML merge keys into explicit pairs.
+func materializeHermesYAMLMapping(node *yaml.Node) (*yaml.Node, error) {
+	materialized, err := materializeHermesYAMLNode(node, make(map[*yaml.Node]bool))
+	if err != nil {
+		return nil, err
+	}
+	if materialized.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("expected mapping, got YAML kind %d", materialized.Kind)
+	}
+	return flattenHermesYAMLMerge(materialized)
+}
+
+// flattenHermesYAMLMerge applies YAML merge semantics to one already
+// alias-materialized mapping. Explicit keys override merged keys. For a merge
+// sequence, earlier mappings override later mappings, matching YAML's merge-key
+// precedence. The returned mapping contains no << key.
+func flattenHermesYAMLMerge(mapping *yaml.Node) (*yaml.Node, error) {
+	type yamlPair struct {
+		key *yaml.Node
+		val *yaml.Node
+	}
+	explicit := make([]yamlPair, 0, len(mapping.Content)/2)
+	merges := make([]*yaml.Node, 0, 1)
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		key, val := mapping.Content[i], mapping.Content[i+1]
+		if key.Kind != yaml.ScalarNode {
+			return nil, fmt.Errorf("mapping key must be a scalar")
+		}
+		if key.Value == "<<" {
+			merges = append(merges, val)
+			continue
+		}
+		explicit = append(explicit, yamlPair{key: key, val: val})
+	}
+
+	out := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: mapping.Style}
+	index := make(map[string]int, len(explicit))
+	addFirst := func(key, val *yaml.Node) error {
+		if key.Kind != yaml.ScalarNode {
+			return fmt.Errorf("merged mapping key must be a scalar")
+		}
+		if _, exists := index[key.Value]; exists {
+			return nil
+		}
+		index[key.Value] = len(out.Content)
+		out.Content = append(out.Content, key, val)
+		return nil
+	}
+	mergeMapping := func(source *yaml.Node) error {
+		if source.Kind != yaml.MappingNode {
+			return fmt.Errorf("merge source must be a mapping, got YAML kind %d", source.Kind)
+		}
+		flat, err := flattenHermesYAMLMerge(source)
+		if err != nil {
+			return err
+		}
+		for i := 0; i+1 < len(flat.Content); i += 2 {
+			if err := addFirst(flat.Content[i], flat.Content[i+1]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, merge := range merges {
+		switch merge.Kind {
+		case yaml.MappingNode:
+			if err := mergeMapping(merge); err != nil {
+				return nil, err
+			}
+		case yaml.SequenceNode:
+			for _, source := range merge.Content {
+				if err := mergeMapping(source); err != nil {
+					return nil, err
+				}
+			}
+		default:
+			return nil, fmt.Errorf("merge value must be a mapping or sequence of mappings, got YAML kind %d", merge.Kind)
+		}
+	}
+	for _, pair := range explicit {
+		if pos, exists := index[pair.key.Value]; exists {
+			out.Content[pos], out.Content[pos+1] = pair.key, pair.val
+			continue
+		}
+		index[pair.key.Value] = len(out.Content)
+		out.Content = append(out.Content, pair.key, pair.val)
+	}
+	return out, nil
+}
+
+// materializeHermesYAMLNode deep-copies node while recursively replacing every
+// alias with an independent copy of its target. Anchors are stripped from the
+// result so changing the task-local Figma mapping cannot mutate or re-link any
+// unrelated source mapping. visiting tracks the current target path and turns a
+// cyclic alias into an actionable error instead of unbounded recursion.
+func materializeHermesYAMLNode(node *yaml.Node, visiting map[*yaml.Node]bool) (*yaml.Node, error) {
+	if node == nil {
+		return nil, fmt.Errorf("nil YAML node")
+	}
+	if node.Kind == yaml.AliasNode {
+		if node.Alias == nil {
+			return nil, fmt.Errorf("dangling YAML alias %q", node.Value)
+		}
+		if visiting[node.Alias] {
+			return nil, fmt.Errorf("cyclic YAML alias %q", node.Value)
+		}
+		return materializeHermesYAMLNode(node.Alias, visiting)
+	}
+	if visiting[node] {
+		return nil, fmt.Errorf("cyclic YAML node")
+	}
+	visiting[node] = true
+	defer delete(visiting, node)
+
+	clone := *node
+	clone.Anchor = ""
+	clone.Alias = nil
+	if len(node.Content) == 0 {
+		return &clone, nil
+	}
+	clone.Content = make([]*yaml.Node, len(node.Content))
+	for i, child := range node.Content {
+		materialized, err := materializeHermesYAMLNode(child, visiting)
+		if err != nil {
+			return nil, err
+		}
+		clone.Content[i] = materialized
+	}
+	return &clone, nil
 }
 
 // disableHermesMemoryProvider forces skills-adjacent `memory.provider` to empty

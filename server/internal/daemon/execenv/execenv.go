@@ -239,6 +239,12 @@ type TaskContextForEnv struct {
 	InitiatorEmail string
 }
 
+func hermesHomeOptionsForTask(task TaskContextForEnv) hermesHomeOptions {
+	return hermesHomeOptions{
+		disableFigmaMCP: task.AutopilotRunID != "" && task.AutopilotSource == "schedule",
+	}
+}
+
 // SkillContextForEnv represents a skill to be written into the execution environment.
 // IssueStatusForEnv is one active custom workspace status rendered into the
 // brief (MUL-6460). Name and Description are user-authored text and MUST pass
@@ -661,7 +667,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// Emptying an agent's own skill list is NOT a way to opt out of the overlay.
 	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
-		sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+		opts := hermesHomeOptionsForTask(params.Task)
+		sessions, err := prepareHermesHomeWithOptions(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, opts, logger)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
@@ -956,7 +963,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
 		if len(params.Task.AgentSkills) > 0 {
-			sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+			opts := hermesHomeOptionsForTask(params.Task)
+			sessions, err := prepareHermesHomeWithOptions(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, opts, logger)
 			if err != nil {
 				// Fail closed: a half-built overlay must not run. Returning nil
 				// makes the daemon fall back to a fresh Prepare, whose error
