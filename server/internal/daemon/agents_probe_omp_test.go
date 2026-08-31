@@ -40,7 +40,7 @@ func TestProbeAgentCLIs_DiscoversPiAndOmpSeparately(t *testing.T) {
 	t.Setenv("MULTICA_PI_PATH", "")
 	t.Setenv("MULTICA_OMP_PATH", "")
 
-	agents := probeAgentCLIs()
+	agents, _ := probeAgentCLIs()
 
 	// Both pi and omp should be discovered as separate entries.
 	piEntry, piOk := agents["pi"]
@@ -115,7 +115,7 @@ func TestRegisterRuntimes_PiAndOmpBothReachTheServer(t *testing.T) {
 	t.Setenv("MULTICA_PI_PATH", "")
 	t.Setenv("MULTICA_OMP_PATH", "")
 
-	agents := probeAgentCLIs()
+	agents, _ := probeAgentCLIs()
 	piEntry, ok := agents["pi"]
 	if !ok {
 		t.Fatal("pi not discovered; the registration assertion below would be vacuous")

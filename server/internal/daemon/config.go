@@ -103,6 +103,7 @@ type Config struct {
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	DiscoverySkipped               map[string]string     // providers found but rejected at discovery time (currently only dsh without its Multica runtime profile); folded into /health skipped_agents
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -247,7 +248,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 
 	// Discover installed agent CLIs. Extracted so the periodic workspace sync
 	// can re-run the same discovery on a live daemon (MUL-5439).
-	agents := probeAgentCLIs()
+	agents, discoverySkipped := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, or zeroclaw and ensure it is on PATH")
 	}
@@ -576,6 +577,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		RuntimeName:                     runtimeName,
 		Profile:                         profile,
 		Agents:                          agents,
+		DiscoverySkipped:                discoverySkipped,
 		WorkspacesRoot:                  workspacesRoot,
 		KeepEnvAfterTask:                keepEnv,
 		GCEnabled:                       gcEnabled,
