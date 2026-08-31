@@ -686,7 +686,7 @@
   },
   "delete_workspace_dialog": {
     "title": "ワークスペースを削除",
-    "description": "この操作は元に戻せません。すべてのタスク、エージェント、データが完全に削除されます。",
+    "description": "この操作は元に戻せません。すべてのタスク、エージェント、チャット、実行履歴が完全に削除されます。",
     "type_to_confirm_prefix": "確認するには、下に",
     "type_to_confirm_suffix": " と入力してください。",
     "cancel": "キャンセル",

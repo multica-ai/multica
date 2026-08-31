@@ -13,6 +13,8 @@ import enSearch from "../locales/en/search.json";
 // The palette labels its Pages group from the sidebar's own nav strings, so
 // the layout namespace is part of its contract, not incidental setup.
 import enLayout from "../locales/en/layout.json";
+import enProjects from "../locales/en/projects.json";
+import zhHansProjects from "../locales/zh-Hans/projects.json";
 
 const TEST_RESOURCES = {
   en: {
@@ -21,6 +23,23 @@ const TEST_RESOURCES = {
     settings: enSettings,
     search: enSearch,
     layout: enLayout,
+    projects: enProjects,
+  },
+};
+
+// Deliberately NOT a full zh-Hans bundle: only `projects` is translated, and
+// every other namespace stays on its English bundle under the zh-Hans key.
+// The one thing under test is whether a project row names its status through
+// the projects namespace, and keeping the chrome in English lets these tests
+// go on addressing the palette by its English placeholder and group headings.
+const ZH_TEST_RESOURCES = {
+  "zh-Hans": {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    search: enSearch,
+    layout: enLayout,
+    projects: zhHansProjects,
   },
 };
 
@@ -33,6 +52,17 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 }
 
 const renderSearch = () => render(<SearchCommand />, { wrapper: I18nWrapper });
+
+function ChineseI18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="zh-Hans" resources={ZH_TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+const renderSearchInChinese = () =>
+  render(<SearchCommand />, { wrapper: ChineseI18nWrapper });
 
 const {
   mockPush,
@@ -1031,6 +1061,31 @@ describe("SearchCommand", () => {
       Array.from(
         document.querySelectorAll<HTMLElement>("[cmdk-group-heading]"),
       ).map((el) => el.textContent ?? "");
+
+    it("renders project status in the selected UI language", async () => {
+      const user = userEvent.setup();
+      mockSearchProjects.mockResolvedValue({
+        projects: [
+          fixtureProject({
+            id: "proj-localized",
+            title: "localized project",
+            status: "in_progress",
+          }),
+        ],
+        total: 1,
+      });
+
+      renderSearchInChinese();
+      await user.type(
+        screen.getByPlaceholderText("Type a command or search..."),
+        "localized",
+      );
+
+      await waitFor(() => expect(screen.getByText("进行中")).toBeInTheDocument(), {
+        timeout: 2000,
+      });
+      expect(screen.queryByText("In Progress")).toBeNull();
+    });
 
     it("keeps a cancelled project below a live issue instead of first", async () => {
       const user = userEvent.setup();

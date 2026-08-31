@@ -47,6 +47,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
+import { useProjectStatusLabels } from "../projects/components/labels";
 import { routeIconForPath } from "../layout/route-icon-components";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
@@ -184,6 +185,9 @@ function ProjectResultRow({
   disabled?: boolean;
   onSelect: (value: string) => void;
 }) {
+  const projectStatusLabels = useProjectStatusLabels();
+  const status = project.status as ProjectStatus;
+
   return (
     <CommandPrimitive.Item
       key={`project:${project.id}`}
@@ -198,9 +202,9 @@ function ProjectResultRow({
           <HighlightText text={project.title} query={query} />
         </span>
         <span
-          className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.color ?? "text-muted-foreground"}`}
+          className={`ml-auto text-caption shrink-0 ${PROJECT_STATUS_CONFIG[status]?.color ?? "text-muted-foreground"}`}
         >
-          {PROJECT_STATUS_CONFIG[project.status as ProjectStatus]?.label ?? project.status}
+          {projectStatusLabels[status] ?? project.status}
         </span>
       </div>
       {project.match_source === "description" && project.matched_snippet && (

@@ -686,7 +686,7 @@
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",
-    "description": "此操作不可撤销。所有任务、智能体和数据都将被永久删除。",
+    "description": "此操作不可撤销。所有任务、智能体、聊天记录和执行历史都将被永久删除。",
     "type_to_confirm_prefix": "确认请输入",
     "type_to_confirm_suffix": "。",
     "cancel": "取消",

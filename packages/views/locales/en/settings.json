@@ -688,7 +688,7 @@
   },
   "delete_workspace_dialog": {
     "title": "Delete workspace",
-    "description": "This cannot be undone. All issues, agents, and data will be permanently removed.",
+    "description": "This cannot be undone. All issues, agents, chats, and task history will be permanently removed.",
     "type_to_confirm_prefix": "To confirm, type",
     "type_to_confirm_suffix": " below.",
     "cancel": "Cancel",

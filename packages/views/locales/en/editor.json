@@ -73,6 +73,8 @@
     "group_users": "Users",
     "group_issues": "Issues",
     "all_members": "All members",
+    "agent_badge": "Agent",
+    "squad_badge": "Squad",
     "searching": "Searching...",
     "no_results": "No results",
     "group_current": "Current page",
@@ -88,6 +90,7 @@
     }
   },
   "code_block": {
+    "html_preview": "HTML preview",
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
@@ -108,6 +111,7 @@
     "title_aria_label": "Title"
   },
   "mermaid": {
+    "diagram_label": "Mermaid diagram",
     "render_error": "Unable to render Mermaid diagram.",
     "rendering": "Rendering diagram…",
     "viewer_title": "Diagram",

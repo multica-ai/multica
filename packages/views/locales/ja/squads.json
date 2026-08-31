@@ -19,6 +19,10 @@
     "details_section": "詳細",
     "archive_button": "アーカイブ"
   },
+  "member_type": {
+    "agent": "エージェント",
+    "member": "メンバー"
+  },
   "archive_dialog": {
     "title": "このスクワッドをアーカイブしますか？",
     "description": "\"{{name}}\" がアーカイブされます。現在このスクワッドに割り当てられているタスクはリーダーに引き継がれます。この操作は取り消せません。ルーティングを元に戻すには、新しいスクワッドを作成してください。",
@@ -28,7 +32,13 @@
     "success": "スカッドをアーカイブしました"
   },
   "name_editor": {
-    "cancel": "キャンセル"
+    "title": "スクワッド名を変更",
+    "placeholder": "スクワッド名",
+    "required": "名前を入力してください",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "saved": "保存しました",
+    "save_failed": "保存できませんでした"
   },
   "add_member_dialog": {
     "title": "メンバーを追加",
@@ -36,13 +46,24 @@
     "label_member": "メンバー",
     "label_role": "役割",
     "label_optional": "（任意）",
-    "placeholder_role_inline": "役割を追加…",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "select_target": "メンバーまたはエージェントを選択",
+    "search_placeholder": "メンバーまたはエージェントを検索...",
+    "members_section": "メンバー",
+    "agents_section": "エージェント",
+    "role_placeholder": "例：レビュアー、フロントエンドリード",
+    "add": "追加"
+  },
+  "role_editor": {
+    "empty": "役割を追加…",
+    "placeholder": "役割（例：レビュアー）"
   },
   "description_dialog": {
     "title": "説明を編集",
     "placeholder_empty": "説明を追加",
-    "cancel": "キャンセル"
+    "cancel": "キャンセル",
+    "responsibility_placeholder": "このスクワッドの担当は何ですか？",
+    "save": "保存"
   },
   "discard_changes_dialog": {
     "title": "保存していない変更を破棄しますか？",
@@ -68,6 +89,29 @@
     "last_active_label": "最終アクティブ {{time}}",
     "status_archived": "アーカイブ済み"
   },
+  "detail_tabs": {
+    "members": "メンバー",
+    "instructions": "指示"
+  },
+  "details": {
+    "leader": "リーダー",
+    "members": "メンバー",
+    "created_by": "作成者",
+    "created": "作成日時",
+    "updated": "更新日時"
+  },
+  "toasts": {
+    "member_added": "メンバーを追加しました",
+    "member_add_failed": "メンバーを追加できませんでした",
+    "member_removed": "メンバーを削除しました",
+    "member_remove_failed": "メンバーを削除できませんでした",
+    "role_updated": "役割を更新しました",
+    "role_update_failed": "役割を更新できませんでした",
+    "leader_updated": "リーダーを更新しました",
+    "leader_update_failed": "リーダーを更新できませんでした",
+    "archive_failed": "スクワッドをアーカイブできませんでした",
+    "instructions_saved": "指示を保存しました"
+  },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
     "detail_link": "詳細 →",
@@ -79,7 +123,8 @@
   "instructions_tab": {
     "description": "スクワッドの指示は、リーダーエージェントがこのスクワッドに割り当てられたタスクに取り組むたびに、そのプロンプトに挿入されます。スクワッド全体の方針、進め方の取り決め、リーダーがすべての作業で従うべきコンテキストを伝えるために使用します。",
     "unsaved_changes": "保存していない変更",
-    "save_button": "保存"
+    "save_button": "保存",
+    "placeholder": "例：必ず失敗するテストから始める。コミットは小さく独立させる。"
   },
   "scope": {
     "mine": "自分",

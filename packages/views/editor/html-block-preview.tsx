@@ -125,7 +125,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
       {view === "preview" ? (
         <HtmlPreviewBody
           source={{ kind: "inline", html }}
-          title="HTML preview"
+          title={t(($) => $.code_block.html_preview)}
           className={CODE_BLOCK_IFRAME_HEIGHT}
         />
       ) : (
@@ -138,7 +138,7 @@ export function HtmlBlockPreview({ html, className }: HtmlBlockPreviewProps) {
         >
           <HtmlPreviewBody
             source={{ kind: "inline", html }}
-            title="HTML preview"
+            title={t(($) => $.code_block.html_preview)}
             className="h-full w-full"
             iframeClassName="rounded-none border-0"
           />
