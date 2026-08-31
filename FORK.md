@@ -32,17 +32,19 @@ git rev-list --left-right --count upstream/main...HEAD
 
 | Commit | 说明 | 去留 |
 | --- | --- | --- |
-| `1bce09afb` | 发版 CI：CLI / 镜像 / Helm 发到本仓库，fork 跳过 Homebrew tap | 保留 |
-| `3bcc23f07` | 采用 42.x 发行纪元 | 保留 |
-| `27b10a8ca` | 早期 FORK.md 收成「只记源码与发版」 | 已被本文取代，下次 rebase 可 squash 进文档 commit |
-| `e795f2dce` | nix flake + direnv 钉 Node 22 / pnpm 10 / Go 1.26 | 保留 |
+| `bc1466288` | 发版 CI：CLI / 镜像 / Helm 发到本仓库，fork 跳过 Homebrew tap | 保留 |
+| `a2b06781a` / `f62440b10` | 早期 FORK.md（42.x 纪元 + 「只记源码与发版」） | 已被本文取代，下次 rebase 可 squash 进文档 commit |
+| `7a6d388be` | nix flake + direnv 钉 Node 22 / pnpm 10 / Go 1.26 | 保留 |
+| `787c56530` | Web 宽屏 session tab（与 Electron 同一套 store / TabBar） | 保留。rebase 时叠了上游 MUL-6784 `hash` / 可分享 URL |
+| `d6067031e` | `make db-from-k8s` / `make dev-from-k8s`：家里 K8s Postgres 快照进本地 Docker | 保留。与上游 `make up` / `down` / `status` 并存 |
+| `d4efb6249` | Next 16.3.3 走 Turbopack；token 从 Linear seed 推导 | 保留 |
+| `e71aa7ce2` | Cursor Fast / thinking-suffix 定价 | 保留。rebase 时叠了上游 `[1m]` context tag strip |
+| `d2ded68b7` / `a2f05c1ba` | typecheck 走 TypeScript 7 native，并行并保留 incremental info | 保留 |
+| `6f935d570` | landing / dashboard shell 离开胖 view barrel | 保留 |
+| `648085d7e` | 手机 PWA 的 static-first service worker | 保留 |
+| `1c15030ec` | iPad 上 tab pin / close 可点 | 保留 |
 
-工作区里还没成 commit、但已经在用的：
-
-- `make db-from-k8s` / `make dev-from-k8s`：把家里 K8s Postgres 快照进本地 Docker
-- 上游新加的 `make up` / `make down` / `make status` 与上面并存
-
-Web 宽屏 session tab（与 Electron 同一套 store / TabBar）已进源码。「mobile」在这里指 compact（小于 1024px），不是 Expo。见 `docs/adr/0001-web-session-tabs.md`。
+「mobile」在这里指 compact（小于 1024px），不是 Expo。见 `docs/adr/0001-web-session-tabs.md`。
 
 候选（尚未落地）：
 
@@ -59,15 +61,15 @@ Web 宽屏 session tab（与 Electron 同一套 store / TabBar）已进源码。
 | --- | --- | --- | --- | --- |
 | 2026-08-23 | 建 fork / 发 `v42.0.0` | 上游 `v0.4.32` (`ad64e0f800`) | 同上 + 发版 CI | 第一版制品 |
 | 2026-08-27 | rebase `upstream/main` | `0716081bb`（v0.4.32 之后的 main）+ 4 个 fork commit | `v0.4.35` / `09a2410e8` | 72 个上游 commit；fork patch 无冲突重放。含 v0.4.33 / v0.4.34 / v0.4.35 |
+| 2026-08-31 | rebase `upstream/main` | `v0.4.35` / `09a2410e8` + 13 个 fork commit | `15280617b`（v0.4.36 + 5 个 main 提交） | 32 个上游 commit。唯一冲突：session tabs × MUL-6784 hash，保留 session tabs 并接上 `adapter.hash`。pricing / package.json / quick-create 自动合并后核对两边都在 |
 
 这一次带上来的上游发行（细节以上游 changelog 为准）：
 
-- **v0.4.33**（2026-08-24）
-- **v0.4.34**（2026-08-25）：source-context 清理离开 runtime sweep 等
-- **v0.4.35**（2026-08-26）：`starter_prompts` → `conversation_starters`；中间合入后又 revert 的 Codex capacity retry、live HTML preview 已不在 tip 上
+- **v0.4.36**（2026-08-28）：自定义 property filter、本地 Skill 导入、Oh My Pi MCP；runtime GC / 2h idle；desktop 可分享 URL 带 fragment
+- tip 上还没进发行的 5 个提交：chat 流式跟视口、timeout 收口、status/priority/squad i18n、workspace delete 文案
 
-rebase 前备份分支：`main-prerebase-backup`（`b1064faa3`）。`origin/main`
-更新并确认无误后可删。
+rebase 前备份分支：`main-prerebase-backup`（`0f59993fa`）。`origin/main`
+更新并确认无误后可删。旧备份 `b1064faa3` 已过期。
 
 ## 拉取上游并 rebase
 
@@ -118,8 +120,8 @@ rebase 之后、家里要用上这段代码：在 nixos 仓库跑
 对齐某个**上游发行 tag**（而不是 `main` 尖）时：
 
 ```sh
-git fetch upstream tag v0.4.35
-git -c commit.gpgsign=false rebase --empty=drop v0.4.35
+git fetch upstream tag v0.4.36
+git -c commit.gpgsign=false rebase --empty=drop v0.4.36
 ```
 
 ## 版本
@@ -138,8 +140,8 @@ git -c commit.gpgsign=false rebase --empty=drop v0.4.35
 | --- | --- | --- | --- |
 | 42.0.0 | v0.4.32 | ad64e0f800 | fork 发版 CI（CLI / Helm 发到本仓库） |
 
-发一版加一行。Release body 第一行写 `Based on upstream v0.4.35`（按实际基线改）。
-当前 `main` 已 rebase 到 v0.4.35，下一发应升 **42.1.0**。
+发一版加一行。Release body 第一行写 `Based on upstream v0.4.36`（按实际基线改）。
+当前 `main` 已 rebase 到 v0.4.36 之后的 `upstream/main` 尖（`15280617b`），下一发应升 **42.1.0**。若发行要钉在 tag 而不是 tip，从 `v0.4.36` cherry-pick fork commit。
 
 ## 产物
 
@@ -163,10 +165,10 @@ Electron Desktop 和上游 Homebrew tap 不发。日常家里用的是 nixos 仓
 
 ```sh
 git fetch upstream --prune
-git fetch upstream tag v0.4.35
+git fetch upstream tag v0.4.36
 git log --oneline upstream/main..main
 
-git switch -C release-v42.1.0 v0.4.35
+git switch -C release-v42.1.0 v0.4.36
 git cherry-pick $(git log --reverse --format=%H upstream/main..main)
 
 git switch main
@@ -175,7 +177,7 @@ git push origin "$(git rev-parse release-v42.1.0)":refs/tags/v42.1.0
 ```
 
 用 `git push origin <sha>:refs/tags/v42.1.0`，不要在本地 tag 仍指向上游 SHA
-时 `git push origin v0.4.35`。
+时 `git push origin v0.4.36`。
 
 <https://github.com/xesrevinu/multica/actions> — verify 过了才出镜像、CLI、chart。
 
