@@ -13,6 +13,12 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  MattermostInstallationSchema,
+  ListMattermostInstallationsResponseSchema,
+  RedeemMattermostBindingTokenResponseSchema,
+  EMPTY_MATTERMOST_INSTALLATION,
+  EMPTY_LIST_MATTERMOST_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_MATTERMOST_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
@@ -1810,6 +1816,69 @@ describe("Telegram installation schemas", () => {
         { endpoint: "POST /api/telegram/binding/redeem" },
       ),
     ).toEqual(EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE);
+  });
+});
+// Mattermost drives the same connect/disabled/revoked UI decisions as
+// Telegram, plus one field neither Slack nor Telegram has: server_url. It is
+// self-hosted, so a missing or malformed server URL must render as "not
+// connected" rather than as a row pointing nowhere.
+describe("Mattermost installation schemas", () => {
+  it("parses a well-formed installation", () => {
+    const parsed = MattermostInstallationSchema.parse({
+      id: "i1",
+      workspace_id: "w1",
+      agent_id: "a1",
+      server_url: "https://mattermost.example.com",
+      bot_user_id: "botuserid0000000000000000",
+      bot_username: "multica",
+      installer_user_id: "u1",
+      status: "active",
+    });
+    expect(parsed.server_url).toBe("https://mattermost.example.com");
+    expect(parsed.bot_username).toBe("multica");
+    expect(parsed.status).toBe("active");
+  });
+
+  it("defaults incomplete data to the disconnected state", () => {
+    const parsed = MattermostInstallationSchema.parse({ id: "i1" });
+    expect(parsed.status).toBe("revoked");
+    expect(parsed.server_url).toBe("");
+    expect(parsed.bot_user_id).toBe("");
+    expect(parsed.bot_username).toBe("");
+
+    const list = ListMattermostInstallationsResponseSchema.parse({});
+    expect(list).toEqual({ installations: [], configured: false });
+  });
+
+  it("keeps unknown forward-compatible installation fields", () => {
+    const parsed = MattermostInstallationSchema.parse({ id: "i1", future_field: "keep" });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep");
+  });
+
+  it("falls back safely for malformed list, install, and redeem responses", () => {
+    expect(
+      parseWithFallback(
+        "not json",
+        ListMattermostInstallationsResponseSchema,
+        EMPTY_LIST_MATTERMOST_INSTALLATIONS_RESPONSE,
+        { endpoint: "GET /api/workspaces/:id/mattermost/installations" },
+      ),
+    ).toEqual(EMPTY_LIST_MATTERMOST_INSTALLATIONS_RESPONSE);
+
+    expect(
+      parseWithFallback(42, MattermostInstallationSchema, EMPTY_MATTERMOST_INSTALLATION, {
+        endpoint: "POST /api/workspaces/:id/mattermost/install",
+      }),
+    ).toEqual(EMPTY_MATTERMOST_INSTALLATION);
+
+    expect(
+      parseWithFallback(
+        null,
+        RedeemMattermostBindingTokenResponseSchema,
+        EMPTY_REDEEM_MATTERMOST_BINDING_TOKEN_RESPONSE,
+        { endpoint: "POST /api/mattermost/binding/redeem" },
+      ),
+    ).toEqual(EMPTY_REDEEM_MATTERMOST_BINDING_TOKEN_RESPONSE);
   });
 });
 

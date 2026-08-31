@@ -102,6 +102,21 @@
     "error_not_member": "サインイン中の Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。再試行しても解決しない場合は、ワークスペース管理者にお問い合わせください。"
   },
+  "mattermost_bind": {
+    "page_title": "Mattermost アカウントを連携",
+    "redeeming": "アカウントを連携しています…",
+    "needs_auth_description": "連携を完了するには Multica にサインインしてください。リンクのトークンはあなたの Mattermost アカウントをこの Multica ユーザーに紐付けるため、先にログインが必要です。",
+    "sign_in": "サインイン",
+    "done_title": "連携が完了しました。",
+    "done_description": "次に Mattermost でボットに送ったメッセージは、そのままエージェントに届きます。このタブは閉じて構いません。",
+    "error_title": "連携を完了できませんでした",
+    "error_admin_hint": "繰り返し発生する場合は、Mattermost でボットにもう一度メッセージを送り、新しいリンクを取得してください。",
+    "error_missing_token": "リンクにトークンがありません。Mattermost でボットにもう一度メッセージを送って新しいリンクを取得してください。",
+    "error_expired": "このリンクは無効か期限切れです（有効期間は 15 分）。ボットにもう一度メッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この Mattermost アカウントは別の Multica ユーザーに連携済みです。移行するにはまず明示的に解除する必要があります。",
+    "error_not_member": "サインイン中の Multica アカウントは、このワークスペースのメンバーではありません。",
+    "error_unknown": "問題が発生しました。もう一度お試しください。解消しない場合はワークスペース管理者にご連絡ください。"
+  },
   "expandable_description": {
     "expand": "詳細を表示",
     "collapse": "折りたたむ"

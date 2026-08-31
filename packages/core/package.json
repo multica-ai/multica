@@ -129,6 +129,8 @@
     "./wecom/queries": "./wecom/queries.ts",
     "./telegram": "./telegram/index.ts",
     "./telegram/queries": "./telegram/queries.ts",
+    "./mattermost": "./mattermost/index.ts",
+    "./mattermost/queries": "./mattermost/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",

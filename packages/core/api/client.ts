@@ -194,6 +194,10 @@ import type {
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,
   RedeemTelegramBindingTokenResponse,
+  MattermostInstallation,
+  ListMattermostInstallationsResponse,
+  RegisterMattermostRequest,
+  RedeemMattermostBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -361,6 +365,12 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  MattermostInstallationSchema,
+  ListMattermostInstallationsResponseSchema,
+  RedeemMattermostBindingTokenResponseSchema,
+  EMPTY_MATTERMOST_INSTALLATION,
+  EMPTY_LIST_MATTERMOST_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_MATTERMOST_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -4713,6 +4723,57 @@ export class ApiClient {
       RedeemTelegramBindingTokenResponseSchema,
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
+    );
+  }
+
+  async listMattermostInstallations(
+    workspaceId: string,
+  ): Promise<ListMattermostInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/mattermost/installations`);
+    return parseWithFallback(
+      raw,
+      ListMattermostInstallationsResponseSchema,
+      EMPTY_LIST_MATTERMOST_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/mattermost/installations" },
+    );
+  }
+
+  async registerMattermostBot(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterMattermostRequest,
+  ): Promise<MattermostInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/mattermost/install?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, MattermostInstallationSchema, EMPTY_MATTERMOST_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/mattermost/install",
+    });
+  }
+
+  async deleteMattermostInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/mattermost/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemMattermostBindingToken(
+    token: string,
+  ): Promise<RedeemMattermostBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/mattermost/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemMattermostBindingTokenResponseSchema,
+      EMPTY_REDEEM_MATTERMOST_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/mattermost/binding/redeem" },
     );
   }
 }
