@@ -2667,27 +2667,73 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 	}
 }
 
+func TestRestorableRerunIssueScope(t *testing.T) {
+	agentID := parseUUID("00000000-0000-0000-0000-000000000101")
+	otherAgentID := parseUUID("00000000-0000-0000-0000-000000000102")
+	issueID := parseUUID("00000000-0000-0000-0000-000000000201")
+	rerunID := parseUUID("00000000-0000-0000-0000-000000000301")
+
+	baseTask := db.AgentTaskQueue{AgentID: agentID, RerunOfTaskID: rerunID}
+	baseSource := db.AgentTaskQueue{AgentID: agentID, IssueID: issueID}
+	quickCreateTask := baseTask
+	quickCreateTask.Context = []byte(`{"type":"` + service.QuickCreateContextType + `"}`)
+	scopedTask := baseTask
+	scopedTask.IssueID = issueID
+	for _, tc := range []struct {
+		name   string
+		task   db.AgentTaskQueue
+		source db.AgentTaskQueue
+		want   bool
+	}{
+		{name: "lost issue scope", task: baseTask, source: baseSource, want: true},
+		{name: "ordinary issue rerun already scoped", task: scopedTask, source: baseSource},
+		{name: "quick-create context remains issue-less", task: quickCreateTask, source: baseSource},
+		{name: "quick-create source has no issue", task: baseTask, source: db.AgentTaskQueue{AgentID: agentID}},
+		{name: "different agent cannot lend scope", task: baseTask, source: db.AgentTaskQueue{AgentID: otherAgentID, IssueID: issueID}},
+		{name: "non-rerun cannot borrow scope", task: db.AgentTaskQueue{AgentID: agentID}, source: baseSource},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gotIssueID, got := restorableRerunIssueScope(tc.task, tc.source)
+			if got != tc.want {
+				t.Fatalf("restorable = %v, want %v", got, tc.want)
+			}
+			if got && gotIssueID != issueID {
+				t.Fatalf("issue id = %s, want %s", uuidToString(gotIssueID), uuidToString(issueID))
+			}
+		})
+	}
+}
+
 type claimRuntimeGuardTask struct {
-	PriorSessionID                string          `json:"prior_session_id"`
-	PriorWorkDir                  string          `json:"prior_work_dir"`
-	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
-	ChatMessage                   string          `json:"chat_message"`
-	ThreadName                    string          `json:"thread_name"`
-	QuickCreateAttachmentIDs      []string        `json:"quick_create_attachment_ids"`
-	QuickCreatePriority           string          `json:"quick_create_priority"`
-	QuickCreateDueDate            string          `json:"quick_create_due_date"`
-	ProjectID                     string          `json:"project_id"`
-	ProjectDescription            string          `json:"project_description"`
-	ParentIssueID                 string          `json:"parent_issue_id"`
-	QuickCreateSourceContext      json.RawMessage `json:"quick_create_source_context"`
+	IssueID                       string                `json:"issue_id"`
+	PriorSessionID                string                `json:"prior_session_id"`
+	PriorWorkDir                  string                `json:"prior_work_dir"`
+	PriorSessionResumeUnavailable bool                  `json:"prior_session_resume_unavailable"`
+	ChatMessage                   string                `json:"chat_message"`
+	ThreadName                    string                `json:"thread_name"`
+	QuickCreateAttachmentIDs      []string              `json:"quick_create_attachment_ids"`
+	QuickCreatePriority           string                `json:"quick_create_priority"`
+	QuickCreateDueDate            string                `json:"quick_create_due_date"`
+	ProjectID                     string                `json:"project_id"`
+	ProjectDescription            string                `json:"project_description"`
+	ProjectResources              []ProjectResourceData `json:"project_resources"`
+	ParentIssueID                 string                `json:"parent_issue_id"`
+	QuickCreateSourceContext      json.RawMessage       `json:"quick_create_source_context"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
+	return claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID)
+}
+
+func claimTaskForRuntimeGuardWithCapabilities(t *testing.T, runtimeID, daemonID string, capabilities ...string) *claimRuntimeGuardTask {
 	t.Helper()
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
 		testWorkspaceID, daemonID)
+	if len(capabilities) > 0 {
+		req.Header.Set("X-Client-Capabilities", strings.Join(capabilities, ","))
+	}
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("runtimeId", runtimeID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
@@ -3101,6 +3147,71 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("missing_issue_scope_is_restored_before_resolving_current_project_resources", func(t *testing.T) {
+		issueNum++
+		projectID := dbfx.Project(t, "manual retry current resource fixture")
+		const originalPath = "/root/progetto-prova"
+		const updatedPath = "/home/agente/progetto-prova"
+		dbfx.Exec(t, `
+			INSERT INTO project_resource (
+				project_id, workspace_id, resource_type, resource_ref, position
+			) VALUES ($1, $2, 'local_directory', $3::jsonb, 0)
+		`, projectID, testWorkspaceID, `{"daemon_id":"`+daemonID+`","local_path":"`+originalPath+`","execution_mode":"worktree"}`)
+
+		issueID := dbfx.Issue(t, "manual retry restores project context", testutil.Cols{
+			"status":     "in_progress",
+			"number":     issueNum,
+			"project_id": projectID,
+		})
+		sourceID := dbfx.Task(t, agentID, testutil.Cols{
+			"runtime_id": runtimeID,
+			"issue_id":   issueID,
+			"status":     "failed",
+			"work_dir":   originalPath,
+		})
+		dbfx.Exec(t, `
+			UPDATE project_resource
+			SET resource_ref = $2::jsonb
+			WHERE project_id = $1 AND resource_type = 'local_directory'
+		`, projectID, `{"daemon_id":"`+daemonID+`","local_path":"`+updatedPath+`","execution_mode":"worktree"}`)
+
+		var rerunID string
+		dbfx.QueryRow(t, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, status, priority,
+				rerun_of_task_id, force_fresh_session
+			)
+			VALUES ($1, $2, 'queued', 0, $3, TRUE)
+			RETURNING id
+		`, agentID, runtimeID, sourceID).Scan(&rerunID)
+
+		task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityLocalWorktreeV1)
+		if task.IssueID != issueID {
+			t.Fatalf("IssueID = %q, want restored source issue %q", task.IssueID, issueID)
+		}
+		if task.PriorWorkDir != originalPath {
+			t.Fatalf("PriorWorkDir = %q, want source workdir", task.PriorWorkDir)
+		}
+		if len(task.ProjectResources) != 1 {
+			t.Fatalf("ProjectResources = %+v, want updated local_directory", task.ProjectResources)
+		}
+		var localDirectory struct {
+			LocalPath string `json:"local_path"`
+		}
+		if err := json.Unmarshal(task.ProjectResources[0].ResourceRef, &localDirectory); err != nil {
+			t.Fatalf("decode local_directory resource: %v", err)
+		}
+		if localDirectory.LocalPath != updatedPath {
+			t.Fatalf("local_directory path = %q, want current path %q", localDirectory.LocalPath, updatedPath)
+		}
+
+		var persistedIssueID string
+		dbfx.QueryRow(t, `SELECT issue_id FROM agent_task_queue WHERE id = $1`, rerunID).Scan(&persistedIssueID)
+		if persistedIssueID != issueID {
+			t.Fatalf("persisted issue_id = %q, want %q", persistedIssueID, issueID)
 		}
 	})
 

@@ -1985,6 +1985,71 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 	return false
 }
 
+func restorableRerunIssueScope(task, source db.AgentTaskQueue) (pgtype.UUID, bool) {
+	if task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid || !task.RerunOfTaskID.Valid {
+		return pgtype.UUID{}, false
+	}
+	var quickCreate struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(task.Context, &quickCreate) == nil && quickCreate.Type == service.QuickCreateContextType {
+		return pgtype.UUID{}, false
+	}
+	if !source.IssueID.Valid || source.AgentID != task.AgentID {
+		return pgtype.UUID{}, false
+	}
+	return source.IssueID, true
+}
+
+// restoreMissingRerunIssueScope repairs the one manual-rerun state that must
+// never reach the daemon as a generic scratch task: a rerun row whose durable
+// lineage points at an issue task but whose own issue_id is NULL. The source
+// task is server-authored lineage and the agent match prevents a malformed row
+// from borrowing another agent's issue. Persist the repair before assembling
+// the claim so project context is resolved live from the issue's current
+// project resources and later progress/completion stays attached to the issue.
+//
+// Issue-less quick-create reruns are intentionally unchanged: their source has
+// no issue_id, so they continue through the quick-create context path below.
+func (h *Handler) restoreMissingRerunIssueScope(ctx context.Context, task *db.AgentTaskQueue) error {
+	if !task.RerunOfTaskID.Valid || task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
+		return nil
+	}
+
+	source, err := h.Queries.GetAgentTask(ctx, task.RerunOfTaskID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load rerun source while restoring issue scope: %w", err)
+	}
+	issueID, ok := restorableRerunIssueScope(*task, source)
+	if !ok {
+		return nil
+	}
+
+	if err := h.Queries.LinkTaskToIssue(ctx, db.LinkTaskToIssueParams{
+		ID:      task.ID,
+		IssueID: issueID,
+	}); err != nil {
+		return fmt.Errorf("restore rerun issue scope: %w", err)
+	}
+	repaired, err := h.Queries.GetAgentTask(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("verify restored rerun issue scope: %w", err)
+	}
+	if !repaired.IssueID.Valid || repaired.IssueID != issueID {
+		return fmt.Errorf("verify restored rerun issue scope: issue_id was not persisted")
+	}
+	task.IssueID = repaired.IssueID
+	slog.Warn("daemon claim: restored missing issue scope from rerun source",
+		"task_id", uuidToString(task.ID),
+		"source_task_id", uuidToString(source.ID),
+		"issue_id", uuidToString(issueID),
+	)
+	return nil
+}
+
 func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
 }
@@ -1998,6 +2063,20 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 // means the task must not be dispatched; the builder has already cancelled it
 // where the failure semantics require it.
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
+	if err := h.restoreMissingRerunIssueScope(r.Context(), task); err != nil {
+		slog.Error("daemon claim: failed to restore rerun issue scope; requeueing claim",
+			"task_id", uuidToString(task.ID), "error", err)
+		if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); requeueErr != nil {
+			slog.Error("daemon claim: requeue after rerun issue-scope restore failed; stale reclaim will recover it",
+				"task_id", uuidToString(task.ID), "error", requeueErr)
+		}
+		return resp, nil, 0, 0, &claimBuildFailure{
+			outcome: "error_restore_rerun_issue_scope",
+			status:  http.StatusInternalServerError,
+			message: "failed to restore rerun issue context",
+		}
+	}
+
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
 	var issueNumber int32
