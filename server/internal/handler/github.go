@@ -1215,35 +1215,37 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 	}
 }
 
+type ghPullRequest struct {
+	Number         int32  `json:"number"`
+	HTMLURL        string `json:"html_url"`
+	Title          string `json:"title"`
+	Body           string `json:"body"`
+	State          string `json:"state"`
+	Draft          bool   `json:"draft"`
+	Merged         bool   `json:"merged"`
+	MergedAt       string `json:"merged_at"`
+	ClosedAt       string `json:"closed_at"`
+	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	MergeableState string `json:"mergeable_state"`
+	Additions      int32  `json:"additions"`
+	Deletions      int32  `json:"deletions"`
+	ChangedFiles   int32  `json:"changed_files"`
+	Head           struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+	User struct {
+		Login     string `json:"login"`
+		AvatarURL string `json:"avatar_url"`
+	} `json:"user"`
+}
+
 type ghPullRequestPayload struct {
-	Action      string `json:"action"`
-	PullRequest struct {
-		Number         int32  `json:"number"`
-		HTMLURL        string `json:"html_url"`
-		Title          string `json:"title"`
-		Body           string `json:"body"`
-		State          string `json:"state"`
-		Draft          bool   `json:"draft"`
-		Merged         bool   `json:"merged"`
-		MergedAt       string `json:"merged_at"`
-		ClosedAt       string `json:"closed_at"`
-		CreatedAt      string `json:"created_at"`
-		UpdatedAt      string `json:"updated_at"`
-		MergeableState string `json:"mergeable_state"`
-		Additions      int32  `json:"additions"`
-		Deletions      int32  `json:"deletions"`
-		ChangedFiles   int32  `json:"changed_files"`
-		Head           struct {
-			Ref string `json:"ref"`
-			SHA string `json:"sha"`
-		} `json:"head"`
-		User struct {
-			Login     string `json:"login"`
-			AvatarURL string `json:"avatar_url"`
-		} `json:"user"`
-	} `json:"pull_request"`
-	Changes    *ghPRChanges `json:"changes"`
-	Repository struct {
+	Action      string        `json:"action"`
+	PullRequest ghPullRequest `json:"pull_request"`
+	Changes     *ghPRChanges  `json:"changes"`
+	Repository  struct {
 		Name  string `json:"name"`
 		Owner struct {
 			Login string `json:"login"`
@@ -1273,29 +1275,33 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 		// can attribute to a workspace, so drop it silently.
 		return
 	}
-	// #4855 lets one GitHub App installation bind to several workspaces. A
-	// repo's events belong to every bound workspace, so fan the delivery out:
-	// each workspace independently mirrors the PR and auto-links it against its
-	// own issues (its own prefix + github toggle). Repo scope is whatever GitHub
-	// authorized the installation for; we deliberately don't gate on the
-	// workspace.repos registry — that list is "code the agent clones", not a
-	// webhook subscription (MUL-4343).
-	//
-	// Fanning out means an identifier can resolve in more than one workspace at
-	// once (issue prefixes are not globally unique and issue numbers restart at
-	// 1 per workspace, so two bound workspaces can both own a real "ABC-100").
-	// Settle who — if anyone — may act on a closing keyword BEFORE any workspace
-	// links, and treat that verdict as authoritative for the whole delivery, so
-	// the mirror pass cannot re-derive a different answer. See closeIntentPolicy.
-	closePolicy := h.resolveCloseIntentPolicy(ctx, insts, &p)
-	for _, inst := range insts {
-		h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, &p, closePolicy)
+	if err := h.processGitHubPullRequest(ctx, &p, insts, insts); err != nil {
+		slog.Warn("github: process pull request failed", "err", err)
+	}
+}
+
+// processGitHubPullRequest is the shared webhook/poller ingestion path. Callers
+// provide the workspace bindings to mirror and every binding used to resolve
+// cross-workspace close-intent ambiguity; storage, linking, terminal status
+// changes, and refresh triggers remain identical.
+func (h *Handler) processGitHubPullRequest(
+	ctx context.Context,
+	p *ghPullRequestPayload,
+	mirrorBindings []db.GithubInstallation,
+	closePolicyBindings []db.GithubInstallation,
+) error {
+	closePolicy := h.resolveCloseIntentPolicy(ctx, closePolicyBindings, p)
+	var processErrs []error
+	for _, inst := range mirrorBindings {
+		if err := h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, p, closePolicy); err != nil {
+			processErrs = append(processErrs, fmt.Errorf("workspace %s: %w", uuidToString(inst.WorkspaceID), err))
+		}
 	}
 	// The PR row(s) now carry the new head; ask the API pipeline for the
-	// authoritative CI + mergeability snapshot for that head. The webhook is
-	// only the doorbell — its own mergeable/checks payload is not used for
-	// display anymore (MUL-5265).
+	// authoritative CI + mergeability snapshot for that head. The delivery is
+	// only the doorbell — its own checks payload is not used for display.
 	h.PRRefresh.Enqueue(p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+	return errors.Join(processErrs...)
 }
 
 // closeIntentPolicy decides which (closing identifier, workspace) pairs this
@@ -1519,19 +1525,18 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 	}
 }
 
-// mirrorPullRequestForWorkspace mirrors a pull_request webhook into a single
-// workspace: it upserts the PR row, replays any check_suite events that
-// arrived before the PR was mirrored, auto-links referenced issues (gated by
-// the workspace's github toggles), advances issues on terminal events, and
-// broadcasts the change. Invoked once per workspace bound to the delivering
-// installation.
+// mirrorPullRequestForWorkspace mirrors one GitHub PR into a single workspace:
+// it upserts the PR row, replays any check_suite events that arrived before the
+// PR was mirrored, auto-links referenced issues (gated by the workspace's
+// GitHub toggles), advances issues on terminal events, and broadcasts the
+// change. Invoked once per workspace binding selected by a webhook or poll.
 //
 // closePolicy is the delivery-wide verdict on which closing identifiers this
 // workspace may act on; identifiers it does not permit still link, but never
 // carry close_intent, so they can never advance an issue to done. This function
 // only ever narrows that verdict — it cannot grant close intent the policy
 // withheld.
-func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) {
+func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) error {
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
@@ -1558,8 +1563,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		ChangedFiles:        p.PullRequest.ChangedFiles,
 	})
 	if err != nil {
-		slog.Warn("github: upsert pr failed", "err", err)
-		return
+		return fmt.Errorf("upsert pull request: %w", err)
 	}
 
 	workspaceID := uuidToString(wsID)
@@ -1576,7 +1580,16 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	// flag (which itself short-circuits when the master `github_enabled`
 	// switch is off).
 	linkedIssueIDs := make([]string, 0)
-	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
+	ws, err := h.Queries.GetWorkspace(ctx, wsID)
+	if err != nil {
+		return fmt.Errorf("load workspace: %w", err)
+	}
+	autoLink, settingsErr := autoLinkPRsEnabledForWorkspace(ws)
+	if settingsErr != nil {
+		slog.Warn("github: invalid workspace settings; using auto-link default",
+			"err", settingsErr, "workspace_id", workspaceID)
+	}
+	if autoLink {
 		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 		// closingIdents is the subset of identifiers that this PR explicitly
 		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
@@ -1609,7 +1622,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// a terminal event, later edit/synchronize webhooks must not rewrite
 		// the merge-time close decision.
 		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
-		prefix := h.getIssuePrefix(ctx, wsID)
+		prefix := issuePrefixForWorkspace(ws)
 		// reevalIssues collects each issue whose link row we just touched so
 		// we can re-run the auto-advance gate against the persisted aggregate
 		// after every link upsert in this event. Driving the gate off
@@ -1621,7 +1634,10 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// MUL-1 still advances.
 		reevalIssues := make([]db.Issue, 0, len(idents))
 		for _, id := range idents {
-			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
+			issue, ok, err := h.lookupIssueByIdentifierWithError(ctx, wsID, prefix, id)
+			if err != nil {
+				return fmt.Errorf("lookup issue %s: %w", id, err)
+			}
 			if !ok {
 				continue
 			}
@@ -1646,8 +1662,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				LinkedByType:        strToText("system"),
 				LinkedByID:          pgtype.UUID{},
 			}); err != nil {
-				slog.Warn("github: link failed", "err", err)
-				continue
+				return fmt.Errorf("link issue %s: %w", id, err)
 			}
 			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
 			reevalIssues = append(reevalIssues, issue)
@@ -1678,11 +1693,12 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				// an open GitHub PR blocks it on the VCS webhook path.
 				counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
 				if err != nil {
-					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
-					continue
+					return fmt.Errorf("count linked pull requests for issue %s: %w", uuidToString(issue.ID), err)
 				}
 				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
+					if err := h.advanceIssueToDone(ctx, issue, workspaceID); err != nil {
+						return fmt.Errorf("advance issue %s: %w", uuidToString(issue.ID), err)
+					}
 				}
 			}
 		}
@@ -1694,6 +1710,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
+	return nil
 }
 
 // derivePRMergeableState resolves the upsert behaviour for the PR row's
@@ -1879,29 +1896,36 @@ func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
 // "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
 // the workspace's configured prefix and the number resolves to a real issue.
 func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+	issue, ok, _ := h.lookupIssueByIdentifierWithError(ctx, workspaceID, prefix, identifier)
+	return issue, ok
+}
+
+func (h *Handler) lookupIssueByIdentifierWithError(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool, error) {
 	number, ok := issueNumberForPrefix(identifier, prefix)
 	if !ok {
-		return db.Issue{}, false
+		return db.Issue{}, false, nil
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: workspaceID,
 		Number:      number,
 	})
-	if err != nil {
-		return db.Issue{}, false
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Issue{}, false, nil
 	}
-	return issue, true
+	if err != nil {
+		return db.Issue{}, false, err
+	}
+	return issue, true, nil
 }
 
-func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) error {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
 		Status:      "done",
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		slog.Warn("github: advance issue to done failed", "err", err)
-		return
+		return err
 	}
 
 	// Fire the platform parent-notification path on the same transition the
@@ -1923,6 +1947,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "github_pr_merged",
 	})
+	return nil
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

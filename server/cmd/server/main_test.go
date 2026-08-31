@@ -386,6 +386,28 @@ func TestEnvBool(t *testing.T) {
 	}
 }
 
+func TestGitHubPRPollConfigFromEnv(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("GITHUB_PR_POLLING_ENABLED", "")
+		config, enabled := githubPRPollConfigFromEnv()
+		if enabled || config.Interval != 0 || config.InitialLookback != 0 || config.Overlap != 0 {
+			t.Fatalf("disabled config = %+v, enabled=%v", config, enabled)
+		}
+	})
+	t.Run("enabled with configured interval and lookback", func(t *testing.T) {
+		t.Setenv("GITHUB_PR_POLLING_ENABLED", "true")
+		t.Setenv("GITHUB_PR_POLL_INTERVAL", "2m")
+		t.Setenv("GITHUB_PR_POLL_INITIAL_LOOKBACK", "48h")
+		config, enabled := githubPRPollConfigFromEnv()
+		if !enabled {
+			t.Fatal("poller was not enabled")
+		}
+		if config.Interval != 2*time.Minute || config.InitialLookback != 48*time.Hour || config.Overlap != 5*time.Minute {
+			t.Fatalf("enabled config = %+v", config)
+		}
+	})
+}
+
 func TestEnvNonNegativeDuration(t *testing.T) {
 	tests := []struct {
 		name  string

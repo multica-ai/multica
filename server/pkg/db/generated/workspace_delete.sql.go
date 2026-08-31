@@ -214,7 +214,11 @@ func (q *Queries) DeleteWorkspaceCommunicationRoots(ctx context.Context, workspa
 }
 
 const deleteWorkspaceConnections = `-- name: DeleteWorkspaceConnections :exec
-WITH deleted_github_installations AS (
+WITH deleted_github_pr_poll_cursors AS (
+    DELETE FROM github_pr_poll_cursor
+    WHERE github_pr_poll_cursor.workspace_id = $1
+),
+deleted_github_installations AS (
     DELETE FROM github_installation
     WHERE github_installation.workspace_id = $1
 )

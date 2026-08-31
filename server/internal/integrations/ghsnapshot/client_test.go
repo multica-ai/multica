@@ -203,3 +203,45 @@ func TestNewClientFromEnv(t *testing.T) {
 		}
 	})
 }
+
+func TestGetUsesInstallationTokenAndDecodes(t *testing.T) {
+	var mints int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/access_tokens"):
+			atomic.AddInt32(&mints, 1)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"ghs_poll","expires_at":"` +
+				time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`))
+		case r.URL.Path == "/repos/acme/widget/pulls":
+			if got := r.Header.Get("Authorization"); got != "Bearer ghs_poll" {
+				t.Errorf("Authorization = %q", got)
+			}
+			_, _ = w.Write([]byte(`{"name":"widget"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	var got struct {
+		Name string `json:"name"`
+	}
+	if err := c.Get(context.Background(), 42, "/repos/acme/widget/pulls", &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "widget" {
+		t.Fatalf("decoded name = %q", got.Name)
+	}
+	if atomic.LoadInt32(&mints) != 1 {
+		t.Fatalf("token mints = %d, want 1", mints)
+	}
+}
+
+func TestGetRejectsAbsolutePath(t *testing.T) {
+	c := newTestClient(t, "https://api.github.com")
+	if err := c.Get(context.Background(), 42, "https://example.com/token", &struct{}{}); err == nil {
+		t.Fatal("absolute API path was accepted")
+	}
+}

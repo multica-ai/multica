@@ -209,6 +209,45 @@ func (c *Client) mintInstallationToken(ctx context.Context, installationID int64
 	return parsed.Token, nil
 }
 
+// Get decodes one installation-authenticated GitHub REST response. apiPath
+// must be a path on api.github.com; rejecting absolute/network paths prevents
+// an installation token from being forwarded to another host.
+func (c *Client) Get(ctx context.Context, installationID int64, apiPath string, out any) error {
+	if !c.Enabled() {
+		return errors.New("github App API is not configured")
+	}
+	if !strings.HasPrefix(apiPath, "/") || strings.HasPrefix(apiPath, "//") {
+		return errors.New("github REST path must be absolute")
+	}
+	token, err := c.installationToken(ctx, installationID)
+	if err != nil {
+		return err
+	}
+	endpoint := strings.TrimRight(c.apiBase, "/") + apiPath
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+		return rateLimitFromResponse(resp, c.now())
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("github REST GET %s: unexpected status %d", apiPath, resp.StatusCode)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(out); err != nil {
+		return fmt.Errorf("github REST GET %s: malformed response: %w", apiPath, err)
+	}
+	return nil
+}
+
 // graphQL runs a single GraphQL query as the given installation and returns the
 // raw `data` object. GitHub returns HTTP 200 even for query-level errors, so we
 // inspect the `errors` array too, mapping a RATE_LIMITED error type to a

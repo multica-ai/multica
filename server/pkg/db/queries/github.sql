@@ -76,6 +76,46 @@ SELECT * FROM github_pending_installation WHERE installation_id = $1
 ;
 
 -- =====================
+-- GitHub Pull Request Polling
+-- =====================
+
+-- name: ListGitHubPRPollingTargets :many
+WITH repository_urls AS (
+    SELECT workspace_id, btrim(resource_ref->>'url') AS repo_url
+    FROM project_resource
+    WHERE resource_type = 'github_repo'
+    UNION
+    SELECT w.id AS workspace_id, btrim(repo->>'url') AS repo_url
+    FROM workspace w
+    CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(w.repos) = 'array' THEN w.repos ELSE '[]'::jsonb END
+    ) AS repo
+)
+SELECT DISTINCT r.workspace_id, i.installation_id, r.repo_url
+FROM repository_urls r
+JOIN github_installation i ON i.workspace_id = r.workspace_id
+WHERE r.repo_url IS NOT NULL AND r.repo_url <> ''
+ORDER BY r.workspace_id, r.repo_url, i.installation_id;
+
+-- name: GetGitHubPRPollCursor :one
+SELECT cursor_updated_at
+FROM github_pr_poll_cursor
+WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3;
+
+-- name: UpsertGitHubPRPollCursor :exec
+INSERT INTO github_pr_poll_cursor (
+    workspace_id, repo_owner, repo_name, cursor_updated_at
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name) DO UPDATE SET
+    cursor_updated_at = GREATEST(
+        github_pr_poll_cursor.cursor_updated_at,
+        EXCLUDED.cursor_updated_at
+    ),
+    updated_at = now();
+
+-- =====================
 -- GitHub Pull Request
 -- =====================
 

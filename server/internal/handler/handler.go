@@ -381,7 +381,10 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
-	cfg       Config
+	// githubAPIGet is bound to the same installation-token client as PRRefresh.
+	// Kept as the concrete Get method so tests can supply a deterministic API.
+	githubAPIGet func(context.Context, int64, string, any) error
+	cfg          Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -488,6 +491,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
 	}
 	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+	if ghClient != nil {
+		h.githubAPIGet = ghClient.Get
+	}
 
 	return h
 }

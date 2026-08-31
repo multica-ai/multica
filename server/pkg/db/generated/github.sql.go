@@ -137,6 +137,25 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
+const getGitHubPRPollCursor = `-- name: GetGitHubPRPollCursor :one
+SELECT cursor_updated_at
+FROM github_pr_poll_cursor
+WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3
+`
+
+type GetGitHubPRPollCursorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RepoOwner   string      `json:"repo_owner"`
+	RepoName    string      `json:"repo_name"`
+}
+
+func (q *Queries) GetGitHubPRPollCursor(ctx context.Context, arg GetGitHubPRPollCursorParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getGitHubPRPollCursor, arg.WorkspaceID, arg.RepoOwner, arg.RepoName)
+	var cursor_updated_at pgtype.Timestamptz
+	err := row.Scan(&cursor_updated_at)
+	return cursor_updated_at, err
+}
+
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
 SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, api_mergeable, api_merge_state_status, checks_rollup_state, snapshot_head_sha, snapshot_fetched_at FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
@@ -417,6 +436,55 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
+const listGitHubPRPollingTargets = `-- name: ListGitHubPRPollingTargets :many
+
+WITH repository_urls AS (
+    SELECT workspace_id, btrim(resource_ref->>'url') AS repo_url
+    FROM project_resource
+    WHERE resource_type = 'github_repo'
+    UNION
+    SELECT w.id AS workspace_id, btrim(repo->>'url') AS repo_url
+    FROM workspace w
+    CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(w.repos) = 'array' THEN w.repos ELSE '[]'::jsonb END
+    ) AS repo
+)
+SELECT DISTINCT r.workspace_id, i.installation_id, r.repo_url
+FROM repository_urls r
+JOIN github_installation i ON i.workspace_id = r.workspace_id
+WHERE r.repo_url IS NOT NULL AND r.repo_url <> ''
+ORDER BY r.workspace_id, r.repo_url, i.installation_id
+`
+
+type ListGitHubPRPollingTargetsRow struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	InstallationID int64       `json:"installation_id"`
+	RepoUrl        string      `json:"repo_url"`
+}
+
+// =====================
+// GitHub Pull Request Polling
+// =====================
+func (q *Queries) ListGitHubPRPollingTargets(ctx context.Context) ([]ListGitHubPRPollingTargetsRow, error) {
+	rows, err := q.db.Query(ctx, listGitHubPRPollingTargets)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListGitHubPRPollingTargetsRow{}
+	for rows.Next() {
+		var i ListGitHubPRPollingTargetsRow
+		if err := rows.Scan(&i.WorkspaceID, &i.InstallationID, &i.RepoUrl); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIssueIDsForPullRequest = `-- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
 WHERE pull_request_id = $1
@@ -660,6 +728,37 @@ func (q *Queries) UpdateGitHubInstallationAccountByInstallationID(ctx context.Co
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertGitHubPRPollCursor = `-- name: UpsertGitHubPRPollCursor :exec
+INSERT INTO github_pr_poll_cursor (
+    workspace_id, repo_owner, repo_name, cursor_updated_at
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (workspace_id, repo_owner, repo_name) DO UPDATE SET
+    cursor_updated_at = GREATEST(
+        github_pr_poll_cursor.cursor_updated_at,
+        EXCLUDED.cursor_updated_at
+    ),
+    updated_at = now()
+`
+
+type UpsertGitHubPRPollCursorParams struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
+}
+
+func (q *Queries) UpsertGitHubPRPollCursor(ctx context.Context, arg UpsertGitHubPRPollCursorParams) error {
+	_, err := q.db.Exec(ctx, upsertGitHubPRPollCursor,
+		arg.WorkspaceID,
+		arg.RepoOwner,
+		arg.RepoName,
+		arg.CursorUpdatedAt,
+	)
+	return err
 }
 
 const upsertGitHubPullRequest = `-- name: UpsertGitHubPullRequest :one

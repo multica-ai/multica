@@ -204,6 +204,17 @@ func envDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
+func githubPRPollConfigFromEnv() (handler.GitHubPRPollConfig, bool) {
+	if !envBool("GITHUB_PR_POLLING_ENABLED", false) {
+		return handler.GitHubPRPollConfig{}, false
+	}
+	return handler.GitHubPRPollConfig{
+		Interval:        envDuration("GITHUB_PR_POLL_INTERVAL", 5*time.Minute),
+		InitialLookback: envDuration("GITHUB_PR_POLL_INITIAL_LOOKBACK", 30*24*time.Hour),
+		Overlap:         5 * time.Minute,
+	}, true
+}
+
 func envNonNegativeDuration(name string, def time.Duration) time.Duration {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -629,6 +640,11 @@ func main() {
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
 	h.PRRefresh.Start(sweepCtx)
+	if pollConfig, enabled := githubPRPollConfigFromEnv(); enabled {
+		go h.RunGitHubPRPoller(sweepCtx, pollConfig)
+	} else {
+		slog.Info("github PR poller: disabled")
+	}
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is channel-agnostic,

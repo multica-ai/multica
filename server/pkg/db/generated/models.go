@@ -677,6 +677,15 @@ type GithubPendingInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type GithubPrPollCursor struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RepoOwner       string             `json:"repo_owner"`
+	RepoName        string             `json:"repo_name"`
+	CursorUpdatedAt pgtype.Timestamptz `json:"cursor_updated_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubPullRequest struct {
 	ID                  pgtype.UUID        `json:"id"`
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`

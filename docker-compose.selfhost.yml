@@ -109,16 +109,18 @@ services:
       MULTICA_CLOUD_URL: ${MULTICA_CLOUD_URL:-}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
-      # App API credentials. The pull_request webhook is what mirrors a PR
-      # onto a card; these are what let the server authenticate as the App
-      # and pull the CI / mergeability snapshot that enriches it, plus
-      # Settings -> Repositories -> Choose from GitHub. Left unset,
-      # ghsnapshot.NewClientFromEnv returns a nil client and the enrichment
-      # degrades off silently - no error and no log line to notice.
+      # App API credentials. Webhooks mirror PRs by default; the optional
+      # outbound poller below uses the same credentials when inbound GitHub
+      # delivery is unavailable. They also power PR-card CI / mergeability and
+      # Settings -> Repositories -> Choose from GitHub. Left unset, App API
+      # features remain disabled.
       # GITHUB_APP_PRIVATE_KEY is a PEM block: double-quote it in .env so
       # its newlines survive into the container.
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
+      GITHUB_PR_POLLING_ENABLED: ${GITHUB_PR_POLLING_ENABLED:-false}
+      GITHUB_PR_POLL_INTERVAL: ${GITHUB_PR_POLL_INTERVAL:-5m}
+      GITHUB_PR_POLL_INITIAL_LOOKBACK: ${GITHUB_PR_POLL_INITIAL_LOOKBACK:-720h}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy
