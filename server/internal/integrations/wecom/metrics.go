@@ -103,10 +103,13 @@ type Metrics interface {
 	// ratio track which replica happened to hold a socket rather than any
 	// outcome. Always recorded, on whichever replica refused the frame.
 	//
-	// outbound_dropped moves alongside it only when the refusing replica was
-	// the one holding that bot's socket, because only then did shedding cost
-	// the user the reply. Every replica reads every frame, so counting a shed
-	// on the others would report one reply as delivered and dropped at once.
+	// It moves no reply counter, not even on the replica holding the socket.
+	// Every replica reads every frame, and during a lease handoff two of them
+	// hold a sender at once, so no replica can tell locally whether its own
+	// shed cost the user anything — each one answering for itself is what
+	// reported a single reply as delivered and dropped together. Whether a shed
+	// reply was really lost is settled once by the replica that routed it, in
+	// RelayOutbound.watchOutcomes.
 	RecordRelayShed(kind string)
 }
 

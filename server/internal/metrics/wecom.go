@@ -110,7 +110,7 @@ func NewWecomMetrics() *WecomMetrics {
 		}, []string{"reason"}),
 		RelayShed: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "wecom", Name: "outbound_relay_shed_total",
-			Help: "Frames the cross-replica dispatcher refused because a shard queue was full, by kind (reply|inbox). An ADMISSION decision, not a per-reply outcome: the relay carries inbox notifications too, and counting those as dropped replies would make the delivered/dropped ratio track which replica held a socket instead of what happened to anyone's message. Recorded on whichever replica refused the frame; a shed reply also increments outbound_dropped_total{reason=\"relay_overflow\"} only on the replica that held that bot's socket, since every replica reads every frame and only the holder's refusal costs the user the reply.",
+			Help: "Frames the cross-replica dispatcher refused because a shard queue was full, by kind (reply|inbox). An ADMISSION decision, not a per-reply outcome: the relay carries inbox notifications too, and counting those as dropped replies would make the delivered/dropped ratio track which replica held a socket instead of what happened to anyone's message. Recorded on whichever replica refused the frame, and it moves no reply counter: every replica reads every frame, so no replica can tell locally whether its own shed cost the user anything. Whether a shed reply was in fact lost is settled once by the replica that routed it, as outbound_dropped_total{reason=\"no_live_connection\"} when no replica claimed the delivery.",
 		}, []string{"kind"}),
 	}
 }
