@@ -5,6 +5,11 @@
 // table or a hung connection cannot drag /metrics — and by extension the
 // whole alerting story — down. A 5–10 second TTL cache absorbs concurrent
 // scrapes from multiple Prometheus replicas.
+//
+// The active_users and active_workspaces samplers were retired in MUL-6882:
+// scrape-time distinct scans over growing chat and issue history consumed
+// sustained database CPU. If those metrics are needed again, source them from
+// an asynchronously maintained aggregate instead of querying raw history here.
 package metrics
 
 import (
@@ -27,7 +32,6 @@ import (
 const (
 	defaultSamplerCacheTTL     = 8 * time.Second
 	defaultSamplerQueryTimeout = 500 * time.Millisecond
-	samplerRowLimit            = 100
 
 	// A running task is considered "stuck" once started_at is older
 	// than this. Matches the Grafana board threshold from MUL-2328.
