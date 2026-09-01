@@ -911,6 +911,24 @@ describe("ChatMessageList auto-scroll while idle", () => {
     },
   );
 
+  it("keeps following for an unknown pending-task status", () => {
+    const { scroll } = renderChat({
+      pendingTask: { task_id: TASK_ID, status: "some_future_streaming_status" },
+    });
+
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("keeps following when the pending-task status is absent", () => {
+    const { scroll } = renderChat({ pendingTask: { task_id: TASK_ID } });
+
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
   it("stops pinning when a live task becomes idle", () => {
     const { scroll, setPendingTask } = renderChat();
 
