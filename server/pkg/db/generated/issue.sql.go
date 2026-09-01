@@ -14,12 +14,17 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE issue_effective_status(workspace_id, status) IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
 GROUP BY parent_issue_id
 `
+
+type ChildIssueProgressParams struct {
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+}
 
 type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
@@ -27,8 +32,8 @@ type ChildIssueProgressRow struct {
 	Done          int64       `json:"done"`
 }
 
-func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUID) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, workspaceID)
+func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
+	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -536,24 +541,27 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at FROM issue
 WHERE workspace_id = $1
-  AND issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
-  AND project_id IS NOT DISTINCT FROM $2::uuid
-  AND parent_issue_id IS NOT DISTINCT FROM $3::uuid
-  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $4
+  -- Negate only known terminal keys so an unknown legacy key remains active.
+  AND NOT (status = ANY($2::text[]))
+  AND project_id IS NOT DISTINCT FROM $3::uuid
+  AND parent_issue_id IS NOT DISTINCT FROM $4::uuid
+  AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = $5
 ORDER BY created_at ASC
 LIMIT 1
 `
 
 type FindActiveDuplicateIssueParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	ProjectID       pgtype.UUID `json:"project_id"`
-	ParentIssueID   pgtype.UUID `json:"parent_issue_id"`
-	NormalizedTitle string      `json:"normalized_title"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+	ProjectID          pgtype.UUID `json:"project_id"`
+	ParentIssueID      pgtype.UUID `json:"parent_issue_id"`
+	NormalizedTitle    string      `json:"normalized_title"`
 }
 
 func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDuplicateIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, findActiveDuplicateIssue,
 		arg.WorkspaceID,
+		arg.TerminalStatusKeys,
 		arg.ProjectID,
 		arg.ParentIssueID,
 		arg.NormalizedTitle,
@@ -595,12 +603,13 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at FROM issue i
 WHERE i.workspace_id = $1
-  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
+  -- Negate only known terminal keys so an unknown legacy key remains active.
+  AND NOT (i.status = ANY($3::text[]))
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
-  AND i.project_id IS NOT DISTINCT FROM $3::uuid
-  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = $4
-  AND i.created_at >= $5::timestamptz
+  AND i.project_id IS NOT DISTINCT FROM $4::uuid
+  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = $5
+  AND i.created_at >= $6::timestamptz
   AND EXISTS (
     SELECT 1
     FROM autopilot_run r
@@ -613,17 +622,19 @@ LIMIT 1
 `
 
 type FindRecentAutopilotDuplicateIssueParams struct {
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	OriginID        pgtype.UUID        `json:"origin_id"`
-	ProjectID       pgtype.UUID        `json:"project_id"`
-	NormalizedTitle string             `json:"normalized_title"`
-	CreatedAfter    pgtype.Timestamptz `json:"created_after"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	OriginID           pgtype.UUID        `json:"origin_id"`
+	TerminalStatusKeys []string           `json:"terminal_status_keys"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	NormalizedTitle    string             `json:"normalized_title"`
+	CreatedAfter       pgtype.Timestamptz `json:"created_after"`
 }
 
 func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg FindRecentAutopilotDuplicateIssueParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, findRecentAutopilotDuplicateIssue,
 		arg.WorkspaceID,
 		arg.OriginID,
+		arg.TerminalStatusKeys,
 		arg.ProjectID,
 		arg.NormalizedTitle,
 		arg.CreatedAfter,
@@ -1206,25 +1217,28 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
-  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
-  AND ($2::text IS NULL OR i.priority = $2)
-  AND ($3::uuid IS NULL OR i.assignee_id = $3)
-  AND ($4::uuid[] IS NULL OR i.assignee_id = ANY($4::uuid[]))
-  AND ($5::uuid IS NULL OR i.creator_id = $5)
-  AND ($6::uuid IS NULL OR i.project_id = $6)
-  AND ($7::jsonb IS NULL OR i.metadata @> $7::jsonb)
+  -- Negate only known terminal keys so an unknown legacy key remains visible.
+  AND NOT (i.status = ANY($2::text[]))
+  AND ($3::text IS NULL OR i.priority = $3)
+  AND ($4::uuid IS NULL OR i.assignee_id = $4)
+  AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
+  AND ($6::uuid IS NULL OR i.creator_id = $6)
+  AND ($7::uuid IS NULL OR i.project_id = $7)
+  AND ($8::jsonb IS NULL OR i.metadata @> $8::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- containment patterns (built by parsePropertiesFilterParam): the issue
   -- must match at least one pattern from EVERY group (AND of ORs). A pattern
   -- of the shape {"__none__": "<definitionId>"} is the "no value" marker and
   -- matches when the issue's properties are missing that key. The correlated
-  -- form skips the GIN index, which is fine here: open_only is an
-  -- unpaginated workspace scan already narrowed by status.
+  -- form skips the GIN index, which is fine here: open_only is already an
+  -- unpaginated workspace scan. The terminal-status predicate intentionally
+  -- remains a filter rather than a positive index narrowing so unknown legacy
+  -- status keys stay visible.
   AND (
-    $8::jsonb IS NULL
+    $9::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($8::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($9::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1234,11 +1248,11 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $9::uuid IS NULL
+    $10::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $9::uuid
+             AND a.owner_id     = $10::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1246,14 +1260,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $9::uuid
+             AND sm.member_id   = $10::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $9::uuid
+             AND a.owner_id     = $10::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1262,22 +1276,23 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $9::uuid
+             AND a.owner_id     = $10::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
 `
 
 type ListOpenIssuesParams struct {
-	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
-	Priority         pgtype.Text   `json:"priority"`
-	AssigneeID       pgtype.UUID   `json:"assignee_id"`
-	AssigneeIds      []pgtype.UUID `json:"assignee_ids"`
-	CreatorID        pgtype.UUID   `json:"creator_id"`
-	ProjectID        pgtype.UUID   `json:"project_id"`
-	MetadataFilter   []byte        `json:"metadata_filter"`
-	PropertiesFilter []byte        `json:"properties_filter"`
-	InvolvesUserID   pgtype.UUID   `json:"involves_user_id"`
+	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
+	TerminalStatusKeys []string      `json:"terminal_status_keys"`
+	Priority           pgtype.Text   `json:"priority"`
+	AssigneeID         pgtype.UUID   `json:"assignee_id"`
+	AssigneeIds        []pgtype.UUID `json:"assignee_ids"`
+	CreatorID          pgtype.UUID   `json:"creator_id"`
+	ProjectID          pgtype.UUID   `json:"project_id"`
+	MetadataFilter     []byte        `json:"metadata_filter"`
+	PropertiesFilter   []byte        `json:"properties_filter"`
+	InvolvesUserID     pgtype.UUID   `json:"involves_user_id"`
 }
 
 type ListOpenIssuesRow struct {
@@ -1311,6 +1326,7 @@ type ListOpenIssuesRow struct {
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
+		arg.TerminalStatusKeys,
 		arg.Priority,
 		arg.AssigneeID,
 		arg.AssigneeIds,

@@ -149,7 +149,7 @@ func TestRuntimeGC_ProtectsEveryNonTerminalTaskStatus(t *testing.T) {
 	}
 }
 
-func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testing.T) {
+func TestRuntimeGCCandidates_ExcludeBlockedRuntimes(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -168,12 +168,6 @@ func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testi
 	systemAgentID := createRuntimeGCFixtureAgent(t, ctx, systemRuntimeID, "candidate-system")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET kind = 'system', system_key = $2 WHERE id = $1`, systemAgentID, "runtime_gc_candidate_"+systemAgentID); err != nil {
 		t.Fatalf("convert candidate to system agent: %v", err)
-	}
-	foreignWorkspaceID := createRuntimeGCFixtureWorkspace(t, ctx, "candidate-mismatch")
-	mismatchRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-mismatch")
-	mismatchAgentID := createRuntimeGCFixtureAgentForWorkspace(t, ctx, foreignWorkspaceID, mismatchRuntimeID, "candidate-mismatch")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, mismatchAgentID); err != nil {
-		t.Fatalf("archive candidate workspace-mismatch agent: %v", err)
 	}
 	_ = createRuntimeGCFixtureTask(t, ctx, blockedRuntimeID, agentID, "deferred", false)
 	queries := db.New(testPool)
@@ -209,82 +203,6 @@ func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testi
 	}
 	if !foundArchived || !foundSystem {
 		t.Fatalf("archived/system candidates found=%v/%v, want both", foundArchived, foundSystem)
-	}
-	backlog, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(ctx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	if err != nil {
-		t.Fatalf("classify runtime GC backlog: %v", err)
-	}
-	var activeBlocked, taskBlocked, workspaceMismatch int64
-	for _, row := range backlog {
-		switch row.Reason {
-		case "active_agent":
-			activeBlocked = row.Count
-		case "non_terminal_task":
-			taskBlocked = row.Count
-		case "workspace_mismatch":
-			workspaceMismatch = row.Count
-		}
-	}
-	if activeBlocked < 1 {
-		t.Fatalf("active-agent backlog = %d, want at least 1", activeBlocked)
-	}
-	if taskBlocked < 1 {
-		t.Fatalf("non-terminal-task backlog = %d, want at least 1", taskBlocked)
-	}
-	if workspaceMismatch < 1 {
-		t.Fatalf("workspace-mismatch backlog = %d, want at least 1", workspaceMismatch)
-	}
-	legacyBlocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(ctx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	if err != nil {
-		t.Fatalf("count legacy task-blocked runtimes: %v", err)
-	}
-
-	// The second task predicate must remain independently indexable: a task can
-	// be pinned to an online runtime after a historical move while its archived
-	// owner is still bound to this stale runtime. Only the agent-id path should
-	// classify the stale runtime as task-blocked.
-	pinnedOwnerRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-agent-task-owner")
-	pinnedAgentID := createRuntimeGCFixtureAgent(t, ctx, pinnedOwnerRuntimeID, "candidate-agent-task-owner")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, pinnedAgentID); err != nil {
-		t.Fatalf("archive candidate agent-task owner: %v", err)
-	}
-	onlineTaskRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-agent-task-target")
-	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, onlineTaskRuntimeID); err != nil {
-		t.Fatalf("mark task target runtime online: %v", err)
-	}
-	_ = createRuntimeGCFixtureTask(t, ctx, onlineTaskRuntimeID, pinnedAgentID, "deferred", false)
-
-	afterPinnedTask, err := queries.CountStaleOfflineRuntimeGCBacklogByReason(ctx, db.CountStaleOfflineRuntimeGCBacklogByReasonParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	if err != nil {
-		t.Fatalf("classify runtime GC backlog after pinned agent task: %v", err)
-	}
-	var taskBlockedAfter int64
-	for _, row := range afterPinnedTask {
-		if row.Reason == "non_terminal_task" {
-			taskBlockedAfter = row.Count
-		}
-	}
-	if taskBlockedAfter != taskBlocked+1 {
-		t.Fatalf("non-terminal-task backlog after agent-owned pinned task = %d, want %d", taskBlockedAfter, taskBlocked+1)
-	}
-	legacyBlockedAfter, err := queries.CountStaleOfflineRuntimesBlockedByTasks(ctx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBacklogScanLimit,
-	})
-	if err != nil {
-		t.Fatalf("recount legacy task-blocked runtimes: %v", err)
-	}
-	if legacyBlockedAfter != legacyBlocked {
-		t.Fatalf("legacy blocked count changed from %d to %d for the broader agent-owned task case", legacyBlocked, legacyBlockedAfter)
 	}
 }
 

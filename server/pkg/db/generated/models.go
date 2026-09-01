@@ -531,23 +531,24 @@ type ClientUsageDaily struct {
 }
 
 type Comment struct {
-	ID             pgtype.UUID        `json:"id"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	AuthorType     string             `json:"author_type"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Content        string             `json:"content"`
-	Type           string             `json:"type"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	ParentID       pgtype.UUID        `json:"parent_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
-	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
-	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
-	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
-	Revision       int64              `json:"revision"`
+	ID                pgtype.UUID        `json:"id"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	AuthorType        string             `json:"author_type"`
+	AuthorID          pgtype.UUID        `json:"author_id"`
+	Content           string             `json:"content"`
+	Type              string             `json:"type"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ParentID          pgtype.UUID        `json:"parent_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt        pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType    pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID      pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID      pgtype.UUID        `json:"source_task_id"`
+	QuickActionID     pgtype.UUID        `json:"quick_action_id"`
+	ViaPluginID       pgtype.UUID        `json:"via_plugin_id"`
+	Revision          int64              `json:"revision"`
+	RecoverySettledAt pgtype.Timestamptz `json:"recovery_settled_at"`
 }
 
 type CommentReaction struct {

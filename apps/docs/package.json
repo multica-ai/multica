@@ -5,10 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "next dev --port 4000",
-    "build": "fumadocs-mdx && next build",
+    "build": "next build",
     "start": "next start",
-    "typecheck": "fumadocs-mdx && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "mdx": "fumadocs-mdx",
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {

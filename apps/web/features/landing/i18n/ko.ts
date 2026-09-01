@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,39 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.37",
+          date: "2026-08-31",
+          title: "더 빠른 Issue 목록, 더 안정적인 장시간 태스크, 더 완전한 다국어 표시",
+          changes: [],
+          features: [
+            "Huawei Cloud CodeArts를 기본 에이전트 런타임으로 사용할 수 있습니다.",
+            "모델을 고르고 이전 세션을 이어가며, MCP와 로컬 스킬도 함께 쓸 수 있습니다.",
+            "iPad에 Multica를 네이티브로 설치할 수 있고, 화면 방향도 자유롭습니다.",
+            "여러 대의 서버에 셀프 호스팅해도 WeCom 봇 답장이 제대로 전달됩니다.",
+            "보내지 못한 WeCom 답장의 건수와 이유를 확인할 수 있습니다.",
+          ],
+          improvements: [
+            "큰 워크스페이스에서도 Issue 목록이 더 빠르게 열립니다.",
+            "스킬이 많아도 에이전트가 더 빠르게 시작합니다.",
+            "온보딩, 스쿼드, 에디터, 상태, 우선순위 표현이 각 언어에서 자연스러워졌습니다.",
+            "에이전트 출력에 파일 경로가 그대로 보이고, 잘못 가려지지 않습니다.",
+            "셀프 호스팅 서버가 백그라운드에서 데이터베이스에 주는 부담이 줄었습니다.",
+            "연결이 멈춰도 셀프 호스팅 서버가 계속 응답합니다.",
+          ],
+          fixes: [
+            "채팅이 최신 답장에 머물고, 출력 중에 튀거나 깜빡이지 않습니다.",
+            "좁은 화면에서도 Analytics 순위를 옆으로 스크롤할 수 있고 잘리지 않습니다.",
+            "Codex 세션이 준비 도중에 멈추지 않고 안정적으로 시작합니다.",
+            "내 컴퓨터의 데몬이 쉬고 있어도 로컬 스킬을 불러올 수 있습니다.",
+            "데스크톱 앱이 예기치 않게 멈춘 데몬을 다시 살립니다.",
+            "휴대폰의 Issue 헤더가 다시 간결해지고, 아바타와 터치 영역은 그대로입니다.",
+            "예전 버전에서 셀프 호스팅을 업그레이드해도 수동 조치가 필요 없습니다.",
+            "작업 폴더가 바뀌어도 Pi와 Oh My Pi 세션이 이어집니다.",
+            "워크스페이스를 삭제할 때 실제로 지워지는 것만 안내합니다.",
+            "오래 실행되는 태스크와 대기 중인 태스크가 기다렸다는 이유로 취소되지 않습니다.",
+          ],
+        },
         {
           version: "0.4.36",
           date: "2026-08-28",

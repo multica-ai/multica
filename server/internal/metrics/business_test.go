@@ -208,12 +208,6 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	m.RecordRuntimeGCDeleted()
 	m.RecordRuntimeGCFailed()
 	m.RecordRuntimeGCSkipped(RuntimeGCSkipNonTerminalTask)
-	m.SetRuntimeGCBlocked(3)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogActiveAgent, 2)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogNonTerminalTask, 3)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogWorkspaceMismatch, 1)
-	m.SetRuntimeGCBacklog(RuntimeGCBacklogEligible, 4)
-	m.RecordRuntimeGCBlockedObservationFailed()
 
 	if got := testutil.ToFloat64(m.runtimeGCDeleted); got != 1 {
 		t.Fatalf("runtime GC deleted = %v, want 1", got)
@@ -223,22 +217,6 @@ func TestBusinessMetricsRuntimeGC(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.runtimeGCSkipped.WithLabelValues(RuntimeGCSkipNonTerminalTask)); got != 1 {
 		t.Fatalf("runtime GC skipped = %v, want 1", got)
-	}
-	if got := testutil.ToFloat64(m.runtimeGCBlocked); got != 3 {
-		t.Fatalf("runtime GC blocked = %v, want 3", got)
-	}
-	for reason, want := range map[string]float64{
-		RuntimeGCBacklogActiveAgent:       2,
-		RuntimeGCBacklogNonTerminalTask:   3,
-		RuntimeGCBacklogWorkspaceMismatch: 1,
-		RuntimeGCBacklogEligible:          4,
-	} {
-		if got := testutil.ToFloat64(m.runtimeGCBacklog.WithLabelValues(reason)); got != want {
-			t.Fatalf("runtime GC backlog %s = %v, want %v", reason, got, want)
-		}
-	}
-	if got := testutil.ToFloat64(m.runtimeGCBlockedObservationFailed); got != 1 {
-		t.Fatalf("runtime GC blocked observation failures = %v, want 1", got)
 	}
 }
 

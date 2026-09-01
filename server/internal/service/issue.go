@@ -731,7 +731,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}
-	verdict, admitted := agentAssigneeVerdict(ctx, s.Queries, issue)
+	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
 	if !admitted && verdict.Reason == dispatch.ReasonRuntimeUnusable {
 		// Assignment has no response the assigner reads for this outcome, so the
 		// refusal explains itself on the issue instead of vanishing (MUL-6164).
@@ -777,11 +777,11 @@ func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q 
 	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
-	return isAgentAssigneeReadyWithQueries(ctx, q, issue)
+	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
 }
 
-func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
-	_, ok := agentAssigneeVerdict(ctx, q, issue)
+func isAgentAssigneeReadyWithQueries(ctx context.Context, lookup RuntimeLookup, issue db.Issue) bool {
+	_, ok := agentAssigneeVerdict(ctx, lookup, issue)
 	return ok
 }
 
@@ -791,15 +791,15 @@ func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue d
 //
 // Only a BLOCKED verdict stops the enqueue. A merely offline machine still
 // queues: that work runs when the laptop comes back, and people rely on it.
-func agentAssigneeVerdict(ctx context.Context, q *db.Queries, issue db.Issue) (AgentVerdict, bool) {
+func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Issue) (AgentVerdict, bool) {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
 		return AgentVerdict{}, false
 	}
-	agent, err := q.GetAgent(ctx, issue.AssigneeID)
+	agent, err := lookup.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil {
 		return AgentVerdict{}, false
 	}
-	verdict, err := AgentReadiness(ctx, q, agent)
+	verdict, err := AgentReadiness(ctx, lookup, agent)
 	if err != nil {
 		return AgentVerdict{}, false
 	}
@@ -828,7 +828,7 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	verdict, err := AgentReadiness(ctx, s.Queries, agent)
+	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
 	if err != nil {
 		return false
 	}

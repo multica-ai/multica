@@ -231,7 +231,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 启动握手上限 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
@@ -272,7 +272,7 @@ multica config show
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |
-| `codex_handshake_timeout` | `30s` | Codex app-server 握手上限 |
+| `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |

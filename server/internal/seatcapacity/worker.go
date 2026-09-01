@@ -33,7 +33,6 @@ type WorkerConfig struct {
 	BatchSize         int32
 	MaxAttempts       int32
 	Logger            *slog.Logger
-	Metrics           WorkerMetrics
 }
 
 type workerQueries interface {
@@ -45,13 +44,7 @@ type workerQueries interface {
 	GetInvitation(context.Context, pgtype.UUID) (db.WorkspaceInvitation, error)
 	MarkClaimedSeatCapacityIntentDeadLettered(context.Context, db.MarkClaimedSeatCapacityIntentDeadLetteredParams) (int64, error)
 	MarkClaimedSeatCapacityIntentFailed(context.Context, db.MarkClaimedSeatCapacityIntentFailedParams) (int64, error)
-	SeatCapacityOutboxStats(context.Context) ([]db.SeatCapacityOutboxStatsRow, error)
 	TransitionClaimedSeatCapacityIntent(context.Context, db.TransitionClaimedSeatCapacityIntentParams) (int64, error)
-}
-
-type WorkerMetrics interface {
-	ResetOutbox()
-	SetOutbox(action string, pending, deadLettered int64, oldestPendingAgeSeconds float64)
 }
 
 // Worker settles durable product-side intents. Each row is claimed atomically
@@ -63,7 +56,6 @@ type Worker struct {
 	batchSize         int32
 	maxAttempts       int32
 	logger            *slog.Logger
-	metrics           WorkerMetrics
 	workspaceLocker   WorkspaceLocker
 	now               func() time.Time
 }
@@ -94,7 +86,7 @@ func newWorker(queries workerQueries, executor Executor, cfg WorkerConfig) *Work
 	return &Worker{
 		queries: queries, executor: executor, reconcileInterval: interval,
 		batchSize: batch, maxAttempts: maxAttempts, logger: logger,
-		metrics: cfg.Metrics, now: time.Now,
+		now: time.Now,
 	}
 }
 
@@ -163,7 +155,7 @@ func (w *Worker) ReconcileOnce(ctx context.Context) error {
 			w.recordFailure(ctx, intent, settleErr)
 		}
 	}
-	return w.refreshMetrics(ctx)
+	return nil
 }
 
 type rateLimitDeferral struct {
@@ -392,21 +384,6 @@ func (w *Worker) recordFailure(ctx context.Context, intent db.SeatCapacityOutbox
 			"workspace_id", workspaceIDString(intent.WorkspaceID), "action", intent.Action,
 			"attempt", intent.AttemptCount+1, "error", settleErr)
 	}
-}
-
-func (w *Worker) refreshMetrics(ctx context.Context) error {
-	if w.metrics == nil {
-		return nil
-	}
-	stats, err := w.queries.SeatCapacityOutboxStats(ctx)
-	if err != nil {
-		return err
-	}
-	w.metrics.ResetOutbox()
-	for _, stat := range stats {
-		w.metrics.SetOutbox(stat.Action, stat.PendingCount, stat.DeadLetteredCount, stat.OldestPendingAgeSeconds)
-	}
-	return nil
 }
 
 func uuidFromPG(value pgtype.UUID) uuid.UUID {

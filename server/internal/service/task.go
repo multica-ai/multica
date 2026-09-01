@@ -925,7 +925,7 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 	}
 
 	if task.RuntimeID.Valid {
-		if rt, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID); err == nil {
+		if rt, err := s.runtimeLookup().Get(ctx, task.RuntimeID); err == nil {
 			tc.WorkspaceID = util.UUIDToString(rt.WorkspaceID)
 			tc.RuntimeMode = rt.RuntimeMode
 			tc.Provider = rt.Provider
@@ -2544,8 +2544,20 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 // `multica agent update <id> --status idle` to unwedge. It now reconciles agent
 // status and broadcasts task:cancelled, matching CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
-	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
-	if err != nil {
+	var cancelled []db.AgentTaskQueue
+	// The cancel and its settlement commit together: a settlement that failed
+	// after the cancel committed could never be repaired, because the outbox
+	// scan excludes a comment whose covering task is terminal and already holds
+	// the receipt. It would neither replay nor settle — it would sit in the
+	// partial index forever.
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		cancelled, err = qtx.CancelAgentTasksByIssue(ctx, issueID)
+		if err != nil {
+			return err
+		}
+		return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...)
+	}); err != nil {
 		return err
 	}
 	for _, t := range cancelled {
@@ -2588,8 +2600,15 @@ func distinctAgentIDs(cancelled []db.AgentTaskQueue) []pgtype.UUID {
 //
 // Returns the cancelled rows so callers can report counts / log them.
 func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
-	cancelled, err := s.Queries.CancelAgentTasksByAgent(ctx, agentID)
-	if err != nil {
+	var cancelled []db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		cancelled, err = qtx.CancelAgentTasksByAgent(ctx, agentID)
+		if err != nil {
+			return err
+		}
+		return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...)
+	}); err != nil {
 		return nil, err
 	}
 	for _, t := range cancelled {
@@ -2609,8 +2628,15 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 // retained for call-site stability. It must run before deletion clears the
 // trigger FK; the returned rows let the handler re-route every surviving input.
 func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
-	cancelled, err := s.Queries.CancelAgentTasksByTriggerComment(ctx, commentID)
-	if err != nil {
+	var cancelled []db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		cancelled, err = qtx.CancelAgentTasksByTriggerComment(ctx, commentID)
+		if err != nil {
+			return err
+		}
+		return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...)
+	}); err != nil {
 		return nil, err
 	}
 	for _, t := range cancelled {
@@ -2657,6 +2683,11 @@ func (s *TaskService) BroadcastTaskQueued(ctx context.Context, task db.AgentTask
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 }
 
+// CaptureCancelledTasks records analytics for an already-committed bulk
+// cancellation. It deliberately does NOT settle delegated-failure recoveries:
+// by the time it runs the cancel has committed, so a failure here could not be
+// rolled back and the stranded receipt could never be repaired. Callers settle
+// inside the transaction that performs the cancel.
 func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
@@ -2826,6 +2857,11 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 				return err
 			}
 			task = cancelled
+			// CancelAgentTaskByUser appends the recovery receipt in the same
+			// statement, so the returned row already carries it.
+			if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled); err != nil {
+				return err
+			}
 			if !cancelled.ChatSessionID.Valid {
 				return nil
 			}
@@ -2884,6 +2920,9 @@ func (s *TaskService) CancelQueuedChatTasks(ctx context.Context, sessionID, agen
 		tasks, err = qtx.CancelQueuedAgentTasksForSession(ctx, sessionID)
 		if err != nil {
 			return fmt.Errorf("cancel queued chat tasks: %w", err)
+		}
+		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, tasks...); err != nil {
+			return err
 		}
 		for _, task := range tasks {
 			if _, err := s.settleQueuedChatInput(ctx, qtx, task, "remove"); err != nil {
@@ -4209,6 +4248,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		}
 		task = t
 
+		// Atomic with the status flip: a crash between the two would leave a
+		// finished obligation looking pending forever.
+		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, t); err != nil {
+			return err
+		}
+
 		if t.ChatSessionID.Valid {
 			// Pin the chat_session's runtime_id alongside the session_id so the
 			// next claim can apply the runtime-guard. Both fields move together:
@@ -4687,6 +4732,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+
+		// Atomic with the status flip, same as the completion path. A failed
+		// coordinator that already received the recovery comment has consumed
+		// the obligation: the pre-existing delivered_comment_ids coverage check
+		// never looked at the covering task's status either.
+		if err := SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, t); err != nil {
+			return err
+		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -5477,9 +5530,20 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// working on; interrupting an in-flight run is what CancelTask /
 	// `multica issue cancel-task` is for.
 	clearPendingSlot := func() int {
-		cancelled, cerr := s.Queries.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
-			IssueID: issueID,
-			AgentID: agentID,
+		var cancelled []db.AgentTaskQueue
+		// Atomic with the cancel: a pending coordinator task can already hold a
+		// recovery receipt, and nothing downstream could repair a settlement
+		// that failed after this committed.
+		cerr := s.runInTx(ctx, func(qtx *db.Queries) error {
+			var err error
+			cancelled, err = qtx.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
+				IssueID: issueID,
+				AgentID: agentID,
+			})
+			if err != nil {
+				return err
+			}
+			return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, cancelled...)
 		})
 		if cerr != nil {
 			slog.Warn("rerun: cancel pending tasks failed",
@@ -5606,6 +5670,83 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
 }
 
+// The bulk terminal writes below are the sweeper, archive and daemon-recovery
+// paths that finalize many tasks in one statement. They exist on TaskService rather than
+// being called as bare queries so the statement and its delegated-failure
+// settlement share a transaction.
+//
+// That is not a stylistic preference. HandleFailedTasks and
+// CaptureCancelledTasks run AFTER their caller committed, so a settlement
+// issued there could not be rolled back — and could not be repaired either,
+// because ListPendingDelegatedFailureRecoveries excludes a comment whose
+// covering task is terminal and already holds the receipt. Such a row would
+// neither replay nor settle; it would sit in the partial index forever,
+// restoring the unbounded history scan this change set removes.
+
+// FailTasksForOfflineRuntimes fails in-flight tasks whose runtime stayed
+// offline past the reconnect grace.
+func (s *TaskService) FailTasksForOfflineRuntimes(ctx context.Context, arg db.FailTasksForOfflineRuntimesParams) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.FailTasksForOfflineRuntimes(ctx, arg)
+	})
+}
+
+// FailExpiredRuntimeReconnectRetries fails deferred retries that reached their
+// terminal reconnect deadline.
+func (s *TaskService) FailExpiredRuntimeReconnectRetries(ctx context.Context, arg db.FailExpiredRuntimeReconnectRetriesParams) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.FailExpiredRuntimeReconnectRetries(ctx, arg)
+	})
+}
+
+// FailStaleTasks fails claimed work whose runtime stopped reporting.
+func (s *TaskService) FailStaleTasks(ctx context.Context, arg db.FailStaleTasksParams) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.FailStaleTasks(ctx, arg)
+	})
+}
+
+// ExpireStaleQueuedTasks fails queued work whose runtime never came back.
+func (s *TaskService) ExpireStaleQueuedTasks(ctx context.Context, arg db.ExpireStaleQueuedTasksParams) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.ExpireStaleQueuedTasks(ctx, arg)
+	})
+}
+
+// RecoverOrphanedTasksForRuntime fails work a restarted daemon reports it lost.
+func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.RecoverOrphanedTasksForRuntime(ctx, runtimeID)
+	})
+}
+
+// CancelTasksForArchivedAgent cancels every active task belonging to an agent
+// being archived and settles their recovery receipts in the same transaction.
+//
+// Unlike CancelTasksForAgent it emits no per-task task:cancelled event: the
+// agent:archived event the caller publishes already invalidates every client's
+// active-task view, so per-row events would be redundant noise.
+func (s *TaskService) CancelTasksForArchivedAgent(ctx context.Context, agentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.CancelAgentTasksByAgent(ctx, agentID)
+	})
+}
+
+func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
+	var failed []db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		failed, err = fail(qtx)
+		if err != nil {
+			return err
+		}
+		return SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, failed...)
+	}); err != nil {
+		return nil, err
+	}
+	return failed, nil
+}
+
 // HandleFailedTasks runs the post-failure side effects for a batch of
 // freshly-failed tasks: optional auto-retry, task:failed event broadcast,
 // agent status reconciliation, and (when an issue has no remaining active
@@ -5717,6 +5858,48 @@ const (
 	delegatedFailureRecoveryMaxTaskAttempts = 3
 	delegatedFailureRecoveryCommentType     = "progress_update"
 )
+
+// SettleDeliveredDelegatedFailureRecoveries retires every delegated-failure
+// recovery comment the given now-terminal tasks actually received, so those
+// comments drop out of idx_comment_delegated_failure_unsettled instead of
+// being re-proven settled by ListPendingDelegatedFailureRecoveries on every
+// sweeper tick. Without it the outbox scan grows with total history even when
+// it returns nothing.
+//
+// INVARIANT: every path that moves tasks to a terminal status must reach this
+// with the same qtx as the terminal write — per-task writes and bulk
+// cancellations alike, so the marker commits atomically with the status change
+// or not at all. A row stranded by a committed-but-unsettled terminal write
+// cannot be repaired later: ListPendingDelegatedFailureRecoveries excludes a
+// comment whose covering task is already terminal and holds its receipt, so
+// nothing replays the settlement and nothing else marks it, and the index
+// reacquires the unbounded growth it exists to remove.
+//
+// For the same reason the post-commit helpers — BroadcastCancelledTasks,
+// CaptureCancelledTasks, HandleFailedTasks — must never call this: they run
+// after their caller has committed, where a failure here can neither roll back
+// nor be compensated. Do not reintroduce a best-effort settlement outside the
+// transaction; the old one was deleted, not kept.
+//
+// Call this only once the task is terminal. A dispatched task's receipt is
+// still replaceable (SetTaskDeliveredCommentIDs), so settling earlier would
+// freeze a legitimate reclaim window into a permanently lost recovery.
+// SettleDelegatedFailureRecoveriesForTask re-checks the terminal status in SQL,
+// so a mistaken early call updates nothing rather than losing a recovery.
+//
+// A task with no delivery receipt — nearly every task — costs a slice length
+// check and no query.
+func SettleDeliveredDelegatedFailureRecoveries(ctx context.Context, q *db.Queries, tasks ...db.AgentTaskQueue) error {
+	for _, t := range tasks {
+		if len(t.DeliveredCommentIds) == 0 {
+			continue
+		}
+		if _, err := q.SettleDelegatedFailureRecoveriesForTask(ctx, t.ID); err != nil {
+			return fmt.Errorf("settle delegated failure recoveries for task %s: %w", util.UUIDToString(t.ID), err)
+		}
+	}
+	return nil
+}
 
 type delegatedFailureRecoveryDispatchOutcome uint8
 
@@ -5934,6 +6117,15 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			MaxAttempts:  delegatedFailureRecoveryMaxTaskAttempts,
 		}); err != nil {
 			return fmt.Errorf("acknowledge exhausted delegated failure recovery: %w", err)
+		}
+
+		// The receipt above lands on the newest attempt row, which may still be
+		// running, so the task-scoped settle cannot see it. Exhaustion is
+		// terminal on its own terms — the attempt budget is spent and the
+		// visible explanation below tells the user why nothing else will run —
+		// so retire the comment directly, in this same transaction.
+		if _, err := qtx.SettleDelegatedFailureRecoveryComment(ctx, target.comment.ID); err != nil {
+			return fmt.Errorf("settle exhausted delegated failure recovery: %w", err)
 		}
 
 		comment, err := qtx.GetDelegatedFailureRecoveryExhaustionComment(ctx, db.GetDelegatedFailureRecoveryExhaustionCommentParams{
@@ -6324,35 +6516,166 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 }
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
-func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
+//
+// A read failure is REPORTED, never swallowed into a shorter skill set. Both
+// reads are all-or-nothing for the agent's entire skill set — the file load
+// covers every skill in one query — so a swallowed error does not degrade the
+// payload, it silently replaces it: every skill loses its supporting files, or
+// the agent loses every skill. Nothing downstream can tell that apart from an
+// agent that genuinely has none, because the bundle hash is computed over
+// whatever did load, so the daemon's own validation passes and the agent
+// starts on rules it is missing. Callers must settle the failure (preserve the
+// claim for redelivery, or 5xx the resolve) instead of dispatching that.
+func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, error) {
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
-	if err != nil || len(skills) == 0 {
-		return nil
+	if err != nil {
+		return nil, fmt.Errorf("list agent skills: %w", err)
+	}
+	if len(skills) == 0 {
+		return nil, nil
+	}
+	return s.skillsWithFiles(ctx, skills)
+}
+
+// skillsWithFiles loads the files of every given skill in ONE round trip
+// instead of one query per skill, and assembles the result in the order the
+// skills were given. Shared by the claim-time full load and the resolve-time
+// scoped load so the two cannot drift on skill order, per-skill file order, or
+// the nil (not empty) file list of a skill that has none.
+func (s *TaskService) skillsWithFiles(ctx context.Context, skills []db.Skill) ([]AgentSkillData, error) {
+	skillIDs := make([]pgtype.UUID, len(skills))
+	for i, sk := range skills {
+		skillIDs[i] = sk.ID
+	}
+	// Group by skill_id in a single linear pass — the query orders by
+	// skill_id, path.
+	files, err := s.Queries.ListSkillFilesBySkillIDs(ctx, skillIDs)
+	if err != nil {
+		return nil, fmt.Errorf("list skill files for %d skills: %w", len(skills), err)
+	}
+	filesBySkill := make(map[string][]AgentSkillFileData, len(skills))
+	for _, f := range files {
+		id := util.UUIDToString(f.SkillID)
+		filesBySkill[id] = append(filesBySkill[id], AgentSkillFileData{Path: f.Path, Content: f.Content})
 	}
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		data := AgentSkillData{
+		result = append(result, AgentSkillData{
 			ID:          util.UUIDToString(sk.ID),
 			Name:        sk.Name,
 			Description: sk.Description,
 			Content:     sk.Content,
-		}
-		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
-		for _, f := range files {
-			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
-		}
-		result = append(result, data)
+			Files:       filesBySkill[util.UUIDToString(sk.ID)],
+		})
 	}
-	return result
+	return result, nil
 }
 
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
-func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
-	skills := s.LoadAgentSkills(ctx, agentID)
+// It fails closed on a workspace-skill read error for the reason in
+// LoadAgentSkills: a bundle set built from a partial read is indistinguishable
+// from a correct one.
+func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData, error) {
+	skills, err := s.LoadAgentSkills(ctx, agentID)
+	if err != nil {
+		return nil, nil, err
+	}
 	skills = append(skills, s.BuiltinSkills()...)
-	return BuildAgentSkillBundles(skills)
+	bundles, refs := BuildAgentSkillBundles(skills)
+	return bundles, refs, nil
+}
+
+// BuiltinSkillID is the ref id a builtin skill is addressed by. Builtins have
+// no database row, so their identity is their name — this is the one place
+// that turns a name into that identity, for both the bundle builder that hands
+// the id out and the resolver that looks one back up.
+func BuiltinSkillID(name string) string { return "builtin:" + name }
+
+// AgentSkillBundleKey is the (source, id) identity a daemon skill ref resolves
+// by. Source is part of the key because a builtin and a workspace skill are
+// different bundles even when they share a name.
+func AgentSkillBundleKey(source, id string) string { return source + "\x00" + id }
+
+// AgentSkillBundleRef is one skill a daemon is asking to resolve.
+type AgentSkillBundleRef struct {
+	ID     string
+	Source string
+}
+
+// LoadRequestedAgentSkillBundles returns bundles for EXACTLY the refs given,
+// keyed by AgentSkillBundleKey. A ref the agent cannot see is simply absent
+// from the map — the junction predicate in ListAgentSkillsByIDs is the
+// authorization, so "no row" and "not allowed" are the same answer and the
+// caller reports both as not-found.
+//
+// This exists because the daemon resolves one skill per request (GH #4505, so
+// each download gets its own size-scaled deadline and caches independently).
+// Serving those out of the agent's full bundle set made the server redo the
+// whole agent on every request: N requests, each reading and hashing all N
+// skills to return one. Loading only what was asked for makes that linear,
+// which is why the resolve path must not reuse LoadAgentSkillBundles.
+func (s *TaskService) LoadRequestedAgentSkillBundles(ctx context.Context, agentID pgtype.UUID, refs []AgentSkillBundleRef) (map[string]AgentSkillData, error) {
+	requestedIDs := make([]pgtype.UUID, 0, len(refs))
+	seenWorkspace := make(map[string]struct{}, len(refs))
+	wantBuiltin := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		switch ref.Source {
+		case skillbundle.SourceBuiltin:
+			wantBuiltin[ref.ID] = struct{}{}
+		case skillbundle.SourceWorkspace:
+			if _, ok := seenWorkspace[ref.ID]; ok {
+				continue
+			}
+			id, err := util.ParseUUID(ref.ID)
+			if err != nil {
+				// An unparseable id matches no row, which is the same outcome
+				// as an id the agent does not have. Skipping it keeps one
+				// malformed ref from failing the refs alongside it.
+				continue
+			}
+			seenWorkspace[ref.ID] = struct{}{}
+			requestedIDs = append(requestedIDs, id)
+		}
+		// Any other source has no server-side producer, so it resolves to
+		// nothing and the caller reports not-found.
+	}
+
+	var requested []AgentSkillData
+	if len(requestedIDs) > 0 {
+		skills, err := s.Queries.ListAgentSkillsByIDs(ctx, db.ListAgentSkillsByIDsParams{
+			AgentID:  agentID,
+			SkillIds: requestedIDs,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("list agent skills by ids: %w", err)
+		}
+		if len(skills) > 0 {
+			// Same fail-closed rule as LoadAgentSkills: a failed file read
+			// would produce a bundle that hashes and validates like a complete
+			// one, so it must never be served.
+			loaded, err := s.skillsWithFiles(ctx, skills)
+			if err != nil {
+				return nil, err
+			}
+			requested = append(requested, loaded...)
+		}
+	}
+	if len(wantBuiltin) > 0 {
+		for _, builtin := range s.BuiltinSkills() {
+			if _, ok := wantBuiltin[BuiltinSkillID(builtin.Name)]; ok {
+				requested = append(requested, builtin)
+			}
+		}
+	}
+
+	bundles, _ := BuildAgentSkillBundles(requested)
+	resolved := make(map[string]AgentSkillData, len(bundles))
+	for _, bundle := range bundles {
+		resolved[AgentSkillBundleKey(bundle.Source, bundle.ID)] = bundle
+	}
+	return resolved, nil
 }
 
 func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {
@@ -6369,7 +6692,7 @@ func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentS
 			}
 		}
 		if id == "" && source == skillbundle.SourceBuiltin {
-			id = "builtin:" + skill.Name
+			id = BuiltinSkillID(skill.Name)
 		}
 		skill.Source = source
 		skill.ID = id
