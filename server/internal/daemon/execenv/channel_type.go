@@ -17,6 +17,8 @@ const (
 	ChannelTypeFeishu   = "feishu"
 	ChannelTypeWecom    = "wecom"
 	ChannelTypeDingtalk = "dingtalk"
+	// ChannelTypeMattermost mirrors mattermost.TypeMattermost.
+	ChannelTypeMattermost = "mattermost"
 )
 
 // SurfacePersistsTranscript reports whether a chat surface stores its
@@ -29,7 +31,7 @@ const (
 // so a future non-persisting channel is never told "read it back".
 func SurfacePersistsTranscript(channelType string) bool {
 	switch channelType {
-	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk:
+	case "", ChannelTypeFeishu, ChannelTypeWecom, ChannelTypeDingtalk, ChannelTypeMattermost:
 		return true
 	default:
 		return false
@@ -128,6 +130,8 @@ func ChannelDisplayName(channelType string) string {
 		return "WeCom"
 	case ChannelTypeDingtalk:
 		return "DingTalk"
+	case ChannelTypeMattermost:
+		return "Mattermost"
 	default:
 		return channelType
 	}

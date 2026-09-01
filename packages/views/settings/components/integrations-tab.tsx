@@ -8,6 +8,7 @@ import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
 import { WecomTab } from "./wecom-tab";
 import { TelegramTab } from "./telegram-tab";
+import { MattermostTab } from "./mattermost-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
@@ -105,6 +106,17 @@ export function IntegrationsTab() {
         description={t(($) => $.telegram.page_description)}
       >
         <TelegramTab />
+      </SettingsSection>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="mattermost" />
+            {t(($) => $.mattermost.section_title)}
+          </span>
+        }
+        description={t(($) => $.mattermost.page_description)}
+      >
+        <MattermostTab />
       </SettingsSection>
     </SettingsTab>
   );
