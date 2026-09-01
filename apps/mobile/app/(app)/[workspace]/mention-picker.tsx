@@ -27,6 +27,13 @@ export default function MentionPickerRoute() {
   const mode: Mode = rawMode === "chat" ? "chat" : "comment";
   const placeholder =
     mode === "chat" ? "Reference an issue" : "Search people or issues";
-  const query = useNativeSearchBar(placeholder, { autoFocus: true });
-  return <MentionPickerBody mode={mode} query={query} />;
+  const { query, SearchField } = useNativeSearchBar(placeholder, {
+    autoFocus: true,
+  });
+  return (
+    <>
+      <SearchField />
+      <MentionPickerBody mode={mode} query={query} />
+    </>
+  );
 }

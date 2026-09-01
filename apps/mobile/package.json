@@ -15,9 +15,16 @@
     "ios:device:staging:release": "dotenv -e .env.staging -- cross-env APP_ENV=staging ./scripts/ios-run.sh --device --configuration Release",
     "ios:device:prod": "dotenv -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device",
     "ios:device:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device --configuration Release",
+    "android": "node scripts/android-run.mjs",
+    "android:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging node scripts/android-run.mjs",
+    "android:prod": "dotenv -e .env.production -- cross-env APP_ENV=production node scripts/android-run.mjs",
+    "android:apk": "node scripts/android-apk.mjs",
+    "android:apk:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging node scripts/android-apk.mjs",
+    "android:apk:prod": "dotenv -e .env.production -- cross-env APP_ENV=production node scripts/android-apk.mjs",
+    "android:internal": "dotenv -e .env.staging -- cross-env APP_ENV=staging npx eas-cli@latest build --platform android --profile internal",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && bash scripts/ios-run.test.sh"
+    "test": "vitest run && bash scripts/ios-run.test.sh && node scripts/android-run.test.mjs"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",

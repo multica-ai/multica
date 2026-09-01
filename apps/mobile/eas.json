@@ -1,0 +1,19 @@
+{
+  "cli": {
+    "version": ">= 16.0.0"
+  },
+  "build": {
+    "internal": {
+      "distribution": "internal",
+      "channel": "staging",
+      "env": {
+        "APP_ENV": "staging",
+        "EXPO_PUBLIC_API_URL": "https://multica-api.copilothub.ai",
+        "EXPO_PUBLIC_WEB_URL": "https://multica-app.copilothub.ai"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    }
+  }
+}

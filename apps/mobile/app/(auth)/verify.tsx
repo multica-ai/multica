@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { MulticaLogo } from "@/components/brand/multica-logo";
 import { useAuthStore } from "@/data/auth-store";
 import { mapAuthError } from "@/lib/auth-error";
+import { keyboardAvoidingEnabled } from "@/lib/keyboard-avoiding";
 
 const CODE_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 60;
@@ -72,7 +73,8 @@ export default function Verify() {
     <SafeAreaView className="flex-1 bg-background">
       <KeyboardAvoidingView
         className="flex-1"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
+        enabled={keyboardAvoidingEnabled("fullScreen", Platform.OS)}
       >
         <View className="flex-1 justify-center px-6 gap-6">
           <View className="items-center gap-3">

@@ -1,6 +1,7 @@
 /**
  * Project lead picker route — presented as a formSheet by the parent Stack
  * with iOS-native nav header + UISearchController via `useNativeSearchBar`.
+ * Android renders the inline `SearchField` fallback.
  * Self-contained: reads project from cache, fires useUpdateProject directly.
  */
 import { useLocalSearchParams, router } from "expo-router";
@@ -16,7 +17,7 @@ export default function ProjectLeadPickerRoute() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: project } = useQuery(projectDetailOptions(wsId, id));
   const updateProject = useUpdateProject(id);
-  const query = useNativeSearchBar("Search members or agents", {
+  const { query, SearchField } = useNativeSearchBar("Search members or agents", {
     autoFocus: true,
   });
 
@@ -26,17 +27,20 @@ export default function ProjectLeadPickerRoute() {
       : null;
 
   return (
-    <ProjectLeadPickerBody
-      value={value}
-      query={query}
-      onChange={(next) => {
-        if (next === null) {
-          updateProject.mutate({ lead_type: null, lead_id: null });
-        } else {
-          updateProject.mutate({ lead_type: next.type, lead_id: next.id });
-        }
-        router.back();
-      }}
-    />
+    <>
+      <SearchField />
+      <ProjectLeadPickerBody
+        value={value}
+        query={query}
+        onChange={(next) => {
+          if (next === null) {
+            updateProject.mutate({ lead_type: null, lead_id: null });
+          } else {
+            updateProject.mutate({ lead_type: next.type, lead_id: next.id });
+          }
+          router.back();
+        }}
+      />
+    </>
   );
 }

@@ -21,13 +21,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   TextInput,
   View,
 } from "react-native";
+import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { stripChannelMediaMarkers } from "@multica/core/types";
@@ -40,6 +40,7 @@ import { useUpdateIssue } from "@/data/mutations/issues";
 import { buildIssueTextUpdate } from "@/data/issue-edit";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMentionInput } from "@/lib/use-mention-input";
+import { keyboardAvoidingEnabled } from "@/lib/keyboard-avoiding";
 
 export default function EditIssue() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -151,7 +152,8 @@ export default function EditIssue() {
       <Stack.Screen options={{ headerLeft, headerRight }} />
       <KeyboardAvoidingView
         className="flex-1 bg-background"
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
+        enabled={keyboardAvoidingEnabled("modal", Platform.OS)}
       >
         <ScrollView
           className="flex-1"

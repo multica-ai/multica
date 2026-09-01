@@ -60,6 +60,41 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ? "ai.multica.mobile.staging"
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
     },
+    android: {
+      // Keep the three local variants installable side-by-side, matching the
+      // iOS bundle identifier split above. The production package is the
+      // stable Android application identity used for deep links and internal
+      // distribution.
+      package: isProd
+        ? "ai.kitta.multica"
+        : isStaging
+          ? "ai.kitta.multica.staging"
+          : "ai.kitta.multica.dev",
+      versionCode: 1,
+      // Full-screen pages (login / verify) rely on window resize rather than
+      // KeyboardAvoidingView padding, which would double-offset on Android.
+      softwareKeyboardLayoutMode: "resize",
+      adaptiveIcon: {
+        // The source icon already contains the Multica mark on its dark
+        // background. Expo derives the Android adaptive-icon resources during
+        // prebuild so Android launchers can apply their own mask.
+        foregroundImage: "./assets/icon.png",
+        backgroundColor: "#111827",
+      },
+      permissions: [
+        "android.permission.INTERNET",
+        // Image attachments use expo-image-picker. Android shows its native
+        // photo permission prompt only when the user picks an image.
+        "android.permission.READ_MEDIA_IMAGES",
+      ],
+      intentFilters: [
+        {
+          action: "VIEW",
+          data: [{ scheme: "multica" }],
+          category: ["BROWSABLE", "DEFAULT"],
+        },
+      ],
+    },
     plugins: [
       "expo-router",
       "expo-secure-store",

@@ -1,4 +1,4 @@
-# Multica Mobile (iOS)
+# Multica Mobile (iOS + Android)
 
 Expo + React Native iOS client for Multica. Independent from web/desktop — shares only types from `@multica/core/`. See [`CLAUDE.md`](./CLAUDE.md) for the locked tech-stack baseline and import rules.
 
@@ -49,10 +49,42 @@ Everything below is for app developers — you can ignore the rest if you only w
 | `pnpm ios:mobile:device:staging:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | staging |
 | `pnpm ios:mobile:device:prod` | Full rebuild + install on **USB iPhone**, Debug | production |
 | `pnpm ios:mobile:device:prod:release` | Full rebuild + install on **USB iPhone**, Release (standalone) | production |
+| `pnpm android:mobile` | Full rebuild + install on an **Android emulator/device**, Debug | local |
+| `pnpm android:mobile:staging` | Full rebuild + install on an **Android emulator/device**, Debug | staging |
+| `pnpm android:mobile:apk:staging` | Build a local installable Debug APK | staging |
+| `pnpm android:mobile:internal` | Start EAS's staging APK internal build | staging |
 
 `dev:*` runs Metro only — assumes the matching variant is already installed. `ios:mobile*` does a full native rebuild + install.
 
 Bundle id and display name switch on `APP_ENV` (see `app.config.ts`), so Dev / Staging / Production variants can coexist on the same device or simulator.
+
+## Android development and internal testing
+
+The stable production Android package is `ai.kitta.multica`; development and
+staging use `ai.kitta.multica.dev` and `ai.kitta.multica.staging` so all three
+variants can coexist. The app handles `multica://` deep links and requests only
+network access plus Android's image-picker permission.
+
+Install a debug build on a running emulator or USB-connected device:
+
+```bash
+pnpm android:mobile:staging
+```
+
+To create an APK without an emulator, install Android SDK Platform Tools, a
+matching SDK platform/build-tools, Java 17, and set `ANDROID_HOME` (or
+`ANDROID_SDK_ROOT`). Then run:
+
+```bash
+pnpm android:mobile:apk:staging
+# artifact: apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+For a shareable internal APK, authenticate EAS CLI first (`npx eas-cli@latest
+login`) and run `pnpm android:mobile:internal`. The `internal` profile uses the
+staging environment and `distribution: internal`; it never submits to Google
+Play. This command starts a remote EAS build and is intentionally not part of
+the local test suite.
 
 ## First-time setup
 

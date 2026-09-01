@@ -19,7 +19,7 @@ export default function IssueProjectPickerRoute() {
   const { data: issue } = useQuery(issueDetailOptions(wsId, id));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const updateIssue = useUpdateIssue(id);
-  const query = useNativeSearchBar("Search projects", { autoFocus: true });
+  const { query, SearchField } = useNativeSearchBar("Search projects", { autoFocus: true });
 
   const project = useMemo(
     () => findProject(projects, issue?.project_id ?? null),
@@ -27,7 +27,9 @@ export default function IssueProjectPickerRoute() {
   );
 
   return (
-    <ProjectPickerBody
+    <>
+      <SearchField />
+      <ProjectPickerBody
       value={project ?? null}
       query={query}
       onChange={(next) => {
@@ -35,5 +37,6 @@ export default function IssueProjectPickerRoute() {
         router.back();
       }}
     />
+    </>
   );
 }
