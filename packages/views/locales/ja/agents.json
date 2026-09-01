@@ -227,6 +227,8 @@
     "thinking_clear": "CLI 設定に従う",
     "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます",
     "service_tier_default": "ランタイムのデフォルト",
+    "service_tier_standard": "標準",
+    "service_tier_standard_description": "通常速度と標準使用量",
     "service_tier_tooltip": "速度 · {{value}}",
     "service_tier_clear": "ランタイムのデフォルト",
     "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます"

@@ -297,7 +297,7 @@
     "disabled_badge": "已禁用",
     "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
     "delete_title": "移除共享服务？",
-    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个任务起生效。",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个 task 起生效。",
     "delete_confirm": "移除",
     "cancel": "取消",
     "added_toast": "已添加共享 MCP 服务",

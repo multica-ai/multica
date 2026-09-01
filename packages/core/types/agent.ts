@@ -1103,6 +1103,12 @@ export interface RuntimeModel {
   thinking?: RuntimeModelThinking;
   /** Runtime-native execution tiers advertised for this exact model. */
   service_tiers?: RuntimeModelServiceTier[];
+  /**
+   * Whether this runtime's installed Codex CLI accepts the request-only
+   * `default` sentinel for explicit standard routing. Missing means false so
+   * a new client stays safe when connected to an older daemon.
+   */
+  supports_explicit_standard_service_tier?: boolean;
 }
 
 export interface RuntimeModelServiceTier {

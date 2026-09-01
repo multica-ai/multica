@@ -1,6 +1,6 @@
 ---
 title: セルフホスト Git ホスティング
-description: ワークスペースごとにセルフホストの Forgejo、Gitea、GitLab インスタンスを接続し、イシュー番号を参照する Pull Request / Merge Request を対応するイシューへ自動的に紐づけ、マージ時に「完了」へ移動して CI ステータスを表示します。
+description: ワークスペースごとにセルフホストの Forgejo、Gitea、GitLab インスタンスを接続し、タスク番号を参照する Pull Request / Merge Request を対応するタスクへ自動的に紐づけ、マージ時に「完了」へ移動して CI ステータスを表示します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 **セルフホスト版 Multica 専用です。** この連携は Multica を**自分でデプロイしている**場合のみ利用でき、Multica Cloud では提供されません。ここでの「セルフホスト」は **Multica 自体**のセルフホストを意味します。通常は独自ネットワーク内の Git インスタンスへアクセスするために使用します。サーバー運用者が `MULTICA_VCS_INTEGRATION_ENABLED=true` を設定して機能を有効にし、`MULTICA_VCS_SECRET_KEY` も設定する必要があります。それまでは、設定 → 連携にこのセクションは表示されません。
 </Callout>
 
-Multica はワークスペースごとにセルフホストの Git ホスティング、**Forgejo**、**Gitea**、**GitLab** のいずれかへ接続します。接続後、ブランチ名、タイトル、本文にイシュー番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）は、対応する[イシュー](/issues)へ**自動的に紐づけられ**、イシューサイドバーの **Pull requests** に表示されます。終了キーワードを含む PR がマージされると、イシューは「完了」へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
+Multica はワークスペースごとにセルフホストの Git ホスティング、**Forgejo**、**Gitea**、**GitLab** のいずれかへ接続します。接続後、ブランチ名、タイトル、本文にタスク番号（例: `MUL-123`）を含む Pull Request（GitLab では Merge Request）は、対応する[タスク](/issues)へ**自動的に紐づけられ**、タスクサイドバーの **Pull requests** に表示されます。終了キーワードを含む PR がマージされると、タスクは「完了」へ移動します。head commit の CI はカード上のチェックバーとして表示されます。
 
 これらの Git ホスティングは GitHub と並行して利用でき、1 つのワークスペースで任意に組み合わせられます。
 
@@ -76,7 +76,7 @@ Multica は保存済みの secret で各 delivery を検証するため、一致
 ## ミラーされる内容
 
 - **Pull / Merge Request** — open、closed、merged、draft の状態、作成者、ブランチ、および Git ホスティングが提供する場合は diff 統計。
-- **イシューの紐づけ** — タイトル、本文、ブランチの番号で PR をイシューへ紐づけます。マージ済み PR に終了キーワード（`Closes`/`Fixes`/`Resolves MUL-123`）があり、open の関連 PR が残っていなければ、イシューを「完了」へ移動します。
+- **タスクの紐づけ** — タイトル、本文、ブランチの番号で PR をタスクへ紐づけます。マージ済み PR に終了キーワード（`Closes`/`Fixes`/`Resolves MUL-123`）があり、open の関連 PR が残っていなければ、タスクを「完了」へ移動します。
 - **CI** — Forgejo/Gitea の commit status と GitLab pipeline を、head commit の成功/失敗/進行中チェックバーへ集約します。
 
 ## エージェントによる Pull Request の作成

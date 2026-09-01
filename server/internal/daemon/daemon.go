@@ -4185,20 +4185,22 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		Description string `json:"description,omitempty"`
 	}
 	type modelWire struct {
-		ID           string                 `json:"id"`
-		Label        string                 `json:"label"`
-		Provider     string                 `json:"provider,omitempty"`
-		Default      bool                   `json:"default,omitempty"`
-		Thinking     *modelThinkingWire     `json:"thinking,omitempty"`
-		ServiceTiers []modelServiceTierWire `json:"service_tiers,omitempty"`
+		ID                                  string                 `json:"id"`
+		Label                               string                 `json:"label"`
+		Provider                            string                 `json:"provider,omitempty"`
+		Default                             bool                   `json:"default,omitempty"`
+		Thinking                            *modelThinkingWire     `json:"thinking,omitempty"`
+		ServiceTiers                        []modelServiceTierWire `json:"service_tiers,omitempty"`
+		SupportsExplicitStandardServiceTier bool                   `json:"supports_explicit_standard_service_tier,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
 		entry := modelWire{
-			ID:       m.ID,
-			Label:    m.Label,
-			Provider: m.Provider,
-			Default:  m.Default,
+			ID:                                  m.ID,
+			Label:                               m.Label,
+			Provider:                            m.Provider,
+			Default:                             m.Default,
+			SupportsExplicitStandardServiceTier: m.SupportsExplicitStandardServiceTier,
 		}
 		if m.Thinking != nil {
 			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
@@ -7508,6 +7510,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var promptOptions []PromptOption
 	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+	}
+	// Worktree mode hands this turn a tree that is mid-merge when the user's
+	// edits since the previous turn collided with the branch's own work. The
+	// conflict is deliberately left in place for the agent to resolve, so the
+	// prompt has to be the thing that tells it (MUL-6881).
+	if env.LocalWorktree != nil && len(env.LocalWorktree.ReplayConflicts) > 0 {
+		promptOptions = append(promptOptions, WithWorktreeReplayConflicts(env.LocalWorktree.ReplayConflicts))
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 

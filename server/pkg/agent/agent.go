@@ -105,7 +105,8 @@ type ExecOptions struct {
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
 	// ServiceTier is a runtime-native Codex execution tier (for example
-	// "priority", displayed as Fast). Empty means inherit local Codex config.
+	// "priority", displayed as Fast). "default" explicitly selects standard
+	// routing; empty means inherit local Codex config.
 	// Other providers ignore this field.
 	ServiceTier string
 	// OpenclawMode chooses between local (embedded) and gateway routing for

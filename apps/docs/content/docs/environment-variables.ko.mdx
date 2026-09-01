@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica는 프로세스를 시작할 때 환경 변수를 읽습니다. 수정 후에는 보통 해당 API, Web 또는 데몬을 다시 시작해야 합니다. Docker Compose의 `docker compose restart`는 `.env`를 다시 읽지 않으므로 `up -d`로 컨테이너를 다시 만들어야 적용됩니다.
 
-이 페이지에는 배포자를 위한 설정만 나열하며 테스트 변수와 내부 태스크 변수는 다루지 않습니다. 여기서는 그룹별 참조를 제공하고 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
+이 페이지에는 배포자를 위한 설정만 나열하며 테스트 변수와 내부 작업 변수는 다루지 않습니다. 여기서는 그룹별 참조를 제공하고 전체 배포 단계는 [자체 호스팅 빠른 시작](/self-host-quickstart)을 참고하세요.
 
 ## 프로덕션 최소 설정
 
@@ -191,7 +191,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 
 ## 서버 측 LLM
 
-이 설정 그룹은 대화 제목 같은 서버 측 보조 생성 기능에 사용됩니다. 에이전트가 태스크를 실행할 때 사용하는 AI 코딩 도구의 자격 증명이 아닙니다.
+이 설정 그룹은 대화 제목 같은 서버 측 보조 생성 기능에 사용됩니다. 에이전트가 작업을 실행할 때 사용하는 AI 코딩 도구의 자격 증명이 아닙니다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -210,7 +210,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스트림 요청을 전혀 보내지 않습니다. 위 두 기능 모두 아무것도 전송하지 않습니다. 이 레이어가 채팅 내용을 배포 환경 밖으로 보내면 안 되는 정책이라면 이것이 지원되는 구성입니다. 세션은 클라이언트가 첫 메시지에서 만든 제목을 그대로 사용하고, 후속 질문 버튼은 표시되지 않으며, 나머지 기능은 영향을 받지 않습니다.
 
 <Callout type="info">
-이는 보조 생성 레이어에만 해당합니다. 에이전트 실행은 별도의 데이터 경로입니다. 에이전트가 채팅에 답변할 때 데몬은 해당 에이전트의 AI 코딩 도구를 그 도구 자체의 자격 증명으로 실행하며, 위의 `MULTICA_LLM_*` 설정을 도구에 전달하지 않습니다. (에이전트 자체에 필요한 태스크 범위의 Multica 연결 변수는 데몬이 별도로 주입합니다.) 위 변수를 비워 두어도 이 경로에는 영향이 없으므로, 에이전트의 런타임 설정에서 관리하세요.
+이는 보조 생성 레이어에만 해당합니다. 에이전트 실행은 별도의 데이터 경로입니다. 에이전트가 채팅에 답변할 때 데몬은 해당 에이전트의 AI 코딩 도구를 그 도구 자체의 자격 증명으로 실행하며, 위의 `MULTICA_LLM_*` 설정을 도구에 전달하지 않습니다. (에이전트 자체에 필요한 작업 범위의 Multica 연결 변수는 데몬이 별도로 주입합니다.) 위 변수를 비워 두어도 이 경로에는 영향이 없으므로, 에이전트의 런타임 설정에서 관리하세요.
 </Callout>
 
 ## 데몬 설정
@@ -222,9 +222,9 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket 주소. `http(s)`도 허용 |
 | `MULTICA_DAEMON_DEVICE_NAME` | host 이름 | 런타임 목록의 기기 이름 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 런타임 표시 이름 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 실행 태스크 polling 간격 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | wakeup 이벤트가 없을 때 작업 polling 간격 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | heartbeat 간격 |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 실행 태스크 상한 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 데몬 하나의 동시 작업 상한 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 단일 실행의 절대 시간 제한. `0`은 제한 없음 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다 |
@@ -235,9 +235,9 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`, 자체 호스팅 `false` | CLI 자동 확인 및 업데이트 여부 |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 업데이트 확인 간격 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 외부에서 교체된 `multica` 바이너리(`brew upgrade`, 재다운로드, 로컬 빌드)로 재시작할지 여부. `MULTICA_DAEMON_AUTO_UPDATE`와 독립적 |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 실행 태스크 작업 디렉터리의 루트 |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 작업 작업 디렉터리의 루트 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`(Linux/macOS) | Linux/macOS 전용. 작업별 비공개 임시 디렉터리의 상위 디렉터리입니다. 기존의 쓰기 가능한 절대 경로여야 하며, 값이 잘못되면 `/tmp`로 대체하지 않고 작업 시작에 실패합니다. 짧은 경로를 선택하세요. 하위 도구가 그 아래에 AF_UNIX 소켓을 만들 수 있으며 `sun_path` 제한은 Linux에서 108바이트, macOS에서 104바이트입니다 |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 실행 태스크 디렉터리 유지 |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 디버깅을 위해 작업 디렉터리 유지 |
 
 각 AI 코딩 도구는 `MULTICA_<PROVIDER>_PATH`로 명령 경로를 덮어쓸 수 있으며 모델 재정의를 지원하는 도구는 `MULTICA_<PROVIDER>_MODEL`도 사용할 수 있습니다. QwenPaw와 MiniMax Code에는 모델 변수가 없고 MiniMax Code의 경로 변수는 `MULTICA_MCODE_PATH`입니다. 자세한 내용은 [AI 코딩 도구 비교](/providers#모델-출처)를 참고하세요. DeepSeek Harness는 `MULTICA_DSH_PATH`와 `MULTICA_DSH_MODEL`을 지원합니다(값은 dsh 모델 카탈로그의 모델 ID, 예: `deepseek-official/deepseek-chat`). ZeroClaw는 `MULTICA_ZEROCLAW_PATH`를 지원하지만 모델 변수는 없습니다. 모델은 ZeroClaw의 에이전트 설정에서 관리합니다. 컴퓨터 전체 기본 인수 `MULTICA_<PROVIDER>_ARGS`는 현재 Claude Code, Codex, CodeBuddy, Qwen Code, QwenPaw 다섯 도구를 지원합니다. 해당 변수는 `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, `MULTICA_QWENPAW_ARGS`입니다. 예시:
 
@@ -266,9 +266,9 @@ multica config show
 | `workspace_id` | 비어 있음 | 기본 워크스페이스 |
 | `device_name` | host 이름 | 런타임 목록의 기기 이름 |
 | `runtime_name` | `Local Agent` | 런타임 표시 이름 |
-| `workspaces_root` | `~` 아래 profile별 경로 | 실행 태스크 작업 디렉터리의 루트 |
-| `max_concurrent_tasks` | `20` | 동시 실행 태스크 상한. `0` 또는 빈 값은 설정되지 않음을 의미 |
-| `poll_interval` | `30s` | 실행 태스크 polling 간격 |
+| `workspaces_root` | `~` 아래 profile별 경로 | 작업 작업 디렉터리의 루트 |
+| `max_concurrent_tasks` | `20` | 동시 작업 상한. `0` 또는 빈 값은 설정되지 않음을 의미 |
+| `poll_interval` | `30s` | 작업 polling 간격 |
 | `heartbeat_interval` | `15s` | heartbeat 간격 |
 | `agent_timeout` | 제한 없음 | 단일 실행의 절대 시간 제한 |
 | `codex_semantic_inactivity_timeout` | 파생 | Codex 의미 활동 없음 기준값. 설정하지 않으면 idle과 tool watchdog 예산 중 큰 값을 따르고, tool 예산이 `0`이면 idle 예산으로 되돌아갑니다. Codex 자체의 `10m`은 watchdog 전체를 비활성화했을 때만 유지됩니다 |

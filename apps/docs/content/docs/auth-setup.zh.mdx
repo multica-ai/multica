@@ -18,10 +18,10 @@ Multica 默认使用邮箱验证码登录，也可以增加 Google OAuth。已�
 1. 在 [Resend](https://resend.com/) 验证发信域名并创建 API key。
 2. 设置：
 
-   ```dotenv
-   RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
-   RESEND_FROM_EMAIL=noreply@example.com
-   ```
+ ```dotenv
+ RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+ RESEND_FROM_EMAIL=noreply@example.com
+ ```
 
 3. 重启 API 服务。
 
@@ -81,17 +81,17 @@ MULTICA_DEV_VERIFICATION_CODE=888888
 1. 在 [Google Cloud Console](https://console.cloud.google.com/) 创建 OAuth 2.0 client。
 2. 把 Multica 前端的回调地址加入 **Authorized redirect URIs**：
 
-   ```text
-   https://multica.example.com/auth/callback
-   ```
+ ```text
+ https://multica.example.com/auth/callback
+ ```
 
 3. 设置：
 
-   ```dotenv
-   GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
-   GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
-   ```
+ ```dotenv
+ GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+ GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+ GOOGLE_REDIRECT_URI=https://multica.example.com/auth/callback
+ ```
 
 4. 重启 API 服务。
 

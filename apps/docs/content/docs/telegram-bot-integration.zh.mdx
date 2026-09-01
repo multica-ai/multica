@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 使用你通过 Telegram 官方 [@BotFather](https://t.me/BotFather) 创建的 Bot。一个 Bot 对应一个 Multica 智能体；需要多个独立 Bot 身份时，为每个智能体分别创建。
 
-Telegram 集成[由社区维护](/community-maintained)：每个版本都会随包发布，但不附带官方支持 SLA。遇到问题请提到 [GitHub issues](https://github.com/multica-ai/multica/issues)。
+Telegram 集成[由社区维护](/community-maintained)：每个版本都会随包发布，但不附带官方支持 SLA。遇到问题请提到 [GitHub 任务](https://github.com/multica-ai/multica/issues)。
 
 ## 开始前
 
@@ -23,7 +23,7 @@ Telegram 集成[由社区维护](/community-maintained)：每个版本都会随�
 4. 保持 **Group Privacy** 开启。群聊里 Multica 只需要接收命令、明确的 @ 和对 Bot 消息的回复。
 
 <Callout type="warning">
-不要把 token 发到 issue、聊天、日志或代码仓库。若已泄露，请在 @BotFather 中撤销，再用替换后的 token 重新连接。
+不要把 token 发到任务、聊天、日志或代码仓库。若已泄露，请在 @BotFather 中撤销，再用替换后的 token 重新连接。
 </Callout>
 
 ## 2. 连接到智能体
@@ -56,12 +56,12 @@ Multica 会实时请求 Telegram 验证 Bot，检查是否存在与长轮询冲�
 
 - `/new` 创建一个新的空 Multica Chat，并把该 Telegram 对话的后续消息路由到新 Chat；`/new <消息>` 会把消息作为新 Chat 的第一轮。回复其他成员并明确 @ Bot 时，被选中的引用内容仍会附在第一轮中。
 - `/clear` 保留当前 Multica Chat，把新的智能体可见上下文应用到下一条非空消息；`/clear <消息>` 会把消息作为上下文边界后的第一轮，明确选择的回复引用仍会保留。
-- `/issue <标题>` 创建 Multica issue，后续行作为可选描述；不带标题时返回用法提示。
+- `/issue <标题>` 创建 Multica 任务，后续行作为可选描述；不带标题时返回用法提示。
 - 群聊支持 `/issue@your_bot` 这种 Telegram 命令后缀。
 
 ### 回复与内容范围
 
-Bot 通过发送并编辑 Telegram 消息来流式展示文字回复，引用触发消息、保留 forum topic，并按 Telegram 长度限制自动分段。最终回复在进程内异步投递。正常情况下，某个聊天的退避等待不会占用 worker；缓存达到容量上限并压缩退避状态时，同一 Bot installation 下的其他聊天可能被保守延迟。终态队列有固定容量，超限任务会被明确拒绝并记录错误；队列不会跨服务重启恢复。
+Bot 通过发送并编辑 Telegram 消息来流式展示文字回复，引用触发消息、保留 forum topic，并按 Telegram 长度限制自动分段。最终回复在进程内异步投递。正常情况下，某个聊天的退避等待不会占用 worker；缓存达到容量上限并压缩退避状态时，同一 Bot installation 下的其他聊天可能被保守延迟。终态队列有固定容量，超限 task 会被明确拒绝并记录错误；队列不会跨服务重启恢复。
 
 当前版本只接收文字。图片、文件、视频、语音、贴纸等非文字消息在私聊中会收到明确的不支持提示；群里明确 @ Bot 的媒体消息也会收到提示，未 @ 的媒体消息保持静默。
 
@@ -94,4 +94,4 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
 
 - [聊天集成](/channels) — 比较平台并理解会话与身份机制。
 - [与智能体对话](/chat) — Bot 消息如何变成智能体执行。
-- [Issues](/issues) — `/issue` 创建的工作项。
+- [任务](/issues) — `/issue` 创建的工作项。

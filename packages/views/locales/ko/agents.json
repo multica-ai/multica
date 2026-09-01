@@ -235,6 +235,8 @@
     "thinking_clear": "CLI 설정 따르기",
     "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다",
     "service_tier_default": "런타임 기본값",
+    "service_tier_standard": "표준",
+    "service_tier_standard_description": "기본 속도 및 표준 사용량",
     "service_tier_tooltip": "속도 · {{value}}",
     "service_tier_clear": "런타임 기본값",
     "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"

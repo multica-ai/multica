@@ -114,7 +114,7 @@ Multica's product nouns split into two categories:
 - **Everyday noun** — the word a user would say out loud for it. **Translate fully**, whether or not it is a database entity: `issue` → 任务, `workspace` → 工作区, `project` → 项目.
 - **Multica-specific term** — a concept no local word carries (`skill`), or a schema-level identifier a user may have to type or match (`todo`, `in_progress`, `task_id`). Render as **lowercase English** so it reads like a type name.
 
-The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. They still carry the old English `issue` in prose and are being swept separately — follow the table below, not those pages, for this term.
+The Chinese pages under `apps/docs/content/docs/*.zh.mdx` are the de facto voice standard for everything else on this page. The `*.zh.mdx`, `*.ja.mdx`, and `*.ko.mdx` prose now follows the table below as well.
 
 ### `issue` is the product's task — translate it
 
@@ -132,7 +132,7 @@ What does not move:
 - **API / DB fields** stay `issue` / `task` / `skill` everywhere: `issue_status`, `task_id`, `skill_uuid`.
 - **Code references and literal commands** stay English: `multica issue ...`, the `/issue` Slack and Lark slash command.
 - **`skill`** keeps lowercase English in Chinese text — a Multica-specific concept with no established Chinese term; titles may capitalize as `Skills`.
-- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常`, not `任务`.
+- **`issue` in the "problem" sense** (runtime health) is a plain noun, not the entity: `{{count}} issues` on a machine card is `{{count}} 个异常` / `問題 {{count}} 件` / `문제 {{count}}개`, never the entity word.
 
 **Why `issue` is translated while `skill` is not**: users file and read issues all day, and "issue" has no meaning in Chinese, Japanese, or Korean outside of dev jargon. The everyday task word is what people already say for this. `skill` is a Multica-specific concept where no local word carries the meaning.
 
