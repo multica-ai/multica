@@ -67,7 +67,7 @@ func init() {
 	repoRemoveCmd.Flags().StringArray("url", nil, "Repository URL to remove (may be repeated)")
 	repoRemoveCmd.Flags().String("output", "json", "Output format: table or json")
 
-	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, or commit to check out instead of the remote default branch")
+	repoCheckoutCmd.Flags().StringVar(&repoCheckoutRef, "ref", "", "branch, tag, commit, or fully-qualified ref such as refs/pull/12/head, to check out instead of the remote default branch")
 
 	repoCmd.AddCommand(repoListCmd)
 	repoCmd.AddCommand(repoAddCmd)
