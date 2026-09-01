@@ -1,4 +1,5 @@
 // @vitest-environment node
+import "@multica/eslint-config/register-ts6";
 import { describe, expect, it } from "vitest";
 import { Linter } from "eslint";
 import tsParser from "@typescript-eslint/parser";
