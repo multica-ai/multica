@@ -79,6 +79,7 @@
     "./agents/stores": "./agents/stores/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/stores": "./squads/stores/index.ts",
+    "./templates": "./templates/index.ts",
     "./permissions": "./permissions/index.ts",
     "./search/cancelled-rank": "./search/cancelled-rank.ts",
     "./projects": "./projects/index.ts",

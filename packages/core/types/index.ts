@@ -294,6 +294,24 @@ export type {
   SquadMemberStatusListResponse,
 } from "./squad";
 export type {
+  MarketplaceTemplateSourceType,
+  MarketplaceTemplateVisibility,
+  MarketplaceTemplateScope,
+  MarketplaceTemplateSort,
+  MarketplaceTemplateAgentPreview,
+  MarketplaceTemplateSkillFileSnapshot,
+  MarketplaceTemplateSkillSnapshot,
+  MarketplaceTemplateAgentSnapshot,
+  MarketplaceTemplateSquadSnapshot,
+  MarketplaceTemplateSnapshot,
+  MarketplaceTemplate,
+  ListMarketplaceTemplatesParams,
+  ListMarketplaceTemplatesResponse,
+  CreateMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateResponse,
+} from "./template";
+export type {
   BillingBalance,
   BillingTransaction,
   BillingTransactionsPage,

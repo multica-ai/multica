@@ -1007,6 +1007,25 @@ type LarkUserBinding struct {
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
 }
 
+type MarketplaceTemplate struct {
+	ID                pgtype.UUID        `json:"id"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	SourceType        string             `json:"source_type"`
+	SourceID          pgtype.UUID        `json:"source_id"`
+	Name              string             `json:"name"`
+	Description       string             `json:"description"`
+	Tags              []string           `json:"tags"`
+	Visibility        string             `json:"visibility"`
+	ImageUrl          pgtype.Text        `json:"image_url"`
+	SnapshotVersion   int32              `json:"snapshot_version"`
+	Snapshot          []byte             `json:"snapshot"`
+	AppliedCount      int64              `json:"applied_count"`
+	FeaturedAt        pgtype.Timestamptz `json:"featured_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Member struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

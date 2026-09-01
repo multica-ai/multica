@@ -2079,6 +2079,135 @@ export const EMPTY_SQUAD: Squad = {
   member_preview: [],
 };
 
+const MarketplaceTemplateAgentPreviewSchema = z.object({
+  key: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  role: z.string().default(""),
+  is_leader: z.boolean().default(false),
+}).loose();
+
+const MarketplaceTemplateSkillFileSnapshotSchema = z.object({
+  path: z.string().default(""),
+  content: z.string().default(""),
+}).loose();
+
+const MarketplaceTemplateSkillSnapshotSchema = z.object({
+  key: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  content: z.string().default(""),
+  config: z.record(z.string(), z.unknown()).default({}),
+  files: z.array(MarketplaceTemplateSkillFileSnapshotSchema).default([]),
+}).loose();
+
+const MarketplaceTemplateAgentSnapshotSchema = z.object({
+  key: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  conversation_starters: z.array(z.object({
+    label: z.string().default(""),
+    prompt: z.string().default(""),
+  }).loose()).default([]),
+  max_concurrent_tasks: z.number().int().positive().default(1),
+  skill_keys: z.array(z.string()).default([]),
+}).loose();
+
+const MarketplaceTemplateSquadSnapshotSchema = z.object({
+  name: z.string().default(""),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  leader_key: z.string().default(""),
+  members: z.array(z.object({
+    agent_key: z.string().default(""),
+    role: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const MarketplaceTemplateSnapshotSchema = z.object({
+  version: z.number().int().positive().default(1),
+  source_type: z.enum(["agent", "squad"]),
+  agents: z.array(MarketplaceTemplateAgentSnapshotSchema).default([]),
+  skills: z.array(MarketplaceTemplateSkillSnapshotSchema).default([]),
+  squad: MarketplaceTemplateSquadSnapshotSchema.optional(),
+}).loose();
+
+export const MarketplaceTemplateSchema = z.object({
+  id: z.string().default(""),
+  source_workspace_id: z.string().default(""),
+  created_by: z.string().default(""),
+  creator_name: z.string().default(""),
+  source_type: z.enum(["agent", "squad"]),
+  source_id: z.string().nullable().default(null),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  visibility: z.enum(["private", "workspace", "public"]).catch("private"),
+  image_url: z.string().nullable().default(null),
+  snapshot_version: z.number().int().positive().default(1),
+  applied_count: z.number().int().nonnegative().default(0),
+  featured_at: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  agent_count: z.number().int().nonnegative().default(0),
+  skill_count: z.number().int().nonnegative().default(0),
+  preview_agents: z.array(MarketplaceTemplateAgentPreviewSchema).default([]),
+  snapshot: MarketplaceTemplateSnapshotSchema.optional(),
+  can_manage: z.boolean().default(false),
+}).loose();
+
+export const MarketplaceTemplateListSchema = z.object({
+  templates: z.array(MarketplaceTemplateSchema).default([]),
+  total: z.number().int().nonnegative().default(0),
+  page: z.number().int().positive().default(1),
+  page_size: z.number().int().positive().default(12),
+}).loose();
+
+export const ApplyMarketplaceTemplateResponseSchema = z.object({
+  template_id: z.string().default(""),
+  agent_ids: z.record(z.string(), z.string()).default({}),
+  squad_id: z.string().nullable().default(null),
+  reused_skill_ids: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_MARKETPLACE_TEMPLATE = {
+  id: "",
+  source_workspace_id: "",
+  created_by: "",
+  creator_name: "",
+  source_type: "agent" as const,
+  source_id: null,
+  name: "",
+  description: "",
+  tags: [],
+  visibility: "private" as const,
+  image_url: null,
+  snapshot_version: 1,
+  applied_count: 0,
+  featured_at: null,
+  created_at: "",
+  updated_at: "",
+  agent_count: 0,
+  skill_count: 0,
+  preview_agents: [],
+  can_manage: false,
+};
+
+export const EMPTY_MARKETPLACE_TEMPLATE_LIST = {
+  templates: [],
+  total: 0,
+  page: 1,
+  page_size: 12,
+};
+
+export const EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE = {
+  template_id: "",
+  agent_ids: {},
+  squad_id: null,
+  reused_skill_ids: [],
+};
+
 // Squad member status — backs the Squad detail page's Members tab. status
 // is `string | null` (not the narrow `SquadMemberStatusValue` union) so a
 // new server-side status doesn't fail the parse; the UI defaults to a

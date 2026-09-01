@@ -197,6 +197,12 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  MarketplaceTemplate,
+  ListMarketplaceTemplatesParams,
+  ListMarketplaceTemplatesResponse,
+  CreateMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateResponse,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -321,6 +327,12 @@ import {
   SquadSchema,
   SquadListSchema,
   SquadMemberStatusListResponseSchema,
+  MarketplaceTemplateSchema,
+  MarketplaceTemplateListSchema,
+  ApplyMarketplaceTemplateResponseSchema,
+  EMPTY_MARKETPLACE_TEMPLATE,
+  EMPTY_MARKETPLACE_TEMPLATE_LIST,
+  EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -4081,6 +4093,66 @@ export class ApiClient {
     return parseWithFallback(raw, SquadMemberStatusListResponseSchema, EMPTY_SQUAD_MEMBER_STATUS_LIST, {
       endpoint: "GET /api/squads/:id/members/status",
     }) as SquadMemberStatusListResponse;
+  }
+
+  // Marketplace templates
+  async listMarketplaceTemplates(
+    params: ListMarketplaceTemplatesParams = {},
+  ): Promise<ListMarketplaceTemplatesResponse> {
+    const search = new URLSearchParams();
+    if (params.query) search.set("q", params.query);
+    if (params.source_type) search.set("type", params.source_type);
+    if (params.scope && params.scope !== "all") search.set("scope", params.scope);
+    if (params.sort) search.set("sort", params.sort);
+    if (params.page) search.set("page", String(params.page));
+    if (params.page_size) search.set("page_size", String(params.page_size));
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/templates${suffix}`);
+    return parseWithFallback(
+      raw,
+      MarketplaceTemplateListSchema,
+      EMPTY_MARKETPLACE_TEMPLATE_LIST,
+      { endpoint: "GET /api/templates" },
+    ) as ListMarketplaceTemplatesResponse;
+  }
+
+  async getMarketplaceTemplate(id: string): Promise<MarketplaceTemplate> {
+    const raw = await this.fetch<unknown>(`/api/templates/${id}`);
+    return parseWithFallback(raw, MarketplaceTemplateSchema, EMPTY_MARKETPLACE_TEMPLATE, {
+      endpoint: "GET /api/templates/:id",
+    }) as MarketplaceTemplate;
+  }
+
+  async createMarketplaceTemplate(
+    data: CreateMarketplaceTemplateRequest,
+  ): Promise<MarketplaceTemplate> {
+    const raw = await this.fetch<unknown>("/api/templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, MarketplaceTemplateSchema, EMPTY_MARKETPLACE_TEMPLATE, {
+      endpoint: "POST /api/templates",
+    }) as MarketplaceTemplate;
+  }
+
+  async applyMarketplaceTemplate(
+    id: string,
+    data: ApplyMarketplaceTemplateRequest,
+  ): Promise<ApplyMarketplaceTemplateResponse> {
+    const raw = await this.fetch<unknown>(`/api/templates/${id}/apply`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      ApplyMarketplaceTemplateResponseSchema,
+      EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
+      { endpoint: "POST /api/templates/:id/apply" },
+    ) as ApplyMarketplaceTemplateResponse;
+  }
+
+  async deleteMarketplaceTemplate(id: string): Promise<void> {
+    await this.fetch(`/api/templates/${id}`, { method: "DELETE" });
   }
 
   // Autopilots

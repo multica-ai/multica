@@ -8,6 +8,7 @@
     "autopilots": "自动化",
     "agents": "智能体",
     "squads": "小队",
+    "templates": "模板广场",
     "usage": "统计",
     "runtimes": "运行时",
     "skills": "Skills",
@@ -54,6 +55,7 @@
     "pinned_label": "固定",
     "workspace_group": "工作区",
     "configure_group": "配置",
+    "solutions_group": "解决方案",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "加入 Discord",

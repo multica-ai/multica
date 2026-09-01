@@ -8,6 +8,7 @@
     "autopilots": "오토파일럿",
     "agents": "에이전트",
     "squads": "스쿼드",
+    "templates": "템플릿 갤러리",
     "usage": "분석",
     "runtimes": "런타임",
     "skills": "스킬",
@@ -54,6 +55,7 @@
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",
     "configure_group": "설정",
+    "solutions_group": "솔루션",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Discord 참여하기",

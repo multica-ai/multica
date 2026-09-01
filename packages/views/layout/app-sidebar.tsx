@@ -119,6 +119,7 @@ type NavKey =
   | "autopilots"
   | "agents"
   | "squads"
+  | "templates"
   | "usage"
   | "runtimes"
   | "skills"
@@ -135,6 +136,7 @@ type NavLabelKey =
   | "autopilots"
   | "agents"
   | "squads"
+  | "templates"
   | "usage"
   | "runtimes"
   | "skills"
@@ -162,6 +164,10 @@ const configureNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "runtimes", labelKey: "runtimes" },
   { key: "skills", labelKey: "skills" },
   { key: "settings", labelKey: "settings" },
+];
+
+const solutionsNav: { key: NavKey; labelKey: NavLabelKey }[] = [
+  { key: "templates", labelKey: "templates" },
 ];
 
 function DraftDot() {
@@ -855,6 +861,31 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {configureNav.map((item) => {
+                  const href = p[item.key]();
+                  const Icon = routeIconForPath(href);
+                  const isActive = isNavActive(pathname, href);
+                  return (
+                    <SidebarMenuItem key={item.key}>
+                      <SidebarMenuButton
+                        isActive={isActive}
+                        render={<AppLink href={href} />}
+                        className="text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+                      >
+                        <Icon />
+                        <span>{t(($) => $.nav[item.labelKey])}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+
+          <SidebarGroup>
+            <SidebarGroupLabel>{t(($) => $.sidebar.solutions_group)}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu className="gap-0.5">
+                {solutionsNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
                   const isActive = isNavActive(pathname, href);
