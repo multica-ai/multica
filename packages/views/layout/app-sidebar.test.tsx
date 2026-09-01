@@ -429,3 +429,27 @@ describe("personal nav — Chat", () => {
     expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
 });
+
+describe("sidebar nav groups", () => {
+  beforeEach(() => {
+    navigation.current.pathname = "/acme/issues";
+  });
+
+  it("drops the standalone agents row and keeps agents under runtimes", () => {
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/agents"]')).toBeNull();
+    expect(container.querySelector('button[data-href="/acme/runtimes"]')).not.toBeNull();
+    expect(container.querySelector('button[data-href="/acme/autopilots"]')).not.toBeNull();
+    expect(container.querySelector('button[data-href="/acme/squads"]')).not.toBeNull();
+    expect(container.querySelector('button[data-href="/acme/usage"]')).not.toBeNull();
+  });
+
+  it("highlights runtimes while the merged agents surface is open", () => {
+    navigation.current.pathname = "/acme/agents";
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('button[data-href="/acme/runtimes"]')).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+  });
+});

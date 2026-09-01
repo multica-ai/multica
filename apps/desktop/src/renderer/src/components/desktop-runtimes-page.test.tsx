@@ -5,7 +5,7 @@ const runtimesPage = vi.fn<(props: Record<string, unknown>) => null>(() => null)
 const useDesktopRuntimeContext = vi.fn();
 
 vi.mock("@multica/views/runtimes", () => ({
-  RuntimesPage: (props: Record<string, unknown>) => runtimesPage(props),
+  AgentsRuntimesPage: (props: Record<string, unknown>) => runtimesPage(props),
 }));
 
 vi.mock("./use-desktop-runtime-context", () => ({

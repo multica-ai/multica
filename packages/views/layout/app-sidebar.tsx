@@ -81,6 +81,7 @@ import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { routeIconForPath } from "./route-icon-components";
+import { configureNav, personalNav, workspaceNav } from "./sidebar-nav";
 import { useT } from "../i18n";
 import {
   useShortcut,
@@ -106,63 +107,6 @@ const EMPTY_WORKSPACES: Awaited<ReturnType<typeof api.listWorkspaces>> = [];
 const EMPTY_INVITATIONS: Awaited<ReturnType<typeof api.listMyInvitations>> = [];
 const EMPTY_INBOX: Awaited<ReturnType<typeof api.listInbox>> = [];
 const EMPTY_INBOX_SUMMARY: Awaited<ReturnType<typeof api.getInboxUnreadSummary>> = [];
-
-// Nav items reference WorkspacePaths method names so they can be resolved
-// against the current workspace slug at render time (see AppSidebar body).
-// Only parameterless paths are valid nav destinations.
-type NavKey =
-  | "inbox"
-  | "chat"
-  | "myIssues"
-  | "issues"
-  | "projects"
-  | "autopilots"
-  | "agents"
-  | "squads"
-  | "usage"
-  | "runtimes"
-  | "skills"
-  | "settings";
-
-// Static schema (key only) — labels resolved at render via useT("layout"),
-// icons derived from the destination path via routeIconForPath.
-type NavLabelKey =
-  | "inbox"
-  | "chat"
-  | "my_issues"
-  | "issues"
-  | "projects"
-  | "autopilots"
-  | "agents"
-  | "squads"
-  | "usage"
-  | "runtimes"
-  | "skills"
-  | "settings";
-
-// Nav icons are NOT declared here: they are derived from each item's
-// destination path at render time, so the sidebar and the desktop tab bar
-// always agree. See route-icon-components.tsx.
-const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "inbox", labelKey: "inbox" },
-  { key: "chat", labelKey: "chat" },
-  { key: "myIssues", labelKey: "my_issues" },
-];
-
-const workspaceNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "issues", labelKey: "issues" },
-  { key: "projects", labelKey: "projects" },
-  { key: "autopilots", labelKey: "autopilots" },
-  { key: "agents", labelKey: "agents" },
-  { key: "squads", labelKey: "squads" },
-  { key: "usage", labelKey: "usage" },
-];
-
-const configureNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "runtimes", labelKey: "runtimes" },
-  { key: "skills", labelKey: "skills" },
-  { key: "settings", labelKey: "settings" },
-];
 
 function DraftDot() {
   const hasDraft = useIssueDraftStore((s) => s.hasDraft());
@@ -857,7 +801,13 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 {configureNav.map((item) => {
                   const href = p[item.key]();
                   const Icon = routeIconForPath(href);
-                  const isActive = isNavActive(pathname, href);
+                  // Agents merged into Runtimes: keep the configure row lit on
+                  // /agents (list, create, detail) as well as /runtimes.
+                  const isActive =
+                    item.key === "runtimes"
+                      ? isNavActive(pathname, href) ||
+                        isNavActive(pathname, p.agents())
+                      : isNavActive(pathname, href);
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton

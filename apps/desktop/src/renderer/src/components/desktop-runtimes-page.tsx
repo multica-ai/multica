@@ -1,4 +1,4 @@
-import { RuntimesPage } from "@multica/views/runtimes";
+import { AgentsRuntimesPage } from "@multica/views/runtimes";
 import { useDesktopRuntimeContext } from "./use-desktop-runtime-context";
 
 /**
@@ -19,7 +19,7 @@ export function DesktopRuntimesPage() {
   const context = useDesktopRuntimeContext();
 
   return (
-    <RuntimesPage
+    <AgentsRuntimesPage
       localDaemonId={context.localDaemonId}
       localMachineName={context.localMachineName}
       // Desktop owns a local machine for the lifetime of the app, even

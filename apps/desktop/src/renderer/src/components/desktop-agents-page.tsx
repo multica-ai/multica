@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AgentsPage } from "@multica/views/agents";
+import { AgentsRuntimesPage } from "@multica/views/runtimes";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 
 /**
@@ -41,7 +41,7 @@ export function DesktopAgentsPage() {
   }, []);
 
   return (
-    <AgentsPage
+    <AgentsRuntimesPage
       localDaemonId={status.daemonId ?? lastIdentity.daemonId}
       localMachineName={status.deviceName ?? lastIdentity.deviceName ?? hostName}
       // Desktop owns a local machine for the lifetime of the app, even
