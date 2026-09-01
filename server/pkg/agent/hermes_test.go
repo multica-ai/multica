@@ -93,6 +93,140 @@ func TestExtractACPCurrentModelIDMissing(t *testing.T) {
 	}
 }
 
+// ── acpModelIDsEquivalent ──
+
+func TestACPModelIDsEquivalent(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		configured string
+		current    string
+		want       bool
+	}{
+		{
+			// The regression this helper exists for: agent.model is stored
+			// bare, Hermes reports the provider-encoded form. A raw string
+			// compare missed, so the MUL-5029 skip-gate never fired and every
+			// turn re-sent set_model — rebuilding the runtime-side agent and
+			// re-running the provider auto-detection the gate exists to avoid.
+			name:       "bare configured vs provider-encoded current",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "both provider-encoded and identical",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			name:       "second bare model vs encoded",
+			configured: "claude-haiku-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       true,
+		},
+		{
+			// A real provider switch must still send set_model.
+			name:       "same model, different explicit providers",
+			configured: "openrouter:claude-sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "different models under same provider",
+			configured: "custom:claude-sonnet-4-5",
+			current:    "custom:claude-haiku-4-5",
+			want:       false,
+		},
+		{
+			name:       "different bare models",
+			configured: "claude-sonnet-4-5",
+			current:    "custom:claude-opus-4-5",
+			want:       false,
+		},
+		{
+			// Hermes lowercases the provider when encoding; a config written
+			// with different casing must still match.
+			name:       "provider casing differs",
+			configured: "Custom:Claude-Sonnet-4-5",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Older runtime / unparsable state: fall through and send
+			// set_model, preserving prior behaviour.
+			name:       "empty current",
+			configured: "claude-sonnet-4-5",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "empty configured",
+			configured: "",
+			current:    "custom:claude-sonnet-4-5",
+			want:       false,
+		},
+		{
+			name:       "both empty",
+			configured: "",
+			current:    "",
+			want:       false,
+		},
+		{
+			name:       "surrounding whitespace is ignored",
+			configured: "  claude-sonnet-4-5 ",
+			current:    "custom:claude-sonnet-4-5",
+			want:       true,
+		},
+		{
+			// Model names carrying a slash (OpenRouter-style) must not be
+			// confused with the provider prefix.
+			name:       "slash-bearing model name, bare vs encoded",
+			configured: "moonshotai/kimi-k2.6",
+			current:    "nous:moonshotai/kimi-k2.6",
+			want:       true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpModelIDsEquivalent(tc.configured, tc.current); got != tc.want {
+				t.Errorf("acpModelIDsEquivalent(%q, %q) = %v, want %v",
+					tc.configured, tc.current, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSplitACPModelID(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in           string
+		wantProvider string
+		wantModel    string
+	}{
+		{"custom:claude-sonnet-4-5", "custom", "claude-sonnet-4-5"},
+		{"claude-sonnet-4-5", "", "claude-sonnet-4-5"},
+		{"nous:moonshotai/kimi-k2.6", "nous", "moonshotai/kimi-k2.6"},
+		{"", "", ""},
+		// Leading colon carries no provider — index 0 is not a separator.
+		{":weird", "", ":weird"},
+		// Only the first colon separates; the rest belongs to the model.
+		{"custom:vendor:model", "custom", "vendor:model"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.in, func(t *testing.T) {
+			t.Parallel()
+			gotProvider, gotModel := splitACPModelID(tc.in)
+			if gotProvider != tc.wantProvider || gotModel != tc.wantModel {
+				t.Errorf("splitACPModelID(%q) = (%q, %q), want (%q, %q)",
+					tc.in, gotProvider, gotModel, tc.wantProvider, tc.wantModel)
+			}
+		})
+	}
+}
+
 // ── resolveResumedSessionID ──
 
 func TestResolveResumedSessionIDMatching(t *testing.T) {

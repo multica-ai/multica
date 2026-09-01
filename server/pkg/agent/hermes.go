@@ -574,9 +574,19 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// downside. An empty sessionCurrentModel (older runtime or unparsable
 		// state) falls through and still sends set_model, preserving prior
 		// behaviour. See MUL-5029 / NousResearch/hermes-agent#59089.
-		if opts.Model != "" && effectiveModel == sessionCurrentModel {
+		//
+		// The comparison is provider-normalised (acpModelIDsEquivalent), not a
+		// raw string match: Hermes always reports its current model in the
+		// provider-encoded `provider:model` form, while agent.model is stored
+		// verbatim from the API and is routinely bare. A literal == therefore
+		// never matched for those agents, so the gate above was dead code and
+		// the MUL-5029 mis-routing hazard it exists to prevent stayed live for
+		// exactly the agents that hit it. See acpModelIDsEquivalent for the
+		// evidence and for what the redundant call actually costs.
+		if opts.Model != "" && acpModelIDsEquivalent(effectiveModel, sessionCurrentModel) {
 			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
 				"model", opts.Model,
+				"session_model", sessionCurrentModel,
 				"session_id", sessionID,
 			)
 		} else if opts.Model != "" {
@@ -2112,6 +2122,88 @@ func extractACPAuthMethods(result json.RawMessage) []string {
 		}
 	}
 	return ids
+}
+
+// splitACPModelID splits an ACP model id into its optional `provider:` prefix
+// and the bare model name. Ids without a colon (or with a leading colon) carry
+// no provider and return ("", id). Mirrors the prefix convention acpModelEntry
+// derives dropdown grouping from.
+//
+// Bare model names can themselves contain colons in theory, so only the FIRST
+// colon is treated as the provider separator — the remainder is the model.
+func splitACPModelID(modelID string) (provider, model string) {
+	id := strings.TrimSpace(modelID)
+	if idx := strings.Index(id, ":"); idx > 0 {
+		return id[:idx], id[idx+1:]
+	}
+	return "", id
+}
+
+// acpModelIDsEquivalent reports whether a configured model id and the id the
+// runtime reports as current denote the same selection.
+//
+// Two id namespaces meet here. Hermes always answers session/new and
+// session/resume with a provider-encoded `provider:model` id — acp_adapter
+// server.py `_encode_model_choice` returns f"{provider}:{model}" whenever a
+// provider resolves, and the provider falls back to detect_provider() or
+// "openrouter", so it is effectively never absent. Confirmed against a live
+// `hermes acp` session: session/new populates models.currentModelId from that
+// encoder, so a bare configured `claude-sonnet-4-5` on a `custom` provider
+// comes back as `custom:claude-sonnet-4-5`.
+// agent.model, meanwhile, is persisted verbatim from the API with no prefix
+// normalisation (handler/agent.go CreateAgent/UpdateAgent), and the CLI
+// documents the bare spelling as valid (`--model claude-sonnet-4-6`). A raw
+// == across those two spellings can never be true, so the gate never fired.
+//
+// What the redundant call costs, per turn, verified in the runtime source:
+// set_session_model replaces state.agent with SessionManager._make_agent,
+// which re-runs load_config + resolve_runtime_provider, joins background MCP
+// discovery for up to mcp_discovery_timeout (~1.5s), constructs a fresh
+// AIAgent, and re-derives all three system-prompt tiers. It also re-runs the
+// provider auto-detection this gate exists to avoid, and it is the only
+// session mutation that skips _schedule_mcp_late_refresh — so the tool
+// snapshot can drift between turns, and on Hermes' direct-native Anthropic
+// tool-cache layout the tools array sits ahead of the system prompt inside
+// the cached prefix. A drifted tool set therefore invalidates the whole
+// prefix, and a model id remapped by _resolve_model_selection additionally
+// fails _stored_prompt_matches_runtime and forces a full prompt rebuild.
+//
+// Deliberately NOT justified by a cache-hit-rate number. The 6.7%-vs-90.2%
+// split that first pointed here was grouped by "does the agent have a
+// configured model", which on the measured deployment was confounded with the
+// transport wire: Hermes emits cache_control breakpoints only when api_mode is
+// anthropic_messages AND the model is Claude-named (verified against
+// agent.agent_runtime_helpers.anthropic_prompt_cache_policy), and that setting
+// was changed five days before this gate was touched. This fix stands on
+// correctness — a comparison that cannot be true, guarding a call the runtime
+// documents as hazardous — not on a cost figure.
+//
+// Equivalence rules:
+//   - Either side empty → not equivalent (caller handles the empty-model case).
+//   - Both sides carry an explicit provider → compare the whole id. A genuine
+//     provider switch (openrouter:X → custom:X) must still send set_model.
+//   - Exactly one side carries a provider → compare model names only. A bare
+//     configured id expresses no provider preference, so the session's own
+//     provider is authoritative and re-selecting it would be pure downside.
+//
+// Provider and model are compared case-insensitively: Hermes lowercases the
+// provider when encoding the id, so a config written as `Custom:...` would
+// otherwise miss.
+func acpModelIDsEquivalent(configured, current string) bool {
+	configured = strings.TrimSpace(configured)
+	current = strings.TrimSpace(current)
+	if configured == "" || current == "" {
+		return false
+	}
+	cfgProvider, cfgModel := splitACPModelID(configured)
+	curProvider, curModel := splitACPModelID(current)
+	if !strings.EqualFold(cfgModel, curModel) {
+		return false
+	}
+	if cfgProvider != "" && curProvider != "" {
+		return strings.EqualFold(cfgProvider, curProvider)
+	}
+	return true
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of
