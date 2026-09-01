@@ -20,6 +20,7 @@ import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
+import { useTabSelectionShortcut } from "./hooks/use-tab-selection-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
@@ -387,6 +388,9 @@ export default function App() {
   // Mounted at the App root for the same reason as Cmd+W: the chord has to
   // work in every renderer state, not only inside the tab shell.
   useOpenSettingsShortcut();
+  // Fixed browser-style tab selection is also owned by main so it remains
+  // available while focus sits inside editors, inputs, menus, or dialogs.
+  useTabSelectionShortcut();
 
   // Flush a freeze/crash breadcrumb the main process parked from a previous
   // session. A true hang or process death can't report itself when it happens

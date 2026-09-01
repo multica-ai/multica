@@ -207,6 +207,23 @@ describe("keyboard shortcut definitions", () => {
     expect(isReservedShortcut(createShortcutChord(","), "macos", "desktop")).toBe(false);
   });
 
+  it("reserves browser-style tab selection on every platform and runtime", () => {
+    for (const key of ["1", "2", "3", "4", "5", "6", "7", "8", "9"]) {
+      const chord = createShortcutChord(key, { primary: true });
+      for (const platform of ["macos", "windows", "linux"] as const) {
+        for (const runtime of ["web", "desktop"] as const) {
+          expect(isReservedShortcut(chord, platform, runtime)).toBe(true);
+          expect(
+            isShortcutAllowedForAction("openSearch", chord, platform, runtime),
+          ).toBe(false);
+        }
+      }
+    }
+    expect(
+      isReservedShortcut(createShortcutChord("1"), "macos", "desktop"),
+    ).toBe(false);
+  });
+
   it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {
     for (const key of ["P", "L", "T", "N", "D", "U"]) {
       const chord = createShortcutChord(key, { primary: true });
