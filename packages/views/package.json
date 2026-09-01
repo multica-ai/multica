@@ -31,6 +31,7 @@
     "./dashboard": "./dashboard/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/components": "./squads/components/index.ts",
+    "./templates": "./templates/index.ts",
     "./workspace/workspace-avatar": "./workspace/workspace-avatar.tsx",
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",
     "./workspace/welcome-after-onboarding": "./workspace/welcome-after-onboarding.tsx",

@@ -9,6 +9,9 @@ import {
   Filter,
   Loader2,
   MoreHorizontal,
+  Download,
+  Share2,
+  PackageOpen,
   Plus,
   Trash2,
   Users,
@@ -36,7 +39,13 @@ import {
   type SquadsScope,
   type SquadSortField,
 } from "@multica/core/squads/stores";
-import type { Agent, MemberWithUser, Squad } from "@multica/core/types";
+import type {
+  Agent,
+  MarketplaceTemplateFileV2,
+  MemberWithUser,
+  NormalizedMarketplaceTemplateFile,
+  Squad,
+} from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -91,6 +100,9 @@ import {
 } from "../../layout/collection-page";
 import { useLocale, useT } from "../../i18n";
 import { PAGE_TOOLBAR } from "../../layout/page-header";
+import { CreateTemplateDialog } from "../../templates/components/create-template-dialog";
+import { ApplyTemplateDialog } from "../../templates/components/templates-page";
+import { ImportSquadTemplateDialog } from "./import-squad-template-dialog";
 
 // Column template — the simplest member of the ListGrid family (squads are
 // the fewest entity, 1-5 rows): subgrid template + var tracks + two-zone
@@ -114,6 +126,22 @@ const COLUMN_WIDTHS: Record<SquadColumnKey, number> = {
 // gaps between the wide template's 8 tracks (zero-width tracks still carry
 // gaps).
 const FIXED_TRACKS_WIDTH = 224 + LEADER_WIDTH + 7 * 12;
+
+function downloadTemplateFile(manifest: MarketplaceTemplateFileV2, squadName: string) {
+  const stem = squadName
+    .trim()
+    .replace(/[^\p{L}\p{N}._-]+/gu, "-")
+    .replace(/^-+|-+$/g, "") || "squad";
+  const blob = new Blob([JSON.stringify(manifest, null, 2) + "\n"], {
+    type: "application/json;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${stem}.multica-template.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
 
 function columnTrackVars(
   isVisible: (key: SquadColumnKey) => boolean,
@@ -317,7 +345,15 @@ function ArchiveSquadDialog({
   );
 }
 
-function SquadRowActions({ squad }: { squad: Squad }) {
+function SquadRowActions({
+  squad,
+  onPublish,
+  onExport,
+}: {
+  squad: Squad;
+  onPublish: (squad: Squad) => void;
+  onExport: (squad: Squad) => void;
+}) {
   const { t } = useT("squads");
   const { t: tCommon } = useT("common");
   const p = useWorkspacePaths();
@@ -341,6 +377,15 @@ function SquadRowActions({ squad }: { squad: Squad }) {
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => onPublish(squad)}>
+            <Share2 className="size-3.5" />
+            {t(($) => $.page.publish_template_action)}
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => onExport(squad)}>
+            <Download className="size-3.5" />
+            {t(($) => $.page.export_template_action)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             onClick={() =>
               intentNavigate(
@@ -778,6 +823,10 @@ export function SquadsPage() {
   const p = useWorkspacePaths();
   const rowLink = useRowLink();
   const currentUser = useAuthStore((s) => s.user);
+  const [publishSquadId, setPublishSquadId] = useState<string | null>(null);
+  const [importPickerOpen, setImportPickerOpen] = useState(false);
+  const [importTemplateId, setImportTemplateId] = useState<string | null>(null);
+  const [importManifest, setImportManifest] = useState<NormalizedMarketplaceTemplateFile | null>(null);
 
   const { data: squads = [], isLoading } = useQuery({
     ...squadListOptions(wsId),
@@ -909,6 +958,19 @@ export function SquadsPage() {
     [isWorkspaceAdmin, rows, currentUser],
   );
 
+  const handleExportTemplate = async (squad: Squad) => {
+    try {
+      const manifest = await api.exportSquadTemplateFile(squad.id);
+      if (!manifest.metadata.name || manifest.type !== "squad") {
+        throw new Error(t(($) => $.page.export_failed));
+      }
+      downloadTemplateFile(manifest, squad.name);
+      toast.success(t(($) => $.page.export_success));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.page.export_failed));
+    }
+  };
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
@@ -916,11 +978,18 @@ export function SquadsPage() {
         title={t(($) => $.page.title)}
         count={squads.length}
         actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_button)}
-            onClick={() => useModalStore.getState().open("create-squad")}
-          />
+          <>
+            <CollectionPageHeaderAction
+              icon={PackageOpen}
+              label={t(($) => $.page.import_button)}
+              onClick={() => setImportPickerOpen(true)}
+            />
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.page.new_button)}
+              onClick={() => useModalStore.getState().open("create-squad")}
+            />
+          </>
         }
       />
 
@@ -1020,7 +1089,11 @@ export function SquadsPage() {
                     <ListGridCell className="justify-end px-0">
                       {isWorkspaceAdmin ||
                       (!!currentUser && squad.creator_id === currentUser.id) ? (
-                        <SquadRowActions squad={squad} />
+                        <SquadRowActions
+                          squad={squad}
+                          onPublish={(item) => setPublishSquadId(item.id)}
+                          onExport={(item) => void handleExportTemplate(item)}
+                        />
                       ) : null}
                     </ListGridCell>
                   </ListGridRow>
@@ -1030,6 +1103,40 @@ export function SquadsPage() {
           </div>
         </>
       )}
+      <CreateTemplateDialog
+        open={publishSquadId !== null}
+        onOpenChange={(next) => {
+          if (!next) setPublishSquadId(null);
+        }}
+        wsId={wsId}
+        initialSourceType="squad"
+        initialSourceId={publishSquadId ?? ""}
+        initialStep={3}
+      />
+      <ImportSquadTemplateDialog
+        open={importPickerOpen}
+        onOpenChange={setImportPickerOpen}
+        wsId={wsId}
+        onMarketplaceTemplate={(templateId) => {
+          setImportManifest(null);
+          setImportTemplateId(templateId);
+        }}
+        onFileTemplate={(manifest) => {
+          setImportTemplateId(null);
+          setImportManifest(manifest);
+        }}
+      />
+      <ApplyTemplateDialog
+        templateId={importTemplateId}
+        manifest={importManifest}
+        onOpenChange={(next) => {
+          if (!next) {
+            setImportTemplateId(null);
+            setImportManifest(null);
+          }
+        }}
+        wsId={wsId}
+      />
     </div>
   );
 }

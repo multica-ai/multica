@@ -1985,11 +1985,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
+					r.Get("/template-file", h.ExportSquadTemplateFile)
 					r.Get("/members", h.ListSquadMembers)
 					r.Get("/members/status", h.ListSquadMemberStatus)
 					r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
+				})
+			})
+
+			// Reusable agent and squad snapshots. Public visibility is instance-wide;
+			// every request still needs membership in its destination workspace.
+			r.Route("/api/templates", func(r chi.Router) {
+				r.Get("/", h.ListMarketplaceTemplates)
+				r.Post("/", h.CreateMarketplaceTemplate)
+				r.Post("/apply-file", h.ApplyMarketplaceTemplateFile)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetMarketplaceTemplate)
+					r.Delete("/", h.DeleteMarketplaceTemplate)
+					r.Post("/apply", h.ApplyMarketplaceTemplate)
 				})
 			})
 

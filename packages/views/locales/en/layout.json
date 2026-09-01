@@ -8,6 +8,7 @@
     "autopilots": "Autopilot",
     "agents": "Agents",
     "squads": "Squads",
+    "templates": "Template gallery",
     "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
@@ -54,6 +55,7 @@
     "pinned_label": "Pinned",
     "workspace_group": "Workspace",
     "configure_group": "Configure",
+    "solutions_group": "Solutions",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Join our Discord",

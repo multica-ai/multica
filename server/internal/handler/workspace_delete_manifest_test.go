@@ -89,6 +89,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"lark_installation":                  workspaceDelete,
 	"lark_outbound_card_message":         workspaceDelete,
 	"lark_user_binding":                  workspaceDelete,
+	"marketplace_template":               workspaceDelete,
 	"member":                             workspaceDelete,
 	"agent_mcp_server":                   workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,

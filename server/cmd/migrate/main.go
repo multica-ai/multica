@@ -276,6 +276,9 @@ var concurrentIndexCleanups = map[string]string{
 	"440_github_pr_head_sha_index":                              "idx_github_pull_request_head_sha",
 	"443_issue_project_status_index":                            "idx_issue_project_status",
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
+	"447_marketplace_template_pkey_index":                       "marketplace_template_pkey",
+	"449_marketplace_template_catalog_index":                    "idx_marketplace_template_catalog",
+	"450_marketplace_template_workspace_index":                  "idx_marketplace_template_workspace",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

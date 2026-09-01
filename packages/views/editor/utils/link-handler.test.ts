@@ -106,6 +106,11 @@ describe("openLink", () => {
     expect(navigatedPaths()).toEqual(["/acme/issues/MUL-1"]);
   });
 
+  it("prefixes the current slug on a slugless template path", () => {
+    openLink("/templates/tpl-1", "acme", APP_ORIGIN);
+    expect(navigatedPaths()).toEqual(["/acme/templates/tpl-1"]);
+  });
+
   it("leaves a path that already carries a slug alone", () => {
     openLink("/other/issues/MUL-1", "acme", APP_ORIGIN);
     expect(navigatedPaths()).toEqual(["/other/issues/MUL-1"]);

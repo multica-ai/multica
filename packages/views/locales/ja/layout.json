@@ -8,6 +8,7 @@
     "autopilots": "オートパイロット",
     "agents": "エージェント",
     "squads": "スクワッド",
+    "templates": "テンプレートギャラリー",
     "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
@@ -54,6 +55,7 @@
     "pinned_label": "ピン留め済み",
     "workspace_group": "ワークスペース",
     "configure_group": "設定",
+    "solutions_group": "ソリューション",
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Discord に参加",

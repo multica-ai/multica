@@ -221,6 +221,18 @@ VALUES ($1, 'head-a', 0, 'backend', 'completed', 'success', false)
 		"runtime_id":     runtimeID,
 		"owner_id":       testUserID,
 	})
+	marketplaceTemplateID := dbfx.Insert(t, "marketplace_template", testutil.Cols{
+		"source_workspace_id": wsID,
+		"created_by":          testUserID,
+		"source_type":         "agent",
+		"source_id":           agentID,
+		"name":                "Workspace delete template",
+		"description":         "Template owned by the workspace deletion fixture",
+		"snapshot":            testutil.Raw("'{}'::jsonb"),
+	})
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM marketplace_template WHERE id = $1`, marketplaceTemplateID)
+	})
 
 	issueID := dbfx.Insert(t, "issue", testutil.Cols{
 		"workspace_id": wsID,
@@ -339,6 +351,12 @@ VALUES ($1, $2, gen_random_uuid(), gen_random_uuid(), 's3://workspace-delete/sou
 	dbfx.QueryRow(t, `SELECT COUNT(*) FROM issue_property WHERE id = $1`, propertyID).Scan(&propertyCount)
 	if propertyCount != 0 {
 		t.Fatalf("issue properties were not cleaned up for deleted workspace: %d", propertyCount)
+	}
+
+	var marketplaceTemplateCount int
+	dbfx.QueryRow(t, `SELECT COUNT(*) FROM marketplace_template WHERE id = $1`, marketplaceTemplateID).Scan(&marketplaceTemplateCount)
+	if marketplaceTemplateCount != 0 {
+		t.Fatalf("marketplace templates were not cleaned up for deleted workspace: %d", marketplaceTemplateCount)
 	}
 
 	for _, table := range []string{

@@ -2,6 +2,7 @@
   "page": {
     "title": "스쿼드",
     "new_button": "새 스쿼드",
+    "import_button": "템플릿 가져오기",
     "empty_no_squads": "아직 스쿼드가 없습니다. 하나 만들어 시작하세요.",
     "empty_no_match": "필터와 일치하는 스쿼드가 없습니다.",
     "table": {
@@ -13,7 +14,23 @@
     },
     "no_matches": "일치하는 스쿼드가 없습니다",
     "row_menu": "스쿼드 작업",
+    "publish_template_action": "템플릿 갤러리에 공개",
+    "export_template_action": "템플릿 파일 내보내기",
+    "export_success": "템플릿 파일을 내보냈습니다",
+    "export_failed": "템플릿 파일을 내보내지 못했습니다",
     "archive_action": "보관"
+  },
+  "import_dialog": {
+    "title": "스쿼드 템플릿 가져오기",
+    "description": "공개된 템플릿을 선택하거나 .multica-template.json 파일을 업로드하세요.",
+    "choose_file": "파일 선택",
+    "choose_file_description": ".multica-template.json 파일 가져오기",
+    "from_gallery": "템플릿 갤러리에서 선택",
+    "from_gallery_description": "사용 가능한 스쿼드 템플릿 둘러보기",
+    "gallery_title": "스쿼드 템플릿 선택",
+    "back": "뒤로",
+    "invalid_file": "유효한 스쿼드 템플릿 파일이 아닙니다",
+    "no_templates": "사용 가능한 스쿼드 템플릿이 없습니다"
   },
   "inspector": {
     "details_section": "세부 정보",
