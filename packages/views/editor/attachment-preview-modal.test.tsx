@@ -15,6 +15,8 @@ vi.mock("../platform", () => ({
 // hoisted too because vi.mock is itself hoisted above the top-level `class`
 // declarations.
 const {
+  getAttachmentMock,
+  getAttachmentBlobMock,
   getAttachmentTextContentMock,
   downloadMock,
   getBaseUrlMock,
@@ -34,6 +36,8 @@ const {
     }
   }
   return {
+    getAttachmentMock: vi.fn(),
+    getAttachmentBlobMock: vi.fn(),
     getAttachmentTextContentMock: vi.fn(),
     downloadMock: vi.fn(),
     // Default to the web shape (empty base, same-origin). Tests covering
@@ -46,6 +50,8 @@ const {
 
 vi.mock("@multica/core/api", () => ({
   api: {
+    getAttachment: getAttachmentMock,
+    getAttachmentBlob: getAttachmentBlobMock,
     getAttachmentTextContent: getAttachmentTextContentMock,
     getBaseUrl: getBaseUrlMock,
   },
@@ -159,6 +165,16 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
     created_at: "2026-05-13T00:00:00Z",
     ...overrides,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 function ClosablePreview({ attachment }: { attachment: Attachment }) {
@@ -416,6 +432,183 @@ describe("AttachmentPreviewModal — server-relative download_url resolution (MU
     expect(img?.getAttribute("src")).toBe(
       "https://cdn.example.test/att-1.png?Signature=s",
     );
+  });
+});
+
+describe("AttachmentPreviewModal — pending image URL upgrade", () => {
+  const attachmentId = "11111111-1111-4111-8111-111111111111";
+  const apiUrl = `https://api.example.test/api/attachments/${attachmentId}/download`;
+  const blobUrl = "blob:https://app.example/preview-att-1";
+  const originalCreateObjectURL = Object.getOwnPropertyDescriptor(
+    URL,
+    "createObjectURL",
+  );
+  const originalRevokeObjectURL = Object.getOwnPropertyDescriptor(
+    URL,
+    "revokeObjectURL",
+  );
+  const originalDecode = Object.getOwnPropertyDescriptor(
+    HTMLImageElement.prototype,
+    "decode",
+  );
+  let probedUrls: string[];
+
+  beforeEach(() => {
+    probedUrls = [];
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: vi.fn(() => blobUrl),
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: vi.fn(function (this: HTMLImageElement) {
+        probedUrls.push(this.src);
+        return this.src === apiUrl
+          ? Promise.reject(new Error("401"))
+          : Promise.resolve();
+      }),
+    });
+  });
+
+  afterEach(() => {
+    if (originalCreateObjectURL) {
+      Object.defineProperty(URL, "createObjectURL", originalCreateObjectURL);
+    } else {
+      Reflect.deleteProperty(URL, "createObjectURL");
+    }
+    if (originalRevokeObjectURL) {
+      Object.defineProperty(URL, "revokeObjectURL", originalRevokeObjectURL);
+    } else {
+      Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
+    if (originalDecode) {
+      Object.defineProperty(
+        HTMLImageElement.prototype,
+        "decode",
+        originalDecode,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    }
+  });
+
+  function proxyAttachment(): Attachment {
+    return makeAttachment({
+      id: attachmentId,
+      filename: "cold-cache.png",
+      content_type: "image/png",
+      download_url: `/api/attachments/${attachmentId}/download`,
+      markdown_url: `/api/attachments/${attachmentId}/download`,
+      url: "/uploads/cold-cache.png",
+    });
+  }
+
+  it("waits for the authenticated blob fallback before probing or rendering the target", async () => {
+    const metadata = deferred<Attachment>();
+    const bytes = deferred<Blob>();
+    const onImageError = vi.fn();
+    getAttachmentMock.mockReturnValue(metadata.promise);
+    getAttachmentBlobMock.mockReturnValue(bytes.promise);
+
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: proxyAttachment() }}
+        open
+        onClose={() => {}}
+        onImageError={onImageError}
+      />,
+    );
+
+    expect(getAttachmentMock).toHaveBeenCalledWith(attachmentId);
+    expect(probedUrls).toEqual([]);
+    expect(document.querySelector(`img[src="${apiUrl}"]`)).toBeNull();
+    expect(onImageError).not.toHaveBeenCalled();
+
+    metadata.resolve(proxyAttachment());
+    await waitFor(() => {
+      expect(getAttachmentBlobMock).toHaveBeenCalledWith(attachmentId);
+    });
+    expect(probedUrls).toEqual([]);
+    expect(onImageError).not.toHaveBeenCalled();
+
+    bytes.resolve(new Blob(["png-bytes"], { type: "image/png" }));
+    await waitFor(() => {
+      expect(probedUrls).toEqual([blobUrl]);
+      expect(document.querySelector("img")?.getAttribute("src")).toBe(blobUrl);
+    });
+    expect(onImageError).not.toHaveBeenCalled();
+  });
+
+  it("reports a real failure after the blob fallback has definitively failed", async () => {
+    const onImageError = vi.fn();
+    getAttachmentMock.mockResolvedValue(proxyAttachment());
+    getAttachmentBlobMock.mockRejectedValue(new Error("blob fetch failed"));
+
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: proxyAttachment() }}
+        open
+        onClose={() => {}}
+        onImageError={onImageError}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onImageError).toHaveBeenCalledTimes(1);
+    });
+    expect(probedUrls).toEqual([apiUrl]);
+  });
+
+  it("probes an already-presigned URL immediately without metadata refresh", async () => {
+    const signedUrl =
+      `https://storage.example.test/${attachmentId}.png?X-Amz-Signature=signed`;
+
+    render(
+      <AttachmentPreviewModal
+        source={{
+          kind: "full",
+          attachment: makeAttachment({
+            id: attachmentId,
+            filename: "presigned.png",
+            content_type: "image/png",
+            download_url: signedUrl,
+          }),
+        }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(probedUrls).toEqual([signedUrl]);
+    });
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(signedUrl);
+    expect(getAttachmentMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-origin web previews on the existing immediate path", async () => {
+    getBaseUrlMock.mockReturnValue("");
+    const relativeUrl = `/api/attachments/${attachmentId}/download`;
+
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: proxyAttachment() }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(probedUrls).toHaveLength(1);
+    });
+    expect(probedUrls[0]?.endsWith(relativeUrl)).toBe(true);
+    expect(document.querySelector("img")?.getAttribute("src")).toBe(relativeUrl);
+    expect(getAttachmentMock).not.toHaveBeenCalled();
   });
 });
 

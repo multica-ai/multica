@@ -339,7 +339,7 @@ export function Attachment({
   // on deployments that have no signed URL to give — to an object URL built
   // from the authenticated byte fetch. Only the image branch renders a native
   // resource load, so only it opts into that byte fetch.
-  const mediaUrl = useResignedInlineMediaURL(
+  const { url: mediaUrl } = useResignedInlineMediaURL(
     state.attachmentId,
     state.url,
     kind === "image",

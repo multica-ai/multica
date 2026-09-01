@@ -58,11 +58,16 @@ const INLINE_BLOB_GC_MS = 5 * 60 * 1000;
 // URL. `blobFallback` gates that on the caller actually rendering a native
 // `<img>`: a file card only needs a link, and downloading a 100 MB archive
 // into renderer memory to draw a chip would be a bad trade.
+//
+// `pending` is true only while `url` is the auth-gated placeholder that a
+// successful metadata refresh or blob fallback is still expected to replace.
+// Probe-style consumers must wait; inline media keeps its existing behaviour
+// by consuming `url` alone and swapping naturally when the upgrade lands.
 export function useResignedInlineMediaURL(
   attachmentId: string | undefined,
   pickedUrl: string,
   blobFallback: boolean,
-): string {
+): { url: string; pending: boolean } {
   const idFromPickedUrl = attachmentIdFromDownloadURL(pickedUrl);
   const resignAttachmentId = attachmentId ?? idFromPickedUrl;
   const isCrossOriginWebURL = (() => {
@@ -81,13 +86,14 @@ export function useResignedInlineMediaURL(
     idFromPickedUrl !== undefined &&
     ((api.getBaseUrl?.() ?? "") !== "" || isCrossOriginWebURL);
 
-  const { data: fresh } = useQuery({
+  const resignQuery = useQuery({
     queryKey: ["attachment-inline-resign", resignAttachmentId],
     queryFn: () => api.getAttachment(resignAttachmentId as string),
     enabled: needsResign,
     staleTime: RESIGN_STALE_MS,
     gcTime: RESIGN_STALE_MS,
   });
+  const fresh = resignQuery.data;
 
   const dl = fresh?.download_url ?? "";
   // Accept the fresh URL only when it is an actual upgrade — absolute and no
@@ -101,18 +107,34 @@ export function useResignedInlineMediaURL(
   // Only after `fresh` has landed do we know this deployment has nothing
   // signed to give — firing the byte fetch earlier would double-download on
   // every CloudFront / presign client.
-  const { data: blob } = useQuery({
+  const blobQuery = useQuery({
     queryKey: ["attachment-inline-blob", resignAttachmentId],
     queryFn: () => api.getAttachmentBlob(resignAttachmentId as string),
     enabled: needsResign && blobFallback && !!fresh && signedUrl === "",
     staleTime: Infinity,
     gcTime: INLINE_BLOB_GC_MS,
   });
+  const blob = blobQuery.data;
   const blobUrl = useObjectURL(blob);
+  // `useObjectURL` publishes from an effect, one render after the byte query
+  // succeeds. Keep the upgrade pending through that gap so a consumer cannot
+  // briefly fall back to the auth-gated URL before the object URL exists.
+  const objectURLPending =
+    !!blob &&
+    !blobUrl &&
+    typeof URL.createObjectURL === "function";
+  const pending =
+    needsResign &&
+    !signedUrl &&
+    (resignQuery.isPending ||
+      (blobFallback &&
+        !!fresh &&
+        !blobQuery.isError &&
+        (blobQuery.isPending || objectURLPending)));
 
-  if (!needsResign) return pickedUrl;
-  if (signedUrl) return signedUrl;
-  return blobUrl || pickedUrl;
+  if (!needsResign) return { url: pickedUrl, pending: false };
+  if (signedUrl) return { url: signedUrl, pending: false };
+  return { url: blobUrl || pickedUrl, pending };
 }
 
 // useObjectURL turns a Blob into a `blob:` URL for the lifetime of the calling
