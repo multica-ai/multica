@@ -1376,6 +1376,41 @@ func parseOmpModels(data []byte) ([]Model, error) {
 	return models, nil
 }
 
+// discoverPrimeModels runs `prime-agent model list` and parses the text table
+// with the same parser as pi's `--list-models`. prime removed `--list-models`
+// (v0.8.0: "Error: --list-models was removed. Use \"prime-agent model list\".")
+// The `model list` output is a `provider  model  context  max-out  thinking
+//
+//	images` table whose rows are structurally identical to pi's table, so
+//
+// parsePiModels normalises them; prime's leading `provider` header line is
+// skipped by the same no-op. An empty catalog (no provider credentials) or a
+// non-zero exit (binary missing / too old) falls back to an empty list so the
+// UI degrades to manual entry instead of erroring.
+func discoverPrimeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "prime-agent"
+	}
+	if _, err := exec.LookPath(runtimeCmd.Path); err != nil {
+		return []Model{}, nil
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	cmd := runtimeCmd.exec(runCtx, "model", "list")
+	hideAgentWindow(cmd)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
+	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
+		return []Model{}, nil
+	}
+	text := string(stdout)
+	if strings.TrimSpace(text) == "" {
+		text = stderr.String()
+	}
+	return parsePiModels(text), nil
+}
+
 // discoverHermesModels spins up a throwaway `hermes acp` process,
 // drives just enough of the protocol to receive the model list
 // advertised in the `session/new` response, and shuts it down. The

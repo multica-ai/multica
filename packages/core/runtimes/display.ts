@@ -49,6 +49,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   qwenpaw: "QwenPaw",
   mcode: "MiniMax Code",
   omp: "Oh-My-Pi",
+  prime: "Prime Agent",
   zeroclaw: "ZeroClaw",
 };
 
