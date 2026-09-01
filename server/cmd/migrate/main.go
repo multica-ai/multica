@@ -255,6 +255,7 @@ var concurrentIndexCleanups = map[string]string{
 	"398_issue_workspace_status_position_index":                 "idx_issue_workspace_status_position",
 	"400_plugin_hook_schedule_installation_key_index":           "idx_plugin_hook_schedule_installation_key",
 	"401_plugin_hook_schedule_enabled_index":                    "idx_plugin_hook_schedule_enabled",
+	"435_project_parent_index":                                   "idx_project_parent",
 	"408_issue_source_context_id_index":                         "idx_issue_source_context_id",
 	"409_issue_source_context_issue_index":                      "idx_issue_source_context_issue",
 	"410_issue_source_context_origin_task_index":                "idx_issue_source_context_origin_task",

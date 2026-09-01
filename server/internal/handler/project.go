@@ -44,23 +44,31 @@ type ProjectResponse struct {
 	// payload to keep parent metadata and child collections separate; clients
 	// that need the list call ListProjectResources directly.
 	ResourceCount int64 `json:"resource_count"`
+	// ParentProjectID is the UUID of the parent project, or null for a
+	// top-level project. See RFC #3104.
+	ParentProjectID *string `json:"parent_project_id"`
+	// Children is populated only by the /tree endpoint and GetProject when
+	// the project has direct children. Stays nil on list/search to keep those
+	// payloads flat. See RFC #3104.
+	Children []ProjectResponse `json:"children,omitempty"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		StartDate:   dateToPtr(p.StartDate),
-		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
+		ID:              uuidToString(p.ID),
+		WorkspaceID:     uuidToString(p.WorkspaceID),
+		Title:           p.Title,
+		Description:     textToPtr(p.Description),
+		Icon:            textToPtr(p.Icon),
+		Status:          p.Status,
+		Priority:        p.Priority,
+		LeadType:        textToPtr(p.LeadType),
+		LeadID:          uuidToPtr(p.LeadID),
+		StartDate:       dateToPtr(p.StartDate),
+		DueDate:         dateToPtr(p.DueDate),
+		CreatedAt:       timestampToString(p.CreatedAt),
+		UpdatedAt:       timestampToString(p.UpdatedAt),
+		ParentProjectID: uuidToPtr(p.ParentProjectID),
 	}
 }
 
@@ -99,16 +107,17 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 }
 
 type CreateProjectRequest struct {
-	Title       string                                `json:"title"`
-	Description *string                               `json:"description"`
-	Icon        *string                               `json:"icon"`
-	Status      string                                `json:"status"`
-	Priority    string                                `json:"priority"`
-	LeadType    *string                               `json:"lead_type"`
-	LeadID      *string                               `json:"lead_id"`
-	StartDate   *string                               `json:"start_date"`
-	DueDate     *string                               `json:"due_date"`
-	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	Title           string                                `json:"title"`
+	Description     *string                               `json:"description"`
+	Icon            *string                               `json:"icon"`
+	Status          string                                `json:"status"`
+	Priority        string                                `json:"priority"`
+	LeadType        *string                               `json:"lead_type"`
+	LeadID          *string                               `json:"lead_id"`
+	StartDate       *string                               `json:"start_date"`
+	DueDate         *string                               `json:"due_date"`
+	ParentProjectID *string                               `json:"parent_project_id"`
+	Resources       []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -122,15 +131,16 @@ type CreateProjectResourceRequestPayload struct {
 }
 
 type UpdateProjectRequest struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Icon        *string `json:"icon"`
-	Status      *string `json:"status"`
-	Priority    *string `json:"priority"`
-	LeadType    *string `json:"lead_type"`
-	LeadID      *string `json:"lead_id"`
-	StartDate   *string `json:"start_date"`
-	DueDate     *string `json:"due_date"`
+	Title           *string `json:"title"`
+	Description     *string `json:"description"`
+	Icon            *string `json:"icon"`
+	Status          *string `json:"status"`
+	Priority        *string `json:"priority"`
+	LeadType        *string `json:"lead_type"`
+	LeadID          *string `json:"lead_id"`
+	StartDate       *string `json:"start_date"`
+	DueDate         *string `json:"due_date"`
+	ParentProjectID *string `json:"parent_project_id"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +157,11 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
+	// parent_id query param (RFC #3104):
+	//   - absent  → no parent filter (all projects in workspace)
+	//   - "null" → top-level projects only (parent_project_id IS NULL)
+	//   - <uuid> → direct children of that project
+	parentIDParam := r.URL.Query().Get("parent_id")
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
 		WorkspaceID: wsUUID,
 		Status:      statusFilter,
@@ -155,6 +170,33 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
 		return
+	}
+
+	// Apply the parent_id filter in Go. The workspace project set is small
+	// enough that a post-filter is simpler than maintaining three sqlc query
+	// variants and avoids the "column IS NULL" conditional sqlc can't express.
+	if parentIDParam != "" {
+		if parentIDParam == "null" {
+			filtered := projects[:0]
+			for _, p := range projects {
+				if !p.ParentProjectID.Valid {
+					filtered = append(filtered, p)
+				}
+			}
+			projects = filtered
+		} else {
+			parentUUID, ok := parseUUIDOrBadRequest(w, parentIDParam, "parent_id")
+			if !ok {
+				return
+			}
+			filtered := projects[:0]
+			for _, p := range projects {
+				if p.ParentProjectID.Valid && p.ParentProjectID == parentUUID {
+					filtered = append(filtered, p)
+				}
+			}
+			projects = filtered
+		}
 	}
 
 	// Batch-fetch issue stats and resource counts for all projects
@@ -217,6 +259,12 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
+	// Populate direct children so the GET response gives a one-level preview
+	// without a second round-trip. The /tree endpoint returns the full subtree.
+	children := h.loadChildProjects(r.Context(), wsUUID, project.ID)
+	if len(children) > 0 {
+		resp.Children = h.projectsToResponses(r.Context(), wsUUID, children)
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -253,6 +301,75 @@ func (h *Handler) writeProjectWriteError(w http.ResponseWriter, r *http.Request,
 	}
 	slog.Error("project "+action+" failed", append(logger.RequestAttrs(r), "error", err)...)
 	writeError(w, http.StatusInternalServerError, "failed to "+action+" project")
+}
+
+// maxProjectDepth is the maximum nesting depth for parent/child project
+// relationships (RFC #3104). Level 1 = top-level, level 2 = child, level 3 =
+// grandchild. Setting a parent that would push a project beyond this depth is
+// rejected with a 400.
+const maxProjectDepth = 3
+
+// validateParentProject validates a parent_project_id against the RFC #3104
+// constraints: the parent must exist in the same workspace, must not be the
+// project itself, must not form a cycle, and the resulting depth must not
+// exceed maxProjectDepth. A nil parentProjectID clears the parent (top-level)
+// and is always valid. Returns the parsed parent UUID on success.
+func (h *Handler) validateParentProject(ctx context.Context, w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID, projectID pgtype.UUID, parentProjectIDStr *string) (pgtype.UUID, bool) {
+	if parentProjectIDStr == nil {
+		return pgtype.UUID{}, true
+	}
+	parentID, ok := parseUUIDOrBadRequest(w, *parentProjectIDStr, "parent_project_id")
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	// Self-reference: a project cannot be its own parent.
+	if projectID.Valid && parentID == projectID {
+		writeError(w, http.StatusBadRequest, "parent_project_id cannot reference the project itself")
+		return pgtype.UUID{}, false
+	}
+	// Cross-workspace prevention + existence: the parent must live in the same
+	// workspace. GetProjectInWorkspace returns no rows otherwise.
+	parent, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+		ID: parentID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "parent_project_id does not reference a project in this workspace")
+		return pgtype.UUID{}, false
+	}
+	// Cycle prevention: walk the parent chain; if any ancestor equals projectID,
+	// setting this parent would create a cycle.
+	cursor := parent.ParentProjectID
+	for cursor.Valid {
+		if projectID.Valid && cursor == projectID {
+			writeError(w, http.StatusBadRequest, "parent_project_id would create a cycle in the project hierarchy")
+			return pgtype.UUID{}, false
+		}
+		ancestor, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID: cursor, WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			break
+		}
+		cursor = ancestor.ParentProjectID
+	}
+	// Depth check: the parent's depth + 1 must not exceed maxProjectDepth.
+	depth := 1
+	cursor = parent.ParentProjectID
+	for cursor.Valid {
+		depth++
+		ancestor, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
+			ID: cursor, WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			break
+		}
+		cursor = ancestor.ParentProjectID
+	}
+	if depth+1 > maxProjectDepth {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("parent_project_id exceeds the maximum nesting depth of %d levels", maxProjectDepth))
+		return pgtype.UUID{}, false
+	}
+	return parentID, true
 }
 
 func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
@@ -297,6 +414,15 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		leadID = id
 	}
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+
+	// parent_project_id validation: the parent must be in the same workspace,
+	// not the project itself, and not form a cycle. A new project has no ID yet,
+	// so self-reference cannot happen on create — but the helper is shared with
+	// update and keeps the logic in one place. See RFC #3104.
+	parentUUID, ok := h.validateParentProject(r.Context(), w, r, wsUUID, pgtype.UUID{}, req.ParentProjectID)
 	if !ok {
 		return
 	}
@@ -368,16 +494,17 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateProjectParams{
-		WorkspaceID: wsUUID,
-		Title:       req.Title,
-		Description: ptrToText(req.Description),
-		Icon:        ptrToText(req.Icon),
-		Status:      status,
-		LeadType:    leadType,
-		LeadID:      leadID,
-		Priority:    priority,
-		StartDate:   startDate,
-		DueDate:     dueDate,
+		WorkspaceID:     wsUUID,
+		Title:           req.Title,
+		Description:     ptrToText(req.Description),
+		Icon:            ptrToText(req.Icon),
+		Status:          status,
+		LeadType:        leadType,
+		LeadID:          leadID,
+		Priority:        priority,
+		StartDate:       startDate,
+		DueDate:         dueDate,
+		ParentProjectID: parentUUID,
 	}
 
 	// Without resources, keep the simple non-tx path.
@@ -504,13 +631,14 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateProjectParams{
-		ID:          prevProject.ID,
-		Description: prevProject.Description,
-		Icon:        prevProject.Icon,
-		LeadType:    prevProject.LeadType,
-		LeadID:      prevProject.LeadID,
-		StartDate:   prevProject.StartDate,
-		DueDate:     prevProject.DueDate,
+		ID:              prevProject.ID,
+		Description:     prevProject.Description,
+		Icon:            prevProject.Icon,
+		LeadType:        prevProject.LeadType,
+		LeadID:          prevProject.LeadID,
+		StartDate:       prevProject.StartDate,
+		DueDate:         prevProject.DueDate,
+		ParentProjectID: prevProject.ParentProjectID,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -583,6 +711,20 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = d
 		} else {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
+		}
+	}
+	// parent_project_id follows the same absent/present-null/present-UUID
+	// contract as the other nullable fields. Absent = unchanged; present null
+	// = clear parent (become top-level); present UUID = set parent (validated).
+	if _, ok := rawFields["parent_project_id"]; ok {
+		if req.ParentProjectID != nil {
+			parentUUID, ok := h.validateParentProject(r.Context(), w, r, wsUUID, prevProject.ID, req.ParentProjectID)
+			if !ok {
+				return
+			}
+			params.ParentProjectID = parentUUID
+		} else {
+			params.ParentProjectID = pgtype.UUID{Valid: false} // explicit null = top-level
 		}
 	}
 	project, err := h.Queries.UpdateProject(r.Context(), params)
@@ -800,7 +942,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
-		p.created_at, p.updated_at,
+		p.created_at, p.updated_at, p.parent_project_id,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
@@ -868,23 +1010,24 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	err := runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
 		for rows.Next() {
 			var row projectSearchRow
-			if err := rows.Scan(
-				&row.project.ID,
-				&row.project.WorkspaceID,
-				&row.project.Title,
-				&row.project.Description,
-				&row.project.Icon,
-				&row.project.Status,
-				&row.project.Priority,
-				&row.project.LeadType,
-				&row.project.LeadID,
-				&row.project.StartDate,
-				&row.project.DueDate,
-				&row.project.CreatedAt,
-				&row.project.UpdatedAt,
-				&row.totalCount,
-				&row.matchSource,
-			); err != nil {
+		if err := rows.Scan(
+			&row.project.ID,
+			&row.project.WorkspaceID,
+			&row.project.Title,
+			&row.project.Description,
+			&row.project.Icon,
+			&row.project.Status,
+			&row.project.Priority,
+			&row.project.LeadType,
+			&row.project.LeadID,
+			&row.project.StartDate,
+			&row.project.DueDate,
+			&row.project.CreatedAt,
+			&row.project.UpdatedAt,
+			&row.project.ParentProjectID,
+			&row.totalCount,
+			&row.matchSource,
+		); err != nil {
 				return fmt.Errorf("scan: %w", err)
 			}
 			results = append(results, row)
@@ -969,4 +1112,136 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		"projects": resp,
 		"total":    total,
 	})
+}
+
+// loadChildProjects returns the direct children of projectID in the workspace.
+// It fetches the full workspace project set and filters in Go — the same
+// approach ListProjects uses for its parent_id filter.
+func (h *Handler) loadChildProjects(ctx context.Context, wsUUID, projectID pgtype.UUID) []db.Project {
+	projects, err := h.Queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID})
+	if err != nil {
+		return nil
+	}
+	var children []db.Project
+	for _, p := range projects {
+		if p.ParentProjectID.Valid && p.ParentProjectID == projectID {
+			children = append(children, p)
+		}
+	}
+	return children
+}
+
+// projectsToResponses converts a slice of db.Project to ProjectResponse,
+// batch-fetching issue stats and resource counts.
+func (h *Handler) projectsToResponses(ctx context.Context, wsUUID pgtype.UUID, projects []db.Project) []ProjectResponse {
+	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
+	if len(projects) > 0 {
+		projectIDs := make([]pgtype.UUID, len(projects))
+		for i, p := range projects {
+			projectIDs[i] = p.ID
+		}
+		stats, err := h.Queries.GetProjectIssueStats(ctx, projectIDs)
+		if err == nil {
+			for _, s := range stats {
+				statsMap[uuidToString(s.ProjectID)] = s
+			}
+		}
+		counts, err := h.Queries.GetProjectResourceCounts(ctx, projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
+	}
+	resp := make([]ProjectResponse, len(projects))
+	for i, p := range projects {
+		resp[i] = projectToResponse(p)
+		if s, ok := statsMap[resp[i].ID]; ok {
+			resp[i].IssueCount = s.TotalCount
+			resp[i].DoneCount = s.DoneCount
+		}
+		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
+	}
+	return resp
+}
+
+// GetProjectTree returns the full subtree rooted at the given project, nested
+// via the Children field on each ProjectResponse. The depth is capped at
+// maxProjectDepth, so the tree is bounded by the same constraint enforced on
+// writes. See RFC #3104.
+func (h *Handler) GetProjectTree(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	root, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+		ID: idUUID, WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	// Fetch all projects in the workspace once and build the tree in memory.
+	// The workspace project set is small; a single query + in-memory assembly
+	// avoids N+1 DB round-trips for each level of nesting.
+	allProjects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{WorkspaceID: wsUUID})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load project tree")
+		return
+	}
+	// Build a parent → children index.
+	childrenMap := make(map[string][]db.Project)
+	for _, p := range allProjects {
+		if p.ParentProjectID.Valid {
+			childrenMap[uuidToString(p.ParentProjectID)] = append(childrenMap[uuidToString(p.ParentProjectID)], p)
+		}
+	}
+	// Batch-fetch stats for all projects so the tree has issue/resource counts.
+	statsMap := make(map[string]db.GetProjectIssueStatsRow)
+	resourceCountMap := make(map[string]int64)
+	if len(allProjects) > 0 {
+		projectIDs := make([]pgtype.UUID, len(allProjects))
+		for i, p := range allProjects {
+			projectIDs[i] = p.ID
+		}
+		stats, err := h.Queries.GetProjectIssueStats(r.Context(), projectIDs)
+		if err == nil {
+			for _, s := range stats {
+				statsMap[uuidToString(s.ProjectID)] = s
+			}
+		}
+		counts, err := h.Queries.GetProjectResourceCounts(r.Context(), projectIDs)
+		if err == nil {
+			for _, c := range counts {
+				resourceCountMap[uuidToString(c.ProjectID)] = c.ResourceCount
+			}
+		}
+	}
+	// Recursively build the tree.
+	var buildNode func(p db.Project) ProjectResponse
+	buildNode = func(p db.Project) ProjectResponse {
+		node := projectToResponse(p)
+		if s, ok := statsMap[node.ID]; ok {
+			node.IssueCount = s.TotalCount
+			node.DoneCount = s.DoneCount
+		}
+		node.ResourceCount = resourceCountMap[node.ID]
+		kids := childrenMap[node.ID]
+		if len(kids) > 0 {
+			node.Children = make([]ProjectResponse, len(kids))
+			for i, c := range kids {
+				node.Children[i] = buildNode(c)
+			}
+		}
+		return node
+	}
+	resp := buildNode(root)
+	writeJSON(w, http.StatusOK, resp)
 }

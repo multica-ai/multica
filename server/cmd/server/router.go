@@ -1961,21 +1961,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Projects
-			r.Route("/api/projects", func(r chi.Router) {
-				r.Get("/search", h.SearchProjects)
-				r.Get("/", h.ListProjects)
-				r.Post("/", h.CreateProject)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetProject)
-					r.Put("/", h.UpdateProject)
-					r.Delete("/", h.DeleteProject)
-					r.Get("/resources", h.ListProjectResources)
-					r.Post("/resources", h.CreateProjectResource)
-					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
-					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
-				})
+		// Projects
+		r.Route("/api/projects", func(r chi.Router) {
+			r.Get("/search", h.SearchProjects)
+			r.Get("/", h.ListProjects)
+			r.Post("/", h.CreateProject)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", h.GetProject)
+				r.Get("/tree", h.GetProjectTree)
+				r.Put("/", h.UpdateProject)
+				r.Delete("/", h.DeleteProject)
+				r.Get("/resources", h.ListProjectResources)
+				r.Post("/resources", h.CreateProjectResource)
+				r.Put("/resources/{resourceId}", h.UpdateProjectResource)
+				r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 			})
+		})
 
 			// Squads
 			r.Route("/api/squads", func(r chi.Router) {
