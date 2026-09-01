@@ -1,0 +1,60 @@
+{
+  "title": "Gebruik",
+  "subtitle": "Tokenverbruik en agentactiviteit in deze workspace.",
+  "filter": {
+    "project_label": "Project",
+    "all_projects": "Alle projects",
+    "period_label": "Periode"
+  },
+  "kpi": {
+    "cost_label": "Kosten · {{days}}D",
+    "tokens_label": "Tokens · {{days}}D",
+    "tokens_hint": "Invoer {{input}} · Uitvoer {{output}}",
+    "run_time_label": "Looptijd · {{days}}D",
+    "run_time_hint": "Over {{tasks}} tasks",
+    "tasks_label": "Tasks · {{days}}D",
+    "tasks_hint": "{{failed}} mislukt"
+  },
+  "dim": {
+    "label": "Dimensie",
+    "daily": "Dagelijks",
+    "weekly": "Wekelijks"
+  },
+  "daily": {
+    "title_cost": "Dagelijkse kosten",
+    "title_tokens": "Dagelijkse tokens",
+    "title_time": "Dagelijkse looptijd",
+    "title_tasks": "Dagelijkse tasks",
+    "metric_cost": "Kosten",
+    "metric_tokens": "Tokens",
+    "metric_time": "Tijd",
+    "metric_tasks": "Tasks",
+    "no_data": "Geen gebruik in dit venster."
+  },
+  "weekly": {
+    "title_cost": "Wekelijkse kosten",
+    "title_tokens": "Wekelijkse tokens",
+    "title_time": "Wekelijkse looptijd",
+    "title_tasks": "Wekelijkse tasks",
+    "partial_label": "{{range}} (gedeeltelijk · {{covered}} / 7 dagen)"
+  },
+  "leaderboard": {
+    "title": "Ranglijst",
+    "caption": "{{count}} agents",
+    "caption_with_deleted": "{{count}} agents · {{deleted}} verwijderd",
+    "deleted_agents": "Verwijderde agents",
+    "header_agent": "Agent",
+    "header_tokens": "Tokens",
+    "header_cost": "Kosten",
+    "header_time": "Tijd",
+    "header_tasks": "Tasks",
+    "no_data": "Geen agentactiviteit in dit venster."
+  },
+  "empty": {
+    "title": "Nog geen gebruik",
+    "body": "Zodra agents hier tasks gaan uitvoeren, verschijnen hun tokenverbruik en looptijd in deze weergave."
+  },
+  "duration": {
+    "less_than_minute": "<1m"
+  }
+}
