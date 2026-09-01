@@ -1,7 +1,7 @@
 {
   "status_catalog_error": {
     "title": "状态列表加载失败",
-    "hint": "没有它就无法应用状态筛选，因此暂时不显示议题。",
+    "hint": "没有它就无法应用状态筛选，因此暂时不显示任务。",
     "retry": "重试"
   },
   "source_context": {

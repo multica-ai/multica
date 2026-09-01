@@ -325,7 +325,7 @@
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
-      "issue_statuses": "이슈 상태",
+      "issue_statuses": "태스크 상태",
       "properties": "속성",
       "quick_actions": "퀵 액션",
       "plugins": "Plugins",
@@ -388,8 +388,8 @@
       "secret_set": "저장됨 — 새 값을 입력하면 교체됩니다"
     },
     "scopes": {
-      "issues_read": "issue 읽기",
-      "issues_write": "issue 생성 및 수정",
+      "issues_read": "태스크 읽기",
+      "issues_write": "태스크 생성 및 수정",
       "comments_read": "댓글 읽기",
       "comments_write": "댓글 작성",
       "tasks_read": "agent task 읽기",
