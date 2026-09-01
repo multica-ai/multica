@@ -37,6 +37,10 @@ export interface Autopilot {
   pause_reason?: string | null;
   execution_mode: AutopilotExecutionMode;
   issue_title_template: string | null;
+  resource_failure_retry_enabled?: boolean;
+  resource_failure_retry_delay_seconds?: number;
+  failure_receipt_issue_id?: string | null;
+  failure_receipt_marker?: string | null;
   created_by_type: string;
   created_by_id: string;
   last_run_at: string | null;
@@ -163,6 +167,10 @@ export interface CreateAutopilotRequest {
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
   issue_title_template?: string;
+  resource_failure_retry_enabled?: boolean;
+  resource_failure_retry_delay_seconds?: number;
+  failure_receipt_issue_id?: string | null;
+  failure_receipt_marker?: string | null;
   subscribers?: AutopilotSubscriberInput[];
 }
 
@@ -177,6 +185,10 @@ export interface UpdateAutopilotRequest {
   status?: AutopilotStatus;
   execution_mode?: AutopilotExecutionMode;
   issue_title_template?: string | null;
+  resource_failure_retry_enabled?: boolean;
+  resource_failure_retry_delay_seconds?: number;
+  failure_receipt_issue_id?: string | null;
+  failure_receipt_marker?: string | null;
   // When present, fully replaces the autopilot's subscriber template;
   // omit to leave it untouched.
   subscribers?: AutopilotSubscriberInput[];

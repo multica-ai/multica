@@ -64,6 +64,41 @@ func TestTaskFailureReasonForAutopilotRun(t *testing.T) {
 	}
 }
 
+func TestValidateAutopilotFailureRecoveryConfig(t *testing.T) {
+	issueID := testUUID(42)
+	validMarker := pgtype.Text{String: "validation_officer_daily", Valid: true}
+	tests := []struct {
+		name       string
+		mode       string
+		enabled    bool
+		delay      int32
+		issueID    pgtype.UUID
+		marker     pgtype.Text
+		wantErrSub string
+	}{
+		{name: "disabled defaults", mode: "run_only", delay: MinAutopilotResourceFailureRetryDelaySeconds},
+		{name: "configured", mode: "run_only", enabled: true, delay: 3600, issueID: issueID, marker: validMarker},
+		{name: "delay floor", mode: "run_only", enabled: true, delay: 1799, wantErrSub: "at least 1800"},
+		{name: "receipt pair", mode: "run_only", delay: 1800, issueID: issueID, wantErrSub: "set or cleared together"},
+		{name: "marker format", mode: "run_only", delay: 1800, issueID: issueID, marker: pgtype.Text{String: "Bad marker", Valid: true}, wantErrSub: "must match"},
+		{name: "create issue unsupported", mode: "create_issue", enabled: true, delay: 1800, wantErrSub: "only supported for run_only"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateAutopilotFailureRecoveryConfig(tc.mode, tc.enabled, tc.delay, tc.issueID, tc.marker)
+			if tc.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("ValidateAutopilotFailureRecoveryConfig: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErrSub) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErrSub)
+			}
+		})
+	}
+}
+
 func TestBuildIssueDescription_NoTriggerPayload(t *testing.T) {
 	s := &AutopilotService{}
 	ap := db.Autopilot{Description: pgtype.Text{String: "do the thing", Valid: true}}

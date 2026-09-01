@@ -89,6 +89,14 @@ SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
+-- name: LockIssueForAutopilotFailureReceipt :one
+-- A final-failure receipt and its autopilot_run finalization commit together.
+-- Hold a key-share lock on the configured target so a concurrent issue delete
+-- cannot remove it between the target check and CreateComment.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
 -- name: LockIssueForDescriptionUpdate :one
 -- Serialize field-baseline checks and combined attachment binding on the
 -- owner row. The handler merges channel media that landed after the editor's
@@ -341,6 +349,13 @@ WITH target AS (
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_autopilot_failure_receipts AS (
+    UPDATE autopilot
+    SET failure_receipt_issue_id = NULL,
+        failure_receipt_marker = NULL,
+        updated_at = now()
+    WHERE failure_receipt_issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 

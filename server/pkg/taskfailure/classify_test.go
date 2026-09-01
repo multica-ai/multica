@@ -73,6 +73,7 @@ func TestClassifyRules(t *testing.T) {
 		{"balance is too low", "balance is too low to make this request", ReasonAgentProviderQuotaLimit},
 		{"monthly usage limit", "You've hit your org's monthly usage limit", ReasonAgentProviderQuotaLimit},
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
+		{"claude extra usage exhausted", "You're out of extra usage · resets 4am (America/Los_Angeles)", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
@@ -433,6 +434,30 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			reason: string(ReasonAgentUnknown),
 			raw:    "API Error: the model is overloaded",
 			want:   ReasonAgentUnknown,
+		},
+
+		// --- WS-4612: Claude Code extra-usage exhaustion. A daemon older
+		// than the new quota witness can report unknown for the bare copy or
+		// process_failure when its wrapper includes the CLI exit status. The
+		// server must upgrade both so scheduled autopilot retry works during a
+		// rolling daemon deployment.
+		{
+			name:   "old daemon catchall on extra usage is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "You're out of extra usage · resets 4am (America/Los_Angeles)",
+			want:   ReasonAgentProviderQuotaLimit,
+		},
+		{
+			name:   "old daemon process wrapper on extra usage is upgraded",
+			reason: string(ReasonAgentProcessFailure),
+			raw:    "claude exited with error: exit status 1\nYou're out of extra usage · resets 4am",
+			want:   ReasonAgentProviderQuotaLimit,
+		},
+		{
+			name:   "unrelated refined reason with extra usage is preserved",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    "You're out of extra usage · resets 4am",
+			want:   ReasonAgentProviderAuthOrAccess,
 		},
 	}
 

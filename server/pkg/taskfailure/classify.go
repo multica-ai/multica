@@ -127,6 +127,7 @@ func Classify(rawError string) Reason {
 			"balance is too low",
 			"monthly usage limit",
 			"usage limit",
+			"out of extra usage",
 			"you've hit your limit",
 			// Curly apostrophe variant: providers and copy-pasted error
 			// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
@@ -443,6 +444,18 @@ var legacyOpencodeStreamEndedReasons = map[string]bool{
 	"agent_error":                     true,
 }
 
+// legacyExtraUsageReasons are the buckets a daemon predating WS-4612 can send
+// for Claude Code's "out of extra usage" verdict. The bare message lands in
+// unknown; wrappers that append the CLI exit status land in process_failure.
+// The provider-owned phrase is unambiguous, so the server can safely upgrade
+// both during a rolling daemon deployment and make the autopilot quota retry
+// effective as soon as the backend ships.
+var legacyExtraUsageReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -484,6 +497,9 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// flaky provider. Upgrading here makes the retry work the moment the server
 	// deploys, without waiting on the daemon fleet.
 	lowerError := strings.ToLower(strings.TrimSpace(rawError))
+	if legacyExtraUsageReasons[reason] && strings.Contains(lowerError, "out of extra usage") {
+		return ReasonAgentProviderQuotaLimit
+	}
 	if legacyOpencodeStreamEndedReasons[reason] &&
 		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
 			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {

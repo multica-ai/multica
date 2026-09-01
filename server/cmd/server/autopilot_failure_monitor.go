@@ -325,19 +325,23 @@ func resolveAutopilotPausedRecipients(
 // service which we're sitting alongside in cmd/server).
 func autopilotEventPayload(a db.Autopilot) map[string]any {
 	return map[string]any{
-		"id":                   util.UUIDToString(a.ID),
-		"workspace_id":         util.UUIDToString(a.WorkspaceID),
-		"title":                a.Title,
-		"description":          util.TextToPtr(a.Description),
-		"assignee_id":          util.UUIDToString(a.AssigneeID),
-		"status":               a.Status,
-		"execution_mode":       a.ExecutionMode,
-		"issue_title_template": util.TextToPtr(a.IssueTitleTemplate),
-		"created_by_type":      a.CreatedByType,
-		"created_by_id":        util.UUIDToString(a.CreatedByID),
-		"last_run_at":          util.TimestampToPtr(a.LastRunAt),
-		"created_at":           util.TimestampToString(a.CreatedAt),
-		"updated_at":           util.TimestampToString(a.UpdatedAt),
+		"id":                                   util.UUIDToString(a.ID),
+		"workspace_id":                         util.UUIDToString(a.WorkspaceID),
+		"title":                                a.Title,
+		"description":                          util.TextToPtr(a.Description),
+		"assignee_id":                          util.UUIDToString(a.AssigneeID),
+		"status":                               a.Status,
+		"execution_mode":                       a.ExecutionMode,
+		"issue_title_template":                 util.TextToPtr(a.IssueTitleTemplate),
+		"resource_failure_retry_enabled":       a.ResourceFailureRetryEnabled,
+		"resource_failure_retry_delay_seconds": a.ResourceFailureRetryDelaySeconds,
+		"failure_receipt_issue_id":             util.UUIDToPtr(a.FailureReceiptIssueID),
+		"failure_receipt_marker":               util.TextToPtr(a.FailureReceiptMarker),
+		"created_by_type":                      a.CreatedByType,
+		"created_by_id":                        util.UUIDToString(a.CreatedByID),
+		"last_run_at":                          util.TimestampToPtr(a.LastRunAt),
+		"created_at":                           util.TimestampToString(a.CreatedAt),
+		"updated_at":                           util.TimestampToString(a.UpdatedAt),
 	}
 }
 

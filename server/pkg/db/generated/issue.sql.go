@@ -382,6 +382,13 @@ WITH target AS (
 ),
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+),
+cleared_autopilot_failure_receipts AS (
+    UPDATE autopilot
+    SET failure_receipt_issue_id = NULL,
+        failure_receipt_marker = NULL,
+        updated_at = now()
+    WHERE failure_receipt_issue_id IN (SELECT target.id FROM target)
 )
 DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target)
 `
@@ -1385,6 +1392,27 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) error {
 	_, err := q.db.Exec(ctx, lockIssueDuplicateKey, dollar_1)
 	return err
+}
+
+const lockIssueForAutopilotFailureReceipt = `-- name: LockIssueForAutopilotFailureReceipt :one
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockIssueForAutopilotFailureReceiptParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A final-failure receipt and its autopilot_run finalization commit together.
+// Hold a key-share lock on the configured target so a concurrent issue delete
+// cannot remove it between the target check and CreateComment.
+func (q *Queries) LockIssueForAutopilotFailureReceipt(ctx context.Context, arg LockIssueForAutopilotFailureReceiptParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForAutopilotFailureReceipt, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one

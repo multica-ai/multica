@@ -4634,21 +4634,24 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	if retryCandidateReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
-			wantRetry = true
+		} else if plan, planErr := s.automaticRetryPlan(ctx, failureReason, parent); planErr != nil {
+			slog.Warn("fail task auto-retry: resolve policy failed",
+				"task_id", util.UUIDToString(taskID), "error", planErr)
+		} else if plan.Eligible {
+			wantRetry = plan.Eligible
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+			retryMaxAttempts = pgtype.Int4{Int32: plan.MaxAttempts, Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+			if plan.Delay > 0 {
+				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(plan.Delay), Valid: true}
 			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
@@ -4999,6 +5002,76 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
 }
 
+// autopilotResourceFailureReasons is deliberately narrower than the ordinary
+// task retry allowlist. These failures normally require human repair, so they
+// are retried only for an explicitly configured scheduled run_only autopilot.
+var autopilotResourceFailureReasons = map[string]bool{
+	string(taskfailure.ReasonAgentProviderAuthOrAccess):        true,
+	string(taskfailure.ReasonAgentProviderQuotaLimit):          true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
+}
+
+var retryCandidateReasons = func() map[string]bool {
+	out := make(map[string]bool, len(retryableReasons)+len(autopilotResourceFailureReasons))
+	for reason := range retryableReasons {
+		out[reason] = true
+	}
+	for reason := range autopilotResourceFailureReasons {
+		out[reason] = true
+	}
+	return out
+}()
+
+type automaticTaskRetryPlan struct {
+	Eligible    bool
+	Delay       time.Duration
+	MaxAttempts int32
+}
+
+// automaticRetryPlan keeps the generic task policy and the opt-in autopilot
+// policy separate. Scheduled run_only autopilots preserve their original run
+// id across the retry; manual/webhook/API runs and unconfigured autopilots keep
+// their existing terminal behavior.
+func (s *TaskService) automaticRetryPlan(ctx context.Context, reason string, task db.AgentTaskQueue) (automaticTaskRetryPlan, error) {
+	if !task.AutopilotRunID.Valid {
+		if !retryEligible(reason, task) {
+			return automaticTaskRetryPlan{}, nil
+		}
+		return automaticTaskRetryPlan{
+			Eligible:    true,
+			Delay:       retryDelayForAttempt(reason, task.Attempt),
+			MaxAttempts: retryAttemptCeiling(reason, task.MaxAttempts),
+		}, nil
+	}
+
+	if !autopilotResourceFailureReasons[reason] || task.Attempt >= 2 {
+		return automaticTaskRetryPlan{}, nil
+	}
+	run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+	if err != nil {
+		return automaticTaskRetryPlan{}, fmt.Errorf("load autopilot run: %w", err)
+	}
+	if run.Source != "schedule" {
+		return automaticTaskRetryPlan{}, nil
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return automaticTaskRetryPlan{}, fmt.Errorf("load autopilot: %w", err)
+	}
+	if !autopilot.ResourceFailureRetryEnabled || autopilot.ExecutionMode != "run_only" {
+		return automaticTaskRetryPlan{}, nil
+	}
+	delaySeconds := autopilot.ResourceFailureRetryDelaySeconds
+	if delaySeconds < MinAutopilotResourceFailureRetryDelaySeconds {
+		delaySeconds = MinAutopilotResourceFailureRetryDelaySeconds
+	}
+	return automaticTaskRetryPlan{
+		Eligible:    true,
+		Delay:       time.Duration(delaySeconds) * time.Second,
+		MaxAttempts: 2,
+	}, nil
+}
+
 // runtime_offline retries start deferred, not queued: their positive fire_at
 // routes them through health-gated promotion after a fresh runtime heartbeat
 // returns. The queue sweeper also exempts this retry lineage, covering the race
@@ -5171,8 +5244,8 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 // the agent can resume the conversation when the backend supports it. Returns
 // the new task, or nil when no retry was created.
 //
-// Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
+// Scheduled run_only autopilot tasks have a separate opt-in resource-failure
+// policy; automaticRetryPlan keeps it from affecting other autopilot sources.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -5181,27 +5254,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
-	if !retryableReasons[reason] {
-		return nil, nil
+	plan, err := s.automaticRetryPlan(ctx, reason, parent)
+	if err != nil {
+		return nil, err
 	}
-	// Use the reason-aware ceiling, not the raw max_attempts column, so an
-	// orphaned provider_network task recovered on its 2nd attempt is still
-	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
-	// to 3). Kept in sync with retryEligible below, which applies the same
-	// ceiling to the primary FailTask path.
-	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
-		slog.Info("task auto-retry skipped: budget exhausted",
-			"task_id", util.UUIDToString(parent.ID),
-			"attempt", parent.Attempt,
-			"max_attempts", parent.MaxAttempts,
-			"ceiling", retryAttemptCeiling(reason, parent.MaxAttempts),
-		)
-		return nil, nil
-	}
-	// Autopilot has its own retry semantics (don't double-trigger) and a task
-	// with no issue/chat link has nowhere to report its retry — retryEligible
-	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	if !plan.Eligible {
 		return nil, nil
 	}
 
@@ -5224,8 +5281,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// NULL for an immediate child), and write the reason-aware ceiling into the
 	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
-	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
-		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+	if plan.Delay > 0 {
+		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(plan.Delay), Valid: true}
 	}
 	// Same advisory slot check as FailTask's path, for the same reason: skip the
 	// work when a successor is already visible. Losing the race is handled by
@@ -5254,7 +5311,7 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		NewTaskID:            dbid.NewV7(),
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
-		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+		MaxAttempts:          pgtype.Int4{Int32: plan.MaxAttempts, Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})

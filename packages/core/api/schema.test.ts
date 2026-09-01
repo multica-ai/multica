@@ -370,6 +370,29 @@ describe("ApiClient schema fallback", () => {
       expect(res.autopilots[0]?.last_run_status).toBeUndefined();
     });
 
+    it("passes scheduled failure-recovery configuration through", async () => {
+      stubFetchJson({
+        autopilots: [
+          {
+            ...baseAutopilot,
+            resource_failure_retry_enabled: true,
+            resource_failure_retry_delay_seconds: 2700,
+            failure_receipt_issue_id: "issue-1",
+            failure_receipt_marker: "validation_officer_daily",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listAutopilots();
+      expect(res.autopilots[0]).toMatchObject({
+        resource_failure_retry_enabled: true,
+        resource_failure_retry_delay_seconds: 2700,
+        failure_receipt_issue_id: "issue-1",
+        failure_receipt_marker: "validation_officer_daily",
+      });
+    });
+
     it("passes derived fields through and tolerates enum drift", async () => {
       stubFetchJson({
         autopilots: [

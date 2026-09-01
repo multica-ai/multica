@@ -63,10 +63,14 @@ func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *
 // rule (recording the editing member + timestamp), the summary just carries the
 // autopilot row's core config.
 type autopilotRuleConfigSummary struct {
-	AssigneeType  string `json:"assignee_type"`
-	AssigneeID    string `json:"assignee_id"`
-	Status        string `json:"status"`
-	ExecutionMode string `json:"execution_mode"`
+	AssigneeType                     string `json:"assignee_type"`
+	AssigneeID                       string `json:"assignee_id"`
+	Status                           string `json:"status"`
+	ExecutionMode                    string `json:"execution_mode"`
+	ResourceFailureRetryEnabled      bool   `json:"resource_failure_retry_enabled"`
+	ResourceFailureRetryDelaySeconds int32  `json:"resource_failure_retry_delay_seconds"`
+	FailureReceiptIssueID            string `json:"failure_receipt_issue_id,omitempty"`
+	FailureReceiptMarker             string `json:"failure_receipt_marker,omitempty"`
 }
 
 // RecordAutopilotRuleVersion appends one rule-version snapshot for a substantive
@@ -78,10 +82,14 @@ type autopilotRuleConfigSummary struct {
 // auto-pause monitor).
 func RecordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopilot, publishedByType string, publishedByID pgtype.UUID) error {
 	summary, err := json.Marshal(autopilotRuleConfigSummary{
-		AssigneeType:  ap.AssigneeType,
-		AssigneeID:    util.UUIDToString(ap.AssigneeID),
-		Status:        ap.Status,
-		ExecutionMode: ap.ExecutionMode,
+		AssigneeType:                     ap.AssigneeType,
+		AssigneeID:                       util.UUIDToString(ap.AssigneeID),
+		Status:                           ap.Status,
+		ExecutionMode:                    ap.ExecutionMode,
+		ResourceFailureRetryEnabled:      ap.ResourceFailureRetryEnabled,
+		ResourceFailureRetryDelaySeconds: ap.ResourceFailureRetryDelaySeconds,
+		FailureReceiptIssueID:            util.UUIDToString(ap.FailureReceiptIssueID),
+		FailureReceiptMarker:             ap.FailureReceiptMarker.String,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal rule version config summary: %w", err)
@@ -94,6 +102,37 @@ func RecordAutopilotRuleVersion(ctx context.Context, q *db.Queries, ap db.Autopi
 		ConfigSummary:   summary,
 	}); err != nil {
 		return fmt.Errorf("create autopilot rule version: %w", err)
+	}
+	return nil
+}
+
+const MinAutopilotResourceFailureRetryDelaySeconds int32 = 30 * 60
+
+var autopilotFailureReceiptMarkerRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
+
+// ValidateAutopilotFailureRecoveryConfig validates the policy fields shared by
+// the create and update API boundaries. Resource-failure retries intentionally
+// have a 30-minute floor: subscription and quota state rarely changes within a
+// few seconds, and immediate loops would only consume the remaining provider
+// budget faster. A receipt target and marker are an inseparable pair.
+func ValidateAutopilotFailureRecoveryConfig(
+	executionMode string,
+	retryEnabled bool,
+	retryDelaySeconds int32,
+	receiptIssueID pgtype.UUID,
+	receiptMarker pgtype.Text,
+) error {
+	if retryDelaySeconds < MinAutopilotResourceFailureRetryDelaySeconds {
+		return fmt.Errorf("resource_failure_retry_delay_seconds must be at least %d", MinAutopilotResourceFailureRetryDelaySeconds)
+	}
+	if (receiptIssueID.Valid) != (receiptMarker.Valid && strings.TrimSpace(receiptMarker.String) != "") {
+		return errors.New("failure_receipt_issue_id and failure_receipt_marker must be set or cleared together")
+	}
+	if receiptMarker.Valid && !autopilotFailureReceiptMarkerRE.MatchString(receiptMarker.String) {
+		return errors.New("failure_receipt_marker must match ^[a-z][a-z0-9_]{0,63}$")
+	}
+	if executionMode != "run_only" && (retryEnabled || receiptIssueID.Valid) {
+		return errors.New("failure recovery is only supported for run_only autopilots")
 	}
 	return nil
 }
@@ -1098,6 +1137,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 	if err != nil {
 		return
 	}
+	if run.Status == "completed" || run.Status == "skipped" {
+		return
+	}
 
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
@@ -1118,14 +1160,48 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
+		// FailTask creates the retry child in the same transaction as the
+		// parent's terminal write. A deferred child therefore exists before the
+		// failure event reaches this listener; keep the original run open and
+		// point task_id at the attempt that now owns it.
+		active, activeErr := s.Queries.GetActiveAutopilotTaskByRun(ctx, run.ID)
+		if activeErr == nil {
+			if _, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+				ID: run.ID, TaskID: active.ID,
+			}); updateErr != nil {
+				slog.Warn("failed to link autopilot run to active retry",
+					"run_id", util.UUIDToString(run.ID),
+					"task_id", util.UUIDToString(active.ID),
+					"error", updateErr,
+				)
+			}
+			return
+		}
+		if !errors.Is(activeErr, pgx.ErrNoRows) {
+			slog.Warn("failed to inspect active autopilot retry",
+				"run_id", util.UUIDToString(run.ID),
+				"task_id", util.UUIDToString(task.ID),
+				"error", activeErr,
+			)
+			return
+		}
 		reason := "task " + task.Status
 		if task.Error.Valid {
 			reason = task.Error.String
 		}
-		updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
-			ID:            run.ID,
-			FailureReason: pgtype.Text{String: reason, Valid: true},
-		})
+		var updatedRun db.AutopilotRun
+		if run.Source == "schedule" && autopilot.FailureReceiptIssueID.Valid && autopilot.FailureReceiptMarker.Valid {
+			var receipt *db.Comment
+			updatedRun, receipt, err = s.failAutopilotRunWithReceipt(ctx, autopilot, run, task, reason)
+			if err == nil && receipt != nil {
+				s.publishAutopilotFailureReceipt(autopilot, *receipt)
+			}
+		} else {
+			updatedRun, err = s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+				ID:            run.ID,
+				FailureReason: pgtype.Text{String: reason, Valid: true},
+			})
+		}
 		if err != nil {
 			slog.Warn("failed to fail autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
@@ -1133,6 +1209,104 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+func (s *AutopilotService) failAutopilotRunWithReceipt(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	run db.AutopilotRun,
+	task db.AgentTaskQueue,
+	reason string,
+) (db.AutopilotRun, *db.Comment, error) {
+	if s.TxStarter == nil {
+		return db.AutopilotRun{}, nil, errors.New("finalize autopilot run with receipt: transaction starter is required")
+	}
+	if existing, err := s.Queries.GetComment(ctx, run.ID); err == nil {
+		return run, &existing, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AutopilotRun{}, nil, fmt.Errorf("lookup autopilot failure receipt: %w", err)
+	}
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AutopilotRun{}, nil, fmt.Errorf("begin autopilot failure receipt: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	receiptTargetExists := true
+	if _, lockErr := qtx.LockIssueForAutopilotFailureReceipt(ctx, db.LockIssueForAutopilotFailureReceiptParams{
+		ID:          autopilot.FailureReceiptIssueID,
+		WorkspaceID: autopilot.WorkspaceID,
+	}); errors.Is(lockErr, pgx.ErrNoRows) {
+		receiptTargetExists = false
+	} else if lockErr != nil {
+		return db.AutopilotRun{}, nil, fmt.Errorf("lock autopilot failure receipt issue: %w", lockErr)
+	}
+	terminal, err := qtx.UpdateAutopilotRunTerminalWithQuota(ctx, db.UpdateAutopilotRunTerminalWithQuotaParams{
+		TerminalStatus: "failed",
+		FailureReason:  pgtype.Text{String: reason, Valid: true},
+		RunID:          run.ID,
+	})
+	if err != nil {
+		return db.AutopilotRun{}, nil, fmt.Errorf("fail autopilot run: %w", err)
+	}
+	if !receiptTargetExists {
+		if err := tx.Commit(ctx); err != nil {
+			return db.AutopilotRun{}, nil, fmt.Errorf("commit autopilot failure without removed receipt target: %w", err)
+		}
+		slog.Warn("autopilot failure receipt target was removed; finalized run without receipt",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(run.ID),
+			"issue_id", util.UUIDToString(autopilot.FailureReceiptIssueID),
+		)
+		return autopilotRunFromTerminalRow(terminal), nil, nil
+	}
+	receiptReason := "unknown"
+	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
+		receiptReason = strings.TrimSpace(task.FailureReason.String)
+	}
+	content := fmt.Sprintf(
+		"<!-- %s: run_id=%s status=failed reason=%s -->",
+		autopilot.FailureReceiptMarker.String,
+		util.UUIDToString(run.ID),
+		receiptReason,
+	)
+	created, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+		// The run id is the durable idempotency key. UUIDs are scoped by table,
+		// so reusing it as the comment primary key is collision-free and lets a
+		// replay repair publication without creating a second receipt.
+		ID:           run.ID,
+		IssueID:      autopilot.FailureReceiptIssueID,
+		WorkspaceID:  autopilot.WorkspaceID,
+		AuthorType:   "system",
+		AuthorID:     pgtype.UUID{Valid: true},
+		Content:      content,
+		Type:         "system",
+		SourceTaskID: task.ID,
+	})
+	if err != nil {
+		return db.AutopilotRun{}, nil, fmt.Errorf("create autopilot failure receipt: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AutopilotRun{}, nil, fmt.Errorf("commit autopilot failure receipt: %w", err)
+	}
+	updatedRun := autopilotRunFromTerminalRow(terminal)
+	comment := created.Comment()
+	return updatedRun, &comment, nil
+}
+
+func (s *AutopilotService) publishAutopilotFailureReceipt(autopilot db.Autopilot, comment db.Comment) {
+	if s.Bus == nil {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: util.UUIDToString(autopilot.WorkspaceID),
+		ActorType:   "system",
+		Payload: map[string]any{
+			"comment": commentEventFields(comment),
+		},
+	})
 }
 
 // SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
