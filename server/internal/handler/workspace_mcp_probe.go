@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -523,7 +524,7 @@ func (h *Handler) resolveMcpProbeRuntime(ctx context.Context, workspaceID pgtype
 		if !err {
 			return db.AgentRuntime{}, http.StatusBadRequest, "invalid runtime_id"
 		}
-		rt, loadErr := h.Queries.GetAgentRuntime(ctx, runtimeUUID)
+		rt, loadErr := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceRuntimeAPI, runtimeUUID)
 		if loadErr != nil || uuidToString(rt.WorkspaceID) != uuidToString(workspaceID) {
 			return db.AgentRuntime{}, http.StatusNotFound, "runtime not found"
 		}
