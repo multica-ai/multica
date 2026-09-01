@@ -301,6 +301,11 @@ type workspaceState struct {
 	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   contextLock
+	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
+	// for this workspace. Unlike the fields above it is NOT guarded by
+	// Daemon.mu: it exists precisely so the verdict can be read and written as
+	// one step without holding the daemon's central lock across file I/O.
+	coAuthorPublishMu sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
 	// profile list (MUL-3332) as last seen from the server. An on-demand
 	// refresh compares the live signature with this cached value; any drift
@@ -3204,7 +3209,241 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	}
 	d.mu.Unlock()
 
+	// Publish the refreshed Co-authored-by verdict to the repo cache. Hooks
+	// installed by earlier checkouts read that file at commit time, so this is
+	// what makes a toggled-off setting apply to checkouts that already exist
+	// instead of only to the next one (MUL-6921).
+	d.persistCoAuthoredByState(workspaceID)
+
 	return resp, nil
+}
+
+// coAuthoredByPublisher is the repo cache's half of the Co-authored-by wiring:
+// the state file every installed hook reads at commit time, and the hooks
+// themselves in the workspace's bare caches. Optional so test daemons can run
+// with a minimal repoCacheBackend.
+type coAuthoredByPublisher interface {
+	WriteCoAuthoredByState(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHooks(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHookInCheckout(checkoutPath, workspaceID string, enabled bool) error
+}
+
+// persistCoAuthoredByState records the workspace's current Co-authored-by
+// verdict where the installed prepare-commit-msg hooks can see it, and brings
+// hooks written by earlier daemon releases — which read no state at all — in
+// line with it. Called after every settings refresh and on every workspace
+// sync; best-effort, since a failed write only leaves the previous value in
+// place.
+//
+// The daemon is the only writer of this state, and publishes under a
+// per-workspace lock with the verdict read INSIDE that lock. Two publishers
+// racing (a settings refresh and a sync tick, say) therefore serialize, and the
+// one that writes last is the one that read last — a publisher that started
+// before a settings update can never overwrite the value that update produced.
+func (d *Daemon) persistCoAuthoredByState(workspaceID string) {
+	d.publishCoAuthoredByState(workspaceID, d.workspaceCoAuthoredByEnabled)
+}
+
+// publishCoAuthoredByState is persistCoAuthoredByState with the verdict read
+// injected. Production always passes workspaceCoAuthoredByEnabled; tests pass a
+// wrapper that parks a publisher between taking the lock and reading, which is
+// the one ordering the lock exists to guarantee and cannot be observed
+// otherwise.
+func (d *Daemon) publishCoAuthoredByState(workspaceID string, verdict func(string) bool) {
+	if d.repoCache == nil || workspaceID == "" {
+		return
+	}
+	cache, ok := d.repoCache.(coAuthoredByPublisher)
+	if !ok {
+		return
+	}
+
+	d.mu.Lock()
+	ws := d.workspaces[workspaceID]
+	d.mu.Unlock()
+	if ws == nil {
+		return
+	}
+
+	ws.coAuthorPublishMu.Lock()
+	defer ws.coAuthorPublishMu.Unlock()
+
+	enabled := verdict(workspaceID)
+	if err := cache.WriteCoAuthoredByState(workspaceID, enabled); err != nil {
+		d.logger.Warn("record co-authored-by state failed", "workspace_id", workspaceID, "error", err)
+	}
+	if err := cache.ReconcileCoAuthoredByHooks(workspaceID, enabled); err != nil {
+		d.logger.Warn("reconcile co-authored-by hooks failed", "workspace_id", workspaceID, "error", err)
+	}
+	d.reconcileIsolatedCoAuthoredByHooks(cache, workspaceID, enabled)
+}
+
+// isolatedCheckoutScanDepth bounds how far below an env root the sweep looks
+// for a checkout. Repos land at <env root>/<workdir>/<repo>, so two levels
+// covers the layout with one to spare and keeps the walk from wandering into
+// the checked-out source tree.
+const isolatedCheckoutScanDepth = 2
+
+// reconcileIsolatedCoAuthoredByHooks applies the workspace setting to hooks
+// that live inside task workdirs rather than in the shared bare cache.
+//
+// Codex on Linux and the Windows sandbox check out with isolated git metadata,
+// so their hook sits in <checkout>/.git/hooks and the repo cache cannot see it.
+// Left alone, a workdir prepared by an earlier release keeps its unconditional
+// hook — and its next commit keeps adding the trailer — until that repo happens
+// to be checked out again. Env roots are attributed by their owner record, so a
+// workspace never rewrites hooks belonging to another one.
+func (d *Daemon) reconcileIsolatedCoAuthoredByHooks(cache coAuthoredByPublisher, workspaceID string, enabled bool) {
+	root := d.cfg.WorkspacesRoot
+	if root == "" || workspaceID == "" {
+		return
+	}
+	wsEntries, err := os.ReadDir(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Debug("co-authored-by sweep: read workspaces root failed", "error", err)
+		}
+		return
+	}
+
+	for _, wsEntry := range wsEntries {
+		// Dot directories are daemon-internal caches (.repos, .skill-cache),
+		// never workspace directories — the same rule runGC walks by.
+		if !wsEntry.IsDir() || strings.HasPrefix(wsEntry.Name(), ".") {
+			continue
+		}
+		wsDir := filepath.Join(root, wsEntry.Name())
+		envRoots, err := os.ReadDir(wsDir)
+		if err != nil {
+			continue
+		}
+		for _, envEntry := range envRoots {
+			if !envEntry.IsDir() || strings.HasPrefix(envEntry.Name(), ".") {
+				continue
+			}
+			envRoot := filepath.Join(wsDir, envEntry.Name())
+			if !d.envRootBelongsToWorkspace(wsEntry.Name(), envRoot, workspaceID) {
+				continue
+			}
+			for _, checkout := range isolatedCheckoutCandidates(envRoot, isolatedCheckoutScanDepth) {
+				if err := cache.ReconcileCoAuthoredByHookInCheckout(checkout, workspaceID, enabled); err != nil {
+					d.logger.Warn("reconcile co-authored-by hook in checkout failed",
+						"workspace_id", workspaceID, "path", checkout, "error", err)
+				}
+			}
+		}
+	}
+}
+
+// envRootBelongsToWorkspace reports whether an env root is this workspace's, by
+// the strongest evidence the release that created it left behind.
+//
+// Since v0.4.35 the owner record carries the workspace ID, and an exact match
+// is required. Env roots prepared before that recorded only a task ID — or, on
+// older releases still, no marker at all — and they live under the layout that
+// release used: <workspaces root>/<workspace ID>/<task key>. So for an owner
+// record that names no workspace, the directory name is the evidence, and it
+// has to BE the workspace ID. The readable layout that replaced it always
+// appends a suffix (`<slug>-<id tail>`), so a bare workspace UUID can only be
+// one of those older roots and this can never alias a modern one.
+//
+// An unreadable marker attributes nothing: skipping costs a stale hook in one
+// workdir, guessing would rewrite hooks in another workspace's.
+func (d *Daemon) envRootBelongsToWorkspace(wsDirName, envRoot, workspaceID string) bool {
+	owner, err := execenv.ReadEnvRootOwner(envRoot)
+	if err != nil || owner == nil {
+		return false
+	}
+	if owner.WorkspaceID != "" {
+		return owner.WorkspaceID == workspaceID
+	}
+	return wsDirName == workspaceID
+}
+
+// isolatedCheckoutCandidates returns directories at or below dir that hold
+// their own git metadata. A linked worktree's .git is a file, so only isolated
+// checkouts match, and matching stops descending: nothing nested inside a
+// checkout is one.
+func isolatedCheckoutCandidates(dir string, depth int) []string {
+	if depth <= 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		child := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(filepath.Join(child, ".git")); err == nil && info.IsDir() {
+			found = append(found, child)
+			continue
+		}
+		found = append(found, isolatedCheckoutCandidates(child, depth-1)...)
+	}
+	return found
+}
+
+// publishTrackedCoAuthoredByState writes the current verdict for every tracked
+// workspace and reconciles the hooks in their bare caches. Purely local — no
+// request — and both halves skip the write when what is on disk already
+// matches, so a sync tick on a converged host costs a handful of small reads.
+func (d *Daemon) publishTrackedCoAuthoredByState() {
+	d.mu.Lock()
+	ids := make([]string, 0, len(d.workspaces))
+	for id := range d.workspaces {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+
+	for _, id := range ids {
+		d.persistCoAuthoredByState(id)
+	}
+}
+
+// trackedSettingsRefreshTimeout bounds one refreshTrackedWorkspaceSettings
+// pass. A workspace it does not reach keeps its cached settings and picks the
+// change up on its next repo checkout.
+const trackedSettingsRefreshTimeout = 30 * time.Second
+
+// refreshTrackedWorkspaceSettings re-reads repos and settings for workspaces
+// this daemon already tracks. Only the server's workspaces-changed hint calls
+// it: the periodic sync deliberately makes no repos request for a tracked
+// workspace (see syncWorkspacesFromAPI), so without this a settings edit —
+// the GitHub master switch, the Co-authored-by toggle — would sit unseen
+// until the workspace's next repo checkout.
+func (d *Daemon) refreshTrackedWorkspaceSettings(ctx context.Context) {
+	// The sync loop is single-threaded and still owes the hint its membership
+	// reconcile, so bound the whole pass rather than letting one slow
+	// workspace hold every other signal behind it.
+	ctx, cancel := context.WithTimeout(ctx, trackedSettingsRefreshTimeout)
+	defer cancel()
+
+	d.mu.Lock()
+	tracked := make(map[string]*workspaceState, len(d.workspaces))
+	for id, ws := range d.workspaces {
+		tracked[id] = ws
+	}
+	d.mu.Unlock()
+
+	for id, ws := range tracked {
+		if ctx.Err() != nil {
+			return
+		}
+		// Share ensureRepoReady's lock so a checkout in flight and this
+		// refresh cannot interleave their writes to the same workspace.
+		if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+			return
+		}
+		_, err := d.refreshWorkspaceRepos(ctx, id)
+		ws.repoRefreshMu.Unlock()
+		if err != nil {
+			d.logger.Debug("workspace settings refresh failed", "workspace_id", id, "error", err)
+		}
+	}
 }
 
 // refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
@@ -3592,8 +3831,17 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
+			// A settings edit made while the websocket was down produced a
+			// workspaces-changed hint nobody received. Reconnecting is the
+			// daemon's chance to catch up on it: without this the stale
+			// verdict would just get republished by the sync below.
+			d.refreshTrackedWorkspaceSettings(ctx)
 			syncNow(true)
 		case <-workspaceChangesCh:
+			// The hint fires for membership changes AND for workspace edits,
+			// including settings. Refresh cached settings for the workspaces
+			// we already track before reconciling the membership set.
+			d.refreshTrackedWorkspaceSettings(ctx)
 			syncNow(false)
 		case <-timer.C:
 			syncNow(false)
@@ -3811,6 +4059,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	if registered > 0 || removed > 0 {
 		d.notifyRuntimeSetChanged()
 	}
+
+	// Republish each tracked workspace's Co-authored-by verdict. This costs no
+	// request — it writes the daemon's cached verdict where prepare-commit-msg
+	// hooks read it, and migrates hooks left by earlier releases — and is what
+	// covers the cases no refresh reaches: a toggle flipped while the daemon
+	// was down (settings arrive with the register response above), a host that
+	// just upgraded, and a state file removed by repo cache GC.
+	d.publishTrackedCoAuthoredByState()
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))

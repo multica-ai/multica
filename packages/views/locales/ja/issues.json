@@ -1,7 +1,7 @@
 {
   "status_catalog_error": {
     "title": "ステータス一覧を読み込めませんでした",
-    "hint": "これがないとステータスの絞り込みを適用できないため、イシューは表示されません。",
+    "hint": "これがないとステータスの絞り込みを適用できないため、タスクは表示されません。",
     "retry": "再試行"
   },
   "source_context": {
@@ -122,6 +122,9 @@
     "section_priority": "優先度",
     "section_assignee": "担当者",
     "section_creator": "作成者",
+    "chip_op_contains": "{{value}} を含む",
+    "chip_op_before": "{{value}} より前",
+    "chip_op_after": "{{value}} より後",
     "section_project": "プロジェクト",
     "section_label": "ラベル",
     "section_date": "日付",
@@ -608,12 +611,12 @@
       "source_backfill": "バックフィルされた帰属",
       "source_unattributed": "責任メンバーを解決できません"
     },
-    "usage_total_tooltip": "この課題のトークン使用量 — クリックで実行ごとの内訳"
+    "usage_total_tooltip": "このタスクのトークン使用量 — クリックで実行ごとの内訳"
   },
   "usage_detail": {
     "title": "使用量の内訳",
     "subtitle_other": "{{identifier}} · {{count}} 回の実行",
-    "empty": "この課題では、まだトークン使用量が記録された実行はありません。",
+    "empty": "このタスクでは、まだトークン使用量が記録された実行はありません。",
     "kpi_cost": "費用",
     "kpi_cost_hint_other": "失敗した {{count}} 回の実行が {{pct}}% を占めます",
     "kpi_cache": "キャッシュ削減",
@@ -695,6 +698,11 @@
     "custom_property": {
       "empty": "空",
       "none": "値なし",
+      "op_is": "等しい",
+      "op_contains": "含む",
+      "op_before": "より前",
+      "op_after": "より後",
+      "operator_label": "フィルター演算子",
       "true_label": "はい",
       "false_label": "いいえ",
       "value_placeholder": "値を入力…",
@@ -767,15 +775,15 @@
   },
   "save_view": {
     "title": "ビューとして保存",
-    "hint_workspace": "ワークスペースの全 issue をもとに作成",
-    "hint_my_any": "「マイ issue · すべて」をもとに作成",
-    "hint_my_assigned": "「マイ issue · 自分に割り当て」をもとに作成",
-    "hint_my_created": "「マイ issue · 自分が作成」をもとに作成",
-    "hint_my_involved": "「マイ issue · 関与中」をもとに作成",
+    "hint_workspace": "ワークスペースの全タスクをもとに作成",
+    "hint_my_any": "「マイタスク · すべて」をもとに作成",
+    "hint_my_assigned": "「マイタスク · 自分に割り当て」をもとに作成",
+    "hint_my_created": "「マイタスク · 自分が作成」をもとに作成",
+    "hint_my_involved": "「マイタスク · 関与中」をもとに作成",
     "hint_project": "プロジェクト「{{title}}」をもとに作成（そのプロジェクトページでのみ利用可能）",
-    "hint_project_agents": "プロジェクト「{{title}}」のエージェントが担当する issue をもとに作成（そのプロジェクトページでのみ利用可能）",
-    "hint_project_members": "プロジェクト「{{title}}」のメンバーが担当する issue をもとに作成（そのプロジェクトページでのみ利用可能）",
-    "my_private_note": "マイ issue のビューは自分にのみ表示されます",
+    "hint_project_agents": "プロジェクト「{{title}}」のエージェントが担当するタスクをもとに作成（そのプロジェクトページでのみ利用可能）",
+    "hint_project_members": "プロジェクト「{{title}}」のメンバーが担当するタスクをもとに作成（そのプロジェクトページでのみ利用可能）",
+    "my_private_note": "マイタスクのビューは自分にのみ表示されます",
     "name_label": "名前",
     "visibility_label": "公開範囲",
     "visibility_private": "自分のみ",
@@ -796,8 +804,8 @@
     "update": "変更を保存",
     "toast_updated": "ビューを更新しました",
     "toast_conflict": "他のユーザーがこのビューを編集しました。開き直してから再試行してください",
-    "hint_workspace_members": "メンバーが担当するワークスペースの issue をもとに作成",
-    "hint_workspace_agents": "エージェントが担当するワークスペースの issue をもとに作成",
+    "hint_workspace_members": "メンバーが担当するワークスペースのタスクをもとに作成",
+    "hint_workspace_agents": "エージェントが担当するワークスペースのタスクをもとに作成",
     "scope_label_workspace": "担当者タイプ",
     "scope_label_my": "自分との関係",
     "variant_all": "担当者を問わない",

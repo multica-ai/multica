@@ -297,7 +297,7 @@
     "disabled_badge": "無効",
     "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
     "delete_title": "共有サーバーを削除しますか？",
-    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次のタスクから反映されます。",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次の作業から反映されます。",
     "delete_confirm": "削除",
     "cancel": "キャンセル",
     "added_toast": "共有 MCP サーバーを追加しました",
@@ -325,7 +325,7 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
-      "issue_statuses": "ステータス",
+      "issue_statuses": "タスクステータス",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
       "plugins": "Plugins",
@@ -388,8 +388,8 @@
       "secret_set": "保存済み — 新しい値を入力すると置き換わります"
     },
     "scopes": {
-      "issues_read": "issue を読み取る",
-      "issues_write": "issue を作成・編集する",
+      "issues_read": "タスクを読み取る",
+      "issues_write": "タスクを作成・編集する",
       "comments_read": "コメントを読み取る",
       "comments_write": "コメントを投稿する",
       "tasks_read": "agent task を読み取る",
