@@ -178,8 +178,8 @@ func Classify(rawError string) Reason {
 	//    Note this only catches deadlines that arrive as a bare string;
 	//    callers holding the error value should classify structurally
 	//    instead (see taskRunFailureReason in daemon/daemon.go).
-	//    "opencode stream ended" is the shared prefix of every failure the
-	//    OpenCode terminal-signal guard raises (pkg/agent/opencode.go): a step
+	//    The OpenCode/CodeArts "stream ended" prefixes cover every failure the
+	//    shared terminal-signal guard raises (pkg/agent/opencode.go): a step
 	//    left open at EOF, a continuation that never started, and a run that
 	//    ended on a step with no text, no tool call and no reported usage.
 	//    All three mean the same thing — the provider stream died and
@@ -190,22 +190,31 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
-	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
-	case containsAny(lower,
-		"stream disconnected",
-		opencodeStreamEndedPrefix,
-		"connection closed",
-		"mid-response",
-		"error sending request",
-		"unable to connect",
-		"dial tcp",
-		"connection refused",
-		"connectionrefused",
-		"dns",
-		"i/o timeout",
-		"deadline exceeded",
-		"timeout exceeded while awaiting",
-	):
+	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
+	//    the bare strings "Connection error." and "Request timed out." on
+	//    turn_end.errorMessage (then exits 1). Those used to fall through to
+	//    process_failure via "exit status 1" and terminate the task with no
+	//    retry (BHD-135). isPiProviderNetworkError matches only the exact bare
+	//    messages and the stable Pi/OMP exit composite, rather than treating
+	//    the same broad substrings from local tools or MCP servers as retryable.
+	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
+	case isPiProviderNetworkError(lower),
+		containsAny(lower,
+			"stream disconnected",
+			opencodeStreamEndedPrefix,
+			codeartsStreamEndedPrefix,
+			"connection closed",
+			"mid-response",
+			"error sending request",
+			"unable to connect",
+			"dial tcp",
+			"connection refused",
+			"connectionrefused",
+			"dns",
+			"i/o timeout",
+			"deadline exceeded",
+			"timeout exceeded while awaiting",
+		):
 		return ReasonAgentProviderNetwork
 
 	// 8. Model not found / unavailable. The SQL uses `%model%not%found%`,
@@ -397,11 +406,25 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+func isPiProviderNetworkError(lower string) bool {
+	for _, message := range []string{"connection error.", "request timed out."} {
+		if lower == message ||
+			strings.HasPrefix(lower, message+"; pi exited with error: ") ||
+			strings.HasPrefix(lower, message+"; omp exited with error: ") {
+			return true
+		}
+	}
+	return false
+}
+
 // opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
 // guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
 // is a PREFIX of the whole error rather than a phrase somewhere inside it, so
 // its presence identifies the failure outright.
-const opencodeStreamEndedPrefix = "opencode stream ended"
+const (
+	opencodeStreamEndedPrefix = "opencode stream ended"
+	codeartsStreamEndedPrefix = "codearts stream ended"
+)
 
 // legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
 // entry lands these errors in: process_failure for the two "terminal signal"
@@ -460,8 +483,10 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// allowlist on exactly the un-upgraded hosts most likely to be hitting a
 	// flaky provider. Upgrading here makes the retry work the moment the server
 	// deploys, without waiting on the daemon fleet.
+	lowerError := strings.ToLower(strings.TrimSpace(rawError))
 	if legacyOpencodeStreamEndedReasons[reason] &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
+		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
+			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {
 		return ReasonAgentProviderNetwork
 	}
 	// #7112: same mixed-version gap. A daemon predating the OpenClaw CLI

@@ -3,6 +3,15 @@ SELECT * FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListVisibleAgentRuntimes :many
+-- A private runtime is another member's machine and must not leak into their
+-- runtime list. The owner can always see their own runtime; everyone else
+-- sees only runtimes the owner has explicitly shared with the workspace.
+SELECT * FROM agent_runtime
+WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'public')
+ORDER BY created_at ASC;
+
 -- name: GetAgentRuntime :one
 SELECT * FROM agent_runtime
 WHERE id = $1;
@@ -486,6 +495,8 @@ WHERE status = 'offline'
     SELECT 1
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
   )
   AND NOT EXISTS (
     SELECT 1
@@ -510,6 +521,8 @@ SELECT EXISTS (
       SELECT 1
       FROM agent
       WHERE agent.runtime_id = agent_runtime.id
+        AND agent.kind = 'user'
+        AND agent.archived_at IS NULL
     )
 ) AS eligible;
 
@@ -517,27 +530,3 @@ SELECT EXISTS (
 -- Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
 -- aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
 SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
-
--- name: CountStaleOfflineRuntimesBlockedByTasks :one
--- Bounded observability sample of runtimes that are otherwise GC-eligible but
--- retain a non-terminal task. In particular, deferred tasks have no generic
--- TTL, so silently filtering them from the candidate batch would hide a
--- permanently-starved runtime. The count saturates at max_rows so this
--- recurring safety signal cannot become an unbounded backlog scan.
-SELECT count(*) FROM (
-  SELECT 1 FROM agent_runtime
-  WHERE status = 'offline'
-    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
-    AND NOT EXISTS (
-      SELECT 1
-      FROM agent
-      WHERE agent.runtime_id = agent_runtime.id
-    )
-    AND EXISTS (
-      SELECT 1
-      FROM agent_task_queue
-      WHERE agent_task_queue.runtime_id = agent_runtime.id
-        AND agent_task_queue.completed_at IS NULL
-    )
-  LIMIT @max_rows::int
-) AS blocked_runtimes;

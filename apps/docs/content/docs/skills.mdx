@@ -19,17 +19,18 @@ Add a skill to an [agent](/agents) and the agent uses its guidance when executin
 
 ## Creating or importing a skill
 
-On the workspace **Skills** page, choose "New skill". Three options are available:
+On the workspace **Skills** page, choose "New skill". Four options are available:
 
 | Option | When it fits |
 |---|---|
 | **Create manually** | Start writing from a blank `SKILL.md`. |
+| **Import from local** | Pick a folder that contains `SKILL.md`, or a `.skill` / `.zip` archive on this computer. |
 | **Import from URL** | Import a published skill from GitHub, ClawHub, or Skills.sh. |
 | **Copy from a runtime** | Scan skills on a connected computer and copy the selected ones into the workspace. |
 
 Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
-With the CLI, you can also import from a `.skill` or `.zip` file:
+The same archive format works from the CLI:
 
 ```bash
 multica skill import --file ./review-helper.skill

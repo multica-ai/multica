@@ -121,10 +121,6 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	// Run deveco in its own process group so cancellation can reach the whole
-	// tree (deveco plus any tool subprocess it spawns), not just the direct
-	// child — otherwise a cancelled or restarted run can orphan a descendant.
-	configureProcessGroup(cmd)
 	// Take over context cancellation: drive a graceful, group-wide
 	// SIGTERM→SIGKILL from the cancellation goroutine below and close the
 	// stdout read end only after the tree has been signalled. Returning nil
@@ -154,7 +150,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[deveco:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start deveco: %w", err)
 	}
@@ -202,6 +198,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		exitErr := cmd.Wait()
 		close(procDone)
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {

@@ -43,17 +43,51 @@ func sessionPersistenceTestDB(t *testing.T) *pgxpool.Pool {
 }
 
 type sessionPersistenceFixture struct {
-	workspaceID pgtype.UUID
-	userID      pgtype.UUID
-	sessionID   pgtype.UUID
+	workspaceID    pgtype.UUID
+	userID         pgtype.UUID
+	agentID        pgtype.UUID
+	sessionID      pgtype.UUID
+	installationID pgtype.UUID
+	channelChatID  string
 }
 
 func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPersistenceFixture {
+	f := seedSessionPersistenceFixtureWithoutChannel(t, pool)
+	ctx := context.Background()
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, status, installer_user_id
+		) VALUES ($1, $2, 'lark', '{}'::jsonb, 'active', $3)
+		RETURNING id
+	`, f.workspaceID, f.agentID, f.userID).Scan(&f.installationID); err != nil {
+		t.Fatalf("create channel installation: %v", err)
+	}
+	f.channelChatID = "channel-media-" + fmt.Sprint(time.Now().UnixNano())
+	if _, err := db.New(pool).CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
+		ChatSessionID: f.sessionID, InstallationID: f.installationID, ChannelType: "lark",
+		ChannelChatID: f.channelChatID, ChatType: "p2p", Config: []byte("{}"),
+	}); err != nil {
+		t.Fatalf("create channel binding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM channel_chat_context_generation
+			WHERE chat_session_id IN (
+				SELECT chat_session_id FROM channel_chat_session_binding WHERE installation_id = $1
+			)
+		`, f.installationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE installation_id = $1`, f.installationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, f.installationID)
+	})
+	return f
+}
+
+func seedSessionPersistenceFixtureWithoutChannel(t *testing.T, pool *pgxpool.Pool) sessionPersistenceFixture {
 	t.Helper()
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
 	var f sessionPersistenceFixture
-	var runtimeID, agentID pgtype.UUID
+	var runtimeID pgtype.UUID
 
 	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
 		"Channel media test", fmt.Sprintf("channel-media-%d@multica.test", suffix)).Scan(&f.userID); err != nil {
@@ -85,17 +119,92 @@ func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPers
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
 		VALUES ($1, $2, 'local', $3, $4)
-		RETURNING id`, f.workspaceID, fmt.Sprintf("channel-media-agent-%d", suffix), runtimeID, f.userID).Scan(&agentID); err != nil {
+		RETURNING id`, f.workspaceID, fmt.Sprintf("channel-media-agent-%d", suffix), runtimeID, f.userID).Scan(&f.agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
 		VALUES ($1, $2, $3, 'Channel media test')
-		RETURNING id`, f.workspaceID, agentID, f.userID).Scan(&f.sessionID); err != nil {
+		RETURNING id`, f.workspaceID, f.agentID, f.userID).Scan(&f.sessionID); err != nil {
 		t.Fatalf("create chat session: %v", err)
 	}
-
 	return f
+}
+
+func TestChannelRouteRevisionContinuesAfterCurrentBindingIsRemoved(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	queries := db.New(pool)
+	session := NewChatSession(queries, pool, channel.Type("lark"), SessionTitles{})
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE channel_chat_session_binding
+		SET retired_at = now()
+		WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL
+	`, fixture.installationID, fixture.channelChatID); err != nil {
+		t.Fatalf("retire first route: %v", err)
+	}
+	secondSession, err := session.EnsureSession(ctx, EnsureSessionInput{
+		WorkspaceID: fixture.workspaceID, AgentID: fixture.agentID,
+		InstallationID: fixture.installationID, Sender: fixture.userID,
+		BindingKey: fixture.channelChatID, ChatType: channel.ChatTypeP2P,
+	})
+	if err != nil {
+		t.Fatalf("ensure route after archive: %v", err)
+	}
+	var secondRevision int64
+	if err := pool.QueryRow(ctx, `
+		SELECT route_revision FROM channel_chat_session_binding
+		WHERE chat_session_id = $1
+	`, secondSession).Scan(&secondRevision); err != nil {
+		t.Fatalf("load recreated route: %v", err)
+	}
+	if secondRevision != 2 {
+		t.Fatalf("recreated route revision = %d, want 2", secondRevision)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE channel_chat_session_binding SET retired_at = now()
+		WHERE chat_session_id = $1
+	`, secondSession); err != nil {
+		t.Fatalf("retire recreated route: %v", err)
+	}
+	started, err := session.StartSession(ctx, StartSessionInput{EnsureSessionInput: EnsureSessionInput{
+		WorkspaceID: fixture.workspaceID, AgentID: fixture.agentID,
+		InstallationID: fixture.installationID, Sender: fixture.userID,
+		BindingKey: fixture.channelChatID, ChatType: channel.ChatTypeP2P,
+	}})
+	if err != nil {
+		t.Fatalf("start route after archive: %v", err)
+	}
+	if started.RouteRevision != 3 || started.Append.RouteRevision != 3 {
+		t.Fatalf("started route revisions = result:%d append:%d, want 3", started.RouteRevision, started.Append.RouteRevision)
+	}
+}
+
+func TestAppendUserMessageReplacesLegacyImplicitChannelTitle(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	session := NewChatSession(db.New(pool), pool, channel.Type("lark"), SessionTitles{})
+
+	res, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		InstallationID: fixture.installationID, Body: "Real first title", MessageID: "m-title",
+	})
+	if err != nil {
+		t.Fatalf("append first channel message: %v", err)
+	}
+	if !res.BecameVisible || res.InitialTitle != "Real first title" {
+		t.Fatalf("append result = %+v, want newly visible deterministic title", res)
+	}
+	var title string
+	if err := pool.QueryRow(ctx, `SELECT title FROM chat_session WHERE id = $1`, fixture.sessionID).Scan(&title); err != nil {
+		t.Fatalf("load initialized title: %v", err)
+	}
+	if title != "Real first title" {
+		t.Fatalf("persisted title = %q, want %q", title, "Real first title")
+	}
 }
 
 func TestChannelIssueCommandIsExcludedFromLaterChatTaskBatch(t *testing.T) {

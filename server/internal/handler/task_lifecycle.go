@@ -222,3 +222,52 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
 	writeJSON(w, http.StatusAccepted, resp)
 }
+
+// RetrySourceContextQuickCreate manually re-enqueues a failed issue-less
+// quick-create while atomically moving its pending immutable source context to
+// the new task. The workspace middleware supplies tenancy; the service also
+// requires the original requester and the normal private-agent invoke gate.
+func (h *Handler) RetrySourceContextQuickCreate(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
+	if !ok {
+		return
+	}
+	requesterID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	taskID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "taskId"), "task id")
+	if !ok {
+		return
+	}
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, "member", userID, userID, uuidToString(workspaceID))
+	}
+	task, err := h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
+	if writeIssueLimitReached(w, err) {
+		return
+	}
+	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+	if errors.Is(err, service.ErrSourceContextRetryUnavailable) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code":  "source_context_retry_unavailable",
+			"error": "This context can no longer be retried. Start again from the branch point.",
+		})
+		return
+	}
+	if err != nil {
+		slog.Warn("source context quick-create retry failed", "task_id", uuidToString(taskID), "error", err)
+		writeError(w, http.StatusInternalServerError, "retry source context quick create")
+		return
+	}
+	resp := taskToResponse(*task, uuidToString(workspaceID))
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusAccepted, resp)
+}

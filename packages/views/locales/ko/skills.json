@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
-      "description": "첫 스킬을 만들거나, URL에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
+      "description": "첫 스킬을 만들거나, URL이나 로컬 폴더에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -36,7 +36,7 @@
     },
     "intro_banner": {
       "title": "워크스페이스와 공유됩니다.",
-      "body": "누구나 스킬을 만들거나 URL에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
+      "body": "누구나 스킬을 만들거나 URL이나 로컬 폴더에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
       "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
     },
     "list_error": {
@@ -233,28 +233,24 @@
     "method": {
       "chooser": {
         "title": "새 스킬",
-        "desc": "이 워크스페이스에 스킬을 추가할 방식을 선택하세요."
+        "desc": "스킬을 추가할 방식을 선택하세요."
       },
       "manual": {
         "title": "직접 만들기",
-        "desc": "새 SKILL.md를 처음부터 작성합니다."
+        "desc": "빈 SKILL.md에서 시작합니다."
+      },
+      "local": {
+        "title": "로컬에서 가져오기",
+        "desc": "SKILL.md가 있는 폴더 또는 .skill / .zip을 선택합니다."
       },
       "url": {
         "title": "URL에서 가져오기",
-        "desc": "공개된 스킬을 URL로 가져옵니다. 파일은 서버에서 가져옵니다."
+        "desc": "공개된 스킬을 URL로 가져옵니다."
       },
       "runtime": {
         "title": "런타임에서 복사",
-        "desc": "로컬 런타임을 스캔해 디스크에 있는 스킬을 이 워크스페이스로 승격합니다."
+        "desc": "로컬 런타임에 설치된 스킬을 워크스페이스로 가져옵니다."
       }
-    },
-    "method_card": {
-      "manual_title": "직접 만들기",
-      "manual_desc": "빈 SKILL.md에서 시작해 직접 지침을 작성합니다.",
-      "url_title": "URL에서 가져오기",
-      "url_desc": "ClawHub 또는 Skills.sh의 공개 스킬을 가져옵니다.",
-      "runtime_title": "런타임에서 복사",
-      "runtime_desc": "로컬 런타임에 이미 설치된 스킬을 워크스페이스로 가져옵니다."
     },
     "manual": {
       "name_label": "이름",
@@ -268,6 +264,23 @@
       "submit": "스킬 만들기",
       "submitting": "만드는 중...",
       "toast_created": "스킬을 만들었습니다"
+    },
+    "local": {
+      "choose_folder": "폴더 선택",
+      "choose_archive": ".skill / .zip 선택",
+      "folder_label": "폴더",
+      "archive_label": "아카이브",
+      "files_other": "파일 {{count}}개",
+      "missing_skill_md": "이 폴더는 스킬이 아닙니다. SKILL.md가 없습니다.",
+      "too_large": "이 스킬은 너무 커서 가져올 수 없습니다.",
+      "empty": "폴더가 비어 있습니다.",
+      "too_many_files": "이 스킬의 파일이 너무 많아 가져올 수 없습니다.",
+      "name_conflict_hint": " 가져온 스킬 이름이 이미 있습니다. 다시 시도하기 전에 기존 스킬을 삭제하세요.",
+      "fallback_error": "가져오기 실패",
+      "cancel": "취소",
+      "import": "가져오기",
+      "importing": "가져오는 중...",
+      "toast_imported": "스킬을 가져왔습니다"
     },
     "url": {
       "url_label": "스킬 URL",

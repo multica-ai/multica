@@ -11,13 +11,14 @@ import (
 // MinVersions defines the minimum required CLI version for each agent type.
 // Versions below these will be rejected during daemon registration.
 var MinVersions = map[string]string{
-	"claude":  "2.0.0",
-	"codex":   "0.100.0", // app-server --listen stdio:// added in 0.100.0
-	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
-	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
-	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
-	"dim":     "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
-	"mcode":   "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
+	"claude":   "2.0.0",
+	"codex":    "0.100.0", // app-server --listen stdio:// added in 0.100.0
+	"copilot":  "1.0.0",   // --output-format json envelope stable from 1.0.x
+	"grok":     "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
+	"qwen":     "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"dim":      "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
+	"mcode":    "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
+	"zeroclaw": "0.8.0",   // persistent ACP sessions and session/resume were added in 0.8.0
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against

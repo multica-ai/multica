@@ -9,7 +9,13 @@ interface RevisionConflictCompareProps {
   serverValue: string;
   localValue: string;
   footer?: ReactNode;
-  actions?: ReactNode;
+  // One action per side, rendered in its own column of the same two-column
+  // grid as the labels and the diff. A single shared action row read as
+  // "keep my version" sitting under the SERVER preview it discards (#7624);
+  // the column is what makes each action point at its own pane, and it holds
+  // at every width because the diff itself never stacks.
+  serverAction?: ReactNode;
+  localAction?: ReactNode;
   className?: string;
 }
 
@@ -101,7 +107,8 @@ export function RevisionConflictCompare({
   serverValue,
   localValue,
   footer,
-  actions,
+  serverAction,
+  localAction,
   className,
 }: RevisionConflictCompareProps) {
   const rows = revisionConflictRows(serverValue, localValue);
@@ -135,11 +142,21 @@ export function RevisionConflictCompare({
             </div>
           ))}
         </div>
+        {serverAction || localAction ? (
+          <div
+            data-revision-conflict-actions
+            className="grid grid-cols-2 border-t bg-muted/40"
+          >
+            {/* px-3 matches the label cells above, so each button's left
+                edge lands on the same vertical line as its column header. */}
+            <div className="min-w-0 px-3 py-2">{serverAction}</div>
+            <div className="min-w-0 border-l px-3 py-2">{localAction}</div>
+          </div>
+        ) : null}
       </div>
       {footer ? (
         <div className="mt-2 text-muted-foreground">{footer}</div>
       ) : null}
-      {actions ? <div className="mt-2">{actions}</div> : null}
     </div>
   );
 }

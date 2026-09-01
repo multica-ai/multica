@@ -17,13 +17,6 @@ type RegistryOptions struct {
 	DaemonWS *daemonws.Metrics
 	Version  string
 	Commit   string
-
-	// BusinessSampler, when non-nil, opts the registry into the
-	// scrape-time SQL sampler from PR4 (MUL-2947). It is intentionally
-	// separate from Pool so existing tests (and any deployment without
-	// METRICS_ADDR) cannot accidentally start hitting the database on
-	// every /metrics scrape.
-	BusinessSampler *BusinessSamplerOptions
 }
 
 type Registry struct {
@@ -33,10 +26,6 @@ type Registry struct {
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	ChannelLease *ChannelLeaseMetrics
 	Wecom        *WecomMetrics
-	// Sampler is non-nil only when RegistryOptions.BusinessSampler was
-	// supplied with a valid Pool. Exposed so the cmd/server entrypoint
-	// can plumb the same instance into health checks if it ever wants to.
-	Sampler *BusinessSamplerCollector
 }
 
 func NewRegistry(opts RegistryOptions) *Registry {
@@ -76,11 +65,6 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		reg.MustRegister(NewDaemonWSCollector(opts.DaemonWS))
 	}
 
-	sampler := NewBusinessSamplerCollector(opts.BusinessSampler)
-	if sampler != nil {
-		reg.MustRegister(sampler.Collectors()...)
-	}
-
 	return &Registry{
 		Gatherer:     reg,
 		HTTP:         httpMetrics,
@@ -88,7 +72,6 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		ChannelMedia: channelMedia,
 		ChannelLease: channelLease,
 		Wecom:        wecomMetrics,
-		Sampler:      sampler,
 	}
 }
 

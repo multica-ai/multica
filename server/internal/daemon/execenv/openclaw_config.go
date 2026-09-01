@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // openclawConfigFile is the per-task synthesized OpenClaw config the daemon
@@ -41,31 +42,45 @@ const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 // across supported hardware is wider than the old margin.
 //
 // 30s is ~3x the slowest measured call, and even the worst case
-// (openclawMaxCLICallsPerPreparation serial calls at that budget) fits inside
-// the outer 5-minute task preparation deadline, so a genuinely hung CLI fails
-// with this specific, actionable reason instead of the generic prepare
+// (openclawMaxCLIDeadlinesPerPreparation serial steps at that budget) fits
+// inside the outer 5-minute task preparation deadline, so a genuinely hung CLI
+// fails with this specific, actionable reason instead of the generic prepare
 // timeout. Hosts outside that envelope can override with
 // MULTICA_OPENCLAW_CLI_TIMEOUT (or backends.openclaw.cli_timeout in the CLI
 // config, which the daemon translates into the same env var).
 //
-// It is a deadline, not a guaranteed cap — see the gap below.
+// The gap that used to be documented here — that this was a deadline and not a
+// cap — is closed as of MUL-5467. Keeping the measurements, because they are
+// what the fix has to hold against: CommandContext kills only the direct child,
+// and cmd.Output() blocks in Wait() until the stdout pipe closes, so a CLI that
+// leaves a descendant holding stdout ran for the descendant's lifetime.
+// Measured on linux/dash: a shim whose backgrounded child slept 6s took 6.01s
+// against a 150ms deadline. An npm shim is that shape on Windows (cmd.exe →
+// node). A cmd.WaitDelay backstop bounded the call but left the descendant
+// running (measured: returns in 2.17s with the grandchild still in state S),
+// trading a hang for a process leak, and on Unix nothing reaped it because
+// preparationProcessController.finish() is a no-op there.
 //
-// Known gap (deliberately not fixed here): this deadline does not actually
-// bound the call when the CLI leaves a descendant holding stdout.
-// CommandContext kills only the direct child, and cmd.Output() blocks in
-// Wait() until the stdout pipe closes, so the call runs for the descendant's
-// lifetime. Measured on linux/dash: a shim whose backgrounded child slept 6s
-// took 6.01s against a 150ms deadline. An npm shim is that shape on Windows
-// (cmd.exe → node).
+// execOpenclawCLI goes through agent.RunCollectQuiet, which owns the pipes and
+// the process tree (Unix process group, Windows Job Object). Owning the pipes is
+// what makes the deadline enforceable: os/exec's own Wait cannot return while a
+// descendant holds an output pipe, so the bound has to come from somewhere else,
+// and a caller-side bound that reports failure would fail a call whose answer
+// arrived. Owning the tree is what stops the descendant becoming an orphan.
 //
-// A cmd.WaitDelay backstop bounds the call but leaves the descendant running
-// (measured: returns in 2.17s with the grandchild still in state S), trading a
-// hang for a process leak — and on Unix nothing reaps it, because
-// preparationProcessController.finish() is a no-op there. Closing this properly
-// needs process-tree ownership (Unix process group, Windows Job Object) so the
-// deadline can terminate the whole tree, which is its own change with its own
-// risk surface. Tracked in MUL-5467; this file intentionally keeps the existing
-// behaviour rather than shipping half of it.
+// Two limits on that claim, both deliberate:
+//
+//   - "Enforceable", not "nothing survives": `openclaw-config` was measured with
+//     its own PGID and SID, so on Unix no group signal reaches it. The deadline
+//     holds anyway, because it is pipe ownership rather than the kill that makes
+//     the call return.
+//   - Returning before the CLI exits requires a completeness rule that the CLI's
+//     pre-answer output cannot satisfy, which in practice means `--json` (see
+//     openclawOutputComplete). Without one — `config file` as the fallback — this
+//     deadline is what the call is bounded by, and reaching it is a failure. That
+//     is a deliberate trade: an earlier revision judged `config file`'s stdout by
+//     shape and review showed it returning a path-shaped *warning* line as the
+//     answer.
 const openclawCLITimeout = 30 * time.Second
 
 // OpenclawCLITimeoutEnv overrides openclawCLITimeout. Accepts a Go duration
@@ -81,31 +96,39 @@ const (
 	openclawCLIMinTimeout = time.Second
 	// openclawCLIMaxTimeout keeps config discovery inside the outer task
 	// preparation budget (daemon.defaultTaskPrepareTimeout, 5 minutes). The
-	// worst case is openclawMaxCLICallsPerPreparation serial calls, so the
+	// worst case is openclawMaxCLIDeadlinesPerPreparation serial steps, so the
 	// ceiling is set so that even then (4 x 60s = 4m) the failure surfaces as a
 	// specific, actionable CLI timeout with room to spare, instead of colliding
 	// with the outer deadline and collapsing into the generic — and retryable —
-	// prepare-timeout reason.
+	// prepare-timeout reason. A step may make more than one invocation — path
+	// resolution falls back from `config validate --json` to `config file` under
+	// one shared deadline — which is why the multiplier counts deadlines.
 	openclawCLIMaxTimeout = 60 * time.Second
 )
 
-// openclawMaxCLICallsPerPreparation is how many serial `openclaw ...`
-// invocations one task preparation can make in the worst case. Each one gets
-// its own deadline, so this is the multiplier that decides whether
-// openclawCLIMaxTimeout still fits inside the outer preparation budget.
+// openclawMaxCLIDeadlinesPerPreparation is how many CLI deadlines one task
+// preparation can consume in the worst case. Deadlines, not invocations: each
+// deadline bounds one *step*, and it is the sum of the steps that has to fit
+// inside the outer preparation budget, so this is the multiplier
+// openclawCLIMaxTimeout is derived from.
 //
-// The four call sites, in the order they can fire:
+// The four steps, in the order they can fire:
 //
-//  1. `config file`                     — locate the active config
+//  1. locate the active config — `config validate --json`, then `config file`
+//     if that did not answer. Two invocations, one deadline: they ask the same
+//     question and openclawActiveConfigPath shares a context between them
+//     precisely so the fallback cannot add a fifth budget.
 //  2. `config get agents.list --json`   — pre-2026.6 agents schema
 //  3. `agents list --json`              — 2026.6+ registry fallback, only
 //     reached when (2) reports the config path is missing
 //  4. `config get --json`               — full resolved config, only for an
 //     agent with a managed mcp_config
 //
-// Adding a fifth call means re-deriving the ceiling; the budget test fails
-// loudly if this constant and the real call graph drift apart.
-const openclawMaxCLICallsPerPreparation = 4
+// Adding a fifth deadline-bearing step means re-deriving the ceiling. The
+// worst-case test counts distinct deadlines rather than calls, so a new
+// invocation that shares an existing budget is free and one that brings its own
+// fails loudly.
+const openclawMaxCLIDeadlinesPerPreparation = 4
 
 // ErrOpenclawCLITimeout marks a task preparation that failed because the local
 // openclaw CLI did not answer within the deadline. It is a sentinel rather
@@ -648,23 +671,80 @@ func stripUserMcpServers(resolved map[string]any) {
 	}
 }
 
-// openclawActiveConfigPath runs `openclaw config file` to discover the path
-// the openclaw CLI considers active. Returns (absolutePath, exists, error).
+// openclawActiveConfigPath discovers the path the openclaw CLI considers active.
+// Returns (absolutePath, exists, error).
 //
 // The CLI handles the full resolution chain — explicit config path, state
 // directory, OPENCLAW_HOME / default home, legacy locations, migration, and `~`
 // expansion — so we prefer it when the installed CLI supports the command.
+//
+// `config validate --json` is asked first, and `config file` is only the
+// fallback, because the two differ in whether the answer can be recognised:
+//
+//   - `config validate --json` puts the path in a named `path` field of a JSON
+//     document, and its stdout is that document and nothing else. Measured on
+//     OpenClaw 2026.7.1-2 with a warning-producing config: 715 bytes, one line,
+//     parseable whole. The Doctor and plugin warnings do not disappear — they
+//     arrive as a `warnings` array *inside* the payload, which is what keeps the
+//     stream parseable rather than merely quieter. (Upstream also has a
+//     console-log reroute for `--json` argv, `withConsoleLogsRoutedToStderrForJson`,
+//     but the structured payload is what was observed doing the work here.)
+//   - `config file` prints the path as its *last line*, after any Doctor and
+//     plugin warnings, on stdout. Deciding "is the answer in yet" then means
+//     asking whether the last line looks like a path — and a warning line that
+//     names one is indistinguishable. Review demonstrated it: a stub printing an
+//     existing `plugin-cache.json` path, then pausing, then printing the real
+//     path had the warning accepted as the answer.
+//
+// Both commands perform the same `readConfigFileSnapshot()` read upstream
+// (checked at `v2026.7.1`: `runConfigFile` prints `shortenHomePath(snapshot.path)`
+// and `runConfigValidate` reports `snapshot.path`, `snapshot.exists` and
+// `snapshot.valid` from that same snapshot), so validation is already part of the
+// read `config file` does. Measured, the JSON form is not merely no worse but
+// meaningfully cheaper: 1.65/1.66/1.65s against 6.36/4.16/4.06s for `config file`
+// over three runs each on the same host and config, which tracks the output it
+// does not have to render — 715 bytes of JSON against 2663 bytes and 28 lines of
+// warning UI.
+//
+// `config validate --json` has carried the `path` field on every branch since
+// `v2026.5.5`, which is minOpenclawVersion. Two of those branches exit non-zero —
+// a missing file and an invalid config, both with the path in the payload and
+// stderr empty — so the exit status must not be read as "no answer"; see
+// openclawValidatedConfigPath.
 //
 // OpenClaw 2026.2.x briefly rejected `openclaw config file` with the generic
 // "too many arguments for 'config'" error. For that command-shape failure only,
 // fall back to the same active-config candidate shape so task prep can still
 // continue without losing upgraded users' legacy config files.
 //
-// The reported path uses `~` shorthand for the user's home; we expand it
-// so the $include reference we write is unambiguous absolute.
+// A reported path may use `~` or `$OPENCLAW_HOME` shorthand; we expand it so the
+// $include reference we write is unambiguously absolute.
 func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, error) {
+	// One deadline for the question, not one per attempt. Both invocations answer
+	// "where is the active config", so they are a single step of preparation with
+	// a preferred and a fallback way of asking — and the budget that has to hold
+	// is the step's. Giving the fallback a fresh full deadline made the worst case
+	// five deadlines against a ceiling derived from four: at the 60s override
+	// ceiling that is 5m of CLI time alone, landing exactly on
+	// daemon.defaultTaskPrepareTimeout, which collapses the specific
+	// non-retryable ErrOpenclawCLITimeout back into the generic retryable prepare
+	// timeout — the outcome openclawCLIMaxTimeout exists to prevent.
+	//
+	// The consequence is deliberate: a `config validate --json` that burns the
+	// whole budget leaves the fallback none, and openclawExec then fails
+	// immediately on the expired context — os/exec's Start reports it, and
+	// execOpenclawCLI attributes ctx first, so it still surfaces as
+	// ErrOpenclawCLITimeout. That is the right report. A CLI that cannot say where
+	// its config is within the entire deadline will not answer the same question
+	// on a second one; a fresh budget would only double the time to an identical
+	// conclusion, and spend it inside the outer preparation deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	if path, ok := openclawValidatedConfigPath(ctx, bin); ok {
+		return openclawStatConfigPath(path)
+	}
+
 	out, err := openclawExec(ctx, bin, "config", "file")
 	if err != nil {
 		if isOpenclawConfigFileUnsupported(err) {
@@ -677,6 +757,66 @@ func openclawActiveConfigPath(bin string, timeout time.Duration) (string, bool, 
 		return "", false, err
 	}
 	return openclawParseActiveConfigPath(out)
+}
+
+// openclawValidatedConfigPath asks `openclaw config validate --json` for the
+// active config path, and reports whether the answer was unambiguous.
+//
+// It takes the caller's ctx rather than its own timeout: this attempt and the
+// `config file` fallback share one deadline, because they are two ways of asking
+// the same question. See openclawActiveConfigPath.
+//
+// The exit status is deliberately not consulted, and that is the common case
+// rather than a corner: measured on 2026.7.1-2, upstream exits 1 both for a
+// missing config file (`{"valid":false,"path":"…","error":"file not found"}`) and
+// for an invalid one (`{"valid":false,"path":"…","issues":[…]}`), with stderr empty
+// and the path present in both. A fresh install is the missing-file case, so
+// reading a non-zero exit as "no answer" would break first run. Whether the user's
+// config parses is not this function's question either — openclaw itself reports
+// that when it runs; all that is owed here is where the file is.
+//
+// Failure is silent by design: every failure mode here is a reason to ask
+// `config file` instead, and reporting one would turn "this CLI answered in a
+// shape we do not understand" into a task failure. The only requirement is that
+// the path be absolute after expansion, which is what distinguishes a real answer
+// from the `CONFIG_PATH ?? "openclaw.json"` fallback upstream prints when it
+// throws before reading the snapshot.
+func openclawValidatedConfigPath(ctx context.Context, bin string) (string, bool) {
+	out, _ := openclawExec(ctx, bin, "config", "validate", "--json")
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return "", false
+	}
+	var payload struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &payload); err != nil {
+		return "", false
+	}
+	reported := strings.TrimSpace(payload.Path)
+	if reported == "" {
+		return "", false
+	}
+	// The reported value must already name an absolute location, before any
+	// expansion. Upstream prints `CONFIG_PATH ?? "openclaw.json"` when it throws
+	// before reading the snapshot, and expandOpenclawPath would turn that bare
+	// relative literal into a confident `<daemon cwd>/openclaw.json` — the #6630
+	// failure shape, arrived at from a different direction. The `~` and
+	// `$OPENCLAW_HOME` forms are absolute once resolved, so they are allowed
+	// through; anything else relative is not an answer, and `config file` gets
+	// asked instead.
+	if !filepath.IsAbs(reported) {
+		_, isTilde := openclawTildeRest(reported)
+		_, isHome := openclawHomeRest(reported)
+		if !isTilde && !isHome {
+			return "", false
+		}
+	}
+	expanded, err := expandOpenclawPath(reported)
+	if err != nil || !filepath.IsAbs(expanded) {
+		return "", false
+	}
+	return expanded, true
 }
 
 func openclawParseActiveConfigPath(out string) (string, bool, error) {
@@ -827,7 +967,11 @@ func openclawTildeRest(path string) (string, bool) {
 // `src/cli/config-cli.ts`'s `runConfigFile` prints `shortenHomePath(...)`, and
 // `src/utils.ts:147-157` uses the `$OPENCLAW_HOME` prefix whenever that variable
 // is non-empty and `~` otherwise — so setting the variable is what selects this
-// form.
+// form. Still true at `v2026.7.1`: `runConfigFile` is unchanged, and
+// `resolveHomeDisplayPrefix` there returns `$OPENCLAW_HOME` on a non-empty
+// trimmed `OPENCLAW_HOME` and `~` otherwise, with the separator coming from the
+// original path rather than being inserted — which is why the rest is sliced
+// after the prefix here rather than trimmed of a leading separator.
 //
 // Only the bare spelling is emitted by that code path. `${OPENCLAW_HOME}` is
 // accepted as defense against a release that spells it the other way, not
@@ -975,6 +1119,12 @@ func openclawResolvedFullConfig(bin string, timeout time.Duration) (map[string]a
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
+	// This target is an object, so an envelope decodes cleanly and would be
+	// carried into the sanitized snapshot as if it were the user's config. There
+	// is no graceful reading of an error here: fail closed.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		return nil, openclawStdoutEnvelopeError("config get --json", message)
+	}
 	var cfg map[string]any
 	if err := json.Unmarshal([]byte(trimmed), &cfg); err != nil {
 		return nil, fmt.Errorf("parse `openclaw config get --json` output: %w", err)
@@ -1015,6 +1165,17 @@ func openclawResolvedAgentsList(bin string, timeout time.Duration) ([]any, bool,
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" || trimmed == "null" {
 		return nil, false, nil
+	}
+	// An envelope that arrived without a non-zero exit must reach the same
+	// verdict as one that did; see openclawStdoutEnvelopeError. Missing the
+	// key here is what selects the registry, so letting the envelope through
+	// as data would turn a graceful fallback into a failed preparation.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if strings.Contains(strings.ToLower(message), "agents.list") && isOpenclawKeyMissingMessage(message) {
+			list, rerr := openclawRegistryAgentsList(bin, timeout)
+			return list, true, rerr
+		}
+		return nil, false, openclawStdoutEnvelopeError("config get agents.list --json", message)
 	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
@@ -1060,6 +1221,14 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
+	// Same reasoning as the resolver above: without a non-zero exit the envelope
+	// only shows up here.
+	if message, isEnvelope := openclawJSONErrorMessage(trimmed); isEnvelope {
+		if isOpenclawKeyMissingMessage(message) || isOpenclawUnknownSubcommandMessage(message) {
+			return nil, nil
+		}
+		return nil, openclawStdoutEnvelopeError("agents list --json", message)
+	}
 	var list []any
 	if err := json.Unmarshal([]byte(trimmed), &list); err != nil {
 		return nil, fmt.Errorf("parse `openclaw agents list --json` output: %w", err)
@@ -1071,6 +1240,56 @@ func openclawRegistryAgentsList(bin string, timeout time.Duration) ([]any, error
 // openclaw CLI. Production points at execOpenclawCLI; tests swap in a stub
 // to avoid spawning a real binary. Production code never reassigns it.
 var openclawExec = execOpenclawCLI
+
+// openclawLastNonEmptyLine returns the last non-empty, trimmed line of out.
+// Used by openclawParseActiveConfigPath for the `config file` fallback, where the
+// path is the last line the CLI prints.
+func openclawLastNonEmptyLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if trimmed := strings.TrimSpace(lines[i]); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+// openclawOutputComplete returns the rule that decides whether the bytes
+// captured so far are a finished answer for this openclaw subcommand, for
+// agent.RunCollectQuiet's early return.
+//
+// Only `--json` commands get one, and that is the whole design rather than a gap
+// to fill in later. Two properties make a JSON answer recognisable, and neither
+// has an equivalent for human-readable output:
+//
+//   - The document has to parse *as a whole*, so a response still being written
+//     cannot satisfy the rule, no matter how long the writer pauses mid-way.
+//   - A `--json` stdout carries the document and nothing else. Measured on
+//     2026.7.1-2 with a warning-producing config, `config validate --json` emitted
+//     one 715-byte line that parses whole, with the Doctor and plugin warnings
+//     carried as a `warnings` array inside it. Without `--json` those same
+//     warnings are 28 lines of UI sharing stdout with the answer.
+//
+// An earlier revision of this branch also had a rule for `config file`: accept
+// the buffer once its last non-empty line looks like a path. Review broke it with
+// a stub that prints an existing `plugin-cache.json` path, pauses past any fixed
+// grace, and then prints the real path — the warning was returned as the answer.
+// That is not fixable by waiting longer, because the pause is the host's plugin
+// and Doctor work and has no bound; it is fixable by not asking a question that
+// content cannot answer. openclawActiveConfigPath now prefers
+// `config validate --json`, whose path arrives in a named field.
+//
+// A nil result means "no rule for this shape", which makes RunCollectQuiet wait
+// for the process to exit — the conservative behaviour, and what `config file`
+// now gets when it is used as the fallback.
+func openclawOutputComplete(args []string) agent.OutputComplete {
+	for _, a := range args {
+		if a == "--json" {
+			return agent.JSONOutputComplete
+		}
+	}
+	return nil
+}
 
 // execOpenclawCLI executes an openclaw subcommand and returns its stdout,
 // including stdout captured before a non-zero exit. Failed stdout stays in the
@@ -1102,14 +1321,21 @@ var openclawExec = execOpenclawCLI
 // check cancellation the standard way. The process error is still printed for
 // diagnosis, just not as the wrapped cause.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = os.Environ()
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	raw, err := cmd.Output()
+	// agent.RunCollectQuiet, not cmd.Output(): this package owns the pipes and
+	// the process tree, which is what makes the deadline above enforceable at all
+	// (MUL-5467 — see openclawCLITimeout). The per-subcommand rule from
+	// openclawOutputComplete additionally lets a CLI that prints its answer and
+	// then refuses to exit be treated as finished, so `openclaw config file` no
+	// longer has to reach the deadline to be useful.
+	//
+	// Every error shape below is unchanged, including returning captured stdout
+	// alongside the error: annotateOpenclawJSONError reads it, and the typed
+	// timeout sentinel is what lets the daemon classify a local stall
+	// structurally.
+	raw, stderrOut, _, err := agent.RunCollectQuiet(ctx, os.Environ(), 0, openclawOutputComplete(args), bin, args...)
 	stdout := string(raw)
 	if err != nil {
-		stderrMsg := strings.TrimSpace(stderr.String())
+		stderrMsg := strings.TrimSpace(stderrOut)
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			msg := fmt.Sprintf("openclaw %s: %v (process: %v)", strings.Join(args, " "), ctxErr, err)
 			if stderrMsg != "" {
@@ -1240,11 +1466,32 @@ func annotateOpenclawJSONError(err error, stdout string) error {
 	if !ok {
 		return err
 	}
+	return fmt.Errorf("%w (json error: %s)", err, openclawBoundedJSONErrorMessage(message))
+}
+
+func openclawBoundedJSONErrorMessage(message string) string {
 	runes := []rune(message)
 	if len(runes) > openclawJSONErrorMaxRunes {
-		message = string(runes[:openclawJSONErrorMaxRunes]) + "…"
+		return string(runes[:openclawJSONErrorMaxRunes]) + "…"
 	}
-	return fmt.Errorf("%w (json error: %s)", err, message)
+	return message
+}
+
+// openclawStdoutEnvelopeError turns a CLI error envelope that arrived on stdout
+// *without* a non-zero exit into an error.
+//
+// The completeness rules let RunCollectQuiet accept a finished-looking answer
+// from a CLI that has printed it but not exited yet (see openclawOutputComplete),
+// and a JSON error envelope is itself valid JSON, so JSONOutputComplete accepts
+// one. The exit-status path therefore no longer sees every CLI error: a build
+// that prints `{"error": "..."}` and then lingers past the idle grace hands back
+// err == nil with the envelope sitting in stdout. Callers must check for that
+// explicitly, because decoding an envelope as data is silent for an object
+// target — it would be written straight into the generated config — and only
+// accidentally noisy for a list target, where the type mismatch surfaces as an
+// opaque parse error instead of the CLI's own message.
+func openclawStdoutEnvelopeError(command, message string) error {
+	return fmt.Errorf("`openclaw %s` reported: %s", command, openclawBoundedJSONErrorMessage(message))
 }
 
 // isOpenclawKeyMissingResult recognizes the JSON error envelope observed in
@@ -1296,7 +1543,11 @@ func isOpenclawUnknownSubcommand(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
+	return isOpenclawUnknownSubcommandMessage(err.Error())
+}
+
+func isOpenclawUnknownSubcommandMessage(msg string) bool {
+	msg = strings.ToLower(msg)
 	return strings.Contains(msg, "unknown command") ||
 		strings.Contains(msg, "unknown option") ||
 		strings.Contains(msg, "does not recognize") ||

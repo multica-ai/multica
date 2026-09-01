@@ -1,6 +1,7 @@
 agy
 claude
 codebuddy
+codearts
 codex
 copilot
 cursor-agent
@@ -22,3 +23,4 @@ qwen
 qwenpaw
 reasonix
 traecli
+zeroclaw

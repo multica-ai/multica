@@ -97,7 +97,6 @@
       "upgrade": "Pro로 업그레이드",
       "manage": "결제 관리",
       "add_seats": "좌석 추가",
-      "refresh_seats": "좌석 새로고침",
       "cancel": "취소",
       "continue_to_stripe": "Stripe로 이동"
     },
@@ -110,9 +109,7 @@
       "checkout_failed": "Checkout을 만들지 못했습니다. 잠시 후 다시 시도하세요.",
       "portal_response": "서버 응답을 읽을 수 없어 Billing Portal을 열지 못했습니다.",
       "portal_unavailable": "이 워크스페이스에서는 Billing Portal을 사용할 수 없습니다. 현재 요금제를 새로고침했습니다.",
-      "portal_failed": "Billing Portal을 열지 못했습니다. 잠시 후 다시 시도하세요.",
-      "reconcile_response": "좌석은 새로고침되었지만 결과를 읽지 못했습니다. 페이지를 다시 불러와 현재 수를 확인하세요.",
-      "reconcile_failed": "좌석을 새로고침하지 못했습니다. 멤버 변경은 저장되었으며 정기 조정이 계속 재시도됩니다."
+      "portal_failed": "Billing Portal을 열지 못했습니다. 잠시 후 다시 시도하세요."
     },
     "return": {
       "cancel_title": "Checkout 취소됨",
@@ -145,10 +142,6 @@
       "canceled_title": "구독이 취소되었습니다",
       "canceled_description": "위 요금제 배지는 이 워크스페이스에 현재 적용되는 요금제를 보여 줍니다."
     },
-    "read_only": {
-      "title": "결제 정보 읽기 전용",
-      "description": "워크스페이스 요금제와 한도를 볼 수 있습니다. 구독 구매와 관리는 owner와 admin만 할 수 있습니다."
-    },
     "current": {
       "title": "현재 요금제",
       "plan": "워크스페이스 요금제",
@@ -170,8 +163,6 @@
       "pro_for_team_other": "사용자 좌석 {{count}}개에 Pro 적용",
       "price_loading": "구독 가격을 불러오는 중",
       "unit_price": "사용자 좌석당 {{price}}",
-      "estimated_monthly_total": "예상 월간 합계: {{price}}",
-      "estimated_yearly_total": "예상 연간 합계: {{price}}",
       "price_at_checkout": "구매 전에 서버가 사용자 멤버를 다시 계산합니다. 결제 전 Stripe Checkout에서 공식 좌석당 가격과 총액을 확인할 수 있습니다."
     },
     "management": {
@@ -183,13 +174,12 @@
     },
     "limits": {
       "title": "사용량 및 한도",
-      "description": "한도는 현재 entitlement에서, 자동화 사용량은 서버 쿼터 집계에서 가져옵니다.",
-      "issues": "최근 태스크",
-      "issues_description": "Free에서는 최근 활성 태스크를 이용할 수 있습니다. Pro에는 범위 제한이 없습니다.",
-      "autopilots": "성공한 자동화",
-      "autopilots_description": "Free 한도는 UTC 기준 매월 초기화됩니다. Pro는 무제한입니다.",
+      "description": "한도와 사용량은 서버의 현재 entitlement와 쿼터 집계에서 가져옵니다.",
+      "issues": "Issue 수",
+      "issues_description": "현재 Issue 사용량과 서버에서 반환한 유효 한도입니다.",
+      "autopilots": "자동화 실행",
+      "autopilots_description": "현재 자동화 사용량과 서버에서 반환한 초기화 시각입니다.",
       "unlimited": "무제한",
-      "unavailable": "사용할 수 없음",
       "per_month": "월 {{count}}회",
       "usage_loading": "자동화 사용량 불러오는 중",
       "usage_label": "자동화 쿼터 사용량",
@@ -221,8 +211,10 @@
       "summary_loading": "구독 좌석 상세 정보 불러오는 중",
       "summary_unavailable_title": "일부 좌석 상세 정보를 불러올 수 없습니다",
       "summary_unavailable_description": "현재 요금제는 계속 표시되지만 구매한 좌석과 예정 좌석 수를 불러오지 못했습니다.",
-      "updated": "좌석 새로고침됨",
-      "reconciled": "현재 멤버: {{actual}} · 결제 좌석: {{billed}}"
+      "members_over_capacity_title": "멤버 수가 구매한 좌석 수를 초과합니다",
+      "members_over_capacity_description": "이 워크스페이스에는 멤버가 {{actual}}명이지만 구매한 좌석은 {{purchased}}개입니다. 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하세요.",
+      "occupancy_over_capacity_description": "이 워크스페이스는 구매한 좌석 {{purchased}}개에 대해 {{occupied}}개를 점유하고 있습니다(멤버 {{members}}명, 대기 중인 초대 {{reserved}}건). 더 초대하기 전에 좌석을 추가하거나 멤버를 제거하거나 대기 중인 초대를 취소하세요.",
+      "updated": "좌석 구매를 제출했습니다"
     },
     "seat_purchase": {
       "title": "좌석 추가",
@@ -247,7 +239,7 @@
       "pending_description_other": "Stripe가 좌석 {{count}}개로 구독 업데이트를 확인하고 있습니다.",
       "delayed_title": "좌석 확인이 예상보다 오래 걸리고 있습니다",
       "delayed_description": "자동 확인이 중지되었습니다. 구매는 계속 완료될 수 있습니다. 다른 구매를 시작하기 전에 나중에 다시 확인하거나 지원팀에 문의하세요.",
-      "delayed_description_with_expiry": "자동 확인이 중지되었습니다. {{date}} 이후에도 대기 중이면 좌석을 새로고침하여 요청을 해제하고 새 견적을 받으세요. 다른 구매를 시작하기 전에 지원팀에 문의할 수도 있습니다.",
+      "delayed_description_with_expiry": "자동 확인이 중지되었습니다. {{date}} 이후에도 대기 중이면 페이지를 다시 불러온 후 새 견적을 요청하세요. 대기 상태가 계속되면 지원팀에 문의하세요.",
       "submitted_other": "좌석 {{count}}개 구매를 제출했습니다. Stripe 확인 후 새 용량이 표시됩니다.",
       "error_title": "예상 금액을 업데이트할 수 없습니다"
     },

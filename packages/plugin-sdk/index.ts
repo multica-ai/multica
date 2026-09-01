@@ -13,9 +13,7 @@
  */
 
 import {
-  BRIDGE_INIT_MESSAGE,
-  BRIDGE_PROTOCOL_VERSION,
-  BRIDGE_READY_MESSAGE,
+  BRIDGE_PORT_GLOBAL,
   isBridgeEvent,
   isBridgeResponse,
   type BridgeMethod,
@@ -83,9 +81,6 @@ export class MulticaPluginError extends Error {
 }
 
 const DEFAULT_TIMEOUT_MS = 15_000;
-const ANNOUNCE_INTERVAL_MS = 120;
-const ANNOUNCE_ATTEMPTS = 50;
-
 type Pending = {
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -106,65 +101,19 @@ class Bridge {
     this.ready = new Promise((resolve) => {
       this.markReady = resolve;
     });
-    if (typeof window !== "undefined") {
-      window.addEventListener("message", this.onWindowMessage);
-      this.announce();
+    const guestPort = (globalThis as Record<string, unknown>)[BRIDGE_PORT_GLOBAL];
+    if (guestPort && typeof (guestPort as MessagePort).postMessage === "function" &&
+        typeof (guestPort as MessagePort).close === "function") {
+      // First reader wins. The port is not a credential, but leaving a second
+      // global reference around makes accidental competing SDK instances much
+      // harder to diagnose and weakens the one-channel invariant.
+      delete (globalThis as Record<string, unknown>)[BRIDGE_PORT_GLOBAL];
+      this.port = guestPort as MessagePort;
+      this.port.onmessage = this.onPortMessage;
+      this.port.start?.();
+      this.markReady();
     }
   }
-
-  /**
-   * Announces until the host answers with a port.
-   *
-   * One announcement is not enough in either direction: a srcdoc frame can
-   * finish executing before the embedder's effect attaches its listener, and a
-   * host that waits on the iframe load event can miss it entirely. Repeating
-   * until the port arrives makes the handshake independent of who is ready
-   * first, which is the only ordering nobody controls.
-   */
-  private announce() {
-    if (typeof window === "undefined" || !window.parent) return;
-    let attempts = 0;
-    const beat = () => {
-      if (this.port || attempts++ > ANNOUNCE_ATTEMPTS) return;
-      // targetOrigin "*" because this frame has an opaque origin and cannot
-      // know the embedder's. The message carries nothing but the signal.
-      window.parent.postMessage({ type: BRIDGE_READY_MESSAGE }, "*");
-      setTimeout(beat, ANNOUNCE_INTERVAL_MS);
-    };
-    beat();
-  }
-
-  private onWindowMessage = (event: MessageEvent) => {
-    const data = event.data as { type?: string; version?: number; theme?: ThemeTokens } | null;
-    if (!data || data.type !== BRIDGE_INIT_MESSAGE) return;
-    const port = event.ports?.[0];
-    if (!port) return;
-    // Only the embedder may hand this frame a port.
-    //
-    // Sibling frames are mutually opaque, but `parent.frames[i]` is an indexed
-    // cross-origin access the spec allows, so another plugin on the same page
-    // can postMessage into this one. Without this check it could deliver its own
-    // MessagePort and become this surface's "host": feed it fabricated issue
-    // data and read everything the surface writes, including whatever it puts in
-    // storage:user. Origin cannot be compared — a sandboxed frame sees "null" —
-    // so the embedder is identified by window reference, mirroring the host's
-    // own check on the readiness signal.
-    if (event.source !== window.parent) return;
-    // First init wins. A hijacker that lost the race could otherwise send a
-    // second init and take the channel over afterwards.
-    if (this.port) return;
-    if (data.version !== BRIDGE_PROTOCOL_VERSION) {
-      // A host newer or older than this SDK: fail loudly rather than guess at a
-      // shape neither side agreed on.
-      return;
-    }
-    this.port = port;
-    port.onmessage = this.onPortMessage;
-    port.start?.();
-    if (data.theme) this.applyTheme(data.theme);
-    for (const request of this.queued.splice(0)) port.postMessage(request);
-    this.markReady();
-  };
 
   private onPortMessage = (event: MessageEvent) => {
     const message = event.data;

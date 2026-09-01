@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	testServiceToken   = "01234567890123456789012345678901"
 	testIssueLimit     = 137
 	testAutopilotLimit = 23
 )
@@ -35,36 +34,21 @@ func TestDefaultConfigIsDisabledAndPerformsNoIO(t *testing.T) {
 	if client.Enabled() {
 		t.Fatal("zero Config must be disabled")
 	}
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonDisabled || calls.Load() != 0 {
 		t.Fatalf("decision = %+v, calls = %d", decision, calls.Load())
 	}
-	if _, err := New(Config{
-		Enabled: false, BaseURL: "://invalid", ServiceToken: "weak", Timeout: time.Hour,
-	}); err != nil {
-		t.Fatalf("disabled config must ignore Cloud-only settings: %v", err)
-	}
 }
 
-func TestEnabledConfigValidation(t *testing.T) {
-	valid := Config{
-		Enabled:      true,
-		BaseURL:      "https://cloud.internal",
-		ServiceToken: testServiceToken,
-	}
+func TestConnectedConfigValidation(t *testing.T) {
+	valid := Config{BaseURL: "https://cloud.internal"}
 	tests := []struct {
 		name   string
 		mutate func(*Config)
 	}{
-		{"missing base URL", func(c *Config) { c.BaseURL = "" }},
 		{"unsupported base URL scheme", func(c *Config) { c.BaseURL = "ftp://cloud.internal" }},
 		{"base URL credentials", func(c *Config) { c.BaseURL = "https://user:pass@cloud.internal" }},
 		{"base URL query", func(c *Config) { c.BaseURL = "https://cloud.internal?secret=value" }},
-		{"weak service token", func(c *Config) { c.ServiceToken = "short" }},
-		{"whitespace service token", func(c *Config) { c.ServiceToken = strings.Repeat("x", 32) + "\n" }},
-		{"long timeout", func(c *Config) { c.Timeout = maxRequestTimeout + time.Millisecond }},
-		{"negative max entries", func(c *Config) { c.MaxEntries = -1 }},
-		{"negative stale grace", func(c *Config) { c.StaleGrace = -1 }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -86,8 +70,8 @@ func TestGateFetchesMachinePolicyWithoutHumanIdentity(t *testing.T) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/internal/entitlement-policies/"+workspaceID.String() {
 			t.Errorf("request = %s %s", r.Method, r.URL.Path)
 		}
-		if got := r.Header.Get("Authorization"); got != "Bearer "+testServiceToken {
-			t.Errorf("Authorization = %q", got)
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("Authorization must be absent, got %q", got)
 		}
 		if got := r.Header.Get("X-User-ID"); got != "" {
 			t.Errorf("X-User-ID must be absent, got %q", got)
@@ -97,7 +81,7 @@ func TestGateFetchesMachinePolicyWithoutHumanIdentity(t *testing.T) {
 	defer server.Close()
 
 	client := newTestClient(t, server.URL, nil)
-	decision := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	decision := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if decision.Gate.Action != ActionEnforce || decision.Gate.Limit == nil || *decision.Gate.Limit != testIssueLimit ||
 		decision.Reason != ReasonRefreshed || decision.PolicyRevision != 7 || decision.SubscriptionVersion != 3 {
 		t.Fatalf("decision = %+v", decision)
@@ -114,14 +98,14 @@ func TestGateCachesByWorkspaceAndClonesResults(t *testing.T) {
 	client := newTestClient(t, server.URL, nil)
 	workspaceID := uuid.New()
 
-	first := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	first := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	*first.Gate.Limit = 999
-	second := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	second := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	autopilot := client.Gate(context.Background(), workspaceID, GateAutopilotRuns)
 	if second.Reason != ReasonCacheFresh || second.Gate.Limit == nil || *second.Gate.Limit != testIssueLimit {
 		t.Fatalf("cached decision = %+v", second)
 	}
-	if autopilot.Gate.Action != ActionObserve || calls.Load() != 1 {
+	if autopilot.Gate.Action != ActionEnforce || calls.Load() != 1 {
 		t.Fatalf("autopilot = %+v, calls = %d", autopilot, calls.Load())
 	}
 }
@@ -135,7 +119,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 			close(requestStarted)
 		}
 		<-release
-		writePolicy(t, w, samplePolicy(1, 0, 60, ActionObserve))
+		writePolicy(t, w, samplePolicy(1, 0, 60, ActionEnforce))
 	}))
 	defer server.Close()
 	client := newTestClient(t, server.URL, nil)
@@ -150,7 +134,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			results <- client.Gate(context.Background(), workspaceID, GateIssueWindow)
+			results <- client.Gate(context.Background(), workspaceID, GateIssueCount)
 		}()
 	}
 	close(start)
@@ -159,7 +143,7 @@ func TestConcurrentWorkspaceMissesUseSingleflight(t *testing.T) {
 	wg.Wait()
 	close(results)
 	for decision := range results {
-		if decision.Gate.Action != ActionObserve {
+		if decision.Gate.Action != ActionEnforce {
 			t.Errorf("decision = %+v", decision)
 		}
 	}
@@ -172,7 +156,7 @@ func TestCancelledLeaderDoesNotCancelSharedRefresh(t *testing.T) {
 	requestStarted := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int64
-	policyBody, err := json.Marshal(samplePolicy(1, 0, 60, ActionObserve))
+	policyBody, err := json.Marshal(samplePolicy(1, 0, 60, ActionEnforce))
 	if err != nil {
 		t.Fatalf("marshal policy: %v", err)
 	}
@@ -197,19 +181,19 @@ func TestCancelledLeaderDoesNotCancelSharedRefresh(t *testing.T) {
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	leaderResult := make(chan Decision, 1)
 	go func() {
-		leaderResult <- client.Gate(leaderCtx, workspaceID, GateIssueWindow)
+		leaderResult <- client.Gate(leaderCtx, workspaceID, GateIssueCount)
 	}()
 	<-requestStarted
 
 	cancelLeader()
 	followerResult := make(chan Decision, 1)
 	go func() {
-		followerResult <- client.Gate(context.Background(), workspaceID, GateIssueWindow)
+		followerResult <- client.Gate(context.Background(), workspaceID, GateIssueCount)
 	}()
 	close(release)
 
 	leader, follower := <-leaderResult, <-followerResult
-	if leader.Gate.Action != ActionObserve || follower.Gate.Action != ActionObserve {
+	if leader.Gate.Action != ActionEnforce || follower.Gate.Action != ActionEnforce {
 		t.Fatalf("leader = %+v, follower = %+v", leader, follower)
 	}
 	if calls.Load() != 1 {
@@ -226,16 +210,17 @@ func TestWorkspaceIsolationAndBoundedLRUEviction(t *testing.T) {
 		workspaceID := strings.TrimPrefix(r.URL.Path, "/api/v1/internal/entitlement-policies/")
 		policy := samplePolicy(1, 0, 60, ActionEnforce)
 		limit := limits[workspaceID]
-		policy.Gates[string(GateIssueWindow)] = wireGate{Action: string(ActionEnforce), Limit: &limit}
+		policy.Gates[string(GateIssueCount)] = wireGate{Action: string(ActionEnforce), Limit: &limit}
 		writePolicy(t, w, policy)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.MaxEntries = 1 })
+	client := newTestClient(t, server.URL, nil)
+	client.cache = newPolicyCache(1)
 	for _, tc := range []struct {
 		workspaceID uuid.UUID
 		wantLimit   int
 	}{{workspaceA, 11}, {workspaceB, 22}, {workspaceA, 11}} {
-		decision := client.Gate(context.Background(), tc.workspaceID, GateIssueWindow)
+		decision := client.Gate(context.Background(), tc.workspaceID, GateIssueCount)
 		if decision.Gate.Limit == nil || *decision.Gate.Limit != tc.wantLimit {
 			t.Fatalf("workspace %s decision = %+v", tc.workspaceID, decision)
 		}
@@ -258,9 +243,14 @@ func TestColdFailuresFailOpen(t *testing.T) {
 		{"oversized response", bodyHandler(http.StatusOK, strings.Repeat("x", maxResponseBodySize+1)), ReasonInvalidPolicy},
 		{"unknown schema", policyHandler(func(p *wirePolicy) { p.SchemaVersion = 2 }), ReasonInvalidPolicy},
 		{"unknown action", policyHandler(func(p *wirePolicy) {
-			gate := p.Gates[string(GateIssueWindow)]
+			gate := p.Gates[string(GateIssueCount)]
 			gate.Action = "future"
-			p.Gates[string(GateIssueWindow)] = gate
+			p.Gates[string(GateIssueCount)] = gate
+		}), ReasonInvalidPolicy},
+		{"cloud observe action", policyHandler(func(p *wirePolicy) {
+			gate := p.Gates[string(GateIssueCount)]
+			gate.Action = string(ActionObserve)
+			p.Gates[string(GateIssueCount)] = gate
 		}), ReasonInvalidPolicy},
 		{"missing gate", policyHandler(func(p *wirePolicy) { delete(p.Gates, string(GateAutopilotRuns)) }), ReasonInvalidPolicy},
 		{"excessive TTL", policyHandler(func(p *wirePolicy) { p.ValidForSeconds = 301 }), ReasonInvalidPolicy},
@@ -280,7 +270,7 @@ func TestColdFailuresFailOpen(t *testing.T) {
 			server := httptest.NewServer(tt.handler)
 			defer server.Close()
 			client := newTestClient(t, server.URL, nil)
-			decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+			decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 			if decision.Gate.Action != ActionOff || decision.Reason != tt.wantReason {
 				t.Fatalf("decision = %+v", decision)
 			}
@@ -289,7 +279,7 @@ func TestColdFailuresFailOpen(t *testing.T) {
 }
 
 func TestAutopilotResetMayFollowPeriodEnd(t *testing.T) {
-	policy := samplePolicy(1, 0, 60, ActionObserve)
+	policy := samplePolicy(1, 0, 60, ActionEnforce)
 	gate := policy.Gates[string(GateAutopilotRuns)]
 	resetAt := gate.PeriodEnd.Add(time.Hour)
 	gate.ResetAt = &resetAt
@@ -307,10 +297,11 @@ func TestTimeoutFailsOpenWithinIndependentBound(t *testing.T) {
 		close(requestCancelled)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.Timeout = 20 * time.Millisecond })
+	client := newTestClient(t, server.URL, nil)
+	client.timeout = 20 * time.Millisecond
 
 	started := time.Now()
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 		t.Fatalf("decision = %+v", decision)
 	}
@@ -320,7 +311,7 @@ func TestTimeoutFailsOpenWithinIndependentBound(t *testing.T) {
 	<-requestCancelled
 }
 
-func TestServiceTokenIsNeverForwardedThroughRedirect(t *testing.T) {
+func TestInternalPolicyClientDoesNotFollowRedirect(t *testing.T) {
 	var redirectedCalls atomic.Int64
 	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		redirectedCalls.Add(1)
@@ -332,7 +323,7 @@ func TestServiceTokenIsNeverForwardedThroughRedirect(t *testing.T) {
 	defer origin.Close()
 	client := newTestClient(t, origin.URL, nil)
 
-	decision := client.Gate(context.Background(), uuid.New(), GateIssueWindow)
+	decision := client.Gate(context.Background(), uuid.New(), GateIssueCount)
 	if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 		t.Fatalf("decision = %+v", decision)
 	}
@@ -354,7 +345,7 @@ func TestFastFailuresAreRateLimitedPerWorkspace(t *testing.T) {
 	workspaceID := uuid.New()
 
 	for range 2 {
-		decision := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+		decision := client.Gate(context.Background(), workspaceID, GateIssueCount)
 		if decision.Gate.Action != ActionOff || decision.Reason != ReasonUnavailable {
 			t.Fatalf("decision = %+v", decision)
 		}
@@ -363,7 +354,7 @@ func TestFastFailuresAreRateLimitedPerWorkspace(t *testing.T) {
 		t.Fatalf("HTTP calls during retry suppression = %d, want 1", calls.Load())
 	}
 	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if calls.Load() != 2 {
 		t.Fatalf("HTTP calls after retry suppression = %d, want 2", calls.Load())
 	}
@@ -385,11 +376,11 @@ func TestObserverRecordsCacheRefreshDecisionAndDegradation(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 	fail.Store(true)
 	clock = clock.Add(6 * time.Second)
-	_ = client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	_ = client.Gate(context.Background(), workspaceID, GateIssueCount)
 
 	cache, refresh, decisions, _ := observer.snapshot()
 	if strings.Join(cache, ",") != "miss,hit,expired" {
@@ -398,7 +389,7 @@ func TestObserverRecordsCacheRefreshDecisionAndDegradation(t *testing.T) {
 	if strings.Join(refresh, ",") != "ok,5xx" {
 		t.Fatalf("refresh observations = %v", refresh)
 	}
-	if strings.Join(decisions, ",") != "issue_window/enforce/refreshed,issue_window/enforce/cache_fresh,issue_window/observe/stale" {
+	if strings.Join(decisions, ",") != "issue_count/enforce/refreshed,issue_count/enforce/cache_fresh,issue_count/observe/stale" {
 		t.Fatalf("decision observations = %v", decisions)
 	}
 }
@@ -418,54 +409,28 @@ func TestExpiredPolicyNeverEnforcesAndIgnoresCloudClock(t *testing.T) {
 		writePolicy(t, w, policy)
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.StaleGrace = 10 * time.Second })
+	client := newTestClient(t, server.URL, nil)
+	client.staleGrace = 10 * time.Second
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	fresh := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	fresh := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if fresh.Gate.Action != ActionEnforce {
 		t.Fatalf("fresh = %+v", fresh)
 	}
 	fail.Store(true)
 	clock = clock.Add(6 * time.Second)
-	stale := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	stale := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if stale.Gate.Action != ActionObserve || stale.Gate.Limit == nil || *stale.Gate.Limit != testIssueLimit || stale.Reason != ReasonStale {
 		t.Fatalf("stale = %+v", stale)
 	}
 	clock = clock.Add(10 * time.Second)
-	expired := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	expired := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if expired.Gate.Action != ActionOff || expired.Reason != ReasonUnavailable {
 		t.Fatalf("expired = %+v", expired)
 	}
 	if calls.Load() != 3 {
 		t.Fatalf("calls = %d, want 3", calls.Load())
-	}
-}
-
-func TestPolicySwitchReplacesExpiredSnapshot(t *testing.T) {
-	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
-	var policyRevision atomic.Int64
-	policyRevision.Store(1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		action := ActionEnforce
-		if policyRevision.Load() == 2 {
-			action = ActionOff
-		}
-		writePolicy(t, w, samplePolicy(policyRevision.Load(), 0, 5, action))
-	}))
-	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
-	client.now = func() time.Time { return clock }
-	workspaceID := uuid.New()
-
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("initial = %+v", got)
-	}
-	policyRevision.Store(2)
-	clock = clock.Add(6 * time.Second)
-	got := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if got.Gate.Action != ActionOff || got.PolicyRevision != 2 || got.Reason != ReasonRefreshed {
-		t.Fatalf("switched = %+v", got)
 	}
 }
 
@@ -485,22 +450,22 @@ func TestSubscriptionVersionSwitchReplacesExpiredSnapshot(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
+	if got := client.Gate(context.Background(), workspaceID, GateIssueCount); got.Gate.Action != ActionEnforce {
 		t.Fatalf("initial = %+v", got)
 	}
 	subscriptionVersion.Store(2)
 	clock = clock.Add(6 * time.Second)
-	got := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	got := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if got.Gate.Action != ActionOff || got.PolicyRevision != 1 || got.SubscriptionVersion != 2 || got.Reason != ReasonRefreshed {
 		t.Fatalf("switched = %+v", got)
 	}
 }
 
-func TestRevisionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
+func TestSubscriptionVersionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
 	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
 	observer := &recordingObserver{}
 	var mu sync.Mutex
-	policy := samplePolicy(2, 4, 5, ActionEnforce)
+	policy := samplePolicy(1, 4, 5, ActionEnforce)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -511,89 +476,53 @@ func TestRevisionRegressionCannotOverwriteWorkspaceCache(t *testing.T) {
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	initial := client.Gate(context.Background(), workspaceID, GateIssueWindow)
+	initial := client.Gate(context.Background(), workspaceID, GateIssueCount)
 	if initial.Gate.Action != ActionEnforce {
 		t.Fatalf("initial = %+v", initial)
 	}
 	mu.Lock()
-	policy = samplePolicy(1, 5, 5, ActionOff)
+	policy = samplePolicy(1, 3, 5, ActionOff)
 	mu.Unlock()
 	clock = clock.Add(6 * time.Second)
-	regressed := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if regressed.Gate.Action != ActionObserve || regressed.PolicyRevision != 2 || regressed.SubscriptionVersion != 4 {
+	regressed := client.Gate(context.Background(), workspaceID, GateIssueCount)
+	if regressed.Gate.Action != ActionObserve || regressed.PolicyRevision != 1 || regressed.SubscriptionVersion != 4 {
 		t.Fatalf("regressed = %+v", regressed)
 	}
-	if got := observer.regressions(); len(got) != 1 || got[0] != "policy" {
-		t.Fatalf("regressions = %v", got)
-	}
-
-	mu.Lock()
-	policy = samplePolicy(3, 3, 5, ActionOff)
-	mu.Unlock()
-	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	regressed = client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if regressed.PolicyRevision != 2 || regressed.SubscriptionVersion != 4 {
-		t.Fatalf("subscription regression replaced cache: %+v", regressed)
-	}
-	if got := observer.regressions(); len(got) != 2 || got[1] != "subscription" {
-		t.Fatalf("regressions = %v", got)
+	if got := observer.regressions(); got != 1 {
+		t.Fatalf("regressions = %d", got)
 	}
 }
 
-func TestRevisionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
+func TestSubscriptionVersionRegressionIsAcceptedAfterStaleGrace(t *testing.T) {
 	clock := time.Date(2026, 8, 18, 9, 0, 0, 0, time.UTC)
 	var calls atomic.Int64
-	var policyRevision atomic.Int64
-	policyRevision.Store(2)
+	var subscriptionVersion atomic.Int64
+	subscriptionVersion.Store(2)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls.Add(1)
-		writePolicy(t, w, samplePolicy(policyRevision.Load(), 0, 60, ActionOff))
+		writePolicy(t, w, samplePolicy(1, subscriptionVersion.Load(), 60, ActionOff))
 	}))
 	defer server.Close()
-	client := newTestClient(t, server.URL, func(cfg *Config) { cfg.StaleGrace = 10 * time.Second })
+	client := newTestClient(t, server.URL, nil)
+	client.staleGrace = 10 * time.Second
 	client.now = func() time.Time { return clock }
 	workspaceID := uuid.New()
 
-	initial := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if initial.PolicyRevision != 2 || initial.Reason != ReasonRefreshed {
+	initial := client.Gate(context.Background(), workspaceID, GateIssueCount)
+	if initial.SubscriptionVersion != 2 || initial.Reason != ReasonRefreshed {
 		t.Fatalf("initial = %+v", initial)
 	}
-	policyRevision.Store(1)
+	subscriptionVersion.Store(1)
 	clock = clock.Add(71 * time.Second)
-	recovered := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if recovered.PolicyRevision != 1 || recovered.Reason != ReasonRefreshed {
+	recovered := client.Gate(context.Background(), workspaceID, GateIssueCount)
+	if recovered.SubscriptionVersion != 1 || recovered.Reason != ReasonRefreshed {
 		t.Fatalf("recovered = %+v", recovered)
 	}
 
 	clock = clock.Add(defaultFailureRetry + time.Millisecond)
-	cached := client.Gate(context.Background(), workspaceID, GateIssueWindow)
-	if cached.PolicyRevision != 1 || cached.Reason != ReasonCacheFresh || calls.Load() != 2 {
+	cached := client.Gate(context.Background(), workspaceID, GateIssueCount)
+	if cached.SubscriptionVersion != 1 || cached.Reason != ReasonCacheFresh || calls.Load() != 2 {
 		t.Fatalf("cached = %+v, HTTP calls = %d", cached, calls.Load())
-	}
-}
-
-func TestEmergencyDisableIsImmediateAndCannotPromote(t *testing.T) {
-	var calls atomic.Int64
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls.Add(1)
-		writePolicy(t, w, samplePolicy(1, 0, 60, ActionEnforce))
-	}))
-	defer server.Close()
-	client := newTestClient(t, server.URL, nil)
-	workspaceID := uuid.New()
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("initial = %+v", got)
-	}
-	client.SetEmergencyDisabled(true)
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionOff || got.Reason != ReasonEmergencyDisabled {
-		t.Fatalf("emergency = %+v", got)
-	}
-	if calls.Load() != 1 {
-		t.Fatalf("emergency disable made HTTP call; calls = %d", calls.Load())
-	}
-	client.SetEmergencyDisabled(false)
-	if got := client.Gate(context.Background(), workspaceID, GateIssueWindow); got.Gate.Action != ActionEnforce {
-		t.Fatalf("restored = %+v", got)
 	}
 }
 
@@ -609,7 +538,7 @@ func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 		workspaceID uuid.UUID
 		gate        GateName
 		reason      Reason
-	}{{uuid.Nil, GateIssueWindow, ReasonInvalidWorkspace}, {uuid.New(), GateName("future_gate"), ReasonUnknownGate}}
+	}{{uuid.Nil, GateIssueCount, ReasonInvalidWorkspace}, {uuid.New(), GateName("future_gate"), ReasonUnknownGate}}
 	for _, tt := range tests {
 		decision := client.Gate(context.Background(), tt.workspaceID, tt.gate)
 		if decision.Gate.Action != ActionOff || decision.Reason != tt.reason {
@@ -624,13 +553,8 @@ func TestInvalidWorkspaceAndUnknownGateDoNotFetch(t *testing.T) {
 func newTestClient(t *testing.T, baseURL string, mutate func(*Config)) *Client {
 	t.Helper()
 	cfg := Config{
-		Enabled:      true,
-		BaseURL:      baseURL,
-		ServiceToken: testServiceToken,
-		Timeout:      time.Second,
-		MaxEntries:   8,
-		StaleGrace:   time.Minute,
-		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		BaseURL: baseURL,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -658,9 +582,9 @@ func samplePolicy(policyRevision, subscriptionVersion, validForSeconds int64, is
 		ValidUntil:          time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC),
 		ValidForSeconds:     validForSeconds,
 		Gates: map[string]wireGate{
-			string(GateIssueWindow): issueGate,
+			string(GateIssueCount): issueGate,
 			string(GateAutopilotRuns): {
-				Action: string(ActionObserve), Limit: &autopilotLimit,
+				Action: string(ActionEnforce), Limit: &autopilotLimit,
 				PeriodStart: &periodStart, PeriodEnd: &periodEnd, ResetAt: &periodEnd,
 			},
 		},
@@ -688,7 +612,7 @@ func bodyHandler(status int, body string) http.HandlerFunc {
 
 func policyHandler(mutate func(*wirePolicy)) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
-		policy := samplePolicy(1, 0, 60, ActionObserve)
+		policy := samplePolicy(1, 0, 60, ActionEnforce)
 		mutate(&policy)
 		data, _ := json.Marshal(policy)
 		_, _ = w.Write(data)
@@ -704,7 +628,7 @@ type recordingObserver struct {
 	cache              []string
 	refresh            []string
 	decisions          []string
-	versionRegressions []string
+	versionRegressions int
 }
 
 func (o *recordingObserver) RecordEntitlementCache(outcome string) {
@@ -725,20 +649,20 @@ func (o *recordingObserver) RecordEntitlementDecision(gate, action, reason strin
 	o.decisions = append(o.decisions, gate+"/"+action+"/"+reason)
 }
 
-func (o *recordingObserver) RecordEntitlementVersionRegression(source string) {
+func (o *recordingObserver) RecordEntitlementVersionRegression() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.versionRegressions = append(o.versionRegressions, source)
+	o.versionRegressions++
 }
 
-func (o *recordingObserver) regressions() []string {
+func (o *recordingObserver) regressions() int {
 	_, _, _, regressions := o.snapshot()
 	return regressions
 }
 
-func (o *recordingObserver) snapshot() (cache, refresh, decisions, regressions []string) {
+func (o *recordingObserver) snapshot() (cache, refresh, decisions []string, regressions int) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return append([]string(nil), o.cache...), append([]string(nil), o.refresh...),
-		append([]string(nil), o.decisions...), append([]string(nil), o.versionRegressions...)
+		append([]string(nil), o.decisions...), o.versionRegressions
 }

@@ -9,7 +9,17 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+type runtimeLocalSkillPendingWorkRecorder struct {
+	hints []string
+}
+
+func (r *runtimeLocalSkillPendingWorkRecorder) NotifyPendingWork(runtimeID, kind string) {
+	r.hints = append(r.hints, runtimeID+":"+kind)
+}
 
 func newRequestAsUser(userID, method, path string, body any) *http.Request {
 	var buf bytes.Buffer
@@ -223,16 +233,18 @@ func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	}
 }
 
-// Capability discovery (list + poll) is readable by any workspace member so
-// the Agent capabilities surfaces work for agents bound to someone else's
-// runtime. Import stays owner-only (tests below).
-func TestListLocalSkills_AllowsNonOwnerWorkspaceMember(t *testing.T) {
+// Capability discovery (list + poll) is readable by workspace members only
+// after the runtime owner shares the machine with the workspace.
+func TestListLocalSkills_AllowsNonOwnerForPublicRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
 	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("make runtime public: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
@@ -260,6 +272,32 @@ func TestListLocalSkills_AllowsNonOwnerWorkspaceMember(t *testing.T) {
 	testHandler.GetLocalSkillListRequest(w, pollReq)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateListLocalSkills_WakesDaemon(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkills
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
 	}
 }
 
@@ -312,8 +350,51 @@ func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	)
 
 	testHandler.InitiateImportLocalSkill(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateImportLocalSkill_WakesDaemonAfterValidEnqueue(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	recorder := &runtimeLocalSkillPendingWorkRecorder{}
+	h := *testHandler
+	h.DaemonPendingWork = recorder
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+		}),
+		"runtimeId", runtimeID,
+	)
+
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	want := runtimeID + ":" + protocol.PendingWorkKindLocalSkillImport
+	if len(recorder.hints) != 1 || recorder.hints[0] != want {
+		t.Fatalf("pending-work hints = %v, want [%s]", recorder.hints, want)
+	}
+
+	w = httptest.NewRecorder()
+	req = withURLParams(
+		newRequestAsUser(testUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "",
+		}),
+		"runtimeId", runtimeID,
+	)
+	h.InitiateImportLocalSkill(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if len(recorder.hints) != 1 {
+		t.Fatalf("rejected enqueue must not send another hint, got %v", recorder.hints)
 	}
 }
 
@@ -341,8 +422,8 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 	)
 
 	testHandler.GetLocalSkillImportRequest(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

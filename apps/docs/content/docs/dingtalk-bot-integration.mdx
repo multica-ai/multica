@@ -58,12 +58,13 @@ Direct messages and group chats both support messages containing text and images
 
 Send `/issue <title>` or `/issue <title>{newline}<detailed description>` to create a new Multica issue and automatically assign it to the agent connected to the Bot. Images in the same message are also added to the issue as attachments. Unlike regular chat messages, the `/issue` command leaves no record in Multica [Chat](/chat).
 
-### Start over with `/new`
+### Start a new Chat with `/new`
 
-Send `/new`, and the next message sent successfully will be processed by the agent in a fresh context. You can also send `/new <message>` to have the agent process that message immediately in a fresh context.
+Send `/new` to create a new empty Multica Chat and route later DingTalk messages to it. Send `/new <message>` to create the Chat and use that message as its first turn. The previous Chat remains stored and usable in Multica.
 
-The `/new` command only makes the agent process messages in a fresh context. It does not create a new Multica Chat.
+### Clear the current context with `/clear`
 
+Send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message. Send `/clear <message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica.
 
 ## Manage connections
 

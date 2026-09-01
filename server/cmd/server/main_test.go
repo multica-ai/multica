@@ -513,3 +513,28 @@ func TestJWTSecretBootError(t *testing.T) {
 		})
 	}
 }
+
+// TestNewMainHTTPServerTimeouts pins the production timeout defaults on the
+// public HTTP server. These are safety settings, not tuning: removing them,
+// resetting them to zero, or making ReadTimeout/WriteTimeout non-zero would
+// silently reintroduce the Slowloris exposure or start killing uploads and
+// long-lived WebSocket connections mid-stream — none of which the rest of the
+// suite would catch.
+func TestNewMainHTTPServerTimeouts(t *testing.T) {
+	srv := newMainHTTPServer(":8080", nil)
+
+	if got, want := srv.ReadHeaderTimeout, 5*time.Second; got != want {
+		t.Errorf("ReadHeaderTimeout = %v, want %v", got, want)
+	}
+	if got, want := srv.IdleTimeout, 120*time.Second; got != want {
+		t.Errorf("IdleTimeout = %v, want %v", got, want)
+	}
+	// Zero is intentional: WebSocket upgrades and large uploads share this
+	// listener and must not be bounded by a whole-request deadline.
+	if got := srv.ReadTimeout; got != 0 {
+		t.Errorf("ReadTimeout = %v, want 0", got)
+	}
+	if got := srv.WriteTimeout; got != 0 {
+		t.Errorf("WriteTimeout = %v, want 0", got)
+	}
+}

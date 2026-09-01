@@ -120,7 +120,7 @@ const createServer = tlsCert && tlsKey
   : createHTTPServer;
 
 const server = createServer((request, response) => {
-  if (request.method !== "POST" || !request.url?.startsWith("/hooks/triage")) {
+  if (request.method !== "POST" || !request.url?.startsWith("/hooks/")) {
     response.writeHead(404).end();
     return;
   }
@@ -144,6 +144,18 @@ const server = createServer((request, response) => {
     console.log(`hook ${body.hook_key} via ${body.trigger}${body.event_type ? ` (${body.event_type})` : ""} as ${body.actor?.type}`);
 
     try {
+      // A scheduled delivery has no issue or caller input. delivery_id is
+      // stable across retries while invocation_id changes per HTTP attempt; a
+      // real side-effecting handler persists delivery_id before doing work.
+      if (body.hook_key === "scheduled_heartbeat" && body.trigger === "schedule") {
+        console.log(
+          `scheduled delivery ${body.delivery_id} attempt ${body.attempt} planned ${body.schedule?.planned_at}`,
+        );
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ received: body.delivery_id }));
+        return;
+      }
+
       // The host tells us which issue this is about, having already resolved and
       // permission-checked it. Preferred over anything in `input`: for an event
       // trigger there was no client to supply it, and for ui/manual a

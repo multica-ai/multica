@@ -50,7 +50,7 @@
     "replied_in": "{{elapsed}} 内回复",
     "failed_after": "{{elapsed}} 后失败",
     "finished_in": "{{elapsed}} 内结束",
-    "no_response": "本轮已结束，Agent 没有返回文字回复。",
+    "no_response": "本轮已结束，智能体没有返回文字回复。",
     "failure": {
       "agent_error": "智能体运行时出错，没能完成回复。请重试。",
       "timeout": "智能体处理超时，未能完成。可以重试，或把需求拆得更小一些。",
@@ -78,6 +78,7 @@
     "copy_failed_toast": "复制失败",
     "loading_older": "正在加载更早的消息…",
     "quick_actions_heading": "后续提问",
+    "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
     "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
   },
@@ -146,10 +147,21 @@
     "returning_subtitle": "试试问",
     "chat_with_named": "与 {{name}} 对话"
   },
-  "starter_prompts": {
-    "list_open": "按优先级列出我未完成的任务",
-    "summarize_today": "总结一下我今天做了什么",
-    "plan_next": "规划接下来该做什么"
+  "conversation_starters": {
+    "aria_label": "对话开场建议",
+    "capabilities": {
+      "label": "你能帮我做什么？",
+      "prompt": "你最擅长帮我做什么？请简要介绍。"
+    },
+    "first_task": {
+      "label": "建议第一个任务",
+      "prompt": "建议三个适合交给你的实用任务。"
+    },
+    "recommend": {
+      "label": "推荐一个操作",
+      "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
+    },
+    "customize": "自定义开场建议"
   },
   "onboarding_cards": {
     "aria_label": "开始方式",
@@ -211,9 +223,9 @@
     "you_prefix": "你：",
     "no_messages": "还没有消息",
     "no_response_preview": "无文字回复",
-    "quick_agents": "常用 Agent",
+    "quick_agents": "常用智能体",
     "add": "添加",
-    "add_agent": "添加常用 Agent",
+    "add_agent": "添加常用智能体",
     "unpin_agent": "移出常用",
     "waiting": "等待回复",
     "pin": "置顶",
@@ -225,7 +237,7 @@
     "row_actions_aria": "聊天操作"
   },
   "header": {
-    "view_profile": "查看 Agent 资料",
+    "view_profile": "查看智能体资料",
     "rename": "重命名会话",
     "delete": "删除会话",
     "archive": "归档会话",

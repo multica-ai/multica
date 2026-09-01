@@ -123,6 +123,7 @@ function renderPage(searchParams = new URLSearchParams()) {
     back: vi.fn(),
     pathname: "/acme/skills/skill-1",
     searchParams,
+    hash: "",
     getShareableUrl: (path) => path,
   };
   render(

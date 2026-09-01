@@ -61,7 +61,12 @@ const editorProps = vi.hoisted(() => ({
 }));
 // Records imperative editor calls so tests can assert whether a commit
 // scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
-const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0, focused: 0 }));
+const editorState = vi.hoisted(() => ({
+  cleared: 0,
+  blurred: 0,
+  focused: 0,
+  adopted: [] as string[],
+}));
 
 vi.mock("../../editor", async () => ({
   // Real submit gate (pure React) driven by the mock editor's
@@ -163,6 +168,7 @@ vi.mock("../../editor", async () => ({
       // Same file: the upload-pinned adopt path needs the real Guard 0, which
       // this mock has no concept of. Kept so the ref honours the full contract.
       adoptContent: (markdown: string) => {
+        editorState.adopted.push(markdown);
         valueRef.current = markdown;
       },
     }));
@@ -248,6 +254,7 @@ beforeEach(() => {
   editorState.cleared = 0;
   editorState.blurred = 0;
   editorState.focused = 0;
+  editorState.adopted = [];
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
@@ -491,6 +498,45 @@ describe("ChatInput focusRequest", () => {
   it("does not focus on mount when focusRequest is undefined or 0", () => {
     renderInput();
     expect(editorState.focused).toBe(0);
+  });
+});
+
+describe("ChatInput conversation starter prefill", () => {
+  it("replaces live editor text and the stored draft", () => {
+    const onConversationStarterApplied = vi.fn();
+    const { rerender } = renderInput();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "unfinished local text" },
+    });
+    rerender(
+      element({
+        conversationStarterRequest: {
+          id: 1,
+          content: "Review the release pull request.",
+        },
+        onConversationStarterApplied,
+      }),
+    );
+
+    expect(useChatStore.getState().setInputDraft).toHaveBeenLastCalledWith(
+      "__draft_new__",
+      "Review the release pull request.",
+    );
+    expect(editorState.adopted).toEqual(["Review the release pull request."]);
+    expect(onConversationStarterApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies each request only once", () => {
+    const request = {
+      id: 1,
+      content: "Review the release pull request.",
+    };
+    const { rerender } = renderInput({ conversationStarterRequest: request });
+
+    rerender(element({ conversationStarterRequest: request }));
+
+    expect(editorState.adopted).toEqual([request.content]);
   });
 });
 

@@ -22,6 +22,7 @@ import { memberListOptions, agentListOptions } from "@multica/core/workspace/que
 import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
 import {
   deriveRuntimeHealth,
+  isRuntimeUsableForUser,
   runtimeDisplayName,
   runtimeProfileListOptions,
 } from "@multica/core/runtimes";
@@ -66,7 +67,7 @@ function shortDaemonId(id: string | null): string | null {
 }
 
 // 30s tick keeps derived runtime health honest as time-based windows
-// (recently_lost → offline → about_to_gc) cross thresholds without any new
+// (recently_lost → offline → long_offline) cross thresholds without any new
 // query data arriving. Agent presence has no time windows anymore, so it
 // doesn't need this — but useWorkspacePresenceMap is the dependency we
 // already mounted on this page, and that's wired to query data, not `now`.
@@ -119,6 +120,7 @@ export function RuntimeDetail({
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;
+  const canReadRuntime = isRuntimeUsableForUser(runtime, user?.id ?? null);
   const runtimeProfile: RuntimeProfile | null = runtime.profile_id
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
     : null;
@@ -193,7 +195,7 @@ export function RuntimeDetail({
               cliVersion={cliVersion}
               daemonShort={daemonShort}
             />
-            <UsageSection runtime={runtime} />
+            {canReadRuntime && <UsageSection runtime={runtime} />}
           </div>
 
           {/* Right rail: serving agents + diagnostics */}

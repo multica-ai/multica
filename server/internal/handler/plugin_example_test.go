@@ -169,7 +169,7 @@ func installExamplePlugin(t *testing.T, servers exampleServers) string {
 	// without a deployment key the engine refuses to call out at all.
 	plugins.DeploymentKey = bytes.Repeat([]byte{3}, 32)
 	plugins.Callbacks = service.NewCallbackTokens()
-	plugins.CallbackBaseURL = "https://multica.test/api/v1/plugin"
+	plugins.CallbackBaseURL = "https://plugin-api.multica.test/v1"
 	t.Cleanup(func() { *plugins = previous })
 
 	// Publishing is what validates the whole artifact: the manifest, the surface

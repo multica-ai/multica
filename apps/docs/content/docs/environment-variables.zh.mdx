@@ -52,9 +52,14 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `FRONTEND_ORIGIN` | 空 | 用户访问的前端 origin；用于 CORS、cookie 和邀请链接 |
 | `MULTICA_APP_URL` | 回退到 `FRONTEND_ORIGIN` | 用户可访问的 Web 地址；CLI 登录和账号绑定链接使用它 |
 | `MULTICA_PUBLIC_URL` | 空 | 公网 API 地址；用于 webhook URL 和运行时连接说明 |
+| `MULTICA_DAEMON_SERVER_URL` | 回退到 `MULTICA_PUBLIC_URL`，再回退到 `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | API 进程写入 `multica setup self-host` 命令的服务端地址；守护进程访问 API 的地址与公网 webhook 地址不同时设置 |
 | `CORS_ALLOWED_ORIGINS` | 空 | 额外允许的 HTTP origin，逗号分隔 |
 | `ALLOWED_ORIGINS` | 回退到 CORS / 前端地址 | WebSocket origin 白名单，逗号分隔 |
 | `COOKIE_DOMAIN` | 空 | 前后端不同 host 且浏览器直接访问 API 域时必须设置；单域部署保持为空 |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` 会由无需认证的 `/api/config` 接口返回，客户端可以读取。请将它视为公开配置，切勿填入凭据、令牌或其他密钥。
+</Callout>
 
 前端和 API 使用不同 host、且浏览器直接访问 API 域时，必须设置 `COOKIE_DOMAIN`，否则浏览器读不到 CSRF cookie——所有写请求返回 `403 CSRF validation failed`，而读请求一切正常。取值用能同时覆盖两个 host 的最窄父域（`.agent.example.com` 优于 `.example.com`）。它会把登录会话 cookie 扩散到该域下的所有 host，只有这些 host 都由同一可信主体运维时才可用。修改后需要在两个 host 上清除旧 cookie 并重新登录。若采用[自托管快速上手](/self-host-quickstart#3-选择访问方式)的同源配方（浏览器只访问 app 域），保持为空即可。不要填写 IP 地址，浏览器会忽略带 IP Domain 的 cookie。
 
@@ -175,6 +180,10 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
+| 插件 | `MULTICA_PLUGIN_SECRET_KEY` | base64 编码的 32 字节密钥，用于加密已存 secret 和 surface 启动 URL |
+| 插件 | `MULTICA_PLUGIN_SURFACE_ORIGIN` | 路由到后端的独立无 Cookie 浏览器 origin；必须不同于 app/API origin，并保留 `Host` |
+| 插件 | `MULTICA_PLUGIN_API_URL` | 带版本的插件 Public API 完整 Base URL，例如 `https://plugin-api.example.com/v1`；未设置时使用 `MULTICA_PUBLIC_URL` + `/v1` |
+| 插件 | `MULTICA_PLUGIN_DIR` | 开发时用于发布本地插件包的可选绝对目录 |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 
@@ -217,12 +226,12 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳间隔 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发执行任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 没有输出且没有工具执行时的静默上限 |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 单个工具调用持续静默的上限 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 专用静默阈值 |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 语义静默阈值 |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | Codex 语义静默阈值。Codex 自己的计时器看不到工具是否在执行，因此跟随 idle / tool 预算中较大的那个，而不再单独保留一个更短的上限 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | 显式覆盖 Codex 首轮无进展上限；`0` 保持默认值。实际首轮等待仍受 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 和总执行超时限制——需将 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 设为严格大于此值（并留出余量），否则等待会被截断至该值，且会跳过模型目录启动重试。设为相等还不够：语义计时器先启动，两者相等时仍可能丢失该重试 |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server 启动握手上限 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
@@ -230,7 +239,7 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留执行任务目录用于调试 |
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -262,8 +271,8 @@ multica config show
 | `poll_interval` | `30s` | 执行任务轮询间隔 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
-| `codex_semantic_inactivity_timeout` | `10m` | Codex 语义静默阈值 |
-| `codex_handshake_timeout` | `30s` | Codex app-server 握手上限 |
+| `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |
+| `codex_handshake_timeout` | `30s`；`thread/start`、`thread/resume`：`60s` | Codex app-server 启动握手上限；显式设置后会统一覆盖两类预算 |
 | `disable_auto_update` | 跟随环境 | `true` 关闭自动更新；`false` 清除本地覆盖，回到环境变量或默认 |
 | `auto_update_check_interval` | `6h` | 检查更新的间隔 |
 | `disable_auto_reload` | 跟随环境 | `true` 让守护进程不再跟随磁盘上被替换的二进制；`false` 清除本地覆盖。与 `disable_auto_update` 分开解析 |

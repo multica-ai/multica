@@ -121,7 +121,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// personal_access_tokens table for this prefix; an mcn_
 			// string is not a valid mul_ value, so falling through
 			// would just be a redundant DB miss. When the verifier
-			// is unconfigured (no MULTICA_CLOUD_FLEET_URL) we reject
+			// is unconfigured (no MULTICA_CLOUD_URL) we reject
 			// at this branch rather than treating the token as a
 			// JWT/PAT — failing closed avoids a misconfigured prod
 			// silently downgrading auth.

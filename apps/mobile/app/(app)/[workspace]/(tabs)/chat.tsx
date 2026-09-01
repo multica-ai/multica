@@ -92,6 +92,7 @@ import { OfflineBanner } from "@/components/chat/offline-banner";
 import { RuntimeRequiredBanner } from "@/components/chat/runtime-required-banner";
 import { useChatSelectStore } from "@/data/chat-select-store";
 import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { chatSessionDisplayTitle } from "@/lib/chat-session-title";
 
 export default function ChatTab() {
   const qc = useQueryClient();
@@ -450,7 +451,7 @@ export default function ChatTab() {
     if (!activeSession) return;
     Alert.alert(
       "Delete this chat?",
-      activeSession.title || "Untitled chat",
+      chatSessionDisplayTitle(activeSession.title),
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -519,7 +520,7 @@ export default function ChatTab() {
           messages={visibleMessages}
           loading={messagesLoading}
           hasSessions={sessions.length > 0}
-          agentName={currentAgent?.name}
+          agent={currentAgent}
           onPickPrompt={(text) => setDraft(draftKey, text)}
           onQuickAction={(action) =>
             handleSend(action.prompt, [], { clearDraft: false })

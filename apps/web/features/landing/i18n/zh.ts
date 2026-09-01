@@ -101,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 23 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 23 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 26 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 23 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 26 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、CodeArts、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Dim、Grok、Hermes、Kimi、Kiro CLI、MiniMax Code、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI、ZeroClaw）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 23 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 26 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001CodeArts\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Dim\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001MiniMax Code\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3001ZeroClaw\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -293,6 +293,156 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.4.37",
+        date: "2026-08-31",
+        title: "Issue 列表更快、长任务更稳、多语言文案更全",
+        changes: [],
+        features: [
+          "华为云 CodeArts 现已成为内置的智能体运行时。",
+          "可以选它的模型、续接之前的会话，并使用 MCP 和本地技能。",
+          "iPad 上可以原生安装 Multica，横屏竖屏都能用。",
+          "自托管部署在多台服务器上时，企业微信机器人的回复也能送达。",
+          "可以查看有多少条企业微信回复没有发出，以及原因。",
+        ],
+        improvements: [
+          "大工作区里的 Issue 列表打开更快。",
+          "技能很多时，智能体的启动也更快。",
+          "新手引导、小队、编辑器、状态和优先级在各语言下都更自然。",
+          "智能体输出会完整显示文件路径，不再被误遮挡。",
+          "自托管服务器的后台采集更轻，数据库负担更小。",
+          "有连接卡住时，自托管服务器依然正常响应。",
+        ],
+        fixes: [
+          "聊天会停在最新回复，输出过程中不再跳动或闪烁。",
+          "窄窗口下 Analytics 排行榜可以横向滑动，不再被裁掉。",
+          "Codex 会话启动更稳定，不会在初始化时中断。",
+          "本机守护进程空闲时，本地技能也能正常加载。",
+          "桌面端会自动恢复意外停止的守护进程。",
+          "手机上 Issue 顶部重新变得紧凑，头像和点击区域都还在。",
+          "从更早版本升级自托管实例不再需要手动修复。",
+          "工作目录变化后，Pi 和 Oh My Pi 的会话仍然接得上。",
+          "删除工作区时，提示只说明真正会被删除的内容。",
+          "长时间运行和排队中的任务不会仅因等待被取消。",
+        ],
+      },
+      {
+        version: "0.4.36",
+        date: "2026-08-28",
+        title: "自定义属性筛选、技能本地导入、Oh My Pi 的 MCP 支持",
+        changes: [],
+        features: [
+          "Issue 可以按文本、数字、日期和 URL 类型的自定义属性筛选。",
+          "也可以只看某个自定义属性还没有填值的 Issue。",
+          "筛选菜单、分组统计和保存的视图里都能用这些条件。",
+          "新建技能时可以直接导入本地文件夹、.skill 或 .zip 文件。",
+          "导入前可以预览内容，名称冲突也会提前提示。",
+          "Oh My Pi 智能体现在可以在智能体页面配置并使用 MCP。",
+        ],
+        improvements: [
+          "运行时只会在确实安全时被回收，不会在运行中途被收走。",
+          "长时间离线的运行时，现在只会如实说明当前状态。",
+          "智能体的长步骤最多可以空闲两小时，不会被提前中断。",
+          "CLI 现在写明了列出 Issue 的单页上限和翻页方式。",
+        ],
+        fixes: [
+          "桌面端复制或分享的链接，在任何浏览器和设备上都能打开。",
+          "即使启动目录已被删除，仓库拉取和更新也照样能用。",
+          "长上下文模型的运行费用计算正确，用量不会漏记。",
+          "不含英文字符的自定义 Issue 状态，各处都显示正确名称。",
+          "编辑冲突时，两个选项分别放在各自版本的内容下方。",
+          "飞书的回复不会再因为凭证过期而一直卡住。",
+          "Quick Create 恢复草稿时，高度会重新贴合内容。",
+          "OpenClaw 超时后会完全停止，不会留下残余进程。",
+          "配置 OpenClaw 时，不会再明明成功却提示失败。",
+        ],
+      },
+      {
+        version: "0.4.35",
+        date: "2026-08-26",
+        title: "全渠道 /new 与 /clear、智能体开场建议、收件箱筛选",
+        changes: [],
+        features: [
+          "用 /new 开新会话，用 /clear 清空当前会话。",
+          "钉钉、飞书、Slack、Telegram、企业微信都已支持。",
+          "可以给智能体设置最多 3 条开场建议，空白聊天里会直接显示。",
+          "点击开场建议只会填入输入框，你可以改完再发送。",
+          "收件箱通知可以按发起人筛选，也能只看未读。",
+        ],
+        improvements: [
+          "Qwen、Kimi、Ark 模型的运行成本显示更准确。",
+          "Autopilot 列表会显示订阅者和下次运行时间。",
+          "只需填一个 Cloud 地址，云端运行时、账单和席位管理会一起启用。",
+          "本地任务的目录名称清晰易读，找文件更方便。",
+        ],
+        fixes: [
+          "Autopilot 可以把任务交给你的私有智能体和小队了。",
+          "编辑 Autopilot 的其他设置时，不会再清空它的项目。",
+          "聊天输出很快时也会跟到最新内容，手动上滚不会被拉回。",
+          "其他成员不再看到你的私有运行时。",
+          "订阅 Pro 后，账单会立刻显示新的权益。",
+          "Codex 任务不再提前结束，不会漏掉内容或重复计费。",
+          "Autopilot 命令不再接受实际无效的优先级参数。",
+          "Issue 描述很长时，看板也不会变慢。",
+          "读取体积很大的技能更稳定，不会再中断。",
+        ],
+      },
+      {
+        version: "0.4.34",
+        date: "2026-08-25",
+        title: "基于评论快速创建子 Issue、正式开放自定义 Issue 状态创建",
+        changes: [],
+        features: [
+          "讨论到一半的评论，一键就能拆成子 Issue 继续推进。",
+          "拆出的子 Issue 自动带上原讨论内容，接手时不用再补背景。",
+          "自定义 Issue 状态正式开放，所有工作区都能直接创建。",
+        ],
+        improvements: [
+          "结账时自动填入你的账号邮箱，不用再手动输入。",
+          "仓库拉取失败时，会写明具体原因和对应的解决办法。",
+          "自托管指南补齐了健康检查、单一域名部署和版本选择说明。",
+        ],
+        fixes: [
+          "MiniMax Code 不再偶发启动失败。",
+          "成员离开工作区后，不再收到该工作区的 Autopilot 通知。",
+          "任务失败后的自动恢复回复，会回到原来的评论线程。",
+          "评论时间不再显示成错误的时区。",
+          "智能体用完整 ID 定位 Issue 更快、更稳定。",
+          "取消任务后，智能体进程会真正停止，不再在后台残留。",
+          "已取消订阅的席位不再出现在账单里。",
+          "任务被取消时，命令行不再误提示重新登录。",
+        ],
+      },
+      {
+        version: "0.4.33",
+        date: "2026-08-24",
+        title: "收件箱筛选、ZeroClaw 运行时、多语言失败说明",
+        changes: [],
+        features: [
+          "现在可以按 Issue 状态和优先级筛选收件箱通知。",
+          "ZeroClaw 现已成为内置智能体运行时。",
+          "自托管团队可将守护进程流量发送到独立服务器。",
+          "自托管团队可设置排队任务的保留时长。",
+        ],
+        improvements: [
+          "任务失败信息现在会按你选择的语言显示。",
+          "Grok 现在显示每个模型的推理级别。",
+          "技能下载失败时会显示已接收的数据量。",
+          "可用快捷键显示或隐藏右侧边栏。",
+          "iOS 应用现在使用更简洁的扁平图标。",
+          "自托管指南现在说明正确的 PostgreSQL 要求。",
+        ],
+        fixes: [
+          "Windows 上的 Qwen 和 Pi 运行现在能完整保留提示内容。",
+          "Antigravity 回复现在保留原有换行。",
+          "飞书卡片消息中的提及现在能正确送达。",
+          "智能体和 Issue 动态现在保持正确授权和排序。",
+          "新聊天和项目工作现在保持在正确工作区上下文中。",
+          "自托管健康检查和并发本地工作现在更可靠。",
+          "Hermes、Kimi 和 Pi 现在能更可靠地处理运行时失败。",
+          "购买报价和已归档收件箱计数现在能正确恢复。",
+        ],
+      },
       {
         version: "0.4.32",
         date: "2026-08-21",

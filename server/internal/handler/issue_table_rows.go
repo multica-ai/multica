@@ -479,9 +479,6 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 	for index, row := range scanned {
 		issueIDs[index] = row.issue.ID
 	}
-	if windowPolicy, enabled := baseHandler.issueWindowPolicy(r.Context(), compiled.workspaceID); enabled {
-		baseHandler.observeIssueWindow(r.Context(), compiled.workspaceID, windowPolicy, issueIDs, "table")
-	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
 	// One Resolver for the page — see newStatusCategoryFiller. (MUL-6243)
 	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID)

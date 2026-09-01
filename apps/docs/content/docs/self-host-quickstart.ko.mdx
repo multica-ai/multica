@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost`는 공개된 이미지를 pull하며 현재 checkout의 코드를 컴파일하지 않습니다. 로컬 소스 코드를 테스트하려면 `make selfhost-build`를 사용하세요.
+
+공개된 이미지는 최신 **release 태그**를 따르지만, 단순히 `git clone`하면 `main`이 체크아웃되며 보통 릴리스보다 앞서 있습니다. 이 checkout에서 무언가를 빌드할 때(CLI, 또는 `make selfhost-build`로 만드는 이미지)는 먼저 해당 release 태그로 전환해서 빌드 결과물과 실행 중인 컨테이너의 버전을 일치시키세요:
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. 서비스 준비 상태 확인
@@ -131,12 +138,49 @@ api.example.com {
 }
 ```
 
+모든 트래픽을 **단일 오리진**(하나의 도메인, 또는 호스트 하나에 포트 하나로, 소규모 서버에서 흔한 형태)으로 처리하려면, 데몬이 의존하는 경로를 backend로 명시적으로 전달하고 나머지는 frontend에 맡기세요:
+
+```text
+multica.example.com {
+    # CLI 도달 확인: `multica setup`이 <server-url>/health에 GET을 보내 200을 기대합니다.
+    # 구버전 frontend는 이 경로를 전달하지 않으므로 backend로 직접 라우팅합니다
+    handle /health {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 브라우저 realtime WebSocket — web 이미지는 WS 업그레이드를 proxy할 수 없어 backend로 직접
+    handle /ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 데몬 긴 연결: {server-url}/api/daemon/ws로 다이얼합니다(/ws가 아님).
+    # 이 라우트가 없으면 핸드셰이크가 실패하고 데몬은 조용히 폴링으로 폴백합니다
+    handle /api/daemon/ws {
+        reverse_proxy 127.0.0.1:8080 {
+            flush_interval -1
+        }
+    }
+
+    # 나머지 경로는 frontend로 전달하며 frontend가 API와 로그인 요청을 proxy
+    handle {
+        reverse_proxy 127.0.0.1:3000
+    }
+}
+```
+
+단일 오리진에서는 두 URL을 모두 그 오리진으로 지정합니다(`.env`의 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`, 그리고 `multica setup self-host`의 `--server-url`과 `--app-url`).
+
 Caddy가 TLS 인증서를 발급하고 WebSocket을 전달합니다. `.env`를 수정한 뒤 `up -d`로 컨테이너를 다시 만들어 새 설정을 적용합니다.
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
+
+마지막 명령은 `daemon_server_url`(데몬이 API에 연결할 때 쓰는 URL)을 출력합니다: `MULTICA_DAEMON_SERVER_URL`이 설정되어 있으면 그 값을, 그다음 `MULTICA_PUBLIC_URL`, 둘 다 미설정이면 앱 URL(`MULTICA_APP_URL`, 미설정이면 `FRONTEND_ORIGIN`으로 폴백)을 사용합니다. `MULTICA_APP_URL`과 `FRONTEND_ORIGIN` 둘 다 설정되어 있지 않으면 `MULTICA_DAEMON_SERVER_URL`이나 `MULTICA_PUBLIC_URL`이 설정되어 있어도 이 필드는 응답에서 통째로 생략됩니다(위의 grep은 아무것도 출력하지 않음). `localhost`가 출력되면 `.env`가 아직 로컬 기본값인 것입니다: `.env.example`에서 복사한 `${FRONTEND_PORT}` 참조에 의존하지 말고 `FRONTEND_ORIGIN`과 `MULTICA_APP_URL`을 공개 URL로 명시적으로 설정한 뒤 컨테이너를 다시 만드세요.
 
 <Callout type="warning">
 `docker compose restart`는 기존 컨테이너만 다시 시작하며 `.env`를 다시 읽지 않습니다. 설정을 수정한 뒤 `.env`를 다시 읽게 하려면 `docker compose -f docker-compose.selfhost.yml up -d`를 실행하세요.
@@ -201,7 +245,7 @@ multica setup self-host \
   --app-url https://app.example.com
 ```
 
-이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다.
+이 명령은 먼저 `<server-url>/health`를 확인한 뒤 브라우저를 열어 로그인을 완료합니다. 로그인 후 로컬 자격 증명을 저장하고 데몬을 시작합니다. 이 단계에서 `Server not reachable` 오류가 나면 `/health` 프로브가 200을 받지 못했다는 뜻입니다: 프록시가 모든 트래픽을 이 경로를 전달하지 않는 구버전 frontend로 보내고 있거나, 프록시가 `/health`를 backend로 라우팅하지 않거나, DNS·TLS·방화벽·타임아웃·backend의 5xx 같은 하위 계층의 문제일 수 있습니다. [문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)을 참고하세요.
 
 연결 상태를 확인합니다.
 
@@ -299,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration은 자동으로 실행됩니다
 
-[1단계](#1-프로젝트-받아오기-및-백엔드-시작하기)와 마찬가지로, 백엔드 컨테이너는 트래픽을 받기 전에 시작 시점에 `./migrate up`을 실행합니다(`docker/entrypoint.sh`). 별도의 업그레이드 명령은 없습니다 — 새 이미지를 띄우는 것 자체가 migration 단계입니다. 진행 상황을 보려면:
+[1단계](#1-multica-시작)와 마찬가지로, 백엔드 컨테이너는 트래픽을 받기 전에 시작 시점에 `./migrate up`을 실행합니다(`docker/entrypoint.sh`). 별도의 업그레이드 명령은 없습니다 — 새 이미지를 띄우는 것 자체가 migration 단계입니다. 진행 상황을 보려면:
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -334,7 +378,7 @@ Helm은 자체 업그레이드 경로가 있습니다. values 파일에서 `imag
 |---|---|
 | `/readyz`가 `ok`를 반환하지 않음 | `docker compose -f docker-compose.selfhost.yml logs backend postgres`를 실행합니다. |
 | 인증 코드를 받지 못함 | 인증 코드를 한 번 요청한 뒤 backend 로그에서 `Verification code`를 찾습니다. |
-| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. |
+| `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. 404가 반환되면 프록시가 `/health`를 이 경로를 전달하지 않는 구버전 web 릴리스로 보내고 있다는 뜻이니 backend로 직접 라우팅해야 합니다([문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)). |
 | 데몬의 `Agents`가 비어 있음 | AI 코딩 도구가 `PATH`에 있고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다. |
 | 이슈가 계속 큐에서 기다림 | `multica daemon status`를 실행해 데몬이 실행 중이며 워크스페이스에 연결되었는지 확인합니다. |
 

@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "description": "Create your first skill, import one from a URL or a local folder, or copy one from a connected runtime — and every agent in the workspace can use it."
     },
     "no_matches": {
       "title": "No matches",
@@ -36,7 +36,7 @@
     },
     "intro_banner": {
       "title": "Shared with your workspace.",
-      "body": "Anyone can create a skill, import one from a URL, or copy one from their local runtime — and every agent can use it.",
+      "body": "Anyone can create a skill, import one from a URL or a local folder, or copy one from their local runtime — and every agent can use it.",
       "highlight": "Local runtime skills stay private until you copy one here."
     },
     "list_error": {
@@ -248,28 +248,24 @@
     "method": {
       "chooser": {
         "title": "New skill",
-        "desc": "Choose how you want to add a skill to this workspace."
+        "desc": "Choose how to add a skill to this workspace."
       },
       "manual": {
         "title": "Create manually",
-        "desc": "Write a new SKILL.md from scratch."
+        "desc": "Start from a blank SKILL.md."
+      },
+      "local": {
+        "title": "Import from local",
+        "desc": "Pick a folder with SKILL.md, or a .skill / .zip archive."
       },
       "url": {
         "title": "Import from URL",
-        "desc": "Fetch a published skill by URL. Files are pulled server-side."
+        "desc": "Fetch a published skill by URL."
       },
       "runtime": {
         "title": "Copy from runtime",
-        "desc": "Scan a local runtime and promote one of its on-disk skills into this workspace."
+        "desc": "Promote a skill installed on your local runtime."
       }
-    },
-    "method_card": {
-      "manual_title": "Create manually",
-      "manual_desc": "Start from a blank SKILL.md and write your own instructions.",
-      "url_title": "Import from URL",
-      "url_desc": "Pull a published skill from ClawHub or Skills.sh.",
-      "runtime_title": "Copy from runtime",
-      "runtime_desc": "Promote a skill already installed on your local runtime."
     },
     "manual": {
       "name_label": "Name",
@@ -283,6 +279,24 @@
       "submit": "Create skill",
       "submitting": "Creating…",
       "toast_created": "Skill created"
+    },
+    "local": {
+      "choose_folder": "Choose folder",
+      "choose_archive": "Choose .skill / .zip",
+      "folder_label": "Folder",
+      "archive_label": "Archive",
+      "files_one": "{{count}} file",
+      "files_other": "{{count}} files",
+      "missing_skill_md": "This folder is not a skill — it has no SKILL.md.",
+      "too_large": "This skill is too large to import.",
+      "empty": "The folder is empty.",
+      "too_many_files": "This skill has too many files to import.",
+      "name_conflict_hint": " The imported skill's name already exists — delete the existing one before retrying.",
+      "fallback_error": "Import failed",
+      "cancel": "Cancel",
+      "import": "Import",
+      "importing": "Importing…",
+      "toast_imported": "Skill imported"
     },
     "url": {
       "url_label": "Skill URL",

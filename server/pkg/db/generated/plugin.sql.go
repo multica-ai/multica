@@ -67,6 +67,52 @@ func (q *Queries) CountRecentPluginInvocations(ctx context.Context, arg CountRec
 	return count, err
 }
 
+const createPluginHookSchedule = `-- name: CreatePluginHookSchedule :one
+INSERT INTO plugin_hook_schedule (
+    installation_id, workspace_id, hook_key, cron_expression, timezone,
+    next_run_at, enabled
+) VALUES ($1, $2, $3, $4, $5, $7, $6)
+RETURNING id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at
+`
+
+type CreatePluginHookScheduleParams struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	HookKey        string             `json:"hook_key"`
+	CronExpression string             `json:"cron_expression"`
+	Timezone       string             `json:"timezone"`
+	Enabled        bool               `json:"enabled"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+}
+
+func (q *Queries) CreatePluginHookSchedule(ctx context.Context, arg CreatePluginHookScheduleParams) (PluginHookSchedule, error) {
+	row := q.db.QueryRow(ctx, createPluginHookSchedule,
+		arg.InstallationID,
+		arg.WorkspaceID,
+		arg.HookKey,
+		arg.CronExpression,
+		arg.Timezone,
+		arg.Enabled,
+		arg.NextRunAt,
+	)
+	var i PluginHookSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.HookKey,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.Generation,
+		&i.ActivatedAt,
+		&i.NextRunAt,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createPluginInstallation = `-- name: CreatePluginInstallation :one
 INSERT INTO plugin_installation (
     workspace_id, plugin_key, package_version_id, version, manifest, granted_scopes, installed_by
@@ -117,21 +163,29 @@ func (q *Queries) CreatePluginInstallation(ctx context.Context, arg CreatePlugin
 
 const createPluginInvocation = `-- name: CreatePluginInvocation :one
 INSERT INTO plugin_invocation (
-    installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error
-) VALUES ($1, $2, $3, $4, $5, $8, $6, $7, $9)
-RETURNING id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at
+    id, installation_id, workspace_id, hook_key, trigger, status, event_type,
+    delivery_id, planned_at, attempt, latency_ms, error
+) VALUES (
+    COALESCE($8::uuid, gen_random_uuid()),
+    $1, $2, $3, $4, $5, $9, $10,
+    $11, $6, $7, $12
+)
+RETURNING id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at, delivery_id, planned_at
 `
 
 type CreatePluginInvocationParams struct {
-	InstallationID pgtype.UUID `json:"installation_id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	HookKey        string      `json:"hook_key"`
-	Trigger        string      `json:"trigger"`
-	Status         string      `json:"status"`
-	Attempt        int32       `json:"attempt"`
-	LatencyMs      int32       `json:"latency_ms"`
-	EventType      pgtype.Text `json:"event_type"`
-	Error          pgtype.Text `json:"error"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	HookKey        string             `json:"hook_key"`
+	Trigger        string             `json:"trigger"`
+	Status         string             `json:"status"`
+	Attempt        int32              `json:"attempt"`
+	LatencyMs      int32              `json:"latency_ms"`
+	ID             pgtype.UUID        `json:"id"`
+	EventType      pgtype.Text        `json:"event_type"`
+	DeliveryID     pgtype.Text        `json:"delivery_id"`
+	PlannedAt      pgtype.Timestamptz `json:"planned_at"`
+	Error          pgtype.Text        `json:"error"`
 }
 
 func (q *Queries) CreatePluginInvocation(ctx context.Context, arg CreatePluginInvocationParams) (PluginInvocation, error) {
@@ -143,7 +197,10 @@ func (q *Queries) CreatePluginInvocation(ctx context.Context, arg CreatePluginIn
 		arg.Status,
 		arg.Attempt,
 		arg.LatencyMs,
+		arg.ID,
 		arg.EventType,
+		arg.DeliveryID,
+		arg.PlannedAt,
 		arg.Error,
 	)
 	var i PluginInvocation
@@ -159,6 +216,8 @@ func (q *Queries) CreatePluginInvocation(ctx context.Context, arg CreatePluginIn
 		&i.LatencyMs,
 		&i.Error,
 		&i.CreatedAt,
+		&i.DeliveryID,
+		&i.PlannedAt,
 	)
 	return i, err
 }
@@ -276,6 +335,24 @@ func (q *Queries) DeleteExpiredPluginInvocations(ctx context.Context, createdAt 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deletePluginHookSchedule = `-- name: DeletePluginHookSchedule :exec
+DELETE FROM plugin_hook_schedule WHERE id = $1
+`
+
+func (q *Queries) DeletePluginHookSchedule(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePluginHookSchedule, id)
+	return err
+}
+
+const deletePluginHookSchedulesByInstallation = `-- name: DeletePluginHookSchedulesByInstallation :exec
+DELETE FROM plugin_hook_schedule WHERE installation_id = $1
+`
+
+func (q *Queries) DeletePluginHookSchedulesByInstallation(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePluginHookSchedulesByInstallation, installationID)
+	return err
 }
 
 const deletePluginInstallation = `-- name: DeletePluginInstallation :exec
@@ -408,6 +485,41 @@ func (q *Queries) DeletePluginStorageValue(ctx context.Context, arg DeletePlugin
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const disablePluginHookSchedules = `-- name: DisablePluginHookSchedules :exec
+UPDATE plugin_hook_schedule
+SET enabled = FALSE, next_run_at = NULL, updated_at = now()
+WHERE installation_id = $1
+`
+
+func (q *Queries) DisablePluginHookSchedules(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, disablePluginHookSchedules, installationID)
+	return err
+}
+
+const getPluginHookSchedule = `-- name: GetPluginHookSchedule :one
+SELECT id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at FROM plugin_hook_schedule WHERE id = $1
+`
+
+func (q *Queries) GetPluginHookSchedule(ctx context.Context, id pgtype.UUID) (PluginHookSchedule, error) {
+	row := q.db.QueryRow(ctx, getPluginHookSchedule, id)
+	var i PluginHookSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.HookKey,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.Generation,
+		&i.ActivatedAt,
+		&i.NextRunAt,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getPluginInstallation = `-- name: GetPluginInstallation :one
@@ -725,8 +837,88 @@ func (q *Queries) GetWorkspacePluginPackageVersion(ctx context.Context, arg GetW
 	return i, err
 }
 
+const listEnabledPluginHookSchedules = `-- name: ListEnabledPluginHookSchedules :many
+SELECT id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at FROM plugin_hook_schedule
+WHERE enabled
+ORDER BY id ASC
+`
+
+// Do not filter by next_run_at: it is display-only, while retries and recovery
+// derive eligibility from cron + activated_at + sys_cron_executions.
+func (q *Queries) ListEnabledPluginHookSchedules(ctx context.Context) ([]PluginHookSchedule, error) {
+	rows, err := q.db.Query(ctx, listEnabledPluginHookSchedules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PluginHookSchedule{}
+	for rows.Next() {
+		var i PluginHookSchedule
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstallationID,
+			&i.WorkspaceID,
+			&i.HookKey,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.Generation,
+			&i.ActivatedAt,
+			&i.NextRunAt,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPluginHookSchedulesByInstallation = `-- name: ListPluginHookSchedulesByInstallation :many
+SELECT id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at FROM plugin_hook_schedule
+WHERE installation_id = $1
+ORDER BY hook_key ASC
+`
+
+func (q *Queries) ListPluginHookSchedulesByInstallation(ctx context.Context, installationID pgtype.UUID) ([]PluginHookSchedule, error) {
+	rows, err := q.db.Query(ctx, listPluginHookSchedulesByInstallation, installationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PluginHookSchedule{}
+	for rows.Next() {
+		var i PluginHookSchedule
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstallationID,
+			&i.WorkspaceID,
+			&i.HookKey,
+			&i.CronExpression,
+			&i.Timezone,
+			&i.Generation,
+			&i.ActivatedAt,
+			&i.NextRunAt,
+			&i.Enabled,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPluginInvocations = `-- name: ListPluginInvocations :many
-SELECT id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at FROM plugin_invocation
+SELECT id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at, delivery_id, planned_at FROM plugin_invocation
 WHERE installation_id = $1
 ORDER BY created_at DESC
 LIMIT $2
@@ -758,6 +950,8 @@ func (q *Queries) ListPluginInvocations(ctx context.Context, arg ListPluginInvoc
 			&i.LatencyMs,
 			&i.Error,
 			&i.CreatedAt,
+			&i.DeliveryID,
+			&i.PlannedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1041,6 +1235,45 @@ func (q *Queries) LockPluginPackageKey(ctx context.Context, dollar_1 string) err
 	return err
 }
 
+const reactivatePluginHookSchedule = `-- name: ReactivatePluginHookSchedule :one
+UPDATE plugin_hook_schedule
+SET enabled = TRUE,
+    generation = gen_random_uuid(),
+    activated_at = now(),
+    next_run_at = $2,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at
+`
+
+type ReactivatePluginHookScheduleParams struct {
+	ID        pgtype.UUID        `json:"id"`
+	NextRunAt pgtype.Timestamptz `json:"next_run_at"`
+}
+
+// Re-enable starts a new epoch so occurrences while the installation was off
+// are never caught up. An already-sent request from the old generation may
+// finish, but no unstarted old plan survives the generation check.
+func (q *Queries) ReactivatePluginHookSchedule(ctx context.Context, arg ReactivatePluginHookScheduleParams) (PluginHookSchedule, error) {
+	row := q.db.QueryRow(ctx, reactivatePluginHookSchedule, arg.ID, arg.NextRunAt)
+	var i PluginHookSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.HookKey,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.Generation,
+		&i.ActivatedAt,
+		&i.NextRunAt,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const setPluginInstallationEnabled = `-- name: SetPluginInstallationEnabled :one
 UPDATE plugin_installation
 SET enabled = $2,
@@ -1126,6 +1359,75 @@ func (q *Queries) SetPluginMCPApprovals(ctx context.Context, arg SetPluginMCPApp
 		&i.PackageVersionID,
 	)
 	return i, err
+}
+
+const updatePluginHookScheduleDefinition = `-- name: UpdatePluginHookScheduleDefinition :one
+UPDATE plugin_hook_schedule
+SET cron_expression = $2,
+    timezone = $3,
+    generation = gen_random_uuid(),
+    activated_at = now(),
+    next_run_at = $5,
+    enabled = $4,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, installation_id, workspace_id, hook_key, cron_expression, timezone, generation, activated_at, next_run_at, enabled, created_at, updated_at
+`
+
+type UpdatePluginHookScheduleDefinitionParams struct {
+	ID             pgtype.UUID        `json:"id"`
+	CronExpression string             `json:"cron_expression"`
+	Timezone       string             `json:"timezone"`
+	Enabled        bool               `json:"enabled"`
+	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
+}
+
+// A cron/timezone change creates a new scheduler generation. The old
+// sys_cron_executions rows remain immutable history under the prior scope id.
+func (q *Queries) UpdatePluginHookScheduleDefinition(ctx context.Context, arg UpdatePluginHookScheduleDefinitionParams) (PluginHookSchedule, error) {
+	row := q.db.QueryRow(ctx, updatePluginHookScheduleDefinition,
+		arg.ID,
+		arg.CronExpression,
+		arg.Timezone,
+		arg.Enabled,
+		arg.NextRunAt,
+	)
+	var i PluginHookSchedule
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.HookKey,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.Generation,
+		&i.ActivatedAt,
+		&i.NextRunAt,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updatePluginHookScheduleNextRun = `-- name: UpdatePluginHookScheduleNextRun :execrows
+UPDATE plugin_hook_schedule
+SET next_run_at = $3, updated_at = now()
+WHERE id = $1 AND generation = $2 AND enabled
+`
+
+type UpdatePluginHookScheduleNextRunParams struct {
+	ID         pgtype.UUID        `json:"id"`
+	Generation pgtype.UUID        `json:"generation"`
+	NextRunAt  pgtype.Timestamptz `json:"next_run_at"`
+}
+
+func (q *Queries) UpdatePluginHookScheduleNextRun(ctx context.Context, arg UpdatePluginHookScheduleNextRunParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updatePluginHookScheduleNextRun, arg.ID, arg.Generation, arg.NextRunAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updatePluginInstallationConfig = `-- name: UpdatePluginInstallationConfig :one

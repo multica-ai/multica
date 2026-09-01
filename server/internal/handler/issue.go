@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,10 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -46,15 +47,29 @@ type IssueResponse struct {
 	// category for a custom status. Omitted when the endpoint does not resolve
 	// it, so consumers must fall back to Status rather than assume a blank
 	// value means "no category". (MUL-6243)
-	StatusCategory string  `json:"status_category,omitempty"`
-	Priority       string  `json:"priority"`
-	AssigneeType   *string `json:"assignee_type"`
-	AssigneeID     *string `json:"assignee_id"`
-	CreatorType    string  `json:"creator_type"`
-	CreatorID      string  `json:"creator_id"`
-	ParentIssueID  *string `json:"parent_issue_id"`
-	ProjectID      *string `json:"project_id"`
-	Position       float64 `json:"position"`
+	StatusCategory string `json:"status_category,omitempty"`
+	// StatusName is a CUSTOM status's display name, carried beside the key so a
+	// consumer that only ever sees `status` is not left holding a bare handle.
+	// A key derived from a non-Latin name is opaque by construction
+	// (`in_review_2`), and an agent reading an issue has nothing else to match
+	// against the status a human named for it.
+	//
+	// Always emitted, unlike StatusCategory. Empty is a MEANING here — "this is
+	// a built-in, localize it from the key" — not the "this endpoint did not
+	// resolve it" that an absent status_category signals. Keeping the key
+	// present is also what lets TestIssueToMap_KeysMatchIssueResponse see the
+	// field at all: with omitempty a built-in fixture hides it from BOTH
+	// renderings, and the drift guard goes green on a payload that has drifted.
+	// (MUL-6749)
+	StatusName    string  `json:"status_name"`
+	Priority      string  `json:"priority"`
+	AssigneeType  *string `json:"assignee_type"`
+	AssigneeID    *string `json:"assignee_id"`
+	CreatorType   string  `json:"creator_type"`
+	CreatorID     string  `json:"creator_id"`
+	ParentIssueID *string `json:"parent_issue_id"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
 	// Stage groups sub-issues under the same parent into ordered barrier
 	// groups (null = unstaged). See issue_child_done.go for how a closed
 	// stage gates the child-done -> parent wake.
@@ -83,6 +98,9 @@ type IssueResponse struct {
 	// preserves whatever labels are already in cache. nil pointer = "field
 	// absent, do not touch"; non-nil (incl. empty slice) = authoritative list.
 	Labels *[]LabelResponse `json:"labels,omitempty"`
+	// SourceContext is detail-only. List, board, search, and children responses
+	// deliberately omit the potentially large immutable snapshot.
+	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
 }
 
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
@@ -126,7 +144,10 @@ func (h *Handler) resolveIssueStatusKeyKind(w http.ResponseWriter, r *http.Reque
 	entry, err := issuestatus.Resolve(r.Context(), h.Queries, workspaceID, status)
 	if err != nil {
 		if errors.Is(err, issuestatus.ErrUnknownStatus) {
-			allowed, listErr := issuestatus.ActiveKeys(r.Context(), h.Queries, workspaceID)
+			// Labels, not bare keys: a derived key says nothing about what the
+			// status means, so listing `in_review_2` alone leaves the caller no
+			// way to find the one they were told to use. (MUL-6749)
+			allowed, listErr := issuestatus.ActiveKeyLabels(r.Context(), h.Queries, workspaceID)
 			if listErr != nil || len(allowed) == 0 {
 				allowed = issuestatus.Canonical()
 			}
@@ -257,6 +278,9 @@ func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID)
 			return
 		}
 		resp.StatusCategory = resolver.Effective(ctx, h.Queries, resp.Status)
+		// Same Resolver, same single catalog read, so the name rides along for
+		// free. Built-ins return "" and stay omitted. (MUL-6749)
+		resp.StatusName = resolver.Name(ctx, h.Queries, resp.Status)
 	}
 }
 
@@ -596,7 +620,7 @@ type searchResult struct {
 // It uses LOWER(column) LIKE for case-insensitive matching compatible with pg_bigm 1.2 GIN indexes.
 // Search patterns are lowercased in Go to avoid redundant LOWER() on the pattern side in SQL.
 // LIKE patterns are pre-built in Go (e.g. "%html%") so pg_bigm can extract bigrams from a single parameter value.
-func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, creationWindowLimit *int64) (string, []any) {
+func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
 	// Lowercase in Go so SQL only needs LOWER() on the column side.
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
@@ -678,11 +702,10 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
 
 	if !includeClosed {
-		whereClause += " AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')"
-	}
-	if creationWindowLimit != nil {
-		limitRef := nextArg(*creationWindowLimit)
-		whereClause = issueWindowPredicate("i", wsParam, limitRef) + " AND " + whereClause
+		// Negate only known terminal keys so an unknown legacy key remains
+		// searchable instead of disappearing from the default result set.
+		terminalStatusesParam := nextArg(terminalStatusKeys)
+		whereClause += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
 
 	// --- ORDER BY clause ---
@@ -893,13 +916,18 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	terms := splitSearchTerms(q)
 	queryNum, hasNum := parseQueryNumber(q)
-	policy, windowEnabled := h.issueWindowPolicy(ctx, wsUUID)
-
-	var creationWindowLimit *int64
-	if windowEnabled && policy.action == entitlement.ActionEnforce {
-		creationWindowLimit = &policy.limit
+	var terminalStatusKeys []string
+	if !includeClosed {
+		resolvedKeys, err := h.terminalIssueStatusKeys(ctx, wsUUID)
+		if err != nil {
+			slog.Warn("expand terminal status categories failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+			return
+		}
+		terminalStatusKeys = resolvedKeys
 	}
-	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, creationWindowLimit)
+
+	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
 	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
 	args[3] = wsUUID
 	args[len(args)-2] = limit
@@ -965,13 +993,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	if len(results) > 0 {
 		total = results[0].totalCount
 	}
-	resultIDs := make([]pgtype.UUID, len(results))
-	for i, result := range results {
-		resultIDs[i] = result.issue.ID
-	}
-	if windowEnabled {
-		h.observeIssueWindow(ctx, wsUUID, policy, resultIDs, "search")
-	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID)
@@ -1036,7 +1057,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	windowPolicy, windowEnabled := h.issueWindowPolicy(ctx, wsUUID)
 
 	// Parse optional filter params. Malformed UUIDs in filters return 400 —
 	// silently coercing them to a zero UUID would mask a client bug and let
@@ -1121,40 +1141,26 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			openPropertiesFilter = marshaled
 		}
+		terminalStatusKeys, err := h.terminalIssueStatusKeys(ctx, wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+			return
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:      wsUUID,
-			Priority:         priorityFilter,
-			AssigneeID:       assigneeFilter,
-			AssigneeIds:      assigneeIdsFilter,
-			CreatorID:        creatorFilter,
-			ProjectID:        projectFilter,
-			InvolvesUserID:   involvesUserFilter,
-			MetadataFilter:   metadataFilter,
-			PropertiesFilter: openPropertiesFilter,
+			WorkspaceID:        wsUUID,
+			TerminalStatusKeys: terminalStatusKeys,
+			Priority:           priorityFilter,
+			AssigneeID:         assigneeFilter,
+			AssigneeIds:        assigneeIdsFilter,
+			CreatorID:          creatorFilter,
+			ProjectID:          projectFilter,
+			InvolvesUserID:     involvesUserFilter,
+			MetadataFilter:     metadataFilter,
+			PropertiesFilter:   openPropertiesFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
 			return
-		}
-		openIDs := make([]pgtype.UUID, len(issues))
-		for i, issue := range issues {
-			openIDs[i] = issue.ID
-		}
-		if windowEnabled && windowPolicy.action == entitlement.ActionEnforce {
-			visible, visibleErr := h.visibleIssueIDSet(ctx, wsUUID, windowPolicy, openIDs)
-			if visibleErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed to list issues")
-				return
-			}
-			filtered := issues[:0]
-			for _, issue := range issues {
-				if _, ok := visible[issue.ID]; ok {
-					filtered = append(filtered, issue)
-				}
-			}
-			issues = filtered
-		} else if windowEnabled {
-			h.observeIssueWindow(ctx, wsUUID, windowPolicy, openIDs, "list")
 		}
 
 		prefix := h.getIssuePrefix(ctx, wsUUID)
@@ -1467,9 +1473,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
     ))
 )`, ref))
 	}
-	if windowEnabled {
-		where = appendIssueWindow(where, addArg, windowPolicy, "$1", "i")
-	}
 
 	whereSql := strings.Join(where, " AND ")
 
@@ -1566,9 +1569,6 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	ids := make([]pgtype.UUID, len(issues))
 	for i, issue := range issues {
 		ids[i] = issue.ID
-	}
-	if windowEnabled {
-		h.observeIssueWindow(ctx, wsUUID, windowPolicy, ids, "list")
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
@@ -1764,7 +1764,6 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	windowPolicy, windowEnabled := h.issueWindowPolicy(ctx, wsUUID)
 
 	limit := 50
 	offset := 0
@@ -2011,9 +2010,6 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			))
 		}
 	}
-	if windowEnabled {
-		where = appendIssueWindow(where, addArg, windowPolicy, "$1", "i")
-	}
 
 	sortCol := "position"
 	sortIsExpr := false
@@ -2177,9 +2173,6 @@ ORDER BY
 	for i, row := range groupedRows {
 		ids[i] = row.ID
 	}
-	if windowEnabled {
-		h.observeIssueWindow(ctx, wsUUID, windowPolicy, ids, "grouped")
-	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	// One Resolver for the whole page — a per-row filler would query the
@@ -2253,6 +2246,17 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if sourceContext, err := h.issueSourceContextDetail(r.Context(), issue); err == nil {
+		resp.SourceContext = sourceContext
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("load issue source context failed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "error", err)...)
+		// The frozen context is part of the issue's execution contract, not an
+		// optional decoration. Returning a successful detail response without it
+		// would let agents run with silently incomplete instructions.
+		writeError(w, http.StatusInternalServerError, "failed to load issue source context")
+		return
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2266,27 +2270,6 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
-	}
-	windowPolicy, windowEnabled := h.issueWindowPolicy(r.Context(), issue.WorkspaceID)
-	childIDs := make([]pgtype.UUID, len(children))
-	for i, child := range children {
-		childIDs[i] = child.ID
-	}
-	if windowEnabled && windowPolicy.action == entitlement.ActionEnforce {
-		visible, visibleErr := h.visibleIssueIDSet(r.Context(), issue.WorkspaceID, windowPolicy, childIDs)
-		if visibleErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list child issues")
-			return
-		}
-		filtered := children[:0]
-		for _, child := range children {
-			if _, ok := visible[child.ID]; ok {
-				filtered = append(filtered, child)
-			}
-		}
-		children = filtered
-	} else if windowEnabled {
-		h.observeIssueWindow(r.Context(), issue.WorkspaceID, windowPolicy, childIDs, "children")
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	ids := make([]pgtype.UUID, len(children))
@@ -2374,27 +2357,6 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
 	}
-	windowPolicy, windowEnabled := h.issueWindowPolicy(r.Context(), wsUUID)
-	childIDs := make([]pgtype.UUID, len(children))
-	for i, child := range children {
-		childIDs[i] = child.ID
-	}
-	if windowEnabled && windowPolicy.action == entitlement.ActionEnforce {
-		visible, visibleErr := h.visibleIssueIDSet(r.Context(), wsUUID, windowPolicy, childIDs)
-		if visibleErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to list child issues")
-			return
-		}
-		filtered := children[:0]
-		for _, child := range children {
-			if _, ok := visible[child.ID]; ok {
-				filtered = append(filtered, child)
-			}
-		}
-		children = filtered
-	} else if windowEnabled {
-		h.observeIssueWindow(r.Context(), wsUUID, windowPolicy, childIDs, "children")
-	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
@@ -2429,66 +2391,31 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	terminalStatusKeys, err := h.terminalIssueStatusKeys(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve status categories")
+		return
+	}
+	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
+		WorkspaceID:        wsUUID,
+		TerminalStatusKeys: terminalStatusKeys,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
+		return
+	}
+
 	type progressEntry struct {
 		ParentIssueID string `json:"parent_issue_id"`
 		Total         int64  `json:"total"`
 		Done          int64  `json:"done"`
-		VisibleTotal  int64  `json:"visible_total"`
-		VisibleDone   int64  `json:"visible_done"`
-		HiddenTotal   int64  `json:"hidden_total"`
 	}
-	policy, windowEnabled := h.issueWindowPolicy(r.Context(), wsUUID)
-	resp := []progressEntry{}
-	if windowEnabled && policy.action == entitlement.ActionEnforce {
-		query := fmt.Sprintf(`WITH visible_issue_ids AS MATERIALIZED (
-			%s
-		)
-		SELECT i.parent_issue_id,
-			COUNT(*)::bigint AS total,
-			COUNT(*) FILTER (WHERE issue_effective_status(i.workspace_id, i.status) IN ('done', 'cancelled'))::bigint AS done,
-			COUNT(child_visible.id)::bigint AS visible_total,
-			COUNT(child_visible.id) FILTER (WHERE issue_effective_status(i.workspace_id, i.status) IN ('done', 'cancelled'))::bigint AS visible_done
-		FROM issue i
-		JOIN visible_issue_ids parent_visible ON parent_visible.id = i.parent_issue_id
-		LEFT JOIN visible_issue_ids child_visible ON child_visible.id = i.id
-		WHERE i.workspace_id = $1
-		  AND i.parent_issue_id IS NOT NULL
-		GROUP BY i.parent_issue_id`, issueWindowVisibleSetSQL("$1", "$2"))
-		rows, err := h.DB.Query(r.Context(), query, wsUUID, policy.limit)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
-			return
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var parentID pgtype.UUID
-			var entry progressEntry
-			if err := rows.Scan(&parentID, &entry.Total, &entry.Done, &entry.VisibleTotal, &entry.VisibleDone); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
-				return
-			}
-			entry.ParentIssueID = uuidToString(parentID)
-			entry.HiddenTotal = entry.Total - entry.VisibleTotal
-			resp = append(resp, entry)
-		}
-		if err := rows.Err(); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
-			return
-		}
-	} else {
-		rows, err := h.Queries.ChildIssueProgress(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
-			return
-		}
-		for _, row := range rows {
-			resp = append(resp, progressEntry{
-				ParentIssueID: uuidToString(row.ParentIssueID),
-				Total:         row.Total,
-				Done:          row.Done,
-				VisibleTotal:  row.Total,
-				VisibleDone:   row.Done,
-			})
+	resp := make([]progressEntry, len(rows))
+	for i, row := range rows {
+		resp[i] = progressEntry{
+			ParentIssueID: uuidToString(row.ParentIssueID),
+			Total:         row.Total,
+			Done:          row.Done,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -2630,6 +2557,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		r.Context(), r, workspaceID,
 		pgtype.Text{String: "agent", Valid: true},
 		agentUUID,
+		scopeNoDelegation(),
 	); status != 0 {
 		writeError(w, status, msg)
 		return
@@ -2650,7 +2578,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
 	// as "runtime is offline" and sends the user to reconnect a machine that is
 	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.Queries, agent); err != nil {
+	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
 		return
 	} else if !verdict.Ready() {
@@ -2667,13 +2595,13 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	// twenty seconds later. Dev-built
 	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
 	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), agent.RuntimeID); status != 0 {
+	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID); status != 0 {
 		writeJSON(w, status, payload)
 		return
 	}
 	if priority != "" || dueDate != "" {
 		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
 		); status != 0 {
 			writeJSON(w, status, payload)
 			return
@@ -2728,6 +2656,9 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
 	if err != nil {
+		if writeIssueLimitReached(w, err) {
+			return
+		}
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
 		return
@@ -2757,7 +2688,7 @@ func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode disp
 // agent's runtime is offline so the user gets immediate feedback in the
 // modal instead of an inbox failure twenty seconds later.
 func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bool {
-	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
+	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, runtimeID)
 	if err != nil {
 		return false
 	}
@@ -2778,12 +2709,12 @@ func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bo
 //	  "min_version":     "0.2.21",
 //	  "runtime_id":      "<uuid>"
 //	}
-func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
-	return h.checkQuickCreateDaemonVersionAtLeast(ctx, runtimeID, agentpkg.MinQuickCreateCLIVersion)
+func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, source string, runtimeID pgtype.UUID) (int, map[string]any) {
+	return h.checkQuickCreateDaemonVersionAtLeast(ctx, source, runtimeID, agentpkg.MinQuickCreateCLIVersion)
 }
 
-func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
-	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
+func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, source string, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
+	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
 	if err != nil {
 		// Runtime row vanished between the online check and here — treat
 		// as unavailable rather than wedging the request on a 500.
@@ -2922,13 +2853,43 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		assigneeID = id
 	}
 
-	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+	var parentIssueID pgtype.UUID
+	var projectID pgtype.UUID
+	var parentIssue *db.Issue
+	if req.ParentIssueID != nil {
+		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
+		if !ok {
+			return
+		}
+		parentIssueID = id
+		if assigneeType.Valid && (assigneeType.String == "agent" || assigneeType.String == "squad") {
+			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          parentIssueID,
+				WorkspaceID: wsUUID,
+			})
+			if err != nil || !parent.ID.Valid {
+				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+				return
+			}
+			parentIssue = &parent
+		}
+	}
+
+	// An agent/squad assignee on a PARENTLESS create has no issue to bind an
+	// autopilot authority to, so the scope names the create itself: only a
+	// verified, still-running run_only autopilot task may borrow there
+	// (MUL-6691 — the reported flow, where the leader creates DRA-109/DRA-110
+	// from scratch rather than under an autopilot-created issue).
+	assignScope := scopeChildOf(parentIssue)
+	if req.ParentIssueID == nil {
+		assignScope = scopeNewTopLevelIssue()
+	}
+
+	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID, assignScope); status != 0 {
 		writeError(w, status, msg)
 		return
 	}
 
-	var parentIssueID pgtype.UUID
-	var projectID pgtype.UUID
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -2936,17 +2897,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
-	if req.ParentIssueID != nil {
-		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
-		if !ok {
-			return
-		}
-		parentIssueID = id
-	}
-	// Cross-workspace parent / project existence is enforced inside
-	// IssueService.Create (atomically with the create), so every entry
-	// point — HTTP, Lark, future MCP — gets the same boundary check
-	// without duplicating the lookup here.
+	// Project existence and the final parent boundary check are enforced inside
+	// IssueService.Create atomically with the create. The handler preloads a
+	// supplied parent only because the assignee gate must bind any autopilot
+	// authority fallback to that server-verified issue before admission.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -3133,6 +3087,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, service.ErrIssueStatusUnavailable) {
 		writeError(w, http.StatusConflict,
 			"the target status was archived while this request was in flight; reload the status list and retry")
+		return
+	}
+	if writeIssueLimitReached(w, err) {
 		return
 	}
 	if err != nil {
@@ -3569,10 +3526,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
 	// caller is not changing it.
+	//
+	// The scope is THIS issue: an unattributed autopilot run that verifiably owns
+	// the work on it may point it at a private agent, exactly as it may when
+	// creating a child under it. Before MUL-6691 this passed nil, so the reported
+	// flow — create DRA-109 unassigned, then assign it — was refused even though
+	// the identical lineage was accepted on the create path.
 	_, touchedType := rawFields["assignee_type"]
 	_, touchedID := rawFields["assignee_id"]
 	if touchedType || touchedID {
-		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status != 0 {
 			writeError(w, status, msg)
 			return
 		}
@@ -3726,11 +3689,16 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // That means owner-only for a private agent, with NO workspace-admin bypass
 // and NO unconditional agent-to-agent bypass — an agent caller (X-Agent-ID) is
 // judged by the top-of-chain human originator like everywhere else.
+// scope names the work the assignment belongs to. An unattributed autopilot
+// run may borrow an autopilot authority only within it — the parent issue for
+// child creation, the issue itself for an update, or the run's own verified
+// autopilot when creating a parentless issue (MUL-4857, MUL-6691). It never
+// changes the new issue's or task's attribution.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
 // to the client.
-func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID) (int, string) {
+func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, scope assignAuthorityScope) (int, string) {
 	// Both unset → unassigned issue, valid.
 	if !assigneeType.Valid && !assigneeID.Valid {
 		return 0, ""
@@ -3764,7 +3732,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canInvokeAgent(ctx, agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		effectiveInvoker := h.effectiveInvocationAuthorityFromRequest(r, scope, actorType, actorID, workspaceID)
+		if !h.canInvokeAgent(ctx, agent, actorType, actorID, effectiveInvoker, workspaceID) {
 			// Names the missing permission, not the target's configuration: the
 			// old "private agent" wording both disclosed the agent's permission
 			// mode and was simply wrong for a `public_to` agent scoped to
@@ -3792,7 +3761,8 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		if !h.canInvokeAgent(ctx, leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		effectiveInvoker := h.effectiveInvocationAuthorityFromRequest(r, scope, actorType, actorID, workspaceID)
+		if !h.canInvokeAgent(ctx, leader, actorType, actorID, effectiveInvoker, workspaceID) {
 			// Same wording rule as the agent branch above; "this squad"
 			// avoids disclosing the leader agent's permission mode.
 			return http.StatusForbidden, "you do not have permission to assign work to this squad"
@@ -3902,7 +3872,7 @@ func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool
 	// The shared verdict, not a local re-check (service.AgentReadiness). Only a
 	// BLOCKED verdict stops the enqueue: an offline machine still queues,
 	// because that work runs when the machine comes back.
-	verdict, err := service.AgentReadiness(ctx, h.Queries, agent)
+	verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
 	if err != nil || !verdict.Blocked() {
 		return err == nil
 	}
@@ -3927,13 +3897,13 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
 	_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
-	attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
+	deleteResult, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue, nil)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
 	}
 
-	h.deleteS3Objects(r.Context(), attachmentURLs)
+	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	// Always emit the resolved UUID — frontend caches key by UUID, so an
@@ -3941,6 +3911,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// other clients after an identifier-path delete.
 	resolvedID := uuidToString(issue.ID)
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
+	h.publishDetachedChildren(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3950,34 +3921,98 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 // FOR KEY SHARE, and URL collection happens only after that lock is held:
 // bind-first means the new URL is collected; delete-first means the bind rolls
 // back without consuming its durable object intent.
-func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue) ([]string, error) {
+type issueDeleteResult struct {
+	AttachmentURLs   []string
+	DetachedChildren []db.Issue
+}
+
+func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue, excludedIssueIDs []pgtype.UUID) (issueDeleteResult, error) {
+	return h.deleteIssuesAndCollectAttachmentURLs(ctx, []db.Issue{issue}, excludedIssueIDs)
+}
+
+func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issues []db.Issue, excludedIssueIDs []pgtype.UUID) (issueDeleteResult, error) {
+	sort.Slice(issues, func(i, j int) bool {
+		return uuidToString(issues[i].ID) < uuidToString(issues[j].ID)
+	})
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("begin issue delete: %w", err)
+		return issueDeleteResult{}, fmt.Errorf("begin issue delete: %w", err)
 	}
 	defer tx.Rollback(ctx)
 	qtx := h.Queries.WithTx(tx)
 
-	if _, err := qtx.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
-		return nil, fmt.Errorf("lock issue for delete: %w", err)
-	}
-	attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
-	if err != nil {
-		return nil, fmt.Errorf("list issue attachment URLs: %w", err)
-	}
-	if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
-		return nil, fmt.Errorf("delete issue: %w", err)
+	result := issueDeleteResult{}
+	for _, issue := range issues {
+		if _, err := qtx.LockIssueForDelete(ctx, db.LockIssueForDeleteParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("lock issue for delete: %w", err)
+		}
+		detached, err := qtx.DetachDirectChildIssues(ctx, db.DetachDirectChildIssuesParams{
+			WorkspaceID: issue.WorkspaceID, ParentIssueID: issue.ID, ExcludedIssueIds: excludedIssueIDs,
+		})
+		if err != nil {
+			return issueDeleteResult{}, fmt.Errorf("detach child issues: %w", err)
+		}
+		result.DetachedChildren = append(result.DetachedChildren, detached...)
+		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
+		if err != nil {
+			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
+		}
+		result.AttachmentURLs = append(result.AttachmentURLs, attachmentURLs...)
+		if sourceContext, contextErr := qtx.GetIssueSourceContextByIssue(ctx, db.GetIssueSourceContextByIssueParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID}); contextErr == nil {
+			contextAttachments, listErr := qtx.ListAttachmentsBySourceContext(ctx, db.ListAttachmentsBySourceContextParams{
+				WorkspaceID: issue.WorkspaceID, SourceContextID: sourceContext.ID,
+			})
+			if listErr != nil {
+				return issueDeleteResult{}, fmt.Errorf("list source context attachments: %w", listErr)
+			}
+			// The storage interface's legacy bulk delete has no result channel. Keep
+			// durable object intents before removing DB ownership so the periodic
+			// reconciler retries any ambiguous or failed best-effort delete.
+			if h.Storage != nil {
+				for _, clone := range contextAttachments {
+					storageKey := h.Storage.KeyFromURL(clone.Url)
+					if storageKey == "" {
+						continue
+					}
+					if _, intentErr := qtx.RecordSourceContextDeletionObjectIntent(ctx, db.RecordSourceContextDeletionObjectIntentParams{
+						StorageKey: storageKey, WorkspaceID: issue.WorkspaceID, SourceContextID: sourceContext.ID,
+						AttachmentID: clone.ID, ObjectUrl: clone.Url,
+					}); intentErr != nil {
+						return issueDeleteResult{}, fmt.Errorf("record source context delete intent: %w", intentErr)
+					}
+				}
+			}
+			clones, cloneErr := qtx.DeleteAttachmentsBySourceContext(ctx, db.DeleteAttachmentsBySourceContextParams{WorkspaceID: issue.WorkspaceID, SourceContextID: sourceContext.ID})
+			if cloneErr != nil {
+				return issueDeleteResult{}, fmt.Errorf("delete source context attachments: %w", cloneErr)
+			}
+			for _, clone := range clones {
+				result.AttachmentURLs = append(result.AttachmentURLs, clone.Url)
+			}
+			if _, contextErr = qtx.DeleteIssueSourceContextByIssue(ctx, db.DeleteIssueSourceContextByIssueParams{WorkspaceID: issue.WorkspaceID, IssueID: issue.ID}); contextErr != nil {
+				return issueDeleteResult{}, fmt.Errorf("delete issue source context: %w", contextErr)
+			}
+		} else if !errors.Is(contextErr, pgx.ErrNoRows) {
+			return issueDeleteResult{}, fmt.Errorf("load issue source context for delete: %w", contextErr)
+		}
+		if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("delete issue: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit issue delete: %w", err)
+		return issueDeleteResult{}, fmt.Errorf("commit issue delete: %w", err)
 	}
-	return attachmentURLs, nil
+	return result, nil
+}
+
+func (h *Handler) publishDetachedChildren(ctx context.Context, children []db.Issue, actorType, actorID string) {
+	for _, child := range children {
+		response := issueToResponse(child, h.getIssuePrefix(ctx, child.WorkspaceID))
+		h.fillStatusCategory(ctx, child.WorkspaceID, &response)
+		h.publish(protocol.EventIssueUpdated, uuidToString(child.WorkspaceID), actorType, actorID, map[string]any{"issue": response})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -4236,10 +4271,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		// Validate the resulting assignee pair when this batch update touches
 		// either assignee field. Skip the issue silently on failure.
+		//
+		// Scoped PER ISSUE (prevIssue is this iteration's row), so one bound
+		// issue in the batch can never lend its authority to the others: an
+		// unbound entry simply fails the check and is skipped. This IS a real
+		// agent-reachable authorization point — a task token authenticates as its
+		// bound workspace member, so requireUserID above is satisfied and
+		// resolveActor still classifies the caller as an agent (MUL-6691).
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
 		if batchTouchedType || batchTouchedID {
-			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
+			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status != 0 {
 				continue
 			}
 		}
@@ -4376,10 +4418,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	deleted := 0
+	issues := make([]db.Issue, 0, len(req.IssueIDs))
+	excludedIDs := make([]pgtype.UUID, 0, len(req.IssueIDs))
+	seenIssueIDs := make(map[pgtype.UUID]struct{}, len(req.IssueIDs))
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
+			continue
+		}
+		if _, duplicate := seenIssueIDs[issueUUID]; duplicate {
 			continue
 		}
 		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
@@ -4390,22 +4437,25 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		seenIssueIDs[issueUUID] = struct{}{}
+		issues = append(issues, issue)
+		excludedIDs = append(excludedIDs, issue.ID)
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
-
-		attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
-		if err != nil {
-			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
-			continue
-		}
-
-		h.deleteS3Objects(r.Context(), attachmentURLs)
-
-		// Always emit the resolved UUID — frontend caches key by UUID.
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
-		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
-		deleted++
 	}
+	deleteResult, err := h.deleteIssuesAndCollectAttachmentURLs(r.Context(), issues, excludedIDs)
+	if err != nil {
+		slog.Warn("batch delete issues failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to delete issues")
+		return
+	}
+	h.deleteS3Objects(r.Context(), deleteResult.AttachmentURLs)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	for _, issue := range issues {
+		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
+	}
+	h.publishDetachedChildren(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
+	deleted := len(issues)
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})

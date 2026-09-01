@@ -15,6 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { truncateWithEllipsis } from "@multica/core/utils";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
@@ -652,7 +653,9 @@ function EmptyState({
 // ---------- Helpers ----------
 
 function truncateValue(value: string, max = 32): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
+  // `max` is a content-character budget; the shared helper counts the ellipsis
+  // toward its own budget, so pass `max + 1`.
+  return truncateWithEllipsis(value, max + 1);
 }
 
 function highlight(text: string, query: string): ReactNode {

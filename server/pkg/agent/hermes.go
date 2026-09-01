@@ -340,7 +340,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("hermes stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
@@ -437,6 +437,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// task timeout and make a later deferred cancel ineffective.
 			cancel()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()
@@ -925,6 +926,17 @@ type hermesClient struct {
 
 	usageMu sync.Mutex
 	usage   acpUsageAccumulator
+
+	// terminalEnabled is only set for ACP runtimes whose client-side terminal
+	// calls are implemented below. Keeping it opt-in avoids advertising a
+	// capability to Hermes-family runtimes that do not need it.
+	terminalEnabled bool
+	terminalCtx     context.Context
+	terminalCwd     string
+	terminalEnv     []string
+	terminalMu      sync.Mutex
+	terminals       map[string]*acpTerminal
+	nextTerminalID  int
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -1031,11 +1043,11 @@ func (c *hermesClient) handleLine(line string) {
 }
 
 // handleAgentRequest replies to JSON-RPC requests the agent sends
-// us (agent → client direction). The only one we care about today is
-// `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we answer it ourselves — granting when a
-// safe option is offered, otherwise declining just this action or
-// failing closed (see below).
+// us (agent → client direction). Kimi's ACP terminal capability is
+// implemented here alongside the permission request handling: the daemon is
+// headless and cannot actually prompt a user, so we answer permission requests
+// ourselves — granting when a safe option is offered, otherwise declining
+// just this action or failing closed (see below).
 //
 // The reply MUST select one of the optionIds the agent actually
 // offered — the ACP permission contract is "pick from these options",
@@ -1057,9 +1069,86 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	if !ok {
 		return
 	}
+	if method == "terminal/wait_for_exit" && c.terminalEnabled {
+		// wait_for_exit is intentionally long-lived. The ACP reader must remain
+		// available for the output polling and terminal/kill requests Kimi sends
+		// while this request is pending.
+		id := append(json.RawMessage(nil), rawID...)
+		params := append(json.RawMessage(nil), raw["params"]...)
+		go func() {
+			result, err := c.acpTerminalResponse(method, params)
+			if err != nil {
+				c.writeAgentRequestResponse(method, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"error": map[string]any{
+						"code":    -32602,
+						"message": err.Error(),
+					},
+				})
+				return
+			}
+			c.writeAgentRequestResponse(method, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  result,
+			})
+		}()
+		return
+	}
 
 	var resp map[string]any
 	switch method {
+	case "terminal/create":
+		if !c.terminalEnabled {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "terminal capability is not enabled",
+				},
+			}
+			break
+		}
+		result, err := c.acpTerminalCreate(raw["params"])
+		if err != nil {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32602,
+					"message": err.Error(),
+				},
+			}
+			break
+		}
+		resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(rawID), "result": result}
+	case "terminal/output", "terminal/wait_for_exit", "terminal/kill", "terminal/release":
+		if !c.terminalEnabled {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "terminal capability is not enabled",
+				},
+			}
+			break
+		}
+		result, err := c.acpTerminalResponse(method, raw["params"])
+		if err != nil {
+			resp = map[string]any{
+				"jsonrpc": "2.0",
+				"id":      json.RawMessage(rawID),
+				"error": map[string]any{
+					"code":    -32602,
+					"message": err.Error(),
+				},
+			}
+			break
+		}
+		resp = map[string]any{"jsonrpc": "2.0", "id": json.RawMessage(rawID), "result": result}
 	case "session/request_permission":
 		selector := c.selectPermission
 		if selector == nil {
@@ -1118,14 +1207,26 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 		c.cfg.Logger.Debug("unhandled agent→client request", "method", method)
 	}
 
+	c.writeAgentRequestResponse(method, resp)
+}
+
+func (c *hermesClient) writeAgentRequestResponse(method string, resp map[string]any) {
 	data, err := json.Marshal(resp)
 	if err != nil {
-		c.cfg.Logger.Warn("marshal agent-request response", "method", method, "error", err)
+		logger := c.cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("marshal agent-request response", "method", method, "error", err)
 		return
 	}
 	data = append(data, '\n')
 	if err := c.writeLine(data); err != nil {
-		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
+		logger := c.cfg.Logger
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("write agent-request response", "method", method, "error", err)
 	}
 }
 
@@ -1250,15 +1351,19 @@ func (e *acpRPCError) Error() string {
 // (Internal error), Kiro puts "No session found with id ..." in
 // `data` under -32603, and kimi-cli raises invalid_params (-32602)
 // with {"session_id": "Session not found"} in `data` for every
-// unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
-// "session/resume: unknown session <id>" under -32602 — so neither the
-// code nor one runtime's exact wording is discriminating and both are matched.
+// unknown-session path (src/kimi_cli/acp/server.py), Reasonix says
+// "session/resume: unknown session <id>" under -32602, and ZeroClaw defines
+// its own SESSION_NOT_FOUND = -32000 in the implementation-defined range
+// (zeroclaw-api/src/jsonrpc.rs) — so neither the code nor one runtime's exact
+// wording is discriminating and all of them are matched. The wording check
+// still carries the decision: -32000 is a generic server-error code, and a
+// transient failure reported under it must not read as a lost session.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
 		return false
 	}
-	if rpcErr.Code != -32603 && rpcErr.Code != -32602 && rpcErr.Code != -32002 {
+	if rpcErr.Code != -32603 && rpcErr.Code != -32602 && rpcErr.Code != -32002 && rpcErr.Code != -32000 {
 		return false
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
@@ -1869,11 +1974,9 @@ func acpRawText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-// Terminal blocks ({type:"terminal", terminalId}) reference a remote
-// terminal the client would normally subscribe to via terminal/output;
-// we don't advertise terminal capability so we never receive those in
-// practice, but if one slips through we skip it (nothing useful to
-// surface from a bare ID).
+// Terminal blocks ({type:"terminal", terminalId}) reference a terminal whose
+// output is served through terminal/output. The textual extractor has no
+// payload to duplicate here; the ACP transport retains the terminal output.
 func extractACPToolCallText(blocks []json.RawMessage) string {
 	var b strings.Builder
 	appendPiece := func(piece string) {

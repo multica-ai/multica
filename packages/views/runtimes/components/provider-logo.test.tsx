@@ -4,6 +4,17 @@ import { describe, expect, it } from "vitest";
 import { ProviderLogo } from "./provider-logo";
 
 describe("ProviderLogo", () => {
+  it("renders the dedicated CodeArts icon", () => {
+    const { container } = render(
+      <ProviderLogo provider="codearts" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector('img[alt="CodeArts"]');
+
+    expect(logo?.getAttribute("src")).toBeTruthy();
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("keeps the official Reasonix artwork", () => {
     const logoSvg = readFileSync("runtimes/components/reasonix-logo.svg", "utf8");
 
@@ -90,6 +101,22 @@ describe("ProviderLogo", () => {
     expect(logo?.getAttribute("fill")).toBe("currentColor");
     expect(path?.getAttribute("d")).toContain("M27.0157 5.80436");
     expect(path?.getAttribute("d")).toContain("ZM11.0587 8.88053");
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
+  it("renders the ZeroClaw placeholder mark instead of the generic fallback", () => {
+    const { container } = render(
+      <ProviderLogo provider="zeroclaw" className="runtime-logo" />,
+    );
+
+    const logo = container.querySelector("svg");
+
+    // No official ZeroClaw asset has been sourced yet, so this pins the
+    // deliberate placeholder mark (three strokes) rather than the generic
+    // <Monitor /> fallback that unknown providers get.
+    expect(logo?.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(logo?.getAttribute("stroke")).toBe("currentColor");
+    expect(logo?.querySelectorAll("path").length).toBe(3);
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 });

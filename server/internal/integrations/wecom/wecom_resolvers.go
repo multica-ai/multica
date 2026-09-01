@@ -84,9 +84,26 @@ func NewResolverSet(
 // production value.
 type engineSessionBinder interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
-	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
+	StartSession(ctx context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
+}
+
+func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
+		EnsureSessionInput: engine.EnsureSessionInput{
+			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
+			InstallationID: p.Installation.ID, Sender: p.Creator,
+			BindingKey: p.Message.Source.ChatID, ChatType: p.Message.Source.ChatType,
+		},
+		Initiator: p.Sender,
+		Body:      p.Message.Text, MessageID: p.Message.MessageID,
+		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
+		BeforeCommit: p.BeforeCommit,
+	})
+	return engine.StartSessionResult{SessionID: result.SessionID, BindingID: result.BindingID, RouteRevision: result.RouteRevision, Append: result.Append}, err
 }
 
 // ---- installation routing ----
@@ -227,8 +244,8 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
-func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
-	return r.session.MarkPendingFresh(ctx, sessionID)
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	return r.session.MarkPendingFresh(ctx, sessionID, messageID)
 }
 
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
@@ -267,8 +284,8 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 // rather than to the chat message that created it; the other issue fields are
 // what let the description reference them. Feishu passes all of them
 // (lark/feishu_resolvers.go:223).
-func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
-	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) (engine.BindMediaResult, error) {
+	in := engine.BindMediaInput{
 		MessageID:            p.MessageID,
 		SessionID:            p.SessionID,
 		WorkspaceID:          p.WorkspaceID,
@@ -278,7 +295,13 @@ func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams)
 		IssueCommandText:     p.IssueCommandText,
 		Body:                 p.Body,
 		MediaRefs:            p.MediaRefs,
-	})
+	}
+	if richer, ok := r.session.(interface {
+		BindMediaRefsWithResult(context.Context, engine.BindMediaInput) (engine.BindMediaResult, error)
+	}); ok {
+		return richer.BindMediaRefsWithResult(ctx, in)
+	}
+	return engine.BindMediaResult{}, r.session.BindMediaRefs(ctx, in)
 }
 
 // ---- audit ----

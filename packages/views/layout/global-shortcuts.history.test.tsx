@@ -38,6 +38,7 @@ function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdap
     forward: vi.fn(),
     pathname: "/w/issues",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (path) => path,
     ...overrides,
   };

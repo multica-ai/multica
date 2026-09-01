@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime, WorkspaceMcpServer } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";
 import {
+  isRuntimeUsableForUser,
   runtimeCapabilitiesOptions,
   runtimeDisplayLabel,
 } from "@multica/core/runtimes";
@@ -58,12 +59,14 @@ import { McpServerDialog } from "./mcp-server-dialog";
 export function McpConfigTab({
   agent,
   runtime,
+  currentUserId,
   canEdit = true,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
+  currentUserId?: string | null;
   /**
    * Whether this viewer may change the agent. A member without it can still
    * read the inventory — it carries no credential material — but every write
@@ -74,8 +77,12 @@ export function McpConfigTab({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
+  const canReadRuntime =
+    runtime != null && isRuntimeUsableForUser(runtime, currentUserId ?? null);
   const runtimeId =
-    runtime?.runtime_mode === "local" && runtime.status === "online"
+    runtime?.runtime_mode === "local" &&
+    runtime.status === "online" &&
+    canReadRuntime
       ? runtime.id
       : null;
   const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
@@ -339,6 +346,8 @@ export function McpConfigTab({
         </div>
         {!runtime ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_missing)} />
+        ) : !canReadRuntime ? (
+          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_forbidden)} />
         ) : runtime.status !== "online" ? (
           <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_offline)} />
         ) : runtimeQuery.isLoading ? (

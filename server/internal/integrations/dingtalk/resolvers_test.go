@@ -49,6 +49,7 @@ type captureChatSession struct {
 	ensure      engine.EnsureSessionInput
 	ensureCalls int
 	ensureErr   error
+	start       engine.StartSessionInput
 	append      engine.AppendInput
 	appendErr   error
 	media       engine.BindMediaInput
@@ -59,7 +60,11 @@ func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSe
 	c.ensureCalls++
 	return pgtype.UUID{}, c.ensureErr
 }
-func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
+func (c *captureChatSession) StartSession(_ context.Context, in engine.StartSessionInput) (engine.StartSessionResult, error) {
+	c.start = in
+	return engine.StartSessionResult{}, c.ensureErr
+}
+func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (c *captureChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	c.append = in
 	return engine.AppendResult{}, c.appendErr
@@ -137,6 +142,35 @@ func TestSessionBinder_MapsCommandTextAndMediaDeadline(t *testing.T) {
 	}
 	if in.MediaPendingSeconds != 45 || !in.ForceFresh || in.SessionID != session || in.Sender != sender || in.InstallationID != inst || in.ClaimToken != claim {
 		t.Fatalf("mapped append input = %+v", in)
+	}
+}
+
+func TestSessionBinder_StartSessionCarriesDingTalkRouteAndFirstTurn(t *testing.T) {
+	capture := &captureChatSession{}
+	binder := &sessionBinder{session: capture}
+	_, err := binder.StartSession(context.Background(), engine.StartSessionParams{
+		Installation: engine.ResolvedInstallation{
+			ID:          pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
+			AgentID:     pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+		},
+		Creator: pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
+		Sender:  pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
+		Message: channel.InboundMessage{
+			MessageID: "m1", Text: "first turn",
+			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup, ThreadID: "thread-1"},
+		},
+		PersistMessage: true,
+	})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	got := capture.start
+	if got.BindingKey != "cid-platform" || got.MessageID != "m1" || got.ThreadID != "thread-1" || got.Body != "first turn" || !got.PersistMessage {
+		t.Fatalf("start mapping wrong: %+v", got)
+	}
+	if got.Sender != (pgtype.UUID{Bytes: [16]byte{4}, Valid: true}) || got.Initiator != (pgtype.UUID{Bytes: [16]byte{5}, Valid: true}) {
+		t.Fatalf("creator/initiator mapping wrong: %+v", got)
 	}
 }
 
@@ -319,7 +353,7 @@ func TestSessionBinder_MapsMediaBodyAndIssueTarget(t *testing.T) {
 	base := pgtype.Text{String: "[Image]\nfix login", Valid: true}
 	capture := &captureChatSession{}
 	binder := &sessionBinder{session: capture}
-	if err := binder.BindMedia(context.Background(), engine.BindMediaParams{
+	if _, err := binder.BindMedia(context.Background(), engine.BindMediaParams{
 		MessageID: message, SessionID: session, WorkspaceID: workspace, Sender: sender,
 		IssueID: issue, IssueDescriptionBase: base, IssueCommandText: "/issue fix login", Body: "[Image]\nfix login", MediaRefs: []channel.MediaRef{ref},
 	}); err != nil {

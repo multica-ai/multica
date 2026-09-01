@@ -180,7 +180,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		verdict, err := AgentReadiness(ctx, s.Queries, leader)
+		verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), leader)
 		if err != nil || !verdict.Ready() {
 			return IssueRunTrigger{}, false
 		}

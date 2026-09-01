@@ -68,7 +68,7 @@ func installHookPlugin(t *testing.T) string {
 
 func invokeHookRequest(installationID, hookKey string, payload map[string]any) *http.Request {
 	body, _ := json.Marshal(payload)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/plugin/hooks/"+hookKey, bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, "/api/plugin-bridge/v1/hooks/"+hookKey, bytes.NewReader(body))
 	request.Header.Set("X-User-ID", testUserID)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set(pluginInstallationHeader, installationID)
@@ -196,6 +196,53 @@ func TestRotatePluginTokenIssuesOnceAndInvalidatesThePrevious(t *testing.T) {
 	// time an admin rotates the token.
 	if second.SigningSecret != first.SigningSecret {
 		t.Fatal("the signing secret must be stable across token rotations")
+	}
+}
+
+func TestRotatePluginTokenDoesNotRequireHookSigning(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	installationID := installHookPlugin(t)
+	previousKey := testHandler.PluginService.DeploymentKey
+	testHandler.PluginService.DeploymentKey = nil
+	t.Cleanup(func() { testHandler.PluginService.DeploymentKey = previousKey })
+
+	issued := rotateToken(t, installationID)
+	if issued.Token == "" {
+		t.Fatal("rotation did not return a Public API token")
+	}
+	if issued.SigningSecret != "" {
+		t.Fatalf("signing_secret = %q without a deployment key", issued.SigningSecret)
+	}
+	installation, err := testHandler.PluginService.AuthenticateInstallToken(context.Background(), issued.Token)
+	if err != nil {
+		t.Fatalf("token issued without hook signing must authenticate: %v", err)
+	}
+	if uuidToString(installation.ID) != installationID {
+		t.Fatalf("token resolved to %s, want %s", uuidToString(installation.ID), installationID)
+	}
+}
+
+func TestRotatePluginTokenPreservesPreviousTokenWhenPreparationFails(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	installationID := installHookPlugin(t)
+	previousKey := testHandler.PluginService.DeploymentKey
+	t.Cleanup(func() { testHandler.PluginService.DeploymentKey = previousKey })
+
+	testHandler.PluginService.DeploymentKey = bytes.Repeat([]byte{9}, 32)
+	previous := rotateToken(t, installationID)
+	testHandler.PluginService.DeploymentKey = []byte("invalid")
+
+	response := httptest.NewRecorder()
+	testHandler.RotatePluginToken(response, pluginHandlerRequest(http.MethodPost, "/token", nil, map[string]string{
+		"id": testWorkspaceID, "installationId": installationID,
+	}))
+	if response.Code != http.StatusBadGateway {
+		t.Fatalf("failed preparation status=%d body=%s", response.Code, response.Body.String())
+	}
+	if _, err := testHandler.PluginService.AuthenticateInstallToken(context.Background(), previous.Token); err != nil {
+		t.Fatalf("failed credential preparation invalidated the previous token: %v", err)
 	}
 }
 
