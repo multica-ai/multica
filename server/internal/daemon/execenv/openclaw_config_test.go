@@ -1640,6 +1640,11 @@ func TestIsOpenclawKeyMissing(t *testing.T) {
 			errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list. Run openclaw config validate to inspect config shape.)"),
 			true,
 		},
+		{
+			"2026.8.x Unknown config path",
+			errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Unknown config path: agents.list. Run openclaw config schema to inspect valid paths.)"),
+			true,
+		},
 		{"real failure stays an error", errors.New("openclaw: failed to read config: permission denied"), false},
 		{"malformed json is not a missing key", errors.New("parse output: invalid character 'x'"), false},
 	}
@@ -1669,6 +1674,12 @@ func TestIsOpenclawKeyMissingResult(t *testing.T) {
 		{
 			name:   "2026.7.2-beta.7 stdout json missing path",
 			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   true,
+		},
+		{
+			name:   "2026.8.x stdout json unknown config path",
+			stdout: `{"ok":false,"error":{"type":"cli_error","message":"Unknown config path: agents.list. Run openclaw config schema to inspect valid paths."}}`,
 			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
 			want:   true,
 		},
