@@ -248,6 +248,38 @@ func TestReplierOutcomes(t *testing.T) {
 	}
 }
 
+// A verdict notice must land exactly where the agent reply that follows it
+// lands, or a DM gets a one-message thread for the notice and an inline
+// answer right after it. Both paths ask mattermostSessionRouting; this pins
+// them together so they cannot drift apart again.
+func TestReplierPlacementMatchesTheAgentReply(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  channel.InboundMessage
+	}{
+		{name: "direct message", msg: dmInbound()},
+		{name: "channel top level", msg: groupInbound("hi")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newReplierHarness(t)
+			h.replier.Reply(context.Background(), h.inst, tc.msg, engine.Result{
+				Outcome: engine.OutcomeAgentOffline,
+			})
+			posts := h.sent()
+			if len(posts) != 1 {
+				t.Fatalf("sent %d posts, want 1", len(posts))
+			}
+			// This is the anchor the outbound path uses for the agent reply.
+			_, _, wantThread := mattermostSessionRouting(tc.msg)
+			if posts[0].RootID != wantThread {
+				t.Errorf("notice RootID = %q, want %q (where the agent reply goes)",
+					posts[0].RootID, wantThread)
+			}
+		})
+	}
+}
+
 // Every reply threads under the triggering post so it stays attached in a busy
 // channel.
 func TestReplierThreadsItsReply(t *testing.T) {

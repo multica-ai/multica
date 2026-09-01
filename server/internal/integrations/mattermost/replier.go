@@ -188,9 +188,15 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 	if creds.ServerURL == "" {
 		return errors.New("installation has no server url")
 	}
+	// Land where the agent's own reply lands. Both paths ask the same routing
+	// helper, so a verdict notice and the answer that follows it appear in the
+	// same place: top level in a direct message, under the thread root in a
+	// channel. Deriving this separately here is how they drifted — the notice
+	// opened a one-message thread in a DM while the agent reply sat inline.
+	_, _, replyThread := mattermostSessionRouting(msg)
 	if _, err := newRESTClient(creds.ServerURL, creds.AccessToken, r.client).CreatePost(ctx, Post{
 		ChannelID: msg.Source.ChatID,
-		RootID:    replyRoot(msg.Source.ThreadID, msg.MessageID),
+		RootID:    replyThread,
 		Message:   text,
 	}); err != nil {
 		return fmt.Errorf("post mattermost reply: %w", err)
