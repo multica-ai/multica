@@ -591,7 +591,11 @@ WITH deleted_github_installations AS (
 DELETE FROM vcs_connection WHERE vcs_connection.workspace_id = $1;
 
 -- name: DeleteWorkspaceSquadsAndSkills :exec
-WITH deleted_squads AS (
+WITH deleted_marketplace_templates AS (
+    DELETE FROM marketplace_template
+    WHERE marketplace_template.source_workspace_id = $1
+),
+deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
