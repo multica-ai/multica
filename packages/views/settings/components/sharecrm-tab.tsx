@@ -35,16 +35,16 @@ import { api } from "@multica/core/api";
 import type { ShareCRMInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { openExternal } from "../../platform";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // formatInstalledAt renders the install timestamp defensively: the schema
 // defaults installed_at to "" and the backend can emit a zero-value timestamp
 // (0001-01-01T…) for a never-set time, either of which would otherwise surface
 // as "Invalid Date" or a year-1 date. Fall back to a neutral placeholder.
-function formatInstalledAt(value: string): string {
+function formatInstalledAt(value: string, locale: string): string {
   const t = Date.parse(value);
   if (!value || Number.isNaN(t) || t <= 0) return "—";
-  return new Date(t).toLocaleString();
+  return new Date(t).toLocaleString(locale);
 }
 
 // ShareCRMTab is the workspace settings panel for ShareCRM robot installations.
@@ -186,6 +186,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
@@ -210,7 +211,7 @@ function InstallationRow({
           </p>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.sharecrm.installed_at_label, {
-              when: formatInstalledAt(installation.installed_at),
+              when: formatInstalledAt(installation.installed_at, locale),
             })}
           </p>
         </div>

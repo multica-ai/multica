@@ -5,7 +5,7 @@ description: Multica 에이전트를 자체 ShareCRM 봇에 연결하세요 — 
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-임의의 [에이전트](/agents)를 ShareCRM 봇에 연결하면 팀은 ShareCRM 안에서 바로 사용할 수 있습니다 — 봇에 DM하거나, 그룹에서 @멘션하거나, `/issue`를 입력해 앱을 열지 않고 [Multica 이슈](/issues)를 만들 수 있습니다.
+임의의 [에이전트](/agents)를 ShareCRM 봇에 연결하면 팀은 ShareCRM 안에서 바로 사용할 수 있습니다 — 봇에 DM하거나, 그룹에서 @멘션하거나, `/issue`를 입력해 앱을 열지 않고 [Multica 태스크](/issues)를 만들 수 있습니다.
 
 ShareCRM 연동은 [커뮤니티가 유지관리](/community-maintained)합니다. 매 릴리스에 포함되지만 공식 지원 SLA는 제공되지 않습니다. 문제가 있으면 [GitHub issues](https://github.com/multica-ai/multica/issues)에 보고해 주세요.
 
@@ -66,7 +66,7 @@ ShareCRM에는 네이티브 입력 중 표시가 없으므로 — DingTalk와 �
 | **봇에 DM** | 워크스페이스 멤버가 1:1 채팅에서 봇에 메시지를 보냅니다. 대화는 해당 에이전트의 Multica [chat](/chat) 세션이 되며 모든 메시지가 읽힙니다. |
 | **그룹에서 @멘션** | 봇을 그룹에 추가한 뒤 @멘션합니다. ShareCRM이 봇에 전달하는 메시지만 읽히며, 봇은 전체 그룹을 듣지 않습니다. |
 | **텍스트만** | 현재 텍스트 메시지만 처리합니다. 이미지, 파일, 음성은 에이전트로 전달되지 않습니다. |
-| **`/issue` 명령** | 메시지를 `/issue <제목>`으로 시작하면 입력 내용으로 Multica 이슈를 당신 명의로 바로 만들고, 같은 대화에 이슈 ID와 제목을 돌려줍니다. 설명은 이어지는 줄에 적습니다. 명령 자체는 Multica Chat에 나타나지 않으며, 생성된 이슈가 Multica에 기록되는 결과입니다. |
+| **`/issue` 명령** | 메시지를 `/issue <제목>`으로 시작하면 입력 내용으로 Multica 태스크를 당신 명의로 바로 만들고, 같은 대화에 태스크 ID와 제목을 돌려줍니다. 설명은 이어지는 줄에 적습니다. 명령 자체는 Multica Chat에 나타나지 않으며, 생성된 태스크가 Multica에 기록되는 결과입니다. |
 | **`/new` 명령** | `/new`를 보내면 새 빈 Multica Chat을 만들고 이후 ShareCRM 메시지를 그 Chat으로 라우팅합니다. `/new <메시지>`를 보내면 Chat을 만들고 그 메시지를 첫 턴으로 사용합니다. 이전 Chat은 Multica에 그대로 남아 계속 사용할 수 있습니다. |
 | **`/clear` 명령** | `/clear`를 보내면 현재 Multica Chat을 유지한 채 다음 메시지에 새 에이전트 가시 컨텍스트를 적용합니다. `/clear <메시지>`를 보내면 그 메시지를 경계 이후 첫 턴으로 사용합니다. 전체 Chat 기록은 Multica에 그대로 남습니다. |
 | **답장** | 에이전트 답변은 같은 1:1 채팅 또는 그룹에 일반 텍스트로 게시됩니다(전달 시 Markdown은 제거됩니다). |
@@ -87,7 +87,7 @@ ShareCRM에는 네이티브 입력 중 표시가 없으므로 — DingTalk와 �
 
 - **그룹에서** — 봇을 그룹에 추가한 뒤 `@your-bot <메시지>`를 보냅니다. 후속 질문마다 다시 @하세요(봇은 ShareCRM이 라우팅한 메시지만 받습니다).
 - **1:1 채팅에서** — 봇을 열고 직접 메시지를 보냅니다. @가 필요 없으며 모든 메시지가 읽힙니다.
-- **이슈 만들기** — `/issue Safari 로그인 리다이렉트가 깨짐`을 보내고 필요하면 다음 줄에 설명을 추가합니다. Multica가 동기적으로 이슈를 만들고 ID와 제목을 채팅에 돌려줍니다.
+- **태스크 만들기** — `/issue Safari 로그인 리다이렉트가 깨짐`을 보내고 필요하면 다음 줄에 설명을 추가합니다. Multica가 동기적으로 태스크를 만들고 ID와 제목을 채팅에 돌려줍니다.
 - **새 Chat 시작** — `/new`를 보내면 새 빈 Multica Chat을 만들고 이후 ShareCRM 메시지를 그 Chat으로 라우팅합니다. `/new <메시지>`면 그 메시지가 첫 턴이 됩니다. 이전 Chat은 Multica에 그대로 남아 계속 사용할 수 있습니다.
 - **컨텍스트 지우기** — `/clear`를 보내면 현재 Multica Chat을 유지한 채 다음 메시지에 새 에이전트 가시 컨텍스트를 적용합니다. `/clear <메시지>`면 그 메시지가 경계 이후 첫 턴이 됩니다. 전체 Chat 기록은 Multica에 그대로 남습니다.
 
@@ -129,5 +129,5 @@ Multica Cloud에서는 이 연동이 이미 사용 가능합니다 — 이 섹�
 ## 다음 단계
 
 - [채팅 연동](/channels) — channel 엔진, 세션, 권한 부여 방식
-- [에이전트](/agents) · [Chat](/chat) · [Issues](/issues)
+- [에이전트](/agents) · [Chat](/chat) · [태스크](/issues)
 - [환경 변수](/environment-variables) — 전체 자체 호스팅 구성 참조
