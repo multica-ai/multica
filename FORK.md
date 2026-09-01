@@ -43,6 +43,8 @@ git rev-list --left-right --count upstream/main...HEAD
 | `6f935d570` | landing / dashboard shell 离开胖 view barrel | 保留 |
 | `648085d7e` | 手机 PWA 的 static-first service worker | 保留 |
 | `1c15030ec` | iPad 上 tab pin / close 可点 | 保留 |
+| `c1bfc6af4` | hover 用 `pointer:fine` 门控，iPad 可点 | 保留。上游原生 iPad（`apps/mobile` Expo）不覆盖这层 |
+| `13d1d9596` | Web session tab 前进 / 后退 | 保留 |
 
 「mobile」在这里指 compact（小于 1024px），不是 Expo。见 `docs/adr/0001-web-session-tabs.md`。
 
@@ -62,14 +64,15 @@ git rev-list --left-right --count upstream/main...HEAD
 | 2026-08-23 | 建 fork / 发 `v42.0.0` | 上游 `v0.4.32` (`ad64e0f800`) | 同上 + 发版 CI | 第一版制品 |
 | 2026-08-27 | rebase `upstream/main` | `0716081bb`（v0.4.32 之后的 main）+ 4 个 fork commit | `v0.4.35` / `09a2410e8` | 72 个上游 commit；fork patch 无冲突重放。含 v0.4.33 / v0.4.34 / v0.4.35 |
 | 2026-08-31 | rebase `upstream/main` | `v0.4.35` / `09a2410e8` + 13 个 fork commit | `15280617b`（v0.4.36 + 5 个 main 提交） | 32 个上游 commit。唯一冲突：session tabs × MUL-6784 hash，保留 session tabs 并接上 `adapter.hash`。pricing / package.json / quick-create 自动合并后核对两边都在 |
+| 2026-09-01 | rebase `upstream/main` | `15280617b` + 19 个 fork commit | `11861145a`（v0.4.37 + 2 个 tip） | 27 个上游 commit。冲突按意图：`apps/web/package.json` 保留 Turbopack / Next 16.3.3 并接上游 `mdx`；`turbo.json` `typecheck` 用 `^cache-inputs` + `mdx` 并保留 `tsbuildinfo`；`issue-detail.tsx` i18n aria + `pointer:fine`。README / views package.json+tsconfig 两边都留。lockfile rebase 后重生成。上游原生 iPad 未覆盖 web hover 门控 |
 
 这一次带上来的上游发行（细节以上游 changelog 为准）：
 
-- **v0.4.36**（2026-08-28）：自定义 property filter、本地 Skill 导入、Oh My Pi MCP；runtime GC / 2h idle；desktop 可分享 URL 带 fragment
-- tip 上还没进发行的 5 个提交：chat 流式跟视口、timeout 收口、status/priority/squad i18n、workspace delete 文案
+- **v0.4.37**（2026-08-31）：Huawei CodeArts；Expo 原生 iPad；WeCom 多副本；issue 列表 / Skill 加载；i18n；路径 redact；少打 DB；HTTP 超时；chat 贴底；Codex handshake；本地 Skill 唤醒 daemon；desktop 拉回 daemon；手机 issue header；VCS link migration；Pi 换 workdir 保 session
+- tip 上还没进发行的 2 个提交：MUL-6880 workdir 释放；MUL-6758 `truncateWithEllipsis`
 
-rebase 前备份分支：`main-prerebase-backup`（`0f59993fa`）。`origin/main`
-更新并确认无误后可删。旧备份 `b1064faa3` 已过期。
+rebase 前备份分支：`main-prerebase-backup`（`13d1d9596`）。`origin/main`
+更新并确认无误后可删。旧备份 `0f59993fa` 已过期。
 
 ## 拉取上游并 rebase
 
@@ -140,8 +143,8 @@ git -c commit.gpgsign=false rebase --empty=drop v0.4.36
 | --- | --- | --- | --- |
 | 42.0.0 | v0.4.32 | ad64e0f800 | fork 发版 CI（CLI / Helm 发到本仓库） |
 
-发一版加一行。Release body 第一行写 `Based on upstream v0.4.36`（按实际基线改）。
-当前 `main` 已 rebase 到 v0.4.36 之后的 `upstream/main` 尖（`15280617b`），下一发应升 **42.1.0**。若发行要钉在 tag 而不是 tip，从 `v0.4.36` cherry-pick fork commit。
+发一版加一行。Release body 第一行写 `Based on upstream v0.4.37`（按实际基线改）。
+当前 `main` 已 rebase 到 v0.4.37 之后的 `upstream/main` 尖（`11861145a`），下一发应升 **42.1.0**。若发行要钉在 tag 而不是 tip，从 `v0.4.37` cherry-pick fork commit。
 
 ## 产物
 
