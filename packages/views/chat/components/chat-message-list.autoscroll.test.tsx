@@ -437,7 +437,7 @@ describe("ChatMessageList auto-scroll", () => {
   // again. The loop swallowed the reader's wheel scrolls, leaving the list
   // shaking and immovable. Corrections must go through Virtuoso.
   it("corrects through Virtuoso rather than writing scrollTop on the container", () => {
-    const { scroll } = renderStreamingChat();
+    const { scroll } = renderChat();
 
     scroll.grow(180);
     scroll.shrinkViewport(72);
@@ -456,7 +456,7 @@ describe("ChatMessageList auto-scroll", () => {
   // newest row's own box, because during the estimate the scroll geometry
   // reports the viewport as being at the live end.
   it("stays hidden until the newest message has actually landed at the bottom", () => {
-    const { view, scroll } = renderStreamingChat();
+    const { view, scroll } = renderChat();
 
     const box = (el: Element, top: number, bottom: number) => {
       el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
@@ -491,7 +491,7 @@ describe("ChatMessageList auto-scroll", () => {
   // highlighting — moves the content under a reader pinned to the bottom.
   // Reaching the live end once is not enough to reveal (MUL-6879).
   it("keeps waiting while rows are still changing size at the live end", () => {
-    const { view, scroll } = renderStreamingChat();
+    const { view, scroll } = renderChat();
 
     const box = (el: Element, top: number, bottom: number) => {
       el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
