@@ -1,11 +1,18 @@
 -- name: ListInboxItems :many
+-- Active inbox for the recipient. LIMIT bounds the response the same way
+-- ListArchivedInboxItems does: v1 ships no pagination, and without a cap a
+-- heavy inbox produces multi-MB payloads on every mark-read refetch (#6527).
+-- Rows are newest-first, so truncation drops the OLDEST rows and can never
+-- hide a group's newest row — the one the deduplicated UI renders. The unread
+-- badge uses CountUnreadInbox (a separate count query) and is unaffected.
 SELECT i.*,
        iss.status AS issue_status,
        iss.priority AS issue_priority
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
-ORDER BY i.created_at DESC;
+ORDER BY i.created_at DESC
+LIMIT 200;
 
 -- name: ListArchivedInboxItems :many
 -- Archived counterpart of ListInboxItems, backing the inbox's "Archived"
