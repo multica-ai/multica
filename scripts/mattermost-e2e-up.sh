@@ -40,7 +40,23 @@ api() {
   curl "${args[@]}"
 }
 
-json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);const v=process.argv[1].split(".").reduce((a,k)=>a==null?a:a[k],j);process.stdout.write(v==null?"":String(v))}catch(e){process.stdout.write("")}})' "$1"; }
+# json FIELD — read a field from a SUCCESS body on stdin.
+#
+# Mattermost error bodies are also JSON and also carry an "id" field (the error
+# code, e.g. app.user.save.username_exists.app_error). Reading "id" blindly
+# therefore turns "already exists" into a plausible-looking identifier that
+# poisons every later request. Error bodies are the ones carrying status_code,
+# so this returns empty for them and the caller falls back to a lookup.
+json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s);if(j&&typeof j==="object"&&j.status_code!==undefined){process.stdout.write("");return}const v=process.argv[1].split(".").reduce((a,k)=>a==null?a:a[k],j);process.stdout.write(v==null?"":String(v))}catch(e){process.stdout.write("")}})' "$1"; }
+
+# need NAME VALUE — abort with a clear message rather than propagating an empty
+# id into the next request, where it surfaces as an unrelated 404.
+need() {
+  if [[ -z "$2" ]]; then
+    log "ERROR: could not resolve $1"
+    exit 1
+  fi
+}
 
 # ---- 1. container -----------------------------------------------------------
 
@@ -79,6 +95,7 @@ if [[ -z "$ADMIN_TOKEN" ]]; then
   exit 1
 fi
 ADMIN_ID="$(api GET /users/me '' "$ADMIN_TOKEN" | json id)"
+need "admin user id" "$ADMIN_ID"
 log "admin ${ADMIN_USER} (${ADMIN_ID})"
 
 # Bot accounts and personal access tokens are both off by default in the
@@ -96,11 +113,13 @@ log "enabled bot accounts + personal access tokens"
 
 TEAM_ID="$(api POST /teams "$(printf '{"name":"%s","display_name":"E2E Team","type":"O"}' "$TEAM_NAME")" "$ADMIN_TOKEN" | json id)"
 [[ -z "$TEAM_ID" ]] && TEAM_ID="$(api GET "/teams/name/${TEAM_NAME}" '' "$ADMIN_TOKEN" | json id)"
+need "team id" "$TEAM_ID"
 log "team ${TEAM_NAME} (${TEAM_ID})"
 
 HUMAN_ID="$(api POST /users "$(printf '{"email":"%s","username":"%s","password":"%s"}' "$HUMAN_EMAIL" "$HUMAN_USER" "$HUMAN_PASS")" "$ADMIN_TOKEN" | json id)"
 [[ -z "$HUMAN_ID" ]] && HUMAN_ID="$(api GET "/users/username/${HUMAN_USER}" '' "$ADMIN_TOKEN" | json id)"
 api POST "/teams/${TEAM_ID}/members" "$(printf '{"team_id":"%s","user_id":"%s"}' "$TEAM_ID" "$HUMAN_ID")" "$ADMIN_TOKEN" >/dev/null || true
+need "human user id" "$HUMAN_ID"
 log "human ${HUMAN_USER} (${HUMAN_ID})"
 
 HUMAN_TOKEN="$(curl -sS -i -X POST "${BASE}/api/v4/users/login" \
@@ -108,9 +127,12 @@ HUMAN_TOKEN="$(curl -sS -i -X POST "${BASE}/api/v4/users/login" \
   -d "$(printf '{"login_id":"%s","password":"%s"}' "$HUMAN_EMAIL" "$HUMAN_PASS")" \
   | tr -d '\r' | awk 'tolower($1)=="token:"{print $2}')"
 
+need "human session token" "$HUMAN_TOKEN"
+
 CHANNEL_ID="$(api POST /channels "$(printf '{"team_id":"%s","name":"%s","display_name":"E2E Channel","type":"O"}' "$TEAM_ID" "$CHANNEL_NAME")" "$ADMIN_TOKEN" | json id)"
 [[ -z "$CHANNEL_ID" ]] && CHANNEL_ID="$(api GET "/teams/${TEAM_ID}/channels/name/${CHANNEL_NAME}" '' "$ADMIN_TOKEN" | json id)"
 api POST "/channels/${CHANNEL_ID}/members" "$(printf '{"user_id":"%s"}' "$HUMAN_ID")" "$ADMIN_TOKEN" >/dev/null || true
+need "channel id" "$CHANNEL_ID"
 log "channel ${CHANNEL_NAME} (${CHANNEL_ID})"
 
 # ---- 4. bot account + token -------------------------------------------------
@@ -125,17 +147,19 @@ if [[ -z "$BOT_TOKEN" ]]; then
   log "ERROR: could not issue a bot access token"
   exit 1
 fi
+need "bot user id" "$BOT_USER_ID"
 log "bot ${BOT_USERNAME} (${BOT_USER_ID})"
 
 # A direct-message channel between the bot and the human, so the suite can
 # exercise the p2p path without a mention.
 DM_CHANNEL_ID="$(api POST /channels/direct "$(printf '["%s","%s"]' "$BOT_USER_ID" "$HUMAN_ID")" "$ADMIN_TOKEN" | json id)"
+need "dm channel id" "$DM_CHANNEL_ID"
 log "dm channel (${DM_CHANNEL_ID})"
 
 # ---- 5. emit ----------------------------------------------------------------
 
 cat <<ENVEOF
-export MULTICA_MM_E2E=1
+export MULTICA_MM_E2E='1'
 export MULTICA_MM_E2E_URL='${BASE}'
 export MULTICA_MM_E2E_BOT_TOKEN='${BOT_TOKEN}'
 export MULTICA_MM_E2E_BOT_USER_ID='${BOT_USER_ID}'

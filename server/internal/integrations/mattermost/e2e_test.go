@@ -161,9 +161,6 @@ func startLiveChannel(t *testing.T, env e2eEnv) *liveChannel {
 	lc.cancel = cancel
 	go func() { lc.connErr <- built.Connect(ctx) }()
 
-	// The connection is only usable once the server has accepted the
-	// authentication challenge. Probing with a post is the honest readiness
-	// check: it proves the whole receive path, not just the socket.
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -177,6 +174,23 @@ func startLiveChannel(t *testing.T, env e2eEnv) *liveChannel {
 			t.Error("Connect did not return within 15s of cancellation")
 		}
 	})
+
+	// Block until the socket has actually authenticated and is delivering.
+	//
+	// Connect dials and sends the authentication challenge asynchronously, so a
+	// post published straight after this function returns can be produced before
+	// the server has subscribed this client — and Mattermost does not replay it.
+	// On localhost the connection usually wins that race, which is worse than
+	// losing it: the suite would pass here and flake in CI. Posting a probe and
+	// waiting for it to come back proves the whole receive path is live.
+	probe := postAs(t, env, env.HumanToken, Post{
+		ChannelID: env.ChannelID,
+		Message:   fmt.Sprintf("@%s readiness probe", env.BotUsername),
+	})
+	if _, ok := lc.await(t, probe.ID, 60*time.Second); !ok {
+		t.Fatal("the websocket never delivered the readiness probe; the connection is not usable")
+	}
+
 	return lc
 }
 
