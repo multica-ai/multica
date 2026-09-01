@@ -263,7 +263,13 @@ func (c *mattermostChannel) dispatchPosted(ctx context.Context, frame wsFrame) e
 		}
 		return nil
 	}
-	if msg.Text == "" {
+	// A BARE control command (`/clear`, `/new` with no body) normalizes to an
+	// empty Text: inbound strips the directive and nothing is left. The Router
+	// still needs it — that exact input is what produces FreshPending and
+	// ChatStarted, and dropping it here makes those replies unreachable.
+	// CommandText keeps the user's original line, so it is the honest test for
+	// "was anything actually said". Only a post with neither is dropped.
+	if msg.Text == "" && msg.CommandText == "" {
 		return nil
 	}
 	// A group member who replies to someone else AND mentions the bot is

@@ -486,6 +486,35 @@ func TestE2EBotOwnPostIsSuppressed(t *testing.T) {
 	}
 }
 
+// A BARE control command carries no body, so inbound normalizes Text to empty.
+// It must still reach the engine: that input is exactly what produces the
+// FreshPending / ChatStarted replies. An adapter-level "drop empty text" guard
+// silently swallows it, which is how this was originally broken.
+func TestE2EBareControlCommandStillReachesTheEngine(t *testing.T) {
+	env := requireE2E(t)
+	lc := startLiveChannel(t, env)
+
+	for _, command := range []string{"/clear", "/new"} {
+		t.Run(command, func(t *testing.T) {
+			posted := postAs(t, env, env.HumanToken, Post{ChannelID: env.DMChannelID, Message: command})
+			msg, ok := lc.await(t, posted.ID, 30*time.Second)
+			if !ok {
+				t.Fatalf("a bare %s never reached the engine handler", command)
+			}
+			if msg.Text != "" {
+				t.Errorf("Text = %q, want empty for a bare command", msg.Text)
+			}
+			// CommandText is what the Router parses the directive out of.
+			if msg.CommandText != command {
+				t.Errorf("CommandText = %q, want %q", msg.CommandText, command)
+			}
+			if command == "/clear" && !msg.ForceFresh {
+				t.Error("ForceFresh = false for /clear, want true")
+			}
+		})
+	}
+}
+
 // ---- outbound against the real server --------------------------------------
 
 func TestE2ESendPostsAndThreads(t *testing.T) {
