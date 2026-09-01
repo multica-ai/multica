@@ -2009,8 +2009,9 @@ func restorableRerunIssueScope(task, source db.AgentTaskQueue) (pgtype.UUID, boo
 // the claim so project context is resolved live from the issue's current
 // project resources and later progress/completion stays attached to the issue.
 //
-// Issue-less quick-create reruns are intentionally unchanged: their source has
-// no issue_id, so they continue through the quick-create context path below.
+// Quick-create reruns are intentionally unchanged: even if the source task later
+// gets an issue_id via LinkTaskToIssue, quick-create runs should continue through
+// the quick-create context path below rather than borrowing issue scope.
 func (h *Handler) restoreMissingRerunIssueScope(ctx context.Context, task *db.AgentTaskQueue) error {
 	if !task.RerunOfTaskID.Valid || task.IssueID.Valid || task.ChatSessionID.Valid || task.AutopilotRunID.Valid {
 		return nil
