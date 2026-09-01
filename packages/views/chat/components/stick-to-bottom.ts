@@ -123,9 +123,10 @@ export interface StickToBottom {
  * scroll to the last row is what Virtuoso's own `followOutput` does, and it
  * converges because Virtuoso measures that row before deciding where to stop.
  *
- * `live` is whether a task is in flight. An idle chat has no live end to
- * follow, so while `live` is false nothing here moves the viewport: expanding
- * a fold, loading an image or resizing the composer must not move the reader.
+ * `live` is whether the pending task can currently stream. Idle and parked
+ * chats have no live end to follow, so while `live` is false nothing here
+ * moves the viewport: expanding a fold, loading an image or resizing the
+ * composer must not yank the reader to the bottom.
  */
 export function useStickToBottom(
   scrollEl: HTMLElement | null,
@@ -211,9 +212,9 @@ export function useStickToBottom(
         // A staged claim defers pins (a wheel tick's scroll is animated and a
         // pin mid-flight would cancel it). If the claim was never confirmed —
         // nested-scroller input the list did not consume — it is gone now, so
-        // re-judge a pin it deferred: it fires one frame late, not never.
-        // Only when one was actually deferred: an unconditional re-judge
-        // would snap back sub-threshold reader scrolls nothing had pinned.
+        // re-judge only if it deferred a pin. The pin then fires one frame
+        // late; an unconditional re-judge would instead snap back
+        // sub-threshold reader scrolls when nothing requested a pin.
         if (follow.endInputFrame()) onResize();
       });
     };

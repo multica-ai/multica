@@ -360,7 +360,7 @@ export function ChatMessageList({
         atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
         // Follow appended rows only while Virtuoso says the reader is at the
         // live end. An in-flight smooth animation temporarily reports "not at
-        // bottom" on the next append and permanently drops the follow (#6697),
+        // bottom" on the next append and permanently drops the follow,
         // so live growth must use an immediate scroll. While a task can stream,
         // `isFollowing` narrows this further: the reader may have
         // scrolled away by input the 120px `atBottom` band forgives (see

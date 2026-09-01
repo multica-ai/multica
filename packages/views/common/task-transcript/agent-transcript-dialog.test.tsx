@@ -1038,8 +1038,9 @@ describe("AgentTranscriptDialog — live-end follow wiring", () => {
     expect(scroll.scrollTop).toBe(0);
   });
 
-  // Regression (TIM-65 review): an unconditional frame-boundary re-judge
-  // snapped back every confirmed sub-threshold reader scroll one frame later.
+  // Only an actually deferred pin warrants a frame-boundary re-judge;
+  // re-judging every input frame would snap back a confirmed sub-threshold
+  // reader scroll one frame later.
   it("leaves a confirmed sub-threshold scroll alone at the frame boundary", () => {
     const scroll = liveScroller();
 
@@ -1066,11 +1067,11 @@ describe("AgentTranscriptDialog — live-end follow wiring", () => {
     expect(scroll.scrollTop).toBe(0);
   });
 
-  // Locks the re-judge to onResize. Re-judging through onScroll would read
+  // Re-judge through onResize. Routing through onScroll would read
   // the distance moved since the last scroll event as continued reader
   // motion, so a prepend compensation writing scrollTop in that gap would be
   // credited against the wheel tick's carry and release the follow on pure
-  // system displacement (TIM-65 review round 2).
+  // system displacement.
   it("does not credit a silent prepend write against the tick at the re-judge", () => {
     const scroll = liveScroller();
 

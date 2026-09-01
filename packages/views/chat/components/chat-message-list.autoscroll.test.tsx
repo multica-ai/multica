@@ -709,12 +709,11 @@ describe("ChatMessageList auto-scroll", () => {
     expect(scroll.distanceFromBottom()).toBe(0);
   });
 
-  // A mouse wheel tick delivers its input at once; the browser ANIMATES the
-  // scroll over the following frames. A pin landing mid-animation cancels the
-  // animation and reverts the tick, so wheel users were yanked back to the
-  // bottom continuously — every tick answered by a chunk or one of Virtuoso's
-  // re-measure height changes — while touchpads, whose displacement confirms
-  // per event, escaped normally (TIM-65 follow-up).
+  // A mouse wheel tick delivers its input at once, but the browser may animate
+  // its displacement over later frames. A pin landing mid-animation cancels
+  // and reverts the tick. Content growth and Virtuoso remeasurement can request
+  // pins during that interval; touchpads usually confirm displacement per event
+  // and therefore reach the release threshold before a pin can interrupt them.
   it("does not cancel an animated wheel tick with a mid-flight chunk pin", () => {
     const { scroll, streamChunk } = renderChat();
 
@@ -743,10 +742,9 @@ describe("ChatMessageList auto-scroll", () => {
     expect(scroll.distanceFromBottom()).toBe(560);
   });
 
-  // The frame-boundary re-judge fires only for pins a gesture actually
-  // deferred. An unconditional re-judge snapped back every sub-threshold
-  // reader scroll (touchpad tick, arrow key) one frame later, with no growth
-  // anywhere (TIM-65 review).
+  // Only a pin actually deferred by a gesture warrants a frame-boundary
+  // re-judge. Re-judging every input frame would snap back a sub-threshold
+  // touchpad tick or arrow-key scroll even when no growth requested a pin.
   it("leaves a confirmed sub-threshold scroll alone at the frame boundary", () => {
     const { scroll } = renderChat();
 
@@ -772,11 +770,10 @@ describe("ChatMessageList auto-scroll", () => {
     expect(scroll.distanceFromBottom()).toBe(0);
   });
 
-  // A deferral with no input frame left to consume it (growth deferred by
-  // carry residue after the gesture's rAF already fired) must be settled by
-  // the pin that eventually resolves it — not inherited by the next gesture's
-  // frame boundary, which would snap back a scroll that gesture never earned
-  // (TIM-65 review round 2).
+  // A deferral created after its input frame ended can outlive the gesture
+  // that caused it. The first resolved pin verdict must settle that deferral;
+  // otherwise the next gesture's frame boundary can inherit it and snap back
+  // a scroll that gesture never deferred.
   it("does not inherit a stranded deferral into a later gesture's frame", () => {
     const { scroll, streamChunk } = renderChat();
 
@@ -867,8 +864,8 @@ describe("ChatMessageList auto-scroll", () => {
   });
 });
 
-// With no task in flight there is no live end: nothing may move the viewport
-// on the reader's behalf, whatever resizes or scrolls happen (TIM-65).
+// With no streaming task there is no live end: resizes and system scrolls must
+// not move the viewport on the reader's behalf.
 describe("ChatMessageList auto-scroll while idle", () => {
   it("does not pin when content grows under a reader at the bottom", () => {
     const { scroll } = renderIdleChat();

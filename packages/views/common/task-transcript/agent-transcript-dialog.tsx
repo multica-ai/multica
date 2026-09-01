@@ -349,12 +349,12 @@ export function AgentTranscriptDialog({
           inputFrame = null;
           // A staged claim defers pins so a wheel tick's animated scroll is
           // not cancelled mid-flight. Once the unconfirmed claim is discarded,
-          // re-judge a pin it deferred so it fires one frame late, not never —
-          // and only such a pin, or sub-threshold reader scrolls get snapped
-          // back. Through onResize, never onScroll: a Virtuoso prepend
-          // compensation writing scrollTop in the gap since the last scroll
-          // event would run the continued-motion branch and credit a system
-          // shift as reader displacement.
+          // re-judge only if it deferred a pin. This lets the pin fire one frame
+          // late without snapping back sub-threshold reader scrolls. Re-judge
+          // through onResize, never onScroll: a Virtuoso prepend compensation
+          // writing scrollTop in the gap since the last scroll event would run
+          // the continued-motion branch and credit a system shift as reader
+          // displacement.
           if (followCtl.endInputFrame() && followCtl.onResize(el.scrollTop)) {
             el.scrollTop = 0;
           }
