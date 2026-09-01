@@ -489,6 +489,29 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesFable51(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	fable, ok := ids["claude-fable-5-1"]
+	if !ok {
+		t.Fatalf("missing Claude Fable 5.1 in: %+v", models)
+	}
+	if fable.Label != "Claude Fable 5.1" || fable.Provider != "anthropic" || fable.Default {
+		t.Errorf("unexpected Fable 5.1 entry: %+v", fable)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
 func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
 	models := claudeStaticModels()
 	ids := map[string]Model{}

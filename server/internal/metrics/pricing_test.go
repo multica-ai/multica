@@ -392,3 +392,38 @@ func TestPriceForModelAliasContextTagStripping(t *testing.T) {
 		}
 	}
 }
+
+func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
+	// Fable 5.1 is its own SKU on the same Mythos-class tier as Fable 5, but
+	// with cache reads at 0.025x input ($0.25) instead of the usual 0.1x. The
+	// unanchored Fable 5 alias would otherwise swallow the `-1` suffix and
+	// bill those reads at 4x, so every spelling below must land on the
+	// Fable 5.1 row specifically.
+	fable51 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10, CacheReadPerM: 0.25, CacheWritePerM: 12.5, OutputPerM: 50}
+	fable5 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50}
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{model: "claude-fable-5-1", want: fable51},
+		{model: "anthropic/claude-fable-5-1", want: fable51},
+		{model: "anthropic:claude-fable-5-1", want: fable51},
+		// Copilot reports Claude models dotted.
+		{model: "claude-fable-5.1", want: fable51},
+		// Claude Code reports the 1M-context variant with a bracketed suffix.
+		{model: "claude-fable-5-1[1m]", want: fable51},
+		// Fable 5 must keep resolving to its own row, including its 1M form.
+		{model: "claude-fable-5", want: fable5},
+		{model: "claude-fable-5[1m]", want: fable5},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+}

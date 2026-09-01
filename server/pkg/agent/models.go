@@ -542,6 +542,7 @@ func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-fable-5-1", Label: "Claude Fable 5.1", Provider: "anthropic"},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-5", Label: "Claude Opus 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
