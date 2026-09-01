@@ -3,7 +3,7 @@ import { act, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
-import type { TaskMessagePayload } from "@multica/core/types";
+import type { ChatPendingTask, TaskMessagePayload } from "@multica/core/types";
 import type { ReactElement } from "react";
 import enChat from "../../locales/en/chat.json";
 import { ChatMessageList } from "./chat-message-list";
@@ -370,12 +370,12 @@ const RUNNING_TASK = { task_id: TASK_ID, status: "running" } as const;
 
 function renderChat({
   contentHeight = 2000,
-  pendingTask = RUNNING_TASK as typeof RUNNING_TASK | null,
+  pendingTask = RUNNING_TASK as ChatPendingTask | null,
 } = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
-  const ui = (pending: typeof RUNNING_TASK | null) => (
+  const ui = (pending: ChatPendingTask | null) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
         <ChatMessageList messages={[]} pendingTask={pending} availability={undefined} />
@@ -397,7 +397,7 @@ function renderChat({
       view.container
         .querySelector("[data-follow-at-bottom]")
         ?.getAttribute("data-follow-at-bottom"),
-    setPendingTask: (pending: typeof RUNNING_TASK | null) => {
+    setPendingTask: (pending: ChatPendingTask | null) => {
       act(() => {
         view.rerender(ui(pending));
       });
@@ -898,6 +898,26 @@ describe("ChatMessageList auto-scroll while idle", () => {
     const { followsAtBottom } = renderIdleChat();
 
     expect(followsAtBottom()).toBe("auto");
+  });
+
+  it.each(["queued", "waiting_local_directory", "deferred"])(
+    "does not pin content growth while the pending task is %s",
+    (status) => {
+      const { scroll } = renderChat({ pendingTask: { task_id: TASK_ID, status } });
+
+      scroll.grow(180);
+
+      expect(scroll.distanceFromBottom()).toBe(180);
+    },
+  );
+
+  it("stops pinning when a live task becomes idle", () => {
+    const { scroll, setPendingTask } = renderChat();
+
+    setPendingTask(null);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(180);
   });
 
   it("engages the follow when a task starts with the reader at the bottom", () => {
