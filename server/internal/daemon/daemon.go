@@ -6512,7 +6512,8 @@ func formatBytes(n int64) string {
 
 const (
 	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
-	// tiny bundle still tolerates connection setup and round-trip latency.
+	// tiny bundle still tolerates connection setup, proxy negotiation, and
+	// first-byte latency before any response body transfer budget is added.
 	skillBundleResolveMinTimeout = 30 * time.Second
 	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
 	// task in prepare indefinitely.
@@ -6520,24 +6521,26 @@ const (
 	// skillBundleResolveMinThroughput is the pessimistic floor throughput
 	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
 	// to cover slow, jittery links rather than ideal bandwidth.
-	skillBundleResolveMinThroughput = 50 * 1024
+	skillBundleResolveMinThroughput = 10 * 1024
 )
 
 // skillBundleResolveTimeout returns the deadline budget for downloading a
-// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
-// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
+// bundle of the given size: a connection/first-byte allowance plus a body
+// transfer allowance at skillBundleResolveMinThroughput, capped at
+// skillBundleResolveMaxTimeout.
 func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
 	if sizeBytes <= 0 {
 		return skillBundleResolveMinTimeout
 	}
-	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
-	if scaled < skillBundleResolveMinTimeout {
-		return skillBundleResolveMinTimeout
-	}
-	if scaled > skillBundleResolveMaxTimeout {
+	maxTransferSeconds := int64((skillBundleResolveMaxTimeout - skillBundleResolveMinTimeout) / time.Second)
+	if maxTransferSeconds <= 0 || sizeBytes >= maxTransferSeconds*skillBundleResolveMinThroughput {
 		return skillBundleResolveMaxTimeout
 	}
-	return scaled
+	transferSeconds := sizeBytes / skillBundleResolveMinThroughput
+	if sizeBytes%skillBundleResolveMinThroughput != 0 {
+		transferSeconds++
+	}
+	return skillBundleResolveMinTimeout + time.Duration(transferSeconds)*time.Second
 }
 
 func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {

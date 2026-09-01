@@ -25,8 +25,9 @@ func TestSkillBundleResolveTimeout(t *testing.T) {
 	}{
 		{"zero size floors to min", 0, skillBundleResolveMinTimeout},
 		{"negative size floors to min", -5, skillBundleResolveMinTimeout},
-		{"tiny bundle floors to min", 1024, skillBundleResolveMinTimeout},
-		{"scales with size above the floor", 2 * 1024 * 1024, 40 * time.Second},
+		{"tiny bundle adds one second of body budget", 1024, 31 * time.Second},
+		{"reported one megabyte bundle gets slow-link budget", 1101426, 138 * time.Second},
+		{"scales with size above the floor", 2 * 1024 * 1024, 235 * time.Second},
 		{"huge bundle caps at max", 100 * 1024 * 1024, skillBundleResolveMaxTimeout},
 	}
 	for _, tc := range cases {
