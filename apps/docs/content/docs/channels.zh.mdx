@@ -1,6 +1,6 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信或 Telegram，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信、Telegram 或 Mattermost，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -11,15 +11,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 选择平台
 
-| | 飞书 / Lark | Slack | 钉钉 | 企业微信 | Telegram |
-|---|---|---|---|---|---|
-| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica | 在企业微信管理后台创建智能机器人并开启长连接，再把 Bot ID 与 Secret 填入 Multica | 用 @BotFather 创建 Bot，再把 token 填入 Multica |
-| 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 |
-| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 |
-| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
-| 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
-| 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
-| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 |
+| | 飞书 / Lark | Slack | 钉钉 | 企业微信 | Telegram | Mattermost |
+|---|---|---|---|---|---|---|
+| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica | 在企业微信管理后台创建智能机器人并开启长连接，再把 Bot ID 与 Secret 填入 Multica | 用 @BotFather 创建 Bot，再把 token 填入 Multica | 在 Mattermost 系统控制台创建机器人账号，再把服务器地址和访问令牌填入 Multica |
+| 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 | @ 机器人，或在机器人发起的话题串中回复后触发 |
+| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
+| 新建 Chat | `/new [消息]` | 私聊：`/new [消息]`；频道/thread：`@Multica /new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` | `/new [消息]` |
+| 清空当前 Chat 上下文 | `/clear [消息]` | 私聊：`/clear [消息]`；频道/thread：`@Multica /clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` | `/clear [消息]` |
+| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 | WebSocket |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
 
@@ -37,6 +37,7 @@ Telegram 目前只处理文字消息。不支持的媒体消息会收到一句�
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+- [Mattermost Bot 接入](/mattermost-bot-integration)
 
 ## 消息的执行流程
 
@@ -94,6 +95,7 @@ MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_MATTERMOST_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。
@@ -111,4 +113,5 @@ MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
 - [Telegram Bot 接入](/telegram-bot-integration)
+- [Mattermost Bot 接入](/mattermost-bot-integration)
 - [与智能体对话](/chat)

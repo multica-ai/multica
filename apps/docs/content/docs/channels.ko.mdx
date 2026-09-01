@@ -1,6 +1,6 @@
 ---
 title: 채팅 연동
-description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom 또는 Telegram에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
+description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom, Telegram 또는 Mattermost에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -11,15 +11,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 플랫폼 선택
 
-| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
-|---|---|---|---|---|---|
-| 설치 방법 | Multica에서 QR 코드를 만든 뒤 Feishu로 스캔해 승인 | Slack에서 app을 만든 뒤 두 token을 Multica에 입력 | 사내 app과 Stream 모드 로봇을 만든 뒤 AppKey와 AppSecret을 Multica에 입력 | WeCom 관리자 콘솔에서 장기 연결을 켠 스마트 봇을 만든 뒤 Bot ID와 Secret을 Multica에 입력 | @BotFather에서 Bot을 만든 뒤 token을 Multica에 입력 |
-| 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 |
-| 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 |
-| 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
-| 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
-| 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
-| 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling |
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram | Mattermost |
+|---|---|---|---|---|---|---|
+| 설치 방법 | Multica에서 QR 코드를 만든 뒤 Feishu로 스캔해 승인 | Slack에서 app을 만든 뒤 두 token을 Multica에 입력 | 사내 app과 Stream 모드 로봇을 만든 뒤 AppKey와 AppSecret을 Multica에 입력 | WeCom 관리자 콘솔에서 장기 연결을 켠 스마트 봇을 만든 뒤 Bot ID와 Secret을 Multica에 입력 | @BotFather에서 Bot을 만든 뒤 token을 Multica에 입력 | Mattermost 시스템 콘솔에서 봇 계정을 만든 뒤 서버 URL과 액세스 토큰을 Multica에 입력 |
+| 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 | 지원 |
+| 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 | 봇을 @멘션하거나 봇이 시작한 스레드에서 답글을 달면 트리거 |
+| 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
+| 새 Chat 시작 | `/new [메시지]` | DM: `/new [메시지]`, 채널/thread: `@Multica /new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` | `/new [메시지]` |
+| 현재 Chat 컨텍스트 지우기 | `/clear [메시지]` | DM: `/clear [메시지]`, 채널/thread: `@Multica /clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` | `/clear [메시지]` |
+| 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling | WebSocket |
 
 새 연결은 현재 중국 본토 버전 Feishu에서만 만들 수 있습니다. 기존 국제 버전 Lark 연결은 계속 사용하고 관리할 수 있습니다.
 
@@ -37,6 +37,7 @@ Telegram은 현재 텍스트 메시지만 처리합니다. 미지원 미디어�
 - [Slack Bot 연결](/slack-bot-integration)
 - [DingTalk Bot 연결](/dingtalk-bot-integration)
 - [Telegram Bot 연결](/telegram-bot-integration)
+- [Mattermost Bot 연결](/mattermost-bot-integration)
 
 ## 메시지 실행 과정
 
@@ -94,6 +95,7 @@ MULTICA_SLACK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_DINGTALK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_WECOM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_TELEGRAM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
+MULTICA_MATTERMOST_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 ```
 
 이 키는 Bot 자격 증명을 암호화해 저장하는 데 사용됩니다. 생성, 보관, 교체 방법은 [환경 변수](/environment-variables)를 참고하세요. Multica Cloud에는 이미 설정되어 있습니다.
@@ -111,4 +113,5 @@ WeCom의 발신 경로는 한 프로세스가 보유한 WebSocket뿐입니다. *
 - [Slack Bot 연결](/slack-bot-integration)
 - [DingTalk Bot 연결](/dingtalk-bot-integration)
 - [Telegram Bot 연결](/telegram-bot-integration)
+- [Mattermost Bot 연결](/mattermost-bot-integration)
 - [에이전트와 대화](/chat)
