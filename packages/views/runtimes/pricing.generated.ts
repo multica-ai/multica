@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-31
+// Snapshot: 2026-09-01
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -75,7 +75,6 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-flash-latest": { input: 0.75, output: 3.75, cacheRead: 0.075, cacheWrite: 0.75 },
   "gemini-flash-lite-latest": { input: 0.3, output: 2.5, cacheRead: 0.03, cacheWrite: 0.3 },
   "gemini-omni-flash-preview": { input: 1.5, output: 17.5, cacheRead: 1.5, cacheWrite: 1.5 },
-  "gemini-robotics-er-1.6-preview": { input: 1, output: 5, cacheRead: 1, cacheWrite: 1 },
   "github-copilot/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "github-copilot/gpt-5.6-sol": { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   "github-copilot/gpt-5.6-terra": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2.5 },
