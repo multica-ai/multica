@@ -2038,12 +2038,67 @@ WHERE acknowledged.id = (
   ) >= @max_attempts::int
 RETURNING acknowledged.*;
 
+-- name: SettleDelegatedFailureRecoveriesForTask :execrows
+-- Retire every delegated-failure recovery comment this task actually received.
+--
+-- Callers MUST run this inside the same transaction that makes the task
+-- terminal, and only there. While a task is still dispatched its receipt is
+-- REPLACED rather than appended (SetTaskDeliveredCommentIDs), because a reclaim
+-- by a differently-capable daemon must be able to drop an id it will not
+-- deliver. Settling at receipt-write time would freeze that legitimate
+-- transient window into a permanently lost recovery. Once the task is terminal
+-- the receipt is final, which is exactly the guarantee this marker records.
+--
+-- A comment that was only planned into the task and never delivered is absent
+-- from delivered_comment_ids, so an automatic cancellation correctly leaves it
+-- pending for the sweeper to replay.
+--
+-- The terminal-status predicate is the guarantee itself, not a caller
+-- convention. Settling a dispatched or running task's receipt would freeze the
+-- reclaim window into a permanently lost recovery, and this marker is
+-- monotonic — there is no later pass that could undo it. A caller that passes a
+-- non-terminal task therefore updates nothing rather than silently destroying
+-- the obligation.
+UPDATE comment recovery
+SET recovery_settled_at = now()
+FROM agent_task_queue task
+WHERE task.id = @task_id
+  AND task.status IN ('completed', 'failed', 'cancelled')
+  AND recovery.id = ANY(task.delivered_comment_ids)
+  AND recovery.author_type = 'system'
+  AND recovery.type = 'progress_update'
+  AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL;
+
+-- name: SettleDelegatedFailureRecoveryComment :execrows
+-- Retire one recovery comment by id, for the terminal outcomes that are not a
+-- task reaching a terminal status: exhaustion of the bounded automatic attempts
+-- writes its receipt onto an attempt row that may still be running, and the
+-- user-visible explanation comment is what closes the obligation. Callers run
+-- this in the same transaction that records that outcome.
+UPDATE comment
+SET recovery_settled_at = now()
+WHERE id = @comment_id
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id IS NOT NULL
+  AND recovery_settled_at IS NULL;
+
 -- name: ListPendingDelegatedFailureRecoveries :many
 -- Durable outbox scan for platform recovery comments that are not yet owned by
 -- an executable task and have no terminal delivery receipt. Starting from the
 -- explicit recovery signal avoids retroactively waking unrelated historical
 -- delegated failures. A bounded runtime sweeper replays these comments after a
 -- transient dispatch error or process restart.
+--
+-- recovery_settled_at is what keeps this scan from growing with history. Every
+-- other exclusion below is reversible — an issue can leave 'done', a cancelled
+-- retry can be superseded — so none of them can be frozen into the index
+-- predicate. A delivery receipt on a terminal task cannot be taken back, so
+-- that one condition is recorded as durable state instead of being re-proven
+-- through four joins and two NOT EXISTS subqueries on every tick. The predicate
+-- of idx_comment_delegated_failure_unsettled matches the first four conditions,
+-- so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
 SELECT recovery.*
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
@@ -2056,6 +2111,7 @@ LEFT JOIN issue_status source_status
 WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'

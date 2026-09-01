@@ -89,12 +89,13 @@ type ModelListRequest struct {
 // field, which is fine: the UI hides the selector and the agent runs
 // with the runtime default.
 type ModelEntry struct {
-	ID           string             `json:"id"`
-	Label        string             `json:"label"`
-	Provider     string             `json:"provider,omitempty"`
-	Default      bool               `json:"default,omitempty"`
-	Thinking     *ModelThinking     `json:"thinking,omitempty"`
-	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
+	ID                                  string             `json:"id"`
+	Label                               string             `json:"label"`
+	Provider                            string             `json:"provider,omitempty"`
+	Default                             bool               `json:"default,omitempty"`
+	Thinking                            *ModelThinking     `json:"thinking,omitempty"`
+	ServiceTiers                        []ModelServiceTier `json:"service_tiers,omitempty"`
+	SupportsExplicitStandardServiceTier bool               `json:"supports_explicit_standard_service_tier,omitempty"`
 }
 
 type ModelServiceTier struct {

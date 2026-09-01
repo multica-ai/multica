@@ -28,7 +28,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 完整值无法找回，丢失时吊销旧令牌并创建新的。
 
 <Callout type="warning">
-不要把 PAT 写入仓库、issue、评论、截图或日志，也不要直接放进会被保存的 shell 命令中。
+不要把 PAT 写入仓库、任务、评论、截图或日志，也不要直接放进会被保存的 shell 命令中。
 </Callout>
 
 ## CLI 与 PAT
@@ -56,15 +56,15 @@ multica login --token
 export MULTICA_TOKEN='mul_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
 
 curl https://api.multica.ai/api/me \
-  -H "Authorization: Bearer $MULTICA_TOKEN"
+ -H "Authorization: Bearer $MULTICA_TOKEN"
 ```
 
 调用工作区级 API 时，还需要按接口要求提供工作区：
 
 ```bash
 curl https://api.multica.ai/api/issues \
-  -H "Authorization: Bearer $MULTICA_TOKEN" \
-  -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
+ -H "Authorization: Bearer $MULTICA_TOKEN" \
+ -H "X-Workspace-ID: $MULTICA_WORKSPACE_ID"
 ```
 
 脚本中的令牌取自 secret manager 或受保护的环境变量，不要硬编码。自托管实例把域名替换为自己的公开 API 地址。

@@ -548,6 +548,7 @@ type Comment struct {
 	QuickActionID      pgtype.UUID        `json:"quick_action_id"`
 	ViaPluginID        pgtype.UUID        `json:"via_plugin_id"`
 	Revision           int64              `json:"revision"`
+	RecoverySettledAt  pgtype.Timestamptz `json:"recovery_settled_at"`
 	SuggestedFollowUps []byte             `json:"suggested_follow_ups"`
 }
 

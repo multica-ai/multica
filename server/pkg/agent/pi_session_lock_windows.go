@@ -10,10 +10,13 @@ import (
 )
 
 // tryLockPiSessionFile is the Windows equivalent of flock(LOCK_EX|LOCK_NB).
-// FILE_SHARE_DELETE keeps a held lock from pinning the session directory when
-// cleanup races a cancelled execution.
+// Windows byte-range locks are mandatory, so locking the transcript itself
+// would prevent Pi from reading the file it is supposed to append to. Lock a
+// sidecar instead. FILE_SHARE_DELETE keeps a held lock from pinning the
+// session directory when cleanup races a cancelled execution.
 func tryLockPiSessionFile(path string) (*os.File, bool, error) {
-	p, err := windows.UTF16PtrFromString(path)
+	lockPath := path + ".lock"
+	p, err := windows.UTF16PtrFromString(lockPath)
 	if err != nil {
 		return nil, false, err
 	}
@@ -22,14 +25,14 @@ func tryLockPiSessionFile(path string) (*os.File, bool, error) {
 		windows.GENERIC_READ|windows.GENERIC_WRITE,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil,
-		windows.OPEN_EXISTING,
+		windows.OPEN_ALWAYS,
 		windows.FILE_ATTRIBUTE_NORMAL,
 		0,
 	)
 	if err != nil {
 		return nil, false, err
 	}
-	f := os.NewFile(uintptr(h), path)
+	f := os.NewFile(uintptr(h), lockPath)
 	overlapped := new(windows.Overlapped)
 	err = windows.LockFileEx(
 		windows.Handle(f.Fd()),

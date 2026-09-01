@@ -1,6 +1,6 @@
 ---
 title: 安装 AI 编程工具
-description: 安装并登录一款受支持的 AI 编程工具，让 Multica 在本机执行任务。
+description: 安装并登录一款受支持的 AI 编程工具，让 Multica 在本机 task。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -47,7 +47,7 @@ Multica 当前会检测以下命令：
 
 安装后，先在终端中单独启动一次工具，并按照它自己的流程登录或配置模型服务。工具在终端中无法完成请求时，守护进程调用它同样会失败。
 
-使用 CodeArts 时，请用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，而不只是验证 TUI。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但任务执行使用 `codearts run`，因此仍遵循该命令的授权要求。
+使用 CodeArts 时，请用 `codearts run --model provider/model "只回复 OK"` 验证非交互模式，而不只是验证 TUI。当前 CodeArts CLI 可能允许自定义 provider 在 TUI 中工作，但 `run`、`models` 和 `serve` 仍要求配置 [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html)。Multica 可以从 `~/.codeartsdoer/codearts_cli.json` 或 `.jsonc` 发现自定义模型，但 task 执行使用 `codearts run`，因此仍遵循该命令的授权要求。
 
 使用 Reasonix 时，请先运行 `reasonix setup`，配置默认的模型服务和模型，再启动守护进程。
 
@@ -115,7 +115,7 @@ multica daemon restart
 4. 重启守护进程，让它重新读取当前环境。
 5. 回到**运行时**页面，确认电脑和工具都已上线。
 
-工具已经显示在线，但执行仍然失败时，打开 issue 的执行记录查看 CLI 返回的具体错误，或继续阅读[故障排查](/troubleshooting)。
+工具已经显示在线，但执行仍然失败时，打开任务的执行记录查看 CLI 返回的具体错误，或继续阅读[故障排查](/troubleshooting)。
 
 ## 接下来
 

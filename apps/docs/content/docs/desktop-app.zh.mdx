@@ -38,7 +38,7 @@ Desktop 内置的 CLI 只供应用管理运行时使用。如果你还要在终�
 
 ## 桌面标签页
 
-Desktop 会为每个工作区单独保存标签页。例如，你在工作区 A 打开了三个 issue，切到工作区 B 后会看到 B 自己的标签页；切回 A 时，之前的三个标签页仍然保留。
+Desktop 会为每个工作区单独保存标签页。例如，你在工作区 A 打开了三个任务，切到工作区 B 后会看到 B 自己的标签页；切回 A 时，之前的三个标签页仍然保留。
 
 同一资源只会在当前工作区打开一次。标签页可以重新排序、固定、关闭，也会保留各自的前进、后退和滚动位置。点击或粘贴本部署的应用链接会直接在标签页中打开，不会跳转到浏览器。
 
@@ -82,8 +82,8 @@ Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录�
 
 ```json
 {
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
+ "schemaVersion": 1,
+ "apiUrl": "https://api.example.com"
 }
 ```
 
@@ -104,10 +104,10 @@ Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录�
 
 ```json
 {
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com",
-  "appUrl": "https://app.example.com",
-  "wsUrl": "wss://ws.example.com/socket"
+ "schemaVersion": 1,
+ "apiUrl": "https://api.example.com",
+ "appUrl": "https://app.example.com",
+ "wsUrl": "wss://ws.example.com/socket"
 }
 ```
 
@@ -136,8 +136,8 @@ $dir = "$env:USERPROFILE\.multica"
 New-Item -ItemType Directory -Force $dir | Out-Null
 $json = @'
 {
-  "schemaVersion": 1,
-  "apiUrl": "https://api.example.com"
+ "schemaVersion": 1,
+ "apiUrl": "https://api.example.com"
 }
 '@
 [System.IO.File]::WriteAllText("$dir\desktop.json", $json)
@@ -165,10 +165,10 @@ Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
 
 1. **把隔离的文件恢复回来** —— Windows 安全中心 → *病毒和威胁防护* → *保护历史记录* → 选中 Multica 那一条 → *操作* → *还原*。
 2. **加排除项**，避免再次被隔离 —— *病毒和威胁防护* → *管理设置* → *排除项* → *添加或删除排除项* → *文件夹*，两个都要加：
-   - `%LOCALAPPDATA%\Programs\@multicadesktop`
-   - `%APPDATA%\Multica`
+ - `%LOCALAPPDATA%\Programs\@multicadesktop`
+ - `%APPDATA%\Multica`
 
-   两个路径缺一不可：内置 CLI 被删掉后，Desktop 会把替换版本下载到 `%APPDATA%\Multica\bin`，只排除安装目录的话，下载下来的副本还会再被隔离一次，陷入循环。
+ 两个路径缺一不可：内置 CLI 被删掉后，Desktop 会把替换版本下载到 `%APPDATA%\Multica\bin`，只排除安装目录的话，下载下来的副本还会再被隔离一次，陷入循环。
 3. **把误报提交给微软** —— 在 [Microsoft Security Intelligence 文件提交页](https://www.microsoft.com/en-us/wdsi/filesubmission)选择 *Software developer* 和 *Incorrectly detected as malware*。这一步才是让检测对所有用户撤销的办法，一般几天内生效。
 
 <Callout type="warning">

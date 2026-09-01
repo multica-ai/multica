@@ -1226,11 +1226,15 @@ WHERE i.workspace_id = $1
   AND ($7::uuid IS NULL OR i.project_id = $7)
   AND ($8::jsonb IS NULL OR i.metadata @> $8::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
-  -- containment patterns (built by parsePropertiesFilterParam): the issue
-  -- must match at least one pattern from EVERY group (AND of ORs). A pattern
-  -- of the shape {"__none__": "<definitionId>"} is the "no value" marker and
-  -- matches when the issue's properties are missing that key. The correlated
-  -- form skips the GIN index, which is fine here: open_only is already an
+  -- patterns (built by parsePropertiesFilterParam): the issue must match at
+  -- least one pattern from EVERY group (AND of ORs). Three pattern shapes:
+  --   {"__none__": "<definitionId>"}                         — "no value" marker;
+  --   {"<definitionId>": <value>, ...}                        — containment;
+  --   {"__op__": "<op>", "def": "<id>", "value": "<v>"}       — scalar operator
+  -- (contains / gt / gte / lt / lte / before / after), where the contains
+  -- value arrives already ILIKE-escaped and the op was validated in Go, so
+  -- the per-op branches below only ever see legal values. The correlated
+  -- form skips the GIN index, which is fine here: open_only is an
   -- unpaginated workspace scan. The terminal-status predicate intentionally
   -- remains a filter rather than a positive index narrowing so unknown legacy
   -- status keys stay visible.
@@ -1243,7 +1247,33 @@ WHERE i.workspace_id = $1
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
         WHERE (alt.pattern ? '__none__' AND NOT (i.properties ? (alt.pattern ->> '__none__')))
-           OR (NOT (alt.pattern ? '__none__') AND i.properties @> alt.pattern)
+           OR (NOT (alt.pattern ? '__none__') AND NOT (alt.pattern ? '__op__')
+               AND i.properties @> alt.pattern)
+           OR (alt.pattern ? '__op__'
+               AND i.properties ->> (alt.pattern ->> 'def') IS NOT NULL
+               AND (
+                 (alt.pattern ->> '__op__' = 'contains'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND (i.properties ->> (alt.pattern ->> 'def')) ILIKE '%' || (alt.pattern ->> 'value') || '%')
+                 OR (alt.pattern ->> '__op__' = 'gt'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END > (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'gte'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END >= (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'lt'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END < (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'lte'
+                  AND CASE WHEN jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'number'
+                    THEN (i.properties ->> (alt.pattern ->> 'def'))::numeric END <= (alt.pattern ->> 'value')::numeric)
+                 OR (alt.pattern ->> '__op__' = 'before'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND i.properties ->> (alt.pattern ->> 'def') < (alt.pattern ->> 'value'))
+                 OR (alt.pattern ->> '__op__' = 'after'
+                  AND jsonb_typeof(i.properties -> (alt.pattern ->> 'def')) = 'string'
+                  AND i.properties ->> (alt.pattern ->> 'def') > (alt.pattern ->> 'value'))
+               ))
       )
     )
   )

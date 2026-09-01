@@ -41,7 +41,7 @@
     "filters": {
       "all": "전체",
       "online": "온라인",
-      "issues": "이슈"
+      "issues": "문제"
     },
     "section_local": "로컬",
     "section_remote": "원격",
@@ -64,7 +64,7 @@
       "runtimes_hint_other": "온라인 {{count}}개",
       "health": "상태",
       "health_clear": "문제 없음",
-      "health_issues_other": "이슈 {{count}}개",
+      "health_issues_other": "문제 {{count}}개",
       "workload": "작업량",
       "workload_value_idle": "유휴",
       "workload_idle": "모두 유휴",

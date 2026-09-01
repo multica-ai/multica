@@ -5,7 +5,7 @@ description: 邀请成员，并用 owner、admin 和 member 三种角色管理�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-加入[工作区](/workspaces)的人都是成员，每位成员有一个角色：`owner`、`admin` 或 `member`。角色只控制工作区设置和团队管理；创建 issue、发表评论等日常协作对所有成员开放。
+加入[工作区](/workspaces)的人都是成员，每位成员有一个角色：`owner`、`admin` 或 `member`。角色只控制工作区设置和团队管理；创建任务、发表评论等日常协作对所有成员开放。
 
 ## 三种角色
 
@@ -42,14 +42,14 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 移除成员
 
-被移除的成员立即失去工作区访问权限。该成员创建的 issue、评论和其他协作记录保留在工作区中。
+被移除的成员立即失去工作区访问权限。该成员创建的任务、评论和其他协作记录保留在工作区中。
 
 <Callout type="warning">
-移除成员会同时停用该成员拥有的运行时、归档绑定在其上的智能体，并取消尚未结束的执行任务。该成员在智能体访问范围（Access）中获得的授权也会被清除，重新加入后不会自动恢复。
+移除成员会同时停用该成员拥有的运行时、归档绑定在其上的智能体，并取消尚未结束的 task。该成员在智能体访问范围（Access）中获得的授权也会被清除，重新加入后不会自动恢复。
 </Callout>
 
 ## 接下来
 
-- [Issues](/issues) — 了解成员和智能体共同处理的工作。
+- [任务](/issues) — 了解成员和智能体共同处理的工作。
 - [智能体](/agents) — 区分工作区角色与智能体 Access。
 - [守护进程与运行时](/daemon-runtimes) — 了解运行时由谁拥有以及在哪里执行。

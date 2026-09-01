@@ -297,7 +297,7 @@ func sweepOfflineRuntimeTasks(ctx context.Context, queries *db.Queries, taskSvc 
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageOfflineTasks, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailTasksForOfflineRuntimes(ctx, db.FailTasksForOfflineRuntimesParams{
+	failedTasks, err := taskSvc.FailTasksForOfflineRuntimes(ctx, db.FailTasksForOfflineRuntimesParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		MaxPerTick:         offlineTaskFailBatchSize,
 	})
@@ -325,7 +325,7 @@ func sweepExpiredRuntimeReconnectRetries(ctx context.Context, queries *db.Querie
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageReconnectRetries, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailExpiredRuntimeReconnectRetries(ctx, db.FailExpiredRuntimeReconnectRetriesParams{
+	failedTasks, err := taskSvc.FailExpiredRuntimeReconnectRetries(ctx, db.FailExpiredRuntimeReconnectRetriesParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		RuntimeStaleSecs:   staleThresholdSeconds,
 		MaxPerTick:         reconnectRetryExpireBatchSize,
@@ -585,7 +585,7 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageStaleTasks, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+	failedTasks, err := taskSvc.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: dispatchTimeoutSeconds,
 		RunningTimeoutSecs:  runningTimeoutSeconds,
 		// Reuse the runtime stale window so the running-task backstop
@@ -622,7 +622,7 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageQueuedExpiry, startedAt, stats)
 	}()
 
-	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
+	failedTasks, err := taskSvc.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
 		ReconnectGraceSecs: reconnectGrace.Seconds(),
 		MaxPerTick:         queuedExpireBatchSize,
 	})

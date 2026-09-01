@@ -179,4 +179,48 @@ describe("IssueFilterMenu scalar property filter", () => {
     await userEvent.type(screen.getByRole("textbox"), "{Enter}");
     expect(store.getState().propertyFilters).toEqual({ [PROP]: ["abc", "__none__"] });
   });
+
+  it("picking contains with an empty draft, then typing commits an operator object", async () => {
+    // Regression: killing the pending operator on click downgraded the next
+    // commit back to equality — the pick silently did nothing.
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    expect(screen.getByRole("radiogroup", { name: "Filter operator" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "is" })).toBeChecked();
+    const contains = screen.getByRole("radio", { name: "contains" });
+    await userEvent.click(contains);
+    expect(contains).toBeChecked();
+    await userEvent.type(screen.getByRole("textbox"), "hello{Enter}");
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+  });
+
+  it("clicking an operator commits the current draft with it immediately", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+  });
+
+  it("switching back to is commits a bare string again", async () => {
+    const { store } = renderFilterMenu([textProperty(PROP, "Note")]);
+    await openPropertySubmenu("Note");
+
+    await userEvent.type(screen.getByRole("textbox"), "hello");
+    await userEvent.click(screen.getByRole("radio", { name: "contains" }));
+    expect(store.getState().propertyFilters).toEqual({
+      [PROP]: [{ op: "contains", value: "hello" }],
+    });
+
+    await userEvent.click(screen.getByRole("radio", { name: "is" }));
+    expect(store.getState().propertyFilters).toEqual({ [PROP]: ["hello"] });
+  });
 });
