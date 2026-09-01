@@ -105,6 +105,32 @@ var skillFilesDeleteCmd = &cobra.Command{
 	RunE:  runSkillFilesDelete,
 }
 
+var skillFilesBatchUpsertCmd = &cobra.Command{
+	Use:   "batch-upsert <skill-id>",
+	Short: "Atomically upsert several supporting files from a manifest",
+	Long: `Apply multiple supporting-file writes as one atomic partial update.
+
+Each manifest entry names a skill-relative path and the local file supplying
+its content. Optional expected_sha256 fields enable optimistic concurrency:
+when given, the current content on the server must match or the whole batch
+is rejected with a conflict and nothing is written.
+
+Manifest shape:
+  {
+    "files": [
+      {"path": "references/a.md", "file": "./local/a.md",
+       "expected_sha256": "<64-hex, optional>"},
+      {"path": "references/new.md", "file": "./local/new.md"}
+    ],
+    "expected_skill_sha256": "<64-hex, optional>",
+    "idempotency_key": "<opaque, optional>"
+  }
+
+Files omitted from the manifest are left untouched.`,
+	Args: exactArgs(1),
+	RunE: runSkillFilesBatchUpsert,
+}
+
 func init() {
 	skillCmd.AddCommand(skillListCmd)
 	skillCmd.AddCommand(skillGetCmd)
@@ -118,6 +144,7 @@ func init() {
 
 	skillFilesCmd.AddCommand(skillFilesListCmd)
 	skillFilesCmd.AddCommand(skillFilesUpsertCmd)
+	skillFilesCmd.AddCommand(skillFilesBatchUpsertCmd)
 	skillFilesCmd.AddCommand(skillFilesDeleteCmd)
 
 	// skill list
@@ -170,6 +197,10 @@ func init() {
 	skillFilesUpsertCmd.Flags().Bool("content-stdin", false, "Read file content from stdin. Mutually exclusive with --content and --content-file.")
 	skillFilesUpsertCmd.Flags().String("content-file", "", "Read file content from a UTF-8 file. Mutually exclusive with --content and --content-stdin.")
 	skillFilesUpsertCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill files batch-upsert
+	skillFilesBatchUpsertCmd.Flags().String("manifest", "", "Path to a JSON manifest listing the files to upsert (required)")
+	skillFilesBatchUpsertCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -761,6 +792,102 @@ func runSkillFilesUpsert(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Skill file upserted: %s (%s)\n", strVal(result, "path"), strVal(result, "id"))
+	return nil
+}
+
+// skillFilesBatchManifestEntry is one manifest row: the skill-relative path to
+// write and the local file whose verbatim content becomes that file's body.
+type skillFilesBatchManifestEntry struct {
+	Path           string `json:"path"`
+	File           string `json:"file"`
+	ExpectedSHA256 string `json:"expected_sha256,omitempty"`
+}
+
+// skillFilesBatchManifest mirrors the batch endpoint's request envelope. The
+// files are rebuilt server-side (content read from disk here), so only the
+// concurrency fields pass through verbatim.
+type skillFilesBatchManifest struct {
+	Files               []skillFilesBatchManifestEntry `json:"files"`
+	ExpectedSkillSHA256 string                         `json:"expected_skill_sha256,omitempty"`
+	IdempotencyKey      string                         `json:"idempotency_key,omitempty"`
+}
+
+func runSkillFilesBatchUpsert(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	manifestPath, _ := cmd.Flags().GetString("manifest")
+	if manifestPath == "" {
+		return fmt.Errorf("--manifest is required")
+	}
+	raw, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return fmt.Errorf("read manifest: %w", err)
+	}
+	var manifest skillFilesBatchManifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return fmt.Errorf("parse manifest %s: %w", manifestPath, err)
+	}
+	if len(manifest.Files) == 0 {
+		return fmt.Errorf("manifest %s lists no files", manifestPath)
+	}
+
+	body := map[string]any{}
+	files := make([]map[string]any, 0, len(manifest.Files))
+	for i, entry := range manifest.Files {
+		if entry.Path == "" {
+			return fmt.Errorf("manifest entry %d is missing \"path\"", i+1)
+		}
+		if entry.File == "" {
+			return fmt.Errorf("manifest entry %d (%s) is missing \"file\"", i+1, entry.Path)
+		}
+		contentBytes, err := os.ReadFile(entry.File)
+		if err != nil {
+			return fmt.Errorf("read content for %s: %w", entry.Path, err)
+		}
+		fileBody := map[string]any{
+			"path":    entry.Path,
+			"content": string(contentBytes),
+		}
+		if entry.ExpectedSHA256 != "" {
+			fileBody["expected_sha256"] = entry.ExpectedSHA256
+		}
+		files = append(files, fileBody)
+	}
+	body["files"] = files
+	if manifest.ExpectedSkillSHA256 != "" {
+		body["expected_skill_sha256"] = manifest.ExpectedSkillSHA256
+	}
+	if manifest.IdempotencyKey != "" {
+		body["idempotency_key"] = manifest.IdempotencyKey
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/skills/"+args[0]+"/files/batch", body, &result); err != nil {
+		return fmt.Errorf("batch upsert skill files: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	wroteFiles, _ := result["files"].([]any)
+	for _, rf := range wroteFiles {
+		f, ok := rf.(map[string]any)
+		if !ok {
+			continue
+		}
+		fmt.Printf("Skill file upserted: %s (%s)\n", strVal(f, "path"), strVal(f, "id"))
+	}
+	if agg := strVal(result, "skill_files_sha256"); agg != "" {
+		fmt.Printf("Skill files sha256: %s\n", agg)
+	}
 	return nil
 }
 

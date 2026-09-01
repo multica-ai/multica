@@ -2139,6 +2139,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/labels/{labelId}", h.DetachLabelFromSkill)
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
+					r.Put("/files/batch", h.UpsertSkillFilesBatch)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
 				})
 			})
