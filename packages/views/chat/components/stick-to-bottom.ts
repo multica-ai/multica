@@ -122,23 +122,37 @@ export interface StickToBottom {
  * releases and the list cannot be scrolled at all (MUL-6879). An index-based
  * scroll to the last row is what Virtuoso's own `followOutput` does, and it
  * converges because Virtuoso measures that row before deciding where to stop.
+ *
+ * `live` is whether a task is in flight. An idle chat has no live end to
+ * follow, so while `live` is false nothing here moves the viewport: expanding
+ * a fold, loading an image or resizing the composer must not move the reader.
  */
 export function useStickToBottom(
   scrollEl: HTMLElement | null,
   pinToLiveEnd: () => void,
+  live: boolean,
 ): StickToBottom {
   const followRef = useRef<LiveEndFollow | null>(null);
   if (followRef.current === null) {
     followRef.current = createLiveEndFollow();
-    // Unlike the transcript, the chat list is always live. Activated at
-    // creation, not in an effect: `followOutput` reads the latch on the
-    // very first render.
-    followRef.current.setActive(true);
+    // Activated synchronously, not only in the effect below: `followOutput`
+    // reads the latch on the very first render.
+    followRef.current.setActive(live);
   }
   const follow = followRef.current;
 
   const pinRef = useRef(pinToLiveEnd);
   pinRef.current = pinToLiveEnd;
+
+  useEffect(() => {
+    follow.setActive(live);
+    if (!live) return;
+    // A task just started (or the list mounted mid-task): judge the follow
+    // from where the reader is NOW, not from latch state the previous task
+    // left behind. A reader up in history when a task starts stays there.
+    follow.reset();
+    if (scrollEl && !isAtLiveEnd(scrollEl)) follow.disengage();
+  }, [follow, live, scrollEl]);
   const pin = useCallback(() => {
     pinRef.current();
   }, []);

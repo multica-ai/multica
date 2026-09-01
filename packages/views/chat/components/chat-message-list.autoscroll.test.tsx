@@ -355,21 +355,24 @@ function taskMsg(seq: number, content: string): TaskMessagePayload {
   return { task_id: TASK_ID, seq, type: "text", content } as TaskMessagePayload;
 }
 
-function renderStreamingChat({ contentHeight = 2000 } = {}) {
+const RUNNING_TASK = { task_id: TASK_ID, status: "running" } as const;
+
+function renderChat({
+  contentHeight = 2000,
+  pendingTask = RUNNING_TASK as typeof RUNNING_TASK | null,
+} = {}) {
   const qc = new QueryClient();
   qc.setQueryData(chatKeys.taskMessages(TASK_ID), [taskMsg(0, "Looking into it. ")]);
 
-  const view = render(
+  const ui = (pending: typeof RUNNING_TASK | null) => (
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <ChatMessageList
-          messages={[]}
-          pendingTask={{ task_id: TASK_ID, status: "running" }}
-          availability={undefined}
-        />
+        <ChatMessageList messages={[]} pendingTask={pending} availability={undefined} />
       </QueryClientProvider>
-    </I18nProvider>,
+    </I18nProvider>
   );
+
+  const view = render(ui(pendingTask));
 
   const el = view.container.querySelector<HTMLElement>("[data-tab-scroll-root]");
   if (!el) throw new Error("chat list did not render a scroll container");
@@ -383,6 +386,11 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
       view.container
         .querySelector("[data-follow-at-bottom]")
         ?.getAttribute("data-follow-at-bottom"),
+    setPendingTask: (pending: typeof RUNNING_TASK | null) => {
+      act(() => {
+        view.rerender(ui(pending));
+      });
+    },
     streamChunk: (seq: number) => {
       act(() => {
         qc.setQueryData<TaskMessagePayload[]>(
@@ -394,9 +402,12 @@ function renderStreamingChat({ contentHeight = 2000 } = {}) {
   };
 }
 
+const renderIdleChat = ({ contentHeight = 2000 } = {}) =>
+  renderChat({ contentHeight, pendingTask: null });
+
 describe("ChatMessageList auto-scroll", () => {
   it("follows a streaming reply whose row count never changes", () => {
-    const { scroll, streamChunk, rowCount } = renderStreamingChat();
+    const { scroll, streamChunk, rowCount } = renderChat();
 
     const rowsBefore = rowCount();
     for (let seq = 1; seq <= 30; seq++) {
@@ -493,7 +504,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("keeps the newest content clear of a composer that grew", () => {
-    const { scroll } = renderStreamingChat();
+    const { scroll } = renderChat();
 
     scroll.shrinkViewport(72);
 
@@ -501,7 +512,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("stays pinned when the composer collapses", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     streamChunk(1);
     scroll.grow(180);
@@ -516,7 +527,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("stays pinned when content shrinks", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     streamChunk(1);
     scroll.grow(180);
@@ -533,7 +544,7 @@ describe("ChatMessageList auto-scroll", () => {
   // The base behavior `atBottomThreshold` always granted: a trackpad nudge
   // inside the edge zone is not the reader leaving.
   it("keeps following after a small trackpad nudge near the live end", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.readerScrollsUp(2);
     gestureSettles();
@@ -545,7 +556,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("releases when touch momentum carries a flick past the threshold", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.touchStart(100);
     scroll.touchMove(180, 80);
@@ -560,7 +571,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("leaves a fractional touch drag in progress", () => {
-    const { scroll, streamChunk, followsAtBottom } = renderStreamingChat();
+    const { scroll, streamChunk, followsAtBottom } = renderChat();
 
     scroll.touchStart(100);
     scroll.touchMove(180, 80.5);
@@ -572,7 +583,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("resumes pinning after a sub-threshold touch ends", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.touchStart(100);
     scroll.touchMove(180, 80);
@@ -585,7 +596,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("releases on incremental upward scrolling during a fast stream", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     streamChunk(1);
     scroll.grow(180);
@@ -609,7 +620,7 @@ describe("ChatMessageList auto-scroll", () => {
   // Discrete mouse wheel at reading pace: one notch per event, spaced past
   // the intent window. Release must not require a single fast burst.
   it("releases for wheel notches spaced past the intent window", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.readerScrollsUp(100);
     gestureSettles();
@@ -626,7 +637,7 @@ describe("ChatMessageList auto-scroll", () => {
   // A reply's final chunk always exists and has a whole intent window to land
   // in after any small nudge; no later event will re-evaluate a declined pin.
   it("pins a chunk that lands inside the reader's intent window", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.readerScrollsUp(2);
     streamChunk(1);
@@ -636,7 +647,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("honors Shift+Space paging from a focused row control", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.shiftSpaceFromRowControl();
     scroll.browserScrollsListUp(VIEWPORT);
@@ -650,7 +661,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("leaves the viewport alone once the reader scrolls up to read history", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.readerScrollsTo(900);
     gestureSettles();
@@ -666,7 +677,7 @@ describe("ChatMessageList auto-scroll", () => {
   // Wheel over a capped code block scrolls the block; the event bubbles to
   // the list without moving it. Unconsumed input must not release the follow.
   it("keeps following through wheel input the list never consumed", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.wheelWithoutScroll(200);
     gestureSettles();
@@ -678,7 +689,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("pins a system shift after nested scrolling left input unconsumed", () => {
-    const { scroll } = renderStreamingChat();
+    const { scroll } = renderChat();
 
     scroll.wheelWithoutScroll(300);
     renderFrame();
@@ -688,7 +699,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("keeps following after a flick on a conversation too short to scroll", () => {
-    const { scroll, streamChunk } = renderStreamingChat({ contentHeight: 400 });
+    const { scroll, streamChunk } = renderChat({ contentHeight: 400 });
 
     scroll.wheelWithoutScroll(200);
     gestureSettles();
@@ -705,7 +716,7 @@ describe("ChatMessageList auto-scroll", () => {
   // scrolls the list. The scroll confirms the staged key intent: the reader
   // is released, not pinned back over their own keypress.
   it("honors keyboard paging from a focused row control", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.pageUpFromRowControl();
     scroll.browserScrollsListUp(VIEWPORT);
@@ -719,7 +730,7 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("re-engages when the reader scrolls back down to the live end", () => {
-    const { scroll, streamChunk } = renderStreamingChat();
+    const { scroll, streamChunk } = renderChat();
 
     scroll.readerScrollsTo(900);
     scroll.readerScrollsTo(0);
@@ -734,7 +745,7 @@ describe("ChatMessageList auto-scroll", () => {
   // `followOutput` is `atBottom && isFollowing()`: a released follow must turn
   // it off even while Virtuoso still reports the reader at the bottom.
   it("turns followOutput off while released, even when Virtuoso reports atBottom", () => {
-    const { scroll, streamChunk, followsAtBottom } = renderStreamingChat();
+    const { scroll, streamChunk, followsAtBottom } = renderChat();
 
     expect(followsAtBottom()).toBe("auto");
 
@@ -745,10 +756,67 @@ describe("ChatMessageList auto-scroll", () => {
   });
 
   it("stops measuring once the list unmounts", () => {
-    const { view } = renderStreamingChat();
+    const { view } = renderChat();
 
     view.unmount();
 
     expect(observedTargets()).toHaveLength(0);
+  });
+});
+
+// With no task in flight there is no live end: nothing may move the viewport
+// on the reader's behalf, whatever resizes or scrolls happen (TIM-65).
+describe("ChatMessageList auto-scroll while idle", () => {
+  it("does not pin when content grows under a reader at the bottom", () => {
+    const { scroll } = renderIdleChat();
+
+    scroll.grow(400);
+
+    expect(scroll.distanceFromBottom()).toBe(400);
+  });
+
+  it("does not pin when the composer grows", () => {
+    const { scroll } = renderIdleChat();
+
+    scroll.shrinkViewport(72);
+
+    expect(scroll.distanceFromBottom()).toBe(72);
+  });
+
+  it("does not fight a scroll it saw no input for", () => {
+    const { scroll } = renderIdleChat();
+
+    scroll.browserScrollsListUp(300);
+
+    expect(scroll.distanceFromBottom()).toBe(300);
+  });
+
+  it("still follows appended rows through plain atBottom", () => {
+    const { followsAtBottom } = renderIdleChat();
+
+    expect(followsAtBottom()).toBe("auto");
+  });
+
+  it("engages the follow when a task starts with the reader at the bottom", () => {
+    const { scroll, setPendingTask, streamChunk } = renderIdleChat();
+
+    setPendingTask(RUNNING_TASK);
+    streamChunk(1);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  it("leaves a reader up in history alone when a task starts", () => {
+    const { scroll, setPendingTask, streamChunk } = renderIdleChat();
+
+    scroll.browserScrollsListUp(900);
+    const parked = scroll.scrollTop;
+
+    setPendingTask(RUNNING_TASK);
+    streamChunk(1);
+    scroll.grow(500);
+
+    expect(scroll.scrollTop).toBe(parked);
   });
 });
