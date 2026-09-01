@@ -148,4 +148,3 @@ Frontend tests cover primary styling, prompt tooltip, pending state, activation,
 stale hiding, and honest outcome feedback. Typecheck, lint, focused suites, Go
 tests, SQL generation checks, and the repository verification pipeline run before
 submission.
-

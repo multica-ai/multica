@@ -18,4 +18,3 @@
 8. Review the diff against repository boundaries and contribution requirements,
    commit the implementation, push the feature branch, and open a linked PR with
    screenshots and verification evidence.
-
