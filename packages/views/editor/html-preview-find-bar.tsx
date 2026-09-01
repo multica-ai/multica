@@ -104,9 +104,9 @@ export function HtmlPreviewFindBar({
         }}
         placeholder={t(($) => $.attachment.find_placeholder)}
         aria-label={t(($) => $.attachment.find_placeholder)}
-        className="w-40 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+        className="w-40 bg-transparent text-body text-foreground outline-none placeholder:text-muted-foreground"
       />
-      <span className="min-w-[3rem] shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+      <span className="min-w-[3rem] shrink-0 text-right text-caption tabular-nums text-muted-foreground">
         {count}
       </span>
       <button
