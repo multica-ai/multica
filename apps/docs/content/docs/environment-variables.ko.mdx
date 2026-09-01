@@ -86,7 +86,7 @@ Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`�
 | `SMTP_PORT` | `25` | 일반적인 값: 25, 587, 465 |
 | `SMTP_USERNAME` | 비어 있음 | 사용자 이름. 익명 relay에서는 비워 둠 |
 | `SMTP_PASSWORD` | 비어 있음 | 비밀번호 |
-| `SMTP_FROM_EMAIL` | `RESEND_FROM_EMAIL`로 fallback | Envelope From과 이메일 From |
+| `SMTP_FROM_EMAIL` | `RESEND_FROM_EMAIL`로 fallback | 발신자 주소. 순수 주소 또는 `Display Name <user@example.com>` 형식을 지원하며, 표시 이름은 메일 `From:` 헤더에만 사용되고 SMTP envelope에는 포함되지 않습니다 |
 | `SMTP_TLS` | `starttls` | `implicit`, `smtps`, `ssl`은 암시적 TLS를 의미하며 465에서는 자동 활성화 |
 | `SMTP_TLS_INSECURE` | `false` | 인증서 검증 건너뛰기. 신뢰할 수 있는 내부 네트워크에서만 사용 |
 | `SMTP_EHLO_NAME` | host 이름 | 엄격한 relay에서 요구하는 EHLO/FQDN |

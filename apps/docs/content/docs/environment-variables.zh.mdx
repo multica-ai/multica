@@ -86,7 +86,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `SMTP_PORT` | `25` | 常见值：25、587、465 |
 | `SMTP_USERNAME` | 空 | 用户名；匿名 relay 留空 |
 | `SMTP_PASSWORD` | 空 | 密码 |
-| `SMTP_FROM_EMAIL` | 回退到 `RESEND_FROM_EMAIL` | Envelope From 与邮件 From |
+| `SMTP_FROM_EMAIL` | 回退到 `RESEND_FROM_EMAIL` | 发件人地址。可填裸地址或 `Display Name <user@example.com>`；显示名仅用于邮件 `From:` 头，不会进入 SMTP envelope |
 | `SMTP_TLS` | `starttls` | `implicit`、`smtps` 或 `ssl` 表示隐式 TLS；465 会自动启用 |
 | `SMTP_TLS_INSECURE` | `false` | 跳过证书校验，仅用于可信内网 |
 | `SMTP_EHLO_NAME` | 主机名 | 严格 relay 要求的 EHLO/FQDN |

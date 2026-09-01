@@ -86,7 +86,7 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `SMTP_PORT` | `25` | Common values: 25, 587, 465 |
 | `SMTP_USERNAME` | empty | Username; leave empty for anonymous relays |
 | `SMTP_PASSWORD` | empty | Password |
-| `SMTP_FROM_EMAIL` | falls back to `RESEND_FROM_EMAIL` | Envelope From and message From |
+| `SMTP_FROM_EMAIL` | falls back to `RESEND_FROM_EMAIL` | Sender address. Accepts a bare address or `Display Name <user@example.com>`; the display name is used for the `From:` header only, never the SMTP envelope |
 | `SMTP_TLS` | `starttls` | `implicit`, `smtps`, or `ssl` means implicit TLS; port 465 enables it automatically |
 | `SMTP_TLS_INSECURE` | `false` | Skips certificate verification; trusted internal networks only |
 | `SMTP_EHLO_NAME` | hostname | EHLO/FQDN required by strict relays |

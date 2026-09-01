@@ -86,7 +86,7 @@ Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeco
 | `SMTP_PORT` | `25` | よく使う値: 25、587、465 |
 | `SMTP_USERNAME` | 空 | ユーザー名。匿名 relay では空のまま |
 | `SMTP_PASSWORD` | 空 | パスワード |
-| `SMTP_FROM_EMAIL` | `RESEND_FROM_EMAIL` にフォールバック | Envelope From とメールの From |
+| `SMTP_FROM_EMAIL` | `RESEND_FROM_EMAIL` にフォールバック | 送信者アドレス。ベアアドレスまたは `Display Name <user@example.com>` を指定できます。表示名はメールの `From:` ヘッダーにのみ使われ、SMTP エンベロープには含まれません |
 | `SMTP_TLS` | `starttls` | `implicit`、`smtps`、`ssl` は暗黙的 TLS を意味します。465 では自動的に有効 |
 | `SMTP_TLS_INSECURE` | `false` | 証明書検証をスキップ。信頼できる内部ネットワーク専用 |
 | `SMTP_EHLO_NAME` | ホスト名 | 厳格な relay が要求する EHLO/FQDN |
