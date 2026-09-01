@@ -63,8 +63,13 @@ export interface LiveEndFollow {
    * budget the surface's own scroll can attribute displacement against.
    */
   input(delta: number): void;
-  /** Discards input the surface did not consume during its rendering frame. */
-  endInputFrame(): void;
+  /**
+   * Discards input the surface did not consume during its rendering frame.
+   * Returns whether a pin was deferred by an in-flight gesture since the
+   * previous frame boundary — the wiring must re-judge (via `onResize`) so a
+   * deferred pin fires one frame late rather than never.
+   */
+  endInputFrame(): boolean;
   /** An active touch prevents pinning while drag displacement is confirmed. */
   touchStart(): void;
   /** Ends the held state; confirmed momentum may continue within the settle window. */
@@ -130,17 +135,37 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   // per event) escaped easily. Deferring the pin lets the gesture finish;
   // an unconsumed claim's deferral ends when the wiring discards the claim
   // at the frame boundary and re-judges (see stick-to-bottom.ts).
+  //
+  // Carry residue is the bounded cost: if the browser delivers less
+  // displacement than the claim (scroll extent reached, delta scaling off),
+  // the carry never drains and pins stay deferred until the settle window
+  // expires — at most MOTION_SETTLE_WINDOW_MS with the live end off-screen,
+  // corrected by the next scroll or resize after that.
   const gestureInFlight = () =>
     (inputFresh() && (awayBudget > 0 || towardBudget > 0)) ||
     (motionFresh() && motionSource === "input" && motionCarry > 0);
 
-  const pinVerdict = (distance: number): boolean =>
-    following &&
-    !mouseHeld &&
-    !scrollbarDrag &&
-    !touchHeld &&
-    !gestureInFlight() &&
-    distance > 0;
+  // Whether a wanted pin was suppressed by an in-flight gesture since the
+  // last frame boundary; endInputFrame reports and clears it so the wiring
+  // re-judges only pins that were actually deferred — an unconditional
+  // frame-boundary re-judge would snap back sub-threshold reader scrolls the
+  // latch had deliberately left alone.
+  let pinDeferred = false;
+
+  const pinVerdict = (distance: number): boolean => {
+    const wanted =
+      following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
+    if (wanted && gestureInFlight()) {
+      pinDeferred = true;
+      return false;
+    }
+    // Judged for real: whatever was deferred is settled, so a later frame
+    // boundary must not inherit it — a deferral stranded by a gesture with
+    // no input frame left would otherwise be consumed by the next unrelated
+    // gesture and snap it back.
+    pinDeferred = false;
+    return wanted;
+  };
 
   return {
     setActive(a: boolean) {
@@ -159,6 +184,7 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
       motionSource = null;
       motionCarry = 0;
       lastMotionAt = -MOTION_SETTLE_WINDOW_MS;
+      pinDeferred = false;
     },
     isFollowing: () => active && following,
     disengage() {
@@ -179,6 +205,9 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
     endInputFrame() {
       awayBudget = 0;
       towardBudget = 0;
+      const deferred = pinDeferred;
+      pinDeferred = false;
+      return deferred;
     },
     touchStart() {
       if (active) touchHeld = true;
@@ -286,6 +315,11 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
             towardBudget = 0;
             awayTaken = 0;
             motionDirection = 0;
+            // Clear the carry too: an over-claimed toward gesture (End stages
+            // the whole scrollHeight) would otherwise defer pins for the rest
+            // of the settle window right after the follow re-engaged.
+            motionSource = null;
+            motionCarry = 0;
           }
           return false;
         }
