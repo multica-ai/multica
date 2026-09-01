@@ -2,6 +2,7 @@
   "page": {
     "title": "Squads",
     "new_button": "New Squad",
+    "import_button": "Import template",
     "empty_no_squads": "No squads yet. Create one to get started.",
     "empty_no_match": "No squads match your filters.",
     "table": {
@@ -13,7 +14,23 @@
     },
     "no_matches": "No squads match",
     "row_menu": "Squad actions",
+    "publish_template_action": "Publish to template gallery",
+    "export_template_action": "Export template file",
+    "export_success": "Template file exported",
+    "export_failed": "Failed to export template file",
     "archive_action": "Archive"
+  },
+  "import_dialog": {
+    "title": "Import squad template",
+    "description": "Choose a published template or upload a .multica-template.json file.",
+    "choose_file": "Choose file",
+    "choose_file_description": "Import a .multica-template.json file",
+    "from_gallery": "Choose from template gallery",
+    "from_gallery_description": "Browse squad templates you can use",
+    "gallery_title": "Choose a squad template",
+    "back": "Back",
+    "invalid_file": "This is not a valid squad template file",
+    "no_templates": "No squad templates are available"
   },
   "inspector": {
     "details_section": "Details",

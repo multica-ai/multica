@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bot, Check, ChevronLeft, ChevronRight, Loader2, ShieldCheck, Users } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -102,10 +102,16 @@ export function CreateTemplateDialog({
   open,
   onOpenChange,
   wsId,
+  initialSourceType = "agent",
+  initialSourceId = "",
+  initialStep = 1,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   wsId: string;
+  initialSourceType?: MarketplaceTemplateSourceType;
+  initialSourceId?: string;
+  initialStep?: WizardStep;
 }) {
   const { t } = useT("templates");
   const queryClient = useQueryClient();
@@ -124,6 +130,19 @@ export function CreateTemplateDialog({
     ? agents.filter((agent) => !agent.archived_at)
     : squads;
   const source = sources.find((item) => item.id === sourceId) ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    setSourceType(initialSourceType);
+    setSourceId(initialSourceId);
+    setStep(initialStep);
+  }, [initialSourceId, initialSourceType, initialStep, open]);
+
+  useEffect(() => {
+    if (!open || !initialSourceId || source?.id !== initialSourceId) return;
+    setName(source.name);
+    setDescription(source.description ?? "");
+  }, [initialSourceId, open, source?.id, source?.name, source?.description]);
 
   const reset = () => {
     setStep(1);

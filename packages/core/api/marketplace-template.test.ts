@@ -98,4 +98,43 @@ describe("marketplace template API", () => {
       max_concurrent_tasks: 1,
     });
   });
+
+  it("exports and reapplies a squad template file through schema-checked endpoints", async () => {
+    const manifest = {
+      format: "multica-template",
+      version: 1,
+      exported_at: "2026-09-01T00:00:00Z",
+      name: "Delivery squad",
+      description: "A reusable delivery squad",
+      tags: [],
+      source_type: "squad",
+      snapshot_version: 1,
+      snapshot: {
+        version: 1,
+        source_type: "squad",
+        agents: [{ key: "agent_1", name: "Lead", instructions: "Delegate", skill_keys: [] }],
+        skills: [],
+        squad: { name: "Delivery squad", leader_key: "agent_1", members: [{ agent_key: "agent_1", role: "leader" }] },
+      },
+    };
+    stubJSON(manifest);
+    const client = new ApiClient("https://api.example.test");
+
+    const exported = await client.exportSquadTemplateFile("squad-1");
+    expect(exported).toMatchObject({ format: "multica-template", source_type: "squad" });
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/squads/squad-1/template-file",
+    );
+
+    stubJSON({ template_id: "", agent_ids: { agent_1: "new-agent" }, squad_id: "new-squad", reused_skill_ids: [] });
+    const applied = await client.applyMarketplaceTemplateFile({
+      manifest: exported,
+      name: "Imported squad",
+      runtime_ids: { agent_1: "runtime-1" },
+    });
+    expect(applied).toMatchObject({ squad_id: "new-squad", template_id: "" });
+    expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/templates/apply-file",
+    );
+  });
 });

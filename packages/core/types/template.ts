@@ -56,6 +56,18 @@ export interface MarketplaceTemplateSnapshot {
   squad?: MarketplaceTemplateSquadSnapshot;
 }
 
+export interface MarketplaceTemplateFile {
+  format: "multica-template";
+  version: 1;
+  exported_at: string;
+  name: string;
+  description: string;
+  tags: string[];
+  source_type: MarketplaceTemplateSourceType;
+  snapshot_version: number;
+  snapshot: MarketplaceTemplateSnapshot;
+}
+
 export interface MarketplaceTemplate {
   id: string;
   source_workspace_id: string;
@@ -109,6 +121,10 @@ export interface CreateMarketplaceTemplateRequest {
 export interface ApplyMarketplaceTemplateRequest {
   name?: string;
   runtime_ids: Record<string, string>;
+}
+
+export interface ApplyMarketplaceTemplateFileRequest extends ApplyMarketplaceTemplateRequest {
+  manifest: MarketplaceTemplateFile;
 }
 
 export interface ApplyMarketplaceTemplateResponse {

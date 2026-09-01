@@ -2133,6 +2133,43 @@ export const MarketplaceTemplateSnapshotSchema = z.object({
   squad: MarketplaceTemplateSquadSnapshotSchema.optional(),
 }).loose();
 
+export const MarketplaceTemplateFileSchema = z.object({
+  format: z.literal("multica-template"),
+  version: z.literal(1),
+  exported_at: z.string().default(""),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  tags: z.array(z.string()).default([]),
+  source_type: z.enum(["agent", "squad"]),
+  snapshot_version: z.number().int().positive().default(1),
+  snapshot: MarketplaceTemplateSnapshotSchema,
+}).superRefine((value, context) => {
+  if (value.source_type !== value.snapshot.source_type) {
+    context.addIssue({
+      code: "custom",
+      message: "Template file source type does not match its snapshot",
+      path: ["source_type"],
+    });
+  }
+});
+
+export const EMPTY_MARKETPLACE_TEMPLATE_FILE = {
+  format: "multica-template" as const,
+  version: 1 as const,
+  exported_at: "",
+  name: "",
+  description: "",
+  tags: [],
+  source_type: "squad" as const,
+  snapshot_version: 1,
+  snapshot: {
+    version: 1,
+    source_type: "squad" as const,
+    agents: [],
+    skills: [],
+  },
+};
+
 export const MarketplaceTemplateSchema = z.object({
   id: z.string().default(""),
   source_workspace_id: z.string().default(""),

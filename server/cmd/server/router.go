@@ -1985,6 +1985,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
+					r.Get("/template-file", h.ExportSquadTemplateFile)
 					r.Get("/members", h.ListSquadMembers)
 					r.Get("/members/status", h.ListSquadMemberStatus)
 					r.Post("/members", h.AddSquadMember)
@@ -1998,6 +1999,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/templates", func(r chi.Router) {
 				r.Get("/", h.ListMarketplaceTemplates)
 				r.Post("/", h.CreateMarketplaceTemplate)
+				r.Post("/apply-file", h.ApplyMarketplaceTemplateFile)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetMarketplaceTemplate)
 					r.Delete("/", h.DeleteMarketplaceTemplate)

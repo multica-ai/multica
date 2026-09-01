@@ -202,7 +202,9 @@ import type {
   ListMarketplaceTemplatesResponse,
   CreateMarketplaceTemplateRequest,
   ApplyMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateFileRequest,
   ApplyMarketplaceTemplateResponse,
+  MarketplaceTemplateFile,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -330,9 +332,11 @@ import {
   MarketplaceTemplateSchema,
   MarketplaceTemplateListSchema,
   ApplyMarketplaceTemplateResponseSchema,
+  MarketplaceTemplateFileSchema,
   EMPTY_MARKETPLACE_TEMPLATE,
   EMPTY_MARKETPLACE_TEMPLATE_LIST,
   EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
+  EMPTY_MARKETPLACE_TEMPLATE_FILE,
   SubscribersListSchema,
   TimelineEntriesSchema,
   UserSchema,
@@ -4148,6 +4152,31 @@ export class ApiClient {
       ApplyMarketplaceTemplateResponseSchema,
       EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
       { endpoint: "POST /api/templates/:id/apply" },
+    ) as ApplyMarketplaceTemplateResponse;
+  }
+
+  async exportSquadTemplateFile(squadId: string): Promise<MarketplaceTemplateFile> {
+    const raw = await this.fetch<unknown>(`/api/squads/${squadId}/template-file`);
+    return parseWithFallback(
+      raw,
+      MarketplaceTemplateFileSchema,
+      EMPTY_MARKETPLACE_TEMPLATE_FILE,
+      { endpoint: "GET /api/squads/:id/template-file" },
+    ) as MarketplaceTemplateFile;
+  }
+
+  async applyMarketplaceTemplateFile(
+    data: ApplyMarketplaceTemplateFileRequest,
+  ): Promise<ApplyMarketplaceTemplateResponse> {
+    const raw = await this.fetch<unknown>("/api/templates/apply-file", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      ApplyMarketplaceTemplateResponseSchema,
+      EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
+      { endpoint: "POST /api/templates/apply-file" },
     ) as ApplyMarketplaceTemplateResponse;
   }
 

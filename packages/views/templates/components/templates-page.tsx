@@ -33,6 +33,7 @@ import type {
   MarketplaceTemplateScope,
   MarketplaceTemplateSort,
   MarketplaceTemplateSourceType,
+  MarketplaceTemplateFile,
 } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -148,10 +149,12 @@ function TemplateCard({
 
 export function ApplyTemplateDialog({
   templateId,
+  manifest = null,
   onOpenChange,
   wsId,
 }: {
   templateId: string | null;
+  manifest?: MarketplaceTemplateFile | null;
   onOpenChange: (open: boolean) => void;
   wsId: string;
 }) {
@@ -160,12 +163,37 @@ export function ApplyTemplateDialog({
   const { push } = useNavigation();
   const queryClient = useQueryClient();
   const userId = useAuthStore((state) => state.user?.id ?? null);
-  const { data: template, isPending } = useQuery(marketplaceTemplateDetailOptions(wsId, templateId ?? ""));
+  const { data: fetchedTemplate, isPending } = useQuery(marketplaceTemplateDetailOptions(wsId, templateId ?? ""));
   const { data: runtimes = [], isPending: runtimesLoading } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const [runtimeIds, setRuntimeIds] = useState<Record<string, string>>({});
   const [bulkRuntimeId, setBulkRuntimeId] = useState("");
   const [squadName, setSquadName] = useState("");
+
+  const fileTemplate = useMemo<MarketplaceTemplate | undefined>(() => manifest ? {
+    id: "",
+    source_workspace_id: "",
+    created_by: "",
+    creator_name: "",
+    source_type: manifest.source_type,
+    source_id: null,
+    name: manifest.name,
+    description: manifest.description,
+    tags: manifest.tags,
+    visibility: "private",
+    image_url: null,
+    snapshot_version: manifest.snapshot_version,
+    applied_count: 0,
+    featured_at: null,
+    created_at: manifest.exported_at,
+    updated_at: manifest.exported_at,
+    agent_count: manifest.snapshot.agents.length,
+    skill_count: manifest.snapshot.skills.length,
+    preview_agents: [],
+    snapshot: manifest.snapshot,
+    can_manage: false,
+  } : undefined, [manifest]);
+  const template = fileTemplate ?? fetchedTemplate;
 
   useEffect(() => {
     setRuntimeIds({});
@@ -175,10 +203,15 @@ export function ApplyTemplateDialog({
 
   const agents = template?.snapshot?.agents ?? [];
   const mutation = useMutation({
-    mutationFn: () => api.applyMarketplaceTemplate(template!.id, {
-      name: template?.source_type === "squad" ? squadName.trim() : undefined,
-      runtime_ids: runtimeIds,
-    }),
+    mutationFn: () => {
+      const data = {
+        name: template?.source_type === "squad" ? squadName.trim() : undefined,
+        runtime_ids: runtimeIds,
+      };
+      return manifest
+        ? api.applyMarketplaceTemplateFile({ ...data, manifest })
+        : api.applyMarketplaceTemplate(template!.id, data);
+    },
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: marketplaceTemplateKeys.all(wsId) });
       queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
@@ -197,13 +230,13 @@ export function ApplyTemplateDialog({
   const allAssigned = agents.length > 0 && agents.every((agent) => runtimeIds[agent.key]);
 
   return (
-    <Dialog open={templateId !== null} onOpenChange={onOpenChange}>
+    <Dialog open={templateId !== null || manifest !== null} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{template ? t(($) => $.apply.title, { name: template.name }) : t(($) => $.card.use)}</DialogTitle>
           <DialogDescription>{t(($) => $.apply.description)}</DialogDescription>
         </DialogHeader>
-        {isPending || !template ? (
+        {(isPending && !manifest) || !template ? (
           <div className="grid gap-3 py-4"><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
         ) : (
           <div className="grid gap-5 py-2">

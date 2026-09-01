@@ -2,6 +2,7 @@
   "page": {
     "title": "スクワッド",
     "new_button": "新規スクワッド",
+    "import_button": "テンプレートをインポート",
     "empty_no_squads": "スクワッドはまだありません。作成して始めましょう。",
     "empty_no_match": "フィルターに一致するスクワッドはありません。",
     "table": {
@@ -13,7 +14,23 @@
     },
     "no_matches": "該当するスカッドはありません",
     "row_menu": "スカッドの操作",
+    "publish_template_action": "テンプレートギャラリーに公開",
+    "export_template_action": "テンプレートファイルをエクスポート",
+    "export_success": "テンプレートファイルをエクスポートしました",
+    "export_failed": "テンプレートファイルをエクスポートできませんでした",
     "archive_action": "アーカイブ"
+  },
+  "import_dialog": {
+    "title": "スクワッドテンプレートをインポート",
+    "description": "公開済みテンプレートを選択するか、.multica-template.json ファイルをアップロードします。",
+    "choose_file": "ファイルを選択",
+    "choose_file_description": ".multica-template.json ファイルをインポート",
+    "from_gallery": "テンプレートギャラリーから選択",
+    "from_gallery_description": "利用可能なスクワッドテンプレートを表示",
+    "gallery_title": "スクワッドテンプレートを選択",
+    "back": "戻る",
+    "invalid_file": "有効なスクワッドテンプレートファイルではありません",
+    "no_templates": "利用可能なスクワッドテンプレートはありません"
   },
   "inspector": {
     "details_section": "詳細",

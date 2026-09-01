@@ -304,11 +304,13 @@ export type {
   MarketplaceTemplateAgentSnapshot,
   MarketplaceTemplateSquadSnapshot,
   MarketplaceTemplateSnapshot,
+  MarketplaceTemplateFile,
   MarketplaceTemplate,
   ListMarketplaceTemplatesParams,
   ListMarketplaceTemplatesResponse,
   CreateMarketplaceTemplateRequest,
   ApplyMarketplaceTemplateRequest,
+  ApplyMarketplaceTemplateFileRequest,
   ApplyMarketplaceTemplateResponse,
 } from "./template";
 export type {

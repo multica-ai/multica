@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,10 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -720,10 +717,7 @@ func (h *Handler) ApplyMarketplaceTemplate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}
-	var req struct {
-		Name       string            `json:"name"`
-		RuntimeIDs map[string]string `json:"runtime_ids"`
-	}
+	var req applyMarketplaceTemplateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
@@ -733,199 +727,9 @@ func (h *Handler) ApplyMarketplaceTemplate(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "template snapshot is invalid")
 		return
 	}
-	if err := validateMarketplaceSnapshot(snapshot); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	result, ok := h.applyMarketplaceTemplateSnapshot(w, r, workspaceID, member, templateRow.ID, true, snapshot, req)
+	if !ok {
 		return
 	}
-	runtimes := make(map[string]db.AgentRuntime, len(snapshot.Agents))
-	for _, agentSnapshot := range snapshot.Agents {
-		runtimeID, exists := req.RuntimeIDs[agentSnapshot.Key]
-		if !exists || strings.TrimSpace(runtimeID) == "" {
-			writeError(w, http.StatusBadRequest, "runtime_ids must assign every template agent")
-			return
-		}
-		runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
-		if !ok {
-			return
-		}
-		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{ID: runtimeUUID, WorkspaceID: member.WorkspaceID})
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid runtime_id")
-			return
-		}
-		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
-			return
-		}
-		runtimes[agentSnapshot.Key] = runtime
-	}
-
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to start template import transaction")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-
-	skillIDs := map[string]pgtype.UUID{}
-	reusedSkillIDs := []string{}
-	for _, skillSnapshot := range snapshot.Skills {
-		skill, err := qtx.GetSkillByWorkspaceAndName(r.Context(), db.GetSkillByWorkspaceAndNameParams{WorkspaceID: member.WorkspaceID, Name: skillSnapshot.Name})
-		if err == nil {
-			skillIDs[skillSnapshot.Key] = skill.ID
-			reusedSkillIDs = append(reusedSkillIDs, uuidToString(skill.ID))
-			continue
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusInternalServerError, "failed to check imported skills")
-			return
-		}
-		config := []byte(skillSnapshot.Config)
-		if len(config) == 0 {
-			config = []byte(`{}`)
-		}
-		skill, err = qtx.CreateSkill(r.Context(), db.CreateSkillParams{
-			WorkspaceID: member.WorkspaceID, Name: skillSnapshot.Name,
-			Description: skillSnapshot.Description, Content: skillSnapshot.Content,
-			Config: config, CreatedBy: member.UserID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create imported skill")
-			return
-		}
-		for _, file := range skillSnapshot.Files {
-			if _, err := qtx.UpsertSkillFile(r.Context(), db.UpsertSkillFileParams{SkillID: skill.ID, Path: file.Path, Content: file.Content}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to create imported skill file")
-				return
-			}
-		}
-		skillIDs[skillSnapshot.Key] = skill.ID
-	}
-
-	existingAgents, err := qtx.ListAllAgents(r.Context(), member.WorkspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load workspace agents")
-		return
-	}
-	usedNames := make(map[string]struct{}, len(existingAgents)+len(snapshot.Agents))
-	for _, agent := range existingAgents {
-		usedNames[strings.ToLower(agent.Name)] = struct{}{}
-	}
-	createdByKey := map[string]db.Agent{}
-	createdIDs := map[string]string{}
-	for _, agentSnapshot := range snapshot.Agents {
-		runtime := runtimes[agentSnapshot.Key]
-		starters, _ := json.Marshal(agentSnapshot.ConversationStarters)
-		maxConcurrent := agentSnapshot.MaxConcurrentTasks
-		if maxConcurrent < 1 {
-			maxConcurrent = 1
-		}
-		created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-			WorkspaceID: member.WorkspaceID, Name: nextMarketplaceAgentName(agentSnapshot.Name, usedNames),
-			Description: agentSnapshot.Description, Instructions: agentSnapshot.Instructions,
-			RuntimeMode: runtime.RuntimeMode, RuntimeConfig: []byte(`{}`), RuntimeID: runtime.ID,
-			Visibility: "private", PermissionMode: "private", MaxConcurrentTasks: maxConcurrent,
-			OwnerID: member.UserID, CustomEnv: []byte(`{}`), CustomArgs: []byte(`[]`),
-			ConversationStarters: starters,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create imported agent")
-			return
-		}
-		for _, skillKey := range agentSnapshot.SkillKeys {
-			skillID, exists := skillIDs[skillKey]
-			if !exists {
-				writeError(w, http.StatusBadRequest, "template agent references an unknown skill")
-				return
-			}
-			if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{AgentID: created.ID, SkillID: skillID}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to attach imported skill")
-				return
-			}
-		}
-		createdByKey[agentSnapshot.Key] = created
-		createdIDs[agentSnapshot.Key] = uuidToString(created.ID)
-	}
-
-	var createdSquad *db.Squad
-	if snapshot.SourceType == "squad" && snapshot.Squad != nil {
-		leader, exists := createdByKey[snapshot.Squad.LeaderKey]
-		if !exists {
-			writeError(w, http.StatusBadRequest, "template squad leader is missing")
-			return
-		}
-		name := strings.TrimSpace(req.Name)
-		if name == "" {
-			name = snapshot.Squad.Name
-		}
-		squad, err := qtx.CreateSquad(r.Context(), db.CreateSquadParams{
-			WorkspaceID: member.WorkspaceID, Name: name, Description: snapshot.Squad.Description,
-			LeaderID: leader.ID, CreatorID: member.UserID,
-		})
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to create imported squad")
-			return
-		}
-		if snapshot.Squad.Instructions != "" {
-			updated, err := qtx.UpdateSquad(r.Context(), db.UpdateSquadParams{
-				ID: squad.ID, Instructions: pgtype.Text{String: snapshot.Squad.Instructions, Valid: true},
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to set imported squad instructions")
-				return
-			}
-			squad = updated
-		}
-		for _, squadMember := range snapshot.Squad.Members {
-			agent, exists := createdByKey[squadMember.AgentKey]
-			if !exists {
-				writeError(w, http.StatusBadRequest, "template squad member is missing")
-				return
-			}
-			role := squadMember.Role
-			if squadMember.AgentKey == snapshot.Squad.LeaderKey && role == "" {
-				role = "leader"
-			}
-			if _, err := qtx.AddSquadMember(r.Context(), db.AddSquadMemberParams{
-				SquadID: squad.ID, MemberType: "agent", MemberID: agent.ID, Role: role,
-			}); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to add imported squad member")
-				return
-			}
-		}
-		createdSquad = &squad
-	}
-	if _, err := qtx.IncrementMarketplaceTemplateAppliedCount(r.Context(), templateRow.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to record template usage")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to commit template import")
-		return
-	}
-
-	actorID := uuidToString(member.UserID)
-	for key, created := range createdByKey {
-		if runtimes[key].Status == "online" {
-			h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
-			created, _ = h.Queries.GetAgent(r.Context(), created.ID)
-		}
-		resp := h.agentToResponse(created)
-		_ = h.attachAgentSkills(r.Context(), &resp, created.ID)
-		_ = h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID)
-		h.publish(protocol.EventAgentCreated, workspaceID, "member", actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	}
-	squadID := (*string)(nil)
-	if createdSquad != nil {
-		idString := uuidToString(createdSquad.ID)
-		squadID = &idString
-		if resp, err := h.squadToResponseWithPreview(r.Context(), *createdSquad); err == nil {
-			h.publish(protocol.EventSquadCreated, workspaceID, "member", actorID, map[string]any{"squad": resp})
-		}
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"template_id": uuidToString(templateRow.ID), "agent_ids": createdIDs,
-		"squad_id": squadID, "reused_skill_ids": reusedSkillIDs,
-	})
+	writeJSON(w, http.StatusCreated, result.response(templateRow.ID))
 }

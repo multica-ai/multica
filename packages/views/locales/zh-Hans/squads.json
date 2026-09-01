@@ -2,6 +2,7 @@
   "page": {
     "title": "小队",
     "new_button": "新建小队",
+    "import_button": "导入模板",
     "empty_no_squads": "还没有小队，创建一个开始吧。",
     "empty_no_match": "没有匹配筛选条件的小队。",
     "table": {
@@ -13,7 +14,23 @@
     },
     "no_matches": "没有匹配的小队",
     "row_menu": "小队操作",
+    "publish_template_action": "发布到模板市场",
+    "export_template_action": "导出模板文件",
+    "export_success": "已导出模板文件",
+    "export_failed": "导出模板文件失败",
     "archive_action": "归档"
+  },
+  "import_dialog": {
+    "title": "导入小队模板",
+    "description": "选择已发布的模板，或上传 .multica-template.json 文件。",
+    "choose_file": "选择文件",
+    "choose_file_description": "导入 .multica-template.json 文件",
+    "from_gallery": "从模板广场选择",
+    "from_gallery_description": "浏览你有权限使用的小队模板",
+    "gallery_title": "选择小队模板",
+    "back": "返回",
+    "invalid_file": "这不是有效的小队模板文件",
+    "no_templates": "暂无可用的小队模板"
   },
   "inspector": {
     "details_section": "详情",

@@ -272,3 +272,111 @@ func TestMarketplaceSquadTemplatePreservesLeaderRolesAndInstructions(t *testing.
 		t.Fatalf("imported worker role = %q, want implementation", workerRole)
 	}
 }
+
+func TestSquadTemplateFileRoundTripExcludesSecrets(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	leaderID := createHandlerTestAgent(t, "template-file-leader", nil)
+	sourceSquad := createSquadAs(t, "", "Template file source squad", leaderID)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent
+		SET custom_env = '{"TOKEN":"file-secret-env"}'::jsonb,
+		    mcp_config = '{"token":"file-secret-mcp"}'::jsonb,
+		    runtime_config = '{"gateway":{"token":"file-secret-runtime"}}'::jsonb
+		WHERE id = $1`, leaderID); err != nil {
+		t.Fatalf("seed file export secrets: %v", err)
+	}
+	updateW := httptest.NewRecorder()
+	testHandler.UpdateSquad(updateW, squadScopeReq("", http.MethodPut, "/api/squads", map[string]any{
+		"instructions": "Delegate every implementation task and wait for evidence.",
+	}, map[string]string{"id": sourceSquad.ID}))
+	if updateW.Code != http.StatusOK {
+		t.Fatalf("UpdateSquad: expected 200, got %d: %s", updateW.Code, updateW.Body.String())
+	}
+
+	exportW := httptest.NewRecorder()
+	testHandler.ExportSquadTemplateFile(exportW, squadScopeReq("", http.MethodGet, "/api/squads/template-file", nil, map[string]string{"id": sourceSquad.ID}))
+	if exportW.Code != http.StatusOK {
+		t.Fatalf("ExportSquadTemplateFile: expected 200, got %d: %s", exportW.Code, exportW.Body.String())
+	}
+	if !strings.Contains(exportW.Header().Get("Content-Disposition"), ".multica-template.json") {
+		t.Fatalf("missing template file content disposition: %q", exportW.Header().Get("Content-Disposition"))
+	}
+	for _, secret := range []string{"file-secret-env", "file-secret-mcp", "file-secret-runtime"} {
+		if strings.Contains(exportW.Body.String(), secret) {
+			t.Fatalf("exported template leaked %q", secret)
+		}
+	}
+	var manifest MarketplaceTemplateFile
+	if err := json.Unmarshal(exportW.Body.Bytes(), &manifest); err != nil {
+		t.Fatalf("decode exported template: %v", err)
+	}
+	if err := validateMarketplaceTemplateFile(manifest); err != nil {
+		t.Fatalf("exported template does not validate: %v", err)
+	}
+
+	var runtimeID pgtype.UUID
+	if err := testPool.QueryRow(context.Background(), `SELECT runtime_id FROM agent WHERE id = $1`, leaderID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load source runtime: %v", err)
+	}
+	applyW := httptest.NewRecorder()
+	testHandler.ApplyMarketplaceTemplateFile(applyW, squadScopeReq("", http.MethodPost, "/api/templates/apply-file", map[string]any{
+		"manifest": manifest,
+		"name":     "Imported from file",
+		"runtime_ids": map[string]string{
+			"agent_1": uuidToString(runtimeID),
+		},
+	}, nil))
+	if applyW.Code != http.StatusCreated {
+		t.Fatalf("ApplyMarketplaceTemplateFile: expected 201, got %d: %s", applyW.Code, applyW.Body.String())
+	}
+	var applied struct {
+		TemplateID string            `json:"template_id"`
+		AgentIDs   map[string]string `json:"agent_ids"`
+		SquadID    string            `json:"squad_id"`
+	}
+	if err := json.Unmarshal(applyW.Body.Bytes(), &applied); err != nil {
+		t.Fatalf("decode file import response: %v", err)
+	}
+	if applied.TemplateID != "" || applied.SquadID == "" || applied.AgentIDs["agent_1"] == "" {
+		t.Fatalf("file import response is incomplete: %s", applyW.Body.String())
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad_member WHERE squad_id = $1`, applied.SquadID)
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, applied.SquadID)
+		for _, id := range applied.AgentIDs {
+			testPool.Exec(context.Background(), `DELETE FROM agent_skill WHERE agent_id = $1`, id)
+			testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, id)
+		}
+	})
+	var instructions string
+	if err := testPool.QueryRow(context.Background(), `SELECT instructions FROM squad WHERE id = $1`, applied.SquadID).Scan(&instructions); err != nil {
+		t.Fatalf("load file-imported squad: %v", err)
+	}
+	if instructions != "Delegate every implementation task and wait for evidence." {
+		t.Fatalf("file-imported instructions = %q", instructions)
+	}
+}
+
+func TestMarketplaceTemplateFileRejectsUnsafeSkillPath(t *testing.T) {
+	manifest := MarketplaceTemplateFile{
+		Format: marketplaceTemplateFileFormat, Version: marketplaceTemplateFileVersion,
+		Name: "Unsafe", SourceType: "agent", SnapshotVersion: marketplaceTemplateSnapshotVersion,
+		Snapshot: MarketplaceTemplateSnapshot{
+			Version: marketplaceTemplateSnapshotVersion, SourceType: "agent",
+			Agents: []MarketplaceTemplateAgentSnapshot{{
+				Key: "agent_1", Name: "Unsafe", MaxConcurrentTasks: 1,
+				SkillKeys: []string{"skill_1"},
+			}},
+			Skills: []MarketplaceTemplateSkillSnapshot{{
+				Key: "skill_1", Name: "unsafe", Config: json.RawMessage(`{}`),
+				Files: []MarketplaceTemplateSkillFileSnapshot{{Path: "../escape.sh", Content: "echo no"}},
+			}},
+		},
+	}
+	err := validateMarketplaceTemplateFile(manifest)
+	if err == nil || !strings.Contains(err.Error(), "unsafe") {
+		t.Fatalf("validateMarketplaceTemplateFile() error = %v, want unsafe path", err)
+	}
+}
