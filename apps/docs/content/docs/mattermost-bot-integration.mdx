@@ -104,6 +104,23 @@ Binding links use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN`. The resu
 Multica never follows an HTTP redirect when talking to your Mattermost server, so a misconfigured redirect cannot send the bot token to another host. If your deployment redirects (for example HTTP to HTTPS), enter the final URL — the one you would use in a browser — rather than the one that redirects.
 </Callout>
 
+## Verifying a change against a real server
+
+The adapter ships with an end-to-end suite that runs against a real Mattermost,
+not a fixture. It is the only thing that can catch the adapter being wrong about
+Mattermost rather than wrong about itself, so run it after changing the adapter.
+
+```bash
+eval "$(./scripts/mattermost-e2e-up.sh)"    # start a throwaway server, provision it, export the env
+(cd server && go test -tags=mattermoste2e ./internal/integrations/mattermost/ -run E2E -v -count=1)
+./scripts/mattermost-e2e-down.sh             # remove the container
+```
+
+The suite is behind the `mattermoste2e` build tag and an env gate, so `make test`
+never reaches the network. The bootstrap script creates its own admin, team, bot
+account, channel and second user inside one container, so tearing that container
+down is a complete cleanup.
+
 ## Troubleshooting
 
 - **Bot cannot be verified**: first check the server URL and the API server's network or proxy. Generate a new token only when Mattermost itself rejects the current one — the error message distinguishes the two cases.
