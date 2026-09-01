@@ -1333,8 +1333,44 @@ func resolveBaseRefContext(ctx context.Context, barePath, requestedRef string) (
 		return getRemoteDefaultBranchContext(ctx, barePath), nil
 	}
 
-	// Prefer remote-tracking branches for human branch names. Then allow full
-	// local refs, tags, and raw commits that exist in the fetched bare cache.
+	if resolved, ok := lookupCachedBaseRefContext(ctx, barePath, ref); ok {
+		return resolved, nil
+	}
+
+	// The cache only ever fetches modernFetchRefspec, so its refs are
+	// refs/remotes/origin/* plus tags — nothing else the remote publishes. Two
+	// documented `--ref` inputs therefore can never be in the cache no matter
+	// how recently Sync ran: a fully-qualified ref outside refs/heads/*
+	// (refs/pull/N/head on GitHub, refs/merge-requests/N/head on GitLab), and
+	// a commit no fetched head reaches — a PR head being the usual one. Both
+	// used to fail as "cannot resolve", which reads as a typo rather than as
+	// "this ref exists but we never asked for it" (#6153).
+	//
+	// So ask origin for exactly the one thing that was requested. This stays
+	// bounded: a single refspec (or a single object), --no-tags, and no
+	// widening of the cache's standing refspec — a second full fetch has
+	// already happened in CreateWorktree just above.
+	refspec, localRef, ok := targetedFetchRefspec(ref)
+	if !ok {
+		return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s: it is not a branch, tag, or commit in the cache, and it is neither a fully-qualified ref (refs/...) nor a commit id, so there is nothing specific to fetch from origin", ref, barePath)
+	}
+	if out, err := runGitCombinedOutputContext(ctx, "-C", barePath, "fetch", "--no-tags", "origin", refspec); err != nil {
+		if ctx.Err() != nil {
+			return "", context.Cause(ctx)
+		}
+		return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s: fetching it from origin failed: %s: %w", ref, barePath, strings.TrimSpace(string(out)), err)
+	}
+	if gitRefExistsContext(ctx, barePath, localRef+"^{commit}") {
+		return localRef, nil
+	}
+	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s: origin accepted the fetch but %s does not name a commit (an annotated object or a deleted ref)", ref, barePath, localRef)
+}
+
+// lookupCachedBaseRefContext resolves a requested ref against what the bare
+// cache already holds. Remote-tracking branches come first so a human branch
+// name never collides with a same-named tag; then tags, then anything that is
+// already a full ref or a raw commit in the cache.
+func lookupCachedBaseRefContext(ctx context.Context, barePath, ref string) (string, bool) {
 	candidates := []string{
 		"refs/remotes/origin/" + ref,
 		"refs/tags/" + ref,
@@ -1342,10 +1378,62 @@ func resolveBaseRefContext(ctx context.Context, barePath, requestedRef string) (
 	}
 	for _, candidate := range candidates {
 		if gitRefExistsContext(ctx, barePath, candidate+"^{commit}") {
-			return candidate, nil
+			return candidate, true
 		}
 	}
-	return "", fmt.Errorf("cannot resolve requested ref %q in repo cache at %s", ref, barePath)
+	return "", false
+}
+
+// targetedFetchRefspec maps a requested ref onto the single refspec that would
+// bring it into the bare cache, plus the local name it lands under. It returns
+// ok=false for anything that would turn into an unbounded or ambiguous ask.
+//
+// Only two shapes qualify, and both are self-fencing as git arguments: a
+// "refs/"-prefixed ref and a hex commit id can never start with "-", so an
+// agent-supplied --ref cannot smuggle an option (--upload-pack=...) into the
+// fetch. A bare name is deliberately excluded: Sync already fetched every head
+// and tag, so a bare name that is still missing is a typo, and guessing at
+// namespaces for it is exactly the unbounded resolution #6153 asks us to avoid.
+func targetedFetchRefspec(ref string) (refspec, localRef string, ok bool) {
+	switch {
+	case strings.HasPrefix(ref, "refs/heads/"):
+		// Keep the standard remote-tracking layout so the ref stays where the
+		// bare cache's own refspec would have put it.
+		local := "refs/remotes/origin/" + strings.TrimPrefix(ref, "refs/heads/")
+		return "+" + ref + ":" + local, local, true
+	case strings.HasPrefix(ref, "refs/tags/"):
+		return "+" + ref + ":" + ref, ref, true
+	case strings.HasPrefix(ref, "refs/"):
+		// refs/pull/12/head → refs/remotes/origin/pull/12/head. Never
+		// refs/heads/*: that namespace is reserved for the agent/* branches
+		// worktree creation locks, and a fetch into it can abort on a locked
+		// ref (see modernFetchRefspec).
+		local := "refs/remotes/origin/" + strings.TrimPrefix(ref, "refs/")
+		return "+" + ref + ":" + local, local, true
+	case isCommitID(ref):
+		// No refspec: ask for the object itself. It lands in the cache's
+		// object store (and FETCH_HEAD), and the caller resolves the id
+		// directly. Remotes that refuse unadvertised objects fail here with
+		// their own message, which is more actionable than "cannot resolve".
+		return ref, ref, true
+	default:
+		return "", "", false
+	}
+}
+
+// isCommitID reports whether ref is an abbreviated or full hex object id.
+// Seven is git's own minimum unambiguous abbreviation; 64 covers SHA-256
+// repositories.
+func isCommitID(ref string) bool {
+	if len(ref) < 7 || len(ref) > 64 {
+		return false
+	}
+	for _, r := range ref {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func gitRefExists(repoPath, ref string) bool {

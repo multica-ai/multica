@@ -2250,3 +2250,204 @@ func TestBranchNameDistinctForSharedUUIDv7Prefix(t *testing.T) {
 		t.Fatalf("both tasks resolved to branch %q", a)
 	}
 }
+
+// createPullRequestRef publishes commit under refs/pull/<number>/head in the
+// source repo and leaves it unreachable from every branch — the shape GitHub
+// gives a pull request from a fork. The bare cache's standing refspec
+// (refs/heads/* only) never brings such a ref across.
+func createPullRequestRef(t *testing.T, repoPath, number string) string {
+	t.Helper()
+	defaultBranch := strings.TrimSpace(gitRefCommitName(t, repoPath))
+	runGitAuthored(t, repoPath, "checkout", "-q", "-b", "pr-work")
+	addEmptyCommit(t, repoPath, "pull request head")
+	prCommit := gitHead(t, repoPath)
+	runGitAuthored(t, repoPath, "checkout", "-q", defaultBranch)
+	runGitAuthored(t, repoPath, "branch", "-q", "-D", "pr-work")
+	runGitAuthored(t, repoPath, "update-ref", "refs/pull/"+number+"/head", prCommit)
+	return prCommit
+}
+
+// gitRefCommitName returns the checked-out branch name of a working repo.
+func gitRefCommitName(t *testing.T, repoPath string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", repoPath, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse --abbrev-ref HEAD failed in %s: %v", repoPath, err)
+	}
+	return string(out)
+}
+
+// Regression (#6153): `repo checkout --ref refs/pull/N/head` failed with
+// "cannot resolve requested ref". The ref is real and the remote publishes it,
+// but the cache only ever fetches refs/heads/* into refs/remotes/origin/*, so
+// no amount of syncing could ever make it resolvable. The requested ref is now
+// fetched on demand, as one bounded refspec.
+func TestCreateWorktreeResolvesPullRequestRef(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	prCommit := createPullRequestRef(t, sourceRepo, "1")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// Precondition: a plain sync leaves the PR head unresolvable by name, so
+	// the checkout below can only pass by fetching it.
+	barePath := cache.Lookup("ws-1", sourceRepo)
+	if gitRefExists(barePath, "refs/pull/1/head") {
+		t.Fatal("bare cache already holds refs/pull/1/head; the test no longer covers the on-demand fetch")
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "Reviewer",
+		TaskID:      "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		Ref:         "refs/pull/1/head",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree with a pull-request ref failed: %v", err)
+	}
+	if got := gitHead(t, result.Path); got != prCommit {
+		t.Fatalf("worktree is at %s, want the pull request head %s", got, prCommit)
+	}
+	// The fetch lands in the remote-tracking namespace, never in refs/heads/*
+	// where worktree creation locks the agent/* branches.
+	if !gitRefExists(barePath, "refs/remotes/origin/pull/1/head") {
+		t.Error("expected the fetched pull-request ref under refs/remotes/origin/pull/1/head")
+	}
+}
+
+// The isolated-metadata checkout resolves the base through its own local clone
+// of the cache, so the on-demand fetch has to be visible there too.
+func TestCreateWorktreeResolvesPullRequestRefWithIsolatedGitMetadata(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	prCommit := createPullRequestRef(t, sourceRepo, "7")
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             t.TempDir(),
+		AgentName:           "Reviewer",
+		TaskID:              "b1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		Ref:                 "refs/pull/7/head",
+		IsolatedGitMetadata: true,
+	})
+	if err != nil {
+		t.Fatalf("isolated CreateWorktree with a pull-request ref failed: %v", err)
+	}
+	if got := gitHead(t, result.Path); got != prCommit {
+		t.Fatalf("worktree is at %s, want the pull request head %s", got, prCommit)
+	}
+}
+
+// A bare name that no head or tag matches is a typo, not a namespace we should
+// go guessing at. It must fail without a fetch, and say why.
+func TestCreateWorktreeUnknownBareRefFailsWithoutFetching(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "Reviewer",
+		TaskID:      "c1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		Ref:         "no-such-branch",
+	})
+	if err == nil {
+		t.Fatal("expected an unresolvable ref to fail")
+	}
+	if !strings.Contains(err.Error(), "no-such-branch") {
+		t.Errorf("error should name the requested ref, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "nothing specific to fetch") {
+		t.Errorf("error should explain why nothing was fetched, got: %v", err)
+	}
+}
+
+func TestTargetedFetchRefspec(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		ref      string
+		refspec  string
+		localRef string
+		ok       bool
+	}{
+		{
+			name:     "pull request head lands in the remote-tracking namespace",
+			ref:      "refs/pull/12/head",
+			refspec:  "+refs/pull/12/head:refs/remotes/origin/pull/12/head",
+			localRef: "refs/remotes/origin/pull/12/head",
+			ok:       true,
+		},
+		{
+			name:     "gitlab merge request head",
+			ref:      "refs/merge-requests/3/head",
+			refspec:  "+refs/merge-requests/3/head:refs/remotes/origin/merge-requests/3/head",
+			localRef: "refs/remotes/origin/merge-requests/3/head",
+			ok:       true,
+		},
+		{
+			// refs/heads/* in the bare cache is reserved for the agent/*
+			// branches worktree creation locks; a fetch into it can abort on a
+			// locked ref, so a qualified head keeps the standard layout.
+			name:     "qualified head keeps the standard remote-tracking layout",
+			ref:      "refs/heads/feature",
+			refspec:  "+refs/heads/feature:refs/remotes/origin/feature",
+			localRef: "refs/remotes/origin/feature",
+			ok:       true,
+		},
+		{
+			name:     "qualified tag stays a tag",
+			ref:      "refs/tags/v1.2.3",
+			refspec:  "+refs/tags/v1.2.3:refs/tags/v1.2.3",
+			localRef: "refs/tags/v1.2.3",
+			ok:       true,
+		},
+		{
+			name:     "full commit id is asked for as an object",
+			ref:      "0123456789abcdef0123456789abcdef01234567",
+			refspec:  "0123456789abcdef0123456789abcdef01234567",
+			localRef: "0123456789abcdef0123456789abcdef01234567",
+			ok:       true,
+		},
+		{name: "bare branch name", ref: "feature", ok: false},
+		{name: "short hex below git's abbreviation floor", ref: "abc12", ok: false},
+		{name: "hex-looking but too long", ref: strings.Repeat("a", 65), ok: false},
+		{name: "not hex", ref: "deadbeefz", ok: false},
+		{name: "empty", ref: "", ok: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			refspec, localRef, ok := targetedFetchRefspec(tt.ref)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if !tt.ok {
+				return
+			}
+			if refspec != tt.refspec {
+				t.Errorf("refspec = %q, want %q", refspec, tt.refspec)
+			}
+			if localRef != tt.localRef {
+				t.Errorf("localRef = %q, want %q", localRef, tt.localRef)
+			}
+		})
+	}
+}
