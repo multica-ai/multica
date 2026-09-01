@@ -308,11 +308,14 @@ func TestSquadTemplateFileRoundTripExcludesSecrets(t *testing.T) {
 			t.Fatalf("exported template leaked %q", secret)
 		}
 	}
-	var manifest MarketplaceTemplateFile
-	if err := json.Unmarshal(exportW.Body.Bytes(), &manifest); err != nil {
+	var exportedManifest MarketplaceTemplateFileV2
+	if err := json.Unmarshal(exportW.Body.Bytes(), &exportedManifest); err != nil {
 		t.Fatalf("decode exported template: %v", err)
 	}
-	if err := validateMarketplaceTemplateFile(manifest); err != nil {
+	if exportedManifest.Format != marketplaceTemplateV2FileFormat || exportedManifest.SchemaVersion != marketplaceTemplateV2FileVersion {
+		t.Fatalf("exported template is not v2: %#v", exportedManifest)
+	}
+	if _, err := parseMarketplaceTemplateFile(exportW.Body.Bytes()); err != nil {
 		t.Fatalf("exported template does not validate: %v", err)
 	}
 
@@ -322,7 +325,7 @@ func TestSquadTemplateFileRoundTripExcludesSecrets(t *testing.T) {
 	}
 	applyW := httptest.NewRecorder()
 	testHandler.ApplyMarketplaceTemplateFile(applyW, squadScopeReq("", http.MethodPost, "/api/templates/apply-file", map[string]any{
-		"manifest": manifest,
+		"manifest": exportedManifest,
 		"name":     "Imported from file",
 		"runtime_ids": map[string]string{
 			"agent_1": uuidToString(runtimeID),
@@ -378,5 +381,57 @@ func TestMarketplaceTemplateFileRejectsUnsafeSkillPath(t *testing.T) {
 	err := validateMarketplaceTemplateFile(manifest)
 	if err == nil || !strings.Contains(err.Error(), "unsafe") {
 		t.Fatalf("validateMarketplaceTemplateFile() error = %v, want unsafe path", err)
+	}
+}
+
+func TestParseMarketplaceTemplateFileV2(t *testing.T) {
+	raw := json.RawMessage(`{
+      "format":"multica.template",
+      "schema_version":2,
+      "type":"squad",
+      "metadata":{"name":"Delivery","description":"Portable squad","tags":[],"use_cases":"","usage_notes":""},
+      "resources":{
+        "agents":[{"key":"lead","name":"Lead","description":"","instructions":"Delegate","max_concurrent_tasks":1,"skill_refs":["review"]}],
+        "skills":[{"key":"review","name":"review","description":"","content":"# Review","source_type":"file","files":[]}]
+      },
+      "spec":{"name":"Delivery","description":"Portable squad","leader_ref":"lead","members":[{"agent_ref":"lead","role":"leader"}]}
+    }`)
+	manifest, err := parseMarketplaceTemplateFile(raw)
+	if err != nil {
+		t.Fatalf("parseMarketplaceTemplateFile(v2): %v", err)
+	}
+	if manifest.SourceType != "squad" || manifest.Snapshot.Squad == nil {
+		t.Fatalf("normalized v2 squad is incomplete: %#v", manifest)
+	}
+	if len(manifest.Snapshot.Agents) != 1 || len(manifest.Snapshot.Skills) != 1 {
+		t.Fatalf("normalized v2 resources = %d agents, %d skills", len(manifest.Snapshot.Agents), len(manifest.Snapshot.Skills))
+	}
+	if manifest.Snapshot.Agents[0].SkillKeys[0] != "review" || manifest.Snapshot.Squad.LeaderKey != "lead" {
+		t.Fatalf("normalized v2 references were not mapped: %#v", manifest.Snapshot)
+	}
+}
+
+func TestParseMarketplaceTemplateFileV1BackwardCompatibility(t *testing.T) {
+	raw := json.RawMessage(`{
+      "format":"multica-template",
+      "version":1,
+      "name":"Legacy agent",
+      "description":"Exported before schema v2",
+      "tags":[],
+      "source_type":"agent",
+      "snapshot_version":1,
+      "snapshot":{
+        "version":1,
+        "source_type":"agent",
+        "agents":[{"key":"agent_1","name":"Legacy agent","instructions":"Help","skill_keys":[]}],
+        "skills":[]
+      }
+    }`)
+	manifest, err := parseMarketplaceTemplateFile(raw)
+	if err != nil {
+		t.Fatalf("parseMarketplaceTemplateFile(v1): %v", err)
+	}
+	if manifest.SourceType != "agent" || len(manifest.Snapshot.Agents) != 1 {
+		t.Fatalf("normalized v1 agent is incomplete: %#v", manifest)
 	}
 }

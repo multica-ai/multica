@@ -33,7 +33,7 @@ import type {
   MarketplaceTemplateScope,
   MarketplaceTemplateSort,
   MarketplaceTemplateSourceType,
-  MarketplaceTemplateFile,
+  NormalizedMarketplaceTemplateFile,
 } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -154,7 +154,7 @@ export function ApplyTemplateDialog({
   wsId,
 }: {
   templateId: string | null;
-  manifest?: MarketplaceTemplateFile | null;
+  manifest?: NormalizedMarketplaceTemplateFile | null;
   onOpenChange: (open: boolean) => void;
   wsId: string;
 }) {

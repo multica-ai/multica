@@ -1,7 +1,10 @@
 // @vitest-environment node
 
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient } from "./client";
+import { MarketplaceTemplateFileSchema } from "./schemas";
+import { parseMarketplaceTemplateFile } from "../templates/file";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -14,7 +17,59 @@ function stubJSON(body: unknown) {
   })));
 }
 
+function loadV2Fixture(): unknown {
+  return JSON.parse(
+    readFileSync(new URL("./testdata/squad-template-v2.json", import.meta.url), "utf8"),
+  );
+}
+
 describe("marketplace template API", () => {
+  it("accepts the deployed v2 squad template envelope", () => {
+    const raw = loadV2Fixture();
+    expect(MarketplaceTemplateFileSchema.safeParse(raw).success).toBe(true);
+    const normalized = parseMarketplaceTemplateFile(raw);
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) return;
+    expect(normalized.file.snapshot.agents).toHaveLength(2);
+    expect(normalized.file.snapshot.skills).toHaveLength(1);
+    expect(normalized.file.snapshot.agents[0]?.skill_keys).toEqual(["review"]);
+    expect(normalized.file.snapshot.squad).toMatchObject({
+      leader_key: "lead",
+      members: [
+        { agent_key: "lead", role: "leader" },
+        { agent_key: "worker", role: "implementation" },
+      ],
+    });
+  });
+
+  it("keeps accepting legacy v1 template files", () => {
+    const normalized = parseMarketplaceTemplateFile({
+      format: "multica-template",
+      version: 1,
+      name: "Legacy agent",
+      description: "Exported before schema v2",
+      tags: [],
+      source_type: "agent",
+      snapshot_version: 1,
+      snapshot: {
+        version: 1,
+        source_type: "agent",
+        agents: [
+          {
+            key: "agent_1",
+            name: "Legacy agent",
+            instructions: "Help",
+            skill_keys: [],
+          },
+        ],
+        skills: [],
+      },
+    });
+    expect(normalized.success).toBe(true);
+    if (!normalized.success) return;
+    expect(normalized.file.snapshot.agents[0]?.name).toBe("Legacy agent");
+  });
+
   it("builds catalog filters and defaults additive list fields", async () => {
     stubJSON({
       templates: [{
@@ -100,28 +155,12 @@ describe("marketplace template API", () => {
   });
 
   it("exports and reapplies a squad template file through schema-checked endpoints", async () => {
-    const manifest = {
-      format: "multica-template",
-      version: 1,
-      exported_at: "2026-09-01T00:00:00Z",
-      name: "Delivery squad",
-      description: "A reusable delivery squad",
-      tags: [],
-      source_type: "squad",
-      snapshot_version: 1,
-      snapshot: {
-        version: 1,
-        source_type: "squad",
-        agents: [{ key: "agent_1", name: "Lead", instructions: "Delegate", skill_keys: [] }],
-        skills: [],
-        squad: { name: "Delivery squad", leader_key: "agent_1", members: [{ agent_key: "agent_1", role: "leader" }] },
-      },
-    };
+    const manifest = loadV2Fixture();
     stubJSON(manifest);
     const client = new ApiClient("https://api.example.test");
 
     const exported = await client.exportSquadTemplateFile("squad-1");
-    expect(exported).toMatchObject({ format: "multica-template", source_type: "squad" });
+    expect(exported).toMatchObject({ format: "multica.template", schema_version: 2, type: "squad" });
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe(
       "https://api.example.test/api/squads/squad-1/template-file",
     );

@@ -204,7 +204,7 @@ import type {
   ApplyMarketplaceTemplateRequest,
   ApplyMarketplaceTemplateFileRequest,
   ApplyMarketplaceTemplateResponse,
-  MarketplaceTemplateFile,
+  MarketplaceTemplateFileV2,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -332,7 +332,7 @@ import {
   MarketplaceTemplateSchema,
   MarketplaceTemplateListSchema,
   ApplyMarketplaceTemplateResponseSchema,
-  MarketplaceTemplateFileSchema,
+  MarketplaceTemplateFileV2Schema,
   EMPTY_MARKETPLACE_TEMPLATE,
   EMPTY_MARKETPLACE_TEMPLATE_LIST,
   EMPTY_APPLY_MARKETPLACE_TEMPLATE_RESPONSE,
@@ -4155,14 +4155,14 @@ export class ApiClient {
     ) as ApplyMarketplaceTemplateResponse;
   }
 
-  async exportSquadTemplateFile(squadId: string): Promise<MarketplaceTemplateFile> {
+  async exportSquadTemplateFile(squadId: string): Promise<MarketplaceTemplateFileV2> {
     const raw = await this.fetch<unknown>(`/api/squads/${squadId}/template-file`);
     return parseWithFallback(
       raw,
-      MarketplaceTemplateFileSchema,
+      MarketplaceTemplateFileV2Schema,
       EMPTY_MARKETPLACE_TEMPLATE_FILE,
       { endpoint: "GET /api/squads/:id/template-file" },
-    ) as MarketplaceTemplateFile;
+    ) as MarketplaceTemplateFileV2;
   }
 
   async applyMarketplaceTemplateFile(

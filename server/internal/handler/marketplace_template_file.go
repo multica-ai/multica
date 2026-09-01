@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,12 +15,14 @@ import (
 )
 
 const (
-	marketplaceTemplateFileFormat  = "multica-template"
-	marketplaceTemplateFileVersion = 1
-	maxTemplateFileBytes           = 16 << 20
-	maxTemplateSnapshotAgents      = 50
-	maxTemplateSnapshotSkills      = 100
-	maxTemplateSnapshotFiles       = 500
+	marketplaceTemplateFileFormat    = "multica-template"
+	marketplaceTemplateFileVersion   = 1
+	marketplaceTemplateV2FileFormat  = "multica.template"
+	marketplaceTemplateV2FileVersion = 2
+	maxTemplateFileBytes             = 16 << 20
+	maxTemplateSnapshotAgents        = 50
+	maxTemplateSnapshotSkills        = 100
+	maxTemplateSnapshotFiles         = 500
 )
 
 type MarketplaceTemplateFile struct {
@@ -34,6 +35,59 @@ type MarketplaceTemplateFile struct {
 	SourceType      string                      `json:"source_type"`
 	SnapshotVersion int32                       `json:"snapshot_version"`
 	Snapshot        MarketplaceTemplateSnapshot `json:"snapshot"`
+}
+
+type MarketplaceTemplateFileV2Metadata struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	UseCases    string   `json:"use_cases"`
+	Tags        []string `json:"tags"`
+	UsageNotes  string   `json:"usage_notes"`
+}
+
+type MarketplaceTemplateFileV2Agent struct {
+	Key                  string                     `json:"key"`
+	Name                 string                     `json:"name"`
+	Description          string                     `json:"description"`
+	Instructions         string                     `json:"instructions"`
+	ConversationStarters []AgentConversationStarter `json:"conversation_starters,omitempty"`
+	MaxConcurrentTasks   int32                      `json:"max_concurrent_tasks"`
+	SkillRefs            []string                   `json:"skill_refs"`
+}
+
+type MarketplaceTemplateFileV2Skill struct {
+	Key         string                                 `json:"key"`
+	Name        string                                 `json:"name"`
+	Description string                                 `json:"description"`
+	Content     string                                 `json:"content"`
+	SourceType  string                                 `json:"source_type"`
+	Config      json.RawMessage                        `json:"config,omitempty"`
+	Files       []MarketplaceTemplateSkillFileSnapshot `json:"files"`
+}
+
+type MarketplaceTemplateFileV2Member struct {
+	AgentRef string `json:"agent_ref"`
+	Role     string `json:"role"`
+}
+
+type MarketplaceTemplateFileV2Spec struct {
+	Name         string                            `json:"name"`
+	Description  string                            `json:"description"`
+	Instructions string                            `json:"instructions,omitempty"`
+	LeaderRef    string                            `json:"leader_ref"`
+	Members      []MarketplaceTemplateFileV2Member `json:"members"`
+}
+
+type MarketplaceTemplateFileV2 struct {
+	Format        string                            `json:"format"`
+	SchemaVersion int                               `json:"schema_version"`
+	Type          string                            `json:"type"`
+	Metadata      MarketplaceTemplateFileV2Metadata `json:"metadata"`
+	Resources     struct {
+		Agents []MarketplaceTemplateFileV2Agent `json:"agents"`
+		Skills []MarketplaceTemplateFileV2Skill `json:"skills"`
+	} `json:"resources"`
+	Spec *MarketplaceTemplateFileV2Spec `json:"spec,omitempty"`
 }
 
 type applyMarketplaceTemplateRequest struct {
@@ -54,6 +108,134 @@ func (result marketplaceTemplateApplyResult) response(templateID pgtype.UUID) ma
 		"squad_id":         result.SquadID,
 		"reused_skill_ids": result.ReusedSkillID,
 	}
+}
+
+func normalizeMarketplaceTemplateFileV2(manifest MarketplaceTemplateFileV2) (MarketplaceTemplateFile, error) {
+	if manifest.Format != marketplaceTemplateV2FileFormat || manifest.SchemaVersion != marketplaceTemplateV2FileVersion {
+		return MarketplaceTemplateFile{}, fmt.Errorf("unsupported template file version")
+	}
+	if manifest.Type != "agent" && manifest.Type != "squad" {
+		return MarketplaceTemplateFile{}, fmt.Errorf("template file type must be agent or squad")
+	}
+	snapshot := MarketplaceTemplateSnapshot{
+		Version: marketplaceTemplateSnapshotVersion, SourceType: manifest.Type,
+		Agents: make([]MarketplaceTemplateAgentSnapshot, 0, len(manifest.Resources.Agents)),
+		Skills: make([]MarketplaceTemplateSkillSnapshot, 0, len(manifest.Resources.Skills)),
+	}
+	for _, agent := range manifest.Resources.Agents {
+		conversationStarters := agent.ConversationStarters
+		if conversationStarters == nil {
+			conversationStarters = []AgentConversationStarter{}
+		}
+		snapshot.Agents = append(snapshot.Agents, MarketplaceTemplateAgentSnapshot{
+			Key: agent.Key, Name: agent.Name, Description: agent.Description,
+			Instructions: agent.Instructions, ConversationStarters: conversationStarters,
+			MaxConcurrentTasks: agent.MaxConcurrentTasks, SkillKeys: agent.SkillRefs,
+		})
+	}
+	for _, skill := range manifest.Resources.Skills {
+		config := skill.Config
+		if len(config) == 0 {
+			config = json.RawMessage(`{}`)
+		}
+		snapshot.Skills = append(snapshot.Skills, MarketplaceTemplateSkillSnapshot{
+			Key: skill.Key, Name: skill.Name, Description: skill.Description,
+			Content: skill.Content, Config: config, Files: skill.Files,
+		})
+	}
+	if manifest.Type == "squad" {
+		if manifest.Spec == nil {
+			return MarketplaceTemplateFile{}, fmt.Errorf("squad template file is missing spec")
+		}
+		members := make([]MarketplaceTemplateSquadMemberSnapshot, 0, len(manifest.Spec.Members))
+		for _, member := range manifest.Spec.Members {
+			members = append(members, MarketplaceTemplateSquadMemberSnapshot{AgentKey: member.AgentRef, Role: member.Role})
+		}
+		snapshot.Squad = &MarketplaceTemplateSquadSnapshot{
+			Name: manifest.Spec.Name, Description: manifest.Spec.Description,
+			Instructions: manifest.Spec.Instructions, LeaderKey: manifest.Spec.LeaderRef,
+			Members: members,
+		}
+	}
+	normalized := MarketplaceTemplateFile{
+		Format: marketplaceTemplateFileFormat, Version: marketplaceTemplateFileVersion,
+		Name: manifest.Metadata.Name, Description: manifest.Metadata.Description,
+		Tags: manifest.Metadata.Tags, SourceType: manifest.Type,
+		SnapshotVersion: marketplaceTemplateSnapshotVersion, Snapshot: snapshot,
+	}
+	if err := validateMarketplaceTemplateFile(normalized); err != nil {
+		return MarketplaceTemplateFile{}, err
+	}
+	return normalized, nil
+}
+
+func parseMarketplaceTemplateFile(raw json.RawMessage) (MarketplaceTemplateFile, error) {
+	var envelope struct {
+		Format string `json:"format"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return MarketplaceTemplateFile{}, fmt.Errorf("invalid template file")
+	}
+	switch envelope.Format {
+	case marketplaceTemplateV2FileFormat:
+		var manifest MarketplaceTemplateFileV2
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return MarketplaceTemplateFile{}, fmt.Errorf("invalid v2 template file")
+		}
+		return normalizeMarketplaceTemplateFileV2(manifest)
+	case marketplaceTemplateFileFormat:
+		var manifest MarketplaceTemplateFile
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			return MarketplaceTemplateFile{}, fmt.Errorf("invalid v1 template file")
+		}
+		if err := validateMarketplaceTemplateFile(manifest); err != nil {
+			return MarketplaceTemplateFile{}, err
+		}
+		return manifest, nil
+	default:
+		return MarketplaceTemplateFile{}, fmt.Errorf("unsupported template file format")
+	}
+}
+
+func marketplaceTemplateFileV2FromSnapshot(
+	name, description string,
+	tags []string,
+	snapshot MarketplaceTemplateSnapshot,
+) MarketplaceTemplateFileV2 {
+	manifest := MarketplaceTemplateFileV2{
+		Format: marketplaceTemplateV2FileFormat, SchemaVersion: marketplaceTemplateV2FileVersion,
+		Type: snapshot.SourceType,
+		Metadata: MarketplaceTemplateFileV2Metadata{
+			Name: name, Description: description, Tags: tags,
+		},
+	}
+	manifest.Resources.Agents = make([]MarketplaceTemplateFileV2Agent, 0, len(snapshot.Agents))
+	for _, agent := range snapshot.Agents {
+		manifest.Resources.Agents = append(manifest.Resources.Agents, MarketplaceTemplateFileV2Agent{
+			Key: agent.Key, Name: agent.Name, Description: agent.Description,
+			Instructions: agent.Instructions, ConversationStarters: agent.ConversationStarters,
+			MaxConcurrentTasks: agent.MaxConcurrentTasks, SkillRefs: agent.SkillKeys,
+		})
+	}
+	manifest.Resources.Skills = make([]MarketplaceTemplateFileV2Skill, 0, len(snapshot.Skills))
+	for _, skill := range snapshot.Skills {
+		manifest.Resources.Skills = append(manifest.Resources.Skills, MarketplaceTemplateFileV2Skill{
+			Key: skill.Key, Name: skill.Name, Description: skill.Description,
+			Content: skill.Content, SourceType: "file", Config: skill.Config, Files: skill.Files,
+		})
+	}
+	if snapshot.SourceType == "squad" && snapshot.Squad != nil {
+		members := make([]MarketplaceTemplateFileV2Member, 0, len(snapshot.Squad.Members))
+		for _, member := range snapshot.Squad.Members {
+			members = append(members, MarketplaceTemplateFileV2Member{AgentRef: member.AgentKey, Role: member.Role})
+		}
+		manifest.Spec = &MarketplaceTemplateFileV2Spec{
+			Name: snapshot.Squad.Name, Description: snapshot.Squad.Description,
+			Instructions: snapshot.Squad.Instructions, LeaderRef: snapshot.Squad.LeaderKey,
+			Members: members,
+		}
+	}
+	return manifest
 }
 
 func validateMarketplaceTemplateFile(manifest MarketplaceTemplateFile) error {
@@ -128,12 +310,7 @@ func (h *Handler) ExportSquadTemplateFile(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	manifest := MarketplaceTemplateFile{
-		Format: marketplaceTemplateFileFormat, Version: marketplaceTemplateFileVersion,
-		ExportedAt: time.Now().UTC().Format(time.RFC3339), Name: squad.Name,
-		Description: squad.Description, Tags: []string{}, SourceType: "squad",
-		SnapshotVersion: marketplaceTemplateSnapshotVersion, Snapshot: snapshot,
-	}
+	manifest := marketplaceTemplateFileV2FromSnapshot(squad.Name, squad.Description, []string{}, snapshot)
 	filename := "squad.multica-template.json"
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
@@ -151,20 +328,21 @@ func (h *Handler) ApplyMarketplaceTemplateFile(w http.ResponseWriter, r *http.Re
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTemplateFileBytes)
 	var req struct {
-		Manifest   MarketplaceTemplateFile `json:"manifest"`
-		Name       string                  `json:"name"`
-		RuntimeIDs map[string]string       `json:"runtime_ids"`
+		Manifest   json.RawMessage   `json:"manifest"`
+		Name       string            `json:"name"`
+		RuntimeIDs map[string]string `json:"runtime_ids"`
 	}
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid template file request")
 		return
 	}
-	if err := validateMarketplaceTemplateFile(req.Manifest); err != nil {
+	manifest, err := parseMarketplaceTemplateFile(req.Manifest)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	result, ok := h.applyMarketplaceTemplateSnapshot(w, r, workspaceID, member, pgtype.UUID{}, false, req.Manifest.Snapshot, applyMarketplaceTemplateRequest{
+	result, ok := h.applyMarketplaceTemplateSnapshot(w, r, workspaceID, member, pgtype.UUID{}, false, manifest.Snapshot, applyMarketplaceTemplateRequest{
 		Name: req.Name, RuntimeIDs: req.RuntimeIDs,
 	})
 	if !ok {

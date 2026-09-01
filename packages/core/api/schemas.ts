@@ -2133,7 +2133,7 @@ export const MarketplaceTemplateSnapshotSchema = z.object({
   squad: MarketplaceTemplateSquadSnapshotSchema.optional(),
 }).loose();
 
-export const MarketplaceTemplateFileSchema = z.object({
+export const MarketplaceTemplateFileV1Schema = z.object({
   format: z.literal("multica-template"),
   version: z.literal(1),
   exported_at: z.string().default(""),
@@ -2153,21 +2153,83 @@ export const MarketplaceTemplateFileSchema = z.object({
   }
 });
 
+const MarketplaceTemplateFileV2AgentSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  conversation_starters: z.array(z.object({
+    label: z.string().default(""),
+    prompt: z.string().default(""),
+  }).loose()).optional().default([]),
+  max_concurrent_tasks: z.number().int().positive().default(1),
+  skill_refs: z.array(z.string()).default([]),
+}).loose();
+
+const MarketplaceTemplateFileV2SkillSchema = z.object({
+  key: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().default(""),
+  content: z.string().default(""),
+  source_type: z.string().default("file"),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+  files: z.array(MarketplaceTemplateSkillFileSnapshotSchema).default([]),
+}).loose();
+
+const MarketplaceTemplateFileV2SpecSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().default(""),
+  instructions: z.string().optional().default(""),
+  leader_ref: z.string().min(1),
+  members: z.array(z.object({
+    agent_ref: z.string().min(1),
+    role: z.string().default(""),
+  }).loose()).default([]),
+}).loose();
+
+export const MarketplaceTemplateFileV2Schema = z.object({
+  format: z.literal("multica.template"),
+  schema_version: z.literal(2),
+  type: z.enum(["agent", "squad"]),
+  metadata: z.object({
+    name: z.string().min(1),
+    description: z.string().default(""),
+    use_cases: z.string().default(""),
+    tags: z.array(z.string()).default([]),
+    usage_notes: z.string().default(""),
+  }).loose(),
+  resources: z.object({
+    agents: z.array(MarketplaceTemplateFileV2AgentSchema).default([]),
+    skills: z.array(MarketplaceTemplateFileV2SkillSchema).default([]),
+  }).loose(),
+  spec: MarketplaceTemplateFileV2SpecSchema.optional(),
+}).superRefine((value, context) => {
+  if (value.type === "squad" && !value.spec) {
+    context.addIssue({
+      code: "custom",
+      message: "Squad template file is missing spec",
+      path: ["spec"],
+    });
+  }
+});
+
+export const MarketplaceTemplateFileSchema = z.union([
+  MarketplaceTemplateFileV2Schema,
+  MarketplaceTemplateFileV1Schema,
+]);
+
 export const EMPTY_MARKETPLACE_TEMPLATE_FILE = {
-  format: "multica-template" as const,
-  version: 1 as const,
-  exported_at: "",
-  name: "",
-  description: "",
-  tags: [],
-  source_type: "squad" as const,
-  snapshot_version: 1,
-  snapshot: {
-    version: 1,
-    source_type: "squad" as const,
-    agents: [],
-    skills: [],
+  format: "multica.template" as const,
+  schema_version: 2 as const,
+  type: "squad" as const,
+  metadata: {
+    name: "",
+    description: "",
+    use_cases: "",
+    tags: [],
+    usage_notes: "",
   },
+  resources: { agents: [], skills: [] },
 };
 
 export const MarketplaceTemplateSchema = z.object({

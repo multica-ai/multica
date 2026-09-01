@@ -39,7 +39,13 @@ import {
   type SquadsScope,
   type SquadSortField,
 } from "@multica/core/squads/stores";
-import type { Agent, MarketplaceTemplateFile, MemberWithUser, Squad } from "@multica/core/types";
+import type {
+  Agent,
+  MarketplaceTemplateFileV2,
+  MemberWithUser,
+  NormalizedMarketplaceTemplateFile,
+  Squad,
+} from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -121,7 +127,7 @@ const COLUMN_WIDTHS: Record<SquadColumnKey, number> = {
 // gaps).
 const FIXED_TRACKS_WIDTH = 224 + LEADER_WIDTH + 7 * 12;
 
-function downloadTemplateFile(manifest: MarketplaceTemplateFile, squadName: string) {
+function downloadTemplateFile(manifest: MarketplaceTemplateFileV2, squadName: string) {
   const stem = squadName
     .trim()
     .replace(/[^\p{L}\p{N}._-]+/gu, "-")
@@ -820,7 +826,7 @@ export function SquadsPage() {
   const [publishSquadId, setPublishSquadId] = useState<string | null>(null);
   const [importPickerOpen, setImportPickerOpen] = useState(false);
   const [importTemplateId, setImportTemplateId] = useState<string | null>(null);
-  const [importManifest, setImportManifest] = useState<MarketplaceTemplateFile | null>(null);
+  const [importManifest, setImportManifest] = useState<NormalizedMarketplaceTemplateFile | null>(null);
 
   const { data: squads = [], isLoading } = useQuery({
     ...squadListOptions(wsId),
@@ -955,7 +961,7 @@ export function SquadsPage() {
   const handleExportTemplate = async (squad: Squad) => {
     try {
       const manifest = await api.exportSquadTemplateFile(squad.id);
-      if (!manifest.name || manifest.source_type !== "squad") {
+      if (!manifest.metadata.name || manifest.type !== "squad") {
         throw new Error(t(($) => $.page.export_failed));
       }
       downloadTemplateFile(manifest, squad.name);

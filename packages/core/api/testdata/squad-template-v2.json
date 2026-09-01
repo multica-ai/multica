@@ -1,0 +1,53 @@
+{
+  "format": "multica.template",
+  "schema_version": 2,
+  "type": "squad",
+  "metadata": {
+    "name": "Delivery squad",
+    "description": "A portable delivery squad fixture.",
+    "use_cases": "Feature delivery",
+    "tags": ["delivery"],
+    "usage_notes": "Bind every agent to a runtime before importing."
+  },
+  "resources": {
+    "agents": [
+      {
+        "key": "lead",
+        "name": "Delivery lead",
+        "description": "Coordinates the squad.",
+        "instructions": "Delegate work and report evidence.",
+        "max_concurrent_tasks": 1,
+        "skill_refs": ["review"]
+      },
+      {
+        "key": "worker",
+        "name": "Implementation engineer",
+        "description": "Implements the change.",
+        "instructions": "Implement the approved design.",
+        "max_concurrent_tasks": 2,
+        "skill_refs": []
+      }
+    ],
+    "skills": [
+      {
+        "key": "review",
+        "name": "review",
+        "description": "Review checklist.",
+        "content": "# Review",
+        "source_type": "file",
+        "files": [
+          { "path": "references/checklist.md", "content": "Check evidence." }
+        ]
+      }
+    ]
+  },
+  "spec": {
+    "name": "Delivery squad",
+    "description": "A portable delivery squad fixture.",
+    "leader_ref": "lead",
+    "members": [
+      { "agent_ref": "lead", "role": "leader" },
+      { "agent_ref": "worker", "role": "implementation" }
+    ]
+  }
+}

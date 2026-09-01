@@ -56,7 +56,7 @@ export interface MarketplaceTemplateSnapshot {
   squad?: MarketplaceTemplateSquadSnapshot;
 }
 
-export interface MarketplaceTemplateFile {
+export interface MarketplaceTemplateFileV1 {
   format: "multica-template";
   version: 1;
   exported_at: string;
@@ -67,6 +67,52 @@ export interface MarketplaceTemplateFile {
   snapshot_version: number;
   snapshot: MarketplaceTemplateSnapshot;
 }
+
+export interface MarketplaceTemplateFileV2 {
+  format: "multica.template";
+  schema_version: 2;
+  type: MarketplaceTemplateSourceType;
+  metadata: {
+    name: string;
+    description: string;
+    tags: string[];
+    use_cases: string;
+    usage_notes: string;
+  };
+  resources: {
+    agents: Array<{
+      key: string;
+      name: string;
+      description: string;
+      instructions: string;
+      conversation_starters?: AgentConversationStarter[];
+      max_concurrent_tasks: number;
+      skill_refs: string[];
+    }>;
+    skills: Array<{
+      key: string;
+      name: string;
+      description: string;
+      content: string;
+      source_type: string;
+      config?: Record<string, unknown>;
+      files: MarketplaceTemplateSkillFileSnapshot[];
+    }>;
+  };
+  spec?: {
+    name: string;
+    description: string;
+    instructions?: string;
+    leader_ref: string;
+    members: Array<{
+      agent_ref: string;
+      role: string;
+    }>;
+  };
+}
+
+export type MarketplaceTemplateFile = MarketplaceTemplateFileV1 | MarketplaceTemplateFileV2;
+export type NormalizedMarketplaceTemplateFile = MarketplaceTemplateFileV1;
 
 export interface MarketplaceTemplate {
   id: string;

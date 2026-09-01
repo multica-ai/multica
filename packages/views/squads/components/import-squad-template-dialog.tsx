@@ -3,9 +3,8 @@
 import { useRef, useState } from "react";
 import { ArrowLeft, Check, FileUp, LayoutTemplate, Loader2, PackageOpen, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { MarketplaceTemplateFileSchema } from "@multica/core/api/schemas";
-import { marketplaceTemplateListOptions } from "@multica/core/templates";
-import type { MarketplaceTemplateFile } from "@multica/core/types";
+import { marketplaceTemplateListOptions, parseMarketplaceTemplateFile } from "@multica/core/templates";
+import type { NormalizedMarketplaceTemplateFile } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -31,7 +30,7 @@ export function ImportSquadTemplateDialog({
   onOpenChange: (open: boolean) => void;
   wsId: string;
   onMarketplaceTemplate: (templateId: string) => void;
-  onFileTemplate: (manifest: MarketplaceTemplateFile) => void;
+  onFileTemplate: (manifest: NormalizedMarketplaceTemplateFile) => void;
 }) {
   const { t } = useT("squads");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,13 +59,13 @@ export function ImportSquadTemplateDialog({
     setFileError("");
     try {
       const raw: unknown = JSON.parse(await file.text());
-      const parsed = MarketplaceTemplateFileSchema.safeParse(raw);
-      if (!parsed.success || parsed.data.source_type !== "squad") {
+      const parsed = parseMarketplaceTemplateFile(raw);
+      if (!parsed.success || parsed.file.source_type !== "squad") {
         setFileError(t(($) => $.import_dialog.invalid_file));
         return;
       }
       close(false);
-      onFileTemplate(parsed.data as MarketplaceTemplateFile);
+      onFileTemplate(parsed.file);
     } catch {
       setFileError(t(($) => $.import_dialog.invalid_file));
     }
