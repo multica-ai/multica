@@ -4982,6 +4982,23 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 	}
 
+	// Visibility for a *deferred* auto-retry (MS-121): when the retry child was
+	// pushed out by a real backoff, the issue would otherwise sit silent for
+	// 15m–4h with no sign that a retry is pending. Post one system comment so the
+	// history shows this was automatic, not a manual rerun. Gated on a >=1min
+	// delay so provider_network's ~5s final-attempt deferral stays silent — only
+	// the capacity/rate/session-limit schedule is announced. The raw-error
+	// comment below is skipped whenever retried != nil, so there is no duplicate.
+	if retried != nil && retryFireAt.Valid && task.IssueID.Valid {
+		if wait := time.Until(retryFireAt.Time); wait >= time.Minute {
+			note := fmt.Sprintf(
+				"Transient provider limit hit (%s) — auto-retry scheduled in ~%s (attempt %d of %d). No manual rerun needed.",
+				failureReason, wait.Round(time.Minute), retried.Attempt, retried.MaxAttempts,
+			)
+			s.createAgentComment(ctx, task.IssueID, task.AgentID, note, "system", task.TriggerCommentID, task.ID)
+		}
+	}
+
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
@@ -5043,13 +5060,25 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // never started, so there is nothing to be idempotent about, and every bundle
 // that did download is already cached on disk — a retry resumes from there
 // instead of re-fetching the whole set (MUL-5370).
+//
+// The second agent_error.* exception is provider_capacity_or_rate_limit: an
+// HTTP 429 / provider overload or a session/usage-window limit
+// ("You've hit your session limit · resets 2pm") is transient infrastructure
+// backpressure, not an agent decision — waiting for the provider cooldown
+// clears it. Unattended issue runs otherwise sit on `todo` forever after a
+// single limit-hit run failed (MS-121). Unlike provider_network's seconds-scale
+// blip, this reason needs a real staggered backoff (15m / 1h / 4h) and is gated
+// to issue runs in retryEligible, so an interactive chat turn is never silently
+// deferred for hours. It is resume-safe, so the retry child continues the
+// session rather than restarting.
 var retryableReasons = map[string]bool{
-	string(taskfailure.ReasonRuntimeOffline):         true,
-	string(taskfailure.ReasonRuntimeRecovery):        true,
-	string(taskfailure.ReasonTimeout):                true,
-	"codex_semantic_inactivity":                      true,
-	string(taskfailure.ReasonAgentProviderNetwork):   true,
-	string(taskfailure.ReasonSkillBundleUnavailable): true,
+	string(taskfailure.ReasonRuntimeOffline):                   true,
+	string(taskfailure.ReasonRuntimeRecovery):                  true,
+	string(taskfailure.ReasonTimeout):                          true,
+	"codex_semantic_inactivity":                                true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonSkillBundleUnavailable):           true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
 }
 
 // runtime_offline retries start deferred, not queued: their positive fire_at
@@ -5070,6 +5099,17 @@ const (
 	providerNetworkFinalRetryWait = 5 * time.Second
 )
 
+// Provider capacity / rate / session limits (provider_capacity_or_rate_limit)
+// recover only after a real provider-side cooldown, so they get a staggered
+// backoff instead of provider_network's back-to-back retry (MS-121). The three
+// retries wait 15m, then 1h, then 4h; capacityRateLimitMaxAttempts is
+// 1 (original run) + len(capacityRateLimitBackoff). Once the budget is spent the
+// run stays `failed` and the issue is visibly unworked — a hard ceiling, never a
+// silent endless retry. (A dedicated test pins the two constants in sync.)
+const capacityRateLimitMaxAttempts = 4
+
+var capacityRateLimitBackoff = []time.Duration{15 * time.Minute, time.Hour, 4 * time.Hour}
+
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
 // a failure reason. It only ever WIDENS the task's generic max_attempts, and
 // only for reasons with a bespoke schedule; everything else keeps the column's
@@ -5085,8 +5125,15 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 	if taskMaxAttempts <= 1 {
 		return taskMaxAttempts
 	}
-	if reason == string(taskfailure.ReasonAgentProviderNetwork) && taskMaxAttempts < providerNetworkMaxAttempts {
-		return providerNetworkMaxAttempts
+	switch reason {
+	case string(taskfailure.ReasonAgentProviderNetwork):
+		if taskMaxAttempts < providerNetworkMaxAttempts {
+			return providerNetworkMaxAttempts
+		}
+	case string(taskfailure.ReasonAgentProviderCapacityOrRateLimit):
+		if taskMaxAttempts < capacityRateLimitMaxAttempts {
+			return capacityRateLimitMaxAttempts
+		}
 	}
 	return taskMaxAttempts
 }
@@ -5098,12 +5145,20 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // the child is created 'queued', claimable at once). Callers pass the returned
 // delay to CreateRetryTask via fire_at.
 func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
-	if reason == string(taskfailure.ReasonRuntimeOffline) {
+	switch reason {
+	case string(taskfailure.ReasonRuntimeOffline):
 		return runtimeOfflineRetryDeferral
-	}
-	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
-		failedAttempt >= providerNetworkMaxAttempts-1 {
-		return providerNetworkFinalRetryWait
+	case string(taskfailure.ReasonAgentProviderNetwork):
+		if failedAttempt >= providerNetworkMaxAttempts-1 {
+			return providerNetworkFinalRetryWait
+		}
+	case string(taskfailure.ReasonAgentProviderCapacityOrRateLimit):
+		// failedAttempt is 1-based (the attempt that just failed). Map attempt N
+		// to schedule index N-1: attempt 1 → 15m, 2 → 1h, 3 → 4h. Past the
+		// schedule the ceiling has been reached and no further child is created.
+		if idx := int(failedAttempt) - 1; idx >= 0 && idx < len(capacityRateLimitBackoff) {
+			return capacityRateLimitBackoff[idx]
+		}
 	}
 	return 0
 }
@@ -5175,8 +5230,19 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
-	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+	if !retryableReasons[failureReason] {
+		return false
+	}
+	// Capacity / rate / session limits recover only after a 15m–4h cooldown.
+	// Deferring an interactive chat turn that long would leave the user staring
+	// at a silent pending message; the CLI's own retry plus the pending-message
+	// pattern already cover transient chat blips. Restrict this reason's
+	// staggered-backoff auto-retry to unattended issue runs (MS-121). Every other
+	// retryable reason (seconds-scale) still applies to issue and chat alike.
+	if failureReason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit) && !t.IssueID.Valid {
+		return false
+	}
+	return t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid || isSourceContextQuickCreateTask(t))
 }
