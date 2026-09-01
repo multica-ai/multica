@@ -129,12 +129,16 @@
     "no_previous": "暂无历史对话",
     "untitled": "新对话",
     "my_agents": "我的智能体",
+    "pinned_agents": "已置顶",
     "others": "其他",
     "no_agents": "暂无智能体",
     "history_group": "历史对话",
     "agent_filter_placeholder": "搜索智能体...",
     "agent_needs_runtime": "需绑定运行时",
-    "agent_needs_runtime_hint": "请先绑定运行时，再与该智能体开始对话"
+    "agent_needs_runtime_hint": "请先绑定运行时，再与该智能体开始对话",
+    "pin_agent": "置顶智能体",
+    "unpin_agent": "取消置顶",
+    "pin_limit_reached": "已达到置顶智能体上限"
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",

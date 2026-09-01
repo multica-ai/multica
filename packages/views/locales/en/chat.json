@@ -133,12 +133,16 @@
     "no_previous": "No previous chats",
     "untitled": "New chat",
     "my_agents": "My agents",
+    "pinned_agents": "Pinned",
     "others": "Others",
     "no_agents": "No agents",
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents...",
     "agent_needs_runtime": "Needs runtime",
-    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent"
+    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent",
+    "pin_agent": "Pin agent",
+    "unpin_agent": "Unpin agent",
+    "pin_limit_reached": "Pinned agent limit reached"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

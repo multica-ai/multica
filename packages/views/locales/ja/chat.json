@@ -129,12 +129,16 @@
     "no_previous": "以前のチャットはありません",
     "untitled": "新規チャット",
     "my_agents": "マイエージェント",
+    "pinned_agents": "ピン留め",
     "others": "その他",
     "no_agents": "エージェントなし",
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索...",
     "agent_needs_runtime": "ランタイム未設定",
-    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください"
+    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください",
+    "pin_agent": "エージェントをピン留め",
+    "unpin_agent": "ピン留めを解除",
+    "pin_limit_reached": "ピン留めできるエージェントの上限に達しました"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",
