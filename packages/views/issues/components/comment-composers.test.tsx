@@ -99,6 +99,7 @@ vi.mock("../../editor", async () => ({
     dropZoneProps: { "data-testid": "drop-zone" },
   }),
   FileDropOverlay: () => null,
+  VoiceInputButton: () => null,
   ContentEditor: forwardRef(function MockContentEditor(
     {
       defaultValue,

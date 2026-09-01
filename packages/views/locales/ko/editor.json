@@ -89,6 +89,20 @@
     "show_source": "소스 표시",
     "fullscreen": "전체 화면"
   },
+  "desktop": {
+    "dictation": {
+      "toggle": "Codex로 음성 입력",
+      "opening": "Codex 음성 입력 여는 중…",
+      "sent": "Codex에 {{shortcut}}을 보냈습니다. 음성 입력 창에서 녹음을 마치고, 이 입력란을 선택한 상태로 텍스트를 확인한 뒤 전송하세요.",
+      "not_configured": "Codex/ChatGPT 데스크톱 앱에서 Toggle dictation hotkey를 Ctrl+Alt+Shift+D로 설정하세요. 앱 내부의 Start dictation이 아닌, 충돌 없는 전역 단축키를 사용해야 합니다.",
+      "app_not_running": "Windows용 Codex/ChatGPT 데스크톱 앱을 열어 로그인한 뒤 다시 시도하세요. Codex CLI만으로는 전역 음성 입력을 사용할 수 없습니다.",
+      "not_focused": "현재 Multica 창과 입력란을 선택한 상태에서 다시 시도하세요.",
+      "busy": "누르고 있는 단축키를 놓고 잠시 후 다시 시도하세요.",
+      "cleanup_failed": "일부 단축키를 해제하지 못했습니다. 입력 전에 Ctrl, Alt, Shift, D를 눌렀다 놓으세요. 다시 전환하기 전에 Codex 음성 입력 상태를 확인하세요.",
+      "unavailable": "Codex 음성 입력을 열지 못했습니다. Ctrl+Alt+Shift+D를 직접 눌러 보세요. Multica 전사 API로 오디오를 보내지 않았습니다.",
+      "editor_not_ready": "입력란이 아직 준비되지 않았습니다. 다시 시도하세요."
+    }
+  },
   "file_card": {
     "uploading": "{{filename}} 업로드 중"
   },

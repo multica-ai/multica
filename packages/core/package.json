@@ -145,6 +145,7 @@
     "./constants/*": "./constants/*.ts",
     "./feature-flags": "./feature-flags/index.ts",
     "./platform": "./platform/index.ts",
+    "./platform/dictation": "./platform/dictation.tsx",
     "./drafts": "./drafts/index.ts",
     "./drafts/*": "./drafts/*.ts",
     "./shortcuts": "./shortcuts/index.ts",

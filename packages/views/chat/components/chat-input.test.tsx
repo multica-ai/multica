@@ -84,6 +84,7 @@ vi.mock("../../editor", async () => ({
     return { isDragOver: false, dropZoneProps: { "data-testid": "drop-zone" } };
   },
   FileDropOverlay: () => null,
+  VoiceInputButton: () => null,
   ContentEditor: forwardRef(function MockContentEditor(
     props: {
       defaultValue?: string;

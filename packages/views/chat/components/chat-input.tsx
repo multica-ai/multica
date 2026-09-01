@@ -11,6 +11,7 @@ import {
   FileDropOverlay,
   useUploadGate,
   useComposerSubmit,
+  VoiceInputButton,
 } from "../../editor";
 import { PASTE_AS_FILE_THRESHOLD } from "../../editor/paste-as-file";
 import {
@@ -29,6 +30,7 @@ import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import { useDictationAdapter } from "@multica/core/platform/dictation";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
@@ -176,6 +178,7 @@ export function ChatInput({
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
+  const dictationAdapter = useDictationAdapter();
   const editorRef = useRef<ContentEditorRef>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -715,7 +718,7 @@ export function ChatInput({
             showBubbleMenu
           />
         </div>
-        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
+        {(uploadEnabled || projectSelectionEnabled || dictationAdapter || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
             {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
@@ -728,6 +731,10 @@ export function ChatInput({
                 projectContextUnsupported={projectContextUnsupported}
               />
             )}
+            <VoiceInputButton
+              editorRef={editorRef}
+              disabled={!!disabled || !!noAgent || submitting}
+            />
             {leftAdornment}
           </div>
         )}

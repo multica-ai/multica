@@ -51,7 +51,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit } from "../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit, VoiceInputButton } from "../editor";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
@@ -1367,6 +1367,11 @@ export function ManualCreatePanel({
                 grid child in both branches below. */}
             <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
               <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+                <VoiceInputButton
+                  size="sm"
+                  editorRef={descEditorRef}
+                  disabled={submitBusy}
+                />
                 <FileUploadButton
                   size="sm"
                   multiple

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
+import type { DictationResult } from "@multica/core/types/dictation";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
@@ -20,6 +21,8 @@ import {
   type IssueWindowRequest,
 } from "../shared/issue-window";
 import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import { CODEX_DICTATION_CHANNEL } from "../shared/dictation";
+import { installCodexDictationActivation } from "./dictation-activation";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
@@ -98,6 +101,10 @@ function subscribeToMainRendererChannel<T>(
 }
 
 const desktopAPI = {
+  /** Parameterless native dictation delegation; never accepts audio or keys. */
+  dictation: {
+    toggle: (): Promise<DictationResult> => ipcRenderer.invoke(CODEX_DICTATION_CHANNEL),
+  },
   /** App version + normalized OS. Read once at preload time so the renderer
    *  can use it synchronously when initializing the API client. */
   appInfo,
@@ -315,6 +322,7 @@ const updaterAPI = {
 };
 
 if (process.contextIsolated) {
+  if (process.platform === "win32") installCodexDictationActivation();
   contextBridge.exposeInMainWorld("electron", electronAPI);
   contextBridge.exposeInMainWorld("desktopAPI", desktopAPI);
   contextBridge.exposeInMainWorld("daemonAPI", daemonAPI);

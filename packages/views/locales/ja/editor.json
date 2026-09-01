@@ -89,6 +89,20 @@
     "show_source": "ソースを表示",
     "fullscreen": "全画面"
   },
+  "desktop": {
+    "dictation": {
+      "toggle": "Codex で音声入力",
+      "opening": "Codex の音声入力を開いています…",
+      "sent": "Codex に {{shortcut}} を送りました。音声入力ウィンドウで録音を終了し、この入力欄を選択したまま、文字を確認してから送信してください。",
+      "not_configured": "Codex/ChatGPT デスクトップアプリで Toggle dictation hotkey を Ctrl+Alt+Shift+D に設定してください。アプリ内の Start dictation ではなく、重複のないグローバルショートカットを使用します。",
+      "app_not_running": "Windows 版 Codex/ChatGPT デスクトップアプリを開いてログインし、もう一度お試しください。Codex CLI だけではグローバル音声入力を利用できません。",
+      "not_focused": "この Multica ウィンドウと入力欄を選択して、もう一度お試しください。",
+      "busy": "押しているショートカットキーを離し、少し待ってからお試しください。",
+      "cleanup_failed": "一部のキーを解放できませんでした。入力前に Ctrl、Alt、Shift、D を押して離してください。再度切り替える前に Codex の音声入力状態を確認してください。",
+      "unavailable": "Codex の音声入力を開けませんでした。Ctrl+Alt+Shift+D を手動でお試しください。Multica の文字起こし API には音声を送信していません。",
+      "editor_not_ready": "入力欄の準備ができていません。もう一度お試しください。"
+    }
+  },
   "file_card": {
     "uploading": "{{filename}} をアップロード中"
   },

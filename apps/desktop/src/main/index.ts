@@ -7,6 +7,7 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
+import { registerCodexDictationWindow, setupCodexDictation } from "./codex-dictation";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -232,6 +233,7 @@ function loadRenderer(window: BrowserWindow): void {
   // this one site covers both — see navigation-guard.ts for what is and is not
   // in scope (it is origin hardening; in-app routing never reaches it).
   installNavigationGuard(window, rendererURL);
+  registerCodexDictationWindow(window, rendererURL);
 
   if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
     void window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
@@ -827,6 +829,7 @@ if (!gotTheLock) {
     });
 
     desktopInitialized = true;
+    setupCodexDictation();
     createWindow();
 
     setupAutoUpdater(() => mainWindow);

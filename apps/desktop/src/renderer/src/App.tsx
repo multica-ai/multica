@@ -23,6 +23,7 @@ import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
+import { desktopDictationAdapter } from "./platform/dictation-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
@@ -461,6 +462,7 @@ export default function App() {
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
+          dictationAdapter={os === "windows" ? desktopDictationAdapter : undefined}
         >
           <DesktopAuthSessionBridge />
           {windowContext.kind === "main" && <DiagnosticRouteReporter />}

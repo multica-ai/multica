@@ -16,6 +16,7 @@ import { QueryProvider } from "../provider";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
+import { DictationProvider } from "./dictation";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import { ClientUsageReporter } from "../client-usage";
@@ -94,6 +95,7 @@ export function CoreProvider({
   locale,
   resources,
   localeAdapter,
+  dictationAdapter,
 }: CoreProviderProps) {
   // Initialize singletons on first render only. Dependencies are read-once:
   // apiBaseUrl, storage, and callbacks are set at app boot and never change at runtime.
@@ -130,7 +132,9 @@ export function CoreProvider({
           cookieAuth={cookieAuth}
           identity={identity}
         >
-          {children}
+          <DictationProvider adapter={dictationAdapter}>
+            {children}
+          </DictationProvider>
         </WSProvider>
       </AuthInitializer>
     </QueryProvider>

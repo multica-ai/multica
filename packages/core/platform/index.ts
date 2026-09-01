@@ -1,4 +1,5 @@
 export { CoreProvider } from "./core-provider";
+export { DictationProvider, useDictationAdapter } from "./dictation";
 export type { CoreProviderProps, ClientIdentity } from "./types";
 export { AuthInitializer } from "./auth-initializer";
 export { defaultStorage } from "./storage";

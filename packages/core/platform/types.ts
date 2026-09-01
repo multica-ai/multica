@@ -4,6 +4,7 @@ import type {
   SupportedLocale,
 } from "../i18n";
 import type { StorageAdapter } from "../types/storage";
+import type { DictationAdapter } from "../types/dictation";
 
 /** Identifies the calling client to the server. Threaded through to
  *  ApiClient and WSClient so all HTTP requests and WS connections from
@@ -40,4 +41,6 @@ export interface CoreProviderProps {
   /** Locale adapter for persisting user choice (used by Settings switcher).
    *  Optional because some shells (e.g. CLI auth pages) don't need switching. */
   localeAdapter?: LocaleAdapter;
+  /** Optional host-owned dictation UI; no audio or transcript crosses this adapter. */
+  dictationAdapter?: DictationAdapter;
 }

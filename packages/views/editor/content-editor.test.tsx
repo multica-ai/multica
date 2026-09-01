@@ -5,6 +5,10 @@ import type { Attachment } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 
 const mockFocus = vi.hoisted(() => vi.fn());
+const mockNativeFocus = vi.hoisted(() => vi.fn());
+const mockHasFocus = vi.hoisted(() => vi.fn(() => true));
+const mockClientRects = vi.hoisted(() => vi.fn(() => [{}]));
+const mockInsertContent = vi.hoisted(() => vi.fn(() => true));
 const mockSetContent = vi.hoisted(() => vi.fn());
 const mockSetTextSelection = vi.hoisted(() => vi.fn());
 const mockDispatch = vi.hoisted(() => vi.fn());
@@ -18,6 +22,8 @@ const capturedExtOptions = vi.hoisted<{
 const editorState = vi.hoisted(() => ({
   isFocused: false,
   isDestroyed: false,
+  isEditable: true,
+  isConnected: true,
   markdown: "",
   // Nodes the mocked doc reports via `descendants`. The content-sync effect
   // walks these to detect in-flight uploads; default empty = nothing uploading.
@@ -107,8 +113,12 @@ vi.mock("@tiptap/react", () => ({
         get isDestroyed() {
           return editorState.isDestroyed;
         },
+        get isEditable() {
+          return editorState.isEditable;
+        },
         commands: {
           focus: mockFocus,
+          insertContent: mockInsertContent,
           clearContent: vi.fn(),
           setContent: mockSetContent,
           setTextSelection: mockSetTextSelection,
@@ -123,7 +133,15 @@ vi.mock("@tiptap/react", () => ({
             (listener) => listener !== cb,
           );
         },
-        view: { dispatch: mockDispatch },
+        view: {
+          dispatch: mockDispatch,
+          focus: mockNativeFocus,
+          hasFocus: mockHasFocus,
+          dom: {
+            get isConnected() { return editorState.isConnected; },
+            getClientRects: mockClientRects,
+          },
+        },
         state: {
           get tr() {
             return emptyTr;
@@ -160,6 +178,10 @@ describe("ContentEditor", () => {
     vi.clearAllMocks();
     editorState.isFocused = false;
     editorState.isDestroyed = false;
+    editorState.isEditable = true;
+    editorState.isConnected = true;
+    mockHasFocus.mockReturnValue(true);
+    mockClientRects.mockReturnValue([{}]);
     editorState.markdown = "";
     editorState.uploadingNodes = [];
     editorRef.current = null;
@@ -184,6 +206,27 @@ describe("ContentEditor", () => {
     fireEvent.mouseDown(shell!);
 
     expect(mockFocus).toHaveBeenCalledWith("end");
+  });
+
+  it("focuses native input synchronously without inserting text or moving selection", () => {
+    const ref = createRef<ContentEditorRef>();
+    render(<ContentEditor ref={ref} />);
+    expect(ref.current?.focusForNativeInput()).toBe(true);
+    expect(mockNativeFocus).toHaveBeenCalledOnce();
+    expect(mockFocus).not.toHaveBeenCalled();
+    expect(mockSetTextSelection).not.toHaveBeenCalled();
+    expect(mockInsertContent).not.toHaveBeenCalled();
+  });
+
+  it.each(["destroyed", "readonly", "detached", "hidden"])("rejects a %s native input target", (state) => {
+    const ref = createRef<ContentEditorRef>();
+    render(<ContentEditor ref={ref} />);
+    if (state === "destroyed") editorState.isDestroyed = true;
+    if (state === "readonly") editorState.isEditable = false;
+    if (state === "detached") editorState.isConnected = false;
+    if (state === "hidden") mockClientRects.mockReturnValue([]);
+    expect(ref.current?.focusForNativeInput()).toBe(false);
+    expect(mockNativeFocus).not.toHaveBeenCalled();
   });
 
   it("does not hijack clicks that land inside the ProseMirror node", () => {

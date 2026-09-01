@@ -10,6 +10,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/desktopdictation"
 )
 
 var (
@@ -97,6 +98,12 @@ func init() {
 }
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == desktopdictation.HelperArg {
+		// A bundled Desktop helper must not load a profile, access an account,
+		// start the daemon, or run the CLI updater just to dispatch a shortcut.
+		fmt.Fprintln(os.Stdout, desktopdictation.Run(os.Args[2:]))
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == execenv.PreparationHelperArg {
 		logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		if err := execenv.RunPreparationHelper(os.Stdin, os.Stdout, logger); err != nil {

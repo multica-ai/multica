@@ -146,6 +146,7 @@ vi.mock("../../editor", async () => ({
     upload: vi.fn(),
     uploading: false,
   }),
+  VoiceInputButton: () => null,
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the

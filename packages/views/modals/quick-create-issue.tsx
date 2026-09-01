@@ -78,6 +78,7 @@ import {
   FileDropOverlay,
   useUploadGate,
   useComposerSubmit,
+  VoiceInputButton,
 } from "../editor";
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
@@ -849,6 +850,11 @@ export function AgentCreatePanel({
             {/* Deliberately NOT disabled while uploading: each file is its
                 own queue entry, so queueing a second one is safe and waiting
                 for the first to land just to attach the next is busywork. */}
+            <VoiceInputButton
+              size="sm"
+              editorRef={editorRef}
+              disabled={submitting}
+            />
             <FileUploadButton
               size="sm"
               multiple

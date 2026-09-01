@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit, VoiceInputButton } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -295,6 +295,12 @@ function ReplyInput({
           />
         </div>
         <div className="absolute bottom-0 right-0 flex items-center gap-1">
+          <VoiceInputButton
+            size="sm"
+            editorRef={editorRef}
+            disabled={submitting}
+            onBeforeRecord={lazy.activate}
+          />
           <FileUploadButton
             size="sm"
             multiple
