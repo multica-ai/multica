@@ -132,6 +132,10 @@ func init() {
 	autopilotCreateCmd.Flags().String("mode", "", "Execution mode: create_issue or run_only (required)")
 	autopilotCreateCmd.Flags().String("project", "", "Project ID (optional)")
 	autopilotCreateCmd.Flags().String("issue-title-template", "", "Template for issue titles (create_issue mode). Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected at create-time.")
+	autopilotCreateCmd.Flags().Bool("retry-resource-failures", false, "Retry one scheduled provider quota, entitlement, or rate-limit failure")
+	autopilotCreateCmd.Flags().Duration("retry-resource-failure-delay", 30*time.Minute, "Delay before the resource-failure retry (minimum 30m)")
+	autopilotCreateCmd.Flags().String("failure-receipt-issue", "", "Issue key or full UUID that receives the final scheduled-failure receipt")
+	autopilotCreateCmd.Flags().String("failure-receipt-marker", "", "Machine marker for the final failure receipt (lowercase snake_case)")
 	autopilotCreateCmd.Flags().StringArray("subscriber", nil, "Member subscriber to notify for issues this autopilot creates (name or user ID; repeatable)")
 	autopilotCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -143,6 +147,11 @@ func init() {
 	autopilotUpdateCmd.Flags().String("status", "", "New status (active, paused)")
 	autopilotUpdateCmd.Flags().String("mode", "", "New execution mode (create_issue or run_only)")
 	autopilotUpdateCmd.Flags().String("issue-title-template", "", "New issue title template. Only {{date}} (UTC, YYYY-MM-DD) is interpolated; any other {{...}} token is rejected.")
+	autopilotUpdateCmd.Flags().Bool("retry-resource-failures", false, "Enable or disable one delayed retry for scheduled provider resource failures")
+	autopilotUpdateCmd.Flags().Duration("retry-resource-failure-delay", 30*time.Minute, "Delay before the resource-failure retry (minimum 30m)")
+	autopilotUpdateCmd.Flags().String("failure-receipt-issue", "", "Issue key or full UUID that receives the final scheduled-failure receipt")
+	autopilotUpdateCmd.Flags().String("failure-receipt-marker", "", "Machine marker for the final failure receipt (lowercase snake_case)")
+	autopilotUpdateCmd.Flags().Bool("clear-failure-receipt", false, "Clear the configured final-failure receipt target and marker")
 	autopilotUpdateCmd.Flags().StringArray("subscriber", nil, "Replace subscribers with this member (name or user ID; repeatable)")
 	autopilotUpdateCmd.Flags().Bool("clear-subscribers", false, "Remove all autopilot subscribers")
 	autopilotUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -426,6 +435,26 @@ func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("issue-title-template"); v != "" {
 		body["issue_title_template"] = v
 	}
+	if enabled, _ := cmd.Flags().GetBool("retry-resource-failures"); enabled {
+		body["resource_failure_retry_enabled"] = true
+	}
+	if cmd.Flags().Changed("retry-resource-failure-delay") {
+		delay, _ := cmd.Flags().GetDuration("retry-resource-failure-delay")
+		body["resource_failure_retry_delay_seconds"] = int64(delay / time.Second)
+	}
+	receiptIssue, _ := cmd.Flags().GetString("failure-receipt-issue")
+	receiptMarker, _ := cmd.Flags().GetString("failure-receipt-marker")
+	if (receiptIssue == "") != (receiptMarker == "") {
+		return fmt.Errorf("--failure-receipt-issue and --failure-receipt-marker must be provided together")
+	}
+	if receiptIssue != "" {
+		issueRef, err := resolveIssueRef(ctx, client, receiptIssue)
+		if err != nil {
+			return fmt.Errorf("resolve failure receipt issue: %w", err)
+		}
+		body["failure_receipt_issue_id"] = issueRef.ID
+		body["failure_receipt_marker"] = receiptMarker
+	}
 	if subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber"); len(subscriberRefs) > 0 {
 		subscribers, err := resolveAutopilotSubscriberInputs(ctx, client, subscriberRefs)
 		if err != nil {
@@ -506,6 +535,34 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("issue-title-template")
 		body["issue_title_template"] = v
 	}
+	if cmd.Flags().Changed("retry-resource-failures") {
+		enabled, _ := cmd.Flags().GetBool("retry-resource-failures")
+		body["resource_failure_retry_enabled"] = enabled
+	}
+	if cmd.Flags().Changed("retry-resource-failure-delay") {
+		delay, _ := cmd.Flags().GetDuration("retry-resource-failure-delay")
+		body["resource_failure_retry_delay_seconds"] = int64(delay / time.Second)
+	}
+	clearReceipt, _ := cmd.Flags().GetBool("clear-failure-receipt")
+	receiptIssue, _ := cmd.Flags().GetString("failure-receipt-issue")
+	receiptMarker, _ := cmd.Flags().GetString("failure-receipt-marker")
+	if clearReceipt && (receiptIssue != "" || receiptMarker != "") {
+		return fmt.Errorf("--clear-failure-receipt cannot be combined with --failure-receipt-issue or --failure-receipt-marker")
+	}
+	if (receiptIssue == "") != (receiptMarker == "") {
+		return fmt.Errorf("--failure-receipt-issue and --failure-receipt-marker must be provided together")
+	}
+	if clearReceipt {
+		body["failure_receipt_issue_id"] = nil
+		body["failure_receipt_marker"] = nil
+	} else if receiptIssue != "" {
+		issueRef, err := resolveIssueRef(ctx, client, receiptIssue)
+		if err != nil {
+			return fmt.Errorf("resolve failure receipt issue: %w", err)
+		}
+		body["failure_receipt_issue_id"] = issueRef.ID
+		body["failure_receipt_marker"] = receiptMarker
+	}
 	clearSubscribers, _ := cmd.Flags().GetBool("clear-subscribers")
 	subscriberRefs, _ := cmd.Flags().GetStringArray("subscriber")
 	if clearSubscribers && len(subscriberRefs) > 0 {
@@ -522,7 +579,7 @@ func runAutopilotUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --description, --agent, --status, --mode, etc.")
+		return fmt.Errorf("no fields to update; use flags like --title, --description, --agent, --status, --mode, or failure recovery flags")
 	}
 
 	var result map[string]any

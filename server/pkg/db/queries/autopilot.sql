@@ -56,10 +56,15 @@ FOR UPDATE;
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
+    resource_failure_retry_enabled, resource_failure_retry_delay_seconds,
+    failure_receipt_issue_id, failure_receipt_marker,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
     $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
+    COALESCE(sqlc.narg('resource_failure_retry_enabled')::boolean, FALSE),
+    COALESCE(sqlc.narg('resource_failure_retry_delay_seconds')::int, 1800),
+    sqlc.narg('failure_receipt_issue_id'), sqlc.narg('failure_receipt_marker'),
     $7, $8
 ) RETURNING *;
 
@@ -77,6 +82,10 @@ UPDATE autopilot SET
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
+    resource_failure_retry_enabled = COALESCE(sqlc.narg('resource_failure_retry_enabled')::boolean, resource_failure_retry_enabled),
+    resource_failure_retry_delay_seconds = COALESCE(sqlc.narg('resource_failure_retry_delay_seconds')::int, resource_failure_retry_delay_seconds),
+    failure_receipt_issue_id = sqlc.narg('failure_receipt_issue_id'),
+    failure_receipt_marker = sqlc.narg('failure_receipt_marker'),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -592,6 +601,15 @@ RETURNING *;
 SELECT * FROM agent_task_queue
 WHERE autopilot_run_id = $1
 ORDER BY created_at
+LIMIT 1;
+
+-- name: GetActiveAutopilotTaskByRun :one
+-- A run_only retry keeps the same autopilot_run_id. The terminal listener uses
+-- the newest active attempt to keep the run open while a deferred retry waits.
+SELECT * FROM agent_task_queue
+WHERE autopilot_run_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+ORDER BY attempt DESC, created_at DESC
 LIMIT 1;
 
 -- =====================

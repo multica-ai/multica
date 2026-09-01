@@ -41,17 +41,21 @@ type AutopilotResponse struct {
 	// AssigneeType is "agent" or "squad". Path A from MUL-2429: when set
 	// to "squad", AssigneeID points at squad(id) rather than agent(id) and
 	// dispatch resolves to squad.leader_id at run time.
-	AssigneeType       string  `json:"assignee_type"`
-	AssigneeID         string  `json:"assignee_id"`
-	Status             string  `json:"status"`
-	PauseReason        *string `json:"pause_reason"`
-	ExecutionMode      string  `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
-	CreatedByType      string  `json:"created_by_type"`
-	CreatedByID        string  `json:"created_by_id"`
-	LastRunAt          *string `json:"last_run_at"`
-	CreatedAt          string  `json:"created_at"`
-	UpdatedAt          string  `json:"updated_at"`
+	AssigneeType                     string  `json:"assignee_type"`
+	AssigneeID                       string  `json:"assignee_id"`
+	Status                           string  `json:"status"`
+	PauseReason                      *string `json:"pause_reason"`
+	ExecutionMode                    string  `json:"execution_mode"`
+	IssueTitleTemplate               *string `json:"issue_title_template"`
+	ResourceFailureRetryEnabled      bool    `json:"resource_failure_retry_enabled"`
+	ResourceFailureRetryDelaySeconds int32   `json:"resource_failure_retry_delay_seconds"`
+	FailureReceiptIssueID            *string `json:"failure_receipt_issue_id"`
+	FailureReceiptMarker             *string `json:"failure_receipt_marker"`
+	CreatedByType                    string  `json:"created_by_type"`
+	CreatedByID                      string  `json:"created_by_id"`
+	LastRunAt                        *string `json:"last_run_at"`
+	CreatedAt                        string  `json:"created_at"`
+	UpdatedAt                        string  `json:"updated_at"`
 
 	// List-endpoint-only derived fields (absent on the detail/create/update
 	// responses and on older servers — clients must treat them as optional).
@@ -199,23 +203,27 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		}
 	}
 	return AutopilotResponse{
-		ID:                 uuidToString(a.ID),
-		WorkspaceID:        uuidToString(a.WorkspaceID),
-		Title:              a.Title,
-		Description:        textToPtr(a.Description),
-		ProjectID:          uuidToPtr(a.ProjectID),
-		AssigneeType:       assigneeType,
-		AssigneeID:         uuidToString(a.AssigneeID),
-		Status:             a.Status,
-		PauseReason:        textToPtr(a.PauseReason),
-		ExecutionMode:      a.ExecutionMode,
-		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
-		CreatedByType:      a.CreatedByType,
-		CreatedByID:        uuidToString(a.CreatedByID),
-		LastRunAt:          timestampToPtr(a.LastRunAt),
-		CreatedAt:          timestampToString(a.CreatedAt),
-		UpdatedAt:          timestampToString(a.UpdatedAt),
-		Subscribers:        subResp,
+		ID:                               uuidToString(a.ID),
+		WorkspaceID:                      uuidToString(a.WorkspaceID),
+		Title:                            a.Title,
+		Description:                      textToPtr(a.Description),
+		ProjectID:                        uuidToPtr(a.ProjectID),
+		AssigneeType:                     assigneeType,
+		AssigneeID:                       uuidToString(a.AssigneeID),
+		Status:                           a.Status,
+		PauseReason:                      textToPtr(a.PauseReason),
+		ExecutionMode:                    a.ExecutionMode,
+		IssueTitleTemplate:               textToPtr(a.IssueTitleTemplate),
+		ResourceFailureRetryEnabled:      a.ResourceFailureRetryEnabled,
+		ResourceFailureRetryDelaySeconds: a.ResourceFailureRetryDelaySeconds,
+		FailureReceiptIssueID:            uuidToPtr(a.FailureReceiptIssueID),
+		FailureReceiptMarker:             textToPtr(a.FailureReceiptMarker),
+		CreatedByType:                    a.CreatedByType,
+		CreatedByID:                      uuidToString(a.CreatedByID),
+		LastRunAt:                        timestampToPtr(a.LastRunAt),
+		CreatedAt:                        timestampToString(a.CreatedAt),
+		UpdatedAt:                        timestampToString(a.UpdatedAt),
+		Subscribers:                      subResp,
 	}
 }
 
@@ -329,22 +337,30 @@ type CreateAutopilotRequest struct {
 	ProjectID   *string `json:"project_id"`
 	// AssigneeType is optional and defaults to "agent" — preserves backward
 	// compatibility with desktop clients shipped before MUL-2429.
-	AssigneeType       *string           `json:"assignee_type"`
-	AssigneeID         string            `json:"assignee_id"`
-	ExecutionMode      string            `json:"execution_mode"`
-	IssueTitleTemplate *string           `json:"issue_title_template"`
-	Subscribers        []SubscriberInput `json:"subscribers"`
+	AssigneeType                     *string           `json:"assignee_type"`
+	AssigneeID                       string            `json:"assignee_id"`
+	ExecutionMode                    string            `json:"execution_mode"`
+	IssueTitleTemplate               *string           `json:"issue_title_template"`
+	ResourceFailureRetryEnabled      bool              `json:"resource_failure_retry_enabled"`
+	ResourceFailureRetryDelaySeconds *int32            `json:"resource_failure_retry_delay_seconds"`
+	FailureReceiptIssueID            *string           `json:"failure_receipt_issue_id"`
+	FailureReceiptMarker             *string           `json:"failure_receipt_marker"`
+	Subscribers                      []SubscriberInput `json:"subscribers"`
 }
 
 type UpdateAutopilotRequest struct {
-	Title              *string `json:"title"`
-	Description        *string `json:"description"`
-	ProjectID          *string `json:"project_id"`
-	AssigneeType       *string `json:"assignee_type"`
-	AssigneeID         *string `json:"assignee_id"`
-	Status             *string `json:"status"`
-	ExecutionMode      *string `json:"execution_mode"`
-	IssueTitleTemplate *string `json:"issue_title_template"`
+	Title                            *string `json:"title"`
+	Description                      *string `json:"description"`
+	ProjectID                        *string `json:"project_id"`
+	AssigneeType                     *string `json:"assignee_type"`
+	AssigneeID                       *string `json:"assignee_id"`
+	Status                           *string `json:"status"`
+	ExecutionMode                    *string `json:"execution_mode"`
+	IssueTitleTemplate               *string `json:"issue_title_template"`
+	ResourceFailureRetryEnabled      *bool   `json:"resource_failure_retry_enabled"`
+	ResourceFailureRetryDelaySeconds *int32  `json:"resource_failure_retry_delay_seconds"`
+	FailureReceiptIssueID            *string `json:"failure_receipt_issue_id"`
+	FailureReceiptMarker             *string `json:"failure_receipt_marker"`
 	// Wholesale replacement when present; omit to leave subscribers untouched.
 	Subscribers []SubscriberInput `json:"subscribers"`
 }
@@ -698,6 +714,26 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	retryDelaySeconds := service.MinAutopilotResourceFailureRetryDelaySeconds
+	if req.ResourceFailureRetryDelaySeconds != nil {
+		retryDelaySeconds = *req.ResourceFailureRetryDelaySeconds
+	}
+	receiptIssueID, receiptMarker, ok := h.parseAutopilotFailureReceipt(
+		w, r, req.FailureReceiptIssueID, req.FailureReceiptMarker, wsUUID,
+	)
+	if !ok {
+		return
+	}
+	if err := service.ValidateAutopilotFailureRecoveryConfig(
+		req.ExecutionMode,
+		req.ResourceFailureRetryEnabled,
+		retryDelaySeconds,
+		receiptIssueID,
+		receiptMarker,
+	); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Parse before insert so a malformed payload doesn't open a transaction.
 	subscribers, ok := parseAutopilotSubscribers(w, req.Subscribers)
@@ -730,17 +766,21 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	autopilot, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
-		WorkspaceID:        wsUUID,
-		Title:              req.Title,
-		AssigneeType:       assigneeType,
-		AssigneeID:         assigneeUUID,
-		Status:             "active",
-		ExecutionMode:      req.ExecutionMode,
-		CreatedByType:      "member",
-		CreatedByID:        parseUUID(userID),
-		Description:        ptrToText(req.Description),
-		IssueTitleTemplate: ptrToText(req.IssueTitleTemplate),
-		ProjectID:          projectID,
+		WorkspaceID:                      wsUUID,
+		Title:                            req.Title,
+		AssigneeType:                     assigneeType,
+		AssigneeID:                       assigneeUUID,
+		Status:                           "active",
+		ExecutionMode:                    req.ExecutionMode,
+		CreatedByType:                    "member",
+		CreatedByID:                      parseUUID(userID),
+		Description:                      ptrToText(req.Description),
+		IssueTitleTemplate:               ptrToText(req.IssueTitleTemplate),
+		ProjectID:                        projectID,
+		ResourceFailureRetryEnabled:      pgtype.Bool{Bool: req.ResourceFailureRetryEnabled, Valid: true},
+		ResourceFailureRetryDelaySeconds: pgtype.Int4{Int32: retryDelaySeconds, Valid: true},
+		FailureReceiptIssueID:            receiptIssueID,
+		FailureReceiptMarker:             receiptMarker,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create autopilot")
@@ -897,11 +937,15 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(bodyBytes, &rawFields)
 
 	params := db.UpdateAutopilotParams{
-		ID:                 prev.ID,
-		Description:        prev.Description,
-		AssigneeID:         prev.AssigneeID,
-		IssueTitleTemplate: prev.IssueTitleTemplate,
-		ProjectID:          prev.ProjectID,
+		ID:                               prev.ID,
+		Description:                      prev.Description,
+		AssigneeID:                       prev.AssigneeID,
+		IssueTitleTemplate:               prev.IssueTitleTemplate,
+		ProjectID:                        prev.ProjectID,
+		ResourceFailureRetryEnabled:      pgtype.Bool{Bool: prev.ResourceFailureRetryEnabled, Valid: true},
+		ResourceFailureRetryDelaySeconds: pgtype.Int4{Int32: prev.ResourceFailureRetryDelaySeconds, Valid: true},
+		FailureReceiptIssueID:            prev.FailureReceiptIssueID,
+		FailureReceiptMarker:             prev.FailureReceiptMarker,
 	}
 	if req.Title != nil {
 		params.Title = pgtype.Text{String: *req.Title, Valid: true}
@@ -911,6 +955,12 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExecutionMode != nil {
 		params.ExecutionMode = pgtype.Text{String: *req.ExecutionMode, Valid: true}
+	}
+	if req.ResourceFailureRetryEnabled != nil {
+		params.ResourceFailureRetryEnabled = pgtype.Bool{Bool: *req.ResourceFailureRetryEnabled, Valid: true}
+	}
+	if req.ResourceFailureRetryDelaySeconds != nil {
+		params.ResourceFailureRetryDelaySeconds = pgtype.Int4{Int32: *req.ResourceFailureRetryDelaySeconds, Valid: true}
 	}
 	if _, ok := rawFields["description"]; ok {
 		params.Description = ptrToText(req.Description)
@@ -930,6 +980,36 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProjectID = projectID
+	}
+	_, receiptIssueSent := rawFields["failure_receipt_issue_id"]
+	_, receiptMarkerSent := rawFields["failure_receipt_marker"]
+	if receiptIssueSent != receiptMarkerSent {
+		writeError(w, http.StatusBadRequest, "failure_receipt_issue_id and failure_receipt_marker must be updated together")
+		return
+	}
+	if receiptIssueSent {
+		receiptIssueID, receiptMarker, ok := h.parseAutopilotFailureReceipt(
+			w, r, req.FailureReceiptIssueID, req.FailureReceiptMarker, prev.WorkspaceID,
+		)
+		if !ok {
+			return
+		}
+		params.FailureReceiptIssueID = receiptIssueID
+		params.FailureReceiptMarker = receiptMarker
+	}
+	nextExecutionMode := prev.ExecutionMode
+	if req.ExecutionMode != nil {
+		nextExecutionMode = *req.ExecutionMode
+	}
+	if err := service.ValidateAutopilotFailureRecoveryConfig(
+		nextExecutionMode,
+		params.ResourceFailureRetryEnabled.Bool,
+		params.ResourceFailureRetryDelaySeconds.Int32,
+		params.FailureReceiptIssueID,
+		params.FailureReceiptMarker,
+	); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	// assignee_type and assignee_id are validated as a pair: switching
 	// between agent and squad without supplying a new id would leave the
@@ -1130,7 +1210,11 @@ func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
 		prev.Status != next.Status ||
 		prev.ExecutionMode != next.ExecutionMode ||
 		prev.Description != next.Description ||
-		prev.IssueTitleTemplate != next.IssueTitleTemplate
+		prev.IssueTitleTemplate != next.IssueTitleTemplate ||
+		prev.ResourceFailureRetryEnabled != next.ResourceFailureRetryEnabled ||
+		prev.ResourceFailureRetryDelaySeconds != next.ResourceFailureRetryDelaySeconds ||
+		prev.FailureReceiptIssueID != next.FailureReceiptIssueID ||
+		prev.FailureReceiptMarker != next.FailureReceiptMarker
 }
 
 // recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
@@ -1162,6 +1246,32 @@ func (h *Handler) parseAutopilotProjectID(
 		return pgtype.UUID{}, false
 	}
 	return projectID, true
+}
+
+func (h *Handler) parseAutopilotFailureReceipt(
+	w http.ResponseWriter,
+	r *http.Request,
+	rawIssueID, rawMarker *string,
+	workspaceID pgtype.UUID,
+) (pgtype.UUID, pgtype.Text, bool) {
+	if rawIssueID == nil && rawMarker == nil {
+		return pgtype.UUID{}, pgtype.Text{}, true
+	}
+	if rawIssueID == nil || rawMarker == nil || strings.TrimSpace(*rawIssueID) == "" || strings.TrimSpace(*rawMarker) == "" {
+		writeError(w, http.StatusBadRequest, "failure_receipt_issue_id and failure_receipt_marker must be set or cleared together")
+		return pgtype.UUID{}, pgtype.Text{}, false
+	}
+	issueID, ok := parseUUIDOrBadRequest(w, *rawIssueID, "failure_receipt_issue_id")
+	if !ok {
+		return pgtype.UUID{}, pgtype.Text{}, false
+	}
+	if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+		ID: issueID, WorkspaceID: workspaceID,
+	}); err != nil {
+		writeError(w, http.StatusBadRequest, "failure_receipt_issue_id must reference an issue in this workspace")
+		return pgtype.UUID{}, pgtype.Text{}, false
+	}
+	return issueID, pgtype.Text{String: strings.TrimSpace(*rawMarker), Valid: true}, true
 }
 
 func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {

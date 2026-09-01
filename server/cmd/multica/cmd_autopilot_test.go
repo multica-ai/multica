@@ -22,6 +22,10 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
+	cmd.Flags().Bool("retry-resource-failures", false, "")
+	cmd.Flags().Duration("retry-resource-failure-delay", 30*time.Minute, "")
+	cmd.Flags().String("failure-receipt-issue", "", "")
+	cmd.Flags().String("failure-receipt-marker", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
@@ -36,6 +40,11 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
+	cmd.Flags().Bool("retry-resource-failures", false, "")
+	cmd.Flags().Duration("retry-resource-failure-delay", 30*time.Minute, "")
+	cmd.Flags().String("failure-receipt-issue", "", "")
+	cmd.Flags().String("failure-receipt-marker", "", "")
+	cmd.Flags().Bool("clear-failure-receipt", false, "")
 	cmd.Flags().StringArray("subscriber", nil, "")
 	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
@@ -446,6 +455,49 @@ func TestRunAutopilotCreateSendsProjectID(t *testing.T) {
 	}
 }
 
+func TestRunAutopilotCreateSendsFailureRecoveryConfig(t *testing.T) {
+	const (
+		agentID        = "11111111-1111-1111-1111-111111111111"
+		receiptIssueID = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "autopilot-1"})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newAutopilotCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Daily validation")
+	_ = cmd.Flags().Set("agent", agentID)
+	_ = cmd.Flags().Set("mode", "run_only")
+	_ = cmd.Flags().Set("retry-resource-failures", "true")
+	_ = cmd.Flags().Set("retry-resource-failure-delay", "45m")
+	_ = cmd.Flags().Set("failure-receipt-issue", receiptIssueID)
+	_ = cmd.Flags().Set("failure-receipt-marker", "validation_officer_daily")
+
+	if err := runAutopilotCreate(cmd, nil); err != nil {
+		t.Fatalf("runAutopilotCreate: %v", err)
+	}
+	if body["resource_failure_retry_enabled"] != true || body["resource_failure_retry_delay_seconds"] != float64(2700) {
+		t.Fatalf("retry request fields = enabled %#v delay %#v, want true/2700", body["resource_failure_retry_enabled"], body["resource_failure_retry_delay_seconds"])
+	}
+	if body["failure_receipt_issue_id"] != receiptIssueID || body["failure_receipt_marker"] != "validation_officer_daily" {
+		t.Fatalf("receipt request fields = issue %#v marker %#v", body["failure_receipt_issue_id"], body["failure_receipt_marker"])
+	}
+}
+
 func TestRunAutopilotCreateSendsSubscribers(t *testing.T) {
 	const (
 		agentID = "11111111-1111-1111-1111-111111111111"
@@ -548,6 +600,69 @@ func TestRunAutopilotUpdateSendsProjectIDChanges(t *testing.T) {
 		}
 		if got != nil {
 			t.Fatalf("project_id = %#v, want nil", got)
+		}
+	})
+}
+
+func TestRunAutopilotUpdateSendsFailureRecoveryChanges(t *testing.T) {
+	const (
+		autopilotID    = "33333333-3333-3333-3333-333333333333"
+		receiptIssueID = "44444444-4444-4444-4444-444444444444"
+	)
+
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID || r.Method != http.MethodPatch {
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		bodies = append(bodies, body)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": autopilotID})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	t.Run("configure", func(t *testing.T) {
+		cmd := newAutopilotUpdateTestCmd()
+		_ = cmd.Flags().Set("retry-resource-failures", "true")
+		_ = cmd.Flags().Set("retry-resource-failure-delay", "45m")
+		_ = cmd.Flags().Set("failure-receipt-issue", receiptIssueID)
+		_ = cmd.Flags().Set("failure-receipt-marker", "validation_officer_daily")
+		if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
+			t.Fatalf("runAutopilotUpdate: %v", err)
+		}
+		body := bodies[len(bodies)-1]
+		if body["resource_failure_retry_enabled"] != true || body["resource_failure_retry_delay_seconds"] != float64(2700) {
+			t.Fatalf("retry request fields = enabled %#v delay %#v, want true/2700", body["resource_failure_retry_enabled"], body["resource_failure_retry_delay_seconds"])
+		}
+		if body["failure_receipt_issue_id"] != receiptIssueID || body["failure_receipt_marker"] != "validation_officer_daily" {
+			t.Fatalf("receipt request fields = issue %#v marker %#v", body["failure_receipt_issue_id"], body["failure_receipt_marker"])
+		}
+	})
+
+	t.Run("disable retry and clear receipt", func(t *testing.T) {
+		cmd := newAutopilotUpdateTestCmd()
+		_ = cmd.Flags().Set("retry-resource-failures", "false")
+		_ = cmd.Flags().Set("clear-failure-receipt", "true")
+		if err := runAutopilotUpdate(cmd, []string{autopilotID}); err != nil {
+			t.Fatalf("runAutopilotUpdate: %v", err)
+		}
+		body := bodies[len(bodies)-1]
+		if body["resource_failure_retry_enabled"] != false {
+			t.Fatalf("resource_failure_retry_enabled = %#v, want false", body["resource_failure_retry_enabled"])
+		}
+		if got, ok := body["failure_receipt_issue_id"]; !ok || got != nil {
+			t.Fatalf("failure_receipt_issue_id = %#v (present %v), want present nil", got, ok)
+		}
+		if got, ok := body["failure_receipt_marker"]; !ok || got != nil {
+			t.Fatalf("failure_receipt_marker = %#v (present %v), want present nil", got, ok)
 		}
 	})
 }

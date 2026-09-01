@@ -2,14 +2,219 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+func TestScheduledRunOnlyResourceFailureRetriesThenWritesReceipt(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	receiptIssueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, receiptIssueID) })
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:                      parseUUID(testWorkspaceID),
+		Title:                            "Scheduled resource failure recovery",
+		Description:                      pgtype.Text{String: "WS-4612 regression", Valid: true},
+		AssigneeType:                     "agent",
+		AssigneeID:                       parseUUID(agentID),
+		Status:                           "active",
+		ExecutionMode:                    "run_only",
+		CreatedByType:                    "member",
+		CreatedByID:                      parseUUID(testUserID),
+		ResourceFailureRetryEnabled:      pgtype.Bool{Bool: true, Valid: true},
+		ResourceFailureRetryDelaySeconds: pgtype.Int4{Int32: service.MinAutopilotResourceFailureRetryDelaySeconds, Valid: true},
+		FailureReceiptIssueID:            parseUUID(receiptIssueID),
+		FailureReceiptMarker:             pgtype.Text{String: "validation_officer_daily", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+
+	run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if !run.TaskID.Valid {
+		t.Fatal("run_only dispatch did not link a task")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, run.ID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	runTaskWithBudget(t, queries, run.TaskID, 2)
+	firstFailureAt := time.Now()
+	const quotaError = "You're out of extra usage · resets 4am (America/Los_Angeles)"
+	if _, err := taskSvc.FailTask(ctx, run.TaskID, quotaError, "", "", "", string(taskfailure.ReasonAgentUnknown), false, "", ""); err != nil {
+		t.Fatalf("first FailTask: %v", err)
+	}
+
+	retry, err := queries.GetActiveAutopilotTaskByRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetActiveAutopilotTaskByRun: %v", err)
+	}
+	if retry.Status != "deferred" || retry.Attempt != 2 || retry.MaxAttempts != 2 {
+		t.Fatalf("retry = status %q attempt %d/%d, want deferred 2/2", retry.Status, retry.Attempt, retry.MaxAttempts)
+	}
+	minimumFireAt := firstFailureAt.Add(30*time.Minute - 2*time.Second)
+	if !retry.FireAt.Valid || retry.FireAt.Time.Before(minimumFireAt) {
+		t.Fatalf("retry fire_at = %v, want at least %v", retry.FireAt, minimumFireAt)
+	}
+	openRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun after first failure: %v", err)
+	}
+	if openRun.Status != "running" || openRun.TaskID != retry.ID {
+		t.Fatalf("run after first failure = status %q task %v, want running task %v", openRun.Status, openRun.TaskID, retry.ID)
+	}
+
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now(), fire_at = NULL WHERE id = $1`,
+		retry.ID,
+	); err != nil {
+		t.Fatalf("promote retry: %v", err)
+	}
+	if _, err := queries.StartAgentTask(ctx, retry.ID); err != nil {
+		t.Fatalf("StartAgentTask retry: %v", err)
+	}
+	const entitlementError = "Your organization has disabled Claude subscription access for Claude Code"
+	if _, err := taskSvc.FailTask(ctx, retry.ID, entitlementError, "", "", "", "", false, "", ""); err != nil {
+		t.Fatalf("second FailTask: %v", err)
+	}
+
+	failedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun after final failure: %v", err)
+	}
+	if failedRun.Status != "failed" {
+		t.Fatalf("final run status = %q, want failed", failedRun.Status)
+	}
+	receipt, err := queries.GetComment(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("GetComment failure receipt: %v", err)
+	}
+	wantReceipt := fmt.Sprintf(
+		"<!-- validation_officer_daily: run_id=%s status=failed reason=agent_error.provider_auth_or_access -->",
+		util.UUIDToString(run.ID),
+	)
+	if receipt.IssueID != parseUUID(receiptIssueID) || receipt.Content != wantReceipt {
+		t.Fatalf("receipt = issue %v content %q, want issue %s content %q", receipt.IssueID, receipt.Content, receiptIssueID, wantReceipt)
+	}
+
+	finalTask, err := queries.GetAgentTask(ctx, retry.ID)
+	if err != nil {
+		t.Fatalf("GetAgentTask final retry: %v", err)
+	}
+	autopilotSvc.SyncRunFromTask(ctx, finalTask)
+	var receiptCount int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE id = $1`, run.ID).Scan(&receiptCount); err != nil {
+		t.Fatalf("count failure receipts: %v", err)
+	}
+	if receiptCount != 1 {
+		t.Fatalf("failure receipt count = %d, want 1", receiptCount)
+	}
+}
+
+func TestRunOnlyResourceFailureRecoveryDoesNotApplyToNonScheduledRuns(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	receiptIssueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, receiptIssueID) })
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:                      parseUUID(testWorkspaceID),
+		Title:                            "Non-scheduled resource failure",
+		Description:                      pgtype.Text{String: "WS-4612 source gate regression", Valid: true},
+		AssigneeType:                     "agent",
+		AssigneeID:                       parseUUID(agentID),
+		Status:                           "active",
+		ExecutionMode:                    "run_only",
+		CreatedByType:                    "member",
+		CreatedByID:                      parseUUID(testUserID),
+		ResourceFailureRetryEnabled:      pgtype.Bool{Bool: true, Valid: true},
+		ResourceFailureRetryDelaySeconds: pgtype.Int4{Int32: service.MinAutopilotResourceFailureRetryDelaySeconds, Valid: true},
+		FailureReceiptIssueID:            parseUUID(receiptIssueID),
+		FailureReceiptMarker:             pgtype.Text{String: "validation_officer_daily", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	for _, source := range []string{"manual", "webhook"} {
+		t.Run(source, func(t *testing.T) {
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, source, nil)
+			if err != nil {
+				t.Fatalf("DispatchAutopilot(%s): %v", source, err)
+			}
+			if !run.TaskID.Valid {
+				t.Fatal("run_only dispatch did not link a task")
+			}
+			runTaskWithBudget(t, queries, run.TaskID, 2)
+			if _, err := taskSvc.FailTask(
+				ctx,
+				run.TaskID,
+				"You're out of extra usage · resets 4am (America/Los_Angeles)",
+				"", "", "", string(taskfailure.ReasonAgentUnknown), false, "", "",
+			); err != nil {
+				t.Fatalf("FailTask(%s): %v", source, err)
+			}
+
+			failedRun, err := queries.GetAutopilotRun(ctx, run.ID)
+			if err != nil {
+				t.Fatalf("GetAutopilotRun(%s): %v", source, err)
+			}
+			if failedRun.Status != "failed" {
+				t.Fatalf("%s run status = %q, want failed", source, failedRun.Status)
+			}
+			var taskCount, receiptCount int
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID).Scan(&taskCount); err != nil {
+				t.Fatalf("count %s tasks: %v", source, err)
+			}
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM comment WHERE id = $1`, run.ID).Scan(&receiptCount); err != nil {
+				t.Fatalf("count %s receipts: %v", source, err)
+			}
+			if taskCount != 1 || receiptCount != 0 {
+				t.Fatalf("%s recovery side effects = %d tasks/%d receipts, want 1/0", source, taskCount, receiptCount)
+			}
+		})
+	}
+}
 
 func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	ctx := context.Background()

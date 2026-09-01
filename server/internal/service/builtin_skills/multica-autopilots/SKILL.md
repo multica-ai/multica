@@ -47,6 +47,32 @@ multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
 ```
 
+Scheduled `run_only` autopilots can opt into one delayed retry for provider
+quota, entitlement/access, or capacity/rate-limit failures. The delay must be
+at least 30 minutes. A final failed attempt can also leave a top-level,
+machine-readable system comment on a chosen issue:
+
+```bash
+multica autopilot update <autopilot-id> \
+  --retry-resource-failures \
+  --retry-resource-failure-delay 30m \
+  --failure-receipt-issue <issue-key-or-id> \
+  --failure-receipt-marker <lowercase_snake_case> \
+  --output json
+```
+
+The retry preserves the original autopilot run ID and applies only to
+`source=schedule`; manual, webhook, and API-triggered runs do not inherit it.
+After the retry is exhausted, the receipt has this stable shape:
+
+```text
+<!-- <marker>: run_id=<uuid> status=failed reason=<canonical_failure_reason> -->
+```
+
+Use `--retry-resource-failures=false` to disable the retry and
+`--clear-failure-receipt` to remove the receipt target. Do not combine the
+clear flag with the two receipt-setting flags.
+
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 
 `autopilot get` redacts `webhook_token`, `webhook_path`, and `webhook_url` by default while reporting whether a token exists and its non-sensitive hint. Only add `--show-secrets` when the user explicitly asks to retrieve the live webhook credential; the command warns on stderr. Do not paste webhook tokens or signing material into comments, logs, docs, or PRs.
