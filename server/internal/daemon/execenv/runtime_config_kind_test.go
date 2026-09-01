@@ -181,6 +181,59 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	}
 }
 
+// TestBriefTeachesMulticaCLIBinary pins the MUL-6662 guidance: the brief writes
+// every command as a bare `multica`, and PATH lookup is exactly what let an
+// unrelated older install answer a daemon-local call (GH #7520). The rule that
+// resolves that ambiguity has to reach every task kind — quick-create trims its
+// command list to `issue create`, but that call runs through the same binary —
+// and it has to name the unset fallback, since applySelfBinaryEnv deliberately
+// injects nothing when the executable cannot be resolved.
+func TestBriefTeachesMulticaCLIBinary(t *testing.T) {
+	t.Parallel()
+
+	fixtures := map[string]TaskContextForEnv{
+		"issue":        {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1"},
+		"chat":         {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
+		"quick-create": {QuickCreatePrompt: "p", AgentName: "Eve", AgentID: "eve-1"},
+		"autopilot":    {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1"},
+	}
+	for name, ctx := range fixtures {
+		out := buildMetaSkillContent("claude", ctx)
+		// Quoted: a Windows install path routinely contains spaces, and an
+		// agent copies the invocation form it is shown.
+		if !strings.Contains(out, "`\"$MULTICA_CLI\" <command>`") {
+			t.Errorf("%s brief does not teach the quoted \"$MULTICA_CLI\" invocation", name)
+		}
+		// `$MULTICA_CLI` is a PowerShell variable, not the environment, so a
+		// Windows agent copying only the POSIX form runs an empty command name
+		// — a worse failure than the bare `multica` this replaces.
+		if !strings.Contains(out, "`& $env:MULTICA_CLI <command>` in PowerShell") {
+			t.Errorf("%s brief does not teach the PowerShell invocation form", name)
+		}
+		if !strings.Contains(out, "fall back to plain `multica` only when `MULTICA_CLI` is unset") {
+			t.Errorf("%s brief does not name the unset fallback; an agent on a daemon that could not resolve its own binary would have no path forward", name)
+		}
+	}
+}
+
+// TestBriefDoesNotInterpolateMulticaCLIValue guards the prompt-cache prefix
+// (MUL-5377). MULTICA_CLI's value is per-machine and per-install, so writing a
+// resolved path into this file would fragment the cache across runtimes and
+// rewrite the brief whenever the daemon binary moves. The brief must reference
+// the variable and let the shell expand it.
+func TestBriefDoesNotInterpolateMulticaCLIValue(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1"}
+	out := buildMetaSkillContent("claude", ctx)
+	if strings.Contains(out, "MULTICA_CLI=") {
+		t.Error("brief assigns MULTICA_CLI a literal value; it must only reference the daemon-injected variable")
+	}
+	if out != buildMetaSkillContent("claude", ctx) {
+		t.Error("brief is not byte-stable across builds with identical context")
+	}
+}
+
 // TestBriefDueDateTeachesCalendarDayFormat pins the --due-date synopsis to
 // the calendar-day format the server canonically accepts
 // (util.ParseCalendarDate: YYYY-MM-DD; an RFC3339 value passes only at exact

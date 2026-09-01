@@ -24,8 +24,12 @@ var (
 var debugFlag bool
 
 var rootCmd = &cobra.Command{
-	Use:           "multica",
-	Short:         "Multica CLI — local agent runtime and management tool",
+	Use:   "multica",
+	Short: "Multica CLI — local agent runtime and management tool",
+	// rootHelpTemplate in help.go, not this field, is what `multica --help`
+	// renders — including the ENVIRONMENT VARIABLES block that documents
+	// MULTICA_CLI. Long is kept as the plain one-liner so the two cannot
+	// disagree about the root description.
 	Long:          "Work seamlessly with Multica from the command line.",
 	SilenceUsage:  true,
 	SilenceErrors: true,

@@ -71,6 +71,10 @@ const (
 	taskSlotCapacityBackoff  = 5 * time.Second
 	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
 	repoCheckoutModeIsolated = "isolated"
+	// multicaCLIEnv carries the absolute path of the multica binary this
+	// daemon process was started from, so an agent can invoke the CLI without
+	// going through PATH at all. See applySelfBinaryEnv for why that matters.
+	multicaCLIEnv = "MULTICA_CLI"
 	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
 	// claim and before StartTask succeeds: runtime resolution, skill bundles,
 	// execution-environment setup, and the StartTask request itself. It is
@@ -176,6 +180,84 @@ func taskMulticaEnvironment(task Task, agentName, token, configRoot, workspacesR
 		"TMP":                  tempDir,
 		"TEMP":                 tempDir,
 	}
+}
+
+// applySelfBinaryEnv points the agent at the multica binary backing this daemon
+// process, in two layers:
+//
+//   - MULTICA_CLI — its absolute path, so agent commands that speak the private
+//     localhost protocol (`repo checkout`, `agent`, `login`, `auth`,
+//     `daemon status`) can skip name resolution entirely.
+//   - PATH — its directory prepended, kept for anything still invoking a bare
+//     `multica`, including sandboxed runtimes (e.g. Codex) that may not inherit
+//     the daemon's PATH at all.
+//
+// PATH alone was never enough. daemon and CLI are the same binary speaking a
+// version-coupled private protocol, but the agent's shell sources the user's
+// profile, and one `eval "$(brew shellenv)"` re-prepends /opt/homebrew/bin ahead
+// of this entry — so an unrelated older Homebrew multica answers instead, and
+// the mismatch surfaces as a credential error that names nothing about PATH
+// (GH #7520; #7524 made that rejection self-explanatory but could not prevent
+// it). The daemon already knows one path that is guaranteed compatible; this
+// hands it over instead of gambling on lookup order.
+//
+// It is a provenance claim, not a version guarantee: resolveSelfExecutable
+// reports where this process STARTED, and the daemon deliberately supports the
+// binary being replaced out of band with the restart deferred while tasks run
+// (trySelfReload). This removes the PATH race, not every possible skew.
+//
+// hostPath is the daemon's own PATH.
+//
+// MULTICA_CLI is injected ONLY when the path still resolves to an executable
+// regular file, and that check is load-bearing rather than defensive. Under
+// Homebrew, os.Executable() reports the Cellar path and `brew cleanup` deletes
+// it on upgrade, while trySelfReload defers the restart for as long as tasks are
+// running and gates nothing — so a task can legitimately start under a daemon
+// whose own path no longer exists. Injecting it there would be strictly worse
+// than doing nothing: the guidance keys on the variable being UNSET, so a set
+// path pointing at a deleted file skips the fallback and fails deterministically,
+// where a bare `multica` would still have found the current version through
+// Homebrew's stable symlink. Absent, not broken, is what keeps the worst case
+// equal to today's behavior.
+//
+// The check races the filesystem — the binary can be removed between here and
+// the agent's first command — but it converts the one predictable window
+// (upgrade with a deferred restart) into a no-op instead of a failure. The PATH
+// prepend is applied either way: a directory that no longer exists is skipped
+// during lookup, which is exactly what happened before this function existed.
+func applySelfBinaryEnv(agentEnv map[string]string, hostPath string) {
+	selfBin, err := resolveSelfExecutable()
+	if err != nil {
+		return
+	}
+	agentEnv["PATH"] = filepath.Dir(selfBin) + string(os.PathListSeparator) + hostPath
+	if usableCLIPath(selfBin) {
+		agentEnv[multicaCLIEnv] = selfBin
+	}
+}
+
+// usableCLIPath reports whether path can be handed to an agent as a runnable
+// multica CLI: absolute, present, and executable right now.
+//
+// Absolute because a relative path would resolve against the AGENT's working
+// directory rather than the daemon's. os.Executable is absolute on every
+// platform Multica targets and selfexec's argv[0] fallback absolutizes what it
+// finds, so this only fires if the resolver regresses.
+func usableCLIPath(path string) bool {
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	// Windows decides executability by extension, not by mode bits — Stat
+	// reports 0666-style permissions for ordinary files there, so an exec-bit
+	// test would reject every valid path on the platform it was meant to guard.
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
+		return false
+	}
+	return true
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -7813,14 +7895,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
-	}
+	applySelfBinaryEnv(agentEnv, os.Getenv("PATH"))
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
 	if env.CodexHome != "" {

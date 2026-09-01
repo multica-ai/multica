@@ -47,6 +47,8 @@ multica repo checkout <url> --ref <branch-or-sha>
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is limited to its owner or a workspace owner/admin; the original initiator may keep polling that specific in-flight request if their admin role changes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which unbinds those agents and cancels their queued/running tasks before deleting the runtime. Unbinding keeps the agents and everything they own — instructions, skills, chats, labels, channel installations, autopilots and task history — and only clears `agent.runtime_id`; an unbound agent cannot run until it is bound to a runtime again (`multica agent update <id> --runtime-id <runtime-id>`), and every trigger path refuses it with `agent_runtime_required`. `repo checkout` creates a dedicated branch in the task working directory. Most runtimes use a linked worktree; Linux and Windows Codex use task-local Git metadata so a task can stage and commit without making the shared `.repos` cache writable.
 
+Run daemon-local commands through `MULTICA_CLI`: `"$MULTICA_CLI" repo checkout <url>` in a POSIX shell, `& $env:MULTICA_CLI repo checkout <url>` in PowerShell. Daemon and CLI are the same binary speaking a version-coupled private protocol over localhost, and the daemon exports `MULTICA_CLI` with the absolute path of the binary it is running; a bare `multica` resolves through `PATH`, where a shell profile (`eval "$(brew shellenv)"` is the usual one) can put an unrelated older install first and make checkout fail intermittently on an otherwise healthy task. Quote the variable — the path can contain spaces — and fall back to plain `multica` only when it is unset. The path records where the daemon process started, not what is on disk now, so it rules out `PATH` shadowing rather than every version skew.
+
 `repo checkout` requires both `MULTICA_DAEMON_PORT` and the injected task-scoped `MULTICA_TOKEN`; it is intended to run inside the active daemon task and from that task's workdir (or a descendant). The local daemon authenticates the token against its active-task registry, derives workspace/task/agent identity itself, and rejects a caller-supplied workdir outside that task. If either variable is absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
 
 ## Task CLI boundary
@@ -74,7 +76,10 @@ Check in this order:
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.
 6. Did the task get claimed or is it stuck pending/running/waiting for local directory?
 7. If repo checkout failed, classify it after checking whether repo context was
-   present in the task/project context.
+   present in the task/project context. A checkout that fails on some
+   dispatches and succeeds on others, with a credential error naming no repo,
+   points at the binary rather than the task: compare `$MULTICA_CLI` against
+   what `which -a multica` (`where.exe multica` on Windows) resolves first.
 
 ## Repos
 

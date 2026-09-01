@@ -801,10 +801,34 @@ func writeAttachments(b *strings.Builder) {
 }
 
 // writeAlwaysUseCLI emits the "must go through the multica CLI" guardrail
-// (compressed).
+// (compressed), plus the rule for WHICH multica binary to run.
+//
+// The binary rule lives here, once, rather than on each command bullet. Every
+// `multica …` in this brief is written as a bare command name for readability,
+// and some of those commands speak a version-coupled private protocol to the
+// local daemon; resolving that name through PATH is what let an unrelated older
+// install answer intermittently (GH #7520). One rule at the point where the
+// brief says "use the CLI" covers every command in every section — including
+// the `--help` surfaces this brief never enumerates — and cannot drift out of
+// sync with a bullet the way N copies would (cf. MUL-5696).
+//
+// Emitted for every task kind on purpose: quick-create trims its command list
+// down to `issue create`, but that call reaches the platform through the same
+// binary and the same lookup.
+//
+// The variable is REFERENCED, never interpolated. Its value is per-machine and
+// per-install, and this file is the prompt-cache prefix (MUL-5377) — writing the
+// resolved path in would fragment the cache across runtimes and rewrite the
+// brief whenever the daemon moves. The shell expands it at run time instead.
 func writeAlwaysUseCLI(b *strings.Builder) {
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
 	b.WriteString("Access Multica platform resources only through the `multica` CLI — never `curl` / `wget`. For anything the CLI doesn't cover, post a comment mentioning the workspace owner rather than working around it.\n\n")
+	// Two details an agent gets wrong by copying a half-form. Quoting: a
+	// Windows install path routinely contains spaces. PowerShell: `$MULTICA_CLI`
+	// is a PowerShell variable, not the environment, so the POSIX form expands
+	// to empty there and the invocation fails more confusingly than the bare
+	// name it replaced.
+	b.WriteString("**Which binary:** commands are written as `multica` throughout, but that name resolves through `PATH`, where a shell profile can put an unrelated older install first. The daemon exports `MULTICA_CLI` with the absolute path of the binary it is running from, so invoke the CLI through that variable — `\"$MULTICA_CLI\" <command>` in a POSIX shell, `& $env:MULTICA_CLI <command>` in PowerShell — and fall back to plain `multica` only when `MULTICA_CLI` is unset. Keep the quotes: the path can contain spaces. This matters most for commands that talk to the local daemon, such as `repo checkout`.\n\n")
 }
 
 // writeDeliveryInvariant emits the always-on delivery contract, shared by every
