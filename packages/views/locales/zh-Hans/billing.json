@@ -175,8 +175,8 @@
     "limits": {
       "title": "用量与限额",
       "description": "限额和用量来自服务端当前 entitlement 与额度统计。",
-      "issues": "任务数量",
-      "issues_description": "当前任务用量和服务端返回的生效限额。",
+      "issues": "工作项数量",
+      "issues_description": "当前工作项用量和服务端返回的生效限额。",
       "autopilots": "自动化执行",
       "autopilots_description": "当前自动化用量和服务端返回的重置时间。",
       "unlimited": "不限",

@@ -101,8 +101,8 @@
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体 task。已产生的内容会保留在对话里。",
-      "description_default": "这会取消当前智能体 task。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体工作任务。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体工作任务。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
       "confirming": "停止中..."
@@ -139,9 +139,9 @@
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "任务、项目、skill",
+    "first_time_pillars": "工作项、项目、skill",
     "first_time_pillars_suffix": "。",
-    "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
+    "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小工作项。",
     "returning_title_named": "你好，我是 {{name}}",
     "returning_title_default": "欢迎使用 Multica",
     "returning_subtitle": "试试问",
@@ -154,8 +154,8 @@
       "prompt": "你最擅长帮我做什么？请简要介绍。"
     },
     "first_task": {
-      "label": "建议第一个任务",
-      "prompt": "建议三个适合交给你的实用任务。"
+      "label": "建议第一个工作项",
+      "prompt": "建议三个适合交给你的实用工作项。"
     },
     "recommend": {
       "label": "推荐一个操作",
@@ -167,13 +167,13 @@
     "aria_label": "开始方式",
     "cta": "开始",
     "board": {
-      "title": "几分钟搭好任务看板",
-      "desc": "告诉我目标，我来建项目、拆任务、排好优先级。",
+      "title": "几分钟搭好工作项看板",
+      "desc": "告诉我目标，我来建项目、拆工作项、排好优先级。",
       "prompt": "把我们的目标整理成一个项目看板"
     },
     "delegate": {
       "title": "先交给我一件事",
-      "desc": "比如一次调研——结果会变成任务和报告交回来。",
+      "desc": "比如一次调研——结果会变成工作项和报告交回来。",
       "prompt": "先交给你一件事：帮我做一次调研，把结果整理成报告交回来"
     },
     "digest": {

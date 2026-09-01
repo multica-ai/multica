@@ -79,11 +79,11 @@ const zh = `欢迎来到 Multica。
 运行时安装前,你可以先做这些事:
 
 1. 为当前工作创建一个项目。
-2. 新建几个任务,并在 backlog、todo、in_progress、done 之间流转。
-3. 给任务加优先级、标签、评论和订阅。
+2. 新建几个工作项,并在 backlog、todo、in_progress、done 之间流转。
+3. 给工作项加优先级、标签、评论和订阅。
 4. 用收件箱追踪分配给你的事项和 @mention。
 
-这样你先熟悉项目管理层。连上运行时后,智能体会直接在这些任务上开始工作。
+这样你先熟悉项目管理层。连上运行时后,智能体会直接在这些工作项上开始工作。
 
 ## 安装第一个 Agent 运行时
 
@@ -109,7 +109,7 @@ const zh = `欢迎来到 Multica。
 
 Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
 
-Mika 会把一个真实目标转化为任务，交给合适的智能体启动执行，并在工作流需要时建议添加可复用的 specialist。`;
+Mika 会把一个真实目标转化为工作项，交给合适的智能体启动执行，并在工作流需要时建议添加可复用的 specialist。`;
 
 const ko = `Multica에 오신 것을 환영합니다.
 

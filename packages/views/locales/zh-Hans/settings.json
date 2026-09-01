@@ -1,12 +1,12 @@
 {
   "issue_statuses": {
-    "title": "任务状态",
-    "description": "定义任务流转的工作流。每个状态的行为由它所属的分类决定。",
+    "title": "工作项状态",
+    "description": "定义工作项流转的工作流。每个状态的行为由它所属的分类决定。",
     "loading": "正在加载状态…",
     "add": "添加状态",
     "show_archived": "显示已归档（{{count}}）",
     "archived_badge": "已归档",
-    "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
+    "archived_hint": "已停止用于新的指派，已经在该状态上的工作项保持不变。",
     "reorder_failed": "排序保存失败。",
     "actions": {
       "open": "{{name}} 的操作",
@@ -23,7 +23,7 @@
       "key_hint": "API 和 CLI 中通过 {{key}} 引用。",
       "created": "状态已创建。API 和 CLI 中通过 {{key}} 引用。",
       "category": "分类",
-      "category_locked": "分类不可修改 —— 已经处于该状态的任务依赖它。",
+      "category_locked": "分类不可修改 —— 已经处于该状态的工作项依赖它。",
       "description": "描述",
       "description_placeholder": "这个状态对团队意味着什么",
       "color": "颜色",
@@ -34,14 +34,14 @@
     },
     "archive_dialog": {
       "title": "归档这个状态？",
-      "description": "「{{name}}」将不再能被指派给新的任务。已经处于该状态的任务保持不变，行为也完全不变。",
+      "description": "「{{name}}」将不再能被指派给新的工作项。已经处于该状态的工作项保持不变，行为也完全不变。",
       "cancel": "取消",
       "confirm": "归档",
       "failed": "归档失败。"
     },
     "categories": {
-      "backlog": "搁置。把任务移到这里不会启动智能体。",
-      "todo": "排队中。把任务移到这里会启动指派的智能体。",
+      "backlog": "搁置。把工作项移到这里不会启动智能体。",
+      "todo": "排队中。把工作项移到这里会启动指派的智能体。",
       "in_progress": "正在进行。",
       "in_review": "已交付，等待人工审核。会结束自动化运行。",
       "done": "已完成。",
@@ -51,7 +51,7 @@
   },
   "quick_actions": {
     "title": "快捷操作",
-    "description": "预先配置好执行的智能体和提示词，之后在任意任务侧边栏一键触发。",
+    "description": "预先配置好执行的智能体和提示词，之后在任意工作项侧边栏一键触发。",
     "add": "新建快捷操作",
     "search_placeholder": "搜索快捷操作",
     "loading": "正在加载快捷操作…",
@@ -85,16 +85,16 @@
     "used_count": "已使用 {{count}} 次",
     "create_title": "新建快捷操作",
     "edit_title": "编辑快捷操作",
-    "dialog_description": "以任务评论的形式执行，和 @提及 一样。",
+    "dialog_description": "以工作项评论的形式执行，和 @提及 一样。",
     "field_name": "名称",
     "field_name_placeholder": "代码审查",
     "field_target": "执行者",
     "field_prompt": "提示词",
-    "field_prompt_placeholder": "请审查这个任务关联的代码，重点关注正确性和边界情况。",
-    "prompt_hint": "原样发送。智能体本来就能看到这个任务。",
-    "template_not_supported": "暂不支持变量，请删除 {{token}}。智能体本来就能读到这个任务。",
+    "field_prompt_placeholder": "请审查这个工作项关联的代码，重点关注正确性和边界情况。",
+    "prompt_hint": "原样发送。智能体本来就能看到这个工作项。",
+    "template_not_supported": "暂不支持变量，请删除 {{token}}。智能体本来就能读到这个工作项。",
     "delete_title": "删除这条快捷操作？",
-    "delete_description": "它会从所有任务侧边栏消失，历史运行记录仍保留在执行日志中。如果以后可能还要用，建议改为归档。"
+    "delete_description": "它会从所有工作项侧边栏消失，历史运行记录仍保留在执行日志中。如果以后可能还要用，建议改为归档。"
   },
   "auto_save": {
     "saving": "正在保存…",
@@ -126,7 +126,7 @@
     },
     "sticky_comment_bar": {
       "title": "固定评论栏",
-      "hint": "滚动任务页面时，评论栏始终固定在底部。"
+      "hint": "滚动工作项页面时，评论栏始终固定在底部。"
     }
   },
   "shortcuts": {
@@ -164,8 +164,8 @@
         "description": "随时搜索内容或运行命令。"
       },
       "createIssue": {
-        "label": "新建任务",
-        "description": "打开你常用的任务创建流程。"
+        "label": "新建工作项",
+        "description": "打开你常用的工作项创建流程。"
       },
       "toggleSidebar": {
         "label": "显示或隐藏左侧边栏",
@@ -180,12 +180,12 @@
         "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
       },
       "findInIssue": {
-        "label": "在任务中查找",
-        "description": "搜索当前打开的任务详情。"
+        "label": "在工作项中查找",
+        "description": "搜索当前打开的工作项详情。"
       },
       "openThreadNav": {
         "label": "打开讨论导航",
-        "description": "列出、搜索并跳转当前任务的评论讨论。"
+        "description": "列出、搜索并跳转当前工作项的评论讨论。"
       },
       "archiveInboxItem": {
         "label": "归档通知",
@@ -193,7 +193,7 @@
       },
       "send": {
         "label": "发送",
-        "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。"
+        "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建工作项。"
       },
       "goBack": {
         "label": "后退",
@@ -212,12 +212,12 @@
         "description": "打开工作区聊天。"
       },
       "goMyIssues": {
-        "label": "前往我的任务",
-        "description": "打开分配给你的任务。"
+        "label": "前往我的工作项",
+        "description": "打开分配给你的工作项。"
       },
       "goIssues": {
-        "label": "前往任务",
-        "description": "打开任务列表。"
+        "label": "前往工作项",
+        "description": "打开工作项列表。"
       },
       "goProjects": {
         "label": "前往项目",
@@ -297,7 +297,7 @@
     "disabled_badge": "已禁用",
     "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
     "delete_title": "移除共享服务？",
-    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个任务起生效。",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个工作任务起生效。",
     "delete_confirm": "移除",
     "cancel": "取消",
     "added_toast": "已添加共享 MCP 服务",
@@ -314,7 +314,7 @@
       "profile": "个人资料",
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
-      "issue": "任务",
+      "issue": "工作项",
       "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
@@ -325,7 +325,7 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "issue_statuses": "任务状态",
+      "issue_statuses": "工作项状态",
       "properties": "属性",
       "quick_actions": "快捷操作",
       "plugins": "Plugins",
@@ -388,12 +388,12 @@
       "secret_set": "已保存 — 输入新值可替换"
     },
     "scopes": {
-      "issues_read": "读取任务",
-      "issues_write": "创建和修改任务",
+      "issues_read": "读取工作项",
+      "issues_write": "创建和修改工作项",
       "comments_read": "读取评论",
       "comments_write": "发表评论",
-      "tasks_read": "读取智能体 task",
-      "tasks_write": "启动和更新智能体 task",
+      "tasks_read": "读取智能体工作任务",
+      "tasks_write": "启动和更新智能体工作任务",
       "agents_read": "读取智能体列表",
       "members_read": "读取成员列表",
       "storage_user": "为每位成员单独存储数据",
@@ -429,7 +429,7 @@
   },
   "properties": {
     "title": "属性",
-    "description": "为该工作区的任务定义类型化的自定义属性。属性值设置在每个任务上，智能体可读写。",
+    "description": "为该工作区的工作项定义类型化的自定义属性。属性值设置在每个工作项上，智能体可读写。",
     "search_placeholder": "按名称筛选...",
     "new_property": "新建属性",
     "show_archived": "显示已归档",
@@ -440,7 +440,7 @@
       "usage": "使用数量",
       "updated": "更新时间"
     },
-    "usage_count_other": "{{count}} 个任务",
+    "usage_count_other": "{{count}} 个工作项",
     "loading": "正在加载属性...",
     "empty": "还没有属性",
     "empty_hint": "创建 Severity、Environment 这类类型化字段——智能体可带校验地读写它们。",
@@ -488,7 +488,7 @@
     },
     "archive_dialog": {
       "title": "归档属性？",
-      "description": "“{{name}}”将从选择器和筛选中隐藏，任务上已有的值会保留。之后可以恢复。",
+      "description": "“{{name}}”将从选择器和筛选中隐藏，工作项上已有的值会保留。之后可以恢复。",
       "cancel": "取消",
       "confirm": "归档属性",
       "failed": "归档属性失败"
@@ -496,9 +496,9 @@
   },
   "labels": {
     "title": "标签",
-    "description": "分别管理工作区中用于整理任务和 skill 的标签。两类标签相互独立。",
+    "description": "分别管理工作区中用于整理工作项和 skill 的标签。两类标签相互独立。",
     "scopes": {
-      "issue": "任务",
+      "issue": "工作项",
       "skill": "Skill"
     },
     "search_placeholder": "按名称或描述筛选...",
@@ -546,7 +546,7 @@
     "click_avatar_hint": "点击上传头像",
     "name_label": "姓名",
     "profile_description_label": "关于你",
-    "profile_description_hint": "会随 task 一起发送给为你工作的智能体——角色、技术栈、偏好，任何你会在第一天告诉新同事的内容。",
+    "profile_description_hint": "会随工作任务一起发送给为你工作的智能体——角色、技术栈、偏好，任何你会在第一天告诉新同事的内容。",
     "profile_description_placeholder": "例如：后端工程师（Go + Postgres）。喜欢简洁的 PR，改动同时附上测试。",
     "profile_description_too_long": "资料过长（最多 {{max}} 字符，当前 {{count}}）。",
     "save": "更新资料",
@@ -558,20 +558,20 @@
   },
   "notifications": {
     "title": "收件箱通知",
-    "description": "控制哪些事件会产生收件箱通知。被静默的事件类型仍然存在——可以直接到任务页面查看。",
+    "description": "控制哪些事件会产生收件箱通知。被静默的事件类型仍然存在——可以直接到工作项页面查看。",
     "toast_failed": "更新通知设置失败",
     "groups": {
       "assignments": {
         "label": "分配",
-        "description": "你被分配或取消分配某个任务时"
+        "description": "你被分配或取消分配某个工作项时"
       },
       "status_changes": {
         "label": "状态变更",
-        "description": "你订阅的任务状态变化时（例如 todo、in_progress、done）"
+        "description": "你订阅的工作项状态变化时（例如 todo、in_progress、done）"
       },
       "comments": {
         "label": "评论",
-        "description": "你订阅的任务有新评论时"
+        "description": "你订阅的工作项有新评论时"
       },
       "mentions": {
         "label": "提及",
@@ -579,11 +579,11 @@
       },
       "updates": {
         "label": "优先级与截止日期",
-        "description": "你订阅的任务优先级或截止日期变更时"
+        "description": "你订阅的工作项优先级或截止日期变更时"
       },
       "agent_activity": {
         "label": "智能体活动",
-        "description": "智能体 task 完成或失败时"
+        "description": "智能体工作任务完成或失败时"
       }
     },
     "system": {
@@ -657,10 +657,10 @@
     "context_label": "上下文",
     "context_placeholder": "供工作区中的智能体参考的背景信息和上下文",
     "slug_label": "Slug",
-    "issue_prefix_label": "任务前缀",
-    "issue_prefix_hint": "用于任务编号，例如 {{example}}。",
-    "prefix_confirm_title": "确认修改任务前缀？",
-    "prefix_confirm_description": "所有任务将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
+    "issue_prefix_label": "工作项前缀",
+    "issue_prefix_hint": "用于工作项编号，例如 {{example}}。",
+    "prefix_confirm_title": "确认修改工作项前缀？",
+    "prefix_confirm_description": "所有工作项将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以修改工作区设置。",
@@ -686,7 +686,7 @@
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",
-    "description": "此操作不可撤销。所有任务、智能体、聊天记录和执行历史都将被永久删除。",
+    "description": "此操作不可撤销。所有工作项、智能体、聊天记录和执行历史都将被永久删除。",
     "type_to_confirm_prefix": "确认请输入",
     "type_to_confirm_suffix": "。",
     "cancel": "取消",
@@ -705,8 +705,8 @@
     "master_description_off": "GitHub 功能已关闭。PR 侧栏、Co-authored-by trailer 与自动关联都已暂停。后台数据未删除。",
     "section_connection": "连接",
     "connection_title": "GitHub App",
-    "connection_description_prefix": "自动把任务关联到 Pull Request。当 PR 的分支、标题或正文中包含",
-    "connection_description_suffix": "并被合并时，对应的任务会自动转为",
+    "connection_description_prefix": "自动把工作项关联到 Pull Request。当 PR 的分支、标题或正文中包含",
+    "connection_description_suffix": "并被合并时，对应的工作项会自动转为",
     "connection_description_done": "已完成",
     "connection_identifier_example": "MUL-123",
     "connected_to": "已连接到 {{login}}",
@@ -730,12 +730,12 @@
     "toast_disconnected": "已断开 GitHub App",
     "section_features": "功能",
     "feature_pr_sidebar_label": "Pull Request 侧栏",
-    "feature_pr_sidebar_description": "在任务详情侧栏中展示关联的 Pull Request。",
+    "feature_pr_sidebar_description": "在工作项详情侧栏中展示关联的 Pull Request。",
     "feature_co_author_label": "Co-authored-by trailer",
     "feature_co_author_description_prefix": "在智能体提交的 commit 中追加",
     "feature_co_author_description_suffix": "。",
-    "feature_auto_link_label": "任务 ↔ PR 自动关联",
-    "feature_auto_link_description": "根据 PR 标题、正文和分支名匹配任务编号并自动建立链接。",
+    "feature_auto_link_label": "工作项 ↔ PR 自动关联",
+    "feature_auto_link_description": "根据 PR 标题、正文和分支名匹配工作项编号并自动建立链接。",
     "section_repositories": "代码仓库",
     "repositories_shortcut_label": "仓库 URL 仍在\"代码仓库\"标签页中管理",
     "repositories_shortcut_link": "前往管理 →",
@@ -743,7 +743,7 @@
   },
   "vcs": {
     "section_title": "Git 代码托管（自托管）",
-    "page_description": "连接自托管的 Forgejo、Gitea 或 GitLab 实例，将 Pull Request 镜像到任务上。每个连接使用一个访问令牌；智能体使用运行时自身的 Git 凭据推送分支并创建 PR。",
+    "page_description": "连接自托管的 Forgejo、Gitea 或 GitLab 实例，将 Pull Request 镜像到工作项上。每个连接使用一个访问令牌；智能体使用运行时自身的 Git 凭据推送分支并创建 PR。",
     "connect_title": "连接代码托管实例",
     "connected_as": "已以 {{login}} 身份连接",
     "form_provider_label": "提供方",
@@ -766,7 +766,7 @@
     "copied": "已复制到剪贴板",
     "copy_failed": "复制失败",
     "disconnect_confirm_title": "断开此代码托管连接？",
-    "disconnect_confirm_description": "该连接镜像的 Pull Request 及其任务关联将被移除。此操作无法撤销。",
+    "disconnect_confirm_description": "该连接镜像的 Pull Request 及其工作项关联将被移除。此操作无法撤销。",
     "disconnect_confirm_cancel": "取消",
     "disconnect_confirm_action": "断开",
     "toast_connected": "已连接代码托管",
@@ -784,7 +784,7 @@
   },
   "lark": {
     "section_title": "飞书",
-    "page_description": "将每个 Multica 智能体绑定到飞书 PersonalAgent Bot。成员可在飞书私聊 Bot、群聊 @ Bot，或输入 /issue 直接创建 Multica 任务。",
+    "page_description": "将每个 Multica 智能体绑定到飞书 PersonalAgent Bot。成员可在飞书私聊 Bot、群聊 @ Bot，或输入 /issue 直接创建 Multica 工作项。",
     "not_enabled_title": "未启用飞书集成",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "才能启用飞书 Bot 绑定。",
@@ -889,7 +889,7 @@
   },
   "slack": {
     "section_title": "Slack",
-    "page_description": "将每个 Multica 智能体连接到专属的 Slack 机器人。成员可私聊机器人、在频道中 @ 它，或输入 /issue 直接创建 Multica 任务。",
+    "page_description": "将每个 Multica 智能体连接到专属的 Slack 机器人。成员可私聊机器人、在频道中 @ 它，或输入 /issue 直接创建 Multica 工作项。",
     "not_enabled_title": "Slack 集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用 Slack 机器人安装。",
@@ -932,8 +932,8 @@
   },
   "dingtalk": {
     "section_title": "钉钉",
-    "page_description": "将每个 Multica 智能体连接到专属的钉钉机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 任务。",
-    "agent_page_description": "通过专属钉钉机器人私聊该智能体、在群内 @ 它，或输入 /issue 创建 Multica 任务。",
+    "page_description": "将每个 Multica 智能体连接到专属的钉钉机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 工作项。",
+    "agent_page_description": "通过专属钉钉机器人私聊该智能体、在群内 @ 它，或输入 /issue 创建 Multica 工作项。",
     "groups_title": "近期钉群",
     "groups_description": "工作区成员关联钉钉账号并在群内 @ 该机器人后，群会显示在这里。默认展示最近 90 天活跃的群。",
     "groups_overview_description": "每条连接显示智能体、钉钉机器人和近期有交互的群。",
@@ -996,7 +996,7 @@
   },
   "wecom": {
     "section_title": "企业微信",
-    "page_description": "将每个 Multica 智能体连接到专属的企业微信智能机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 任务。智能体通过 WebSocket 长连接回复，无需公网回调地址。",
+    "page_description": "将每个 Multica 智能体连接到专属的企业微信智能机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 工作项。智能体通过 WebSocket 长连接回复，无需公网回调地址。",
     "not_enabled_title": "企业微信集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用企业微信智能机器人的安装。",
@@ -1046,7 +1046,7 @@
   },
   "telegram": {
     "section_title": "Telegram",
-    "page_description": "将每个 Multica 智能体连接到专属的 Telegram 机器人。成员可私聊机器人、在群里 @ 它、输入 /issue 创建 Multica 任务，并实时看到智能体的流式回复。",
+    "page_description": "将每个 Multica 智能体连接到专属的 Telegram 机器人。成员可私聊机器人、在群里 @ 它、输入 /issue 创建 Multica 工作项，并实时看到智能体的流式回复。",
     "not_enabled_title": "Telegram 集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用 Telegram 机器人安装。",
@@ -1269,7 +1269,7 @@
       },
       "member": {
         "label": "成员",
-        "description": "创建并处理任务"
+        "description": "创建并处理工作项"
       }
     },
     "share_links_title": "分享链接",

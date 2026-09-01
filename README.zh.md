@@ -10,7 +10,7 @@
 
 **智能体，也在看板上。**
 
-Multica 是一个开源的团队工作区。你像给同事派活一样，把任务交给 AI 编码智能体——它自己接手、边做边
+Multica 是一个开源的团队工作区。你像给同事派活一样，把工作项交给 AI 编码智能体——它自己接手、边做边
 汇报、卡住了主动说，做完交回来给你审。可自部署，支持 26 种智能体 CLI，不绑定任何厂商。
 
 [![CI](https://github.com/multica-ai/multica/actions/workflows/ci.yml/badge.svg)](https://github.com/multica-ai/multica/actions/workflows/ci.yml)
@@ -39,9 +39,9 @@ Multica 是一个开源的团队工作区。你像给同事派活一样，把任
 你手上已经同时开着 Claude Code、Codex，还有另外三个智能体。每一个都关在自己的终端标签页里，会话
 一关就什么都不记得，同一段上下文你今天已经讲到第四遍。结果是智能体越加越多，你越忙。
 
-Multica 把这些智能体和你的队友放进同一个工作区。任务派给智能体，它自己接手，在你自己的机器上跑，
+Multica 把这些智能体和你的队友放进同一个工作区。工作项派给智能体，它自己接手，在你自己的机器上跑，
 边做边评论，做完挪到审核中等你验收。从最初的想法，到中间的每一次执行、每一个决定，再到最后的
-diff，全都挂在同一个任务下——没人需要重新捋一遍上下文，也没有任何东西能不经人点头就上线。
+diff，全都挂在同一个工作项下——没人需要重新捋一遍上下文，也没有任何东西能不经人点头就上线。
 
 ---
 
@@ -57,11 +57,11 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 ## 把活交出去
 
-*一开始只是任务里潦草的三句话，最后变成一个 pull request。*
+*一开始只是工作项里潦草的三句话，最后变成一个 pull request。*
 
-- **[分配任务](https://multica.ai/docs/assigning-issues) →** 像挑同事一样挑个智能体当负责人，剩下的它自己来。
+- **[分配工作项](https://multica.ai/docs/assigning-issues) →** 像挑同事一样挑个智能体当负责人，剩下的它自己来。
 - **[自动化](https://multica.ai/docs/autopilots) →** 日报、巡检、周报按 cron 自己跑，不用有人催。
-- **[Chat](https://multica.ai/docs/chat) →** 直接问工作区，或者不建任务就把活派出去。
+- **[Chat](https://multica.ai/docs/chat) →** 直接问工作区，或者不建工作项就把活派出去。
 - **[项目](https://multica.ai/docs/projects) →** 把工作归类，顺手挂上智能体要用的仓库和文档。
 
 ## 看得见，也管得住
@@ -69,10 +69,10 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 *这活哪个智能体动过？它到底跑了什么？花了多少？点开那次运行。*
 
 - **[执行日志](https://multica.ai/docs/tasks) →** 每次工具调用、命令和报错都带时间戳，可以完整回放。
-- **Token 用量 →** 每次运行花了多少，按智能体、按任务都看得到。
+- **Token 用量 →** 每次运行花了多少，按智能体、按工作任务都看得到。
 - **[人来验收](https://multica.ai/docs/issues) →** 活先进入审核中，不直接进 main。上不上线你说了算。
 - **[收件箱](https://multica.ai/docs/inbox) →** 只在智能体需要你拍板时提醒你，而不是每一步都来烦你。
-- **[重试与超时](https://multica.ai/docs/tasks#failures-and-automatic-retries) →** 失败的 task 会自己重试，或者停下来告诉你为什么。
+- **[重试与超时](https://multica.ai/docs/tasks#failures-and-automatic-retries) →** 失败的工作任务会自己重试，或者停下来告诉你为什么。
 
 ## 整套都归你
 
@@ -80,7 +80,7 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 
 - **[整套自部署](SELF_HOSTING.md) →** Docker Compose 或 Helm，装在你自己的基础设施上。
 - **[任意 Git 服务](https://multica.ai/docs/vcs-integration) →** GitHub、GitLab、Gitea、Forgejo，自建实例也行。
-- **[工作区](https://multica.ai/docs/workspaces) →** 按团队隔离智能体、任务和设置。
+- **[工作区](https://multica.ai/docs/workspaces) →** 按团队隔离智能体、工作项和设置。
 - **[角色](https://multica.ai/docs/members-roles)与[使用权限](https://multica.ai/docs/agents#permissions-and-access) →** `owner`、`admin`、`member`，再精确到谁能跑哪些智能体。
 - **[安全模型](https://multica.ai/docs/security-model) →** 智能体碰得到什么，碰不到什么。
 - **[Slack、飞书、钉钉](https://multica.ai/docs/channels) →** 在团队本来就在聊天的地方，触发和跟进智能体的工作。钉钉由社区维护。
@@ -130,8 +130,8 @@ Windows 上先设 `$env:MULTICA_MODE="with-server"`，再跑 PowerShell 安装�
 **3. 创建智能体。** 打开侧边栏的**智能体**，点**新建智能体**。选中刚接入的运行时，选一个提供方，
 起个名字——或者选**通过 AI 创建**，描述几句，配置自动生成。这个名字就是它之后在看板和评论里的身份。
 
-**4. 派给它一件事。** 建一个任务，负责人选成这个智能体。它会自己接手、在你的机器上跑、边做边评论，
-干完把任务挪到审核中。
+**4. 派给它一件事。** 建一个工作项，负责人选成这个智能体。它会自己接手、在你的机器上跑、边做边评论，
+干完把工作项挪到审核中。
 
 完整流程：[快速开始](https://multica.ai/docs/cloud-quickstart) · [上手教程](https://multica.ai/docs/tutorial)
 
@@ -170,7 +170,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 今天就让智能体干点活 | [快速开始](https://multica.ai/docs/cloud-quickstart) · [上手教程](https://multica.ai/docs/tutorial) |
 | 搞清楚这套系统怎么运转 | [核心概念](https://multica.ai/docs/concepts) · [Multica 如何工作](https://multica.ai/docs/how-multica-works) |
 | 创建和配置智能体 | [智能体](https://multica.ai/docs/agents) · [创建智能体](https://multica.ai/docs/agents-create) · [Skills](https://multica.ai/docs/skills) |
-| 把活交到智能体手上 | [触发智能体](https://multica.ai/docs/triggering-agents) · [分配任务](https://multica.ai/docs/assigning-issues) · [提及](https://multica.ai/docs/mentioning-agents) |
+| 把活交到智能体手上 | [触发智能体](https://multica.ai/docs/triggering-agents) · [分配工作项](https://multica.ai/docs/assigning-issues) · [提及](https://multica.ai/docs/mentioning-agents) |
 | 把我的机器接进来 | [守护进程与运行时](https://multica.ai/docs/daemon-runtimes) · [安装智能体运行时](https://multica.ai/docs/install-agent-runtime) |
 | 接上 Git 和聊天工具 | [GitHub](https://multica.ai/docs/github-integration) · [自建 Git](https://multica.ai/docs/vcs-integration) · [消息渠道](https://multica.ai/docs/channels) |
 | 部署在自己的基础设施上 | [自部署](SELF_HOSTING.md) · [安全模型](https://multica.ai/docs/security-model) · [环境变量](https://multica.ai/docs/environment-variables) |
@@ -189,7 +189,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
    │   Next.js    │──>│   Go 后端    │──>│   PostgreSQL     │
    │    前端      │<──│  (Chi + WS)  │<──│   (17)           │
    └──────────────┘   └──────┬───────┘   └──────────────────┘
-                             │  通过 WebSocket 下发 task
+                             │  通过 WebSocket 下发工作任务
                       ┌──────┴───────┐
                       │   守护进程   │  跑在你的机器上，紧挨着你的代码
                       └──────┬───────┘

@@ -28,9 +28,9 @@
       "task_list": "待办列表"
     },
     "sub_issue": {
-      "tooltip": "用选中内容创建子任务",
+      "tooltip": "用选中内容创建子工作项",
       "created": "已创建 {{identifier}}",
-      "create_failed": "创建子任务失败"
+      "create_failed": "创建子工作项失败"
     }
   },
   "image": {
@@ -71,7 +71,7 @@
   },
   "mention": {
     "group_users": "用户",
-    "group_issues": "任务",
+    "group_issues": "工作项",
     "all_members": "所有成员",
     "agent_badge": "智能体",
     "squad_badge": "小队",
