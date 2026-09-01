@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -78,16 +79,89 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
 		}
+		if !utf8.Valid(data) {
+			return "", false, fmt.Errorf("file content for --%s is not valid UTF-8", fileFlag)
+		}
 		body := strings.TrimSuffix(string(data), "\n")
 		if body == "" {
 			return "", false, fmt.Errorf("file content for --%s is empty", fileFlag)
 		}
+		warnLikelyGBKMojibake(fileFlag, body)
 		return body, true, nil
 	}
 	if inline == "" {
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+func warnLikelyGBKMojibake(fileFlag, body string) {
+	recovered, ok := likelyGBKMojibakeRecovery(body)
+	if !ok {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"warning: --%s content looks like UTF-8 text decoded as GBK/cp936 before submission; "+
+			"recovered preview %q. On Windows PowerShell 5.1, read and write text files with explicit UTF-8, "+
+			"for example Get-Content -Raw -Encoding UTF8 and Set-Content -Encoding UTF8.\n",
+		fileFlag, previewRunes(recovered, 48))
+}
+
+func likelyGBKMojibakeRecovery(text string) (string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if utf8.RuneCountInString(trimmed) < 8 || cjkRuneCount(trimmed) < 6 {
+		return "", false
+	}
+	gbkBytes := encodeGBKLossy(trimmed)
+	if gbkBytes == trimmed {
+		return "", false
+	}
+	recovered := string([]byte(gbkBytes))
+	if recovered == trimmed {
+		return "", false
+	}
+	recoveredRunes := utf8.RuneCountInString(recovered)
+	recoveredCJK := cjkRuneCount(recovered)
+	if recoveredRunes == 0 || recoveredCJK < 6 {
+		return "", false
+	}
+	if float64(recoveredCJK)/float64(recoveredRunes) < 0.25 {
+		return "", false
+	}
+	return recovered, true
+}
+
+func encodeGBKLossy(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		encoded, err := simplifiedchinese.GBK.NewEncoder().String(string(r))
+		if err != nil {
+			b.WriteByte('?')
+			continue
+		}
+		b.WriteString(encoded)
+	}
+	return b.String()
+}
+
+func cjkRuneCount(s string) int {
+	count := 0
+	for _, r := range s {
+		if (r >= 0x3400 && r <= 0x4DBF) ||
+			(r >= 0x4E00 && r <= 0x9FFF) ||
+			(r >= 0xF900 && r <= 0xFAFF) {
+			count++
+		}
+	}
+	return count
+}
+
+func previewRunes(s string, max int) string {
+	if max <= 0 || utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max]) + "..."
 }
 
 // ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
