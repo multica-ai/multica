@@ -34,6 +34,9 @@ export interface IssueGroupPageState {
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
+  /** First page error observed for this branch, when `isError` — lets the
+   * footer distinguish a missing-endpoint 404 from a generic failure. */
+  error: Error | null;
   loadMore: () => void;
   retry: () => void;
 }
@@ -47,6 +50,8 @@ export interface IssueGroupBranches {
   isLoading: boolean;
   isRefreshing: boolean;
   isError: boolean;
+  /** The groups-query error or the first branch error, when `isError`. */
+  error: Error | null;
   hasMoreGroups: boolean;
   isLoadingMoreGroups: boolean;
   loadMoreGroups: () => void;
@@ -69,6 +74,7 @@ interface BranchData {
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
+  error: Error | null;
   headUpdatedAt: number;
   headFetching: boolean;
 }
@@ -274,6 +280,7 @@ export function useIssueGroupBranches({
         isLoading: false,
         isFetching: false,
         isError: false,
+        error: null,
         headUpdatedAt: 0,
         headFetching: false,
       });
@@ -322,6 +329,7 @@ export function useIssueGroupBranches({
       current.isLoading ||= pageResult.isPending;
       current.isFetching ||= pageResult.isFetching;
       current.isError ||= pageResult.isError;
+      if (pageResult.isError) current.error ??= pageResult.error;
       if (target.cursor === null) {
         current.headUpdatedAt = pageResult.dataUpdatedAt;
         current.headFetching = pageResult.isFetching;
@@ -439,6 +447,7 @@ export function useIssueGroupBranches({
               isLoading: enabled && (branch?.isLoading ?? false),
               isFetching: enabled && (branch?.isFetching ?? false),
               isError: enabled && (branch?.isError ?? false),
+              error: branch?.error ?? null,
               loadMore: () => loadMore(descriptor.key),
               retry: () => retry(descriptor.key),
             },
@@ -500,6 +509,10 @@ export function useIssueGroupBranches({
       enabled &&
       (groupsQuery.isError ||
         branchKeys.some((key) => branchData.get(key)?.isError)),
+    error:
+      groupsQuery.error ??
+      branchKeys.map((key) => branchData.get(key)?.error).find((e) => e != null) ??
+      null,
     hasMoreGroups: enabled && !!hasNextGroupPage,
     isLoadingMoreGroups: enabled && isFetchingNextGroupPage,
     loadMoreGroups,

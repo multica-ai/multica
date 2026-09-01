@@ -36,6 +36,10 @@
     "feedback": "Feedback",
     "server_version": "Server version {{version}}"
   },
+  "version_mismatch": {
+    "message": "Server version ({{serverVersion}}) is older than this app ({{appVersion}}) — some features may be unavailable. Please upgrade the server.",
+    "dismiss": "Dismiss"
+  },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",
     "loading_named_prefix": "Loading"

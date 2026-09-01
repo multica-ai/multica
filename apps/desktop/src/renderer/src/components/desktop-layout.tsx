@@ -17,6 +17,7 @@ import {
   AppSidebar,
   GlobalShortcuts,
   NavigationProgress,
+  ServerVersionBanner,
 } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
@@ -298,6 +299,9 @@ export function DesktopShell() {
                     used to have no navigation feedback at all — a click just
                     froze until the destination committed (MUL-6404). */}
                 <NavigationProgress />
+                {/* Read-only version-mismatch hint (#5848). Desktop doesn't
+                    wrap DashboardLayout, so it mounts its own copy here. */}
+                <ServerVersionBanner />
                 <TabContent />
                 {slug && <FloatingChat />}
               </MainCanvas>

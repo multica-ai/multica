@@ -17,3 +17,4 @@ export { WorkspaceLoader } from "./workspace-loader";
 export { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 export { GlobalShortcuts } from "./global-shortcuts";
 export { NavigationProgress } from "./navigation-progress";
+export { ServerVersionBanner } from "./server-version-banner";

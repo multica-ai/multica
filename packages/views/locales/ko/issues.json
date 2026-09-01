@@ -214,6 +214,7 @@
     "load_failed": "태스크를 불러오지 못했습니다.",
     "load_failed_retry": "다시 시도",
     "load_more_failed_retry": "추가 항목을 불러오지 못했습니다 — 다시 시도",
+    "endpoint_unavailable_retry": "서버 버전이 오래되어 이 엔드포인트가 없습니다. 서버를 업그레이드하세요 — 다시 시도",
     "load_more": "더 불러오기",
     "loading_branch": "불러오는 중…",
     "no_more": "더 이상 없음",

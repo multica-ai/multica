@@ -4,6 +4,7 @@ export {
   clientErrorMessage,
   dispatchReasonCode,
   errorCode,
+  EndpointUnavailableError,
   PreviewTooLargeError,
   PreviewUnsupportedError,
 } from "./client";

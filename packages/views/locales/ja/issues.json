@@ -214,6 +214,7 @@
     "load_failed": "タスクを読み込めませんでした。",
     "load_failed_retry": "再試行",
     "load_more_failed_retry": "続きの読み込みに失敗しました — 再試行",
+    "endpoint_unavailable_retry": "サーバーのバージョンが古くこのエンドポイントがありません。サーバーをアップグレードしてください — 再試行",
     "load_more": "さらに読み込む",
     "loading_branch": "読み込み中…",
     "no_more": "これ以上ありません",

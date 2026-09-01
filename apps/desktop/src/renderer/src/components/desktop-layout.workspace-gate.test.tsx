@@ -78,6 +78,7 @@ vi.mock("@multica/views/layout", () => ({
   AppSidebar: () => <div data-testid="app-sidebar" />,
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
   NavigationProgress: () => <div data-testid="navigation-progress" />,
+  ServerVersionBanner: () => <div data-testid="server-version-banner" />,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({

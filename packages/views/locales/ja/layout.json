@@ -36,6 +36,10 @@
     "feedback": "フィードバック",
     "server_version": "サーバーバージョン {{version}}"
   },
+  "version_mismatch": {
+    "message": "サーバーバージョン（{{serverVersion}}）がこのアプリ（{{appVersion}}）より古いため、一部の機能が使えない場合があります。サーバーをアップグレードしてください。",
+    "dismiss": "閉じる"
+  },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
     "loading_named_prefix": "読み込み中"

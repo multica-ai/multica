@@ -35,6 +35,9 @@ export interface IssueStatusPageState {
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
+  /** First page error observed for this branch, when `isError` — lets the
+   * footer distinguish a missing-endpoint 404 from a generic failure. */
+  error: Error | null;
   loadMore: () => void;
   retry: () => void;
 }
@@ -60,6 +63,7 @@ interface StatusBranchData {
   isLoading: boolean;
   isFetching: boolean;
   isError: boolean;
+  error: Error | null;
   headUpdatedAt: number;
   headFetching: boolean;
   /** The head (cursor === null) page alone is still loading with nothing to
@@ -288,6 +292,7 @@ export function useIssueStatusBranches({
         isLoading: false,
         isFetching: false,
         isError: false,
+        error: null,
         headUpdatedAt: 0,
         headFetching: false,
         headPending: false,
@@ -339,6 +344,7 @@ export function useIssueStatusBranches({
       current.isLoading ||= queryResult.isPending;
       current.isFetching ||= queryResult.isFetching;
       current.isError ||= queryResult.isError;
+      if (queryResult.isError) current.error ??= queryResult.error;
       if (target.cursor === null) {
         current.headUpdatedAt = queryResult.dataUpdatedAt;
         current.headFetching = queryResult.isFetching;
@@ -450,6 +456,7 @@ export function useIssueStatusBranches({
             isLoading: enabled && (branch?.isLoading ?? false),
             isFetching: enabled && (branch?.isFetching ?? false),
             isError: enabled && (branch?.isError ?? false),
+            error: branch?.error ?? null,
             loadMore: () => loadMore(status),
             retry: () => retry(status),
           },

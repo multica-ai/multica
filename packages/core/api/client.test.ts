@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "../config";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, EndpointUnavailableError, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
@@ -918,6 +918,62 @@ describe("ApiClient", () => {
         message: "workspace slug already exists",
         status: 409,
         statusText: "Conflict",
+      });
+    }
+  });
+
+  it("narrows a non-JSON 404 to EndpointUnavailableError (missing endpoint)", async () => {
+    // chi's default 404 is plain text with no JSON error body — the route
+    // does not exist on this server build at all (#5848).
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("404 page not found", {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+
+    try {
+      await client.getMe();
+      throw new Error("expected getMe to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(EndpointUnavailableError);
+      // Still an ApiError subclass, so generic handlers keep working.
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ status: 404 });
+    }
+  });
+
+  it("keeps a business 404 with a JSON error body as a plain ApiError", async () => {
+    // Real not-found responses (e.g. issue does not exist) always carry a
+    // JSON body and must not be mistaken for a missing endpoint.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "issue not found" }), {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+
+    try {
+      await client.getMe();
+      throw new Error("expected getMe to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).not.toBeInstanceOf(EndpointUnavailableError);
+      expect(error).toMatchObject({
+        message: "issue not found",
+        status: 404,
       });
     }
   });

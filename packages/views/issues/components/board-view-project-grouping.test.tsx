@@ -161,6 +161,7 @@ function makeGroupBranches(
     isLoading: false,
     isRefreshing: false,
     isError: false,
+    error: null,
     hasMoreGroups: false,
     isLoadingMoreGroups: false,
     loadMoreGroups: () => {},

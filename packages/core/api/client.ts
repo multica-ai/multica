@@ -561,6 +561,19 @@ export function clientErrorMessage(err: unknown): string | undefined {
   return undefined;
 }
 
+// Thrown for a 404 whose body is NOT JSON. The chi router's default 404
+// ("404 page not found", plain text) means the route does not exist on this
+// server at all — typically an older self-hosted server missing an endpoint
+// the app expects (#5848). Business 404s (e.g. issue not found) always carry
+// a JSON error body and stay plain ApiError, so this subclass never swallows
+// a real not-found.
+export class EndpointUnavailableError extends ApiError {
+  constructor(message: string, status: number, statusText: string, body?: unknown) {
+    super(message, status, statusText, body);
+    this.name = "EndpointUnavailableError";
+  }
+}
+
 // Thrown by getAttachmentTextContent when the server refuses to inline a
 // file because it exceeds the 2 MB cap. UI maps to a "too large, please
 // download" affordance with the Download CTA still available.
@@ -768,6 +781,11 @@ export class ApiClient {
       const { message, body } = await this.parseErrorBody(res, `API error: ${res.status} ${res.statusText}`);
       const logLevel = res.status === 404 ? "warn" : "error";
       this.logger[logLevel](`← ${res.status} ${path}`, { rid, duration: `${Date.now() - start}ms`, error: message });
+      // A 404 with no JSON body is chi's default "route missing" response —
+      // the server build predates this endpoint (see EndpointUnavailableError).
+      if (res.status === 404 && body === undefined) {
+        throw new EndpointUnavailableError(message, res.status, res.statusText, body);
+      }
       throw new ApiError(message, res.status, res.statusText, body);
     }
 

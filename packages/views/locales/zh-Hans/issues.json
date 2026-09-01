@@ -214,6 +214,7 @@
     "load_failed": "加载任务失败。",
     "load_failed_retry": "重试",
     "load_more_failed_retry": "加载更多失败——重试",
+    "endpoint_unavailable_retry": "服务端版本过旧，缺少此接口，请升级服务端——重试",
     "load_more": "加载更多",
     "loading_branch": "加载中...",
     "no_more": "没有更多了",

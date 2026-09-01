@@ -40,6 +40,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { childrenByParentsOptions, issueKeys } from "@multica/core/issues/queries";
+import { EndpointUnavailableError } from "@multica/core/api";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -1407,7 +1408,9 @@ function SwimLaneViewImpl({
             className="py-8 text-body text-destructive hover:underline"
             onClick={groupBranches.retryGroups}
           >
-            {t(($) => $.table.load_more_failed_retry)}
+            {groupBranches.error instanceof EndpointUnavailableError
+              ? t(($) => $.table.endpoint_unavailable_retry)
+              : t(($) => $.table.load_more_failed_retry)}
           </button>
         )}
         {/* Sticky status header row — visually matches the top of a BoardColumn */}
@@ -1794,6 +1797,7 @@ function SwimLaneCell({
             total={page.total}
             onLoadMore={page.loadMore}
             isError={page.isError}
+            error={page.error}
             onRetry={page.retry}
           />
         )}
