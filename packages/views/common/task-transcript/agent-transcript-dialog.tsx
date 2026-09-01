@@ -348,6 +348,11 @@ export function AgentTranscriptDialog({
         inputFrame = requestAnimationFrame(() => {
           inputFrame = null;
           followCtl.endInputFrame();
+          // A staged claim defers pins so a wheel tick's animated scroll is
+          // not cancelled mid-flight. An unconfirmed claim is discarded above,
+          // so re-judge: a pin it deferred fires one frame late, not never.
+          // (Zero movement, so this attributes nothing.)
+          if (followCtl.onScroll(el.scrollTop)) el.scrollTop = 0;
         });
       };
       const onWheel = (e: WheelEvent) => {

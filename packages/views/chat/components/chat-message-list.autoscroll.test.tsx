@@ -164,6 +164,12 @@ interface Scroller {
   shrinkViewport(px: number): void;
   /** Reader wheel input scrolling up by `px`, and the scroll it causes. */
   readerScrollsUp(px: number): void;
+  /**
+   * Wheel input alone: the browser answers a mouse wheel tick with ANIMATED
+   * scrolling, so its displacement arrives over later frames (model those
+   * with `browserScrollsListUp`).
+   */
+  wheelInput(px: number): void;
   /** Starts a one-finger touch gesture at `clientY`. */
   touchStart(clientY: number): void;
   /** Moves that finger and then scrolls the list up by `scrollPx`. */
@@ -290,6 +296,11 @@ function scroller(el: HTMLElement, initialContent = 2000): Scroller {
     },
     readerScrollsUp(px) {
       wheelBy(px);
+    },
+    wheelInput(px) {
+      act(() => {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -px }));
+      });
     },
     touchStart(clientY) {
       act(() => {
@@ -694,6 +705,54 @@ describe("ChatMessageList auto-scroll", () => {
     scroll.wheelWithoutScroll(300);
     renderFrame();
     scroll.browserScrollsListUp(200);
+
+    expect(scroll.distanceFromBottom()).toBe(0);
+  });
+
+  // A mouse wheel tick delivers its input at once; the browser ANIMATES the
+  // scroll over the following frames. A pin landing mid-animation cancels the
+  // animation and reverts the tick, so wheel users were yanked back to the
+  // bottom continuously — every tick answered by a chunk or one of Virtuoso's
+  // re-measure height changes — while touchpads, whose displacement confirms
+  // per event, escaped normally (TIM-65 follow-up).
+  it("does not cancel an animated wheel tick with a mid-flight chunk pin", () => {
+    const { scroll, streamChunk } = renderChat();
+
+    scroll.wheelInput(100);
+    scroll.browserScrollsListUp(10); // first animation frame confirms the tick
+    streamChunk(1);
+    scroll.grow(180); // chunk lands mid-animation: must not pin
+
+    expect(scroll.distanceFromBottom()).toBe(190);
+  });
+
+  it("releases across two animated wheel ticks despite growth between them", () => {
+    const { scroll, streamChunk } = renderChat();
+
+    scroll.wheelInput(100);
+    scroll.browserScrollsListUp(20);
+    streamChunk(1);
+    scroll.grow(180); // deferred: the tick's animation is still in flight
+    scroll.browserScrollsListUp(80); // tick 1 finishes: 100px taken
+    scroll.wheelInput(100);
+    scroll.browserScrollsListUp(100); // tick 2: 200px taken, released
+    gestureSettles();
+    streamChunk(2);
+    scroll.grow(180);
+
+    expect(scroll.distanceFromBottom()).toBe(560);
+  });
+
+  it("pins growth deferred by unconsumed input once the claim frame ends", () => {
+    const { scroll, streamChunk } = renderChat();
+
+    scroll.wheelWithoutScroll(300);
+    streamChunk(1);
+    scroll.grow(180); // deferred: the claim might still confirm
+
+    expect(scroll.distanceFromBottom()).toBe(180);
+
+    renderFrame(); // claim discarded at the frame boundary: deferred pin fires
 
     expect(scroll.distanceFromBottom()).toBe(0);
   });

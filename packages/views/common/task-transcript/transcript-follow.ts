@@ -22,8 +22,12 @@
 // - While following, displacement not attributed to the reader is pinned
 //   straight back to the live end (`onScroll` / `onResize` return the
 //   verdict) — immediately, with no intent-window timer for a final event to
-//   hide behind — but never during an active touch or while the mouse is held
-//   down (text selection autoscroll must not be fought).
+//   hide behind — but never during an active touch, while the mouse is held
+//   down (text selection autoscroll must not be fought), or while a reader
+//   gesture is still in flight: a pin mid-flight cancels the browser's wheel
+//   scroll animation and reverts the tick. A pin a staged-but-unconfirmed
+//   claim deferred is re-judged when the wiring discards that claim at the
+//   frame boundary, so it fires one frame late rather than never.
 // - Arriving back within the edge zone re-engages the follow.
 //
 // The state machine is direction-agnostic: callers feed it away-positive
@@ -116,8 +120,27 @@ export function createLiveEndFollow(now: () => number = () => Date.now()): LiveE
   const withinCarry = (amount: number) =>
     amount <= motionCarry + Math.max(1, motionCarry) * 1e-9;
 
+  // A reader gesture the surface has not finished answering: a claim staged
+  // this frame still awaiting its first confirming scroll, or a wheel/key
+  // scroll ANIMATION still spending its claim. A mouse wheel tick delivers
+  // its input at once but the browser animates the displacement over many
+  // frames, and a pin issued mid-flight cancels that animation — reverting
+  // the tick, so a wheel user could never accumulate a release against a
+  // stream or Virtuoso's re-measure resizes while a touchpad (which confirms
+  // per event) escaped easily. Deferring the pin lets the gesture finish;
+  // an unconsumed claim's deferral ends when the wiring discards the claim
+  // at the frame boundary and re-judges (see stick-to-bottom.ts).
+  const gestureInFlight = () =>
+    (inputFresh() && (awayBudget > 0 || towardBudget > 0)) ||
+    (motionFresh() && motionSource === "input" && motionCarry > 0);
+
   const pinVerdict = (distance: number): boolean =>
-    following && !mouseHeld && !scrollbarDrag && !touchHeld && distance > 0;
+    following &&
+    !mouseHeld &&
+    !scrollbarDrag &&
+    !touchHeld &&
+    !gestureInFlight() &&
+    distance > 0;
 
   return {
     setActive(a: boolean) {
