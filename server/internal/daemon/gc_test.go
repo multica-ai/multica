@@ -1385,8 +1385,10 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 
 	mustMkdir("workdir/repo/src")
 	mustWrite("workdir/repo/src/index.ts", "console.log('hi')")
-	mustMkdir("workdir/repo/.git/objects")
-	mustWrite("workdir/repo/.git/objects/pack", "binary")
+	if out, err := exec.Command("git", "-C", filepath.Join(taskDir, "workdir/repo"), "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	mustWrite("workdir/repo/.git/objects/pack/test.pack", "binary")
 	mustMkdir("workdir/repo/node_modules/lodash")
 	mustWrite("workdir/repo/node_modules/lodash/index.js", "module.exports = {}")
 	mustMkdir("workdir/repo/.next/cache")
@@ -1414,7 +1416,7 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 	// Verify protected paths are intact.
 	for _, rel := range []string{
 		"workdir/repo/src/index.ts",
-		"workdir/repo/.git/objects/pack",
+		"workdir/repo/.git/objects/pack/test.pack",
 		"workdir/repo/dist/main.js",
 		"output/result.txt",
 		".gc_meta.json",
@@ -1433,6 +1435,45 @@ func TestCleanTaskArtifacts_RemovesOnlyMatchedDirs(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(taskDir, rel)); !os.IsNotExist(err) {
 			t.Errorf("expected %s to be removed, stat err=%v", rel, err)
 		}
+	}
+}
+
+func TestCleanTaskArtifacts_PreservesTrackedArtifactDirectory(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := t.TempDir()
+	repoDir := filepath.Join(taskDir, "workdir", "repo")
+	tracked := filepath.Join(repoDir, ".next", "server", "page.js")
+	untracked := filepath.Join(repoDir, "node_modules", "dependency", "index.js")
+	for path, content := range map[string]string{
+		tracked:   "committed build output",
+		untracked: "regenerable dependency",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "init").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", repoDir, "add", ".next/server/page.js").CombinedOutput(); err != nil {
+		t.Fatalf("git add tracked artifact: %v: %s", err, out)
+	}
+
+	removed, _, perPattern := d.cleanTaskArtifacts(taskDir, []string{"node_modules", ".next"})
+
+	if removed != 1 || perPattern["node_modules"] != 1 || perPattern[".next"] != 0 {
+		t.Fatalf("removed=%d perPattern=%v, want only untracked node_modules removed", removed, perPattern)
+	}
+	if got, err := os.ReadFile(tracked); err != nil || string(got) != "committed build output" {
+		t.Fatalf("tracked artifact was mutated: data=%q err=%v", got, err)
+	}
+	if _, err := os.Stat(filepath.Dir(filepath.Dir(untracked))); !os.IsNotExist(err) {
+		t.Fatalf("untracked artifact directory survived: %v", err)
 	}
 }
 
