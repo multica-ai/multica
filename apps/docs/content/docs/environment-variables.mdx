@@ -99,6 +99,25 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL in the Google Console |
 
+### Enterprise directory (LDAP)
+
+Read/search-only directory login. `LDAP_ENABLED=true` adds an account-and-password tab to the sign-in page; leave it unset and the feature is invisible.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LDAP_ENABLED` | `false` | The only switch; everything below is ignored while it is `false` |
+| `LDAP_URL` | empty | `ldap://`, `ldaps://`, or `ldapi://` endpoint, e.g. `ldaps://openldap.corp.example.com:636` |
+| `LDAP_BASE_DN` | empty | Subtree the user search starts from, e.g. `ou=people,dc=corp,dc=example,dc=com` |
+| `LDAP_BIND_DN` | empty | Service account that looks up the entry before the user's own bind; read/search permission only |
+| `LDAP_BIND_PASSWORD` | empty | Password of that service account; never written to a log |
+| `LDAP_USER_FILTER` | `(uid=%s)` | Exactly one `%s`, replaced by the RFC 4515-escaped username; `(sAMAccountName=%s)` for AD |
+| `LDAP_EMAIL_ATTR` | `mail` | Attribute holding the login email; Multica matches accounts on it, so an entry without it cannot sign in |
+| `LDAP_NAME_ATTR` | `displayName` | Attribute used to prefill the display name for a first-time login |
+| `LDAP_TLS_INSECURE` | `false` | Skips certificate verification; `ldaps://`/`ldapi://` only and should only be used temporarily on a trusted internal network |
+| `LDAP_TIMEOUT` | `5s` | Budget for the whole connect + search + bind exchange; a Go duration such as `5s` or `1m` |
+
+Directory login does not consult `ALLOW_SIGNUP`, `ALLOWED_EMAILS`, or `ALLOWED_EMAIL_DOMAINS`: a successful bind is its own admission decision. Details in [Sign-in and signup](/auth-setup#enterprise-directory-ldap-sign-in).
+
 ### Signup scope
 
 | Variable | Default | Description |
@@ -152,7 +171,7 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 |---|---|---|
 | `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
-| `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
+| `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code, start Google sign-in, or sign in with a directory account |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Workspace invitations each inviter may create per 10-minute sliding window; `0` disables this gate |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Workspace invitations all admins may create per workspace per 24-hour sliding window; `0` disables this gate |

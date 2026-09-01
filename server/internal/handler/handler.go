@@ -143,6 +143,10 @@ type Config struct {
 	// and cmd/server additionally fails the boot on an out-of-range value before
 	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
 	LLMMaxRetries *llm.RetryOverride
+	// LDAPConfig mirrors the LDAP_* environment variables. It sits beside the
+	// authenticator so the boot log can report the effective directory without
+	// reaching into the client.
+	LDAPConfig auth.LDAPConfig
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -210,7 +214,12 @@ type Handler struct {
 	HeartbeatScheduler HeartbeatScheduler
 	Storage            storage.Storage
 	CFSigner           *auth.CloudFrontSigner
-	Analytics          analytics.Client
+	// LDAPAuth verifies corporate directory credentials. Nil when LDAP login
+	// is not configured for this deployment (always nil on the managed cloud,
+	// which never sets the LDAP_* variables), so the handler answers 503 instead
+	// of pretending the feature exists — the same nil-check style as CFSigner.
+	LDAPAuth  auth.LDAPAuthenticator
+	Analytics analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -385,7 +394,7 @@ type Handler struct {
 	cfg       Config
 }
 
-func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
+func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, ldapAuth auth.LDAPAuthenticator, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
 	var executor dbExecutor
 	if candidate, ok := txStarter.(dbExecutor); ok {
 		executor = candidate
@@ -465,6 +474,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
 		Storage:                      store,
 		CFSigner:                     cfSigner,
+		LDAPAuth:                     ldapAuth,
 		Analytics:                    analyticsClient,
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),

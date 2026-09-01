@@ -29,12 +29,33 @@ function renderWithI18n(ui: ReactElement) {
 
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
+const mockLdapLogin = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
 const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
 const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
+const mockApiLoginWithLdap = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
+
+// Real ApiError lives in the module we mock below, so the test carries its own
+// copy with the same shape -- ldapErrorMessage branches on `instanceof` plus
+// `status`, and nothing else.
+const { ApiError } = vi.hoisted(() => {
+  class ApiErrorImpl extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly body?: unknown;
+    constructor(message: string, status: number, statusText: string, body?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.statusText = statusText;
+      this.body = body;
+    }
+  }
+  return { ApiError: ApiErrorImpl };
+});
 
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
@@ -47,13 +68,18 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
     // Zustand hook form — component may call useAuthStore(selector)
     (selector?: (s: unknown) => unknown) => {
-      const state = { sendCode: mockSendCode, verifyCode: mockVerifyCode };
+      const state = {
+        sendCode: mockSendCode,
+        verifyCode: mockVerifyCode,
+        loginWithLdap: mockLdapLogin,
+      };
       return selector ? selector(state) : state;
     },
     {
       getState: () => ({
         sendCode: mockSendCode,
         verifyCode: mockVerifyCode,
+        loginWithLdap: mockLdapLogin,
       }),
     },
   ),
@@ -66,7 +92,9 @@ vi.mock("@multica/core/api", () => ({
     setToken: mockApiSetToken,
     getMe: mockApiGetMe,
     issueCliToken: mockApiIssueCliToken,
+    loginWithLdap: mockApiLoginWithLdap,
   },
+  ApiError,
 }));
 
 vi.mock("@multica/core/types", () => ({}));
@@ -697,6 +725,232 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
+  // -------------------------------------------------------------------------
+  // Directory (LDAP) login
+  // -------------------------------------------------------------------------
+
+  it("renders both credential tabs when the server offers directory login", async () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    expect(screen.getByRole("tab", { name: /email code/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: /directory account/i }),
+    ).toBeInTheDocument();
+
+    // Email panel is the default: its field is up, the directory fields are not.
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/directory username/i),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+  });
+
+  it("renders no directory tab when ldap is omitted", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} />);
+
+    expect(screen.queryByRole("tab", { name: /directory account/i })).toBeNull();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+  });
+
+  it("renders no directory tab when ldap.enabled is false", () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: false }} />);
+
+    expect(screen.queryByRole("tab", { name: /directory account/i })).toBeNull();
+    expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+  });
+
+  it("hides the Google button while the directory panel is showing", async () => {
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        ldap={{ enabled: true }}
+        google={{ clientId: "cid", redirectUri: "https://app.test/cb" }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    expect(
+      screen.getByRole("button", { name: /continue with google/i }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+
+    expect(
+      screen.queryByRole("button", { name: /continue with google/i }),
+    ).toBeNull();
+  });
+
+  it("clears the directory error when switching back to the email panel", async () => {
+    mockLdapLogin.mockRejectedValueOnce(new ApiError("nope", 401, "Unauthorized"));
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/password/i), "s3cret");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/incorrect username or password/i),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("tab", { name: /email code/i }));
+
+    expect(
+      screen.queryByText(/incorrect username or password/i),
+    ).toBeNull();
+  });
+
+  it("signs in through the auth store and calls onSuccess on directory success", async () => {
+    mockLdapLogin.mockResolvedValueOnce({ id: "u1", email: "alice@corp.test" });
+    mockApiListWorkspaces.mockResolvedValueOnce([{ id: "ws-1" }]);
+    const onTokenObtained = vi.fn();
+
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        onTokenObtained={onTokenObtained}
+        ldap={{ enabled: true }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "  alice  ");
+    await user.type(screen.getByLabelText(/password/i), "s3cret");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalled();
+      expect(onTokenObtained).toHaveBeenCalled();
+    });
+    // Username is trimmed before it reaches the directory.
+    expect(mockLdapLogin).toHaveBeenCalledWith("alice", "s3cret");
+    // Same cache seeding as the code path: onSuccess reads it synchronously.
+    expect(mockSetQueryData).toHaveBeenCalled();
+  });
+
+  it("shows the invalid-credentials copy and keeps the fields on a 401", async () => {
+    mockLdapLogin.mockRejectedValueOnce(new ApiError("bad credentials", 401, "Unauthorized"));
+
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/password/i), "wrong");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/incorrect username or password/i),
+      ).toBeInTheDocument();
+    });
+    expect(onSuccess).not.toHaveBeenCalled();
+    // A wrong password is a typo: making the user retype the username too is
+    // the difference between a shrug and a support ticket.
+    expect(screen.getByLabelText(/directory username/i)).toHaveValue("alice");
+    expect(screen.getByLabelText(/password/i)).toHaveValue("wrong");
+  });
+
+  it("shows the directory-outage copy on a 502 and passes a 429 message through", async () => {
+    mockLdapLogin.mockRejectedValueOnce(new ApiError("down", 502, "Bad Gateway"));
+    const { unmount } = renderWithI18n(
+      <LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/password/i), "pw");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/directory service is unreachable/i)).toBeInTheDocument();
+    });
+    unmount();
+
+    // 429 already says what happened in an actionable form, so the server
+    // wording is what the user should read.
+    mockLdapLogin.mockRejectedValueOnce(new ApiError("too many attempts", 429, "Too Many Requests"));
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/password/i), "pw");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("too many attempts")).toBeInTheDocument();
+    });
+  });
+
+  it("requires both directory fields before submitting", async () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    const button = screen.getByRole("button", { name: /^sign in$/i });
+    expect(button).toBeDisabled();
+
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    expect(button).toBeDisabled();
+  });
+
+  it("hands the token to the CLI callback instead of the app session", async () => {
+    mockApiLoginWithLdap.mockResolvedValueOnce({ token: "jwt-ldap" });
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        ldap={{ enabled: true }}
+        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.type(screen.getByLabelText(/directory username/i), "alice");
+    await user.type(screen.getByLabelText(/password/i), "pw");
+    await user.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    await waitFor(() => {
+      expect(mockApiLoginWithLdap).toHaveBeenCalledWith("alice", "pw");
+      expect(window.location.href).toBe(
+        "http://localhost:9876/callback?token=jwt-ldap&state=abc",
+      );
+    });
+    expect(mockApiSetToken).toHaveBeenCalledWith("jwt-ldap");
+    expect(localStorage.getItem("multica_token")).toBe("jwt-ldap");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("keeps the typed email when switching tabs and back", async () => {
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("tab", { name: /directory account/i }));
+    await user.click(screen.getByRole("tab", { name: /email code/i }));
+
+    expect(screen.getByLabelText(/email/i)).toHaveValue("test@example.com");
+  });
+
+  it("does not offer the directory tab once the code step is open", async () => {
+    mockSendCode.mockResolvedValueOnce(undefined);
+    renderWithI18n(<LoginPage onSuccess={onSuccess} ldap={{ enabled: true }} />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText(/email/i), "test@example.com");
+    await user.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/check your email/i)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("tab", { name: /directory account/i }),
+    ).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------

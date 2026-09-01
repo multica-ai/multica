@@ -99,6 +99,25 @@ Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeco
 | `GOOGLE_CLIENT_SECRET` | 空 | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Google Console のコールバックアドレスと完全に一致している必要があります |
 
+### 企業ディレクトリ（LDAP）
+
+読み取り専用のディレクトリログインです。`LDAP_ENABLED=true` のときだけログインページにアカウント・パスワードのタブが出ます。未設定なら機能は表示されません。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `LDAP_ENABLED` | `false` | 唯一のスイッチ。`false` の間は下の変数はいずれも効果を持ちません |
+| `LDAP_URL` | 空 | `ldap://`、`ldaps://`、`ldapi://` の接続先。例 `ldaps://openldap.corp.example.com:636` |
+| `LDAP_BASE_DN` | 空 | ユーザー検索を開始するサブツリー。例 `ou=people,dc=corp,dc=example,dc=com` |
+| `LDAP_BIND_DN` | 空 | 本人の Bind の前にエントリーを検索するサービスアカウント。読み取り・検索権限だけで十分です |
+| `LDAP_BIND_PASSWORD` | 空 | 上記サービスアカウントのパスワード。ログには記録されません |
+| `LDAP_USER_FILTER` | `(uid=%s)` | `%s` は 1 つだけ。RFC 4515 でエスケープしたユーザー名が代入されます。AD は `(sAMAccountName=%s)` |
+| `LDAP_EMAIL_ATTR` | `mail` | ログイン用メールアドレスを持つ属性。Multica はこれでアカウントを照合するため、属性のないエントリーはログインできません |
+| `LDAP_NAME_ATTR` | `displayName` | 初回ログイン時に表示名をプレフィルする属性 |
+| `LDAP_TLS_INSECURE` | `false` | 証明書検証をスキップします。`ldaps://`/`ldapi://` のみが対象で、信頼できる内部ネットワークで一時的に使う場合に限ってください |
+| `LDAP_TIMEOUT` | `5s` | 接続 + 検索 + Bind 全体に与える時間。Go の duration 形式（`5s`、`1m` など） |
+
+ディレクトリログインは `ALLOW_SIGNUP`、`ALLOWED_EMAILS`、`ALLOWED_EMAIL_DOMAINS` を参照しません。Bind が成功すればそれでアカウントを許可します。詳細は[ログインとサインアップ](/auth-setup#企業ディレクトリldapログイン)を参照してください。
+
 ### サインアップ範囲
 
 | 変数 | デフォルト | 説明 |
@@ -152,7 +171,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 |---|---|---|
 | `REDIS_URL` | 空 | 共有レート制限、リアルタイムイベント、token cache に使用。未設定の場合、リアルタイムイベントと招待制限はプロセス内メモリにフォールバックし、認証レート制限は無効になります |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | マネージド Redis が `CLIENT SETNAME` を禁止している場合に `true` を設定 |
-| `RATE_LIMIT_AUTH` | `5` | 認証コード送信または Google ログイン開始の、IP あたり毎分の回数 |
+| `RATE_LIMIT_AUTH` | `5` | 認証コード送信・Google ログイン開始・ディレクトリアカウントログインの、IP あたり毎分の回数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 認証コード検証の、IP あたり毎分の回数 |
 | `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 招待者ごとの 10 分間スライディングウィンドウ内のワークスペース招待数。`0` でこの制限を無効化 |
 | `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | ワークスペース内の全管理者による 24 時間スライディングウィンドウ内の招待総数。`0` でこの制限を無効化 |

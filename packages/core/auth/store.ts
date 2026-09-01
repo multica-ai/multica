@@ -29,6 +29,7 @@ export interface AuthState {
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
+  loginWithLdap: (username: string, password: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
   setUser: (user: User) => void;
@@ -71,6 +72,21 @@ export function createAuthStore(options: AuthStoreOptions) {
 
     loginWithGoogle: async (code: string, redirectUri: string) => {
       const { token, user } = await api.googleLogin(code, redirectUri);
+      if (!cookieAuth) {
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user, isLoading: false, status: "authenticated" });
+      return user;
+    },
+
+    // Directory (LDAP) login. Same contract as the other two: on any
+    // rejection nothing here runs, so a wrong password leaves the store
+    // exactly as it was and the form keeps what the user typed.
+    loginWithLdap: async (username: string, password: string) => {
+      const { token, user } = await api.loginWithLdap(username, password);
       if (!cookieAuth) {
         storage.setItem("multica_token", token);
         api.setToken(token);

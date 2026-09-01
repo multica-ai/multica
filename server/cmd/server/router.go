@@ -414,6 +414,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 
 	cfSigner := auth.NewCloudFrontSignerFromEnv()
+	ldapCfg := ldapConfigFromEnv()
+	ldapAuth := ldapAuthenticatorFor(ldapCfg)
 	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
@@ -435,9 +437,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
 		LLMMaxRetries:            opts.LLMMaxRetries,
+		LDAPConfig:               ldapCfg,
 		ServerVersion:            normalizeServerVersion(version),
 	}
-	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, ldapAuth, analyticsClient, signupConfig, daemonHub)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1382,6 +1385,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	// Directory login shares the Google/send-code limiter: it is the same
+	// kind of public credential endpoint, and the tighter budget is the
+	// point — an attacker brute-forcing LDAP passwords should not get
+	// the more generous verification-code allowance.
+	r.With(authRL).Post("/auth/ldap/login", h.LDAPLogin)
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API
@@ -2434,6 +2442,41 @@ func optionalUUID(s string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return util.MustParseUUID(s)
+}
+
+// ldapConfigFromEnv reads the LDAP_* variables documented in .env.example.
+//
+// There is deliberately no "which deployment is this" check: LDAP_ENABLED is
+// the whole switch, and the managed cloud simply never sets it, so the feature
+// is unavailable there by construction rather than by a hardcoded exclusion
+// that would have to be remembered on every new environment.
+func ldapConfigFromEnv() auth.LDAPConfig {
+	return auth.LDAPConfig{
+		Enabled:      strings.EqualFold(strings.TrimSpace(os.Getenv("LDAP_ENABLED")), "true"),
+		URL:          strings.TrimSpace(os.Getenv("LDAP_URL")),
+		BaseDN:       strings.TrimSpace(os.Getenv("LDAP_BASE_DN")),
+		BindDN:       strings.TrimSpace(os.Getenv("LDAP_BIND_DN")),
+		BindPassword: os.Getenv("LDAP_BIND_PASSWORD"),
+		UserFilter:   strings.TrimSpace(os.Getenv("LDAP_USER_FILTER")),
+		EmailAttr:    strings.TrimSpace(os.Getenv("LDAP_EMAIL_ATTR")),
+		NameAttr:     strings.TrimSpace(os.Getenv("LDAP_NAME_ATTR")),
+		TLSInsecure:  strings.EqualFold(strings.TrimSpace(os.Getenv("LDAP_TLS_INSECURE")), "true"),
+		Timeout:      envDuration("LDAP_TIMEOUT", auth.DefaultLDAPTimeout),
+	}
+}
+
+// ldapAuthenticatorFor is the whole "is directory login on" decision: only an
+// enabled config gets a client. A disabled one yields a nil authenticator,
+// which is what makes the handler answer 503 and /api/config omit ldap_enabled
+// — so the managed cloud, which never sets LDAP_*, cannot expose the feature
+// by accident. It is a function rather than six inline lines so the gate is a
+// tested contract: nothing outside NewRouterWithOptions could otherwise reach
+// the decision without booting a router and a database.
+func ldapAuthenticatorFor(cfg auth.LDAPConfig) auth.LDAPAuthenticator {
+	if !cfg.Enabled {
+		return nil
+	}
+	return auth.NewLDAPAuthenticator(cfg)
 }
 
 func splitAndTrim(s string) []string {

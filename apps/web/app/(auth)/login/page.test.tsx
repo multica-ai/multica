@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { configStore } from "@multica/core/config";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -24,6 +25,7 @@ const {
   mockIssueCliToken,
   mockListWorkspaces,
   mockListMyInvitations,
+  mockSharedLoginPage,
   mockPush,
   mockReplace,
   searchParamsState,
@@ -32,6 +34,7 @@ const {
   mockIssueCliToken: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
+  mockSharedLoginPage: vi.fn(),
   mockPush: vi.fn(),
   mockReplace: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
@@ -70,6 +73,23 @@ vi.mock("@multica/core/auth", async () => {
   return { ...actual, useAuthStore };
 });
 
+// Mock the shared form so the wrapper's prop contract (what config it hands
+// down) is observable. Rendering the real form here would only duplicate
+// packages/views/auth/login-page.test.tsx.
+vi.mock("@multica/views/auth", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/views/auth")>(
+      "@multica/views/auth",
+    );
+  return {
+    ...actual,
+    LoginPage: (props: unknown) => {
+      mockSharedLoginPage(props);
+      return null;
+    },
+  };
+});
+
 // Mock auth-cookie
 vi.mock("@/features/auth/auth-cookie", () => ({
   setLoggedInCookie: vi.fn(),
@@ -97,11 +117,35 @@ describe("LoginPage", () => {
     authStateRef.state.isLoading = false;
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
+    configStore.getState().setAuthConfig({ allowSignup: true });
   });
 
   // Shared LoginPage behavior is canonical in
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.
+
+  // The directory (LDAP) tab is server-decided: the wrapper reads ldap_enabled
+  // out of /api/config via the config store and hands it down. No tab is
+  // rendered when the connected server does not offer it.
+  it("passes the server directory-login flag down to the shared form", () => {
+    configStore.getState().setAuthConfig({ allowSignup: true, ldapEnabled: true });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(mockSharedLoginPage).toHaveBeenCalled();
+    expect(mockSharedLoginPage.mock.calls[0]?.[0]).toMatchObject({
+      ldap: { enabled: true },
+    });
+  });
+
+  it("passes ldap.enabled false when the server does not offer directory login", () => {
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(mockSharedLoginPage).toHaveBeenCalled();
+    expect(mockSharedLoginPage.mock.calls[0]?.[0]).toMatchObject({
+      ldap: { enabled: false },
+    });
+  });
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
   // and the Desktop app redirects them to /login?platform=desktop, the web

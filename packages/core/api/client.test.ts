@@ -2614,3 +2614,75 @@ describe("clientErrorMessage", () => {
     expect(clientErrorMessage(undefined)).toBeUndefined();
   });
 });
+
+describe("ApiClient.loginWithLdap", () => {
+  const user = {
+    id: "u1",
+    name: "Alice Zhang",
+    email: "alice@corp.example.com",
+    avatar_url: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  function stubJson(body: unknown, status = 200) {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(body), {
+        status,
+        statusText: status === 200 ? "OK" : "Error",
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("posts the credentials to the directory login route", async () => {
+    const fetchMock = stubJson({ token: "jwt-abc", user });
+    const client = new ApiClient("https://api.example.test");
+
+    const res = await client.loginWithLdap("alice", "s3cret");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/auth/ldap/login",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      username: "alice",
+      password: "s3cret",
+    });
+    expect(res.token).toBe("jwt-abc");
+    expect(res.user.email).toBe("alice@corp.example.com");
+  });
+
+  it("surfaces a rejected credential as ApiError, unchanged by validation", async () => {
+    stubJson({ error: "invalid username or password" }, 401);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.loginWithLdap("alice", "wrong")).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("surfaces a directory outage as ApiError with its own status", async () => {
+    stubJson({ error: "directory service unavailable" }, 502);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.loginWithLdap("alice", "pw")).rejects.toMatchObject({
+      status: 502,
+    });
+  });
+
+  it("fails a 200 whose body has no token instead of storing an empty session", async () => {
+    // parseWithFallback swallows schema drift with a fallback, which for a
+    // login would mean persisting "" as the session token and then failing
+    // every later request with an unexplained 401.
+    stubJson({ user });
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.loginWithLdap("alice", "pw")).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+});
