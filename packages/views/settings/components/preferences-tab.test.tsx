@@ -260,6 +260,15 @@ describe("PreferencesTab — Timezone section", () => {
     ).toContain("Asia/Shanghai");
   });
 
+  it("renders a legacy stored Ukraine timezone with the canonical spelling", () => {
+    userRef.current = { id: "user-1", timezone: "Europe/Kiev" };
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const trigger = screen.getByRole("combobox", { name: "Viewing Timezone" });
+    expect(trigger).toHaveTextContent("Europe/Kyiv");
+    expect(trigger).not.toHaveTextContent("Europe/Kiev");
+  });
+
   // handleChange PATCHes then updates the store asynchronously, so the
   // post-pick assertions must waitFor it to settle.
   it("saving a new timezone PATCHes /api/me and updates the auth store", async () => {
