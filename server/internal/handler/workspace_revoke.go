@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -14,8 +16,8 @@ import (
 // agent pinned to one of those runtimes is archived, every in-flight task on
 // those runtimes is cancelled (cancelled rather than failed so the daemon's
 // per-task status poller interrupts the running agent gracefully), the
-// daemon_token rows for those runtimes are deleted, and finally the member row
-// itself is removed.
+// member's durable subscriptions and daemon_token rows are deleted, and
+// finally the member row itself is removed.
 //
 // All DB writes run inside a single transaction so a partial revocation never
 // leaves the workspace half-converged — e.g. a member who is "gone" but whose
@@ -108,6 +110,9 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		if err != nil {
 			return empty, err
 		}
+		if err = service.SettleDeliveredDelegatedFailureRecoveries(ctx, qtx, result.CancelledTasks...); err != nil {
+			return empty, err
+		}
 
 		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
 		if err != nil {
@@ -164,6 +169,24 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// Saved views follow the private-quick-action rule above: a departed
+	// member's PRIVATE views are invisible to everyone left yet still count
+	// against quota, and a re-invite must not resurrect them. Shared views
+	// stay — they are workspace furniture other members may rely on. The
+	// per-user view-bar preferences are meaningless without the member.
+	if err := qtx.DeletePrivateIssueViewsByOwner(ctx, db.DeletePrivateIssueViewsByOwnerParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	}); err != nil {
+		return empty, err
+	}
+	if err := qtx.DeleteIssueViewPreferencesByUser(ctx, db.DeleteIssueViewPreferencesByUserParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
 	// prunes above), and MUL-5483 gave agents a path that writes member
 	// subscriber rows on their own initiative. Dropping them in this tx is what
@@ -176,10 +199,27 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
+	// autopilot_subscriber is another FK-free subscription template. Leaving
+	// stale rows here made the detail API return a user the member picker could
+	// no longer render; the next full-replace PATCH then failed membership
+	// validation, blocking every edit to that autopilot. Prune only templates in
+	// this workspace so the same user's subscriptions elsewhere survive.
+	if err := qtx.DeleteAutopilotSubscribersByMember(ctx, db.DeleteAutopilotSubscribersByMemberParams{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+	}); err != nil {
+		return empty, err
+	}
+
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves
 	// the user out of the workspace with a still-online runtime.
+	if h.seatCapacityEnabled() {
+		if err := enqueueMemberCapacityRelease(ctx, qtx, uuid.UUID(workspaceID.Bytes), uuid.UUID(memberID.Bytes)); err != nil {
+			return empty, err
+		}
+	}
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
@@ -225,7 +265,10 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// subscribers see "task cancelled" before the parent agent disappears
 	// from active lists, matching the order ArchiveAgent uses.
 	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, result.CancelledTasks)
+		// Revocation only archives agents, so a per-task lookup would still
+		// resolve here; the workspace is passed for the same reason as
+		// everywhere else — it is known, and it is the one being revoked.
+		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
 	}
 
 	for _, agent := range result.ArchivedAgents {

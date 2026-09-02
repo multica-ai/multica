@@ -365,9 +365,6 @@ func TestCodexLegacyEventTaskStarted(t *testing.T) {
 	if !gotStatus {
 		t.Fatal("expected status=running message")
 	}
-	if !c.turnStarted {
-		t.Fatal("expected turnStarted=true")
-	}
 	if c.notificationProtocol != "legacy" {
 		t.Fatalf("expected protocol=legacy, got %q", c.notificationProtocol)
 	}
@@ -592,11 +589,91 @@ func TestCodexRawTurnCompletedDeduplication(t *testing.T) {
 		doneCount++
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
-	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
+	line := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(line)
+	c.handleLine(line)
 
 	if doneCount != 1 {
 		t.Fatalf("expected deduplication, but onTurnDone called %d times", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("duplicate completion double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawTurnCompletedWithoutIDDeduplicatesLifecycleAndUsage(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	line := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(line)
+	// An empty-ID start cannot prove that a new turn began, so it must not
+	// reopen an already completed turn.
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{}}}`)
+	c.handleLine(line)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("duplicate empty-id completion double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawTurnCompletedReplayDoesNotReopenSameTurn(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	started := `{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`
+	completed := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(started)
+	c.handleLine(completed)
+	c.handleLine(started)
+	c.handleLine(completed)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1 after replay", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("replayed turn double-counted usage: %+v", c.usage)
+	}
+}
+
+func TestCodexRawLateCompletionWithoutIDCannotReopenClient(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var doneCount int
+	c.onTurnDone = func(aborted bool) { doneCount++ }
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-1"}}}`)
+	completedWithoutID := `{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"status":"completed","usage":{"input_tokens":100,"output_tokens":10}}}}`
+	c.handleLine(completedWithoutID)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"turn":{"id":"turn-2"}}}`)
+	c.handleLine(completedWithoutID)
+
+	if doneCount != 1 {
+		t.Fatalf("completion count = %d, want 1 after late no-ID replay", doneCount)
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	if c.usage.InputTokens != 100 || c.usage.OutputTokens != 10 {
+		t.Fatalf("late no-ID completion double-counted usage: %+v", c.usage)
 	}
 }
 
@@ -657,16 +734,13 @@ func TestCodexRawErrorNotificationTerminal(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
-	c.notificationProtocol = "raw"
+	c.notificationProtocol = "unknown"
 	done := false
 	var activities []string
 	c.onSemanticActivity = func(activity string) {
 		activities = append(activities, activity)
 	}
 	c.onTurnDone = func(aborted bool) {
-		if aborted {
-			t.Fatal("terminal error should not mark the turn aborted")
-		}
 		done = true
 	}
 
@@ -675,11 +749,16 @@ func TestCodexRawErrorNotificationTerminal(t *testing.T) {
 	if got := c.getTurnError(); got != "boom" {
 		t.Fatalf("expected terminal error captured, got %q", got)
 	}
-	if !done {
-		t.Fatal("terminal error should finish the turn")
+	if done {
+		t.Fatal("terminal error must wait for turn/completed")
 	}
 	if got, want := strings.Join(activities, ","), "error:terminal"; got != want {
 		t.Fatalf("semantic activity = %q, want %q", got, want)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-error","status":"failed","error":{"message":"boom"}}}}`)
+	if !done {
+		t.Fatal("turn/completed should finish the failed turn")
 	}
 }
 
@@ -759,8 +838,45 @@ func TestCodexFirstTurnNoProgressTimeoutClamp(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := codexFirstTurnNoProgressTimeout(tc.semantic); got != tc.want {
-				t.Fatalf("codexFirstTurnNoProgressTimeout(%s) = %s, want %s", tc.semantic, got, tc.want)
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, 0); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, 0) = %s, want %s", tc.semantic, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexFirstTurnNoProgressTimeoutExplicitOverride covers the
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT path added for GH #3262 / #5959: a positive
+// configured value is honored as-is for the first-turn watchdog ceiling,
+// including upward past the default that the semantic inactivity timeout alone
+// can never raise. This resolver only sets that one timer's duration; the
+// effective first-item wait is still min(ceiling, semantic, execution) because
+// the semantic timer runs concurrently — see
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated for that runtime
+// interaction. A non-positive override changes nothing — the function falls back
+// to the pinned default/scaling behaviour asserted by
+// TestCodexFirstTurnNoProgressTimeoutClamp.
+func TestCodexFirstTurnNoProgressTimeoutExplicitOverride(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		semantic   time.Duration
+		configured time.Duration
+		want       time.Duration
+	}{
+		{name: "override above the ceiling is honored in full", semantic: 0, configured: 5 * time.Minute, want: 5 * time.Minute},
+		{name: "override wins over the default 10m semantic", semantic: 10 * time.Minute, configured: 2 * time.Minute, want: 2 * time.Minute},
+		{name: "override wins over a value that would otherwise scale down", semantic: 30 * time.Second, configured: 90 * time.Second, want: 90 * time.Second},
+		{name: "override raises the resolver ceiling above the default", semantic: 0, configured: 30 * time.Minute, want: 30 * time.Minute},
+		{name: "zero override keeps the default ceiling", semantic: 0, configured: 0, want: 60 * time.Second},
+		{name: "negative override is ignored and falls back to the ceiling", semantic: 10 * time.Minute, configured: -1 * time.Second, want: 60 * time.Second},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := codexFirstTurnNoProgressTimeout(tc.semantic, tc.configured); got != tc.want {
+				t.Fatalf("codexFirstTurnNoProgressTimeout(%s, %s) = %s, want %s", tc.semantic, tc.configured, got, tc.want)
 			}
 		})
 	}
@@ -1193,12 +1309,76 @@ func TestCodexRawItemCommandExecution(t *testing.T) {
 	}
 }
 
-func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
+func TestCodexRawItemMCPToolCall(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	c.turnStarted = true
+
+	var messages []Message
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news","credentials":{"api_key":"sk-12345678901234567890"}},"status":"inProgress"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1429,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "web_search_exa" || begin.CallID != "mcp-1" {
+		t.Fatalf("unexpected start message: %+v", begin)
+	}
+	if begin.Input["server"] != "plugin-exa-search" {
+		t.Fatalf("expected MCP server provenance, got %#v", begin.Input)
+	}
+	arguments, ok := begin.Input["arguments"].(map[string]any)
+	if !ok || arguments["query"] != "latest Multica news" {
+		t.Fatalf("expected MCP arguments, got %#v", begin.Input["arguments"])
+	}
+	credentials, ok := arguments["credentials"].(map[string]any)
+	if !ok || credentials["api_key"] != "[REDACTED API KEY]" {
+		t.Fatalf("expected nested MCP secret to be redacted, got %#v", arguments["credentials"])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.Tool != "web_search_exa" || end.CallID != "mcp-1" || end.Status != "completed" {
+		t.Fatalf("unexpected complete message: %+v", end)
+	}
+	if end.Output != "completed\nduration: 1429 ms" {
+		t.Fatalf("unexpected MCP result summary: %q", end.Output)
+	}
+	if strings.Contains(end.Output, "private provider payload") {
+		t.Fatalf("MCP result content leaked into transcript summary: %q", end.Output)
+	}
+}
+
+func TestCodexRawItemMCPToolCallFailureIsSanitized(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-2","server":"plugin-exa-search","tool":"web_search_exa","status":"failed","error":{"message":"Bearer secret-token-value"}}}}`)
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if got := messages[0].Output; got != "failed\nerror: Bearer [REDACTED]" {
+		t.Fatalf("unexpected sanitized MCP failure summary: %q", got)
+	}
+}
+
+func TestCodexRawItemAgentMessageFinalAnswerWaitsForTurnCompleted(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
 
 	var gotText string
 	var turnDone bool
@@ -1216,8 +1396,13 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	if gotText != "Done!" {
 		t.Fatalf("expected text 'Done!', got %q", gotText)
 	}
+	if turnDone {
+		t.Fatal("final_answer must not finish the turn")
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
 	if !turnDone {
-		t.Fatal("expected onTurnDone for final_answer")
+		t.Fatal("turn/completed should finish the turn")
 	}
 }
 
@@ -1270,7 +1455,6 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 
 			c, _, _ := newTestCodexClient(t)
 			c.notificationProtocol = tc.protocol
-			c.turnStarted = true
 
 			var finalAnswer, lastAgentMessage string
 			var streamed []string
@@ -1298,25 +1482,24 @@ func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
 	}
 }
 
-func TestCodexRawThreadStatusIdle(t *testing.T) {
+func TestCodexRawThreadStatusIdleWaitsForTurnCompleted(t *testing.T) {
 	t.Parallel()
 
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
-	c.turnStarted = true
 
 	var turnDone bool
-	c.onTurnDone = func(aborted bool) {
-		turnDone = true
-		if aborted {
-			t.Fatal("expected aborted=false for idle")
-		}
-	}
+	c.onTurnDone = func(aborted bool) { turnDone = true }
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"thread/status/changed","params":{"status":{"type":"idle"}}}`)
 
+	if turnDone {
+		t.Fatal("idle status must not finish the turn")
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"turn":{"id":"turn-1","status":"completed"}}}`)
 	if !turnDone {
-		t.Fatal("expected onTurnDone for idle status")
+		t.Fatal("turn/completed should finish the turn")
 	}
 }
 
@@ -1405,7 +1588,6 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	c, _, _ := newTestCodexClient(t)
 	c.notificationProtocol = "raw"
 	c.threadID = "thr_main"
-	c.turnStarted = true
 
 	var messages []Message
 	var doneCount int
@@ -1935,6 +2117,9 @@ func TestCodexTurnInput(t *testing.T) {
 	t.Parallel()
 
 	const prompt = "do the task"
+	// Stands in for whatever the daemon computed for this surface; the backend
+	// only carries it, so the exact wording is the caller's business.
+	const chatNotice = "[System notice] the previous conversation context could not be restored.\n\n"
 	text := func(input []map[string]any) string {
 		if len(input) != 1 {
 			t.Fatalf("expected a single input block, got %d", len(input))
@@ -1945,7 +2130,7 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Resume expected but the backend fell back to a fresh thread → disclose,
 	// and the original prompt must still be delivered.
-	fallback := text(codexTurnInput(prompt, true, false))
+	fallback := text(codexTurnInput(prompt, true, false, chatNotice))
 	if !strings.Contains(fallback, "previous conversation context could not be restored") {
 		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
 	}
@@ -1955,11 +2140,33 @@ func TestCodexTurnInput(t *testing.T) {
 
 	// Successful resume, or an ordinary fresh start with no resume expected →
 	// no notice, prompt delivered verbatim.
-	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+	if got := text(codexTurnInput(prompt, true, true, chatNotice)); got != prompt {
 		t.Errorf("successful resume must not add a notice, got:\n%s", got)
 	}
-	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+	if got := text(codexTurnInput(prompt, false, false, chatNotice)); got != prompt {
 		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
+// TestCodexTurnInputNoticeMatchesWhatTheSurfaceLost is the MUL-5722 half of the
+// continuity notice. An issue's discussion survives in its comments, which the
+// agent re-reads every turn, so ordering it to announce "the previous context
+// was lost" tells the user the discussion is gone when none of it is. The
+// notice still has to fire — the agent must not silently assume continuity —
+// but on that surface it informs the agent instead of scripting an apology.
+func TestCodexTurnInputSuppressesNoticeWhenCallerAlreadyDisclosed(t *testing.T) {
+	t.Parallel()
+
+	// An empty notice is how the caller says "the prompt already carries it".
+	// Honouring that is the backend's half of the no-duplicate guarantee: on
+	// the daemon's fresh-session retry the prompt already ends with the
+	// continuity notice, and before MUL-5722 this path prepended a second copy
+	// of the same paragraph into the same turn.
+	const prompt = "do the task"
+	input := codexTurnInput(prompt, true, false, "")
+	got, _ := input[0]["text"].(string)
+	if got != prompt {
+		t.Fatalf("empty notice must leave the prompt untouched, got:\n%s", got)
 	}
 }
 
@@ -2337,6 +2544,67 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestResolveCodexHandshakeTimeouts(t *testing.T) {
+	tests := []struct {
+		name       string
+		opts       ExecOptions
+		wantBase   time.Duration
+		wantThread time.Duration
+	}{
+		{
+			name:       "separate defaults",
+			wantBase:   defaultCodexHandshakeTimeout,
+			wantThread: defaultCodexThreadHandshakeTimeout,
+		},
+		{
+			name:       "legacy global override remains global",
+			opts:       ExecOptions{HandshakeTimeout: 42 * time.Second},
+			wantBase:   42 * time.Second,
+			wantThread: 42 * time.Second,
+		},
+		{
+			name: "dedicated thread override wins",
+			opts: ExecOptions{
+				HandshakeTimeout:       30 * time.Second,
+				ThreadHandshakeTimeout: 75 * time.Second,
+			},
+			wantBase:   30 * time.Second,
+			wantThread: 75 * time.Second,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			base, thread := resolveCodexHandshakeTimeouts(tc.opts)
+			if base != tc.wantBase || thread != tc.wantThread {
+				t.Fatalf("timeouts = (%s, %s), want (%s, %s)", base, thread, tc.wantBase, tc.wantThread)
+			}
+		})
+	}
+}
+
+func TestCodexHandshakeTimeoutFor(t *testing.T) {
+	c := &codexClient{
+		handshakeTimeout:       30 * time.Second,
+		threadHandshakeTimeout: 60 * time.Second,
+	}
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 60*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 60s", method, got)
+		}
+	}
+	for _, method := range []string{"initialize", "thread/name/set", "turn/start"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("handshakeTimeoutFor(%q) = %s, want 30s", method, got)
+		}
+	}
+	c.threadHandshakeTimeout = 0
+	for _, method := range []string{"thread/start", "thread/resume"} {
+		if got := c.handshakeTimeoutFor(method); got != 30*time.Second {
+			t.Fatalf("zero thread timeout handshakeTimeoutFor(%q) = %s, want base 30s fallback", method, got)
+		}
+	}
+}
+
 func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -2411,7 +2679,8 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
 		t.Fatalf("thread/start timeout must remain fail-closed: %v", failure)
 	}
-	if failure["stderr_model_refresh_timeout_count"] != float64(1) ||
+	if failure["stderr_model_refresh_failure_count"] != float64(1) ||
+		failure["stderr_model_refresh_timeout_count"] != float64(1) ||
 		failure["stderr_mcp_init_transport_count"] != float64(1) ||
 		failure["stderr_bare_timeout_count"] != float64(0) {
 		t.Fatalf("unexpected stderr classification: %v", failure)
@@ -2421,6 +2690,73 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "secret prompt must not be logged") {
 		t.Fatalf("prompt leaked into lifecycle logs: %s", logs.String())
+	}
+}
+
+func TestCodexExecuteThreadResumeTimeoutUsesThreadBudgetAndLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`echo 1 > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`sleep 5`+"\n")
+
+	var logs bytes.Buffer
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+		TaskID:         "task-thread-resume-timeout",
+		RuntimeID:      "runtime-thread-resume-timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          3 * time.Second,
+		ThreadHandshakeTimeout:    500 * time.Millisecond,
+		SemanticInactivityTimeout: time.Second,
+		ResumeSessionID:           "thr-prior",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "thread/resume did not respond after 500ms") {
+		t.Fatalf("expected thread/resume timeout failure, got %+v", result)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+
+	entries := parseJSONLogEntries(t, logs.String())
+	sent := findCodexLifecyclePhase(t, entries, "thread_resume_sent")
+	failure := findCodexLifecyclePhase(t, entries, "thread_resume_failure")
+	for key, want := range map[string]any{
+		"task_id":    "task-thread-resume-timeout",
+		"runtime_id": "runtime-thread-resume-timeout",
+		"attempt":    float64(1),
+		"method":     "thread/resume",
+	} {
+		if got := sent[key]; got != want {
+			t.Fatalf("sent[%s]=%v, want %v; entry=%v", key, got, want, sent)
+		}
+	}
+	if failure["cleanup_confirmed"] != true || failure["reaped"] != true {
+		t.Fatalf("failure lacks confirmed cleanup/reap: %v", failure)
+	}
+	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
+		t.Fatalf("thread/resume timeout must remain fail-closed: %v", failure)
 	}
 }
 
@@ -2745,7 +3081,12 @@ func TestClassifyCodexStartupStderr(t *testing.T) {
 		{
 			name:   "model refresh timeout",
 			stderr: "failed to refresh available models: timeout waiting for child process to exit",
-			want:   codexStderrClassification{modelRefreshTimeout: 1},
+			want:   codexStderrClassification{modelRefreshFailure: 1, modelRefreshTimeout: 1},
+		},
+		{
+			name:   "model refresh non-timeout failure",
+			stderr: "failed to refresh available models: stream disconnected before completion",
+			want:   codexStderrClassification{modelRefreshFailure: 1},
 		},
 		{
 			name:   "mcp init transport",
@@ -2953,6 +3294,193 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 	}
 }
 
+// TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated pins the competing-
+// timer contract for MULTICA_CODEX_FIRST_TURN_TIMEOUT (GH #3262 / #5959): the
+// first status:running arms the semantic-inactivity timer and the first-turn
+// timer together, so a first-turn override ABOVE the semantic timeout cannot
+// extend the first-item wait — the semantic timer fires first. That also
+// reclassifies the failure as semantic inactivity, so the model-catalog startup
+// retry (GH #3291) does NOT run even though the catalog-refresh-failure signal is
+// present in stderr. The resolver tests cannot observe this; this drives the real
+// run loop. It is the inverse of TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics,
+// where the first-turn timer is the smaller of the two and wins.
+func TestCodexExecuteFirstTurnOverrideAboveSemanticIsTruncated(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-trunc"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-trunc","turn":{"id":"turn-trunc"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	// First-turn override (5s) sits far above the semantic timeout (100ms).
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                    5 * time.Second,
+		SemanticInactivityTimeout:  100 * time.Millisecond,
+		FirstTurnNoProgressTimeout: 5 * time.Second,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	// The semantic timer won the race: the failure must be classified as semantic
+	// inactivity, not first-turn no-progress. The override did not extend the wait.
+	if !strings.Contains(result.Error, CodexSemanticInactivityMarker) {
+		t.Fatalf("expected semantic-inactivity classification, got %q", result.Error)
+	}
+	if strings.Contains(result.Error, CodexFirstTurnNoProgressMarker) {
+		t.Fatalf("first-turn override above the semantic timeout must not win the race: %q", result.Error)
+	}
+	// The catalog-refresh-failure signal is present, but because the failure is
+	// classified as semantic (not first-turn) the #3291 startup retry is skipped:
+	// exactly one attempt runs.
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func TestCodexExecuteFirstItemWaitLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	// The helper budget owns the complete subtest, including a possible
+	// two-attempt retry chain, while ExecOptions.Timeout applies per attempt.
+	// Keep the helper deadline away from race-instrumented subprocess jitter.
+	const firstItemWaitTestBudget = 20 * time.Second
+
+	t.Run("successful progress emits a latency sample", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-ok"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok"}}}'`+"\n"+
+			`sleep 0.03`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-first-item-ok","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-first-item-ok","turn":{"id":"turn-first-item-ok","status":"completed"}}}'`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-ok",
+			RuntimeID:     "runtime-first-item-ok",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 5 * time.Second,
+		}, firstItemWaitTestBudget)
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got %+v", result)
+		}
+
+		entry := findCodexLifecyclePhase(t, parseJSONLogEntries(t, logs.String()), "first_item_wait")
+		for key, want := range map[string]any{
+			"task_id":                     "task-first-item-ok",
+			"runtime_id":                  "runtime-first-item-ok",
+			"attempt":                     float64(1),
+			"active_launches":             float64(1),
+			"method":                      "turn/start",
+			"thread_id":                   "thr-first-item-ok",
+			"turn_id":                     "turn-first-item-ok",
+			"outcome":                     "progress",
+			"timeout":                     "4s",
+			"semantic_inactivity_timeout": "5s",
+			"codex_version":               "codex-test",
+			"daemon_version":              "daemon-test",
+			"cleanup_confirmed":           true,
+			"reaped":                      true,
+			"retry_safe":                  false,
+		} {
+			if got := entry[key]; got != want {
+				t.Fatalf("entry[%s]=%v, want %v; entry=%v", key, got, want, entry)
+			}
+		}
+		if latency, ok := entry["latency_ms"].(float64); !ok || latency <= 0 {
+			t.Fatalf("missing/invalid latency_ms: %v", entry)
+		}
+		if entry["stderr_model_refresh_failure_count"] != float64(0) ||
+			entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+			entry["stderr_mcp_init_transport_count"] != float64(0) ||
+			entry["stderr_bare_timeout_count"] != float64(0) {
+			t.Fatalf("successful wait has unexpected stderr classification: %v", entry)
+		}
+	})
+
+	t.Run("catalog failure is classified on every timed-out attempt", func(t *testing.T) {
+		fakePath := writeFakeCodexAppServer(t, ""+
+			`DIR="$(dirname "$0")"`+"\n"+
+			`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+			`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+			`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+			`read line`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-first-item-timeout"}}}'`+"\n"+
+			`read line`+"\n"+
+			`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+			`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-first-item-timeout","turn":{"id":"turn-first-item-timeout"}}}'`+"\n"+
+			`echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+			`sleep 2`+"\n")
+
+		var logs bytes.Buffer
+		result, _ := executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{
+			Logger:        slog.New(slog.NewJSONHandler(&logs, nil)),
+			TaskID:        "task-first-item-timeout",
+			RuntimeID:     "runtime-first-item-timeout",
+			DaemonVersion: "daemon-test",
+			CodexVersion:  "codex-test",
+		}, ExecOptions{
+			Timeout:                   5 * time.Second,
+			SemanticInactivityTimeout: 100 * time.Millisecond,
+		}, firstItemWaitTestBudget)
+		if result.Status != "timeout" {
+			t.Fatalf("expected timeout after the bounded retry, got %+v", result)
+		}
+		assertCodexAttemptCount(t, fakePath, "2")
+
+		var waits []map[string]any
+		for _, entry := range parseJSONLogEntries(t, logs.String()) {
+			if entry["msg"] == "codex lifecycle" && entry["phase"] == "first_item_wait" {
+				waits = append(waits, entry)
+			}
+		}
+		if len(waits) != 2 {
+			t.Fatalf("expected one first-item sample per attempt, got %d: %v", len(waits), waits)
+		}
+		for i, entry := range waits {
+			if entry["attempt"] != float64(i+1) || entry["outcome"] != "no_progress_timeout" ||
+				entry["retry_safe"] != true || entry["cleanup_confirmed"] != true {
+				t.Fatalf("unexpected timeout lifecycle entry: %v", entry)
+			}
+			if entry["stderr_model_refresh_failure_count"] != float64(1) ||
+				entry["stderr_model_refresh_timeout_count"] != float64(0) ||
+				entry["stderr_mcp_init_transport_count"] != float64(0) ||
+				entry["stderr_bare_timeout_count"] != float64(0) {
+				t.Fatalf("catalog failure was misclassified: %v", entry)
+			}
+		}
+	})
+}
+
 func TestCodexExecuteFailsWhenProcessExitsDuringActiveTurn(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2997,8 +3525,8 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	}
 
 	// Regression for GH#4520. On `thread/resume`, the fake codex emits a
-	// single stdout line larger than the daemon's bufio.Scanner cap (10 MB),
-	// which trips "bufio.Scanner: token too long" in the reader goroutine.
+	// single stdout line larger than agentStreamMaxLineBytes, which trips
+	// "bufio.Scanner: token too long" in the reader goroutine.
 	// Pre-fix, drainAndWait then hung forever on cmd.Wait(): the reader had
 	// stopped consuming the pipe, codex was blocked writing into a full
 	// stdout buffer, stdin.Close never unblocked codex, and the deferred
@@ -3019,12 +3547,13 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
 		`read line`+"\n"+
-		// Emit a > 10 MB single line with no embedded newline. printf
+		// Emit a single line past the cap with no embedded newline. printf
 		// avoids the trailing newline echo would add; head + tr generates
-		// the bulk payload in pure POSIX shell. The scanner errors out at
-		// 10 MB even though we write 11 MB.
+		// the bulk payload in pure POSIX shell. The size is derived from
+		// the production constant so raising the cap cannot silently turn
+		// this regression test into a no-op.
 		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
-		`head -c 11000000 /dev/zero | tr '\0' 'x'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
 		`printf '"}}\n'`+"\n"+
 		// Hold the process open without reading more stdin. Pre-fix this
 		// hangs cmd.Wait() because codex never sees stdin EOF (it isn't
@@ -3057,6 +3586,15 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 		t.Fatalf("expected empty SessionID so outer fallback retries fresh, got %q",
 			result.SessionID)
 	}
+	// MUL-5722 layer 2: an unreadable resume response is a rejected resume,
+	// and this flag is the positive evidence shouldRetryWithFreshSession
+	// requires. Without it #5715's gate stops the retry dead (codex is in
+	// neither the ResumeRejected-capable nor the undetectable set), and the
+	// next turn resumes the same oversized thread forever.
+	if !result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=true so the daemon retries on a fresh session; error=%q",
+			result.Error)
+	}
 	// With the shrunken 500 ms grace, two bounded phases plus the SIGKILL
 	// round-trip should complete in ~1-2 s. Pre-fix this test would block
 	// until the executeFakeCodex 10 s outer timeout and fail with "timeout
@@ -3065,6 +3603,50 @@ func TestCodexExecuteCleansUpWhenScannerOverflowsOnResume(t *testing.T) {
 	if elapsed > 5*time.Second {
 		t.Fatalf("cleanup took %s, expected < 5s with shrunken grace (bug regressed?)",
 			elapsed)
+	}
+}
+
+func TestCodexExecuteDoesNotClaimResumeRejectedWhenOverflowIsNotAResume(t *testing.T) {
+	// Not t.Parallel(): mutates codexGracefulShutdownTimeoutNanos globally,
+	// same as its sibling above.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	// The overflow guard is scoped to resumes on purpose. A run with no prior
+	// session that overflows on the thread/start response is a different
+	// failure: there is no session pointer to drop, so reporting a resume
+	// rejection would send the daemon looking for a cure that does not apply
+	// — and ResumeRejected is documented as positive evidence, not a generic
+	// "something went wrong" flag.
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		// Same oversized single line, but answering thread/start rather than
+		// thread/resume because the caller passed no ResumeSessionID.
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "token too long") {
+		t.Fatalf("expected error to surface scanner overflow cause, got %q", result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=false without a prior session, error=%q", result.Error)
 	}
 }
 
@@ -3396,8 +3978,12 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 		`fi`+"\n")
 
 	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
-		ResumeSessionID:           "thr-prior",
-		ResumeExpected:            true,
+		ResumeSessionID: "thr-prior",
+		ResumeExpected:  true,
+		// Supplied by the daemon since MUL-5722: this package no longer holds
+		// the wording, because only the caller knows whether the surface's
+		// conversation can still be read.
+		ResumeContinuityNotice:    "[System notice] the previous conversation context could not be restored.\n\n",
 		Timeout:                   20 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, 20*time.Second)
@@ -3426,8 +4012,8 @@ func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testi
 	if !strings.Contains(string(second), "thread/start") {
 		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
 	}
-	// ResumeExpected survives the cleared pointer, so the agent is told the
-	// prior context could not be restored.
+	// ResumeExpected survives the cleared pointer, so the caller's notice is
+	// still prepended and the agent is told the prior context is gone.
 	if !strings.Contains(string(second), "previous conversation context could not be restored") {
 		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
 	}
@@ -3642,7 +4228,13 @@ func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 // the wait, so retry-exercising tests can ask for more than the default.
 func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts ExecOptions, budget time.Duration) (Result, []Message) {
 	t.Helper()
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	return executeFakeCodexCollectingMessagesWithConfig(t, fakePath, Config{Logger: slog.Default()}, opts, budget)
+}
+
+func executeFakeCodexCollectingMessagesWithConfig(t *testing.T, fakePath string, cfg Config, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
+	cfg.ExecutablePath = fakePath
+	backend, err := New("codex", cfg)
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
@@ -5207,5 +5799,86 @@ func TestCodexPatchApplyStillTruncatesNonSecretPayload(t *testing.T) {
 	// The caller's slice is deliberately left alone: redaction copies first.
 	if original, _ := changes[0].(map[string]any)["content"].(string); len(original) != len(body) {
 		t.Fatalf("codexPatchInput must not mutate its argument: %d != %d", len(original), len(body))
+	}
+}
+
+func TestCodexResumeOverflowError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		errText string
+		want    bool
+	}{
+		{
+			// The exact text executeOnce puts in Result.Error for this failure.
+			name:    "resume overflow",
+			errText: "codex thread/resume failed: codex process exited: bufio.Scanner: token too long",
+			want:    true,
+		},
+		{
+			// Both markers required: an overflow on another RPC leaves the
+			// stored thread perfectly resumable, so retiring it cures nothing.
+			name:    "overflow on thread/start",
+			errText: "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			want:    false,
+		},
+		{
+			// An ordinary resume rejection already has a recovery path.
+			name:    "resume failure without overflow",
+			errText: "codex thread/resume failed: thread not found",
+			want:    false,
+		},
+		{
+			name:    "unrelated process failure",
+			errText: "codex process exited: exit status 2",
+			want:    false,
+		},
+		{name: "empty", errText: "", want: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := CodexResumeOverflowError(tc.errText); got != tc.want {
+				t.Fatalf("CodexResumeOverflowError(%q) = %v, want %v", tc.errText, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCodexResumeOverflowErrorMatchesLiveFailureText guards the seam between
+// the two halves of MUL-5722's layer 3: in-process the backend detects the
+// overflow from the typed bufio.ErrTooLong, but the daemon classifies it at
+// report time from the error STRING alone. If the wording produced by
+// startOrResumeThread ever drifts from what the predicate matches, the resume
+// pointer silently stops being retired and the permanent-stall bug returns
+// with every test above still green.
+func TestCodexResumeOverflowErrorMatchesLiveFailureText(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	codexGracefulShutdownTimeoutNanos.Store(int64(500 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`printf '{"jsonrpc":"2.0","id":2,"result":{"big":"'`+"\n"+
+		fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'`, agentStreamMaxLineBytes+1024*1024)+"\n"+
+		`printf '"}}\n'`+"\n"+
+		`sleep 30`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Cwd:                       t.TempDir(),
+		ResumeSessionID:           "thr_prior",
+		Timeout:                   30 * time.Second,
+		SemanticInactivityTimeout: 5 * time.Second,
+	})
+
+	if !CodexResumeOverflowError(result.Error) {
+		t.Fatalf("predicate missed the error the backend actually produced: %q", result.Error)
 	}
 }

@@ -1,6 +1,15 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
+import codeartsLogo from "./codearts-logo.svg";
 import qwenLogo from "./qwen-logo.svg";
+import reasonixLogo from "./reasonix-logo.svg";
+import dimLogo from "./dim-logo.png";
+
+// Next.js exposes static imports as objects while Vite exposes URL strings.
+// Normalize both shapes here so shared provider logos work in web and desktop.
+function staticAssetSrc(asset: string | { src: string }): string {
+  return typeof asset === "string" ? asset : asset.src;
+}
 
 // Claude (Anthropic) — official mark, sourced from Bootstrap Icons (bi-claude)
 function ClaudeLogo({ className }: { className: string }) {
@@ -84,6 +93,14 @@ const DEVECO_ICON =
   "data:image/png;base64,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";
 function DevecoLogo({ className }: { className: string }) {
   return <img src={DEVECO_ICON} alt="DevEco Code" className={className} />;
+}
+
+// CodeArts — official product icon supplied from the Huawei Cloud CodeArts
+// documentation site favicon.
+const codeartsLogoSrc = staticAssetSrc(codeartsLogo);
+
+function CodeArtsLogo({ className }: { className: string }) {
+  return <img src={codeartsLogoSrc} alt="CodeArts" className={className} />;
 }
 
 // OpenClaw — lobster mascot, vector version based on official branding
@@ -183,6 +200,13 @@ function KimiLogo({ className }: { className: string }) {
   );
 }
 
+// Reasonix — official logo served at https://reasonix.io/logo.svg.
+const reasonixLogoSrc = staticAssetSrc(reasonixLogo);
+
+function ReasonixLogo({ className }: { className: string }) {
+  return <img src={reasonixLogoSrc} alt="Reasonix" className={className} />;
+}
+
 // Qoder (QoderCLI) — official logo from qoder-color.svg
 function QoderLogo({ className }: { className: string }) {
   return (
@@ -204,16 +228,9 @@ function QoderLogo({ className }: { className: string }) {
   );
 }
 
-// Antigravity (Google) — official mark, shipped as a PNG asset next to
-// this file. Different bundlers type the PNG import differently — Next.js
-// gives a StaticImageData object (.src), electron-vite + plain vite give
-// a string. Normalise via unknown so neither side's narrower type wins
-// and breaks the other's typecheck.
+// Antigravity (Google) — official mark, shipped as a PNG asset next to this file.
 import antigravityLogo from "./antigravity-logo.png";
-const antigravityLogoSrc: string = (() => {
-  const asset = antigravityLogo as unknown;
-  return typeof asset === "string" ? asset : (asset as { src: string }).src;
-})();
+const antigravityLogoSrc = staticAssetSrc(antigravityLogo);
 
 function AntigravityLogo({ className }: { className: string }) {
   return <img src={antigravityLogoSrc} alt="Antigravity" className={className} />;
@@ -286,13 +303,77 @@ function GrokLogo({ className }: { className: string }) {
 
 // Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
 // brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
-const qwenLogoSrc: string = (() => {
-  const asset = qwenLogo as unknown;
-  return typeof asset === "string" ? asset : (asset as { src: string }).src;
-})();
+const qwenLogoSrc = staticAssetSrc(qwenLogo);
 
 function QwenLogo({ className }: { className: string }) {
   return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
+}
+
+// QwenPaw — the standalone mark lifted from the official wordmark
+// (agentscope-ai/QwenPaw, console/public/logo-light.svg, Apache-2.0). Upstream
+// ships a black light-theme mark and a white dark-theme one; currentColor gets
+// the same result from a single path.
+function QwenPawLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="-4.5 4 132 132" fill="currentColor" className={className}>
+      <path d="M0,69.98228499999999C0,104.210785,27.535208,131.96455,61.494133,131.96455C69.605812,131.96455,77.3424,130.36953,84.434273,127.48661L74.130531,109.50395C70.145035,110.80365,65.901604,111.5125,61.494133,111.5125C38.776711,111.5125,20.290945,92.880051,20.290945,69.98228499999999C20.290945,47.084499,38.776711,28.452009,61.494133,28.452009C84.21154,28.452009,102.69729,47.084499,102.69729,69.98228499999999C102.69729,79.174469,99.719872,87.669563,94.679405,94.557785L90.764221,87.71682C90.248428,86.818863,89.287231,86.25174,88.255692,86.25174L78.010559,86.25174C76.979034,86.25174,76.017838,86.807045,75.502052,87.71682L72.899734,92.253815C72.383965,93.163589,72.383965,94.274223,72.899734,95.172188L76.33432,101.162422L79.780609,107.176353L89.955383,124.91094L94.022957,132L94.081589,132L116.09566,131.89367L105.452,113.30843C116.30666,102.13131,123,86.842484,123,69.970448L122.97652,69.98228499999999C122.97652,35.753796,95.453049,8,61.494133,8C27.535208,8,0,35.753796,0,69.98228499999999Z" />
+    </svg>
+  );
+}
+
+// MiniMax Code (mcode) — official mark from the MiniMax Code docs logo.
+// The docs ship separate #171717 and white variants; currentColor preserves
+// that light/dark behavior with one inline path.
+function McodeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="2.1 2 27.9 28" fill="currentColor" className={className}>
+      <path d="M27.0157 5.80436C27.867 5.80448 28.5567 6.49502 28.5567 7.34635V20.7487C28.5567 21.2424 28.3347 21.7099 27.9522 22.0221L23.4102 25.7311C23.1167 25.9708 22.7491 26.1021 22.3702 26.1022H5.12508C4.27367 26.1022 3.58308 25.4116 3.58308 24.5602V11.5592C3.58308 11.0643 3.80649 10.5951 4.19051 10.2829L9.24519 6.17253C9.53831 5.93433 9.90459 5.80436 10.2823 5.80436H27.0157ZM11.0587 8.88053C10.8705 8.88052 10.6884 8.94584 10.5421 9.06413L6.99519 11.9313C6.80216 12.0874 6.69051 12.3227 6.69051 12.571V22.4987C6.69073 22.7823 6.92051 23.0124 7.20418 23.0124H9.7491V17.6745C9.74924 17.2206 10.1175 16.8524 10.5714 16.8522H12.5245C12.9784 16.8523 13.3466 17.2206 13.3468 17.6745V23.0124H15.1964V17.6745C15.1965 17.2205 15.5647 16.8522 16.0186 16.8522H17.9718C18.4256 16.8524 18.7939 17.2206 18.794 17.6745V23.0124H21.5587C21.7476 23.0124 21.9306 22.947 22.0772 22.8278L25.17 20.3112C25.3618 20.1551 25.4736 19.9208 25.4737 19.6735V9.40104C25.4736 9.11741 25.2437 8.8875 24.96 8.88737L11.0587 8.88053Z" />
+    </svg>
+  );
+}
+
+// DeepSeek Harness — official mark copied from deepseek-ai/deepseek-harness
+// (apps/web/public/favicon.svg, MIT — Copyright 2026 DeepSeek). Upstream picks
+// its colour with a prefers-color-scheme block; inlining the path lets
+// currentColor follow the app theme instead, which an <img> could not do.
+function DshLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 50 50" fill="currentColor" className={className}>
+      <path
+        fillRule="nonzero"
+        d="M48.8354 10.0479C48.3232 9.79199 48.1025 10.2798 47.8032 10.5278C47.7007 10.6079 47.6143 10.7119 47.5273 10.8076C46.7793 11.624 45.9048 12.1597 44.7622 12.0957C43.0923 12 41.666 12.5356 40.4058 13.8398C40.1377 12.2319 39.2476 11.272 37.8926 10.6558C37.1836 10.3359 36.4668 10.0156 35.9702 9.31982C35.6235 8.82373 35.5293 8.27197 35.356 7.72754C35.2456 7.3999 35.1353 7.06396 34.7651 7.00781C34.3633 6.94385 34.2056 7.2876 34.0479 7.57568C33.418 8.75195 33.1733 10.0479 33.1973 11.3599C33.2524 14.312 34.4736 16.6641 36.8999 18.3359C37.1758 18.5278 37.2466 18.7197 37.1597 19C36.9946 19.5757 36.7974 20.1357 36.624 20.7119C36.5137 21.0801 36.3486 21.1597 35.9624 21C34.6309 20.4321 33.481 19.5918 32.4644 18.5757C30.7393 16.8721 29.1792 14.9917 27.2334 13.52C26.7764 13.1758 26.3193 12.856 25.8467 12.5518C23.8618 10.584 26.1069 8.96777 26.627 8.77588C27.1704 8.57568 26.8159 7.8877 25.0591 7.896C23.3022 7.90381 21.6953 8.50391 19.647 9.30371C19.3477 9.42383 19.0322 9.51172 18.7095 9.58398C16.8501 9.22363 14.9199 9.14355 12.9033 9.37598C9.10596 9.80762 6.07275 11.6396 3.84326 14.7681C1.16455 18.5278 0.53418 22.7998 1.30664 27.2559C2.11768 31.9521 4.46582 35.8398 8.07373 38.8799C11.8159 42.0322 16.1255 43.5762 21.041 43.2803C24.0269 43.104 27.3516 42.6963 31.1016 39.4561C32.0469 39.936 33.0396 40.1279 34.686 40.272C35.9546 40.3921 37.1758 40.208 38.1211 40.0078C39.6021 39.688 39.4995 38.2881 38.9639 38.0322C34.623 35.9678 35.5762 36.8081 34.71 36.1279C36.9155 33.4639 40.2402 30.6958 41.54 21.728C41.6426 21.0161 41.5557 20.5679 41.54 19.9917C41.5322 19.6396 41.6108 19.5039 42.0049 19.4639C43.0923 19.3359 44.1479 19.0317 45.1167 18.4878C47.9292 16.9199 49.064 14.3438 49.3315 11.2559C49.3711 10.7837 49.3237 10.2959 48.8354 10.0479ZM24.3262 37.8398C20.1196 34.4639 18.0791 33.3521 17.2358 33.3999C16.4482 33.4482 16.5898 34.3682 16.7632 34.9678C16.9443 35.5601 17.1812 35.9683 17.5117 36.4878C17.7402 36.832 17.8979 37.3442 17.2832 37.728C15.9282 38.584 13.5728 37.4399 13.4624 37.3838C10.7207 35.7358 8.42822 33.5601 6.81348 30.584C5.25342 27.7197 4.34766 24.6479 4.19775 21.3677C4.1582 20.5757 4.38672 20.2959 5.15869 20.1519C6.17529 19.96 7.22314 19.9199 8.23926 20.0718C12.5327 20.7119 16.1885 22.6719 19.2529 25.7759C21.002 27.5439 22.3252 29.6558 23.6885 31.7202C25.1377 33.9121 26.6978 36 28.6831 37.7119C29.3843 38.312 29.9434 38.7681 30.479 39.104C28.8643 39.2881 26.1699 39.3281 24.3262 37.8398ZM26.3433 24.6001C26.3433 24.248 26.6191 23.9678 26.9658 23.9678C27.0444 23.9678 27.1152 23.9839 27.1782 24.0078C27.2651 24.04 27.3438 24.0879 27.4067 24.1602C27.5171 24.272 27.5801 24.4321 27.5801 24.6001C27.5801 24.9521 27.3042 25.2319 26.9575 25.2319C26.6108 25.2319 26.3433 24.9521 26.3433 24.6001ZM32.6064 27.8799C32.2046 28.0479 31.8027 28.1919 31.4165 28.208C30.8179 28.2397 30.1641 27.9922 29.8096 27.688C29.2583 27.2158 28.8643 26.9521 28.6987 26.1279C28.6279 25.7759 28.6675 25.2319 28.7305 24.9199C28.8721 24.248 28.7144 23.8159 28.2495 23.4238C27.8716 23.104 27.3911 23.0161 26.8633 23.0161C26.666 23.0161 26.4849 22.9277 26.3511 22.856C26.1304 22.7441 25.9492 22.4639 26.1226 22.1201C26.1777 22.0078 26.4458 21.7358 26.5088 21.688C27.2256 21.272 28.0527 21.4077 28.8169 21.7197C29.5259 22.0161 30.0615 22.5601 30.834 23.3281C31.6216 24.2559 31.7632 24.5117 32.2124 25.208C32.5669 25.752 32.8901 26.312 33.1104 26.9521C33.2446 27.3521 33.0713 27.6802 32.6064 27.8799Z"
+      />
+    </svg>
+  );
+}
+
+// Dim (DimCode) — official app icon from the DimAgent desktop client
+// (/opt/DimAgent/resources/build/icon.png), resized to 128px for crisp
+// rendering at small sizes.
+function DimLogo({ className }: { className: string }) {
+  return <img src={staticAssetSrc(dimLogo)} alt="" aria-hidden className={className} />;
+}
+
+// ZeroClaw — no official brand asset has been sourced for this runtime yet
+// (multica-ai/multica#1543), so this is a deliberately simple placeholder
+// mark (three claw-scratch strokes) rather than a claimed "official" logo.
+// currentColor keeps it legible in both themes; swap for a real asset once
+// ZeroClaw ships one, following the DimLogo <img> pattern.
+function ZeroClawLogo({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      className={className}
+    >
+      <path d="M5 5l4 14" />
+      <path d="M12 5l2 14" />
+      <path d="M19 5l-4 14" />
+    </svg>
+  );
 }
 
 export function ProviderLogo({
@@ -313,11 +394,15 @@ export function ProviderLogo({
       return <OpenCodeLogo className={className} />;
     case "deveco":
       return <DevecoLogo className={className} />;
+    case "codearts":
+      return <CodeArtsLogo className={className} />;
     case "openclaw":
       return <OpenClawLogo className={className} />;
     case "hermes":
       return <HermesLogo className={className} />;
     case "pi":
+      return <PiLogo className={className} />;
+    case "omp":
       return <PiLogo className={className} />;
     case "copilot":
       return <CopilotLogo className={className} />;
@@ -325,6 +410,8 @@ export function ProviderLogo({
       return <CursorLogo className={className} />;
     case "kimi":
       return <KimiLogo className={className} />;
+    case "reasonix":
+      return <ReasonixLogo className={className} />;
     case "kiro":
       return <KiroLogo className={className} />;
     case "qoder":
@@ -338,6 +425,16 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
+    case "qwenpaw":
+      return <QwenPawLogo className={className} />;
+    case "mcode":
+      return <McodeLogo className={className} />;
+    case "dsh":
+      return <DshLogo className={className} />;
+    case "dim":
+      return <DimLogo className={className} />;
+    case "zeroclaw":
+      return <ZeroClawLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

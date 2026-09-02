@@ -26,6 +26,9 @@ const (
 	OutcomeDropped       Outcome = "dropped"
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
+	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeChatStarted   Outcome = "chat_started"
+	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
 )
@@ -47,10 +50,12 @@ const (
 // consumed by the outbound side (OutboundReplier / typing). It mirrors the
 // legacy lark.DispatchResult.
 type Result struct {
-	Outcome        Outcome
-	DropReason     DropReason
-	InstallationID pgtype.UUID
-	ChatSessionID  pgtype.UUID
+	Outcome              Outcome
+	DropReason           DropReason
+	InstallationID       pgtype.UUID
+	ChatSessionID        pgtype.UUID
+	ChannelBindingID     pgtype.UUID
+	ChannelRouteRevision int64
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
 	Sender          string
@@ -58,6 +63,17 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// IssueDuplicate marks an /issue command that did not create a new issue
+	// because the shared duplicate guard found the active IssueID above.
+	// Repliers render this as a business conflict, never as an internal error.
+	IssueDuplicate bool
+	// IssueUsageHadMedia marks a title-less /issue whose current inbound
+	// message also carried downloadable media. Repliers use it to tell the
+	// sender to include that media again with the corrected command.
+	IssueUsageHadMedia bool
+	// runScheduled reports whether this ingest scheduled a normal chat run.
+	// It is Router-internal state: repliers must continue to use Outcome.
+	runScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -87,6 +103,30 @@ type EnsureSessionParams struct {
 	Message      channel.InboundMessage
 }
 
+// StartSessionParams carries a /new route rotation. Creator owns the new Chat;
+// Sender is the authenticated user who issued the command and initiated its
+// first context. They differ for group chats, where the installer owns the Chat
+// but the group member remains the turn initiator. PersistMessage is false only
+// for the bare control command; a media-only /new is a real first turn.
+type StartSessionParams struct {
+	Installation           ResolvedInstallation
+	Creator                pgtype.UUID
+	Sender                 pgtype.UUID
+	Message                channel.InboundMessage
+	ClaimToken             pgtype.UUID
+	MediaPendingSeconds    float64
+	PersistMessage         bool
+	HistoryBoundaryPending bool
+	BeforeCommit           func(context.Context, pgx.Tx, db.ChatSession) error
+}
+
+type StartSessionResult struct {
+	SessionID     pgtype.UUID
+	BindingID     pgtype.UUID
+	RouteRevision int64
+	Append        AppendResult
+}
+
 // AppendParams carries the inputs for SessionBinder.AppendMessage. ClaimToken
 // is the dedup owner-fence token; the binder runs the dedup Mark INSIDE its
 // chat_message+session tx so the durable write and the Mark commit atomically.
@@ -113,17 +153,76 @@ type AppendResult struct {
 	// DedupMarked is true when AppendMessage finalized the dedup claim in its
 	// own tx; the Router then skips the post-pipeline finalize.
 	DedupMarked bool
+	// ContextRevision is the durable agent-visible context generation assigned
+	// to this message. The batcher keys and task snapshot use it as a boundary.
+	ContextRevision int64
+	// PendingContexts includes every generation with durable unowned input and
+	// its authenticated sender snapshot. It re-arms debounce windows lost on
+	// process crash without borrowing the sender of a later generation.
+	PendingContexts []PendingContext
+	InitialTitle    string
+	// BecameVisible is true only when this committed ordinary turn changed an
+	// implicit channel session from hidden orchestration state into a public Chat.
+	BecameVisible bool
+	BindingID     pgtype.UUID
+	RouteRevision int64
+}
+
+// PendingContext identifies durable unowned input that needs a run timer. The
+// initiator can be absent only for legacy or corrupt data; recovery fails
+// closed for such older generations rather than impersonating a new sender.
+type PendingContext struct {
+	Revision        int64
+	InitiatorUserID pgtype.UUID
+}
+
+// ChannelChatLifecycle bridges committed channel Chat changes to the server's
+// existing realtime and best-effort title services without coupling the engine
+// package to HTTP handlers.
+type ChannelChatLifecycle interface {
+	ChannelChatStarted(event ChannelChatStartedEvent)
+	ChannelChatTitleInitialized(workspaceID, creatorID, sessionID pgtype.UUID, title string)
+	GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string)
+}
+
+// ChannelChatStartedEvent contains enough committed metadata for clients to
+// add or invalidate a channel-created Chat without changing their navigation.
+type ChannelChatStartedEvent struct {
+	WorkspaceID    pgtype.UUID
+	CreatorID      pgtype.UUID
+	AgentID        pgtype.UUID
+	SessionID      pgtype.UUID
+	InstallationID pgtype.UUID
+	ChannelType    channel.Type
+	RouteRevision  int64
+	Title          string
 }
 
 // BindMediaParams carries stored media references to the post-append
-// attachment transaction. MessageID is the durable chat_message created by
-// AppendMessage; media downloads must never run inside this transaction.
+// attachment transaction. MessageID is the durable chat_message whose pending
+// marker the binder clears. IssueID selects issue ownership for an /issue turn;
+// otherwise the references bind to MessageID. IssueDescriptionBase is valid
+// only for an issue created by this turn and lets the binder replace inline
+// placeholders iff nobody edited the description first. Media downloads must
+// never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
+}
+
+// BindMediaResult reports a title initialized only after the first media
+// attachment committed. The Router uses it to publish realtime state and run
+// the same best-effort LLM/CAS title flow as a text-first Chat.
+type BindMediaResult struct {
+	InitialTitle string
+	TitleSource  string
 }
 
 // IssueCommand is the parsed /issue command.
@@ -143,6 +242,9 @@ var (
 	// ErrSenderNotMember: the sender is bound but not a workspace member →
 	// non_workspace_member drop.
 	ErrSenderNotMember = errors.New("engine: sender not a workspace member")
+	// ErrRouteChanged asks the Router to resolve the platform route again and
+	// retry the same claimed message before any durable write is made.
+	ErrRouteChanged = errors.New("engine: route changed")
 	// ErrDuplicate: Claim found the message already processed / in flight →
 	// duplicate drop.
 	ErrDuplicate = errors.New("engine: duplicate message")
@@ -180,8 +282,10 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	StartSession(ctx context.Context, p StartSessionParams) (StartSessionResult, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
-	BindMedia(ctx context.Context, p BindMediaParams) error
+	BindMedia(ctx context.Context, p BindMediaParams) (BindMediaResult, error)
 }
 
 // MediaResolver resolves platform media after the user message and dedup mark
@@ -201,8 +305,9 @@ type MediaResolver interface {
 	// plain ingest path: no marker, no deferred run, no semaphore slot.
 	HasMedia(msg channel.InboundMessage) bool
 	// ResolveMedia downloads the platform media and uploads it to object
-	// storage. chatMessageID is the durable chat_message the refs will bind
-	// to; the intent ledger keys the reconciler's reference check on it.
+	// storage. chatMessageID is the durable chat_message that owns the pending
+	// intent; the Router decides whether the resulting refs belong to that
+	// message or to an issue created from the same turn.
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
 }
 
@@ -305,13 +410,18 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+	PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, bindingID pgtype.UUID, routeRevision int64) (db.AgentTaskQueue, error)
+	PrepareChatTaskEnqueue(ctx context.Context, agentID, initiatorUserID pgtype.UUID) (service.PreparedChatTaskEnqueue, error)
+	EnqueuePreparedChannelChatTaskInTx(ctx context.Context, tx pgx.Tx, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64, prepared service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error)
+	FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
+	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.

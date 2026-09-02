@@ -4,9 +4,11 @@ import { useState } from "react";
 import {
   Check,
   ChevronRight,
+  ExternalLink,
   Loader2,
   MoreHorizontal,
   Plus,
+  RotateCw,
   Search,
   Trash2,
   X,
@@ -16,6 +18,7 @@ import { toast } from "sonner";
 import type { Agent, SkillSummary } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
@@ -48,6 +51,9 @@ import {
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { useIntentNavigate } from "../../navigation";
+import { isRefreshableOrigin, readOrigin } from "../lib/origin";
+import { RefreshSkillDialog } from "./refresh-skill-dialog";
 import type { SkillRow } from "./skills-page";
 
 // Shared context the row kebab and the batch toolbar both need. Assembled
@@ -505,6 +511,141 @@ export function DeleteSkillsDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Bulk update-from-source (batch toolbar)
+// ---------------------------------------------------------------------------
+
+/**
+ * Confirm-and-run dialog for updating several imported skills from their
+ * sources. Every updatable selection entry is re-downloaded — deliberately
+ * no upstream freshness probe first (product call on #6930): re-fetching an
+ * already-current skill costs one download on an explicit Update click,
+ * which beats probing every source to find out it was current.
+ *
+ * Refreshes run sequentially with per-item failure tolerance (unlike bulk
+ * delete's all-or-nothing loop): a single 409 from an upstream rename
+ * collision must not strand the rest of the batch. A partial failure keeps
+ * the selection (`onUpdated` only fires on a clean run) so retry is one
+ * click away.
+ */
+export function UpdateSkillsDialog({
+  rows,
+  skippedCount,
+  ctx,
+  open,
+  onOpenChange,
+  onUpdated,
+}: {
+  /** The updatable subset of the selection (canEdit + refreshable origin). */
+  rows: SkillRow[];
+  /** Selection entries that are not updatable (manual, runtime, no permission). */
+  skippedCount: number;
+  ctx: SkillActionsContext;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Fired only after a fully successful run, so a partial failure keeps the selection for retry. */
+  onUpdated?: () => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const [updating, setUpdating] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const handleConfirm = async () => {
+    setUpdating(true);
+    let updated = 0;
+    let failed = 0;
+    try {
+      for (const row of rows) {
+        setProgress(updated + failed + 1);
+        try {
+          await api.refreshSkill(row.skill.id);
+          updated++;
+        } catch {
+          failed++;
+        }
+      }
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+      if (failed === 0) {
+        toast.success(t(($) => $.actions.updated_toast, { count: updated }));
+        onOpenChange(false);
+        onUpdated?.();
+      } else {
+        toast.error(
+          t(($) => $.actions.update_partial_toast, { count: updated, failed }),
+        );
+        onOpenChange(false);
+      }
+    } finally {
+      setUpdating(false);
+      setProgress(0);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!updating) onOpenChange(v);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.actions.update_dialog_title)}</DialogTitle>
+        </DialogHeader>
+        <ul className="space-y-1 text-caption text-muted-foreground">
+          <li>
+            {t(($) => $.actions.update_summary_selected, {
+              count: rows.length,
+            })}
+          </li>
+          {skippedCount > 0 && (
+            <li>
+              {t(($) => $.actions.update_summary_skipped, {
+                count: skippedCount,
+              })}
+            </li>
+          )}
+        </ul>
+        <div className="rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">
+          {t(($) => $.detail.refresh.dialog.warning)}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={updating}
+          >
+            {t(($) => $.actions.cancel)}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleConfirm}
+            disabled={updating || rows.length === 0}
+          >
+            {updating ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t(($) => $.actions.update_updating, {
+                  done: progress,
+                  total: rows.length,
+                })}
+              </>
+            ) : (
+              <>
+                <RotateCw className="h-3 w-3" />
+                {t(($) => $.actions.update_confirm, { count: rows.length })}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row kebab
 // ---------------------------------------------------------------------------
 
@@ -520,8 +661,15 @@ export function SkillRowActions({
   ctx: SkillActionsContext;
 }) {
   const { t } = useT("skills");
+  const { t: tCommon } = useT("common");
+  const paths = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const [addOpen, setAddOpen] = useState(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+
+  const origin = readOrigin(row.skill);
+  const canRefresh = row.canEdit && isRefreshableOrigin(origin);
 
   return (
     <span
@@ -541,10 +689,29 @@ export function SkillRowActions({
           }
         />
         <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                paths.skillDetail(row.skill.id),
+                "foreground-tab",
+                row.skill.name,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => setAddOpen(true)}>
             <Plus className="size-3.5" />
             {t(($) => $.actions.add_to_agent)}
           </DropdownMenuItem>
+          {canRefresh && (
+            <DropdownMenuItem onClick={() => setRefreshOpen(true)}>
+              <RotateCw className="size-3.5" />
+              {t(($) => $.actions.refresh)}
+            </DropdownMenuItem>
+          )}
           {row.canEdit && (
             <>
               <DropdownMenuSeparator />
@@ -565,6 +732,15 @@ export function SkillRowActions({
         open={addOpen}
         onOpenChange={setAddOpen}
       />
+      {canRefresh && (
+        <RefreshSkillDialog
+          skill={row.skill}
+          origin={origin}
+          wsId={ctx.wsId}
+          open={refreshOpen}
+          onOpenChange={setRefreshOpen}
+        />
+      )}
       <DeleteSkillsDialog
         rows={[row]}
         ctx={ctx}
@@ -590,11 +766,28 @@ export function SkillBatchToolbar({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (rows.length === 0) return null;
 
   const allDeletable = rows.every((r) => r.canEdit);
+  const updatable = rows.filter(
+    (r) => r.canEdit && isRefreshableOrigin(readOrigin(r.skill)),
+  );
+
+  const updateButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={updatable.length === 0}
+      onClick={() => setUpdateOpen(true)}
+      className={cn(updatable.length === 0 && "pointer-events-none")}
+    >
+      <RotateCw className="mr-1 size-3.5" />
+      {t(($) => $.actions.update)}
+    </Button>
+  );
 
   const deleteButton = (
     <Button
@@ -618,7 +811,7 @@ export function SkillBatchToolbar({
           sidebar/split pane open, viewport-centering sits visibly off the
           list's own center. Same rule for every future list page's batch
           toolbar. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
+      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg max-md:above-chat-launcher">
         <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
           <span className="text-body font-medium">
             {t(($) => $.actions.selected, { count: rows.length })}
@@ -637,6 +830,19 @@ export function SkillBatchToolbar({
           <Plus className="mr-1 size-3.5" />
           {t(($) => $.actions.add_to_agent)}
         </Button>
+
+        {updatable.length > 0 ? (
+          updateButton
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span className="inline-flex">{updateButton}</span>}
+            />
+            <TooltipContent side="top">
+              {t(($) => $.actions.update_none)}
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {allDeletable ? (
           deleteButton
@@ -657,6 +863,14 @@ export function SkillBatchToolbar({
         ctx={ctx}
         open={addOpen}
         onOpenChange={setAddOpen}
+      />
+      <UpdateSkillsDialog
+        rows={updatable}
+        skippedCount={rows.length - updatable.length}
+        ctx={ctx}
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+        onUpdated={onClear}
       />
       <DeleteSkillsDialog
         rows={rows}

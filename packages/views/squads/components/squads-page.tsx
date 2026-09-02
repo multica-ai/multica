@@ -5,6 +5,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDown,
+  ExternalLink,
   Filter,
   Loader2,
   MoreHorizontal,
@@ -52,6 +53,7 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -81,13 +83,14 @@ import {
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
-import { useRowLink } from "../../navigation";
+import { useIntentNavigate, useRowLink } from "../../navigation";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
   CollectionPageState,
 } from "../../layout/collection-page";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 // Column template — the simplest member of the ListGrid family (squads are
 // the fewest entity, 1-5 rows): subgrid template + var tracks + two-zone
@@ -316,6 +319,9 @@ function ArchiveSquadDialog({
 
 function SquadRowActions({ squad }: { squad: Squad }) {
   const { t } = useT("squads");
+  const { t: tCommon } = useT("common");
+  const p = useWorkspacePaths();
+  const intentNavigate = useIntentNavigate();
   const [archiveOpen, setArchiveOpen] = useState(false);
   return (
     <span
@@ -335,6 +341,19 @@ function SquadRowActions({ squad }: { squad: Squad }) {
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem
+            onClick={() =>
+              intentNavigate(
+                p.squadDetail(squad.id),
+                "foreground-tab",
+                squad.name,
+              )
+            }
+          >
+            <ExternalLink className="size-3.5" />
+            {tCommon(($) => $.navigation.open_in_new_tab)}
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setArchiveOpen(true)}
@@ -481,7 +500,7 @@ function SquadListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className={PAGE_TOOLBAR}>
       <div className="flex min-w-0 items-center gap-2">
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {SQUAD_SCOPES.map((s) => (
@@ -753,6 +772,7 @@ function SquadListToolbar({
 
 export function SquadsPage() {
   const { t } = useT("squads");
+  const locale = useLocale();
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
   const p = useWorkspacePaths();
@@ -963,7 +983,7 @@ export function SquadsPage() {
                   <ListGridRow
                     key={squad.id}
                     className="cursor-pointer"
-                    {...rowLink(p.squadDetail(squad.id))}
+                    {...rowLink(p.squadDetail(squad.id), squad.name)}
                   >
                     <NameCell squad={squad} />
                     <LeaderCell
@@ -992,7 +1012,7 @@ export function SquadsPage() {
                     )}
                     {isColVisible("created") ? (
                       <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                        {new Date(squad.created_at).toLocaleDateString()}
+                        {new Date(squad.created_at).toLocaleDateString(locale)}
                       </ListGridCell>
                     ) : (
                       <ListGridCell className="hidden px-0 @2xl:flex" />

@@ -96,55 +96,81 @@ func TestExtractVersionLine(t *testing.T) {
 		name string
 		raw  string
 		want string
+		// wantRecognised is whether the semver scan matched, as opposed to the
+		// trimmed-raw fallback answering. Pinned per case because
+		// salvageProbeAnswer treats the two differently: only a recognised
+		// version is evidence that an incomplete read already holds the answer.
+		wantRecognised bool
 	}{
 		{
-			name: "bare semver",
-			raw:  "0.42.0\n",
-			want: "0.42.0",
+			name:           "bare semver",
+			raw:            "0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "claude full string preserved",
-			raw:  "2.1.5 (Claude Code)\n",
-			want: "2.1.5 (Claude Code)",
+			name:           "claude full string preserved",
+			raw:            "2.1.5 (Claude Code)\n",
+			want:           "2.1.5 (Claude Code)",
+			wantRecognised: true,
 		},
 		{
-			name: "codex prefix preserved",
-			raw:  "codex-cli 0.118.0\n",
-			want: "codex-cli 0.118.0",
+			name:           "codex prefix preserved",
+			raw:            "codex-cli 0.118.0\n",
+			want:           "codex-cli 0.118.0",
+			wantRecognised: true,
 		},
 		// Reproduces #2516: gemini's Windows shim emits `chcp` output to stdout
 		// before the real version. The chcp line has no dotted-number form,
 		// so the semver scan skips it and picks up "0.42.0" from the next line.
 		{
-			name: "windows chcp prefix before version",
-			raw:  "Active code page: 65001\n0.42.0\n",
-			want: "0.42.0",
+			name:           "windows chcp prefix before version",
+			raw:            "Active code page: 65001\n0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "windows chcp prefix CRLF",
-			raw:  "Active code page: 65001\r\n0.42.0\r\n",
-			want: "0.42.0",
+			name:           "windows chcp prefix CRLF",
+			raw:            "Active code page: 65001\r\n0.42.0\r\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "leading blank lines",
-			raw:  "\n\n  0.42.0\n",
-			want: "0.42.0",
+			name:           "leading blank lines",
+			raw:            "\n\n  0.42.0\n",
+			want:           "0.42.0",
+			wantRecognised: true,
 		},
 		{
-			name: "non-semver output falls back to trimmed raw",
-			raw:  "  some-build-id  \n",
-			want: "some-build-id",
+			name:           "non-semver output falls back to trimmed raw",
+			raw:            "  some-build-id  \n",
+			want:           "some-build-id",
+			wantRecognised: false,
+		},
+		// The shape the salvage gate turns on: a wrapper's progress line
+		// satisfies the fallback, so "non-empty" cannot mean "the version
+		// arrived". See TestDetectCLIVersionDoesNotSalvageABannerAsTheVersion.
+		{
+			name:           "wrapper banner is not a recognised version",
+			raw:            "initializing plugins\n",
+			want:           "initializing plugins",
+			wantRecognised: false,
 		},
 		{
-			name: "empty input",
-			raw:  "",
-			want: "",
+			name:           "empty input",
+			raw:            "",
+			want:           "",
+			wantRecognised: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := extractVersionLine(tt.raw); got != tt.want {
+			got, recognised := extractVersionLine(tt.raw)
+			if got != tt.want {
 				t.Errorf("extractVersionLine(%q) = %q, want %q", tt.raw, got, tt.want)
+			}
+			if recognised != tt.wantRecognised {
+				t.Errorf("extractVersionLine(%q) recognised = %v, want %v", tt.raw, recognised, tt.wantRecognised)
 			}
 		})
 	}
@@ -175,6 +201,18 @@ func TestCheckMinVersion(t *testing.T) {
 		{"qwen", "0.20.0", false},
 		{"qwen", "qwen 0.20.1", false},
 		{"qwen", "0.19.9", true},
+		{"dim", "0.3.10", false},
+		{"dim", "0.3.11", false},
+		{"dim", "0.4.0", false},
+		{"dim", "0.3.9", true},
+		{"mcode", "0.1.2", false},
+		{"mcode", "mcode 0.1.1", true},
+		{"zeroclaw", "zeroclaw 0.8.4", false},
+		{"zeroclaw", "0.8.0", false},
+		{"zeroclaw", "0.7.5", true},
+		{"zeroclaw", "invalid", true},
+		{"dim", "0.2.99", true},
+		{"dim", "invalid", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

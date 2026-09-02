@@ -89,7 +89,9 @@ type issueTableFiltersRequest struct {
 	ProjectIDs        []string                     `json:"project_ids,omitempty"`
 	IncludeNoProject  bool                         `json:"include_no_project,omitempty"`
 	LabelIDs          []string                     `json:"label_ids,omitempty"`
-	Properties        map[string][]string          `json:"properties,omitempty"`
+	// Members are raw JSON so operator objects ({op, value}) and plain
+	// strings both survive the round-trip into parsePropertiesFilterParam.
+	Properties        map[string][]json.RawMessage `json:"properties,omitempty"`
 	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
 	WorkingOnly       bool                         `json:"working_only,omitempty"`
 	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
@@ -259,7 +261,7 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
 	for key, values := range normalized.Filters.Properties {
-		normalized.Filters.Properties[key] = sortedUniqueStrings(values)
+		normalized.Filters.Properties[key] = sortedUniqueRawJSON(values)
 	}
 	encoded, err := json.Marshal(struct {
 		WorkspaceID                string              `json:"workspace_id"`
@@ -299,6 +301,32 @@ func sortedUniqueStrings(values []string) []string {
 	sort.Strings(result)
 	if len(result) == 0 {
 		return nil
+	}
+	return result
+}
+
+// sortedUniqueRawJSON canonicalizes property filter members for the query
+// fingerprint: byte-exact dedup + ordering. Members are raw JSON (strings and
+// operator objects), and marshaling the map back into the fingerprint input
+// must reproduce the same bytes for the same query regardless of member order.
+func sortedUniqueRawJSON(values []json.RawMessage) []json.RawMessage {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		key := string(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		unique = append(unique, key)
+	}
+	sort.Strings(unique)
+	result := make([]json.RawMessage, len(unique))
+	for i, value := range unique {
+		result[i] = json.RawMessage(value)
 	}
 	return result
 }
@@ -413,8 +441,14 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
+	// the exact statuses the user picked, and since MUL-6243 those can be custom
+	// — rejecting them here 400'd the entire request, so filtering a board by a
+	// custom status errored the surface instead of narrowing it. The predicate
+	// below is a parameterized `status = ANY(...)`, so an unknown key simply
+	// matches nothing; length-bounded so an arbitrary blob cannot ride in.
 	for _, status := range spec.Filters.Statuses {
-		if !issueTableContainsString(validIssueStatuses, status) {
+		if status == "" || len(status) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid filters.statuses")
 			return issueTableSQL{}, false
 		}
@@ -432,16 +466,24 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Priorities))))
 	}
 
-	switch spec.Scope.Kind {
-	case "workspace":
+	// Workspace and project scopes share the optional assignee-type
+	// narrowing (the Members/Agents tabs above both surfaces).
+	appendAssigneeTypes := func() bool {
 		for _, actorType := range spec.Scope.AssigneeTypes {
 			if !isIssueActorType(actorType) {
 				writeError(w, http.StatusBadRequest, "invalid scope.assignee_types")
-				return issueTableSQL{}, false
+				return false
 			}
 		}
 		if len(spec.Scope.AssigneeTypes) > 0 {
 			where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Scope.AssigneeTypes))))
+		}
+		return true
+	}
+	switch spec.Scope.Kind {
+	case "workspace":
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
 		}
 	case "project":
 		projectID, err := util.ParseUUID(spec.Scope.ProjectID)
@@ -450,6 +492,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			return issueTableSQL{}, false
 		}
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectID)))
+		if !appendAssigneeTypes() {
+			return issueTableSQL{}, false
+		}
 	case "assignee":
 		if spec.Scope.Actor == nil {
 			writeError(w, http.StatusBadRequest, "scope.actor is required")

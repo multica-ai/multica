@@ -13,6 +13,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// isAssignmentRecipientType reports whether an assignee can own a subscriber
+// or inbox row. Squads are routing objects whose work runs through the leader;
+// they are not user identities and have no inbox to consume.
+func isAssignmentRecipientType(assigneeType string) bool {
+	return assigneeType == "member" || assigneeType == "agent"
+}
+
 // registerSubscriberListeners wires up event bus listeners that auto-subscribe
 // relevant users to issues. This ensures creators, assignees, and commenters
 // are automatically tracked as issue subscribers.
@@ -38,8 +45,9 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		// Subscribe the creator
 		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
 
-		// Subscribe the assignee if exists and different from creator
+		// Subscribe the assignee if it is a direct recipient and differs from the creator.
 		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
+			isAssignmentRecipientType(*issue.AssigneeType) &&
 			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
 			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 		}
@@ -72,7 +80,7 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 
 		// Subscribe new assignee if assignee changed
 		if assigneeChanged, _ := payload["assignee_changed"].(bool); assigneeChanged {
-			if issue.AssigneeType != nil && issue.AssigneeID != nil {
+			if issue.AssigneeType != nil && issue.AssigneeID != nil && isAssignmentRecipientType(*issue.AssigneeType) {
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 			}
 		}

@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oklog/ulid/v2"
@@ -14,8 +15,11 @@ import (
 )
 
 const (
-	defaultShardedRelayShards       = 8
-	defaultShardedRelayStreamMaxLen = 100000
+	defaultShardedRelayShards = 8
+	// At the measured baseline of roughly 1 KiB per relay entry, 2000 entries
+	// across each of eight shards estimates about 16 MiB instead of the former
+	// ~800 MiB default. Operators can tune this from observed entry sizes.
+	defaultShardedRelayStreamMaxLen = 2000
 	defaultShardedRelayReadCount    = 128
 	defaultShardedRelayReadBlock    = 5 * time.Second
 	defaultShardedRelayReplayGrace  = 5 * time.Minute
@@ -36,19 +40,43 @@ type ShardedStreamRelayConfig struct {
 	// consuming from (now - ReplayGrace) rather than "$" so that any events
 	// published while this pod was down are replayed. Events are bounded by
 	// the stream's MAXLEN, and downstream consumers must be idempotent.
-	ReplayGrace time.Duration
+	ReplayGrace         time.Duration
+	TrimHorizon         time.Duration
+	StreamTTL           time.Duration
+	TTLRefreshInterval  time.Duration
+	MaintenanceInterval time.Duration
+	StreamTTLEnabled    bool
 }
 
 // DefaultShardedStreamRelayConfig returns production-safe defaults: a small
 // fixed number of blocking readers per pod, bounded stream retention, and
 // batched reads.
 func DefaultShardedStreamRelayConfig() ShardedStreamRelayConfig {
+	retention := DefaultStreamRetentionConfig()
 	return ShardedStreamRelayConfig{
-		Shards:       defaultShardedRelayShards,
-		StreamMaxLen: defaultShardedRelayStreamMaxLen,
-		ReadCount:    defaultShardedRelayReadCount,
-		ReadBlock:    defaultShardedRelayReadBlock,
-		ReplayGrace:  defaultShardedRelayReplayGrace,
+		Shards:              defaultShardedRelayShards,
+		StreamMaxLen:        retention.StreamMaxLen,
+		ReadCount:           defaultShardedRelayReadCount,
+		ReadBlock:           defaultShardedRelayReadBlock,
+		ReplayGrace:         defaultShardedRelayReplayGrace,
+		TrimHorizon:         retention.TrimHorizon,
+		StreamTTL:           retention.StreamTTL,
+		TTLRefreshInterval:  retention.TTLRefreshInterval,
+		MaintenanceInterval: retention.MaintenanceInterval,
+		StreamTTLEnabled:    retention.StreamTTLEnabled,
+	}
+}
+
+// RetentionConfig returns the mode-independent stream retention settings.
+func (c ShardedStreamRelayConfig) RetentionConfig() StreamRetentionConfig {
+	c = c.withDefaults()
+	return StreamRetentionConfig{
+		StreamMaxLen:        c.StreamMaxLen,
+		TrimHorizon:         c.TrimHorizon,
+		StreamTTL:           c.StreamTTL,
+		TTLRefreshInterval:  c.TTLRefreshInterval,
+		MaintenanceInterval: c.MaintenanceInterval,
+		StreamTTLEnabled:    c.StreamTTLEnabled,
 	}
 }
 
@@ -69,7 +97,56 @@ func (c ShardedStreamRelayConfig) withDefaults() ShardedStreamRelayConfig {
 	if c.ReplayGrace <= 0 {
 		c.ReplayGrace = def.ReplayGrace
 	}
+	if c.TrimHorizon <= c.ReplayGrace {
+		c.TrimHorizon = 2 * c.ReplayGrace
+	}
+	if c.StreamTTL < c.TrimHorizon {
+		c.StreamTTL = c.TrimHorizon + c.ReplayGrace
+	}
+	if c.TTLRefreshInterval <= 0 || c.TTLRefreshInterval >= c.StreamTTL {
+		c.TTLRefreshInterval = retentionSubinterval(c.StreamTTL, def.TTLRefreshInterval)
+	}
+	if c.MaintenanceInterval <= 0 || c.MaintenanceInterval >= c.StreamTTL {
+		c.MaintenanceInterval = retentionSubinterval(c.StreamTTL, def.MaintenanceInterval)
+	}
 	return c
+}
+
+func retentionSubinterval(ttl, preferred time.Duration) time.Duration {
+	if preferred > 0 && preferred < ttl {
+		return preferred
+	}
+	interval := ttl / 3
+	if interval <= 0 {
+		return time.Nanosecond
+	}
+	return interval
+}
+
+// Normalized fills missing fields and repairs unsafe retention relationships.
+func (c ShardedStreamRelayConfig) Normalized() ShardedStreamRelayConfig {
+	return c.withDefaults()
+}
+
+// Validate checks the retention relationship that keeps trimming outside the
+// replay window while allowing idle stream keys to expire safely.
+func (c ShardedStreamRelayConfig) Validate() error {
+	if c.ReplayGrace <= 0 {
+		return errors.New("ReplayGrace must be positive")
+	}
+	if c.TrimHorizon <= c.ReplayGrace {
+		return fmt.Errorf("TrimHorizon (%s) must be greater than ReplayGrace (%s)", c.TrimHorizon, c.ReplayGrace)
+	}
+	if c.StreamTTL < c.TrimHorizon {
+		return fmt.Errorf("StreamTTL (%s) must be at least TrimHorizon (%s)", c.StreamTTL, c.TrimHorizon)
+	}
+	if c.TTLRefreshInterval <= 0 || c.TTLRefreshInterval >= c.StreamTTL {
+		return fmt.Errorf("TTLRefreshInterval (%s) must be positive and less than StreamTTL (%s)", c.TTLRefreshInterval, c.StreamTTL)
+	}
+	if c.MaintenanceInterval <= 0 || c.MaintenanceInterval >= c.StreamTTL {
+		return fmt.Errorf("MaintenanceInterval (%s) must be positive and less than StreamTTL (%s)", c.MaintenanceInterval, c.StreamTTL)
+	}
+	return nil
 }
 
 // ShardedStreamRelay publishes all realtime events into a fixed set of Redis
@@ -82,28 +159,43 @@ type ShardedStreamRelay struct {
 	readRDB  *redis.Client
 	nodeID   string
 	config   ShardedStreamRelayConfig
+	now      func() time.Time
+	ttl      *streamTTLRefresher
 
 	mu       sync.Mutex
 	stopping bool
 	wg       sync.WaitGroup
 
+	streamSeen       []atomic.Bool
+	streamGeneration []atomic.Uint64
+
 	daemonRuntime DaemonRuntimeDeliverer
+	wecomOutbound WecomOutboundDeliverer
 }
 
 func NewShardedStreamRelay(hub *Hub, writeRDB, readRDB *redis.Client, config ShardedStreamRelayConfig) *ShardedStreamRelay {
 	if readRDB == nil {
 		readRDB = writeRDB
 	}
+	config = config.withDefaults()
 	return &ShardedStreamRelay{
-		hub:      hub,
-		writeRDB: writeRDB,
-		readRDB:  readRDB,
-		nodeID:   ulid.Make().String(),
-		config:   config.withDefaults(),
+		hub:              hub,
+		writeRDB:         writeRDB,
+		readRDB:          readRDB,
+		nodeID:           ulid.Make().String(),
+		config:           config,
+		now:              time.Now,
+		ttl:              newStreamTTLRefresher(config.StreamTTL, config.TTLRefreshInterval),
+		streamSeen:       make([]atomic.Bool, config.Shards),
+		streamGeneration: make([]atomic.Uint64, config.Shards),
 	}
 }
 
 func (r *ShardedStreamRelay) NodeID() string { return r.nodeID }
+
+func (r *ShardedStreamRelay) SetWecomOutboundDeliverer(d WecomOutboundDeliverer) {
+	r.wecomOutbound = d
+}
 
 func (r *ShardedStreamRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
 	r.daemonRuntime = d
@@ -127,10 +219,14 @@ func (r *ShardedStreamRelay) Start(ctx context.Context) {
 		M.RedisConnected.Store(true)
 	}
 
-	r.wg.Add(1 + r.config.Shards)
+	r.wg.Add(2 + r.config.Shards)
 	go func() {
 		defer r.wg.Done()
 		r.heartbeatLoop(ctx)
+	}()
+	go func() {
+		defer r.wg.Done()
+		r.retentionLoop(ctx)
 	}()
 	for shard := 0; shard < r.config.Shards; shard++ {
 		shard := shard
@@ -173,7 +269,8 @@ func (r *ShardedStreamRelay) Broadcast(message []byte) {
 
 func (r *ShardedStreamRelay) PublishWithID(scopeType, scopeID, exclude string, frame []byte, id string) error {
 	ev := newEnvelope(r.nodeID, scopeType, scopeID, exclude, frame, id)
-	stream := ShardedStreamKey(r.shardFor(scopeType, scopeID))
+	shard := r.shardFor(scopeType, scopeID)
+	stream := ShardedStreamKey(shard)
 	args := &redis.XAddArgs{
 		Stream: stream,
 		MaxLen: r.config.StreamMaxLen,
@@ -192,6 +289,12 @@ func (r *ShardedStreamRelay) PublishWithID(scopeType, scopeID, exclude string, f
 	}
 	M.RedisXAddTotal.Add(1)
 	M.RedisLastXAddLagMicros.Store(time.Since(start).Microseconds())
+	r.streamSeen[shard].Store(true)
+	if r.config.StreamTTLEnabled {
+		if err := r.ttl.refreshIfDue(ctx, r.writeRDB, stream); err != nil {
+			r.recordRetentionError("PEXPIRE failed", err, "stream", stream)
+		}
+	}
 	return nil
 }
 
@@ -208,11 +311,7 @@ func (r *ShardedStreamRelay) shardFor(scopeType, scopeID string) int {
 // rather than the entire retained stream. The "-0" suffix matches any
 // sequence number at that millisecond.
 func (r *ShardedStreamRelay) replayStartID() string {
-	ms := time.Now().Add(-r.config.ReplayGrace).UnixMilli()
-	if ms < 0 {
-		ms = 0
-	}
-	return fmt.Sprintf("%d-0", ms)
+	return streamMinID(r.now(), r.config.ReplayGrace)
 }
 
 func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
@@ -222,14 +321,124 @@ func (r *ShardedStreamRelay) readShard(ctx context.Context, shard int) {
 	// short enough that replay volume stays manageable, and downstream
 	// consumers (daemon wakeups, client reconnects) are idempotent.
 	lastID := r.replayStartID()
+	generation := r.streamGeneration[shard].Load()
 	for {
 		if ctx.Err() != nil || r.isStopping() {
 			return
+		}
+		if current := r.streamGeneration[shard].Load(); current != generation {
+			lastID = r.replayStartID()
+			generation = current
 		}
 		if !r.readShardOnce(ctx, shard, stream, &lastID) {
 			return
 		}
 	}
+}
+
+func (r *ShardedStreamRelay) retentionLoop(ctx context.Context) {
+	r.maintainStreams(ctx)
+	ticker := time.NewTicker(r.config.MaintenanceInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.maintainStreams(ctx)
+		}
+	}
+}
+
+func (r *ShardedStreamRelay) maintainStreams(ctx context.Context) {
+	maintCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	minID := streamMinID(r.now(), r.config.TrimHorizon)
+	withoutTTL := int64(0)
+
+	for shard := 0; shard < r.config.Shards; shard++ {
+		if maintCtx.Err() != nil {
+			return
+		}
+		stream := ShardedStreamKey(shard)
+		exists, err := r.writeRDB.Exists(maintCtx, stream).Result()
+		if err != nil {
+			r.recordRetentionError("EXISTS failed", err, "stream", stream)
+			continue
+		}
+		if exists == 0 {
+			r.updateStreamPresence(shard, false)
+			M.ObserveRedisStream(stream, 0, 0, -2)
+			continue
+		}
+		r.updateStreamPresence(shard, true)
+
+		trimmed, err := r.writeRDB.XTrimMinID(maintCtx, stream, minID).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			r.recordRetentionError("XTRIM MINID failed", err, "stream", stream, "min_id", minID)
+		} else if trimmed > 0 {
+			M.RedisRelayStreamTrimmedTotal.Add(trimmed)
+		}
+
+		ttl, err := r.ttl.reconcileTTL(maintCtx, r.writeRDB, stream, r.config.StreamTTLEnabled)
+		if r.config.StreamTTLEnabled && ttl == -1 {
+			withoutTTL++
+		}
+		if err != nil {
+			r.recordRetentionError("stream TTL repair failed", err, "stream", stream)
+		}
+
+		length, err := r.writeRDB.XLen(maintCtx, stream).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			r.recordRetentionError("XLEN failed", err, "stream", stream)
+			continue
+		}
+		memoryBytes, err := r.writeRDB.MemoryUsage(maintCtx, stream).Result()
+		if err != nil && !errors.Is(err, redis.Nil) {
+			r.recordRetentionError("MEMORY USAGE failed", err, "stream", stream)
+			memoryBytes = 0
+		}
+		M.ObserveRedisStream(stream, length, memoryBytes, redisTTLMillis(ttl))
+	}
+	M.SetRedisStreamsWithoutTTL("sharded", withoutTTL)
+	r.observeRedisServer(maintCtx)
+}
+
+func (r *ShardedStreamRelay) updateStreamPresence(shard int, exists bool) {
+	if exists {
+		r.streamSeen[shard].Store(true)
+		return
+	}
+	if r.streamSeen[shard].Swap(false) {
+		r.streamGeneration[shard].Add(1)
+		r.ttl.forget(ShardedStreamKey(shard))
+		M.RedisRelayStreamMissingTotal.Add(1)
+	}
+}
+
+func (r *ShardedStreamRelay) observeRedisServer(ctx context.Context) {
+	memoryInfo, err := r.writeRDB.Info(ctx, "memory").Result()
+	if err == nil {
+		if used, ok := redisInfoInt64(memoryInfo, "used_memory"); ok {
+			M.RedisUsedMemoryBytes.Store(used)
+		}
+		if max, ok := redisInfoInt64(memoryInfo, "maxmemory"); ok {
+			M.RedisMaxMemoryBytes.Store(max)
+		}
+	}
+	statsInfo, err := r.writeRDB.Info(ctx, "stats").Result()
+	if err == nil {
+		if evicted, ok := redisInfoInt64(statsInfo, "evicted_keys"); ok {
+			M.RedisEvictedKeys.Store(evicted)
+		}
+	}
+}
+
+func (r *ShardedStreamRelay) recordRetentionError(message string, err error, attrs ...any) {
+	M.RedisRelayRetentionErrors.Add(1)
+	M.SetRedisLastError(err.Error())
+	attrs = append([]any{"error", err}, attrs...)
+	slog.Warn("realtime/sharded-redis: "+message, attrs...)
 }
 
 // readShardOnce performs a single XREAD iteration for one shard. It returns
@@ -274,7 +483,7 @@ func (r *ShardedStreamRelay) deliverMessage(msg redis.XMessage) {
 	if !ok || ev.Scope == "" || ev.ScopeID == "" {
 		return
 	}
-	deliverEnvelope(r.hub, r.daemonRuntime, ev)
+	deliverEnvelope(r.hub, r.daemonRuntime, r.wecomOutbound, ev)
 }
 
 func (r *ShardedStreamRelay) heartbeatLoop(ctx context.Context) {

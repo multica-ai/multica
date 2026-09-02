@@ -13,7 +13,6 @@ import { api } from "@multica/core/api";
 import {
   chatKeys,
   isTaskMessageTaskId,
-  mergeTaskMessagesBySeq,
   taskMessagesOptions,
 } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types/agent";
@@ -36,6 +35,9 @@ interface TranscriptButtonProps {
   isLive?: boolean;
   className?: string;
   title?: string;
+  renderButton?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /**
    * Optional content rendered above the transcript event list. Used to
    * surface autopilot webhook payloads inline with the run history.
@@ -64,11 +66,16 @@ export function TranscriptButton({
   isLive = false,
   className,
   title = "View transcript",
+  renderButton = true,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
   headerSlot,
 }: TranscriptButtonProps) {
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadedItems, setLoadedItems] = useState<TimelineItem[] | null>(null);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = controlledOnOpenChange ?? setUncontrolledOpen;
 
   // Live cache mode: the running task feeds the shared task-messages cache, so
   // we render straight off that cache instead of a one-shot local snapshot.
@@ -82,8 +89,14 @@ export function TranscriptButton({
   // authoritative backfill on the running→terminal transition.
   const [liveSession, setLiveSession] = useState(false);
   useEffect(() => {
-    if (!open) setLiveSession(false);
-  }, [open]);
+    if (!open) {
+      setLiveSession(false);
+      return;
+    }
+    if (liveCacheMode) {
+      setLiveSession(true);
+    }
+  }, [liveCacheMode, open]);
 
   // Live mode renders from the cache; lazy/provided modes from local state.
   const items = providedItems ?? loadedItems ?? [];
@@ -115,7 +128,7 @@ export function TranscriptButton({
         })
         .finally(() => setLoading(false));
     },
-    [liveCacheMode, providedItems, loadedItems, task.id],
+    [liveCacheMode, providedItems, loadedItems, setOpen, task.id],
   );
 
   useEffect(() => {
@@ -129,29 +142,31 @@ export function TranscriptButton({
     return () => {
       window.removeEventListener("multica:navigate", handleGlobalNavigate);
     };
-  }, [open]);
+  }, [open, setOpen]);
 
   return (
     <>
-      <Tooltip>
-        <TooltipTrigger
-          render={<button type="button" />}
-          onClick={handleClick}
-          disabled={loading}
-          aria-label={title}
-          className={cn(
-            "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
-            className,
-          )}
-        >
-          {loading ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <ScrollText className="h-3.5 w-3.5" />
-          )}
-        </TooltipTrigger>
-        <TooltipContent>{title}</TooltipContent>
-      </Tooltip>
+      {renderButton ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={<button type="button" />}
+            onClick={handleClick}
+            disabled={loading}
+            aria-label={title}
+            className={cn(
+              "flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors disabled:opacity-50",
+              className,
+            )}
+          >
+            {loading ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ScrollText className="h-3.5 w-3.5" />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>{title}</TooltipContent>
+        </Tooltip>
+      ) : null}
 
       {open &&
         (liveSession ? (
@@ -213,7 +228,8 @@ function LiveTranscriptDialog({
   // `taskMessagesOptions` is `staleTime: Infinity`, so a plain subscription
   // never refetches — a WS reconnect gap (or the final tail of messages a
   // completed issue task never re-broadcasts) would otherwise leave a hole.
-  // Merge by seq so the fetch and any concurrent WS append both survive.
+  // The query's `structuralSharing` folds this response into whatever the
+  // realtime stream has already written, so neither side loses a seq.
   useEffect(() => {
     if (!isTaskMessageTaskId(task.id)) return;
     let cancelled = false;
@@ -223,7 +239,7 @@ function LiveTranscriptDialog({
         if (cancelled) return;
         queryClient.setQueryData<TaskMessagePayload[]>(
           chatKeys.taskMessages(task.id),
-          (old = []) => mergeTaskMessagesBySeq(old, msgs),
+          msgs,
         );
       })
       .catch((err) => {

@@ -165,6 +165,18 @@ type DocumentCommentReplyParams struct {
 	DocumentCommentParams
 	Text    string
 	IsWhole bool
+// TokenCacheInvalidator is implemented by an APIClient that caches
+// tenant_access_token in-process, so credential rotation can tell it to
+// forget what it holds. Rotation is invisible otherwise: re-registering
+// a Bot issues a new app_secret under the SAME app_id, Lark revokes
+// every token minted from the old one, and the cache key does not
+// change.
+//
+// It is deliberately separate from APIClient rather than a method on it:
+// only the real HTTP client holds a cache, and the stub / fakes have
+// nothing to forget. Callers type-assert and skip when it is absent.
+type TokenCacheInvalidator interface {
+	InvalidateTokenCache(appID string)
 }
 
 // ListMessagesParams selects a bounded, recent window of messages in a

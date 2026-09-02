@@ -8,7 +8,7 @@
     "autopilots": "Autopilot",
     "agents": "Agents",
     "squads": "Squads",
-    "usage": "Usage",
+    "usage": "Analytics",
     "runtimes": "Runtimes",
     "skills": "Skills",
     "settings": "Settings"
@@ -29,6 +29,7 @@
   },
   "help": {
     "trigger": "Help",
+    "download_desktop": "Desktop app",
     "docs": "Docs",
     "changelog": "Change log",
     "discord": "Discord",

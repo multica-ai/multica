@@ -10,15 +10,15 @@ import (
 	"testing"
 )
 
-// TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile is the core
+// TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellCommand is the core
 // Windows test: when LookPath resolves pi to the npm-installed .cmd
-// launcher and a sibling pi.ps1 exists, we should invoke PowerShell with
-// -File <ps1> and forward every original arg unchanged — including the
-// multi-line positional prompt that would otherwise be mangled by the
-// cmd.exe %* re-expansion inside pi.cmd. This is the regression test for
-// #3306: daemon argv carried the full prompt, but Pi's session JSONL only
-// recorded the first line.
-func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) {
+// launcher and a sibling pi.ps1 exists, we invoke PowerShell with
+// -Command & 'pi.ps1' @args and forward every original arg unchanged —
+// including a multi-line value. The task prompt travels on stdin (#6457) and
+// -File re-encodes stdin under the console codepage (#7355), so every Pi
+// invocation takes the -Command route; @args also preserves the #3306
+// multi-line custom option value guarantee.
+func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellCommand(t *testing.T) {
 	dir := t.TempDir()
 	cmdPath := filepath.Join(dir, "pi.cmd")
 	ps1Path := filepath.Join(dir, "pi.ps1")
@@ -49,17 +49,62 @@ func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) 
 	wantArgs := append([]string{
 		"-NoProfile",
 		"-ExecutionPolicy", "Bypass",
-		"-File", ps1Path,
+		"-Command", "& '" + ps1Path + "' @args",
 	}, args...)
 	if !reflect.DeepEqual(gotArgs, wantArgs) {
 		t.Errorf("argv mismatch:\n got  %#v\n want %#v", gotArgs, wantArgs)
 	}
 
 	// Explicit check: the last argv (the positional prompt) must still
-	// contain every line of the original multi-line prompt. This is the
-	// concrete property #3306 violates when cmd.exe re-tokenises %*.
+	// contain every line of the original multi-line prompt — forwarded
+	// verbatim through @args.
 	if gotArgs[len(gotArgs)-1] != multiLinePrompt {
 		t.Errorf("multi-line prompt was mangled:\n got  %q\n want %q", gotArgs[len(gotArgs)-1], multiLinePrompt)
+	}
+	for _, arg := range gotArgs {
+		if arg == "-File" {
+			t.Fatalf("task runs must not use powershell -File (re-encodes stdin, #7355): %#v", gotArgs)
+		}
+	}
+}
+
+// TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand pins the model
+// discovery path: --mode rpc takes the same -Command route as every other Pi
+// invocation, since the route is now unconditional.
+func TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "pi.cmd")
+	ps1Path := filepath.Join(dir, "pi.ps1")
+	writeFile(t, cmdPath, "@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0pi.ps1\" %*\r\n")
+	writeFile(t, ps1Path, "# fake pi.ps1\r\n")
+
+	fakePS := filepath.Join(dir, "powershell.exe")
+	writeFile(t, fakePS, "")
+	stubPowerShell(t, fakePS, true)
+
+	args := []string{"--mode", "rpc", "--no-session", "--no-skills"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	gotExec, gotArgs, ok := platformPiInvocation(cmdPath, args, logger)
+	if !ok {
+		t.Fatalf("expected platform rewrite to be applied, got ok=false")
+	}
+	if gotExec != fakePS {
+		t.Errorf("argv0: got %q want %q", gotExec, fakePS)
+	}
+
+	wantArgs := append([]string{
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-Command", "& '" + ps1Path + "' @args",
+	}, args...)
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Errorf("argv mismatch:\n got  %#v\n want %#v", gotArgs, wantArgs)
+	}
+	for _, arg := range gotArgs {
+		if arg == "-File" {
+			t.Fatalf("RPC model discovery must not use powershell -File: %#v", gotArgs)
+		}
 	}
 }
 

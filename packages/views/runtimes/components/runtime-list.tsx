@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
+  ExternalLink,
   Globe,
   Loader2,
   MoreHorizontal,
@@ -28,6 +29,7 @@ import {
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import {
   deriveRuntimeHealth,
+  isRuntimeUsableForUser,
   runtimeProfileListOptions,
   runtimeUsageOptions,
 } from "@multica/core/runtimes";
@@ -36,6 +38,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -50,7 +53,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { useRowLink } from "../../navigation";
+import { useIntentNavigate, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { ProviderLogo } from "./provider-logo";
@@ -340,7 +343,7 @@ function HealthCell({
   }
 
   const health = deriveRuntimeHealth(runtime, now);
-  const offline = health === "offline" || health === "about_to_gc";
+  const offline = health === "offline" || health === "long_offline";
   const lastSeen = runtime.last_seen_at ? timeAgo(runtime.last_seen_at) : null;
   const active = workload.runningCount + workload.queuedCount;
 
@@ -373,13 +376,27 @@ function HealthCell({
 // page are large.
 const COST_CELL_DAYS = 14;
 
-export function CostCell({ runtimeId }: { runtimeId: string }) {
+export function canReadRuntimeUsage(
+  runtime: AgentRuntime,
+  currentUserId: string | null,
+): boolean {
+  return isRuntimeUsableForUser(runtime, currentUserId);
+}
+
+export function CostCell({
+  runtimeId,
+  enabled,
+}: {
+  runtimeId: string;
+  enabled: boolean;
+}) {
   const { t, i18n } = useT("runtimes");
   const tz = useViewingTimezone();
   const locales = i18n.resolvedLanguage ?? i18n.language;
-  const { data: usage = [] } = useQuery(
-    runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
-  );
+  const { data: usage = [] } = useQuery({
+    ...runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
+    enabled,
+  });
   const cost7d = useMemo(() => computeCostInWindow(usage, 7, tz), [usage, tz]);
   const costPrev7d = useMemo(
     () => computeCostInWindow(usage, 7, tz, 7),
@@ -533,18 +550,26 @@ export function RuntimeRowMenu({
   profile,
   wsId,
   canDelete,
+  detailHref,
 }: {
   runtime: AgentRuntime;
   profile: RuntimeProfile | null;
   wsId: string;
   canDelete: boolean;
+  /**
+   * Detail destination for the row, omitted when the row has none — pending
+   * custom runtimes are not navigable, mirroring the list's own row link.
+   */
+  detailHref?: string;
 }) {
   const { t } = useT("runtimes");
+  const { t: tCommon } = useT("common");
+  const intentNavigate = useIntentNavigate();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
-  // Delete is currently the only row action; if the row can't run it, drop
-  // the kebab entirely so the column doesn't render an empty popover. We
+  // Delete is the row's only management action; if the row can't run it, drop
+  // the kebab entirely so the column doesn't render a near-empty popover. We
   // used to also hide it for self-healing runtimes (live local daemon
   // re-registers within seconds), but MUL-3352 surfaced that owners read
   // a missing kebab as "I lost my permission" rather than "the daemon
@@ -570,6 +595,17 @@ export function RuntimeRowMenu({
           }
         />
         <DropdownMenuContent align="end" className="w-40">
+          {detailHref && (
+            <>
+              <DropdownMenuItem
+                onClick={() => intentNavigate(detailHref, "foreground-tab")}
+              >
+                <ExternalLink aria-hidden="true" className="h-3.5 w-3.5" />
+                {tCommon(($) => $.navigation.open_in_new_tab)}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           {isCustomRuntime && profile && (
             <DropdownMenuItem onClick={() => setEditOpen(true)}>
               <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
@@ -743,16 +779,15 @@ export function RuntimeList({
         </ListGridHeader>
         {rows.map((row) => {
           const pending = isPendingCustomRuntime(row.runtime);
+          const detailHref = pending
+            ? undefined
+            : runtimeHref?.(row.runtime.id) ??
+              wsPaths.runtimeDetail(row.runtime.id);
           return (
             <ListGridRow
               key={row.runtime.id}
               className={pending ? "cursor-default" : "cursor-pointer"}
-              {...(!pending
-                ? rowLink(
-                    runtimeHref?.(row.runtime.id) ??
-                      wsPaths.runtimeDetail(row.runtime.id),
-                  )
-                : {})}
+              {...(detailHref ? rowLink(detailHref) : {})}
             >
               <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />
               <HealthCell
@@ -789,7 +824,10 @@ export function RuntimeList({
                     <span className="text-caption text-faint-foreground">—</span>
                   </div>
                 ) : (
-                  <CostCell runtimeId={row.runtime.id} />
+                  <CostCell
+                    runtimeId={row.runtime.id}
+                    enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
+                  />
                 )}
               </ListGridCell>
               <ListGridCell className="hidden @2xl:flex">
@@ -805,6 +843,7 @@ export function RuntimeList({
                     profile={row.profile}
                     wsId={wsId}
                     canDelete={row.canDelete}
+                    detailHref={detailHref}
                   />
                 </span>
               </ListGridCell>

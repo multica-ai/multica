@@ -9,8 +9,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -48,6 +50,26 @@ func TestDaemonAlive(t *testing.T) {
 	}
 }
 
+func TestDaemonLocalCommandsFailClosedInTaskContext(t *testing.T) {
+	t.Setenv("MULTICA_AGENT_ID", "agent-test")
+	t.Setenv("MULTICA_TASK_ID", "task-test")
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
+
+	cases := map[string]func() error{
+		"probe-runtimes": func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
+		"start":          func() error { return runDaemonStart(daemonStartCmd, nil) },
+		"restart":        func() error { return runDaemonRestart(daemonRestartCmd, nil) },
+		"stop":           func() error { return runDaemonStop(daemonStopCmd, nil) },
+		"logs":           func() error { return runDaemonLogs(daemonLogsCmd, nil) },
+	}
+	for name, run := range cases {
+		err := run()
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("daemon %s error = %v, want task-context guard", name, err)
+		}
+	}
+}
+
 func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	t.Parallel()
 
@@ -80,6 +102,87 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	want := []string{"daemon", "start", "--foreground", "--codex-handshake-timeout", (42 * time.Second).String()}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("workspaces-root", "", "")
+	if err := cmd.Flags().Set("workspaces-root", "/Volumes/Agent Workspaces"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--workspaces-root", "/Volumes/Agent Workspaces"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestBuildDaemonStartArgsForwardsNoAutoReload matters because `daemon start`
+// re-execs itself as a foreground child: a flag the parent parsed but doesn't
+// forward is silently dropped, so the opt-out would appear to work and not.
+func TestBuildDaemonStartArgsForwardsNoAutoReload(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Bool("no-auto-reload", false, "")
+	if err := cmd.Flags().Set("no-auto-reload", "true"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--no-auto-reload"}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
+// TestNoAutoReloadFlagRegisteredOnBothDaemonCommands: `daemon restart` mirrors
+// every `daemon start` flag, and a knob registered on only one of them fails at
+// parse time for users who restart rather than start.
+func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		if cmd.Flags().Lookup("no-auto-reload") == nil {
+			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
+		}
+	}
+}
+
+func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		if cmd.Flags().Lookup("workspaces-root") == nil {
+			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
+		}
+	}
+}
+
+// TestPrintDaemonStatusExplainsDeferredRestart: when the daemon has confirmed a
+// version change but is still busy, `daemon status` is where a user finds out.
+// The row is absent otherwise so it reads as an explanation, not a status line.
+func TestPrintDaemonStatusExplainsDeferredRestart(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		"status":      "running",
+		"pid":         float64(1234),
+		"uptime":      "1h2m3s",
+		"cli_version": "0.3.7",
+	}
+
+	var idle bytes.Buffer
+	printDaemonStatusReport(&idle, "Daemon", base)
+	if strings.Contains(idle.String(), "Restart pending") {
+		t.Errorf("status output = %q, want no restart row when nothing is pending", idle.String())
+	}
+
+	base["reload_pending_reason"] = "multica binary on disk reports 0.3.8, running 0.3.7"
+	var pending bytes.Buffer
+	printDaemonStatusReport(&pending, "Daemon", base)
+	if !strings.Contains(pending.String(), "0.3.8") {
+		t.Errorf("status output = %q, want the pending restart reason", pending.String())
 	}
 }
 
@@ -546,7 +649,7 @@ func TestPrintDiskUsageOtherRootsHintSuggestsProfilesWithTasks(t *testing.T) {
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
-	}, "", "")
+	}, "", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "Other workspace roots contain task directories:") {
@@ -588,7 +691,7 @@ func TestPrintDiskUsageOtherRootsHintFiresWhenCurrentRootNonEmpty(t *testing.T) 
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
 		TotalTaskCount: 7, // current root is NOT empty
-	}, "", "")
+	}, "", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "multica --profile desktop-host daemon disk-usage") {
@@ -606,11 +709,35 @@ func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "multica_workspaces_named"),
-	}, "named", "")
+	}, "named", "", false)
 
 	got := out.String()
 	if !strings.Contains(got, "multica daemon disk-usage  #") {
 		t.Fatalf("hint output = %q, want default profile command", got)
+	}
+}
+
+func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
+	home := t.TempDir()
+	customRoot := filepath.Join(t.TempDir(), "custom-profile-root")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: customRoot}, "custom"); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+	writeDiskUsageFile(t, filepath.Join(customRoot, "ws1", "task1", "workdir", "main.go"))
+
+	var out bytes.Buffer
+	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
+		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
+	}, "", "", false)
+
+	got := out.String()
+	if !strings.Contains(got, customRoot) {
+		t.Fatalf("hint output = %q, want configured root %q", got, customRoot)
+	}
+	if strings.Contains(got, filepath.Join(home, "multica_workspaces_custom")) {
+		t.Fatalf("hint output = %q, must not suggest the profile's old default root", got)
 	}
 }
 
@@ -625,7 +752,7 @@ func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 	var out bytes.Buffer
 	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
 		WorkspacesRoot: filepath.Join(home, "custom-root"),
-	}, "", filepath.Join(home, "custom-root"))
+	}, "", filepath.Join(home, "custom-root"), false)
 
 	if got := out.String(); got != "" {
 		t.Fatalf("hint output = %q, want no hint for explicit root override", got)
@@ -739,5 +866,140 @@ func writeDiskUsageFile(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestVersionTemplateMatchesDaemonProbe pins a contract that spans two packages
+// and would otherwise break in silence.
+//
+// The daemon's auto-reload check runs `<binary> --version` and parses the result
+// back into a version string it compares against its own compile-time version
+// (MUL-3269). That only works while cobra's version template keeps rendering
+// "multica <version> ..." as its first line — a reasonable-looking edit here
+// would leave the daemon reading a version that never matches, restarting on
+// every check, and nothing else in the suite would notice.
+func TestVersionTemplateMatchesDaemonProbe(t *testing.T) {
+	tmpl, err := template.New("version").Parse(rootCmd.VersionTemplate())
+	if err != nil {
+		t.Fatalf("parse version template: %v", err)
+	}
+	var rendered bytes.Buffer
+	if err := tmpl.Execute(&rendered, rootCmd); err != nil {
+		t.Fatalf("render version template: %v", err)
+	}
+
+	if got := daemon.ParseSelfVersion(rendered.String()); got != version {
+		t.Fatalf("daemon.ParseSelfVersion(%q) = %q, want the build version %q — "+
+			"the --version template and the auto-reload probe have diverged",
+			rendered.String(), got, version)
+	}
+}
+
+// `daemon status` is allowed inside a task, but only against the daemon that
+// hosts it. healthPortForProfile hashes whatever --profile it is handed, so a
+// task must take the port the daemon injected instead of re-deriving one:
+// re-deriving reports the default daemon when the task is actually hosted by a
+// named-profile daemon, and lets a task probe an unrelated one on purpose.
+func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
+	const injectedPort = 19601
+
+	t.Run("outside a task derives the port from the profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if want := healthPortForProfile(""); got != want {
+			t.Fatalf("health port = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("port-only host context derives the port from the profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("profile", "staging"); err != nil {
+			t.Fatalf("set profile flag: %v", err)
+		}
+		got, err := daemonStatusHealthPort(cmd)
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if want := healthPortForProfile("staging"); got != want {
+			t.Fatalf("health port = %d, want profile-derived %d", got, want)
+		}
+		if got == injectedPort {
+			t.Fatal("port-only host context used the stale injected port")
+		}
+	})
+
+	t.Run("inside a task uses the injected port", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_TASK_ID", "task-test")
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		got, err := daemonStatusHealthPort(testCmd())
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if got != injectedPort {
+			t.Fatalf("health port = %d, want the injected %d", got, injectedPort)
+		}
+		if got == healthPortForProfile("") {
+			t.Fatal("injected port collided with the profile-derived port; the test proves nothing")
+		}
+	})
+
+	t.Run("inside a task rejects --profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_TASK_ID", "task-test")
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("profile", "staging"); err != nil {
+			t.Fatalf("set profile flag: %v", err)
+		}
+		_, err := daemonStatusHealthPort(cmd)
+		if err == nil || !strings.Contains(err.Error(), "not available inside a daemon-managed task") {
+			t.Fatalf("error = %v, want a --profile rejection", err)
+		}
+	})
+
+	t.Run("inside a task fails closed on a missing or invalid port", func(t *testing.T) {
+		for name, value := range map[string]string{"missing": "", "invalid": "not-a-port", "zero": "0"} {
+			t.Run(name, func(t *testing.T) {
+				t.Chdir(t.TempDir())
+				clearDaemonTaskEnv(t)
+				t.Setenv("MULTICA_TASK_ID", "task-test")
+				t.Setenv("MULTICA_DAEMON_PORT", value)
+
+				if _, err := daemonStatusHealthPort(testCmd()); err == nil {
+					t.Fatalf("MULTICA_DAEMON_PORT=%q resolved a port, want fail closed", value)
+				}
+			})
+		}
+	})
+}
+
+// clearDaemonTaskEnv drops every daemon-injected marker so a subtest starts
+// from a known context and can opt back in to exactly the ones it needs.
+func clearDaemonTaskEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"MULTICA_AGENT_ID",
+		"MULTICA_TASK_ID",
+		"MULTICA_DAEMON_PORT",
+		"MULTICA_TASK_CONFIG_ROOT",
+		daemon.TaskWorkspacesRootEnv,
+	} {
+		t.Setenv(key, "")
 	}
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -16,7 +16,6 @@ import {
   Rows3,
   SignalHigh,
   SlidersHorizontal,
-  X,
   Tag,
   Table2,
   User,
@@ -26,6 +25,7 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -49,8 +49,16 @@ import {
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import { Switch } from "@multica/ui/components/ui/switch";
 import {
-  ALL_STATUSES,
-  PRIORITY_ORDER,
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+} from "@multica/ui/components/ui/select";
+import { Toggle } from "@multica/ui/components/ui/toggle";
+import {
+  PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
@@ -67,6 +75,7 @@ import type {
   IssueTableFacetsResponse,
   WorkingAgentSummary,
 } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -86,13 +95,29 @@ import {
   type ViewMode,
 } from "@multica/core/issues/stores/view-store";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { FilterChipsBar } from "./filter-chips-bar";
+import { SaveViewDialog, type SaveViewScope } from "./save-view-dialog";
+import { ViewBar } from "./view-bar";
+import { toast } from "sonner";
+import { useActiveIssueView } from "@multica/core/issue-views/use-active-view";
+import { useAuthStore } from "@multica/core/auth";
+import type { IssueViewScope } from "@multica/core/issue-views/queries";
+import { actorFilterKey, baselineFromQuery, type IssueViewBaseline } from "@multica/core/issue-views/baseline";
+import type { IssueView } from "@multica/core/api/schemas";
 import { addDaysDateOnly, dateOnlyToLocalDate, formatDateOnly, toDateOnly, todayDateOnly } from "@multica/core/issues/date";
 import {
+  useIssuesScope,
   useIssuesScopeStore,
   type IssuesScope,
+  type IssuesScopePageKey,
 } from "@multica/core/issues/stores/issues-scope-store";
+import { actorKindForViewVariant } from "@multica/core/issues/surface/scope";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useStatusOptions } from "../utils/status-options";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -107,27 +132,46 @@ type LocalDateRange = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getActiveFilterCount(state: {
-  statusFilters: string[];
-  priorityFilters: string[];
-  assigneeFilters: ActorFilterValue[];
-  includeNoAssignee: boolean;
-  creatorFilters: ActorFilterValue[];
-  projectFilters: string[];
-  includeNoProject: boolean;
-  labelFilters: string[];
-  propertyFilters?: Record<string, string[]>;
-  dateFilter?: IssueDateFilter | null;
-}) {
+function getActiveFilterCount(
+  state: {
+    statusFilters: string[];
+    priorityFilters: string[];
+    assigneeFilters: ActorFilterValue[];
+    includeNoAssignee: boolean;
+    creatorFilters: ActorFilterValue[];
+    projectFilters: string[];
+    includeNoProject: boolean;
+    labelFilters: string[];
+    propertyFilters?: Record<string, PropertyFilterValue[]>;
+    dateFilter?: IssueDateFilter | null;
+  },
+  // Inside a saved view only the user's additions on top of the view's own
+  // query count — the baseline is the view, not "active filtering".
+  baseline?: IssueViewBaseline,
+) {
   let count = 0;
-  if (state.statusFilters.length > 0) count++;
-  if (state.priorityFilters.length > 0) count++;
-  if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
-  if (state.creatorFilters.length > 0) count++;
-  if (state.projectFilters.length > 0 || state.includeNoProject) count++;
-  if (state.labelFilters.length > 0) count++;
-  for (const selected of Object.values(state.propertyFilters ?? {})) {
-    if (selected.length > 0) count++;
+  const delta = (values: string[], fixed?: Set<string>) =>
+    fixed ? values.filter((v) => !fixed.has(v)).length : values.length;
+  if (delta(state.statusFilters, baseline?.status) > 0) count++;
+  if (delta(state.priorityFilters, baseline?.priority) > 0) count++;
+  const assigneeDelta =
+    delta(state.assigneeFilters.map(actorFilterKey), baseline?.assignee) > 0 ||
+    (state.includeNoAssignee && !(baseline?.includeNoAssignee ?? false));
+  if (assigneeDelta) count++;
+  if (delta(state.creatorFilters.map(actorFilterKey), baseline?.creator) > 0) count++;
+  const projectDelta =
+    delta(state.projectFilters, baseline?.project) > 0 ||
+    (state.includeNoProject && !(baseline?.includeNoProject ?? false));
+  if (projectDelta) count++;
+  if (delta(state.labelFilters, baseline?.label) > 0) count++;
+  for (const [id, selected] of Object.entries(state.propertyFilters ?? {})) {
+    // Property members can be operator objects — compare through their
+    // canonical keys so a view-fixed operator still cancels out.
+    const fixed = baseline?.property.get(id);
+    const deltaCount = fixed
+      ? selected.filter((v) => !fixed.has(propertyFilterValueKey(v))).length
+      : selected.length;
+    if (deltaCount > 0) count++;
   }
   if (state.dateFilter) count++;
   return count;
@@ -273,6 +317,9 @@ function ActorSubContent({
   onToggleNoAssignee,
   noAssigneeCount,
   showSquads = true,
+  fixedKeys,
+  noAssigneeFixed = false,
+  fixedTitle,
 }: {
   counts: Map<string, number>;
   selected: ActorFilterValue[];
@@ -282,6 +329,10 @@ function ActorSubContent({
   onToggleNoAssignee?: () => void;
   noAssigneeCount?: number;
   showSquads?: boolean;
+  /** Actor keys (`type:id`) fixed by the open saved view. */
+  fixedKeys?: Set<string>;
+  noAssigneeFixed?: boolean;
+  fixedTitle?: string;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
@@ -321,6 +372,8 @@ function ActorSubContent({
           (!query || "no assignee".includes(query) || "unassigned".includes(query)) && (
             <DropdownMenuCheckboxItem
               checked={includeNoAssignee ?? false}
+              disabled={noAssigneeFixed}
+              title={noAssigneeFixed ? fixedTitle : undefined}
               onCheckedChange={() => onToggleNoAssignee?.()}
               className={FILTER_ITEM_CLASS}
             >
@@ -345,6 +398,8 @@ function ActorSubContent({
                 <DropdownMenuCheckboxItem
                   key={m.user_id}
                   checked={checked}
+                  disabled={fixedKeys?.has(`member:${m.user_id}`) === true}
+                  title={fixedKeys?.has(`member:${m.user_id}`) === true ? fixedTitle : undefined}
                   onCheckedChange={() =>
                     onToggle({ type: "member", id: m.user_id })
                   }
@@ -374,6 +429,8 @@ function ActorSubContent({
                 <DropdownMenuCheckboxItem
                   key={a.id}
                   checked={checked}
+                  disabled={fixedKeys?.has(`agent:${a.id}`) === true}
+                  title={fixedKeys?.has(`agent:${a.id}`) === true ? fixedTitle : undefined}
                   onCheckedChange={() =>
                     onToggle({ type: "agent", id: a.id })
                   }
@@ -403,6 +460,8 @@ function ActorSubContent({
                 <DropdownMenuCheckboxItem
                   key={s.id}
                   checked={checked}
+                  disabled={fixedKeys?.has(`squad:${s.id}`) === true}
+                  title={fixedKeys?.has(`squad:${s.id}`) === true ? fixedTitle : undefined}
                   onCheckedChange={() =>
                     onToggle({ type: "squad", id: s.id })
                   }
@@ -443,6 +502,9 @@ function ProjectSubContent({
   includeNoProject,
   onToggleNoProject,
   noProjectCount,
+  fixedIds,
+  noProjectFixed = false,
+  fixedTitle,
 }: {
   counts: Map<string, number>;
   selected: string[];
@@ -450,6 +512,9 @@ function ProjectSubContent({
   includeNoProject: boolean;
   onToggleNoProject: () => void;
   noProjectCount: number;
+  fixedIds?: Set<string>;
+  noProjectFixed?: boolean;
+  fixedTitle?: string;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
@@ -477,6 +542,8 @@ function ProjectSubContent({
         {(!query || "no project".includes(query) || "unassigned".includes(query)) && (
           <DropdownMenuCheckboxItem
             checked={includeNoProject}
+            disabled={noProjectFixed}
+            title={noProjectFixed ? fixedTitle : undefined}
             onCheckedChange={() => onToggleNoProject()}
             className={FILTER_ITEM_CLASS}
           >
@@ -498,6 +565,8 @@ function ProjectSubContent({
             <DropdownMenuCheckboxItem
               key={p.id}
               checked={checked}
+              disabled={fixedIds?.has(p.id) === true}
+              title={fixedIds?.has(p.id) === true ? fixedTitle : undefined}
               onCheckedChange={() => onToggle(p.id)}
               className={FILTER_ITEM_CLASS}
             >
@@ -531,10 +600,14 @@ function LabelSubContent({
   counts,
   selected,
   onToggle,
+  fixedIds,
+  fixedTitle,
 }: {
   counts: Map<string, number>;
   selected: string[];
   onToggle: (labelId: string) => void;
+  fixedIds?: Set<string>;
+  fixedTitle?: string;
 }) {
   const { t } = useT("issues");
   const [search, setSearch] = useState("");
@@ -564,6 +637,8 @@ function LabelSubContent({
             <DropdownMenuCheckboxItem
               key={l.id}
               checked={checked}
+              disabled={fixedIds?.has(l.id) === true}
+              title={fixedIds?.has(l.id) === true ? fixedTitle : undefined}
               onCheckedChange={() => onToggle(l.id)}
               className={FILTER_ITEM_CLASS}
             >
@@ -591,31 +666,286 @@ function LabelSubContent({
 /**
  * Option checkboxes for one custom property inside the Filter dropdown.
  * Select/multi_select list the definition's options (dot + name); checkbox
- * definitions expose the "true"/"false" pseudo-options with Yes/No labels.
+ * definitions expose the "true"/"false" pseudo-options with Yes/No labels;
+ * actor definitions have no config options at all, so their candidates come
+ * from the member directory instead, with the signed-in member first so
+ * "this property is me" stays one click away.
  */
+
+// Keyboard guard for the inline operator radios — same contract as the
+// scalar input below: Escape/Tab belong to the menu (close / move focus);
+// every other navigation or selection key must not bubble into the popup's
+// typeahead / list-navigation handlers.
+function stopScalarMenuKeys(event: React.KeyboardEvent) {
+  if (event.key === "Escape" || event.key === "Tab") return;
+  event.stopPropagation();
+}
 function PropertyFilterOptions({
   property,
   counts,
   selected,
   onToggle,
+  onSetValues,
+  fixedIds,
+  fixedTitle,
 }: {
   property: IssueProperty;
   counts: Map<string, number> | undefined;
-  selected: string[];
+  selected: PropertyFilterValue[];
   onToggle: (optionId: string) => void;
+  /** Replace the property's full filter value set (scalar types only). */
+  onSetValues: (optionIds: PropertyFilterValue[]) => void;
+  fixedIds?: Set<string>;
+  fixedTitle?: string;
 }) {
   const { t } = useT("issues");
-  const options =
-    property.type === "checkbox"
-      ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
-        ]
-      : (property.config.options ?? []).map((option) => ({
+  const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const actorProperty = isActorPropertyType(property.type);
+  // Scalar properties (text / number / date / url) have no option list — the
+  // filter menu shows a value input plus "No value".
+  const { data: actorMembers = [] } = useQuery({
+    ...memberListOptions(wsId),
+    enabled: actorProperty,
+  });
+
+  const actorOptions = useMemo(() => {
+    if (!actorProperty) return [];
+    return actorMembers
+      .slice()
+      .sort((a, b) => {
+        if (a.user_id === currentUserId) return -1;
+        if (b.user_id === currentUserId) return 1;
+        return 0;
+      })
+      .map((m) => ({
+        id: formatActorRef("member", m.user_id),
+        name: m.name,
+        actorType: "member" as const,
+        actorId: m.user_id,
+      }));
+  }, [actorProperty, actorMembers, currentUserId]);
+
+  // "No value" is offered for every property type: it selects issues where the
+  // property is unset, the inverse of picking one of the options below.
+  const noValueOption = {
+    id: NO_PROPERTY_VALUE,
+    name: t(($) => $.pickers.custom_property.none),
+    color: undefined as string | undefined,
+    actorType: undefined as string | undefined,
+    actorId: undefined as string | undefined,
+  };
+  // Scalar value state lives at the top level so the hooks stay unconditional
+  // (Rules of Hooks): it is only rendered for text / number / date / url, but
+  // must be declared regardless of which branch runs. The draft syncs to the
+  // committed scalar member whenever that changes, so a filter cleared or
+  // rewritten elsewhere cannot be written back from a stale input.
+  const committedMember = selected.find((member) => member !== NO_PROPERTY_VALUE);
+  const committedScalar =
+    typeof committedMember === "object" ? committedMember.value : (committedMember ?? "");
+  const committedOp: PropertyFilterOp | "is" =
+    typeof committedMember === "object" ? committedMember.op : "is";
+  const hasNoValue = selected.includes(NO_PROPERTY_VALUE);
+  const [draft, setDraft] = useState(committedScalar);
+  useEffect(() => setDraft(committedScalar), [committedScalar]);
+  // Operator picked in the open menu but not yet committed; null defers to the
+  // committed member (equality when there is none). Resets whenever the
+  // committed member changes — including right after this menu commits — so a
+  // value rewritten elsewhere can't inherit a stale operator.
+  const [pendingOp, setPendingOp] = useState<PropertyFilterOp | "is" | null>(null);
+  const committedKey =
+    committedMember === undefined
+      ? ""
+      : typeof committedMember === "object"
+        ? `op:${committedMember.op}:${committedMember.value}`
+        : `eq:${committedMember}`;
+  useEffect(() => setPendingOp(null), [committedKey]);
+  const options = [
+    ...(actorProperty
+      ? actorOptions.map((option) => ({
           id: option.id,
           name: option.name,
-          color: option.color as string | undefined,
-        }));
+          color: undefined as string | undefined,
+          actorType: option.actorType as string | undefined,
+          actorId: option.actorId as string | undefined,
+        }))
+      : property.type === "checkbox"
+        ? [
+            { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+            { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
+          ]
+        : (property.config.options ?? []).map((option) => ({
+            id: option.id,
+            name: option.name,
+            color: option.color as string | undefined,
+            actorType: undefined as string | undefined,
+            actorId: undefined as string | undefined,
+          }))),
+    noValueOption,
+  ];
+
+  if (isScalarPropertyType(property.type)) {
+    const placeholder =
+      property.type === "url"
+        ? t(($) => $.pickers.custom_property.url_placeholder)
+        : property.type === "number"
+          ? t(($) => $.pickers.custom_property.number_placeholder)
+          : t(($) => $.pickers.custom_property.value_placeholder);
+    const noneCount = counts?.get(NO_PROPERTY_VALUE) ?? 0;
+    // A saved view locks this dimension: the value (with its operator) AND
+    // "No value" are both part of the view's identity, so neither can be
+    // edited in place.
+    const locked = fixedIds !== undefined && fixedIds.size > 0;
+    // "is" is equality and commits a bare string — the pre-operator shape.
+    // Every other op commits an operator object; the server and matcher both
+    // treat unknown shapes conservatively.
+    const effectiveOp: PropertyFilterOp | "is" = pendingOp ?? committedOp;
+    const scalarOperatorLabel = (op: PropertyFilterOp): string => {
+      if (op === "contains") return t(($) => $.pickers.custom_property.op_contains);
+      if (op === "before") return t(($) => $.pickers.custom_property.op_before);
+      if (op === "after") return t(($) => $.pickers.custom_property.op_after);
+      return PROPERTY_FILTER_OP_SYMBOLS[op] ?? op;
+    };
+    const opButtons: { op: PropertyFilterOp | "is"; label: string }[] = [
+      {
+        op: "is",
+        label:
+          property.type === "number"
+            ? "="
+            : t(($) => $.pickers.custom_property.op_is),
+      },
+      ...(PROPERTY_FILTER_OPS_BY_TYPE[property.type] ?? []).map((op) => ({
+        op,
+        label: scalarOperatorLabel(op),
+      })),
+    ];
+    const commitValue = (raw: string, op: PropertyFilterOp | "is" = effectiveOp) => {
+      const value = raw.trim();
+      // NO_PROPERTY_VALUE is the reserved "no value" sentinel — it cannot be
+      // filtered as a literal value. The value and "No value" compose like
+      // every other property type: committing a value replaces only the value
+      // member and preserves "No value" membership.
+      if (value === NO_PROPERTY_VALUE) return;
+      const member: PropertyFilterValue | undefined = value
+        ? op === "is"
+          ? value
+          : { op, value }
+        : undefined;
+      onSetValues([
+        ...(member ? [member] : []),
+        ...(hasNoValue ? [NO_PROPERTY_VALUE] : []),
+      ]);
+    };
+    const applyOp = (op: PropertyFilterOp | "is") => {
+      // An explicit click commits the current draft with the chosen op, unlike
+      // the input which waits for Enter/blur. With an empty draft nothing
+      // commits, so the choice rides on pendingOp and the next Enter/blur
+      // commit carries it — killing pendingOp here would silently downgrade
+      // that later commit back to equality.
+      setPendingOp(op);
+      commitValue(draft, op);
+    };
+    return (
+      <>
+        {opButtons.length > 1 && (
+          <div
+            role="radiogroup"
+            aria-label={t(($) => $.pickers.custom_property.operator_label)}
+            className="flex flex-wrap gap-1 px-2 pt-1.5"
+          >
+            {opButtons.map(({ op, label }) => {
+              const active = effectiveOp === op;
+              return (
+                <label
+                  key={op}
+                  className={locked ? "cursor-not-allowed" : "cursor-pointer"}
+                >
+                  <input
+                    type="radio"
+                    name={`property-filter-op-${property.id}`}
+                    value={op}
+                    checked={active}
+                    disabled={locked}
+                    onChange={() => applyOp(op)}
+                    onKeyDown={stopScalarMenuKeys}
+                    className="peer sr-only"
+                  />
+                  <span
+                    className={`inline-flex h-6 items-center rounded-md px-1.5 text-caption transition-colors peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-ring ${
+                      active
+                        ? "bg-accent font-medium text-foreground"
+                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div className="px-2 py-1.5">
+          <Input
+            type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"}
+            step={property.type === "number" ? "any" : undefined}
+            inputMode={property.type === "number" ? "decimal" : undefined}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={(event) => {
+              // Clicking the "No value" menu item moves focus off the input,
+              // firing blur first. That premature commit would flip the
+              // checkbox's controlled state before its click handler reads it
+              // — so when focus moves into a menu item in this popup, skip the
+              // blur commit and let onCheckedChange decide from the pre-blur
+              // state.
+              const next = event.relatedTarget;
+              const movedToMenuItem =
+                next instanceof HTMLElement &&
+                next.closest('[role="menuitemcheckbox"]') !== null;
+              if (!movedToMenuItem) commitValue(draft);
+            }}
+            onKeyDown={(event) => {
+              // Base UI's menu popup merges typeahead + list-navigation handlers
+              // onto the role="menu" element and stopEvent()s every printable
+              // key — without stopping propagation, the input would swallow no
+              // characters at all (and arrow keys on number/date inputs would
+              // be hijacked). Escape/Tab are left for the menu to close/move
+              // focus; Enter commits and still needs stopPropagation so it does
+              // not bubble up and activate the highlighted "No value" item.
+              if (event.key === "Escape" || event.key === "Tab") return;
+              if (event.key === "Enter") commitValue(draft);
+              event.stopPropagation();
+            }}
+            disabled={locked}
+            placeholder={placeholder}
+            className="h-8"
+          />
+        </div>
+        <DropdownMenuCheckboxItem
+          checked={hasNoValue}
+          disabled={locked}
+          onCheckedChange={(checked) => {
+            // "No value" toggles membership in the same OR-set as the value —
+            // checking/unchecking never touches the committed value member, so
+            // unchecking restores it without any draft round-trip.
+            const valueMembers = selected.filter((id) => id !== NO_PROPERTY_VALUE);
+            onSetValues(
+              checked
+                ? [...valueMembers, NO_PROPERTY_VALUE]
+                : valueMembers,
+            );
+          }}
+          className={FILTER_ITEM_CLASS}
+        >
+          <HoverCheck checked={hasNoValue} />
+          <span className="truncate">{noValueOption.name}</span>
+          {noneCount > 0 && (
+            <span className="ml-auto text-caption text-muted-foreground">{noneCount}</span>
+          )}
+        </DropdownMenuCheckboxItem>
+      </>
+    );
+  }
 
   return (
     <>
@@ -626,10 +956,15 @@ function PropertyFilterOptions({
           <DropdownMenuCheckboxItem
             key={option.id}
             checked={checked}
+            disabled={fixedIds?.has(option.id) === true}
+            title={fixedIds?.has(option.id) === true ? fixedTitle : undefined}
             onCheckedChange={() => onToggle(option.id)}
             className={FILTER_ITEM_CLASS}
           >
             <HoverCheck checked={checked} />
+            {option.actorType && option.actorId && (
+              <ActorAvatar actorType={option.actorType} actorId={option.actorId} size="sm" />
+            )}
             {option.color && (
               <span
                 className="size-2.5 shrink-0 rounded-full"
@@ -662,6 +997,9 @@ function DateSubContent({
 }) {
   const { t } = useT("issues");
   const [field, setField] = useState<IssueDateField>(value?.field ?? "created_at");
+  // Controlled so Apply can dismiss the calendar while the filter menu
+  // itself stays open (menu-wide rule: filter edits never close the menu).
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [range, setRange] = useState<LocalDateRange | undefined>(() => {
     if (!value) return undefined;
     const from = dateOnlyToLocalDate(value.from);
@@ -690,6 +1028,7 @@ function DateSubContent({
       from: toDateOnly(from),
       to: toDateOnly(to),
     });
+    setCalendarOpen(false);
   };
 
   return (
@@ -698,7 +1037,10 @@ function DateSubContent({
         <DropdownMenuLabel>{t(($) => $.filters.date_field)}</DropdownMenuLabel>
         <DropdownMenuRadioGroup value={field} onValueChange={(next) => setFieldValue(next as IssueDateField)}>
           {(["created_at", "updated_at"] as const).map((option) => (
-            <DropdownMenuRadioItem key={option} value={option}>
+            // Picking the date field is a parameter for the presets below, not
+            // the final action — keep the menu open so the user can continue
+            // to a preset or the custom range.
+            <DropdownMenuRadioItem key={option} value={option} closeOnClick={false}>
               {t(($) => $.filters[DATE_FIELD_LABEL_KEY[option]])}
             </DropdownMenuRadioItem>
           ))}
@@ -706,18 +1048,21 @@ function DateSubContent({
       </DropdownMenuGroup>
 
       <DropdownMenuSeparator />
-      <DropdownMenuItem onClick={() => applyPreset(1)}>
+      {/* Presets set a filter value, same semantics as toggling a status
+          checkbox — keep the menu open so multi-dimension refinement
+          continues. Only Reset (terminal) closes. */}
+      <DropdownMenuItem closeOnClick={false} onClick={() => applyPreset(1)}>
         {t(($) => $.filters.date_today)}
       </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => applyPreset(3)}>
+      <DropdownMenuItem closeOnClick={false} onClick={() => applyPreset(3)}>
         {t(($) => $.filters.date_last_3_days)}
       </DropdownMenuItem>
-      <DropdownMenuItem onClick={() => applyPreset(7)}>
+      <DropdownMenuItem closeOnClick={false} onClick={() => applyPreset(7)}>
         {t(($) => $.filters.date_last_7_days)}
       </DropdownMenuItem>
 
       <div className="px-1.5 py-1">
-        <Popover>
+        <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
           <PopoverTrigger
             render={
               <Button
@@ -749,6 +1094,7 @@ function DateSubContent({
         <>
           <DropdownMenuSeparator />
           <DropdownMenuItem
+            closeOnClick={false}
             onClick={() => {
               setRange(undefined);
               onChange(null);
@@ -803,6 +1149,7 @@ export function IssuesHeader({
   facetCountsExact = true,
   tableFacetCounts,
   onTableFacetChange,
+  saveViewScope = { kind: "workspace" },
 }: {
   scopedIssues: Issue[];
   /** See IssueSurfaceController.workingAgents — the surface-scoped projection
@@ -816,10 +1163,79 @@ export function IssuesHeader({
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
+  /** Where "save as view" files the view. /issues keeps the workspace
+   *  default; the project-detail fallback passes its project scope; `null`
+   *  hides the save affordance entirely. */
+  saveViewScope?: SaveViewScope | null;
 }) {
   const { t } = useT("issues");
-  const scope = useIssuesScopeStore((s) => s.scope);
-  const setScope = useIssuesScopeStore((s) => s.setScope);
+  const [saveViewOpen, setSaveViewOpen] = useState(false);
+  const headerWsId = useWorkspaceId();
+  const viewListScope: IssueViewScope | null = saveViewScope
+    ? saveViewScope.kind === "project"
+      ? { scope_type: "project", scope_id: saveViewScope.projectId }
+      : { scope_type: saveViewScope.kind }
+    : null;
+  const { activeView, views, viewsReady, setActive, missing } = useActiveIssueView(
+    headerWsId,
+    viewListScope,
+  );
+  // The open view vanished (deleted / access revoked): fall back to the
+  // built-in default and say so — never a blank page (§7).
+  useEffect(() => {
+    if (missing) {
+      setActive(null);
+      toast.info(t(($) => $.view_selector.unavailable));
+    }
+  }, [missing, setActive, t]);
+  const viewBaseline = useMemo(
+    () => (activeView ? baselineFromQuery(activeView.query) : undefined),
+    [activeView],
+  );
+  const [editTarget, setEditTarget] = useState<{
+    view: IssueView;
+    fromDefinition: boolean;
+  } | null>(null);
+  const currentUserId = useAuthStore((s) => s.user?.id ?? null);
+  const isViewOwner = !!activeView && activeView.owner_id === currentUserId;
+  // The tab belongs to THIS page (Issues vs each project) — see
+  // IssuesScopePageKey. The header both renders the tabs and seeds the
+  // save-view dialog's default variant from them.
+  const scopePage: IssuesScopePageKey =
+    saveViewScope?.kind === "project"
+      ? `project:${saveViewScope.projectId}`
+      : "issues";
+  const scope = useIssuesScope(scopePage);
+  const setScopeForPage = useIssuesScopeStore((s) => s.setScope);
+  const setScope = useCallback(
+    (next: IssuesScope) => setScopeForPage(scopePage, next),
+    [setScopeForPage, scopePage],
+  );
+  // The save dialog's default variant: while a saved view is open the view's
+  // own variant wins (the rows on screen ARE that variant — a copy must not
+  // silently widen to the page tab); otherwise the page tab applies. Memoized
+  // on primitives: the dialog resets its draft when this prop's identity
+  // changes, so a fresh object per header render would wipe a half-typed
+  // name on any background refetch.
+  const dialogActorKind = activeView
+    ? actorKindForViewVariant(activeView.scope_variant)
+    : scope;
+  const dialogProjectId =
+    saveViewScope?.kind === "project" ? saveViewScope.projectId : null;
+  const dialogMyVariant =
+    saveViewScope?.kind === "my" ? saveViewScope.variant : null;
+  const dialogScope = useMemo<SaveViewScope | null>(() => {
+    if (dialogMyVariant) return { kind: "my", variant: dialogMyVariant };
+    if (dialogProjectId)
+      return {
+        kind: "project",
+        projectId: dialogProjectId,
+        actorKind: dialogActorKind,
+      };
+    if (saveViewScope) return { kind: "workspace", actorKind: dialogActorKind };
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- identity keyed on the primitive projections
+  }, [dialogMyVariant, dialogProjectId, dialogActorKind, !!saveViewScope]);
   // Bind the workspace agents-working chip to the active view store so
   // shared IssuesHeader consumers (/issues and project detail) toggle the
   // same filter state as the rest of the display controls. /my-issues keeps
@@ -842,31 +1258,42 @@ export function IssuesHeader({
   const scopeLabel = t(($) => $.scope[SCOPE_LABEL_KEY[scope]]);
 
   return (
-    <div className="h-12 shrink-0 overflow-x-auto px-4 [-webkit-overflow-scrolling:touch]">
-      <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        {/* Left: scope buttons */}
-        <div className="hidden shrink-0 items-center gap-1 md:flex">
-          {SCOPE_VALUES.map((s) => (
-            <Tooltip key={s}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={
-                      scope === s
-                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                        : "text-muted-foreground"
-                    }
-                    onClick={() => setScope(s)}
-                  >
-                    {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
-            </Tooltip>
-          ))}
+    <>
+    <div className={cn("min-h-12 shrink-0 py-2 [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
+      <div className="flex w-full min-w-0 items-start justify-between gap-2">
+        {/* Left: the view bar — built-in tabs and saved views as one flat,
+            per-user ordered row; wraps instead of overflowing. */}
+        <div className="hidden min-w-0 flex-1 md:block">
+          {saveViewScope && viewListScope && (
+            <ViewBar
+              wsId={headerWsId}
+              scope={viewListScope}
+              builtins={SCOPE_VALUES.map((s) => ({
+                key: s,
+                label: t(($) => $.scope[SCOPE_LABEL_KEY[s]]),
+                description: t(($) => $.scope[SCOPE_DESC_KEY[s]]),
+                active: !activeView && scope === s,
+                onSelect: () => {
+                  // Built-in tabs exit any open saved view; the surface
+                  // returns to its untouched per-tab state.
+                  if (activeView) setActive(null);
+                  setScope(s);
+                },
+              }))}
+              views={views}
+              viewsReady={viewsReady}
+              activeView={activeView}
+              onSelectView={(view) => setActive(view ? view.id : null)}
+              onNewView={() => {
+                setEditTarget(null);
+                setSaveViewOpen(true);
+              }}
+              onEditView={(view) => {
+                setEditTarget({ view, fromDefinition: true });
+                setSaveViewOpen(true);
+              }}
+            />
+          )}
         </div>
 
         <DropdownMenu>
@@ -912,46 +1339,89 @@ export function IssuesHeader({
             facetCountsExact={facetCountsExact}
             tableFacetCounts={tableFacetCounts}
             onTableFacetChange={onTableFacetChange}
+            viewBaseline={viewBaseline}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
       </div>
     </div>
+    <FilterChipsBar
+      dateFilter={dateFilter}
+      onDateFilterChange={onDateFilterChange}
+      viewBaseline={viewBaseline}
+      saveLabel={
+        activeView
+          ? isViewOwner
+            ? t(($) => $.filters.chip_edit)
+            : t(($) => $.filters.chip_save_as)
+          : undefined
+      }
+      onSave={
+        saveViewScope
+          ? () => {
+              setEditTarget(
+                activeView && isViewOwner
+                  ? { view: activeView, fromDefinition: false }
+                  : null,
+              );
+              setSaveViewOpen(true);
+            }
+          : undefined
+      }
+    />
+    {dialogScope && (
+      <SaveViewDialog
+        open={saveViewOpen}
+        onOpenChange={setSaveViewOpen}
+        scope={dialogScope}
+        editView={editTarget?.view ?? null}
+        seedFromDefinition={editTarget?.fromDefinition ?? false}
+      />
+    )}
+    </>
   );
 }
 
-export function IssueDisplayControls({
-  scopedIssues,
-  hideViewToggle = false,
-  allowGantt = false,
-  dateFilter = null,
-  onDateFilterChange,
+/**
+ * The full filter menu (every dimension, search, counts) behind a caller-
+ * supplied trigger. The toolbar wraps it in its labeled button; the
+ * save-view dialog attaches it to a ghost "add filter" chip targeting the
+ * draft store. Counts follow `scopedIssues` — pass nothing to hide them.
+ */
+export function IssueFilterMenu({
+  trigger,
+  tooltip,
+  scopedIssues = NO_COUNT_ISSUES,
   facetCountsExact = true,
   tableFacetCounts,
   onTableFacetChange,
+  dateFilter = null,
+  onDateFilterChange,
+  onOpenChange,
+  freezeAnchor = false,
+  viewBaseline,
 }: {
-  scopedIssues: Issue[];
-  hideViewToggle?: boolean;
-  dateFilter?: IssueDateFilter | null;
-  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
-  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
-  // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
-  // fall back to List if the option were exposed there. Keep Gantt opt-in.
-  allowGantt?: boolean;
-  /**
-   * Whether `scopedIssues` covers the surface's full window. Table does not
-   * use loaded rows for counts; server-paged List, Board, and Swimlane follow
-   * the same rule. They supply `tableFacetCounts` from the backend instead,
-   * so badges remain exact without downloading all issues.
-   */
+  trigger: React.ReactElement;
+  tooltip?: string;
+  scopedIssues?: Issue[];
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
   onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  /** Mirrors the menu's open state. */
+  onOpenChange?: (open: boolean) => void;
+  /** Pin the open menu to the trigger's position AT OPEN TIME (a virtual
+   *  anchor). With it, chips growing or wrapping can reflow the trigger
+   *  freely without the open menu ever moving under the pointer. */
+  freezeAnchor?: boolean;
+  /** Open saved view: values the view fixes render checked-and-disabled
+   *  ("already in this view"); everything else stays selectable. */
+  viewBaseline?: IssueViewBaseline;
 }) {
   const { t } = useT("issues");
-  const [tableGroupMenuOpen, setTableGroupMenuOpen] = useState(false);
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
-  const viewMode = useViewStore((s) => s.viewMode);
+  const triggerRef = useRef<HTMLElement>(null);
+  const [frozenAnchor, setFrozenAnchor] = useState<{ getBoundingClientRect: () => DOMRect } | null>(null);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
@@ -961,106 +1431,44 @@ export function IssueDisplayControls({
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
   const propertyFilters = useViewStore((s) => s.propertyFilters);
-  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
-  const sortBy = useViewStore((s) => s.sortBy);
-  const sortDirection = useViewStore((s) => s.sortDirection);
-  const grouping = useViewStore((s) => s.grouping);
-  const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
-  const cardProperties = useViewStore((s) => s.cardProperties);
-  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
-  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
-  const showSubIssues = useViewStore((s) => s.showSubIssues);
-  const act = useViewStoreApi().getState();
-  const headerWsId = useWorkspaceId();
-  // Active custom-property catalog: drives the filter sections, dynamic
-  // sort/grouping options, and the card-property toggles below.
-  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
-  const propertyById = useMemo(
-    () => new Map(workspaceProperties.map((p) => [p.id, p])),
-    [workspaceProperties],
-  );
+  const viewStoreApi = useViewStoreApi();
+  const act = viewStoreApi.getState();
+  const wsId = useWorkspaceId();
+  const statusOptions = useStatusOptions(wsId);
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter((p) =>
-        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
-      ),
+      workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
     [workspaceProperties],
   );
-  const sortableProperties = useMemo(
-    () => workspaceProperties.filter((p) => p.type === "number" || p.type === "date"),
-    [workspaceProperties],
-  );
-  const groupableProperties = useMemo(
-    () => workspaceProperties.filter((p) => p.type === "select"),
-    [workspaceProperties],
-  );
-  const tableGroupableProperties = useMemo(
-    () =>
-      workspaceProperties.filter((p) =>
-        ["select", "checkbox"].includes(p.type),
-      ),
-    [workspaceProperties],
-  );
-
   const counts = useIssueCounts(
     facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
     tableFacetCounts,
   );
   const showDateFilter = !!onDateFilterChange;
-
-  // Only count filters whose definition is still active — a filter pinned to
-  // an archived definition is stripped by the surface controller and must
-  // not light the badge for an effect that no longer exists.
   const effectivePropertyFilters = useMemo(() => {
     const activeIds = new Set(filterableProperties.map((p) => p.id));
     return Object.fromEntries(
       Object.entries(propertyFilters).filter(([id, selected]) => selected.length > 0 && activeIds.has(id)),
     );
   }, [filterableProperties, propertyFilters]);
-
-  const activeFilterCount = getActiveFilterCount({
-    statusFilters,
-    priorityFilters,
-    propertyFilters: effectivePropertyFilters,
-    assigneeFilters,
-    includeNoAssignee,
-    creatorFilters,
-    projectFilters,
-    includeNoProject,
-    labelFilters,
-    dateFilter: showDateFilter ? dateFilter : null,
-  });
-  const hasActiveFilters = activeFilterCount > 0;
-
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
-    position: "sort_manual",
-    status: "sort_status",
-    priority: "sort_priority",
-    start_date: "sort_start_date",
-    due_date: "sort_due_date",
-    created_at: "sort_created",
-    updated_at: "sort_updated",
-    title: "sort_title",
-  };
-  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
-    status: "group_status",
-    assignee: "group_assignee",
-  };
-  const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_project" | "group_assignee"> = {
-    parent: "group_parent",
-    project: "group_project",
-    assignee: "group_assignee",
-  };
-  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
-    priority: "card_priority",
-    description: "card_description",
-    assignee: "card_assignee",
-    startDate: "card_start_date",
-    dueDate: "card_due_date",
-    project: "card_project",
-    labels: "card_labels",
-    childProgress: "card_child_progress",
-  };
+  const hasActiveFilters =
+    getActiveFilterCount(
+      {
+        statusFilters,
+        priorityFilters,
+        propertyFilters: effectivePropertyFilters,
+        assigneeFilters,
+        includeNoAssignee,
+        creatorFilters,
+        projectFilters,
+        includeNoProject,
+        labelFilters,
+        dateFilter: showDateFilter ? dateFilter : null,
+      },
+      viewBaseline,
+    ) > 0;
+  const fixedTitle = viewBaseline ? t(($) => $.filters.in_view) : undefined;
   const dateFilterLabel = showDateFilter && dateFilter
     ? `${t(($) => $.filters[DATE_FIELD_LABEL_KEY[dateFilter.field]])}: ${
         dateFilter.from === dateFilter.to
@@ -1068,72 +1476,37 @@ export function IssueDisplayControls({
           : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
       }`
     : null;
-  const sortPropertyId = propertyIdFromViewKey(sortBy);
-  const groupingPropertyId = propertyIdFromViewKey(grouping);
-  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
-  // Property-backed sort/grouping label straight from the definition name;
-  // a stale persisted id (archived/deleted definition) falls back to the
-  // manual/status default label.
-  const sortLabel = sortPropertyId
-    ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
-    : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
-  const groupingLabel = groupingPropertyId
-    ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
-    : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
-  const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
-  const effectiveTableGrouping =
-    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
-      ? "none"
-      : tableGrouping;
-  const tableGroupingLabel = tableGroupingPropertyId
-    ? propertyById.get(tableGroupingPropertyId)?.name ??
-      t(($) => $.table.group_none)
-    : effectiveTableGrouping === "status"
-      ? t(($) => $.table.columns.status)
-      : effectiveTableGrouping === "assignee"
-        ? t(($) => $.table.columns.assignee)
-        : t(($) => $.table.group_none);
-  const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
+
+  // Base UI's render-prop merges its own ref with ours, so cloning the
+  // caller's element only adds the ref we need for rect capture.
+  const anchoredTrigger = freezeAnchor
+    ? cloneElement(trigger, { ref: triggerRef } as Partial<React.HTMLAttributes<HTMLElement>>)
+    : trigger;
 
   return (
-    <div className="flex shrink-0 items-center gap-1">
-        {/* Filter */}
-        <DropdownMenu
-          onOpenChange={(open) => {
-            if (!open) onTableFacetChange?.(null);
-          }}
-        >
-          <Tooltip>
-            <DropdownMenuTrigger
-              render={
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant={hasActiveFilters ? "default" : "outline"}
-                      size="sm"
-                      className={
-                        hasActiveFilters
-                          ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5"
-                          : controlButtonClass
-                      }
-                    >
-                      <Filter className="size-3.5" />
-                      <span className="hidden md:inline">
-                        {hasActiveFilters
-                          ? t(($) => $.filters.active_count, { count: activeFilterCount })
-                          : t(($) => $.filters.tooltip)}
-                      </span>
-                      {hasActiveFilters && (
-                        <span className="tabular-nums md:hidden">{activeFilterCount}</span>
-                      )}
-                    </Button>
-                  }
-                />
-              }
-            />
-            <TooltipContent side="bottom">{t(($) => $.filters.tooltip)}</TooltipContent>
-          </Tooltip>
-          <DropdownMenuContent align="end" className="w-auto">
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (freezeAnchor) {
+          if (open && triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect();
+            setFrozenAnchor({ getBoundingClientRect: () => rect });
+          } else if (!open) {
+            setFrozenAnchor(null);
+          }
+        }
+        if (!open) onTableFacetChange?.(null);
+        onOpenChange?.(open);
+      }}
+    >
+      {tooltip ? (
+        <Tooltip>
+          <DropdownMenuTrigger render={<TooltipTrigger render={anchoredTrigger} />} />
+          <TooltipContent side="bottom">{tooltip}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <DropdownMenuTrigger render={anchoredTrigger} />
+      )}
+          <DropdownMenuContent align="end" className="w-auto" anchor={frozenAnchor ?? undefined}>
             {/* Status */}
             <DropdownMenuSub
               onOpenChange={(open) =>
@@ -1150,19 +1523,33 @@ export function IssueDisplayControls({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
+                {/* Options come from the workspace catalog, so a custom status
+                    is filterable — otherwise an issue moved onto one could not
+                    be narrowed to. One flat list in category order: the icon
+                    already carries the category, and a heading per category
+                    doubled the menu's height for no added information
+                    (MUL-6243, MUL-6399). */}
+                {statusOptions.map((option) => {
+                  const checked = statusFilters.includes(option.key);
+                  const count = counts.status.get(option.key) ?? 0;
+                  const fixed = viewBaseline?.status.has(option.key) === true;
                   return (
                     <DropdownMenuCheckboxItem
-                      key={s}
+                      key={option.key}
                       checked={checked}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
+                      disabled={fixed}
+                      title={fixed ? fixedTitle : undefined}
+                      onCheckedChange={() => act.toggleStatusFilter(option.key)}
                       className={FILTER_ITEM_CLASS}
                     >
                       <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
+                      <StatusIcon
+                        status={option.key}
+                        category={option.category}
+                        color={option.color}
+                        className="h-3.5 w-3.5"
+                      />
+                      {option.label}
                       {count > 0 && (
                         <span className="ml-auto text-caption text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}
@@ -1190,13 +1577,16 @@ export function IssueDisplayControls({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-44">
-                {PRIORITY_ORDER.map((p) => {
+                {PRIORITY_DISPLAY_ORDER.map((p) => {
                   const checked = priorityFilters.includes(p);
                   const count = counts.priority.get(p) ?? 0;
+                  const fixed = viewBaseline?.priority.has(p) === true;
                   return (
                     <DropdownMenuCheckboxItem
                       key={p}
                       checked={checked}
+                      disabled={fixed}
+                      title={fixed ? fixedTitle : undefined}
                       onCheckedChange={() => act.togglePriorityFilter(p)}
                       className={FILTER_ITEM_CLASS}
                     >
@@ -1258,6 +1648,9 @@ export function IssueDisplayControls({
                   includeNoAssignee={includeNoAssignee}
                   onToggleNoAssignee={act.toggleNoAssignee}
                   noAssigneeCount={counts.noAssignee}
+                  fixedKeys={viewBaseline?.assignee}
+                  noAssigneeFixed={viewBaseline?.includeNoAssignee === true}
+                  fixedTitle={fixedTitle}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1283,6 +1676,8 @@ export function IssueDisplayControls({
                   selected={creatorFilters}
                   onToggle={act.toggleCreatorFilter}
                   showSquads={false}
+                  fixedKeys={viewBaseline?.creator}
+                  fixedTitle={fixedTitle}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1310,6 +1705,9 @@ export function IssueDisplayControls({
                   includeNoProject={includeNoProject}
                   onToggleNoProject={act.toggleNoProject}
                   noProjectCount={counts.noProject}
+                  fixedIds={viewBaseline?.project}
+                  noProjectFixed={viewBaseline?.includeNoProject === true}
+                  fixedTitle={fixedTitle}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1334,6 +1732,8 @@ export function IssueDisplayControls({
                   counts={counts.label}
                   selected={labelFilters}
                   onToggle={act.toggleLabelFilter}
+                  fixedIds={viewBaseline?.label}
+                  fixedTitle={fixedTitle}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>
@@ -1372,6 +1772,9 @@ export function IssueDisplayControls({
                       counts={counts.property.get(property.id)}
                       selected={selected}
                       onToggle={(optionId) => act.togglePropertyFilter(property.id, optionId)}
+                      onSetValues={(optionIds) => act.setPropertyFilterValues(property.id, optionIds)}
+                      fixedIds={viewBaseline?.property.get(property.id)}
+                      fixedTitle={fixedTitle}
                     />
                   </DropdownMenuSubContent>
                 </DropdownMenuSub>
@@ -1384,7 +1787,13 @@ export function IssueDisplayControls({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   onClick={() => {
-                    act.clearFilters();
+                    if (viewBaseline) {
+                      // Inside a saved view, reset returns to the view's own
+                      // conditions, never to nothing.
+                      act.resetFiltersTo(viewBaseline.raw);
+                    } else {
+                      act.clearFilters();
+                    }
                     onDateFilterChange?.(null);
                   }}
                 >
@@ -1393,32 +1802,215 @@ export function IssueDisplayControls({
               </>
             )}
           </DropdownMenuContent>
-        </DropdownMenu>
+    </DropdownMenu>
+  );
+}
 
-        {hasActiveFilters && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t(($) => $.filters.reset)}
-                  onClick={() => {
-                    act.clearFilters();
-                    onDateFilterChange?.(null);
-                  }}
-                  className="hidden text-muted-foreground md:inline-flex"
-                >
-                  <X className="size-3.5" />
-                </Button>
+export function IssueDisplayControls({
+  scopedIssues,
+  hideViewToggle = false,
+  allowGantt = false,
+  dateFilter = null,
+  onDateFilterChange,
+  facetCountsExact = true,
+  tableFacetCounts,
+  onTableFacetChange,
+  viewBaseline,
+}: {
+  scopedIssues: Issue[];
+  hideViewToggle?: boolean;
+  dateFilter?: IssueDateFilter | null;
+  onDateFilterChange?: (filter: IssueDateFilter | null) => void;
+  /** Open saved view: menu marks the view's values checked-and-disabled;
+   *  the trigger count only counts additions on top. */
+  viewBaseline?: IssueViewBaseline;
+  // Only Project Detail renders <GanttView>; other surfaces (global /issues,
+  // /my-issues, actor panel) ignore viewMode === "gantt" and would silently
+  // fall back to List if the option were exposed there. Keep Gantt opt-in.
+  allowGantt?: boolean;
+  /**
+   * Whether `scopedIssues` covers the surface's full window. Table does not
+   * use loaded rows for counts; server-paged List, Board, and Swimlane follow
+   * the same rule. They supply `tableFacetCounts` from the backend instead,
+   * so badges remain exact without downloading all issues.
+   */
+  facetCountsExact?: boolean;
+  tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
+}) {
+  const { t } = useT("issues");
+  const [tableGroupMenuOpen, setTableGroupMenuOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const viewMode = useViewStore((s) => s.viewMode);
+  const statusFilters = useViewStore((s) => s.statusFilters);
+  const priorityFilters = useViewStore((s) => s.priorityFilters);
+  const assigneeFilters = useViewStore((s) => s.assigneeFilters);
+  const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
+  const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const projectFilters = useViewStore((s) => s.projectFilters);
+  const includeNoProject = useViewStore((s) => s.includeNoProject);
+  const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const sortBy = useViewStore((s) => s.sortBy);
+  const sortDirection = useViewStore((s) => s.sortDirection);
+  const grouping = useViewStore((s) => s.grouping);
+  const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const cardProperties = useViewStore((s) => s.cardProperties);
+  const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
+  const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
+  const showSubIssues = useViewStore((s) => s.showSubIssues);
+  const act = useViewStoreApi().getState();
+  const headerWsId = useWorkspaceId();
+  // Active custom-property catalog: drives the filter sections, dynamic
+  // sort/grouping options, and the card-property toggles below.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
+  const propertyById = useMemo(
+    () => new Map(workspaceProperties.map((p) => [p.id, p])),
+    [workspaceProperties],
+  );
+  const filterableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) => isFilterablePropertyType(p.type)),
+    [workspaceProperties],
+  );
+  const sortableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "number" || p.type === "date"),
+    [workspaceProperties],
+  );
+  const groupableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "select"),
+    [workspaceProperties],
+  );
+  const tableGroupableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        ["select", "checkbox"].includes(p.type),
+      ),
+    [workspaceProperties],
+  );
+
+  const showDateFilter = !!onDateFilterChange;
+
+  // Only count filters whose definition is still active — a filter pinned to
+  // an archived definition is stripped by the surface controller and must
+  // not light the badge for an effect that no longer exists.
+  const effectivePropertyFilters = useMemo(() => {
+    const activeIds = new Set(filterableProperties.map((p) => p.id));
+    return Object.fromEntries(
+      Object.entries(propertyFilters).filter(([id, selected]) => selected.length > 0 && activeIds.has(id)),
+    );
+  }, [filterableProperties, propertyFilters]);
+
+  const activeFilterCount = getActiveFilterCount(
+    {
+      statusFilters,
+      priorityFilters,
+      propertyFilters: effectivePropertyFilters,
+      assigneeFilters,
+      includeNoAssignee,
+      creatorFilters,
+      projectFilters,
+      includeNoProject,
+      labelFilters,
+      dateFilter: showDateFilter ? dateFilter : null,
+    },
+    viewBaseline,
+  );
+  const hasActiveFilters = activeFilterCount > 0;
+
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
+    position: "sort_manual",
+    status: "sort_status",
+    priority: "sort_priority",
+    start_date: "sort_start_date",
+    due_date: "sort_due_date",
+    created_at: "sort_created",
+    updated_at: "sort_updated",
+    title: "sort_title",
+  };
+  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
+    status: "group_status",
+    assignee: "group_assignee",
+    project: "group_project",
+  };
+  const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_project" | "group_assignee"> = {
+    parent: "group_parent",
+    project: "group_project",
+    assignee: "group_assignee",
+  };
+  const CARD_PROPERTY_LABEL_KEY: Record<typeof CARD_PROPERTY_OPTIONS[number]["key"], "card_priority" | "card_description" | "card_assignee" | "card_start_date" | "card_due_date" | "card_project" | "card_labels" | "card_child_progress"> = {
+    priority: "card_priority",
+    description: "card_description",
+    assignee: "card_assignee",
+    startDate: "card_start_date",
+    dueDate: "card_due_date",
+    project: "card_project",
+    labels: "card_labels",
+    childProgress: "card_child_progress",
+  };
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const tableGroupingPropertyId = propertyIdFromViewKey(tableGrouping);
+  // Property-backed sort/grouping label straight from the definition name;
+  // a stale persisted id (archived/deleted definition) falls back to the
+  // manual/status default label.
+  const sortLabel = sortPropertyId
+    ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
+    : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const groupingLabel = groupingPropertyId
+    ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
+    : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
+  const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
+  const effectiveTableGrouping =
+    tableGroupingPropertyId && !propertyById.has(tableGroupingPropertyId)
+      ? "none"
+      : tableGrouping;
+  const tableGroupingLabel = tableGroupingPropertyId
+    ? propertyById.get(tableGroupingPropertyId)?.name ??
+      t(($) => $.table.group_none)
+    : effectiveTableGrouping === "status"
+      ? t(($) => $.table.columns.status)
+      : effectiveTableGrouping === "assignee"
+        ? t(($) => $.table.columns.assignee)
+        : effectiveTableGrouping === "project"
+          ? t(($) => $.table.columns.project)
+          : t(($) => $.table.group_none);
+  const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
+
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+        <IssueFilterMenu
+          trigger={
+            <Button
+              variant={hasActiveFilters ? "default" : "outline"}
+              size="sm"
+              className={
+                hasActiveFilters
+                  ? "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5"
+                  : controlButtonClass
               }
-            />
-            <TooltipContent side="bottom">
-              {t(($) => $.filters.reset)}
-            </TooltipContent>
-          </Tooltip>
-        )}
+            >
+              <Filter className="size-3.5" />
+              <span className="hidden md:inline">
+                {hasActiveFilters
+                  ? t(($) => $.filters.active_count, { count: activeFilterCount })
+                  : t(($) => $.filters.tooltip)}
+              </span>
+              {hasActiveFilters && (
+                <span className="tabular-nums md:hidden">{activeFilterCount}</span>
+              )}
+            </Button>
+          }
+          tooltip={t(($) => $.filters.tooltip)}
+          scopedIssues={scopedIssues}
+          facetCountsExact={facetCountsExact}
+          tableFacetCounts={tableFacetCounts}
+          onTableFacetChange={onTableFacetChange}
+          dateFilter={showDateFilter ? dateFilter : null}
+          onDateFilterChange={onDateFilterChange}
+          viewBaseline={viewBaseline}
+        />
 
         {viewMode === "table" && (
           <DropdownMenu
@@ -1460,6 +2052,9 @@ export function IssueDisplayControls({
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="assignee">
                   {t(($) => $.table.columns.assignee)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="project">
+                  {t(($) => $.table.columns.project)}
                 </DropdownMenuRadioItem>
                 {tableGroupableProperties.map((property) => (
                   <DropdownMenuRadioItem
@@ -1514,89 +2109,88 @@ export function IssueDisplayControls({
             />
             <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
           </Tooltip>
-          <PopoverContent align="end" className="w-64 p-0">
-            {viewMode === "board" && (
-              <div className="border-b px-3 py-2.5">
-                <span className="text-caption font-medium text-muted-foreground">
-                  {t(($) => $.display.grouping_section)}
-                </span>
-                <div className="mt-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full justify-between text-caption"
-                        >
-                          {groupingLabel}
-                          <ChevronDown className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="start" className="w-auto">
-                      <DropdownMenuRadioGroup value={grouping} onValueChange={(v) => act.setGrouping(v as IssueGrouping)}>
-                        {GROUPING_OPTIONS.map((opt) => (
-                          <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                            {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
-                          </DropdownMenuRadioItem>
-                        ))}
-                        {groupableProperties.map((property) => (
-                          <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
-                            <PropertyIcon property={property} className="size-3.5 text-caption" />
-                            <span>{property.name}</span>
-                          </DropdownMenuRadioItem>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+          <PopoverContent align="end" className="w-64 p-3">
+            <div className="space-y-3">
+              {/* Uniform rows: caption label left, control right. Spacing
+                  separates sections — no dividers (see UI rules). */}
+              {viewMode === "board" && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.grouping_section)}
+                  </span>
+                  <Select
+                    items={[
+                      ...GROUPING_OPTIONS.map((opt) => ({
+                        value: opt.value as string,
+                        label: t(($) => $.display[GROUPING_LABEL_KEY[opt.value]]),
+                      })),
+                      ...groupableProperties.map((p) => ({
+                        value: `property:${p.id}`,
+                        label: p.name,
+                      })),
+                    ]}
+                    value={grouping}
+                    onValueChange={(v) => {
+                      if (v) act.setGrouping(v as IssueGrouping);
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-32" aria-label={t(($) => $.display.grouping_section)}>
+                      <SelectValue>{groupingLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectGroup>
+                      {GROUPING_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
+                        </SelectItem>
+                      ))}
+                      {groupableProperties.map((property) => (
+                        <SelectItem key={property.id} value={`property:${property.id}`}>
+                          {property.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-            )}
-            {viewMode === "swimlane" && (
-              <div className="border-b px-3 py-2.5">
-                <span className="text-caption font-medium text-muted-foreground">
-                  {t(($) => $.display.grouping_section)}
-                </span>
-                <div className="mt-2">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full justify-between text-caption"
-                        >
-                          {swimlaneGroupingLabel}
-                          <ChevronDown className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="start" className="w-auto">
-                      <DropdownMenuRadioGroup
-                        value={swimlaneGrouping}
-                        onValueChange={(v) => act.setSwimlaneGrouping(v as SwimlaneGrouping)}
-                      >
-                        {SWIMLANE_GROUPINGS.map((value) => (
-                          <DropdownMenuRadioItem key={value} value={value}>
-                            {t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[value]])}
-                          </DropdownMenuRadioItem>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+              )}
+              {viewMode === "swimlane" && (
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.grouping_section)}
+                  </span>
+                  <Select
+                    items={SWIMLANE_GROUPINGS.map((value) => ({
+                      value: value as string,
+                      label: t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[value]]),
+                    }))}
+                    value={swimlaneGrouping}
+                    onValueChange={(v) => {
+                      if (v) act.setSwimlaneGrouping(v as SwimlaneGrouping);
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-32" aria-label={t(($) => $.display.grouping_section)}>
+                      <SelectValue>{swimlaneGroupingLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectGroup>
+                      {SWIMLANE_GROUPINGS.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[value]])}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-            )}
-
-            {viewMode === "table" && (
-              <div className="border-b px-3 py-2.5">
+              )}
+              {viewMode === "table" && (
                 <label className="flex cursor-pointer items-center justify-between gap-3">
                   <span className="min-w-0">
-                    <span className="block text-body">
+                    <span className="block text-caption font-medium text-muted-foreground">
                       {t(($) => $.table.hierarchy)}
                     </span>
-                    <span className="block text-caption text-muted-foreground">
+                    <span className="block text-caption text-faint-foreground">
                       {t(($) => $.table.hierarchy_description)}
                     </span>
                   </span>
@@ -1606,112 +2200,110 @@ export function IssueDisplayControls({
                     onCheckedChange={() => act.toggleTableHierarchy()}
                   />
                 </label>
-              </div>
-            )}
-
-            <div className="border-b px-3 py-2.5">
-              <span className="text-caption font-medium text-muted-foreground">
-                {t(($) => $.display.ordering_section)}
-              </span>
-              <div className="mt-2 flex items-center gap-1.5">
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1 justify-between text-caption"
-                      >
-                        {sortLabel}
-                        <ChevronDown className="size-3 text-muted-foreground" />
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="start" className="w-auto">
-                    <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => act.setSortBy(v as SortField)}>
+              )}
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.display.ordering_section)}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <Select
+                    items={[
+                      ...SORT_OPTIONS.map((opt) => ({
+                        value: opt.value as string,
+                        label: t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]]),
+                      })),
+                      ...sortableProperties.map((p) => ({
+                        value: `property:${p.id}`,
+                        label: p.name,
+                      })),
+                    ]}
+                    value={sortBy}
+                    onValueChange={(v) => {
+                      if (v) act.setSortBy(v as SortField);
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="w-26" aria-label={t(($) => $.display.ordering_section)}>
+                      <SelectValue>{sortLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectGroup>
                       {SORT_OPTIONS.map((opt) => (
-                        <DropdownMenuRadioItem key={opt.value} value={opt.value}>
+                        <SelectItem key={opt.value} value={opt.value}>
                           {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
-                        </DropdownMenuRadioItem>
+                        </SelectItem>
                       ))}
                       {sortableProperties.map((property) => (
-                        <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
-                          <PropertyIcon property={property} className="size-3.5 text-caption" />
-                          <span>{property.name}</span>
-                        </DropdownMenuRadioItem>
+                        <SelectItem key={property.id} value={`property:${property.id}`}>
+                          {property.name}
+                        </SelectItem>
                       ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                {sortBy !== "position" && (
-                  <Button
-                    variant="outline"
-                    size="icon-sm"
-                    onClick={() =>
-                      act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
-                    }
-                    title={sortDirection === "asc" ? t(($) => $.display.ascending_title) : t(($) => $.display.descending_title)}
-                  >
-                    {sortDirection === "asc" ? (
-                      <ArrowUp className="size-3.5" />
-                    ) : (
-                      <ArrowDown className="size-3.5" />
-                    )}
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <label className="flex cursor-pointer items-center justify-between border-b px-3 py-2.5">
-              <span className="text-body">{t(($) => $.display.show_sub_issues)}</span>
-              <Switch
-                size="sm"
-                checked={showSubIssues}
-                onCheckedChange={() => act.toggleShowSubIssues()}
-              />
-            </label>
-
-            {viewMode !== "table" && (
-              <div className="px-3 py-2.5">
-                <span className="text-caption font-medium text-muted-foreground">
-                  {t(($) => $.display.card_properties_section)}
-                </span>
-                <div className="mt-2 space-y-2">
-                  {CARD_PROPERTY_OPTIONS.map((opt) => (
-                    <label
-                      key={opt.key}
-                      className="flex cursor-pointer items-center justify-between"
+                    </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  {sortBy !== "position" && (
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      onClick={() =>
+                        act.setSortDirection(sortDirection === "asc" ? "desc" : "asc")
+                      }
+                      title={sortDirection === "asc" ? t(($) => $.display.ascending_title) : t(($) => $.display.descending_title)}
                     >
-                      <span className="text-body">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
-                      <Switch
-                        size="sm"
-                        checked={cardProperties[opt.key]}
-                        onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                      />
-                    </label>
-                  ))}
-                  {workspaceProperties.map((property) => (
-                    <label
-                      key={property.id}
-                      className="flex cursor-pointer items-center justify-between"
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5 truncate text-body">
-                        <PropertyIcon
-                          property={property}
-                          className="size-3.5 text-caption"
-                        />
-                        <span className="truncate">{property.name}</span>
-                      </span>
-                      <Switch
-                        size="sm"
-                        checked={cardPropertyIds.includes(property.id)}
-                        onCheckedChange={() => act.toggleCardPropertyId(property.id)}
-                      />
-                    </label>
-                  ))}
+                      {sortDirection === "asc" ? (
+                        <ArrowUp className="size-3.5" />
+                      ) : (
+                        <ArrowDown className="size-3.5" />
+                      )}
+                    </Button>
+                  )}
                 </div>
               </div>
-            )}
+              <label className="flex cursor-pointer items-center justify-between gap-3">
+                <span className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.display.show_sub_issues)}
+                </span>
+                <Switch
+                  size="sm"
+                  checked={showSubIssues}
+                  onCheckedChange={() => act.toggleShowSubIssues()}
+                />
+              </label>
+              {viewMode !== "table" && (
+                <div>
+                  <span className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.display.card_properties_section)}
+                  </span>
+                  {/* Chip toggles (pressed = shown on cards). Unpressed chips
+                      dim so the active set reads at a glance. */}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {CARD_PROPERTY_OPTIONS.map((opt) => (
+                      <Toggle
+                        key={opt.key}
+                        size="sm"
+                        variant="outline"
+                        pressed={cardProperties[opt.key]}
+                        onPressedChange={() => act.toggleCardProperty(opt.key)}
+                        className="h-6 rounded-md px-2 text-caption text-muted-foreground hover:bg-muted/60 aria-pressed:border-transparent aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent/80"
+                      >
+                        {t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}
+                      </Toggle>
+                    ))}
+                    {workspaceProperties.map((property) => (
+                      <Toggle
+                        key={property.id}
+                        size="sm"
+                        variant="outline"
+                        pressed={cardPropertyIds.includes(property.id)}
+                        onPressedChange={() => act.toggleCardPropertyId(property.id)}
+                        className="h-6 max-w-40 rounded-md px-2 text-caption text-muted-foreground hover:bg-muted/60 aria-pressed:border-transparent aria-pressed:bg-accent aria-pressed:text-accent-foreground aria-pressed:hover:bg-accent/80"
+                      >
+                        <span className="truncate">{property.name}</span>
+                      </Toggle>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </PopoverContent>
         </Popover>
 
@@ -1802,6 +2394,7 @@ export function IssueDisplayControls({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
+
     </div>
   );
 }

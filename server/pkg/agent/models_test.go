@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
@@ -34,7 +36,7 @@ func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
 
 func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
 	// Qwen returns its manual-entry catalog without resolving or executing a CLI.
-	got, err := ListModels(context.Background(), "qwen", "")
+	got, err := ListModels(context.Background(), "qwen", Command{Path: ""})
 	if err != nil {
 		t.Fatalf("ListModels(qwen) error: %v", err)
 	}
@@ -57,7 +59,7 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	delete(modelCache, "copilot")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "copilot", missingAgentExecutable(t, "copilot"))
+	got, err := ListModels(ctx, "copilot", Command{Path: missingAgentExecutable(t, "copilot")})
 	if err != nil {
 		t.Fatalf("ListModels(copilot) error: %v", err)
 	}
@@ -74,6 +76,394 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	if !ids["gpt-5.4"] || !ids["claude-sonnet-4.6"] {
 		t.Errorf("static fallback missing expected models: %+v", got)
 	}
+}
+
+func TestParseKimiProviderThinking(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "models": {
+    "kimi-code/kimi-for-coding": {
+      "displayName": "K2.7 Coding"
+    },
+    "kimi-code/k3": {
+      "supportEfforts": ["low", "high", "max", "high", "bad value"],
+      "defaultEffort": "high"
+    },
+    "kimi-code/k3-256k": {
+      "support_efforts": ["low", "max"],
+      "default_effort": "missing"
+    }
+  }
+}`)
+
+	got, err := parseKimiProviderThinking(raw)
+	if err != nil {
+		t.Fatalf("parseKimiProviderThinking: %v", err)
+	}
+	if thinking, ok := got["kimi-code/kimi-for-coding"]; ok {
+		t.Fatalf("model without supportEfforts = %+v, want no entry at all", thinking)
+	}
+	k3 := got["kimi-code/k3"]
+	if k3 == nil {
+		t.Fatal("k3 thinking catalog is nil")
+	}
+	if k3.DefaultLevel != "high" {
+		t.Errorf("k3 default = %q, want high", k3.DefaultLevel)
+	}
+	if values := thinkingValues(k3); !reflect.DeepEqual(values, []string{"low", "high", "max"}) {
+		t.Errorf("k3 levels = %v, want [low high max]", values)
+	}
+	if labels := []string{k3.SupportedLevels[0].Label, k3.SupportedLevels[1].Label, k3.SupportedLevels[2].Label}; !reflect.DeepEqual(labels, []string{"Low", "High", "Max"}) {
+		t.Errorf("k3 labels = %v, want [Low High Max]", labels)
+	}
+	k3Short := got["kimi-code/k3-256k"]
+	if k3Short == nil {
+		t.Fatal("snake_case k3-256k thinking catalog is nil")
+	}
+	if k3Short.DefaultLevel != "" {
+		t.Errorf("unsupported default = %q, want empty", k3Short.DefaultLevel)
+	}
+}
+
+func TestFindACPConfigOptionRequiresExactID(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "config_options": [{
+    "type": "select",
+    "id": "thinking",
+    "category": "thought_level",
+    "current_value": "high"
+  }]
+}`)
+	option, ok := findACPConfigOption(raw, "thinking")
+	if !ok || option.ID != "thinking" {
+		t.Fatalf("findACPConfigOption = (%+v, %v), want exact thinking option", option, ok)
+	}
+	value, ok := acpConfigOptionCurrentValue(raw, "thinking")
+	if !ok || value != "high" {
+		t.Errorf("acpConfigOptionCurrentValue = (%q, %v), want (high, true)", value, ok)
+	}
+
+	for _, invalidID := range []string{"reasoning", "Thinking", " thinking "} {
+		renamed := []byte(fmt.Sprintf(`{"configOptions":[{"id":%q,"category":"thought_level","currentValue":"high"}]}`, invalidID))
+		if option, ok := findACPConfigOption(renamed, "thinking"); ok {
+			t.Fatalf("non-exact id %q exposed config option: %+v", invalidID, option)
+		}
+	}
+}
+
+func TestDiscoverKimiModelsAnnotatesThinkingPerModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"},"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"},"kimi-code/k3-256k":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"},{"value":"kimi-code/k3-256k","name":"K3-256k"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"},{"value":"max","name":"Max"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	if byID["kimi-code/kimi-for-coding"].Thinking != nil {
+		t.Errorf("kimi-for-coding must not inherit the current model's efforts: %+v", byID["kimi-code/kimi-for-coding"].Thinking)
+	}
+	for _, id := range []string{"kimi-code/k3", "kimi-code/k3-256k"} {
+		thinking := byID[id].Thinking
+		if thinking == nil || thinking.DefaultLevel != "high" ||
+			!reflect.DeepEqual(thinkingValues(thinking), []string{"low", "high", "max"}) {
+			t.Errorf("%s thinking = %+v", id, thinking)
+		}
+	}
+
+	valid, err := ValidateThinkingLevel(context.Background(), "kimi", Command{Path: fake}, "kimi-code/k3", "high")
+	if err != nil || !valid {
+		t.Errorf("ValidateThinkingLevel(k3, high) = (%v, %v), want (true, nil)", valid, err)
+	}
+	// Unsupported persisted values are ordinary catalog results, not discovery
+	// errors. The daemon logs a warning, ignores the value, and starts the task
+	// with the runtime's own setting, just as it does for other providers.
+	valid, err = ValidateThinkingLevel(context.Background(), "kimi", Command{Path: fake}, "kimi-code/k3", "medium")
+	if err != nil || valid {
+		t.Errorf("ValidateThinkingLevel(k3, medium) = (%v, %v), want unsupported without an error", valid, err)
+	}
+	valid, err = ValidateThinkingLevel(context.Background(), "kimi", Command{Path: fake}, "kimi-code/kimi-for-coding", "high")
+	if err != nil || valid {
+		t.Errorf("ValidateThinkingLevel(kimi-for-coding, high) = (%v, %v), want unsupported without an error", valid, err)
+	}
+}
+
+func TestDiscoverKimiModelsProviderListFailureHidesThinking(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  exit 1
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	for _, id := range []string{"kimi-code/kimi-for-coding", "kimi-code/k3"} {
+		if thinking := byID[id].Thinking; thinking != nil {
+			t.Errorf("%s received session-local thinking after provider-list failure: %+v", id, thinking)
+		}
+	}
+}
+
+func TestDiscoverKimiModelsDoesNotMigrateSessionThinkingToAnotherModel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]},{"id":"thinking","category":"thought_level","currentValue":"high","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	for _, model := range models {
+		if model.Thinking != nil {
+			t.Errorf("%s received thinking from a different ACP session model: %+v", model.ID, model.Thinking)
+		}
+	}
+}
+
+// TestDiscoverKimiModelsIgnoresTheDiscoverySessionsOwnThinkingSupport pins the
+// per-model rule against the case that makes a session-wide gate wrong. The CLI
+// default model here has no thinking capability at all, so Kimi's session/new
+// omits the `thinking` config id entirely — yet K3 still advertises
+// supportEfforts in the provider catalog and must keep its levels. The mirror
+// case matters just as much: the session does advertise thinking, but that says
+// nothing about a model provider-list gives no efforts for.
+func TestDiscoverKimiModelsIgnoresTheDiscoverySessionsOwnThinkingSupport(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/kimi-for-coding":{"displayName":"K2.7 Coding"},"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/kimi-for-coding","options":[{"value":"kimi-code/kimi-for-coding","name":"K2.7 Coding"},{"value":"kimi-code/k3","name":"K3"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	fake := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	models, err := discoverKimiModels(context.Background(), Command{Path: fake})
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	k3 := byID["kimi-code/k3"].Thinking
+	if k3 == nil || k3.DefaultLevel != "high" ||
+		!reflect.DeepEqual(thinkingValues(k3), []string{"low", "high", "max"}) {
+		t.Errorf("k3 lost its efforts because the default model has none: %+v", k3)
+	}
+	if thinking := byID["kimi-code/kimi-for-coding"].Thinking; thinking != nil {
+		t.Errorf("kimi-for-coding has no efforts in the provider catalog: %+v", thinking)
+	}
+}
+
+// TestDiscoverKimiModelsHidesThinkingBelowTheEffortCapableCLI covers the case
+// provider-list cannot detect on its own. Checked against the real binaries:
+// Kimi 0.28.1 reports K3's supportEfforts exactly like 0.33.0 does, but its ACP
+// only implements the on/off toggle — set_config_option("max") answers success
+// while confirming "on". Advertising Low/High/Max there would let a user save a
+// level the runtime silently ignores, so the version decides.
+func TestDiscoverKimiModelsHidesThinkingBelowTheEffortCapableCLI(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	// The `thinking` config id is present here on purpose: 0.28.1 advertises it
+	// too, which is exactly why it cannot stand in for the capability check.
+	script := `#!/bin/sh
+if [ "$1" = "provider" ]; then
+  printf '%s\n' '{"models":{"kimi-code/k3":{"supportEfforts":["low","high","max"],"defaultEffort":"high"}}}'
+  exit 0
+fi
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"Kimi Code CLI","version":"VERSION"}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"test-session","configOptions":[{"id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/k3","name":"K3"}]},{"id":"thinking","category":"thought_level","currentValue":"on","options":[{"value":"off","name":"Off"},{"value":"on","name":"On"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	tests := []struct {
+		name         string
+		version      string
+		wantThinking bool
+	}{
+		{name: "0.28.1 applies on/off only", version: "0.28.1", wantThinking: false},
+		{name: "0.29.0 is the first effort-capable build", version: "0.29.0", wantThinking: true},
+		{name: "unidentifiable build stays hidden", version: "", wantThinking: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fake := filepath.Join(t.TempDir(), "kimi")
+			writeTestExecutable(t, fake, []byte(strings.Replace(script, "VERSION", tt.version, 1)))
+
+			models, err := discoverKimiModels(context.Background(), Command{Path: fake})
+			if err != nil {
+				t.Fatalf("discoverKimiModels: %v", err)
+			}
+			if len(models) == 0 {
+				t.Fatal("model discovery must keep working on every CLI build")
+			}
+			var k3 *ModelThinking
+			for _, model := range models {
+				if model.ID == "kimi-code/k3" {
+					k3 = model.Thinking
+				}
+			}
+			if got := k3 != nil; got != tt.wantThinking {
+				t.Errorf("k3 thinking present = %v, want %v (version %q): %+v", got, tt.wantThinking, tt.version, k3)
+			}
+		})
+	}
+}
+
+func TestACPAgentInfoVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "kimi shape", raw: `{"protocolVersion":1,"agentInfo":{"name":"Kimi Code CLI","version":"0.33.0"}}`, want: "0.33.0"},
+		{name: "snake_case", raw: `{"agent_info":{"version":"0.29.0"}}`, want: "0.29.0"},
+		{name: "padded", raw: `{"agentInfo":{"version":"  0.30.1  "}}`, want: "0.30.1"},
+		{name: "absent", raw: `{"protocolVersion":1,"agentCapabilities":{}}`, want: ""},
+		{name: "malformed json", raw: `not json`, want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := acpAgentInfoVersion([]byte(tt.raw)); got != tt.want {
+				t.Errorf("acpAgentInfoVersion(%s) = %q, want %q", tt.raw, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestKimiSupportsThinkingEfforts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		version string
+		want    bool
+	}{
+		{version: "0.29.0", want: true},  // first effort-capable build
+		{version: "0.28.1", want: false}, // confirms "on" for any effort
+		{version: "0.33.0", want: true},
+		{version: "1.0.0", want: true},
+		{version: "0.9.0", want: false}, // minor is compared numerically, not lexically
+		{version: "", want: false},      // agent reported no version
+		{version: "not-a-version", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			t.Parallel()
+			if got := kimiSupportsThinkingEfforts(tt.version); got != tt.want {
+				t.Errorf("kimiSupportsThinkingEfforts(%q) = %v, want %v", tt.version, got, tt.want)
+			}
+		})
+	}
+}
+
+func thinkingValues(thinking *ModelThinking) []string {
+	if thinking == nil {
+		return nil
+	}
+	values := make([]string, 0, len(thinking.SupportedLevels))
+	for _, level := range thinking.SupportedLevels {
+		values = append(values, level.Value)
+	}
+	return values
 }
 
 func TestClaudeStaticModelsExposesFable5(t *testing.T) {
@@ -93,6 +483,29 @@ func TestClaudeStaticModelsExposesFable5(t *testing.T) {
 	}
 	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
 		t.Errorf("unexpected Fable entry: %+v", fable)
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
+func TestClaudeStaticModelsExposesFable51(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	fable, ok := ids["claude-fable-5-1"]
+	if !ok {
+		t.Fatalf("missing Claude Fable 5.1 in: %+v", models)
+	}
+	if fable.Label != "Claude Fable 5.1" || fable.Provider != "anthropic" || fable.Default {
+		t.Errorf("unexpected Fable 5.1 entry: %+v", fable)
 	}
 	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
 		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
@@ -209,6 +622,18 @@ func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
 	if got := ids["gpt-5.3-codex"].Thinking; got == nil || !hasThinkingLevel(got, "xhigh") || hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
 		t.Errorf("unexpected gpt-5.3-codex thinking catalog: %+v", got)
 	}
+	for id, label := range map[string]string{
+		"gpt-5.6-sol":   "GPT-5.6 Sol",
+		"gpt-5.6-terra": "GPT-5.6 Terra",
+		"gpt-5.6-luna":  "GPT-5.6 Luna",
+	} {
+		if got := ids[id].Label; got != label {
+			t.Errorf("Codex model %q label = %q, want %q", id, got, label)
+		}
+		if ModelKnownIncompatibleWithProvider("codex", id) {
+			t.Errorf("Codex model %q must be accepted by the provider compatibility gate", id)
+		}
+	}
 }
 
 func TestModelKnownIncompatibleWithProvider(t *testing.T) {
@@ -241,6 +666,30 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			provider: "claude",
 			model:    "claude-opus-4-7",
 			want:     false,
+		},
+		{
+			name:     "claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[1m]",
+			want:     false,
+		},
+		{
+			name:     "future-shaped claude context variant is compatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[500k]",
+			want:     false,
+		},
+		{
+			name:     "malformed claude context variant is incompatible with claude",
+			provider: "claude",
+			model:    "claude-opus-5[weird]",
+			want:     true,
+		},
+		{
+			name:     "unknown claude base stays incompatible after context normalization",
+			provider: "claude",
+			model:    "claude-fake-9[1m]",
+			want:     true,
 		},
 		{
 			name:     "provider-prefixed openai model is incompatible with codex",
@@ -359,22 +808,34 @@ func TestCopilotStaticModelsExposesFullCatalog(t *testing.T) {
 }
 
 func TestListModelsHermesWithoutBinary(t *testing.T) {
-	// With no `hermes` binary on PATH the discovery fast-paths to
-	// an empty list (the UI then falls back to creatable manual
-	// entry). This test only verifies the fast-path; an actual
-	// ACP session is exercised in integration.
+	// Hermes reports discovery failures instead of swallowing them into an
+	// empty list, unlike the kiro / qoder cases below (MUL-6606). Those two
+	// have a caller that substitutes something; hermes has no static catalog,
+	// so an empty list here would be indistinguishable from "this runtime
+	// genuinely has no models" and the picker would render it as an
+	// authoritative empty dropdown. The error keeps the picker in its
+	// discovery-failed state, which still offers manual entry — the same
+	// fallback, minus the false confidence.
+	//
+	// This test only verifies the executable-lookup fast path; an actual ACP
+	// session is exercised in hermes_model_discovery_test.go.
 	ctx := context.Background()
 	// Prime the cache miss so we hit the live discovery function.
 	modelCacheMu.Lock()
 	delete(modelCache, "hermes")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "hermes", missingAgentExecutable(t, "hermes"))
-	if err != nil {
-		t.Fatalf("ListModels(hermes) error: %v", err)
+	got, err := ListModels(ctx, "hermes", Command{Path: missingAgentExecutable(t, "hermes")})
+	if err == nil {
+		t.Fatalf("expected a missing binary to be reported, got catalog %+v", got.Models)
 	}
-	if got.Models == nil {
-		t.Error("expected non-nil slice even when binary is missing")
+	if len(got.Models) != 0 {
+		t.Errorf("a failed discovery must carry no models, got %+v", got.Models)
+	}
+	// The reason has to name what actually went wrong: this text is what the
+	// daemon forwards as the request's error and what the picker displays.
+	if !strings.Contains(err.Error(), "executable lookup") {
+		t.Errorf("error should name the failing stage, got: %v", err)
 	}
 }
 
@@ -384,7 +845,7 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	delete(modelCache, "kiro")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "kiro", missingAgentExecutable(t, "kiro-cli"))
+	got, err := ListModels(ctx, "kiro", Command{Path: missingAgentExecutable(t, "kiro-cli")})
 	if err != nil {
 		t.Fatalf("ListModels(kiro) error: %v", err)
 	}
@@ -399,7 +860,7 @@ func TestListModelsQoderWithoutBinary(t *testing.T) {
 	delete(modelCache, "qoder")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "qoder", missingAgentExecutable(t, "qodercli"))
+	got, err := ListModels(ctx, "qoder", Command{Path: missingAgentExecutable(t, "qodercli")})
 	if err != nil {
 		t.Fatalf("ListModels(qoder) error: %v", err)
 	}
@@ -414,7 +875,7 @@ func TestListModelsQoderCNWithoutBinary(t *testing.T) {
 	delete(modelCache, "qoderclicn")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "qoderclicn", missingAgentExecutable(t, "qoderclicn"))
+	got, err := ListModels(ctx, "qoderclicn", Command{Path: missingAgentExecutable(t, "qoderclicn")})
 	if err != nil {
 		t.Fatalf("ListModels(qoderclicn) error: %v", err)
 	}
@@ -425,7 +886,7 @@ func TestListModelsQoderCNWithoutBinary(t *testing.T) {
 
 func TestListModelsUnknownProvider(t *testing.T) {
 	ctx := context.Background()
-	_, err := ListModels(ctx, "nonexistent", "")
+	_, err := ListModels(ctx, "nonexistent", Command{Path: ""})
 	if err == nil {
 		t.Fatal("ListModels(unknown) expected error")
 	}
@@ -581,7 +1042,7 @@ exit 1
 `
 	writeTestExecutable(t, fake, []byte(script))
 
-	models, err := discoverOpenCodeModels(context.Background(), fake)
+	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fake})
 	if err != nil {
 		t.Fatalf("discoverOpenCodeModels: %v", err)
 	}
@@ -644,6 +1105,131 @@ func TestCachedDiscoveryDoesNotCacheEmpty(t *testing.T) {
 	}
 }
 
+func writeFakePiRPCModelsBinary(t *testing.T) string {
+	t.Helper()
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := `#!/bin/sh
+if [ "$1" = "--mode" ] && [ "$2" = "rpc" ]; then
+  IFS= read -r _state_request
+  IFS= read -r _models_request
+  printf '%s\n' '{"id":"multica-state","type":"response","command":"get_state","success":true,"data":{"model":{"id":"gpt-5.6-luna","name":"Luna","provider":"openai-multi","reasoning":true,"thinkingLevelMap":{"off":"none","minimal":"none","low":"low","medium":null,"high":"high","xhigh":"xhigh","max":"max"}},"thinkingLevel":"max"}}'
+  printf '%s\n' '{"id":"multica-models","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"gpt-5.6-sol","name":"Sol","provider":"openai-multi","reasoning":true},{"id":"gpt-5.6-luna","name":"Luna","provider":"openai-multi","reasoning":true,"thinkingLevelMap":{"off":"none","minimal":"none","low":"low","medium":null,"high":"high","xhigh":"xhigh","max":"max"}},{"id":"plain-chat","name":"Plain chat","provider":"openai-multi","reasoning":false}]}}'
+  exit 0
+fi
+printf '%s\n' 'provider model context max-out thinking images'
+printf '%s\n' 'fallback fallback-model 128K 8K yes no'
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+	return fakePath
+}
+
+func TestDiscoverPiModelsRPCThinkingCatalog(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+	fakePath := writeFakePiRPCModelsBinary(t)
+
+	models, err := discoverPiModels(context.Background(), Command{Path: fakePath})
+	if err != nil {
+		t.Fatalf("discoverPiModels: %v", err)
+	}
+	if len(models) != 3 {
+		t.Fatalf("expected 3 RPC models, got %d: %+v", len(models), models)
+	}
+	byID := make(map[string]Model, len(models))
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+
+	sol := byID["openai-multi/gpt-5.6-sol"]
+	if sol.Thinking == nil || !hasThinkingLevel(sol.Thinking, "medium") || hasThinkingLevel(sol.Thinking, "xhigh") || hasThinkingLevel(sol.Thinking, "max") {
+		t.Fatalf("unexpected Sol thinking catalog: %+v", sol.Thinking)
+	}
+	luna := byID["openai-multi/gpt-5.6-luna"]
+	if !luna.Default {
+		t.Fatal("current Pi model must be marked as the runtime default")
+	}
+	if luna.Thinking == nil || luna.Thinking.DefaultLevel != "max" {
+		t.Fatalf("unexpected Luna thinking default: %+v", luna.Thinking)
+	}
+	for _, level := range []string{"off", "minimal", "low", "high", "xhigh", "max"} {
+		if !hasThinkingLevel(luna.Thinking, level) {
+			t.Errorf("Luna missing level %q: %+v", level, luna.Thinking)
+		}
+	}
+	if hasThinkingLevel(luna.Thinking, "medium") {
+		t.Errorf("explicitly null Pi level must stay disabled: %+v", luna.Thinking)
+	}
+	if got := byID["openai-multi/plain-chat"].Thinking; got != nil {
+		t.Fatalf("non-reasoning Pi model must not expose a picker: %+v", got)
+	}
+	if _, ok := byID["fallback/fallback-model"]; ok {
+		t.Fatal("successful RPC discovery must not append the table fallback")
+	}
+}
+
+func TestDiscoverPiModelsIDLessRPCErrorFallsBack(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := `#!/bin/sh
+if [ "$1" = "--mode" ] && [ "$2" = "rpc" ]; then
+  IFS= read -r _state_request
+  IFS= read -r _models_request
+  printf '%s\n' '{"id":"multica-state","type":"response","command":"get_state","success":true,"data":{"thinkingLevel":"high"}}'
+  printf '%s\n' '{"type":"response","command":"get_available_models","success":false,"error":"Unknown command: get_available_models"}'
+  cat >/dev/null
+  exit 0
+fi
+printf '%s\n' 'provider model context max-out thinking images'
+printf '%s\n' 'fallback fallback-model 128K 8K yes no'
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	models, err := discoverPiModels(ctx, Command{Path: fakePath})
+	if err != nil {
+		t.Fatalf("discoverPiModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "fallback/fallback-model" {
+		t.Fatalf("ID-less RPC error must terminate that request and use the table fallback, got %+v", models)
+	}
+}
+
+func TestDiscoverPiModelsHungRPCPreservesTableFallbackBudget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := `#!/bin/sh
+if [ "$1" = "--mode" ] && [ "$2" = "rpc" ]; then
+  IFS= read -r _state_request
+  IFS= read -r _models_request
+  exec sleep 30
+fi
+printf '%s\n' 'provider model context max-out thinking images'
+printf '%s\n' 'fallback fallback-model 128K 8K yes no'
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	started := time.Now()
+	models, err := discoverPiModelsWithin(context.Background(), Command{Path: fakePath}, 100*time.Millisecond, time.Second)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatalf("discoverPiModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "fallback/fallback-model" {
+		t.Fatalf("hung RPC must leave time for the table fallback, got %+v after %s", models, elapsed)
+	}
+	if elapsed >= 2*time.Second {
+		t.Fatalf("RPC phase consumed the table fallback budget: elapsed %s", elapsed)
+	}
+}
+
 func TestParsePiModels(t *testing.T) {
 	input := `openai:gpt-4o
 anthropic:claude-opus-4-7
@@ -685,6 +1271,41 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+// TestParsePiModelsSkipsForkUsageHints pins the second half of GitHub #4482: a
+// pi-family custom runtime profile can point at a fork with no `--list-models`,
+// which exits printing usage text. Those lines carry no diagnostic prefix, so
+// the field splitter used to coin them into models like `Run/`omp`. An empty
+// catalog is the correct answer — the UI falls back to manual entry, which is
+// strictly better than offering IDs the CLI will reject.
+func TestParsePiModelsSkipsForkUsageHints(t *testing.T) {
+	input := "Error: unknown flag: --list-models\n" +
+		"Run `omp --help` for available flags.\n" +
+		"Usage: omp [command]\n" +
+		"unknown command \"models\" for \"omp\"\n"
+
+	if models := parsePiModels(input); len(models) != 0 {
+		t.Fatalf("expected usage text to yield no models, got %+v", models)
+	}
+}
+
+// TestParsePiModelsKeepsCatalogAlongsideUsageHints pins that the widened noise
+// filter only drops the prose: a real catalog printed next to a usage hint
+// still parses. Without this the #3729 behaviour (catalog on a non-zero exit)
+// could be silently traded away for the #4482 fix.
+func TestParsePiModelsKeepsCatalogAlongsideUsageHints(t *testing.T) {
+	input := "Run `omp --help` for available flags.\n" +
+		"provider  model    context\n" +
+		"opencode  glm-4.7  202.8K\n"
+
+	models := parsePiModels(input)
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "opencode/glm-4.7" {
+		t.Errorf("unexpected model: %+v", models[0])
 	}
 }
 
@@ -744,7 +1365,7 @@ func TestDiscoverPiModelsNonZeroExit(t *testing.T) {
 			fakePath := filepath.Join(t.TempDir(), "pi")
 			writeTestExecutable(t, fakePath, []byte(tc.script))
 
-			models, err := discoverPiModels(context.Background(), fakePath)
+			models, err := discoverPiModels(context.Background(), Command{Path: fakePath})
 			if err != nil {
 				t.Fatalf("discoverPiModels: %v", err)
 			}
@@ -752,6 +1373,9 @@ func TestDiscoverPiModelsNonZeroExit(t *testing.T) {
 			// bogus entry, no header row.
 			if len(models) != 1 || models[0].ID != "glm-coding-plan/glm-4.7" {
 				t.Fatalf("expected exactly [glm-coding-plan/glm-4.7] despite non-zero exit, got %+v", models)
+			}
+			if models[0].Thinking != nil {
+				t.Fatalf("human-table fallback must not guess thinking levels: %+v", models[0].Thinking)
 			}
 		})
 	}
@@ -779,7 +1403,7 @@ func TestDiscoverOpenCodeModelsFallsBackOnVerboseNoise(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "opencode")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	models, err := discoverOpenCodeModels(context.Background(), fakePath)
+	models, err := discoverOpenCodeModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discoverOpenCodeModels: %v", err)
 	}
@@ -1192,9 +1816,9 @@ func TestAntigravityModelSelectionSupported(t *testing.T) {
 	}
 }
 
-// TestParseAntigravityModels covers the `agy models` line-per-name format:
-// each non-blank line becomes a Model whose ID and Label are the verbatim
-// display string `--model` expects, duplicates collapse, and blanks drop.
+// TestParseAntigravityModels covers the legacy single-column `agy models`
+// format (pre-1.1.11): each non-blank tab-free line becomes a Model whose ID
+// and Label are that verbatim value, duplicates collapse, and blanks drop.
 func TestParseAntigravityModels(t *testing.T) {
 	t.Parallel()
 
@@ -1219,6 +1843,32 @@ func TestParseAntigravityModels(t *testing.T) {
 		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+// TestParseAntigravityModelsTabSeparated covers the catalog format introduced
+// by agy 1.1.11: the first tab-delimited field is the value accepted by
+// --model, while the second field is the human-readable picker label.
+func TestParseAntigravityModelsTabSeparated(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"gemini-3.6-flash-high\tGemini 3.6 Flash (High)",
+		"claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\tfuture metadata is ignored",
+		"gemini-3.6-flash-high\tDuplicate label is ignored",
+	}, "\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "gemini-3.6-flash-high", Label: "Gemini 3.6 Flash (High)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseAntigravityModels = %+v, want %+v", got, want)
+	}
+
+	if err := antigravityModelError("gemini-3.6-flash-high", got); err != nil {
+		t.Fatalf("exact model slug from tab-separated catalog was rejected: %v", err)
 	}
 }
 
@@ -1251,5 +1901,239 @@ func TestCachedDiscovery(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 underlying call due to cache, got %d", calls)
+	}
+}
+
+// TestDiscoveryCacheKeyIsolatesByExecutable verifies that two different
+// executable paths for the same provider type produce different cache keys,
+// so a built-in and a custom Dim-compatible executable do not serve each
+// other's model catalog during the TTL.
+func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
+	key1 := discoveryCacheKey("dim", Command{Path: "/usr/bin/dim"})
+	key2 := discoveryCacheKey("dim", Command{Path: "/opt/custom/dim"})
+	if key1 == key2 {
+		t.Fatalf("different executables must produce different cache keys: both %q", key1)
+	}
+	keyEmpty := discoveryCacheKey("dim", Command{Path: ""})
+	if keyEmpty != "dim" {
+		t.Fatalf("empty executable should fall back to provider type, got %q", keyEmpty)
+	}
+	if keyEmpty == key1 {
+		t.Fatal("empty executable key must differ from a non-empty executable key")
+	}
+
+	calls := 0
+	fn := func() (Catalog, error) {
+		calls++
+		return Catalog{Models: []Model{{ID: "m"}}}, nil
+	}
+	modelCacheMu.Lock()
+	delete(modelCache, key1)
+	delete(modelCache, key2)
+	modelCacheMu.Unlock()
+
+	if _, err := cachedDiscovery(key1, fn); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cachedDiscovery(key2, fn); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 underlying calls (one per executable), got %d", calls)
+	}
+}
+
+// TestQualifyModelID covers GH #7300: a persisted model id that
+// omits its provider must be promoted to the catalog's canonical selector,
+// but only when exactly one provider claims it. opencode rejects an
+// unqualified id outright, and every capability lookup keyed on the model id
+// misses until the two agree.
+func TestQualifyModelID(t *testing.T) {
+	t.Parallel()
+
+	gateway := []Model{
+		{ID: "multica-anthropic/claude/claude-opus-5", Provider: "multica-anthropic"},
+		{ID: "multica-anthropic/claude/claude-sonnet-5", Provider: "multica-anthropic"},
+		{ID: "multica-codex/codex/gpt-5.6-sol", Provider: "multica-codex"},
+	}
+
+	tests := []struct {
+		name          string
+		catalog       Catalog
+		model         string
+		want          string
+		wantRewritten bool
+	}{
+		{
+			name:          "slash-shaped id gains its provider",
+			catalog:       Catalog{Models: gateway},
+			model:         "claude/claude-opus-5",
+			want:          "multica-anthropic/claude/claude-opus-5",
+			wantRewritten: true,
+		},
+		{
+			name:    "already canonical is left alone",
+			catalog: Catalog{Models: gateway},
+			model:   "multica-anthropic/claude/claude-opus-5",
+			want:    "multica-anthropic/claude/claude-opus-5",
+		},
+		{
+			name: "an exact catalog id wins over a qualifiable one",
+			// Both a bare `shared-id` model and a `vendor/shared-id` model
+			// exist. The exact match is what the user picked; promoting it to
+			// the other provider's entry would silently reroute the task.
+			catalog: Catalog{Models: []Model{
+				{ID: "shared-id", Provider: ""},
+				{ID: "vendor/shared-id", Provider: "vendor"},
+			}},
+			model: "shared-id",
+			want:  "shared-id",
+		},
+		{
+			name: "ambiguous across providers stays untouched",
+			catalog: Catalog{Models: []Model{
+				{ID: "gateway-a/claude/claude-opus-5", Provider: "gateway-a"},
+				{ID: "gateway-b/claude/claude-opus-5", Provider: "gateway-b"},
+			}},
+			model: "claude/claude-opus-5",
+			want:  "claude/claude-opus-5",
+		},
+		{
+			name:    "unknown model is passed through for the CLI to judge",
+			catalog: Catalog{Models: gateway},
+			model:   "something-nobody-advertises",
+			want:    "something-nobody-advertises",
+		},
+		{
+			name:    "empty catalog cannot qualify anything",
+			catalog: Catalog{},
+			model:   "claude/claude-opus-5",
+			want:    "claude/claude-opus-5",
+		},
+		{
+			// A static stand-in is not what the runtime actually supports, so
+			// promoting against it would invent an id the CLI never advertised.
+			name:    "a fallback catalog is never authoritative",
+			catalog: Catalog{Models: gateway, Fallback: true},
+			model:   "claude/claude-opus-5",
+			want:    "claude/claude-opus-5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, rewritten := QualifyModelID(tt.catalog, tt.model)
+			if got != tt.want || rewritten != tt.wantRewritten {
+				t.Errorf("QualifyModelID(%q) = (%q, %v), want (%q, %v)",
+					tt.model, got, rewritten, tt.want, tt.wantRewritten)
+			}
+		})
+	}
+}
+
+// A blank model means "let the runtime pick its own default" — there is
+// nothing to qualify, and the runtime resolves its own selection.
+func TestQualifyModelIDIgnoresBlankModel(t *testing.T) {
+	t.Parallel()
+	catalog := Catalog{Models: []Model{{ID: "vendor/only-model", Provider: "vendor"}}}
+	got, rewritten := QualifyModelID(catalog, "   ")
+	if got != "" || rewritten {
+		t.Errorf("QualifyModelID(blank) = (%q, %v), want (\"\", false)", got, rewritten)
+	}
+}
+
+// TestSlashShapedPiModelKeepsItsThinkingCatalog walks the chain that GH #7300
+// reported as a dropped thinking_level: pi's RPC catalog carries a
+// gateway-style model whose own id contains a slash, the agent persisted that
+// bare id, and every capability lookup keyed on it missed. Qualifying the id
+// first is what puts the persisted value back on the catalog entry that
+// actually advertises the levels.
+func TestSlashShapedPiModelKeepsItsThinkingCatalog(t *testing.T) {
+	t.Parallel()
+
+	// Verbatim shape of a real `get_available_models` RPC response for the
+	// reporter's models.json.
+	raw := []piRPCModel{
+		{ID: "claude/claude-opus-5", Name: "Claude Opus 5", Provider: "multica-anthropic", Reasoning: true},
+		{ID: "claude/claude-sonnet-5", Name: "Claude Sonnet 5", Provider: "multica-anthropic", Reasoning: true},
+	}
+	models := piModelsFromRPC(raw, piRPCState{})
+
+	qualified, rewritten := QualifyModelID(Catalog{Models: models}, "claude/claude-opus-5")
+	if !rewritten || qualified != "multica-anthropic/claude/claude-opus-5" {
+		t.Fatalf("qualified = (%q, %v), want (%q, true)",
+			qualified, rewritten, "multica-anthropic/claude/claude-opus-5")
+	}
+
+	var thinking *ModelThinking
+	for _, m := range models {
+		if m.ID == qualified {
+			thinking = m.Thinking
+		}
+	}
+	if thinking == nil {
+		t.Fatalf("qualified model %q advertises no thinking catalog", qualified)
+	}
+	if !piThinkingSupports(thinking, "high") {
+		t.Errorf("thinking catalog for %q missing \"high\": %+v", qualified, thinking.SupportedLevels)
+	}
+}
+
+// TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract pins what the
+// predicate actually claims: whether a runtime's CLI refuses a model id that
+// carries no provider prefix. It is deliberately NOT a statement about catalog
+// shape — several runtimes (pi, omp, deveco) emit provider-prefixed ids, but
+// only the ones whose CLI *rejects* the unprefixed form justify spending a
+// discovery subprocess before launch.
+//
+// The pi entries are the load-bearing ones: buildPiArgs and its tests prove pi
+// resolves a canonical selector, a bare id, and an id containing a slash all
+// on its own, so a pi task must launch without the daemon reading any catalog.
+func TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		provider string
+		want     bool
+		why      string
+	}{
+		{"opencode", true, "run --model resolves strictly through provider/model"},
+		{"deveco", true, "opencode fork with the same --model contract"},
+		{"pi", false, "pi's own resolver accepts bare and slash-shaped ids"},
+		{"omp", false, "pi-family fork, inherits pi's resolver"},
+		{"claude", false, "bare model ids, no provider segment to miss"},
+		{"codex", false, "bare model ids"},
+		{"copilot", false, "bare model ids under a display-name provider"},
+		{"dsh", false, "resolves its own provider-prefixed ids"},
+		{"", false, "unknown provider must not spend discovery"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := ModelSelectorMustBeProviderQualified(tt.provider); got != tt.want {
+				t.Errorf("ModelSelectorMustBeProviderQualified(%q) = %v, want %v (%s)",
+					tt.provider, got, tt.want, tt.why)
+			}
+		})
+	}
+}
+
+// omp is a built-in runtime identity rather than a protocol family, so the
+// predicate must resolve it through its descriptor. This is what keeps "add a
+// fork" a descriptor entry instead of a change here.
+func TestModelSelectorContractFollowsProtocolFamily(t *testing.T) {
+	t.Parallel()
+
+	desc, ok := BuiltinRuntimeByID("omp")
+	if !ok {
+		t.Fatal("omp is no longer a built-in runtime identity; this test needs a new subject")
+	}
+	if desc.ProtocolFamily != "pi" {
+		t.Fatalf("omp protocol family = %q, want pi", desc.ProtocolFamily)
+	}
+	if ModelSelectorMustBeProviderQualified("omp") != ModelSelectorMustBeProviderQualified(desc.ProtocolFamily) {
+		t.Error("omp does not inherit its selector contract from the pi protocol family")
 	}
 }

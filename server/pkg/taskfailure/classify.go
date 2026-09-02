@@ -63,7 +63,7 @@ func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(rawError)
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
-		// but that bucket is not part of the canonical 22. In-flight
+		// but that bucket is not part of the canonical taxonomy. In-flight
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
@@ -81,6 +81,7 @@ func Classify(rawError string) Reason {
 		"prompt is too long",
 		"context size has been exceeded",
 	),
+		containsAny(lower, contextWindowExceededWitnesses...),
 		// SQL had `%token%limit%` — ILIKE wildcard between tokens. We
 		// approximate with both substrings present, which catches
 		// "token limit", "tokens per minute limit", etc., without the
@@ -96,7 +97,7 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "missing environment variable"),
 		strings.Contains(lower, "missing") && strings.Contains(lower, "api_key"),
 		strings.Contains(lower, "api key") && strings.Contains(lower, "required"),
-		strings.Contains(lower, "no llm provider configured"),
+		strings.Contains(lower, providerUnconfiguredPhrase),
 		strings.Contains(lower, "no provider configured"):
 		return ReasonAgentMissingConfig
 
@@ -177,21 +178,43 @@ func Classify(rawError string) Reason {
 	//    Note this only catches deadlines that arrive as a bare string;
 	//    callers holding the error value should classify structurally
 	//    instead (see taskRunFailureReason in daemon/daemon.go).
-	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
-	case containsAny(lower,
-		"stream disconnected",
-		"connection closed",
-		"mid-response",
-		"error sending request",
-		"unable to connect",
-		"dial tcp",
-		"connection refused",
-		"connectionrefused",
-		"dns",
-		"i/o timeout",
-		"deadline exceeded",
-		"timeout exceeded while awaiting",
-	):
+	//    The OpenCode/CodeArts "stream ended" prefixes cover every failure the
+	//    shared terminal-signal guard raises (pkg/agent/opencode.go): a step
+	//    left open at EOF, a continuation that never started, and a run that
+	//    ended on a step with no text, no tool call and no reported usage.
+	//    All three mean the same thing — the provider stream died and
+	//    `opencode run` still exited 0 — which is this bucket by definition,
+	//    and being resume-safe the retry continues the truncated session
+	//    instead of redoing the work. Before this they landed in
+	//    agent_error.process_failure (the word "signal" in "terminal signal"
+	//    matching rule 13 by accident) and agent_error.unknown respectively;
+	//    neither is on the retry allowlist, so a transient cut ended the task
+	//    outright and max_attempts never applied (#6522).
+	//    Pi's OpenAI-compatible SDK surfaces a dropped LiteLLM/OpenAI call as
+	//    the bare strings "Connection error." and "Request timed out." on
+	//    turn_end.errorMessage (then exits 1). Those used to fall through to
+	//    process_failure via "exit status 1" and terminate the task with no
+	//    retry (BHD-135). isPiProviderNetworkError matches only the exact bare
+	//    messages and the stable Pi/OMP exit composite, rather than treating
+	//    the same broad substrings from local tools or MCP servers as retryable.
+	//    Mirror these Pi message shapes into the MUL-1949 offline backfill SQL.
+	case isPiProviderNetworkError(lower),
+		containsAny(lower,
+			"stream disconnected",
+			opencodeStreamEndedPrefix,
+			codeartsStreamEndedPrefix,
+			"connection closed",
+			"mid-response",
+			"error sending request",
+			"unable to connect",
+			"dial tcp",
+			"connection refused",
+			"connectionrefused",
+			"dns",
+			"i/o timeout",
+			"deadline exceeded",
+			"timeout exceeded while awaiting",
+		):
 		return ReasonAgentProviderNetwork
 
 	// 8. Model not found / unavailable. The SQL uses `%model%not%found%`,
@@ -221,8 +244,15 @@ func Classify(rawError string) Reason {
 	case strings.Contains(lower, "timed out after"):
 		return ReasonAgentTimeout
 
-	// 11. Runner CLI binary missing.
-	case strings.Contains(lower, "executable not found"):
+	// 11. Runner CLI binary missing, or present but not runnable on this
+	//     machine — the npm placeholder stub left behind when a package's
+	//     postinstall was blocked passes every "is it installed" check and
+	//     only fails at execve (MUL-6164). Operationally the two are the same
+	//     verdict: this host has no usable CLI, and re-running cannot fix it.
+	case containsAny(lower,
+		"executable not found",
+		"exec format error",
+	):
 		return ReasonAgentRuntimeMissingExecutable
 
 	// 12. Runner CLI version too old / incompatible protocol.
@@ -244,6 +274,7 @@ func Classify(rawError string) Reason {
 		"panic",
 		"sigsegv",
 		"process exited",
+		"start codex:",
 		"pipe has been ended",
 		"file already closed",
 		"initialize failed",
@@ -252,6 +283,67 @@ func Classify(rawError string) Reason {
 	}
 
 	return ReasonAgentUnknown
+}
+
+// providerUnconfiguredPhrase is the runtime's wording for "I resolved no LLM
+// provider at all" — structurally a configuration gap, not a rejected
+// credential. This const is the single source of truth for its two readers:
+// rule 2 of Classify above (which maps it to ReasonAgentMissingConfig) and
+// ProviderUnconfigured below. Keep them together; a second literal copy is how
+// the two drift apart.
+const providerUnconfiguredPhrase = "no llm provider configured"
+
+// ProviderUnconfigured reports whether an agent error is the runtime refusing
+// to start because it resolved no provider whatsoever. Callers use it to
+// attach context about WHERE the runtime looked — the failure text names a
+// remedy ("run `hermes model`") without naming the home it would apply to, so
+// a runtime reading a different config directory than the user edited sends
+// them to fix the wrong file (GH #6872).
+//
+// Substring, not equality: the phrase reaches us wrapped in the ACP transport's
+// own framing (`hermes session/new failed: session/new: Internal error
+// (code=-32603, data={"details":"No LLM provider configured. …`).
+//
+// This says nothing about which credential is missing or whether one would
+// help — it is strictly "the runtime resolved no provider". An expired key, a
+// 401, or a provider the user configured but mistyped are all different
+// failures and must not be widened into this.
+func ProviderUnconfigured(errText string) bool {
+	if errText == "" {
+		return false
+	}
+	return strings.Contains(strings.ToLower(errText), providerUnconfiguredPhrase)
+}
+
+// contextWindowExceededWitnesses are the two wordings for an overflow reported
+// on the RESPONSE rather than as a 400 on the request: the provider accepts the
+// call and ends the turn with stop_reason "model_context_window_exceeded", which
+// Claude Code 2.1.x surfaces verbatim as "API Error: The model has reached its
+// context window limit." (GH #6360). Both are matched so a backend forwarding
+// the raw stop reason classifies the same way as one forwarding the CLI's copy.
+//
+// Neither carries "token" nor any of rule 1's other phrases, so before this the
+// failure landed in agent_error.unknown — a reason no resume blacklist covers,
+// which left the over-full session pinned as the resume pointer and made every
+// later comment on that issue replay the same overflow.
+//
+// Each is an unambiguous witness on its own, which is what lets
+// NormalizeDaemonReason reuse them to upgrade an older daemon's catchall
+// server-side. Matched against pre-lowercased text.
+// Mirror these substrings into the MUL-1949 offline backfill SQL.
+//
+// terminal_reason=prompt_too_long joins them for GH #6402: it is the structured
+// enum value Claude Code puts on the result frame when the turn ended because
+// the context window is full, and the daemon quotes it verbatim into the error
+// it reports (see claudeTerminalReasonFailure in pkg/agent/claude.go). Being an
+// enum token rather than prose, it is at least as unambiguous as the two above
+// — no free-form provider message produces it by accident — so a run classified
+// from it lands in context_overflow even when the CLI's accompanying copy is
+// empty or reworded between releases.
+var contextWindowExceededWitnesses = []string{
+	"context window limit",
+	"model_context_window_exceeded",
+	TerminalReasonPromptTooLong,
 }
 
 // legacySkillBundlePrefix is the exact wrapper a pre-MUL-5370 daemon put on a
@@ -272,6 +364,95 @@ var legacySkillBundleReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+// legacyContextOverflowReasons are the buckets an older daemon lands the
+// response-side context overflow in: agent_error.unknown from its own
+// classifier (its rule 1 predates contextWindowExceededWitnesses) and the
+// pre-MUL-1949 coarse agent_error.
+//
+// Deliberately narrower than legacySkillBundleReasons. A refined reason means
+// the old daemon matched an earlier rule on the same text — process_failure on
+// a crash marker, provider_network on a stream cut — and that says more about
+// what actually ended the run than a witness appearing somewhere in the same
+// blob does. Upgrading those would discard information; leaving them alone
+// costs at most the pre-existing behaviour.
+var legacyContextOverflowReasons = map[string]bool{
+	string(ReasonAgentUnknown): true,
+	"agent_error":              true,
+}
+
+// legacyOpenclawCLITimeoutWitnesses identify an OpenClaw config-discovery
+// timeout in the wire text of a daemon that predates the sentinel
+// (execenv.ErrOpenclawCLITimeout). Both halves must appear: the prep-stage
+// wrapper naming this exact call site, and the deadline phrase. That pair is
+// only produced by execOpenclawCLI's cancellation branch.
+var legacyOpenclawCLITimeoutWitnesses = []string{
+	"prepare openclaw config",
+	"deadline exceeded",
+}
+
+// legacyOpenclawCLITimeoutReasons are the buckets an older daemon lands that
+// timeout in. provider_network is what its own rule 7 produces from
+// "deadline exceeded" text, and agent_error / agent_error.unknown cover the
+// coarser pre-MUL-1949 shapes.
+//
+// Worth upgrading at the server rather than waiting for the fleet: the stale
+// label is not merely imprecise, it is actively harmful — it puts a
+// deterministic local failure on the retry allowlist (each retry re-pays the
+// same 8-11s and fails identically) and shows "check your network" copy for a
+// stall that has nothing to do with the network (#7112).
+var legacyOpenclawCLITimeoutReasons = map[string]bool{
+	string(ReasonAgentUnknown):         true,
+	string(ReasonAgentProviderNetwork): true,
+	"agent_error":                      true,
+}
+
+// legacyEnvironmentPrepareWitnesses are the two wrappers the daemon puts on a
+// failed execenv.Prepare / execenv.Reuse. Each opens the error at character
+// zero, and no other code path emits them, so the prefix alone establishes
+// that the run died setting up its workspace directory and never reached an
+// agent.
+var legacyEnvironmentPrepareWitnesses = []string{
+	"prepare execution environment:",
+	"reuse execution environment:",
+}
+
+func isPiProviderNetworkError(lower string) bool {
+	for _, message := range []string{"connection error.", "request timed out."} {
+		if lower == message ||
+			strings.HasPrefix(lower, message+"; pi exited with error: ") ||
+			strings.HasPrefix(lower, message+"; omp exited with error: ") {
+			return true
+		}
+	}
+	return false
+}
+
+// opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
+// guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
+// is a PREFIX of the whole error rather than a phrase somewhere inside it, so
+// its presence identifies the failure outright.
+const (
+	opencodeStreamEndedPrefix = "opencode stream ended"
+	codeartsStreamEndedPrefix = "codearts stream ended"
+)
+
+// legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
+// entry lands these errors in: process_failure for the two "terminal signal"
+// variants, whose word "signal" its rule 13 matches by accident, unknown for
+// anything its rules miss, and the pre-MUL-1949 coarse agent_error.
+//
+// Wider than legacyContextOverflowReasons on purpose, and the witness is why.
+// That rule leaves refined reasons alone because a phrase appearing somewhere
+// in an error blob says less than the bucket an earlier rule already picked.
+// Here the witness is the guard's own message from its first character, so the
+// old bucket cannot be describing some other, better-identified cause — it is
+// the same failure under a label that predates knowing what it was.
+var legacyOpencodeStreamEndedReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
 // NormalizeDaemonReason upgrades a failure_reason reported by an older daemon
 // onto the taxonomy this server understands, using the raw error text as the
 // witness. It returns the reason unchanged when nothing applies.
@@ -284,15 +465,97 @@ var legacySkillBundleReasons = map[string]bool{
 // generic copy. Recognising the wire shape an old daemon produces closes that
 // gap the moment the server deploys.
 //
-// This is a boundary compatibility shim, not internal fallback logic: it can
-// be deleted once no daemon old enough to emit legacySkillBundlePrefix is
-// still reporting.
+// This is a boundary compatibility shim, not internal fallback logic: each rule
+// can be deleted once no daemon old enough to produce its wire shape is still
+// reporting.
 func NormalizeDaemonReason(reason, rawError string) Reason {
 	if legacySkillBundleReasons[reason] &&
 		strings.HasPrefix(strings.TrimSpace(rawError), legacySkillBundlePrefix) {
 		return ReasonSkillBundleUnavailable
 	}
+	// GH #6360: the same mixed-version gap, on a failure where waiting for
+	// every host to update is more expensive. A daemon whose rule 1 predates
+	// contextWindowExceededWitnesses reports the catchall, and the catchall is
+	// on no resume blacklist — so the over-full session stays pinned as the
+	// resume pointer and every later comment on that issue replays the same
+	// overflow. One un-upgraded host means a permanently stuck (agent, issue)
+	// pair, not just a missing label; upgrading here retires the session the
+	// moment the server deploys.
+	if legacyContextOverflowReasons[reason] &&
+		containsAny(strings.ToLower(rawError), contextWindowExceededWitnesses...) {
+		return ReasonAgentContextOverflow
+	}
+	// #6522: the same gap once more. Rule 7 only decides where these land when
+	// THIS server classifies them, and it classifies only when the daemon sent
+	// no reason at all. An installed daemon predating that entry reports a
+	// non-empty agent_error.process_failure instead, which the empty-reason
+	// branch in FailTask deliberately skips — so the run stays off the retry
+	// allowlist on exactly the un-upgraded hosts most likely to be hitting a
+	// flaky provider. Upgrading here makes the retry work the moment the server
+	// deploys, without waiting on the daemon fleet.
+	lowerError := strings.ToLower(strings.TrimSpace(rawError))
+	if legacyOpencodeStreamEndedReasons[reason] &&
+		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
+			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {
+		return ReasonAgentProviderNetwork
+	}
+	// #7112: same mixed-version gap. A daemon predating the OpenClaw CLI
+	// timeout sentinel reports provider_network for a local config-discovery
+	// stall, which both misleads the user and burns auto-retries on a failure
+	// that cannot succeed until the host gets faster or the deadline is raised.
+	if legacyOpenclawCLITimeoutReasons[reason] &&
+		containsAll(strings.ToLower(rawError), legacyOpenclawCLITimeoutWitnesses...) {
+		return ReasonRuntimeCLITimeout
+	}
+	// #7913: the same mixed-version gap on environment preparation. A daemon
+	// predating the structural tag classifies the host's own filesystem error
+	// from its text and reports some agent_error.* value — the catchall today,
+	// provider_server_error on the report that opened the issue. Every one of
+	// them is wrong by construction: the prefix proves the task died before an
+	// agent process existed, so the whole agent_error.* namespace is upgraded
+	// here rather than an enumerated subset of it.
+	//
+	// Last, so the openclaw rule above keeps its own preparation failure: that
+	// one names a specific cause inside this same phase and says strictly more.
+	if isAgentSideReason(reason) && hasAnyPrefix(lowerError, legacyEnvironmentPrepareWitnesses...) {
+		return ReasonEnvironmentPrepareFailed
+	}
 	return Reason(reason)
+}
+
+// containsAll reports whether s contains every one of the supplied substrings.
+// Used where a single phrase would be ambiguous and only the combination
+// identifies the failure. Caller pre-lowercases s, same contract as
+// containsAny.
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return len(subs) > 0
+}
+
+// hasAnyPrefix reports whether s starts with any of the supplied prefixes.
+// Used where the witness is the wrapper opening an error rather than a phrase
+// somewhere inside it, which is what makes it unambiguous. Caller
+// pre-lowercases s, same contract as containsAny.
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAgentSideReason reports whether a wire value blames the agent process —
+// any refined agent_error.* sub-reason, or the pre-MUL-1949 coarse bucket they
+// were split out of. Used by normalization rules whose witness proves the run
+// never reached an agent, so that every such label is known to be wrong
+// without enumerating them.
+func isAgentSideReason(reason string) bool {
+	return Reason(reason).IsAgentError() || reason == "agent_error"
 }
 
 // containsAny reports whether s contains any of the supplied substrings.

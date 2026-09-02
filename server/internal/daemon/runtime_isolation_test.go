@@ -164,6 +164,10 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 		MaxConcurrentTasks: 4,
 	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
 	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1", "rt-2"}}
+	// Both halves, as every production path that publishes a runtime ID does:
+	// handleTask fails a claimed task whose runtime it no longer holds.
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
+	d.runtimeIndex["rt-2"] = Runtime{ID: "rt-2", Provider: "claude"}
 	d.cancelPollInterval = time.Hour // no server-side cancellation polling in this test
 
 	var mu sync.Mutex

@@ -16,7 +16,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { AppLink, useNavigation } from "../../navigation";
+import { AppLink } from "../../navigation";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import {
   buildRuntimeMachines,
@@ -88,7 +88,6 @@ export function RuntimeDetailPage({
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
-  const navigation = useNavigation();
   const qc = useQueryClient();
   const healthLabel = useHealthLabel();
   const timeAgo = useTimeAgo();
@@ -191,7 +190,11 @@ export function RuntimeDetailPage({
               {t(($) => $.machine.not_found_hint)}
             </p>
           </div>
-          <Button size="sm" onClick={() => navigation.push(paths.runtimes())}>
+          <Button
+            size="sm"
+            render={<AppLink href={paths.runtimes()} />}
+            nativeButton={false}
+          >
             {t(($) => $.detail.all_runtimes)}
           </Button>
         </div>
@@ -261,7 +264,7 @@ export function RuntimeDetailPage({
                   <MachineCliSection
                     machine={machine}
                     currentUserId={currentUserId}
-                    canManageAnyRuntime={isAdmin}
+                    canManagePublicRuntimes={isAdmin}
                   />
                   {machine.lastSeenAt && (
                     <span>{timeAgo(machine.lastSeenAt)}</span>

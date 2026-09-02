@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { ApiError } from "@multica/core/api";
 import { configStore } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -44,11 +45,25 @@ vi.mock("./slack-tab", () => ({
   SlackTab: () => <div data-testid="slack-tab" />,
 }));
 
+vi.mock("./dingtalk-tab", () => ({
+  DingTalkTab: () => <div data-testid="dingtalk-tab" />,
+}));
+
 vi.mock("./vcs-tab", () => ({
   VCSTab: () => <div data-testid="vcs-tab" />,
 }));
 
+vi.mock("./wecom-tab", () => ({
+  WecomTab: () => <div data-testid="wecom-tab" />,
+}));
+
+vi.mock("./telegram-tab", () => ({
+  TelegramTab: () => <div data-testid="telegram-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
+
+afterEach(cleanup);
 
 function renderTab() {
   return render(
@@ -83,6 +98,35 @@ describe("Settings IntegrationsTab", () => {
 
     expect(screen.getByTestId("composio-tab")).toBeInTheDocument();
     expect(queryCallsRef.current[0]?.enabled).toBe(true);
+  });
+
+  it("shows each channel description below its icon and title", () => {
+    renderTab();
+
+    for (const channel of ["lark", "slack", "dingtalk", "wecom", "telegram"]) {
+      const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
+      const title = icon.closest("h3");
+      const description = title?.nextElementSibling;
+      expect(title).not.toBeNull();
+      expect(description?.tagName).toBe("P");
+      expect(description).toHaveClass("text-caption", "text-muted-foreground");
+      expect(icon).not.toHaveClass("border");
+      expect(icon).not.toHaveClass("bg-muted/40");
+    }
+  });
+
+  // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
+  // one speech bubble, with nothing on the row saying which platform it was
+  // (#6585). Requiring five distinct shapes is the cheap guard against a
+  // regression to that.
+  it("gives every channel its own brand mark", () => {
+    renderTab();
+
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
+      (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
+    );
+
+    expect(new Set(shapes).size).toBe(shapes.length);
   });
 
   it("hides Composio when the feature flag is on but the server reports 503", () => {

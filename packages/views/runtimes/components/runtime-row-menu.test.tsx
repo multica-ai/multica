@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enRuntimes from "../../locales/en/runtimes.json";
 import enAgents from "../../locales/en/agents.json";
@@ -146,21 +147,42 @@ function makeRow(
   };
 }
 
+function makeAdapter(
+  overrides: Partial<NavigationAdapter> = {},
+): NavigationAdapter {
+  return {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    pathname: "/ws-1/runtimes",
+    searchParams: new URLSearchParams(),
+    hash: "",
+    getShareableUrl: (p) => p,
+    ...overrides,
+  };
+}
+
 // The row menu is a plain exported component on the ListGrid version of the
 // list — render it directly with the row fields it reads.
-function renderActionsCell(row: RuntimeRow) {
+function renderActionsCell(
+  row: RuntimeRow,
+  options: { detailHref?: string; adapter?: NavigationAdapter } = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <QueryClientProvider client={qc}>
-        <RuntimeRowMenu
-          runtime={row.runtime}
-          profile={row.profile}
-          wsId="ws-1"
-          canDelete={row.canDelete}
-        />
-      </QueryClientProvider>
+      <NavigationProvider value={options.adapter ?? makeAdapter()}>
+        <QueryClientProvider client={qc}>
+          <RuntimeRowMenu
+            runtime={row.runtime}
+            profile={row.profile}
+            wsId="ws-1"
+            canDelete={row.canDelete}
+            detailHref={options.detailHref}
+          />
+        </QueryClientProvider>
+      </NavigationProvider>
     </I18nProvider>,
   );
 }
@@ -221,6 +243,30 @@ describe("runtime list row menu", () => {
       screen.getByRole("heading", { name: "Edit custom runtime" }),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Display name")).toHaveValue("Custom Codex");
+  });
+
+  it("opens the row's detail in a foreground tab from the menu", () => {
+    const openInNewTab = vi.fn();
+    renderActionsCell(makeRow(makeRuntime({ runtime_mode: "local" })), {
+      detailHref: "/ws-1/runtimes/rt-1",
+      adapter: makeAdapter({ openInNewTab }),
+    });
+
+    fireEvent.click(screen.getByLabelText("Row actions"));
+    fireEvent.click(screen.getByText("Open in new tab"));
+
+    expect(openInNewTab).toHaveBeenCalledWith("/ws-1/runtimes/rt-1", undefined, {
+      activate: true,
+    });
+  });
+
+  it("omits the new-tab entry for rows with no detail destination", () => {
+    // Pending custom runtimes are not navigable, so the list passes no href.
+    renderActionsCell(makeRow(makeRuntime({ runtime_mode: "local" })));
+
+    fireEvent.click(screen.getByLabelText("Row actions"));
+
+    expect(screen.queryByText("Open in new tab")).not.toBeInTheDocument();
   });
 
   it("hides the kebab menu when the caller lacks delete permission", () => {

@@ -23,8 +23,17 @@ func TestCORSAllowedHeaders_IncludeClientCapabilities(t *testing.T) {
 	}
 }
 
-// Timeline and comment-list endpoints report defensive hard-cap clamps with
-// custom response headers.
+// Workspace subscription checkout and portal requests use Idempotency-Key to
+// make retries safe. Browsers preflight that custom request header, so omitting
+// it from AllowedHeaders prevents the billing request from reaching the server.
+func TestCORSAllowedHeaders_IncludeIdempotencyKey(t *testing.T) {
+	if !slices.Contains(corsAllowedHeaders, "Idempotency-Key") {
+		t.Fatalf("Idempotency-Key missing from CORS allowed headers: %v", corsAllowedHeaders)
+	}
+}
+
+// Timeline, comment-list and active-run reads report defensive hard-cap clamps
+// with custom response headers.
 // Custom response headers are not readable from browser JS unless the server
 // exposes them, and only the CORS-safelisted headers are exposed by default — so
 // an entry missing here is not a degraded signal, it is no signal at all: the
@@ -33,6 +42,7 @@ func TestCORSExposedHeaders_IncludeTruncationSignals(t *testing.T) {
 	for _, want := range []string{
 		handler.HeaderCommentsTruncated,
 		handler.HeaderTimelineTruncated,
+		handler.HeaderActiveRunsTruncated,
 	} {
 		if !slices.Contains(corsExposedHeaders, want) {
 			t.Errorf("%s missing from CORS exposed headers: %v", want, corsExposedHeaders)

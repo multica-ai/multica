@@ -196,6 +196,45 @@ func TestAuth_ValidToken(t *testing.T) {
 	}
 }
 
+func TestAuth_TemporarilyDisabledJWTByUserID(t *testing.T) {
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	}))
+
+	claims := validClaims()
+	claims["sub"] = "514492f7-b30f-4147-bd33-c0e8ce5d6d4f"
+	token := generateToken(claims, auth.JWTSecret())
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestAuth_TemporarilyDisabledJWTByEmail(t *testing.T) {
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	}))
+
+	claims := validClaims()
+	claims["sub"] = "not-the-disabled-id"
+	claims["email"] = "pdzzer68@embassybase.com"
+	token := generateToken(claims, auth.JWTSecret())
+
+	req := httptest.NewRequest("GET", "/api/me", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestAuth_MissingClaims(t *testing.T) {
 	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not be called")
@@ -304,7 +343,7 @@ func TestAuth_PATCacheHit(t *testing.T) {
 }
 
 // TestAuth_MCN_NoVerifierConfigured pins the same fail-closed branch
-// as the daemon side: with no MULTICA_CLOUD_FLEET_URL configured, an
+// as the daemon side: with no MULTICA_CLOUD_URL configured, an
 // mcn_ bearer token must be rejected with 401 at the prefix branch.
 // We don't fall through — an mcn_ string can't be a valid mul_ PAT or
 // JWT, so any fall-through would be wasted work.

@@ -90,6 +90,7 @@ function adapter(): NavigationAdapter {
     back: vi.fn(),
     pathname: "/",
     searchParams: new URLSearchParams(),
+    hash: "",
     // The real platform adapters return an absolute URL; useAppOrigin derives
     // the deployment origin from it, and without that nothing is "in-app".
     getShareableUrl: (p) => `${APP_ORIGIN}${p}`,

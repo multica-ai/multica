@@ -13,14 +13,23 @@ import {
   Plug,
   MessageCircle,
   Tags,
+  CircleDot,
   Keyboard,
   ListTodo,
   Zap,
+  Blocks,
+  CreditCard,
+  Server,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useCurrentWorkspace } from "@multica/core/paths";
+import { useFeatureEnabled } from "@multica/core/config";
+import {
+  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  PLUGINS_V1_FLAG,
+} from "@multica/core/feature-flags";
 import { useNavigation } from "../../navigation";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
@@ -35,9 +44,14 @@ import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
+import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { PluginsTab } from "./plugins-tab";
+import { McpTab } from "./mcp-tab";
+import { BillingTab } from "./billing-tab";
+import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
 const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "issue", "chat", "notifications", "tokens"] as const;
@@ -58,9 +72,13 @@ const WORKSPACE_TAB_KEYS = [
   "integrations",
   "labs",
   "members",
+  "billing",
   "labels",
+  "issue_statuses",
   "properties",
   "quick_actions",
+  "mcp",
+  "plugins",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
@@ -69,9 +87,13 @@ const WORKSPACE_TAB_VALUES = {
   integrations: "integrations",
   labs: "labs",
   members: "members",
+  billing: "billing",
   labels: "labels",
+  issue_statuses: "issue-statuses",
   properties: "properties",
   quick_actions: "quick-actions",
+  mcp: "mcp",
+  plugins: "plugins",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -80,9 +102,13 @@ const WORKSPACE_TAB_ICONS = {
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
+  billing: CreditCard,
   labels: Tags,
+  issue_statuses: CircleDot,
   properties: SlidersHorizontal,
   quick_actions: Zap,
+  mcp: Server,
+  plugins: Blocks,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -116,6 +142,21 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
   const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
   const isMobile = useIsMobile();
+  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
+  const billingEnabled = useFeatureEnabled(
+    BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+    false,
+  );
+
+  const visibleWorkspaceTabKeys = React.useMemo(
+    () =>
+      WORKSPACE_TAB_KEYS.filter(
+        (key) =>
+          (key !== "plugins" || pluginsEnabled) &&
+          (key !== "billing" || billingEnabled),
+      ),
+    [billingEnabled, pluginsEnabled],
+  );
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
   // the default. Whitelisting also blocks junk like ?tab=<script> from
@@ -124,15 +165,17 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     () =>
       new Set<string>([
         ...ACCOUNT_TAB_KEYS,
-        ...Object.values(WORKSPACE_TAB_VALUES),
+        ...visibleWorkspaceTabKeys.map((key) => WORKSPACE_TAB_VALUES[key]),
         ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
       ]),
-    [extraAccountTabs],
+    [extraAccountTabs, visibleWorkspaceTabKeys],
   );
 
   const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
   const candidateTab = tabFromUrl
-    ? LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
+    ? tabFromUrl === "billing" && !billingEnabled
+      ? "workspace"
+      : LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
     : null;
   const activeTab =
     candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
@@ -157,7 +200,16 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           tab merges into the card top, and a tinted panel under the first tabs
           breaks that seam (MUL-4439). Zoning comes from the divider instead. */}
       <div className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
-        <h1 className="sr-only text-body font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
+        {/* This page builds its own chrome instead of a PageHeader, so it has
+            to supply the nav trigger itself — below `xl` the nav is a sheet or
+            auto-collapsed, and settings has no other way back to it. */}
+        {/* The gap below this row belongs to the row, not to the heading: with
+            `items-center`, a bottom margin on the `h1` is part of the box being
+            centred, so it offsets the heading against the trigger beside it. */}
+        <div className="flex items-center md:mb-4">
+          <CollapsedNavTrigger />
+          <h1 className="sr-only text-body font-semibold md:not-sr-only md:px-2">{t(($) => $.page.title)}</h1>
+        </div>
         <TabsList
           variant="line"
           className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch"
@@ -194,7 +246,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <span className="hidden truncate px-2 pb-1 pt-4 text-caption font-medium text-muted-foreground md:block">
             {workspaceName ?? t(($) => $.page.workspace_fallback)}
           </span>
-          {WORKSPACE_TAB_KEYS.map((key) => {
+          {visibleWorkspaceTabKeys.map((key) => {
             const Icon = WORKSPACE_TAB_ICONS[key];
             return (
               <TabsTrigger
@@ -212,7 +264,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
       {/* Right content */}
       <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" || activeTab === "quick-actions"
+        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "issue-statuses" || activeTab === "properties" || activeTab === "quick-actions"
               ? "max-w-5xl"
               : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
@@ -228,9 +280,15 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
           <TabsContent value="labs"><LabsTab /></TabsContent>
           <TabsContent value="members"><MembersTab /></TabsContent>
+          {billingEnabled ? (
+            <TabsContent value="billing"><BillingTab /></TabsContent>
+          ) : null}
           <TabsContent value="labels"><LabelsTab /></TabsContent>
+          <TabsContent value="issue-statuses"><IssueStatusesTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
           <TabsContent value="quick-actions"><QuickActionsTab /></TabsContent>
+          <TabsContent value="mcp"><McpTab /></TabsContent>
+          {pluginsEnabled ? <TabsContent value="plugins"><PluginsTab /></TabsContent> : null}
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

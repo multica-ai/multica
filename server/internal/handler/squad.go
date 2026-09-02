@@ -11,9 +11,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -605,13 +607,13 @@ func deriveSquadMemberStatus(
 	archived bool,
 	runtimeStatus pgtype.Text,
 	lastSeen pgtype.Timestamptz,
-	hasActiveTask bool,
+	hasWorkingTask bool,
 	now time.Time,
 ) string {
 	if archived {
 		return "archived"
 	}
-	if hasActiveTask {
+	if hasWorkingTask {
 		return "working"
 	}
 	if !runtimeStatus.Valid {
@@ -630,10 +632,10 @@ func deriveSquadMemberStatus(
 }
 
 // ListSquadMemberStatus returns one entry per squad member with derived
-// status, the issues each agent member is currently running, and the last
-// observed runtime activity. The endpoint is read-only and inherits the
-// workspace-membership guard from the route middleware — any member of the
-// workspace can read it.
+// status, the issues each agent member is currently running or waiting to run,
+// and the last observed runtime activity. The endpoint is read-only and
+// inherits the workspace-membership guard from the route middleware — any
+// member of the workspace can read it.
 func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) {
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
@@ -655,7 +657,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 	type memberAcc struct {
 		response       SquadMemberStatusResponse
 		archived       bool
-		hasActiveTask  bool
+		hasWorkingTask bool
 		runtimeStatus  pgtype.Text
 		runtimeSeenAt  pgtype.Timestamptz
 		latestActiveAt pgtype.Timestamptz
@@ -685,13 +687,15 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		// A dispatched/running task occupies an agent slot even when it
-		// has no associated issue (chat / quick-create tasks set
-		// agent_task_queue.issue_id = NULL). The `working` bucket is
-		// defined by task presence, not by whether we can render an
-		// issue link, so flag the agent here regardless of issue_id.
+		// Keep waiting_local_directory rows available for issue visibility,
+		// but only dispatched/running work drives the `working` bucket. A
+		// working task may have no issue (chat / quick-create), so decide the
+		// bucket independently from whether an issue link can be rendered.
 		if row.TaskID.Valid {
-			entry.hasActiveTask = true
+			if row.TaskStatus.Valid &&
+				(row.TaskStatus.String == "dispatched" || row.TaskStatus.String == "running") {
+				entry.hasWorkingTask = true
+			}
 
 			if row.TaskIssueID.Valid {
 				brief := SquadActiveIssueBrief{
@@ -725,7 +729,7 @@ func (h *Handler) ListSquadMemberStatus(w http.ResponseWriter, r *http.Request) 
 				entry.archived,
 				entry.runtimeStatus,
 				entry.runtimeSeenAt,
-				entry.hasActiveTask,
+				entry.hasWorkingTask,
 				now,
 			)
 			entry.response.Status = &status
@@ -943,6 +947,17 @@ func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) 
 // RecordSquadLeaderEvaluation records a squad leader's evaluation decision
 // into the unified activity_log. Called by the leader agent via CLI after
 // each trigger to record whether it took action, stayed silent, or failed.
+//
+// The leader-turn check is task-provenance based (is_leader_task + squad_id on
+// the X-Task-ID row), the SAME source the claim path uses to inject the squad
+// briefing and the mandatory-recording instruction. The target issue's own
+// assignee is deliberately NOT consulted: leaders legitimately run on issues
+// that are not squad-assigned. See MUL-6622 / GH #7487.
+//
+// Two authorization gates, in this order: the caller must own the task, and must
+// still be the squad's leader. The first is what makes it safe to quote the
+// task's issue id in an error; the second is what keeps a claim-downgraded run
+// (see the comment at gate 2) from writing a leader verdict.
 func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -963,14 +978,78 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// The issue must be assigned to a squad.
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		writeError(w, http.StatusBadRequest, "issue is not assigned to a squad")
+	// Authority for "is this run a squad leader turn" is the TASK ROW, not the
+	// target issue's assignee (MUL-6622 / GH #7487). is_leader_task + squad_id
+	// are stamped at enqueue time and are exactly what the claim path keys the
+	// squad briefing and the mandatory-`squad activity` instruction off
+	// (handler/daemon.go, daemon/prompt.go taskIsSquadLeader). Gating this
+	// endpoint on issue.assignee_type == "squad" instead made the recording
+	// call unsatisfiable on the paths where a leader legitimately runs on a
+	// non-squad-assigned issue — a `@squad` mention on an issue owned by a
+	// plain agent, or a leader task bound to a child issue — and because the
+	// no_action instruction forbids substituting a comment, the decision left
+	// no trace at all.
+	//
+	// Check ORDER is load-bearing. Every rejection below the ownership gate may
+	// quote task-derived ids; every rejection above it must not. `GetAgentTask`
+	// is a global lookup by id, so tenant scoping (GetAgentTaskInWorkspace,
+	// which joins the owning agent's workspace) and the "caller owns this task"
+	// gate both come first — otherwise an unrelated task id, probed through an
+	// issue the caller can legitimately read, would echo back a foreign
+	// workspace's issue id.
+	taskID := r.Header.Get("X-Task-ID")
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
+	if !ok {
+		return
+	}
+	task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+		ID:          taskUUID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !task.IssueID.Valid {
+		writeError(w, http.StatusBadRequest, "task does not belong to issue")
+		return
+	}
+
+	// Security gate 1: the caller must be the agent this task was enqueued for.
+	workspaceID := uuidToString(issue.WorkspaceID)
+	userID := requestUserID(r)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != "agent" || !task.AgentID.Valid || actorID != uuidToString(task.AgentID) {
+		writeError(w, http.StatusForbidden, "only the squad leader agent can record evaluations")
+		return
+	}
+
+	// Past the ownership gate, naming the task's own issue is safe — and useful:
+	// a leader woken by a stage barrier / child-done callback runs on the PARENT
+	// issue, so recording against the child it just read is the common mistake.
+	if uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		writeError(w, http.StatusBadRequest,
+			"task does not belong to issue; record the evaluation on issue "+uuidToString(task.IssueID)+" (the issue this task is running on)")
+		return
+	}
+	// Narrowing vs. the old behavior: a leader agent running a NON-leader task
+	// on a squad-assigned issue (for example a same-squad worker task) used to
+	// be accepted here. It is rejected now — it is not running as the leader,
+	// and the runtime only mandates this call when taskIsSquadLeader(task).
+	if !task.IsLeaderTask {
+		writeError(w, http.StatusBadRequest, "task is not a squad leader task")
+		return
+	}
+	if !task.SquadID.Valid {
+		// Pre-MUL-3730 rows can be leader tasks without a stamped squad. Log it
+		// rather than failing silently from the operator's point of view.
+		slog.Warn("squad leader evaluation: leader task has no squad_id",
+			append(logger.RequestAttrs(r),
+				"task_id", uuidToString(task.ID),
+				"issue_id", uuidToString(issue.ID),
+			)...)
+		writeError(w, http.StatusBadRequest, "leader task has no squad_id")
 		return
 	}
 
 	squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
+		ID:          task.SquadID,
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
@@ -978,23 +1057,23 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Security: only the squad leader agent can record evaluations.
-	workspaceID := uuidToString(issue.WorkspaceID)
-	userID := requestUserID(r)
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if actorType != "agent" || actorID != uuidToString(squad.LeaderID) {
+	// Security gate 2: the caller must still be this squad's leader.
+	//
+	// `is_leader_task` on the row records the enqueue-time INTENT, which is not
+	// always the role the claim actually delivered: when the leader was swapped
+	// between enqueue and claim, the claim path clears resp.IsLeaderTask and the
+	// run proceeds as an ordinary agent turn, while the row keeps
+	// is_leader_task = true (handler/daemon.go, "claim delivered as a non-leader
+	// task"). Trusting the row alone would let such a downgraded run write a
+	// leader verdict — and, on no_action, suppress its own comment. Until the
+	// delivered role is persisted, the live leader check is the only thing that
+	// distinguishes the two, so it stays.
+	//
+	// Cost of the conservative choice: a leader rotated away MID-run is refused
+	// here. That no longer means silence — the injected rules now tell a leader
+	// whose recording call failed to leave a short comment instead.
+	if actorID != uuidToString(squad.LeaderID) {
 		writeError(w, http.StatusForbidden, "only the squad leader agent can record evaluations")
-		return
-	}
-
-	taskID := r.Header.Get("X-Task-ID")
-	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task id")
-	if !ok {
-		return
-	}
-	task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-	if err != nil || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
-		writeError(w, http.StatusBadRequest, "task does not belong to issue")
 		return
 	}
 
@@ -1006,12 +1085,17 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 	})
 
 	activity, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     issue.ID,
 		ActorType:   pgtype.Text{String: "agent", Valid: true},
-		ActorID:     squad.LeaderID,
-		Action:      "squad_leader_evaluated",
-		Details:     details,
+		// task.AgentID, not squad.LeaderID: the no_action comment suppression
+		// lookup matches actor_id against task.agent_id
+		// (service.HasSquadLeaderNoActionEvaluationForTask), so this column has
+		// to carry the task's agent for suppression to find the row at all.
+		ActorID: task.AgentID,
+		Action:  "squad_leader_evaluated",
+		Details: details,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record evaluation")

@@ -40,12 +40,13 @@
  * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
  * hacks). Cell recycling also keeps scroll-up smooth.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, View } from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import type {
+  Agent,
   ChatMessage,
   ChatPendingTask,
   ChatQuickAction,
@@ -55,6 +56,7 @@ import type { AgentAvailability } from "@multica/core/agents";
 import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
 import { Markdown } from "@/lib/markdown";
+import { ImageSequenceProvider } from "@/lib/markdown/image-sequence";
 import { failureReasonLabel } from "@/lib/failure-reason-label";
 import { formatElapsedMs } from "@/lib/format-elapsed";
 import { cn } from "@/lib/utils";
@@ -78,9 +80,9 @@ interface Props {
   loading: boolean;
   /** Has the workspace ever started a chat? Drives empty-state copy. */
   hasSessions: boolean;
-  /** Currently picked / inherited agent's display name. */
-  agentName?: string;
-  /** Receive a starter-prompt tap. Caller writes into the draft store
+  /** Currently picked / inherited agent. */
+  agent: Agent | null;
+  /** Receive a conversation-starter tap. Caller writes into the draft store
    *  (or focuses the composer with the text) — empty state stays neutral
    *  about send vs. preview. */
   onPickPrompt: (text: string) => void;
@@ -104,7 +106,7 @@ export function ChatMessageList({
   messages,
   loading,
   hasSessions,
-  agentName,
+  agent,
   onPickPrompt,
   onQuickAction,
   quickActionsDisabled = false,
@@ -116,6 +118,25 @@ export function ChatMessageList({
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
   const selectingId = useChatSelectStore((s) => s.selectingId);
+
+  // Every image in this session, in message order (MUL-5752), so tapping one
+  // opens the lightbox at its position and a swipe walks the rest.
+  //
+  // Above the loading / empty early returns because hooks must run on every
+  // render — an empty `messages` just yields an empty block list.
+  //
+  // Persisted messages only — same boundary web draws: a task transcript's
+  // images live behind a separate cache and inside a folded section, so they
+  // keep opening on their own rather than joining a sequence the reader
+  // cannot see the rest of.
+  const imageBlocks = useMemo(
+    () =>
+      messages.map((message) => ({
+        content: message.content,
+        attachments: message.attachments,
+      })),
+    [messages],
+  );
 
   if (loading && messages.length === 0) {
     return (
@@ -131,7 +152,7 @@ export function ChatMessageList({
     return (
       <ChatEmptyState
         hasSessions={hasSessions}
-        agentName={agentName}
+        agent={agent}
         onPickPrompt={onPickPrompt}
       />
     );
@@ -161,6 +182,7 @@ export function ChatMessageList({
     // `if (isSelecting) return body;`), so taps on the selected bubble
     // also dismiss, matching iOS Notes / iMessage behaviour. Scroll
     // gestures are unaffected (Pressable only intercepts non-drag taps).
+    <ImageSequenceProvider blocks={imageBlocks}>
     <Pressable
       onPress={
         selectingId
@@ -232,6 +254,7 @@ export function ChatMessageList({
       keyboardShouldPersistTaps="handled"
     />
     </Pressable>
+    </ImageSequenceProvider>
   );
 }
 

@@ -1,6 +1,18 @@
 package agent
 
-import "log/slog"
+import (
+	"log/slog"
+	"strings"
+)
+
+// piPowerShellCommandArgs builds the argv for the -Command route, which is the
+// only PowerShell route that leaves stdin bytes untouched (#7355).
+func piPowerShellCommandArgs(ps1 string, args []string) []string {
+	quotedPS1 := strings.ReplaceAll(ps1, "'", "''")
+	full := make([]string, 0, 6+len(args))
+	full = append(full, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "& '"+quotedPS1+"' @args")
+	return append(full, args...)
+}
 
 // choosePiInvocation selects the actual program (argv[0]) and the full
 // argv to spawn a Pi run.
@@ -16,10 +28,13 @@ import "log/slog"
 //     containing newlines or other whitespace — for Pi, that's the
 //     multi-line positional prompt passed by buildPiArgs. Symptom: the
 //     Pi session JSONL records only the first line of the prompt
-//     (#3306). To stay on the official launch path while avoiding that
-//     re-tokenisation, we resolve pi.ps1 next to the .cmd and invoke
-//     PowerShell with `-File <ps1>` directly, letting Go pass each argv
-//     as a separate token.
+//     (#3306). We resolve pi.ps1 next to the .cmd and invoke PowerShell
+//     with `-Command & 'pi.ps1' @args`. The prompt moved to stdin in
+//     #6457, and -File re-encodes stdin under the console ANSI codepage,
+//     destroying every non-ASCII byte (#7355) — so every Pi invocation
+//     takes the -Command route, which forwards stdin untouched. The
+//     residual #3306 exposure is a multi-line custom option value, which
+//     @args still forwards as one token.
 //
 // The Windows-specific behaviour is implemented in
 // pi_invocation_windows.go; on other platforms we fall through to a

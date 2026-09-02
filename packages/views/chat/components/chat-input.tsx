@@ -27,6 +27,7 @@ import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, Project } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
+import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -72,6 +73,15 @@ interface ChatInputProps {
      */
     sessionId?: string;
   } | null;
+  /** Explicit replacement requested by a conversation-starter button. Unlike a
+   * synchronized draft write, this may intentionally replace dirty editor
+   * content, so ChatInput adopts it after cancelling any pending debounce. */
+  conversationStarterRequest?: {
+    id: number;
+    content: string;
+  } | null;
+  /** Fired after the request has replaced both the stored and live draft. */
+  onConversationStarterApplied?: () => void;
   /**
    * Fired when — and only when — the restore's content/attachments were written
    * into the draft. A restore the composer cannot apply yet (the user has work
@@ -87,6 +97,8 @@ interface ChatInputProps {
   uploadEnabled?: boolean;
   onStop?: () => void;
   isRunning?: boolean;
+  /** Enabled only after the server explicitly advertises follow-up queues. */
+  allowSubmitWhileRunning?: boolean;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -96,6 +108,13 @@ interface ChatInputProps {
    *  as opposed to the session itself being archived — swaps the placeholder
    *  copy so the read-only reason reads accurately. */
   agentArchived?: boolean;
+  /** True when `disabled` is because the caller may no longer INVOKE the bound
+   *  agent (flipped to personal, ownership moved, dropped from the allow-list).
+   *  Distinct from `noAgent`: an agent IS bound and its transcript is readable,
+   *  the caller just cannot run it (MUL-6380). Takes precedence over `noAgent`
+   *  in the placeholder — when the only agent in the workspace is the revoked
+   *  one, both are true and "create an agent" would be the wrong instruction. */
+  agentAccessRevoked?: boolean;
   agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
@@ -130,13 +149,17 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   restoreDraftRequest,
+  conversationStarterRequest,
+  onConversationStarterApplied,
   onRestoreDraftApplied,
   uploadEnabled: uploadAllowed,
   onStop,
   isRunning,
+  allowSubmitWhileRunning,
   disabled,
   noAgent,
   agentArchived,
+  agentAccessRevoked,
   agentRuntimeRequired,
   agentName,
   leftAdornment,
@@ -205,6 +228,7 @@ export function ChatInput({
   // reads the live editor and bails when it is empty.
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
+  const appliedConversationStarterIdRef = useRef<number | null>(null);
   const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
 
   // The draft whose document the editor instance is currently HOLDING.
@@ -353,6 +377,32 @@ export function ChatInput({
     editorRef.current?.focus();
   }, [focusRequest]);
 
+  // A conversation-starter click is an explicit replacement, not an ordinary
+  // external store sync. ContentEditor deliberately rejects external values
+  // while it has dirty local text, so adopting here prevents the old text's
+  // pending debounce from winning the race and overwriting the chosen prompt.
+  // Wait out active uploads: adopting content while an upload node is present
+  // would strand its completion callback.
+  useLayoutEffect(() => {
+    if (!conversationStarterRequest) return;
+    if (appliedConversationStarterIdRef.current === conversationStarterRequest.id) return;
+    if (editorDraftKeyRef.current !== draftKey) return;
+    if (editorRef.current?.hasActiveUploads() === true) return;
+
+    editorRef.current?.flushPendingUpdate();
+    appliedConversationStarterIdRef.current = conversationStarterRequest.id;
+    commitDraft(draftKey, conversationStarterRequest.content);
+    editorRef.current?.adoptContent(conversationStarterRequest.content);
+    setIsEmpty(!conversationStarterRequest.content.trim());
+    onConversationStarterApplied?.();
+  }, [
+    commitDraft,
+    draftKey,
+    onConversationStarterApplied,
+    conversationStarterRequest,
+    uploadGate.uploading,
+  ]);
+
   useEffect(() => {
     if (!restoreDraftRequest) {
       appliedRestoreIdRef.current = null;
@@ -431,8 +481,12 @@ export function ChatInput({
       editorScrubbedRef.current = false;
       // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
       // read-only or busy composer must still refuse the keyboard path.
-      if (isRunning || disabled || noAgent) {
-        logger.debug("input.send skipped", { isRunning, disabled, noAgent });
+      if (disabled || noAgent || (isRunning && !allowSubmitWhileRunning)) {
+        logger.debug("input.send skipped", {
+          disabled,
+          noAgent,
+          runningWithoutQueueSupport: !!isRunning && !allowSubmitWhileRunning,
+        });
         return false;
       }
       // The editor is still holding a DIFFERENT draft's document than the one
@@ -524,7 +578,9 @@ export function ChatInput({
     },
   });
 
-  const placeholder = noAgent
+  const placeholder = agentAccessRevoked
+    ? t(($) => $.input.placeholder_access_revoked)
+    : noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? agentArchived
@@ -562,6 +618,10 @@ export function ChatInput({
         // spilling out of it.
         "flex max-h-[50%] min-h-0 flex-col pb-3 pt-0",
         CHAT_GUTTER,
+        // Static elevation, NOT queue-conditional: ChatQueue tucks its bottom
+        // edge under this surface (z-0 + negative margin on its side), and the
+        // composer simply always paints on top. Its own chrome never varies.
+        "relative z-10",
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -570,6 +630,7 @@ export function ChatInput({
       )}
     >
       <div
+        data-slot="chat-input-surface"
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
           // max-h-96 is the absolute ceiling on top of the wrapper's 50%: on a
@@ -602,12 +663,13 @@ export function ChatInput({
                 onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
                 disabled={!projectSelectionEnabled}
                 triggerRender={
-                  <button
-                    type="button"
+                  <ClearablePillButton
                     disabled={!projectSelectionEnabled}
                     aria-label={t(($) => $.input.change_project_context)}
                     title={t(($) => $.input.change_project_context)}
-                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-caption font-medium text-foreground transition-colors hover:bg-accent/60"
+                    onClear={() => onProjectChange?.(null)}
+                    clearLabel={t(($) => $.input.remove_project_context)}
+                    className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
                   />
                 }
               />
@@ -675,15 +737,28 @@ export function ChatInput({
             disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
             loading={submitting}
             busy={gate.uploading}
-            running={isRunning}
+            // Queue-capable runs reuse this one action slot: an empty composer
+            // offers Stop, while live content swaps it to Queue Send. Older
+            // servers cannot accept follow-ups, so they remain stop-only. An
+            // upload blocks submit, so it also falls back to Stop rather than
+            // removing chat's only cancellation path; the attachment node
+            // remains the visible upload-progress surface in the editor.
+            running={
+              !!isRunning &&
+              (!allowSubmitWhileRunning || hasNothingToSend || gate.uploading)
+            }
             onStop={onStop}
             tooltip={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
-              : sendShortcut
-                ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                : t(($) => $.input.send_tooltip)}
+              : isRunning
+                ? t(($) => $.input.queue_send_tooltip)
+                : sendShortcut
+                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+                  : t(($) => $.input.send_tooltip)}
             ariaLabel={gate.uploading
               ? tEditor(($) => $.upload.in_progress)
+              : isRunning
+                ? t(($) => $.input.queue_send_tooltip)
               : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
             stopAriaLabel={t(($) => $.input.stop_tooltip)}

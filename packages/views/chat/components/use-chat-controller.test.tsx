@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import type { Agent, ChatSession, Project } from "@multica/core/types";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import type { Agent, ChatPendingTask, ChatSession, Project } from "@multica/core/types";
 
 interface QueuedRestore {
   id: string;
@@ -53,8 +53,15 @@ const h = vi.hoisted(() => {
       store.pendingSendRestores = next;
     }),
   };
+  const queryClient = {
+    getQueryData: vi.fn(),
+    setQueryData: vi.fn(),
+    invalidateQueries: vi.fn(),
+    cancelQueries: vi.fn(),
+  };
   return {
     store,
+    queryClient,
     archivedMutate: vi.fn(),
     markReadMutate: vi.fn(),
     // Stable across renders so tests can assert on it; lazy-creates the session
@@ -69,6 +76,7 @@ const h = vi.hoisted(() => {
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
     projects: [] as Project[],
+    pendingTask: null as ChatPendingTask | null,
     draftRestores: null as
       | { restores: { id: string; chat_session_id: string; content: string }[] }
       | null,
@@ -87,9 +95,29 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/projects/queries", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
-vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
+// Steerable per test: the invoke rule is what decides whether an OPEN session's
+// agent is still runnable. Default true so every existing case is unaffected.
+const invokableAgentIds = vi.hoisted(() => ({ current: null as string[] | null }));
+vi.mock("@multica/views/issues/components", () => ({
+  canAssignAgent: (agent: { id: string }) =>
+    invokableAgentIds.current === null ||
+    invokableAgentIds.current.includes(agent.id),
+}));
 vi.mock("@multica/core/api", () => ({
-  api: { sendChatMessage: vi.fn(), cancelTaskById: vi.fn() },
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+    }
+  },
+  api: {
+    sendChatMessage: vi.fn(),
+    cancelTaskById: vi.fn(),
+    clearQueuedChatTasks: vi.fn(),
+    prioritizeQueuedChatTask: vi.fn(),
+  },
   // Names the 403 that a revoked invoke permission raises (MUL-4525); plain
   // failures have no reason code.
   dispatchReasonCode: () => undefined,
@@ -98,6 +126,7 @@ vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
   useAgentPresenceDetail: () => ({ availability: "online" }),
+  useCustomizeConversationStartersHref: () => null,
   useWorkspaceAgentAvailability: () => "available",
 }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
@@ -144,6 +173,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
       if (key.includes("projects")) return { data: h.projects, isSuccess: true };
+      if (key.includes("pending-task")) return { data: h.pendingTask };
       if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
@@ -154,16 +184,12 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       hasNextPage: false,
       isFetchingNextPage: false,
     }),
-    useQueryClient: () => ({
-      getQueryData: vi.fn(),
-      setQueryData: vi.fn(),
-      invalidateQueries: vi.fn(),
-    }),
+    useQueryClient: () => h.queryClient,
   };
 });
 
 import { useChatController } from "./use-chat-controller";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 
 // --- Fixtures ---------------------------------------------------------------
 function makeSession(
@@ -202,13 +228,19 @@ const sA = makeSession({ id: "sA", agent_id: "agent-a", updated_at: "2026-07-08T
 const sB = makeSession({ id: "sB", agent_id: "agent-b", updated_at: "2026-07-08T02:00:00Z" });
 const sC = makeSession({ id: "sC", agent_id: "agent-a", updated_at: "2026-07-08T01:00:00Z" });
 
-function setup(activeSessionId: string | null, sessions: ChatSession[], agents: Agent[]) {
+function setup(
+  activeSessionId: string | null,
+  sessions: ChatSession[],
+  agents: Agent[],
+  pendingTask: ChatPendingTask | null = null,
+) {
   h.store.activeSessionId = activeSessionId;
   h.store.selectedAgentId = null;
   h.store.selectedProjectId = null;
   h.sessions = sessions;
   h.agents = agents;
   h.projects = [];
+  h.pendingTask = pendingTask;
   const { result } = renderHook(() => useChatController());
   // Ignore any render-time store writes (self-heal etc.); we assert only the
   // effect of the call under test.
@@ -491,6 +523,315 @@ describe("useChatController.archiveSession", () => {
     act(() => result.current.archiveSession("sA"));
 
     expect(h.archivedMutate).toHaveBeenCalledWith({ sessionId: "sA", archived: true });
+  });
+});
+
+describe("useChatController queued task actions", () => {
+  beforeEach(() => {
+    vi.mocked(api.cancelTaskById).mockReset();
+    vi.mocked(api.clearQueuedChatTasks).mockReset();
+    vi.mocked(api.prioritizeQueuedChatTask).mockReset();
+    h.removeFromCaches.mockClear();
+    h.store.enqueuePendingSendRestore.mockClear();
+    h.store.pendingSendRestores = {};
+    h.queryClient.getQueryData.mockReset();
+    h.queryClient.setQueryData.mockReset();
+    h.queryClient.invalidateQueries.mockReset();
+    h.queryClient.cancelQueries.mockReset();
+  });
+
+  it("recovers an edited queued prompt through durable draft restore", async () => {
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-queued",
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Revise this follow-up",
+        restore_to_input: true,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleEditQueuedTask("task-queued");
+    });
+
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-queued", {
+      queuedAction: "edit",
+      sessionId: "sA",
+    });
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-queued",
+    );
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["draft-restores"]) }),
+    );
+  });
+
+  it("uses durable edit cancellation when Stop targets a queued head", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      supports_queue: true,
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: taskId,
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, {
+        queuedAction: "edit",
+        sessionId: "sA",
+      });
+    });
+  });
+
+  it("keeps the legacy synchronous restore path when queue capability is absent", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: taskId,
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Keep this prompt",
+        restore_to_input: true,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenCalledWith(taskId, undefined);
+      expect(h.store.enqueuePendingSendRestore).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "Keep this prompt" }),
+      );
+    });
+  });
+
+  it("falls back to active cancellation when a derived queued Stop loses the claim race", async () => {
+    const taskId = "11111111-1111-4111-8111-111111111111";
+    const pending: ChatPendingTask = {
+      task_id: taskId,
+      status: "queued",
+      supports_queue: true,
+      queued_tasks: [],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById)
+      .mockRejectedValueOnce(new ApiError("task is no longer queued", 409, "Conflict"))
+      .mockResolvedValueOnce({
+        id: taskId,
+        cancelled_chat_message: {
+          chat_session_id: "sA",
+          message_id: "message-queued",
+          content: "Stop and restore this",
+          restore_to_input: true,
+          attachments: [],
+        },
+      } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    act(() => result.current.handleStop());
+
+    await waitFor(() => {
+      expect(api.cancelTaskById).toHaveBeenNthCalledWith(1, taskId, {
+        queuedAction: "edit",
+        sessionId: "sA",
+      });
+      expect(api.cancelTaskById).toHaveBeenNthCalledWith(2, taskId);
+      expect(h.store.enqueuePendingSendRestore).toHaveBeenCalledWith(
+        expect.objectContaining({ content: "Stop and restore this" }),
+      );
+    });
+  });
+
+  it("removes a queued prompt without restoring it", async () => {
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-queued",
+      cancelled_chat_message: {
+        chat_session_id: "sA",
+        message_id: "message-queued",
+        content: "Discard this follow-up",
+        restore_to_input: false,
+        attachments: [],
+      },
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleRemoveQueuedTask("task-queued");
+    });
+
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-queued", {
+      queuedAction: "remove",
+      sessionId: "sA",
+    });
+    expect(h.removeFromCaches).toHaveBeenCalled();
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+  });
+
+  it("restores the pending snapshot when queued-only cancellation loses a race", async () => {
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-queued", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new Error("task is no longer queued"));
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleRemoveQueuedTask("task-queued");
+    });
+
+    expect(h.queryClient.setQueryData).toHaveBeenLastCalledWith(
+      expect.anything(),
+      pending,
+    );
+  });
+
+  it("refetches the durable restore when a queued edit response is lost", async () => {
+    vi.mocked(api.cancelTaskById).mockRejectedValue(new Error("response lost"));
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleEditQueuedTask("task-queued");
+    });
+
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["draft-restores"]) }),
+    );
+    expect(h.store.enqueuePendingSendRestore).not.toHaveBeenCalled();
+  });
+
+  it("clears the queue with one session-scoped request", async () => {
+    vi.mocked(api.clearQueuedChatTasks).mockResolvedValue();
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        {
+          task_id: "task-1",
+          status: "queued",
+          created_at: "2026-07-01T00:00:01Z",
+          message_id: "message-1",
+        },
+        {
+          task_id: "task-2",
+          status: "queued",
+          created_at: "2026-07-01T00:00:02Z",
+          message_id: "message-2",
+        },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleClearQueuedTasks();
+    });
+
+    expect(api.clearQueuedChatTasks).toHaveBeenCalledTimes(1);
+    expect(api.clearQueuedChatTasks).toHaveBeenCalledWith("sA");
+    expect(api.cancelTaskById).not.toHaveBeenCalled();
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-1",
+    );
+    expect(h.removeFromCaches).toHaveBeenCalledWith(
+      expect.anything(),
+      "sA",
+      "message-2",
+    );
+  });
+
+  it("refetches messages when the clear response is lost", async () => {
+    vi.mocked(api.clearQueuedChatTasks).mockRejectedValue(new Error("response lost"));
+    const result = setup("sA", [sA], [agentA]);
+
+    await act(async () => {
+      await result.current.handleClearQueuedTasks();
+    });
+
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["messages"]) }),
+    );
+    expect(h.queryClient.invalidateQueries).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: expect.arrayContaining(["messages-page"]) }),
+    );
+  });
+
+  it("prioritizes send-now before stopping the active task", async () => {
+    vi.mocked(api.prioritizeQueuedChatTask).mockResolvedValue({
+      task_id: "task-queued",
+      active_task_id: "task-active",
+    });
+    vi.mocked(api.cancelTaskById).mockResolvedValue({
+      id: "task-active",
+    } as Awaited<ReturnType<typeof api.cancelTaskById>>);
+    const result = setup("sA", [sA], [agentA], {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-queued", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+      ],
+    });
+
+    await act(async () => {
+      await result.current.handleSendQueuedTaskNow("task-queued");
+    });
+
+    expect(api.prioritizeQueuedChatTask).toHaveBeenCalledWith("sA", "task-queued");
+    expect(api.cancelTaskById).toHaveBeenCalledWith("task-active", undefined);
+    expect(
+      vi.mocked(api.prioritizeQueuedChatTask).mock.invocationCallOrder[0],
+    ).toBeLessThan(vi.mocked(api.cancelTaskById).mock.invocationCallOrder[0]!);
+  });
+
+  it("restores the pending snapshot when send-now loses a queued race", async () => {
+    const pending: ChatPendingTask = {
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        { task_id: "task-first", status: "queued", created_at: "2026-07-01T00:00:01Z" },
+        { task_id: "task-stale", status: "queued", created_at: "2026-07-01T00:00:02Z" },
+      ],
+    };
+    h.queryClient.getQueryData.mockReturnValue(pending);
+    vi.mocked(api.prioritizeQueuedChatTask).mockRejectedValue(
+      new Error("task is no longer queued"),
+    );
+    const result = setup("sA", [sA], [agentA], pending);
+
+    await act(async () => {
+      await result.current.handleSendQueuedTaskNow("task-stale");
+    });
+
+    expect(h.queryClient.setQueryData).toHaveBeenLastCalledWith(
+      expect.anything(),
+      pending,
+    );
   });
 });
 
@@ -835,5 +1176,56 @@ describe("useChatController.handleSend — compose target tracking", () => {
     expect(commitInput).toHaveBeenCalledWith(
       expect.objectContaining({ clearEditor: true, extraDraftKeys: ["sA"] }),
     );
+  });
+});
+
+// MUL-6380: a chat session outlives the permission that created it. The agent can
+// be flipped to personal, change owner, or drop this member from its allow-list;
+// the server keeps serving the transcript (view gate) but refuses every send
+// (invoke gate, MUL-4525). The controller must reach that verdict up front so the
+// composer is read-only, instead of the user learning it from a 403 after typing.
+describe("useChatController revoked invoke permission", () => {
+  const revokedSession = makeSession({ id: "revoked", agent_id: "agent-a" });
+
+  beforeEach(() => {
+    h.createSessionMutate.mockClear();
+    vi.mocked(api.sendChatMessage).mockClear();
+  });
+
+  afterEach(() => {
+    invokableAgentIds.current = null;
+  });
+
+  it("flags the open session's agent as revoked while still resolving it", () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    // Still bound — the transcript stays readable and the header keeps naming
+    // the real agent; only running is refused.
+    expect(result.current.activeAgent?.id).toBe("agent-a");
+    expect(result.current.isAgentAccessRevoked).toBe(true);
+    // Not conflated with the retired-agent state, which has different copy.
+    expect(result.current.isAgentArchived).toBe(false);
+  });
+
+  it("does not flag an agent the user may still invoke", () => {
+    invokableAgentIds.current = ["agent-a"];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    expect(result.current.isAgentAccessRevoked).toBe(false);
+  });
+
+  it("refuses the send instead of letting the server reject it", async () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    let sent: boolean | undefined;
+    await act(async () => {
+      sent = await result.current.handleSend("are you there?");
+    });
+
+    expect(sent).toBe(false);
+    expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
   });
 });

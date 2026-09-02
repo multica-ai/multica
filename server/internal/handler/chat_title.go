@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -20,19 +21,55 @@ import (
 // a chat title is a nicety, not worth pinning a goroutine for a minute.
 const chatTitleGenTimeout = 20 * time.Second
 
+// ChannelChatStarted publishes list invalidation metadata without changing any
+// client's current navigation. The explicit empty Chat is already committed.
+func (h *Handler) ChannelChatStarted(event engine.ChannelChatStartedEvent) {
+	ws, user, session := uuidToString(event.WorkspaceID), uuidToString(event.CreatorID), uuidToString(event.SessionID)
+	h.publishChat(protocol.EventChatSessionCreated, ws, "member", user, session, protocol.ChatSessionCreatedPayload{
+		WorkspaceID: ws, ChatSessionID: session, AgentID: uuidToString(event.AgentID), CreatorID: user, Title: event.Title,
+		ChannelSource: protocol.ChatSessionChannelSource{
+			ChannelType: string(event.ChannelType), InstallationID: uuidToString(event.InstallationID), RouteRevision: event.RouteRevision,
+		},
+		IsCurrentChannelRoute: true,
+	})
+}
+
+// ChannelChatTitleInitialized publishes the deterministic first-message or
+// media fallback immediately. LLM title generation is optional, so clients
+// must not depend on its later CAS update to observe the committed title.
+func (h *Handler) ChannelChatTitleInitialized(workspaceID, creatorID, sessionID pgtype.UUID, title string) {
+	h.publishChat(protocol.EventChatSessionUpdated, uuidToString(workspaceID), "member", uuidToString(creatorID), uuidToString(sessionID), protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: uuidToString(sessionID),
+		Title:         title,
+	})
+}
+
+// GenerateChannelChatTitle reuses the existing LLM + CAS title path after the
+// shared engine has persisted its deterministic first-message fallback.
+func (h *Handler) GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string) {
+	h.maybeGenerateChatTitleAsync(uuidToString(workspaceID), uuidToString(creatorID), sessionID, currentTitle, sourceText)
+}
+
 // chatTitleSystemPrompt instructs the model to condense the opening of a
 // conversation into a short, language-matched title. The rules mirror the
 // acceptance criteria in MUL-4295: no quotes, no trailing punctuation, no
-// "标题：" / "Title:" prefix, follow the conversation's language. sanitizeChatTitle
-// re-applies these rules defensively in case the model ignores them.
+// label prefix, follow the conversation's language. sanitizeChatTitle re-applies
+// these rules defensively in case the model ignores them.
+//
+// This text names no language and contains no CJK, deliberately. A prompt that
+// spells out a specific language — even only as a formatting example — reads as
+// permission to answer in it, which is how quick actions ended up emitting
+// Chinese pills for English conversations (MUL-5689). The label prefixes this
+// used to enumerate are still stripped for real by chatTitleLabelPrefixes,
+// which is where that guarantee belongs.
 const chatTitleSystemPrompt = `You write a very short title that summarizes the topic of a chat conversation, given the user's opening message.
 
 Rules:
 - Output ONLY the title text — nothing else, no explanation.
 - Keep it short: a few words, ideally under 8, never a full sentence.
-- Write the title in the SAME language as the user's message (Chinese input → Chinese title, English input → English title).
+- Write the title in the SAME language as the user's message, and in no other.
 - Do NOT wrap the title in quotes or brackets.
-- Do NOT prefix it with "Title:", "标题：", or similar.
+- Do NOT prefix it with a label such as "Title:", in any language.
 - Do NOT end with a period or any trailing punctuation.`
 
 // maybeGenerateChatTitleAsync kicks off best-effort LLM title generation for a

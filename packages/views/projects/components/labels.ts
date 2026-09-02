@@ -5,9 +5,11 @@ import { useT } from "../../i18n";
 
 // Hooks returning the i18n-aware label maps for project status / priority.
 // They replace the static `.label` field on PROJECT_STATUS_CONFIG /
-// PROJECT_PRIORITY_CONFIG for view-layer rendering. Core's `.label` stays
-// for non-translated callers (search, create-project modal) — those will
-// flip when their namespaces translate. Mirror of inbox `useTypeLabels`.
+// PROJECT_PRIORITY_CONFIG, and search — the last caller still rendering
+// `PROJECT_STATUS_CONFIG.label` — now resolves through here too, so nothing
+// in the repo reads either `.label` any more. Name a project status through
+// these hooks; the core field is a leftover, not a second source of truth.
+// Mirror of inbox `useTypeLabels`.
 
 export function useProjectStatusLabels(): Record<ProjectStatus, string> {
   const { t } = useT("projects");

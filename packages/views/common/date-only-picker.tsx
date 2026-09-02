@@ -7,14 +7,15 @@ import {
   formatDateOnly,
   isPastDateOnly,
 } from "@multica/core/issues/date";
+import { Check } from "lucide-react";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
 import { DeferredPopup } from "./deferred-popup";
+import { useLocale } from "../i18n";
 
 /**
  * Default class of the date pill trigger — shared with the deferred lookalike
@@ -32,8 +33,8 @@ interface DateOnlyPickerProps {
   icon: React.ReactNode;
   /** Placeholder label shown when no date is set. */
   placeholder: string;
-  /** Label for the "clear date" action inside the popover. */
-  clearLabel: string;
+  /** Label of the empty-value row at the top of the popover ("No due date"). */
+  emptyLabel: string;
   /** Paint the value with `text-destructive` when it is in the past (due dates). */
   highlightOverdue?: boolean;
   /** Fully custom trigger contents (replaces the icon + date/placeholder). */
@@ -90,6 +91,7 @@ function DateTriggerContent({
   placeholder,
   highlightOverdue = false,
 }: Pick<DateOnlyPickerProps, "value" | "icon" | "placeholder" | "highlightOverdue">) {
+  const locale = useLocale();
   const date = dateOnlyToLocalDate(value);
   const overdue = highlightOverdue && isPastDateOnly(value);
   return (
@@ -97,7 +99,7 @@ function DateTriggerContent({
       {icon}
       {date ? (
         <span className={overdue ? "text-destructive" : ""}>
-          {formatDateOnly(value, { month: "short", day: "numeric" }, "en-US")}
+          {formatDateOnly(value, { month: "short", day: "numeric" }, locale)}
         </span>
       ) : (
         <span className="text-muted-foreground">{placeholder}</span>
@@ -111,7 +113,7 @@ function DateOnlyPickerImpl({
   onChange,
   icon,
   placeholder,
-  clearLabel,
+  emptyLabel,
   highlightOverdue = false,
   trigger: customTrigger,
   triggerRender,
@@ -141,6 +143,24 @@ function DateOnlyPickerImpl({
         )}
       </PopoverTrigger>
       <PopoverContent className="w-auto p-0" align={align}>
+        {/* Empty value first, above the calendar — the same position every
+            list-backed picker puts it in, so clearing a field is always the
+            top row no matter which pill was opened. Unlike a footer button it
+            is also a selectable value: it carries the checkmark when the
+            field is empty. */}
+        <button
+          type="button"
+          onClick={() => {
+            onChange(null);
+            setOpen(false);
+          }}
+          className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-body transition-colors hover:bg-accent"
+        >
+          <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+            {emptyLabel}
+          </span>
+          <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
+        </button>
         <Calendar
           mode="single"
           selected={date}
@@ -149,21 +169,6 @@ function DateOnlyPickerImpl({
             setOpen(false);
           }}
         />
-        {date && (
-          <div className="border-t px-3 py-2">
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                onChange(null);
-                setOpen(false);
-              }}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {clearLabel}
-            </Button>
-          </div>
-        )}
       </PopoverContent>
     </Popover>
   );

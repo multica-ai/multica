@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Cloud, Loader2, Lock, Search } from "lucide-react";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import {
+  isRuntimeUsableForUser,
+  runtimeDisplayName,
+} from "@multica/core/runtimes";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import {
   Popover,
@@ -318,17 +321,6 @@ export function RuntimePicker({
       </Popover>
     </div>
   );
-}
-
-// Visibility gate exposed so the parent can defend Create against a locked
-// selection (e.g. duplicate of an agent whose runtime is now private).
-export function isRuntimeUsableForUser(
-  r: RuntimeDevice,
-  currentUserId: string | null,
-): boolean {
-  if (!currentUserId) return true;
-  if (r.owner_id === currentUserId) return true;
-  return r.visibility === "public";
 }
 
 function computeFilteredRuntimes(

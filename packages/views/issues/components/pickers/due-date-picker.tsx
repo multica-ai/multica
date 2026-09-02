@@ -33,7 +33,7 @@ export function DueDatePicker({
       onChange={(v) => onUpdate({ due_date: v })}
       icon={<CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />}
       placeholder={t(($) => $.pickers.due_date.trigger_label)}
-      clearLabel={t(($) => $.pickers.due_date.clear_action)}
+      emptyLabel={t(($) => $.pickers.due_date.none)}
       highlightOverdue
       trigger={trigger}
       triggerRender={triggerRender}

@@ -20,16 +20,21 @@ vi.mock("react-virtuoso", () => ({
     computeItemKey,
     components,
     context,
+    followOutput,
   }: {
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
     components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
     context?: unknown;
+    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
   }) => {
     const Footer = components?.Footer;
     return (
-      <div>
+      <div
+        data-follow-at-bottom={String(followOutput?.(true))}
+        data-follow-away-from-bottom={String(followOutput?.(false))}
+      >
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
             {itemContent(i, item)}
@@ -87,6 +92,46 @@ function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
     );
   });
 }
+
+describe("ChatMessageList live follow (#6697)", () => {
+  it("follows appended output immediately only while Virtuoso is at the live end", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-follow-at-bottom]");
+    expect(list).toHaveAttribute("data-follow-at-bottom", "auto");
+    expect(list).toHaveAttribute("data-follow-away-from-bottom", "false");
+  });
+
+  it("does not follow while older history is being prepended", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+            isFetchingOlderMessages
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(container.querySelector("[data-follow-at-bottom]")).toHaveAttribute(
+      "data-follow-at-bottom",
+      "false",
+    );
+  });
+});
 
 describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
   // The live footer is passed to Virtuoso through `components`. If that prop
@@ -188,6 +233,35 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
 
     expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
     expect(screen.queryByText(/Hidden suggestion/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList footer spacing", () => {
+  it("keeps the bottom inset when no task is pending", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "assistant-idle",
+                chat_session_id: "session-idle",
+                role: "assistant",
+                content: "Idle reply",
+                task_id: null,
+                created_at: "2026-08-12T00:00:00Z",
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-row-key]")?.parentElement;
+    expect(list?.lastElementChild).toHaveClass("pb-4");
+    expect(screen.queryByText(/working|queued/i)).not.toBeInTheDocument();
   });
 });
 
@@ -304,6 +378,45 @@ describe("ChatMessageList quick actions skeleton", () => {
   });
 });
 
+describe("ChatMessageList onboarding kickoff", () => {
+  it("hides the product-authored kickoff while rendering Mika's reply", async () => {
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "kickoff",
+                chat_session_id: "s1",
+                role: "user",
+                content: "INTERNAL ONBOARDING PROMPT",
+                task_id: TASK_ID,
+                created_at: new Date(0).toISOString(),
+                message_kind: "onboarding_kickoff",
+              },
+              {
+                id: "reply",
+                chat_session_id: "s1",
+                role: "assistant",
+                content: "Hi, I'm Mika.",
+                task_id: TASK_ID,
+                created_at: new Date(1).toISOString(),
+              },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Hi, I'm Mika.")).toBeInTheDocument();
+    expect(
+      screen.queryByText("INTERNAL ONBOARDING PROMPT"),
+    ).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   // The backend moved to the refined taxonomy (agent_error.*) in MUL-2946 but
   // the copy map stayed on the six coarse values, so an exact-key lookup
@@ -344,6 +457,20 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });
 
+  it("renders dedicated copy for a failed environment preparation", async () => {
+    // #7913. Without an entry of its own this reason has no agent_error
+    // family to degrade into, so it would land on the generic fallback —
+    // and the one thing the reader needs to know is that the problem is on
+    // the machine running the agent, which the fallback cannot say.
+    renderFailure("environment_prepare_failed");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.environment_prepare_failed,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
   it("renders dedicated copy for a refined reason the map names", async () => {
     renderFailure("agent_error.provider_network");
     expect(
@@ -369,5 +496,95 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   it("still falls back when neither the reason nor its family is known", async () => {
     renderFailure("something_entirely_new");
     expect(await screen.findByText(FALLBACK)).toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList onboarding starter cards", () => {
+  // The opening self-describes: the completion path stamps Mika's reply to the
+  // hidden kickoff with message_kind "onboarding_opening" (the kickoff row
+  // itself never reaches clients).
+  const opening = {
+    id: "opening",
+    chat_session_id: "s1",
+    role: "assistant" as const,
+    content: "Hi, I'm Mika.",
+    task_id: null,
+    created_at: new Date(1).toISOString(),
+    message_kind: "onboarding_opening" as const,
+    quick_actions: [{ label: "LLM chip", prompt: "llm prompt" }],
+  };
+
+  function renderCards(overrides: Partial<Parameters<typeof ChatMessageList>[0]> = {}) {
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[opening]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            {...overrides}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("renders the three cards under the opening and hides that turn's chips", async () => {
+    renderCards();
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Hand me one thing first" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Let the daily digest write itself" }),
+    ).toBeEnabled();
+    // The cards own the opening's suggestion strip — no chip row beside them.
+    expect(screen.queryByRole("button", { name: "LLM chip" })).toBeNull();
+    expect(screen.queryByText("Follow-up questions")).toBeNull();
+  });
+
+  it("sends the card's fixed prompt through the quick-action path", async () => {
+    const onQuickAction = vi.fn();
+    renderCards({ onQuickAction });
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    );
+    expect(onQuickAction).toHaveBeenCalledWith({
+      label: "Get a board up in minutes",
+      prompt: "Turn our current goals into a project board",
+    });
+  });
+
+  it("follows the chips' disabled rule while a task runs", async () => {
+    renderCards({ quickActionsDisabled: true });
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeDisabled();
+  });
+
+  it("renders ordinary chips, not cards, for an unstamped assistant turn", async () => {
+    renderCards({ messages: [{ ...opening, message_kind: "message" as const }] });
+    expect(await screen.findByRole("button", { name: "LLM chip" })).toBeEnabled();
+    expect(
+      screen.queryByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeNull();
+  });
+
+  it("attaches cards only to the stamped opening; later turns keep chips", async () => {
+    const followUp = {
+      id: "follow-up",
+      chat_session_id: "s1",
+      role: "assistant" as const,
+      content: "Anything else?",
+      task_id: null,
+      created_at: new Date(2).toISOString(),
+      quick_actions: [{ label: "Later chip", prompt: "later" }],
+    };
+    renderCards({ messages: [opening, followUp] });
+    expect(
+      await screen.findByRole("button", { name: "Get a board up in minutes" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Later chip" })).toBeEnabled();
   });
 });

@@ -36,6 +36,10 @@ import (
 // internal/external payload boundary in one reviewable place.
 var internalOnlyPayloadKeys = map[string][]string{
 	protocol.EventIssueUpdated: {"prev_description", "prev_title"},
+	// task:failed error text is consumed synchronously by channel outbounds.
+	// It may contain provider/runtime detail that belongs in the originating
+	// chat transcript, not in the workspace-wide realtime fanout.
+	protocol.EventTaskFailed: {"error"},
 }
 
 // projectOutbound returns payload with the event type's internal-only keys
@@ -83,6 +87,8 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
+		protocol.EventChatSessionCreated: true,
+		protocol.EventChatSessionUpdated: true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -170,6 +176,16 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 			sendToRecipient(b, e, *uid)
 		}
 	})
+
+	// A Chat session is creator-private. Its initial title may be derived from
+	// the creator's first message, so the list-invalidation event must not be
+	// broadcast to every workspace member. ActorID is the creator on every
+	// producer path for this event.
+	for _, eventType := range []string{protocol.EventChatSessionCreated, protocol.EventChatSessionUpdated} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			sendToRecipient(b, e, e.ActorID)
+		})
+	}
 
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via

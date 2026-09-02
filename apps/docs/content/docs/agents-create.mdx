@@ -20,7 +20,7 @@ The creation page offers two options:
 
 Build with AI needs an online runtime for the Builder conversation. Either way, you can review and edit the final configuration before creating.
 
-![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.png)
+![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.webp)
 
 ## Required fields
 
@@ -63,6 +63,14 @@ During creation you can pick one or more [skills](/skills) from the workspace.
 
 Skills suit methods and material reused across agents; long-lived requirements that belong only to this agent go in the instructions.
 
+## Conversation starters
+
+Add up to three **conversation starters** to show people what this agent is good at before they send a first chat message. They appear when someone opens a new chat with the agent, above the composer. Each starter has a short label and a complete prompt. Selecting one fills the composer so the user can review or edit it; it never starts a run automatically.
+
+The editor previews exactly what a new chat will show, and anyone who can edit the agent gets a **Customize starters** link in that empty state that deep-links back here.
+
+If you leave the list empty, Chat shows localized general-purpose defaults. Agent-specific examples are usually more useful because they can reflect the role and boundaries in the instructions.
+
 ## Runtime, model, and thinking level
 
 Each runtime already maps to one AI coding tool. After picking a runtime, you can pick a model and thinking level the tool supports; some tools (such as Codex) also offer a service tier:
@@ -83,7 +91,7 @@ Access decides which members can run this agent (assign, @-mention, or chat):
 | **Entire workspace** | Every workspace member can run it. |
 | **Specific people** | Only you and the selected members can run it. |
 
-![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.png)
+![Access settings: Only me, Entire workspace, Specific people](/images/docs/agent-access-settings.webp)
 
 Only the agent owner can change Access — workspace admins cannot. Workspace `owner`s and `admin`s can manage the rest of the configuration, but cannot use their admin role to run agents they aren't granted.
 
@@ -119,11 +127,15 @@ Critical runtime variables such as `PATH`, `HOME`, and `MULTICA_*` cannot be ove
 
 Custom arguments are passed to the AI coding tool as an array, item by item, without shell expansion. Whether an argument is valid is up to the tool; model configuration that already has a dedicated field doesn't need to be repeated here.
 
+<Callout type="warning">
+Do not put credentials or other secrets in custom arguments. They remain in the child process's argv and may be visible to other local processes through `ps` or `/proc`; use environment variables (`custom_env`) instead. Daemon logs redact argument values, but that does not protect the operating system's process list.
+</Callout>
+
 MCP configuration may contain tokens; its storage and display rules match environment variables. Only runtimes that support managed MCP configuration show this section; tools without MCP support don't gain it just because a configuration is saved.
 
 ## Duplicating an agent
 
-Duplicating carries over most working configuration except the name, including instructions, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
+Duplicating carries over most working configuration except the name, including instructions, conversation starters, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
 
 Environment variable values and MCP configuration are never copied and must be set again on the new agent. Duplication keeps the original agent's runtime binding and Access settings.
 

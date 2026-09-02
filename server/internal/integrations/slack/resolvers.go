@@ -12,26 +12,24 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
-// This file is the Slack ResolverSet: the platform-specific seams the
-// channel-agnostic engine.Router runs the inbound pipeline through. It mirrors
-// the Feishu ResolverSet but is built entirely on the generic channel_* queries
-// (no new query, no schema change) plus the shared engine.ChatSession — so
-// "adding Slack" stays "implement Channel + register a ResolverSet".
+// Slack resolvers connect the channel-agnostic inbound pipeline to Slack
+// installation routing, identity binding, deduplication, session persistence,
+// auditing, reactions, replies, and attachment ingestion. They store shared
+// channel state through the generic channel tables.
 
 // originSlackChat is the issue.origin_type label for issues created via the
 // Slack /issue command.
 const originSlackChat = "slack_chat"
 
-// NewSlackResolverSet assembles the Slack ResolverSet over the generated
-// queries + a tx starter (for the shared session service). The replier delivers
-// the outbound binding-prompt / status / issue-created notices; pass a nil
-// engine.OutboundReplier to disable them (the inbound pipeline — route,
-// identity, dedup, session, /issue, run trigger — is fully functional without
-// it). typing shows the "processing" reaction on ingest; pass nil to disable it
-// (MUL-3874). (MUL-3666 wired the replier; stage 3 had both nil.)
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+// NewSlackResolverSet assembles the Slack implementation of each inbound
+// pipeline stage. The replier sends binding and status notices, typing manages
+// the processing reaction, and media stores inbound attachments. Each optional
+// dependency may be nil to disable only that capability while preserving normal
+// Slack message ingestion.
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -42,11 +40,12 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.Outb
 			Fallback: "Slack chat",
 		})},
 		Audit:      &auditor{q: q},
+		Media:      media,
 		Replier:    replier,
 		OriginType: originSlackChat,
 	}
-	// Guard against assigning a nil *TypingIndicatorManager into the interface
-	// field (which would make set.Typing a non-nil typed-nil); mirrors Feishu.
+	// Assign the interface only for a concrete manager. A typed nil would make
+	// the interface compare non-nil and fail when the pipeline invokes it.
 	if typing != nil {
 		set.Typing = &slackTypingNotifier{mgr: typing}
 	}
@@ -332,6 +331,27 @@ func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessio
 	})
 }
 
+func (r *sessionBinder) StartSession(ctx context.Context, p engine.StartSessionParams) (engine.StartSessionResult, error) {
+	bindingKey, config, replyThread := slackSessionRouting(p.Message)
+	result, err := r.session.StartSession(ctx, engine.StartSessionInput{
+		EnsureSessionInput: engine.EnsureSessionInput{
+			WorkspaceID: p.Installation.WorkspaceID, AgentID: p.Installation.AgentID,
+			InstallationID: p.Installation.ID, Sender: p.Creator,
+			BindingKey: bindingKey, BindingConfig: config, ChatType: p.Message.Source.ChatType,
+		},
+		Initiator: p.Sender,
+		Body:      p.Message.Text, MessageID: p.Message.MessageID, ThreadID: replyThread,
+		ClaimToken: p.ClaimToken, MediaPendingSeconds: p.MediaPendingSeconds,
+		PersistMessage: p.PersistMessage, HistoryBoundaryPending: p.HistoryBoundaryPending,
+		BeforeCommit: p.BeforeCommit,
+	})
+	return engine.StartSessionResult{SessionID: result.SessionID, BindingID: result.BindingID, RouteRevision: result.RouteRevision, Append: result.Append}, err
+}
+
+func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	return r.session.MarkPendingFresh(ctx, sessionID, messageID)
+}
+
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
 	_, _, replyThread := slackSessionRouting(p.Message)
 	commandText := p.Message.CommandText
@@ -348,16 +368,21 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		ThreadID:            replyThread,
 		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
 	})
 }
 
-func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
-	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
-		MessageID:   p.MessageID,
-		SessionID:   p.SessionID,
-		WorkspaceID: p.WorkspaceID,
-		Sender:      p.Sender,
-		MediaRefs:   p.MediaRefs,
+func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) (engine.BindMediaResult, error) {
+	return r.session.BindMediaRefsWithResult(ctx, engine.BindMediaInput{
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 
@@ -368,6 +393,7 @@ type auditor struct{ q *db.Queries }
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	raw, _ := decodeSlackRaw(msg) // event_type is best-effort; a decode miss still audits the drop
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeSlack),
 		EventType:        raw.EventType,
 		DropReason:       string(reason),

@@ -1,19 +1,18 @@
 // onboarding_shim.go — DEPRECATED endpoints kept alive for desktop < v3.
 //
-// Background: v3 moved Helper-agent creation and starter-issue seeding to
-// the frontend welcome hook (packages/views/workspace/welcome-after-onboarding.tsx),
-// which calls generic CreateAgent / CreateIssue. Pre-v3 desktop builds
-// however still call BootstrapOnboardingRuntime / BootstrapOnboardingNoRuntime
-// during their onboarding flow. Server-side removal would break those
-// users during the rollout window where v3 server is live but their
-// desktop hasn't auto-updated yet.
+// Background: pre-v3 desktop builds call BootstrapOnboardingRuntime /
+// BootstrapOnboardingNoRuntime during their onboarding flow. Current
+// clients no longer use the runtime bootstrap path; they create only Mika
+// and start the real interactive onboarding chat before completing setup.
+// Removing this endpoint would still break an old installed desktop
+// talking to a newer server.
 //
 // These handlers are intentionally minimal copies of the pre-v3
 // implementation, condensed to inline DB calls (no OnboardingService /
 // WorkspaceContentService layer — that abstraction died with v3). They
 // remain valid until telemetry on the X-Client-Version header confirms
-// every active desktop install is on a v3+ build, at which point this
-// entire file + the two router entries + the 5 tests should be deleted.
+// every active desktop install has aged out, at which point this entire
+// file + the two router entries + the 5 tests should be deleted.
 //
 // DO NOT add features here. DO NOT change behavior. The contract is "what
 // pre-v3 desktop expects".
@@ -35,7 +34,9 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -50,9 +51,9 @@ const runtimeBootstrapBodyLimit = 8 * 1024
 const maxStarterPromptLen = 2 * 1024
 
 const (
-	onboardingAssistantName = "Multica Helper"
-	onboardingIssueTitle    = "Start here: learn Multica with Multica Helper"
-	onboardingAgentTemplate = "multica_helper"
+	onboardingAssistantName       = "Multica Helper"
+	onboardingIssueTitle          = "Start here: learn Multica with Multica Helper"
+	onboardingAgentCreationSource = "multica_helper"
 
 	// noRuntimeIssueTitle MUST match the pre-v3 service constant so
 	// LockAndFindActiveDuplicate dedupes correctly across desktop versions.
@@ -65,12 +66,9 @@ const onboardingAssistantAvatarURL = "data:image/svg+xml,%3Csvg xmlns='http://ww
 
 // onboardingAssistantInstructions is the system prompt persisted on every
 // Multica Helper agent created by this shim. Pre-v3 desktop submits a
-// starter prompt from the workspace OnboardingHelperModal; that prompt
+// starter prompt from the historical workspace OnboardingHelperModal; that prompt
 // becomes the issue body, while this constant becomes the agent's identity
-// block in CLAUDE.md / AGENTS.md / GEMINI.md. v3 frontend has its own
-// in-views copy of this string (`packages/views/onboarding/templates/
-// helper-instructions.ts`) — these two must stay in sync until the shim
-// is removed.
+// block in CLAUDE.md / AGENTS.md / GEMINI.md.
 const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI assistant for this Multica workspace. Your role is to help any member use Multica better — answer questions, give advice, and execute workspace operations on their behalf.
 
 ## What Multica is
@@ -166,6 +164,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	req.WorkspaceID = uuidToString(wsUUID)
+	issueCountPolicy := service.ResolveIssueCountPolicy(r.Context(), h.Entitlements, wsUUID)
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -193,7 +192,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
 		return
 	}
 
@@ -249,8 +248,11 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
 		if err != nil {
+			if writeIssueLimitReached(w, err) {
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
@@ -259,6 +261,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
@@ -312,12 +315,13 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),
-			runtime.Provider, runtime.RuntimeMode, onboardingAgentTemplate, isFirstAgent,
+			runtime.Provider, runtime.RuntimeMode, onboardingAgentCreationSource, isFirstAgent,
 		))
 	}
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
@@ -373,6 +377,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	req.WorkspaceID = uuidToString(wsUUID)
+	issueCountPolicy := service.ResolveIssueCountPolicy(r.Context(), h.Entitlements, wsUUID)
 
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -411,12 +416,16 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := service.AllocateIssueNumber(r.Context(), qtx, wsUUID, issueCountPolicy)
 		if err != nil {
+			if writeIssueLimitReached(w, err) {
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
@@ -458,6 +467,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(

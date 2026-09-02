@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ComponentProps, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
@@ -73,7 +74,15 @@ vi.mock("@multica/core/auth", () => ({
     sel({ user: { id: "user-me" } }),
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+// isRuntimeUsableForUser is the shared owner/public rule the component reads
+// runtime access from, so the real implementation is kept rather than stubbed —
+// a stub here would just re-derive the rule this test is meant to pin down.
+vi.mock("@multica/core/runtimes", async () => ({
+  isRuntimeUsableForUser: (
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    )
+  ).isRuntimeUsableForUser,
   deriveRuntimeHealth: () => "online",
   runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
     rt.custom_name?.trim() || rt.name,
@@ -121,7 +130,9 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
 // Stubbing ProviderLogo / UsageSection avoids dragging in chart libs and
 // additional query keys we don't care about here.
 vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("./usage-section", () => ({ UsageSection: () => null }));
+vi.mock("./usage-section", () => ({
+  UsageSection: () => <div data-testid="usage-section" />,
+}));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
 vi.mock("../../agents/presence", () => ({
   availabilityConfig: { offline: { dotClass: "", textClass: "" } },
@@ -129,7 +140,7 @@ vi.mock("../../agents/presence", () => ({
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../navigation", () => ({
-  AppLink: () => null,
+  AppLink: ({ children }: { children: ReactNode }) => <>{children}</>,
   useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
@@ -174,12 +185,18 @@ function makeProfile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   };
 }
 
-function renderDetail(runtime: AgentRuntime) {
+function renderDetail(
+  runtime: AgentRuntime,
+  props: Pick<
+    ComponentProps<typeof RuntimeDetail>,
+    "machineHref" | "machineLabel"
+  > = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <RuntimeDetail runtime={runtime} />
+        <RuntimeDetail runtime={runtime} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -218,6 +235,33 @@ describe("RuntimeDetail visibility section", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("uses the provider name when the runtime alias is the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Studio Mac",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByText("Pi")).toHaveLength(2);
+    expect(screen.getByRole("banner")).toHaveTextContent("Studio Mac");
+  });
+
+  it("preserves a runtime-specific alias that differs from the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Research Pi",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByText("Research Pi")).toHaveLength(2);
+  });
+
   it("flips visibility to public when the owner clicks the Public choice", async () => {
     renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
     fireEvent.click(screen.getByText("Public"));
@@ -231,6 +275,61 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Public")).toBeInTheDocument();
     // The editor's "Private" choice button must not render in read-only mode.
     expect(screen.queryByText("Private")).not.toBeInTheDocument();
+  });
+
+  // MUL-6126: a workspace admin may rename or delete someone else's runtime,
+  // but not share it — sharing is the owner's consent to lend their machine,
+  // and the PATCH refuses an admin regardless of what this UI renders.
+  it("keeps visibility read-only for a workspace admin who does not own the runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.queryByText("Public")).not.toBeInTheDocument();
+  });
+
+  it("hides usage from a workspace admin viewing another member's private runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Delete runtime/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows usage to a workspace admin viewing another member's public runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "public" }),
+    );
+
+    expect(screen.getByTestId("usage-section")).toBeInTheDocument();
+  });
+
+  // An ownerless runtime is unreadable server-side (the read gate reuses
+  // canUseRuntimeForAgent, which is fail-closed without an owner), so the
+  // page must not render a Usage section that can only 404.
+  it("hides usage for an ownerless runtime even when it is public", () => {
+    mockQueryData.members = [{ user_id: "user-me", role: "admin" }];
+
+    renderDetail(makeRuntime({ owner_id: null, visibility: "public" }));
+
+    expect(screen.queryByTestId("usage-section")).not.toBeInTheDocument();
   });
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime

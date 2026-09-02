@@ -542,6 +542,16 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	// call below hits the right open-platform host: a Lark-international
 	// install must reach open.larksuite.com, not the Feishu default.
 	creds := InstallationCredentials{AppID: res.ClientID, AppSecret: res.ClientSecret, Region: region}
+	// Re-registering an existing Bot issues a fresh client_secret under
+	// the SAME client_id, and Lark revokes every tenant_access_token
+	// minted from the previous one. The API client caches tokens by
+	// app_id — which did not change — so tell it to drop the entry
+	// before we mint with the new credentials; otherwise the first call
+	// below, and every outbound after it, replays a token Lark now
+	// rejects (#7611).
+	if invalidator, ok := s.api.(TokenCacheInvalidator); ok {
+		invalidator.InvalidateTokenCache(res.ClientID)
+	}
 	info, err := s.api.GetBotInfo(ctx, creds)
 	if err != nil {
 		s.cfg.Logger.Warn("lark registration: bot info failed",

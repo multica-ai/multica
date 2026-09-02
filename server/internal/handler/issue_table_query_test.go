@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 type issueTableEnrichmentFailTxStarter struct {
@@ -165,6 +168,48 @@ func TestIssueTableExplicitEmptyAssigneesMatchesNone(t *testing.T) {
 	}
 	if !strings.Contains(compiled.where, "FALSE") {
 		t.Fatalf("explicit empty assignees predicate = %q, want FALSE", compiled.where)
+	}
+}
+
+func TestIssueTableProjectScopeAssigneeTypes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	spec := issueTableQuerySpec{
+		Scope: issueTableScope{
+			Kind:          "project",
+			ProjectID:     "00000000-0000-0000-0000-000000000001",
+			AssigneeTypes: []string{"agent", "squad"},
+		},
+		Sort: issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		spec,
+	)
+	if !ok {
+		t.Fatalf("compile failed: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "i.project_id") {
+		t.Fatalf("project predicate missing: %q", compiled.where)
+	}
+	if !strings.Contains(compiled.where, "i.assignee_type = ANY") {
+		t.Fatalf("assignee-type narrowing missing on project scope: %q", compiled.where)
+	}
+
+	bad := spec
+	bad.Scope.AssigneeTypes = []string{"martian"}
+	w = httptest.NewRecorder()
+	if _, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		bad,
+	); ok {
+		t.Fatal("invalid assignee_types must be rejected on project scope")
 	}
 }
 
@@ -417,6 +462,42 @@ func TestIssueTablePositionCursorIncludesIndexableLowerBound(t *testing.T) {
 	}
 }
 
+func TestIssueTableLastActivityDefaultsToIndexedOrder(t *testing.T) {
+	w := httptest.NewRecorder()
+	sort, ok := testHandler.issueTableOrderBy(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		testWorkspaceID,
+		issueTableSortRequest{Field: "last_activity"},
+	)
+	if !ok {
+		t.Fatalf("last_activity sort rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got, want := sort.orderBy(), "i.last_activity_at DESC NULLS LAST, i.id DESC"; got != want {
+		t.Fatalf("orderBy = %q, want %q", got, want)
+	}
+
+	sortValue := "2026-08-19T05:04:03.123456Z"
+	cursor := issueTableCursor{
+		SortValue: &sortValue,
+		RowID:     "00000000-0000-4000-8000-000000000001",
+	}
+	args := make([]any, 0, 2)
+	predicate, ok := sort.cursorPredicate(w, &cursor, func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	})
+	if !ok {
+		t.Fatalf("valid last_activity cursor rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(predicate, "created_at") {
+		t.Fatalf("last_activity cursor unexpectedly uses created_at tie-break: %s", predicate)
+	}
+	if !strings.Contains(predicate, "i.id < $1::uuid") {
+		t.Fatalf("last_activity cursor is missing id tie-break: %s", predicate)
+	}
+}
+
 func TestIssueTableGroupIdentityBindsIncludeEmpty(t *testing.T) {
 	withoutEmpty := issueTableGroupIdentity(issueTableGroupSpec{
 		Kind:       "property",
@@ -438,6 +519,7 @@ func TestIssueTableCompoundCellKeyResolvesPrimaryAndStatus(t *testing.T) {
 	key := compoundCellGroupKey(
 		"parent:00000000-0000-4000-8000-000000000001",
 		"todo",
+		false,
 	)
 	args := make([]any, 0, 2)
 	predicate, ok := compound.predicate(
@@ -1319,6 +1401,96 @@ func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
 		strings.Contains(rowQuerySQL, "NOT EXISTS (SELECT 1 FROM membership parent") ||
 		strings.Contains(rowQuerySQL, "child_counts AS") {
 		t.Fatalf("hierarchy rows query must preserve ordered paging and page-local counts:\n%s", rowQuerySQL)
+	}
+}
+
+// TestIssueTableSelectPropertySortKeysetPagination walks the keyset cursor
+// over a select-property sort. The sort expression ranks options by option
+// order and carries the "::numeric" token that issueTableOrderBy sniffs into
+// the cursor's cast type, so this pins three things at once: ordinal order,
+// the numeric cursor round-trip (equal ranks tie, valueless rows trail), and
+// no duplicated or skipped rows across pages. Explicit option ids in reverse
+// lexical order make the ordinal assertions deterministic — a regression to
+// raw-value ordering fails every run, not most runs.
+func TestIssueTableSelectPropertySortKeysetPagination(t *testing.T) {
+	const (
+		lowID    = "eeeeeeee-aaaa-4aaa-8aaa-aaaaaaaaaaaa" // lexically last
+		mediumID = "99999999-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+		highID   = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa" // lexically first
+	)
+	sel := createTestProperty(t, map[string]any{
+		"name": "TK" + uuid.NewString()[:8], "type": "select",
+		"config": map[string]any{"options": []map[string]any{
+			{"id": lowID, "name": "Low", "color": "#6b7280"},
+			{"id": mediumID, "name": "Medium", "color": "#f59e0b"},
+			{"id": highID, "name": "High", "color": "#ef4444"},
+		}},
+	})
+
+	projectID := dbfx.Project(t, "Select property sort pagination")
+	seedIssue := func(title string) string {
+		t.Helper()
+		return dbfx.Issue(t, title, testutil.Cols{"project_id": projectID})
+	}
+	lowA := seedIssue("keyset low a")
+	lowB := seedIssue("keyset low b")
+	medium := seedIssue("keyset medium")
+	high := seedIssue("keyset high")
+	unset := seedIssue("keyset unset")
+	for issueID, optionID := range map[string]string{lowA: lowID, lowB: lowID, medium: mediumID, high: highID} {
+		if w := setIssuePropertyRaw(t, issueID, sel.ID, optionID); w.Code != http.StatusOK {
+			t.Fatalf("seed select value: %d %s", w.Code, w.Body.String())
+		}
+	}
+
+	query := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+		Sort:  issueTableSortRequest{Field: "property:" + sel.ID, Direction: "asc"},
+	}
+	fetchPage := func(cursor *string) issueTableRowsResponse {
+		t.Helper()
+		var response issueTableRowsResponse
+		testutil.Call(t, testHandler.ListIssueTableRows, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+			Query: query,
+			Group: issueTableGroupSpec{Kind: "none"},
+			Page:  issueTablePageRequest{Limit: 2, Cursor: cursor},
+		})).Want(http.StatusOK).JSON(&response)
+		return response
+	}
+
+	var order []string
+	seen := make(map[string]struct{}, 5)
+	cursor := (*string)(nil)
+	for page := 0; ; page++ {
+		if page > 5 {
+			t.Fatalf("cursor did not terminate after %d pages", page)
+		}
+		response := fetchPage(cursor)
+		for _, row := range response.Rows {
+			if _, duplicate := seen[row.Issue.ID]; duplicate {
+				t.Fatalf("issue %s repeated across pages", row.Issue.ID)
+			}
+			seen[row.Issue.ID] = struct{}{}
+			order = append(order, row.Issue.ID)
+		}
+		if response.NextCursor == nil {
+			break
+		}
+		cursor = response.NextCursor
+	}
+	if len(order) != 5 {
+		t.Fatalf("paginated rows = %d, want all 5 seeded issues", len(order))
+	}
+
+	index := make(map[string]int, len(order))
+	for i, id := range order {
+		index[id] = i
+	}
+	if !(index[lowA] < index[medium] && index[lowB] < index[medium]) {
+		t.Fatalf("low-ranked issues not first: %v", order)
+	}
+	if !(index[medium] < index[high] && index[high] < index[unset]) {
+		t.Fatalf("option order violated across pages: medium=%d high=%d unset=%d", index[medium], index[high], index[unset])
 	}
 }
 

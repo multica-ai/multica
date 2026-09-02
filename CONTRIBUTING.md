@@ -5,6 +5,7 @@ This guide documents the local development workflow for contributors working on 
 It covers:
 
 - first-time setup
+- environments: starting, inspecting, stopping and deleting them
 - day-to-day development in the main checkout
 - isolated worktree development
 - the shared PostgreSQL model
@@ -41,9 +42,9 @@ This keeps Docker simple while still isolating schema and data.
 
 ## Prerequisites
 
-- Node.js `v20+`
-- `pnpm` `v10.28+`
-- Go `v1.26+`
+- Node.js `22`
+- `pnpm` `10.28.2`
+- Go `1.26.6`
 - Docker
 
 ## Important Rules
@@ -107,6 +108,57 @@ To regenerate a worktree env file:
 ```bash
 FORCE=1 make worktree-env
 ```
+
+## Environments
+
+An environment is the database, ports, CLI profile and processes that belong to
+one checkout. It is a named object: it can be listed, inspected and deleted.
+
+```bash
+make up                      # start this checkout's environment (api + web)
+make up C=api,web,daemon     # choose the components
+make status                  # what is running, and whether it is yours
+make list                    # every environment on this machine
+make down                    # stop the processes, keep the data
+make destroy                 # stop, then drop the database and free the slot
+make gc                      # collect expired environments or ones whose checkout is gone
+```
+
+Components are `api` (Go backend), `web` (Next.js), `daemon` (agent daemon) and
+`desktop` (Electron). Selecting any of them implies `api`. `make up` is
+idempotent: re-running it against a live environment reuses the database, the
+profile and any component already healthy.
+
+Three properties are worth knowing because the old flow lacked them:
+
+- **API, Web and Desktop renderer ports, database names and profiles are allocated, not recomputed.** The
+  allocator starts from this directory's path hash, so a checkout keeps the
+  numbers it has always had, and moves only when the registry or a live
+  listener says the slot is taken. The registry lives in `~/.multica/dev/`;
+  deleting it and re-running `make up` is a supported recovery.
+- **Nothing reports success for something it has not reached.** The database is
+  created and verified through `DATABASE_URL` — the same string the backend
+  uses — and `GET /health` reports `pid`, `commit` and `started_at` so `make up`
+  can prove the process answering is the one it just started rather than a
+  leftover on the same port.
+- **`down` and `destroy` differ deliberately.** `down` stops processes and
+  keeps the database, profile and slot, so the next `make up` is seconds.
+  `destroy` consumes the database, profile, daemon task workspaces, Desktop
+  userData and slot. If any deletion fails, it keeps the manifest and exits
+  non-zero so cleanup can be retried instead of losing the deletion recipe.
+- **Temporary environments have a best-effort fallback.** `make up
+  ARGS=--ephemeral` records a 24-hour TTL. The next `make up` automatically
+  collects expired and directory-less environments; `make gc` runs the same
+  collection explicitly.
+
+Run any command inside an environment's variables without repeating them:
+
+```bash
+make env-exec ARGS="-- pnpm exec playwright test"
+```
+
+`make dev` (below) still runs backend and frontend in the foreground of your
+terminal, which is the right thing when you want Ctrl-C to stop everything.
 
 ## First-Time Setup
 
@@ -190,6 +242,25 @@ make dev              # start (re-runs setup if needed, idempotent)
 make stop-worktree    # stop
 make check-worktree   # verify
 ```
+
+### Removing a Worktree
+
+Git does not provide a `pre-worktree-remove` hook. Use the repository wrapper
+from another checkout so database cleanup happens before Git removes the
+worktree directory:
+
+```bash
+make remove-worktree WORKTREE=../multica-feature
+```
+
+The command refuses to remove the primary checkout, the current checkout, a
+locked worktree, or a worktree with uncommitted changes. If the target contains
+`.env.worktree`, it shows the database name and asks for `y/N` confirmation,
+drops that database, and only then runs `git worktree remove`. A worktree that
+was never set up has no `.env.worktree`, so database cleanup is skipped.
+
+Running `git worktree remove` directly bypasses this cleanup and can leave an
+orphaned local database.
 
 ## Running Main and Worktree at the Same Time
 
@@ -326,218 +397,63 @@ It registers runtimes for all watched workspaces from the CLI config.
 
 ## Full-Stack Isolated Testing
 
-This section covers running the complete stack (backend, frontend, daemon) from
-source in a fully isolated environment. Useful for testing end-to-end changes
-that span multiple components, or for automated CI/AI workflows that need zero
-human intervention.
-
-### Why Not Just `make daemon`?
-
-`make daemon` uses the system-installed CLI's stored token and connects to
-whatever server is configured in `~/.multica/config.json`. That's fine for
-day-to-day development against a shared server, but for fully isolated testing
-you need:
-
-- a local backend and frontend (from source)
-- a local daemon (from source) with its own profile
-- automated authentication (no browser login)
-- no interference with your production CLI config
-
-### Dynamic Profile Naming
-
-Each worktree must use a unique daemon profile to avoid collisions when
-multiple features run in parallel.
-
-The profile name is derived from the worktree directory using the same
-slug + hash pattern as `scripts/init-worktree-env.sh`:
+Running the complete stack — backend, frontend and daemon — from source, with
+its own database and CLI profile, is one command:
 
 ```bash
-WORKTREE_DIR="$(basename "$PWD")"
-SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-OFFSET=$((HASH % 1000))
-PROFILE="dev-${SLUG}-${OFFSET}"
+make up C=api,web,daemon
 ```
 
-Example: worktree at `../multica-feat-auth` produces profile
-`dev-multica_feat_auth-347`, matching that worktree's port and database
-allocation.
+It creates the environment if needed, sets the fixed local verification code
+before the first launch, logs in as `dev@localhost`, mints a personal access
+token, creates a workspace, writes the CLI profile, builds `server/bin/multica`
+and starts the daemon from that binary. It then prints the URL, the login, the
+commit, and the stop command.
 
-### Start the Isolated Environment
+Two constraints are enforced rather than documented:
 
-Run all steps from the worktree root (where the Makefile is).
+- **The daemon runs from a built binary, never `go run`.** The daemon records
+  its own executable path at startup and re-execs it as the
+  execution-environment helper for every task; `go run` deletes that binary when
+  the launcher exits, so the daemon would register, heartbeat, and then fail
+  every task with `fork/exec …/go-build…/exe/multica: no such file or directory`.
+- **`daemon start` is refused under a daemon-managed task.** A checkout below a
+  `.multica/daemon_task_context.json` marker cannot start a second daemon
+  competing for its own work, so `make up C=daemon` stops with that explanation
+  before spending a login on it. Use `C=api,web` there.
 
-#### 1. Start backend, frontend, and database
+### Desktop
 
 ```bash
-make dev
+make up C=desktop
 ```
 
-Wait for the backend to be healthy:
+This writes a marked `apps/desktop/.env.development.local` pointing at this
+environment's backend, starts Electron with the renderer port and app name from
+the environment registry, and waits until that renderer is actually serving.
+Several checkouts can therefore run Desktop side by side without maintaining a
+second path-derived identity. `make destroy` removes the marked env file and
+this environment's Electron userData. Direct `pnpm dev:desktop` still uses its
+path-derived fallback when it is run outside `make up`.
 
-```bash
-PORT=$(grep '^PORT=' .env.worktree 2>/dev/null || grep '^PORT=' .env | head -1 | cut -d= -f2)
-PORT=${PORT:-8080}
-SERVER="http://localhost:${PORT}"
-
-for i in $(seq 1 30); do
-  curl -sf "$SERVER/health" > /dev/null 2>&1 && break
-  sleep 2
-done
-```
-
-#### 2. Create a test user and token (automated auth)
-
-For deterministic local automation, set `MULTICA_DEV_VERIFICATION_CODE=888888`
-in your env file before starting the backend:
-
-```bash
-curl -s -X POST "$SERVER/auth/send-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost"}'
-
-JWT=$(curl -s -X POST "$SERVER/auth/verify-code" \
-  -H "Content-Type: application/json" \
-  -d '{"email": "dev@localhost", "code": "888888"}' | jq -r '.token')
-
-PAT=$(curl -s -X POST "$SERVER/api/tokens" \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "auto-dev", "expires_in_days": 365}' | jq -r '.token')
-```
-
-#### 3. Create a workspace
-
-```bash
-WS=$(curl -s -X POST "$SERVER/api/workspaces" \
-  -H "Authorization: Bearer $PAT" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "Dev", "slug": "dev"}' | jq -r '.id')
-```
-
-#### 4. Compute profile name and write CLI config
-
-```bash
-# Compute profile (see Dynamic Profile Naming above)
-WORKTREE_DIR="$(basename "$PWD")"
-SLUG="$(printf '%s' "$WORKTREE_DIR" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')"
-HASH="$(printf '%s' "$PWD" | cksum | awk '{print $1}')"
-OFFSET=$((HASH % 1000))
-PROFILE="dev-${SLUG}-${OFFSET}"
-
-FRONTEND_PORT=$(grep '^FRONTEND_PORT=' .env.worktree 2>/dev/null || grep '^FRONTEND_PORT=' .env | head -1 | cut -d= -f2)
-FRONTEND_PORT=${FRONTEND_PORT:-3000}
-
-CONFIG_DIR="$HOME/.multica/profiles/$PROFILE"
-mkdir -p "$CONFIG_DIR"
-
-cat > "$CONFIG_DIR/config.json" << EOF
-{
-  "server_url": "$SERVER",
-  "app_url": "http://localhost:${FRONTEND_PORT}",
-  "token": "$PAT",
-  "workspace_id": "$WS",
-  "watched_workspaces": [{"id": "$WS", "name": "Dev"}]
-}
-EOF
-```
-
-#### 5. Start the daemon from source
-
-```bash
-make cli ARGS="daemon start --profile $PROFILE"
-```
-
-The daemon runs from the current worktree's Go source, connecting to the
-local backend. Agent-executed `multica` commands automatically use the same
-binary (the daemon prepends its own directory to `PATH`).
-
-### Stop the Isolated Environment
-
-```bash
-# Compute profile (same formula)
-PROFILE="dev-$(printf '%s' "$(basename "$PWD")" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/_/g; s/__*/_/g; s/^_//; s/_$//')-$(( $(printf '%s' "$PWD" | cksum | awk '{print $1}') % 1000 ))"
-
-# 1. Stop daemon
-make cli ARGS="daemon stop --profile $PROFILE"
-
-# 2. Stop backend + frontend
-make stop            # main checkout
-make stop-worktree   # worktree checkout
-
-# 3. (Optional) Stop shared PostgreSQL
-make db-down
-
-# 4. (Optional) Clean build artifacts
-make clean
-
-# 5. (Optional) Remove profile config
-rm -rf "$HOME/.multica/profiles/$PROFILE"
-```
-
-### Desktop App Local Testing
-
-To test the Electron desktop app against a local backend:
-
-```bash
-# After backend is running (make dev)
-pnpm dev:desktop
-```
-
-This automatically:
-
-1. Compiles the `multica` CLI from `server/cmd/multica` into
-   `apps/desktop/resources/bin/multica`
-2. Creates an isolated profile named `desktop-localhost-<PORT>`
-3. Starts and manages its own daemon instance
-4. Connects to the local backend
-
-Login in the Desktop UI with `dev@localhost` and the generated code from the
-backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
-the backend, you can use `888888` instead.
-
-If the backend runs on a non-default port (worktree), create
-`apps/desktop/.env.development.local`:
-
-```bash
-VITE_API_URL=http://localhost:<backend-port>
-VITE_WS_URL=ws://localhost:<backend-port>/ws
-```
-
-#### Running multiple worktrees side-by-side
-
-`pnpm dev:desktop` auto-isolates a worktree so several worktrees can run their
-own desktop dev instance at once — no extra setup. From a linked worktree it
-derives, from the worktree path (same `cksum % 1000` offset as the backend /
-frontend ports in `.env.worktree`):
-
-- `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`)
-- `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
-  `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
-  distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that
-  share a folder name at different paths.
-
-The primary checkout is left untouched (`5173`, `Multica Canary`). Set either
-env var explicitly to override the derived value. Which backend each instance
-talks to is still controlled only by `apps/desktop/.env*` above — point each
-worktree's desktop at its own backend to also isolate the daemon profile.
+Log in with `dev@localhost` and `888888`.
 
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `multica` or the default
 `~/.multica/config.json`:
 
-| Resource | System / Production | Local Dev (per-worktree) |
+| Resource | System / Production | Local Dev (per environment) |
 |---|---|---|
-| Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<hash>/config.json` |
-| Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<hash>/daemon.pid` |
-| Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
-| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
-| Database | remote / production | local Docker: `multica_<slug>_<hash>` |
+| Config | `~/.multica/config.json` | `~/.multica/profiles/dev-<slug>-<offset>/config.json` |
+| Daemon PID | `~/.multica/daemon.pid` | `~/.multica/profiles/dev-<slug>-<offset>/daemon.pid` |
+| Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<offset>/` |
+| Database | remote / production | local: `multica_<slug>_<offset>` |
+| Registry | — | `~/.multica/dev/envs/<name>/` |
 | Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
 
-Multiple worktrees can run simultaneously without conflict.
+Multiple environments run simultaneously without conflict; `make list` shows
+all of them.
 
 ## Troubleshooting
 
@@ -641,6 +557,19 @@ make start
 - only affects the current env's database; other worktree databases are untouched
 - refuses to run if `DATABASE_URL` points at a remote host
 - pass `ENV_FILE=.env.worktree` to target a specific worktree
+
+To permanently drop the current worktree database without recreating it:
+
+```bash
+make db-drop ENV_FILE=.env.worktree
+```
+
+The command prints the selected database and environment file, then requires a
+`y/N` confirmation. It only operates on the local Docker PostgreSQL service,
+protects PostgreSQL system databases, and refuses to drop the default main
+database `multica` unless `ALLOW_MAIN_DB_DROP=1` is explicitly supplied.
+Declining the confirmation is a successful no-op; when called by
+`make remove-worktree`, it also leaves the worktree in place.
 
 If you want to wipe all local PostgreSQL data for this repo:
 

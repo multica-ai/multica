@@ -134,16 +134,16 @@ export function SquadDetailPage() {
         member_id: input.id,
         role: input.role?.trim() || undefined,
       }),
-    onSuccess: () => { refetchMembers(); toast.success("Member added"); },
+    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.member_added)); },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to add member"),
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.member_add_failed)),
   });
 
   const removeMemberMut = useMutation({
     mutationFn: (m: SquadMember) => api.removeSquadMember(squadId, { member_type: m.member_type, member_id: m.member_id }),
-    onSuccess: () => { refetchMembers(); toast.success("Member removed"); },
+    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.member_removed)); },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to remove member"),
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.member_remove_failed)),
   });
 
   const updateRoleMut = useMutation({
@@ -153,9 +153,9 @@ export function SquadDetailPage() {
         member_id: input.member.member_id,
         role: input.role,
       }),
-    onSuccess: () => { refetchMembers(); toast.success("Role updated"); },
+    onSuccess: () => { refetchMembers(); toast.success(t(($) => $.toasts.role_updated)); },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to update role"),
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.role_update_failed)),
   });
 
   const setLeaderMut = useMutation({
@@ -164,17 +164,17 @@ export function SquadDetailPage() {
       refetchSquad();
       refetchMembers();
       queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
-      toast.success("Leader updated");
+      toast.success(t(($) => $.toasts.leader_updated));
     },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to update leader"),
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.leader_update_failed)),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success(t(($) => $.archive_dialog.success)); },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
+      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.toasts.archive_failed)),
   });
 
   const getEntityName = (type: string, id: string) => {
@@ -243,11 +243,11 @@ export function SquadDetailPage() {
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
-          onCreateAgentClick={canManage ? () => push(`${p.newAgent()}?squad=${encodeURIComponent(squadId)}`) : undefined}
+          createAgentHref={canManage ? `${p.newAgent()}?squad=${encodeURIComponent(squadId)}` : undefined}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
-          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success("Instructions saved"); }}
+          onSaveInstructions={async (next) => { await updateSquadMut.mutateAsync({ instructions: next }); toast.success(t(($) => $.toasts.instructions_saved)); }}
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
@@ -300,7 +300,7 @@ export function SquadDetailPage() {
 function SquadDetailSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
+      <PageHeader>
         <Skeleton className="h-5 w-48" />
       </PageHeader>
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[280px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6 lg:grid-cols-[320px_minmax(0,1fr)]">
@@ -378,13 +378,16 @@ function SquadNameEditor({
   value: string;
   onSave: (next: string) => Promise<void>;
 }) {
+  const { t } = useT("squads");
   return (
     <InlineEditPopover
       value={value}
       onSave={onSave}
-      title="Rename squad"
-      placeholder="Squad name"
-      validate={(v) => (v.trim().length > 0 ? null : "Name is required")}
+      title={t(($) => $.name_editor.title)}
+      placeholder={t(($) => $.name_editor.placeholder)}
+      validate={(v) =>
+        v.trim().length > 0 ? null : t(($) => $.name_editor.required)
+      }
     >
       {(triggerProps) => (
         <button
@@ -442,9 +445,9 @@ function InlineEditPopover({
     try {
       await onSave(draft);
       setOpen(false);
-      toast.success("Saved");
+      toast.success(t(($) => $.name_editor.saved));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to save");
+      toast.error(e instanceof Error ? e.message : t(($) => $.name_editor.save_failed));
     } finally {
       setSaving(false);
     }
@@ -485,7 +488,7 @@ function InlineEditPopover({
               {t(($) => $.name_editor.cancel)}
             </Button>
             <Button size="sm" onClick={() => void commit()} disabled={saving || draft === value}>
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.name_editor.save)}
             </Button>
           </div>
         </div>
@@ -555,10 +558,12 @@ function AddMemberDialog({
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="truncate font-medium">
-                    {target?.name ?? "Select a member or agent"}
+                    {target?.name ?? t(($) => $.add_member_dialog.select_target)}
                   </div>
                   {target && (
-                    <div className="truncate text-caption text-muted-foreground capitalize">{target.type}</div>
+                    <div className="truncate text-caption text-muted-foreground">
+                      {t(($) => $.member_type[target.type])}
+                    </div>
                   )}
                 </div>
                 <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${pickerOpen ? "rotate-180" : ""}`} />
@@ -570,13 +575,13 @@ function AddMemberDialog({
                     type="text"
                     value={pickerFilter}
                     onChange={(e) => setPickerFilter(e.target.value)}
-                    placeholder="Search members or agents..."
+                    placeholder={t(($) => $.add_member_dialog.search_placeholder)}
                     className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
                   />
                 </div>
                 <div className="p-1 max-h-72 overflow-y-auto">
                   {filteredMembers.length > 0 && (
-                    <PickerSection label="Members">
+                    <PickerSection label={t(($) => $.add_member_dialog.members_section)}>
                       {filteredMembers.map((m) => (
                         <PickerItem
                           key={m.user_id}
@@ -594,7 +599,7 @@ function AddMemberDialog({
                     </PickerSection>
                   )}
                   {filteredAgents.length > 0 && (
-                    <PickerSection label="Agents">
+                    <PickerSection label={t(($) => $.add_member_dialog.agents_section)}>
                       {filteredAgents.map((a) => (
                         <PickerItem
                           key={a.id}
@@ -626,7 +631,7 @@ function AddMemberDialog({
               type="text"
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              placeholder="e.g. Reviewer, Frontend Lead"
+              placeholder={t(($) => $.add_member_dialog.role_placeholder)}
               className="mt-1"
               onKeyDown={(e) => {
                 if (isImeComposing(e)) return;
@@ -639,7 +644,7 @@ function AddMemberDialog({
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>{t(($) => $.add_member_dialog.cancel)}</Button>
           <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
-            {submitting ? <Loader2 className="size-3.5 animate-spin" /> : "Add"}
+            {submitting ? <Loader2 className="size-3.5 animate-spin" /> : t(($) => $.add_member_dialog.add)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -686,7 +691,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
           else if (e.key === "Escape") { setDraft(value); setEditing(false); }
         }}
         disabled={saving}
-        placeholder="Role (e.g. Reviewer)"
+        placeholder={t(($) => $.role_editor.placeholder)}
         className="h-6 mt-0.5 text-caption px-1.5"
       />
     );
@@ -698,7 +703,7 @@ function RoleEditor({ value, onSave }: { value: string; onSave: (next: string) =
       onClick={() => setEditing(true)}
       className="text-caption text-muted-foreground mt-0.5 text-left hover:text-foreground transition-colors"
     >
-      {value || <span className="italic opacity-60">{t(($) => $.add_member_dialog.placeholder_role_inline)}</span>}
+      {value || <span className="italic opacity-60">{t(($) => $.role_editor.empty)}</span>}
     </button>
   );
 }
@@ -785,25 +790,25 @@ function SquadDetailInspector({
           {t(($) => $.inspector.details_section)}
         </div>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-          <InspectorRow label="Leader">
+          <InspectorRow label={t(($) => $.details.leader)}>
             <span className="flex min-w-0 items-center gap-1.5">
               <ActorAvatar actorType="agent" actorId={squad.leader_id} size="xs" />
               <span className="truncate">{leaderName}</span>
             </span>
           </InspectorRow>
-          <InspectorRow label="Members">
+          <InspectorRow label={t(($) => $.details.members)}>
             <span className="text-muted-foreground tabular-nums">{memberCount}</span>
           </InspectorRow>
-          <InspectorRow label="Created by">
+          <InspectorRow label={t(($) => $.details.created_by)}>
             <span className="flex min-w-0 items-center gap-1.5">
               <ActorAvatar actorType="member" actorId={squad.creator_id} size="xs" />
               <span className="truncate">{creatorName}</span>
             </span>
           </InspectorRow>
-          <InspectorRow label="Created">
+          <InspectorRow label={t(($) => $.details.created)}>
             <span className="text-muted-foreground">{timeAgo(squad.created_at)}</span>
           </InspectorRow>
-          <InspectorRow label="Updated">
+          <InspectorRow label={t(($) => $.details.updated)}>
             <span className="text-muted-foreground">{timeAgo(squad.updated_at)}</span>
           </InspectorRow>
         </div>
@@ -904,7 +909,7 @@ function SquadDescriptionEditorBody({
         autoFocus
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="What is this squad responsible for?"
+        placeholder={t(($) => $.description_dialog.responsibility_placeholder)}
         rows={6}
         onKeyDown={(e) => {
           if (e.key === "Escape") { onClose(); return; }
@@ -919,7 +924,7 @@ function SquadDescriptionEditorBody({
       <DialogFooter>
         <Button variant="ghost" size="sm" onClick={onClose} disabled={saving}>{t(($) => $.description_dialog.cancel)}</Button>
         <Button size="sm" onClick={() => void commit()} disabled={saving || !dirty}>
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save"}
+          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.description_dialog.save)}
         </Button>
       </DialogFooter>
     </>
@@ -933,9 +938,9 @@ function SquadDescriptionEditorBody({
 // ---------------------------------------------------------------------------
 type SquadDetailTab = "members" | "instructions";
 
-const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileText }[] = [
-  { id: "members", label: "Members", icon: Users },
-  { id: "instructions", label: "Instructions", icon: FileText },
+const squadDetailTabs: { id: SquadDetailTab; icon: typeof FileText }[] = [
+  { id: "members", icon: Users },
+  { id: "instructions", icon: FileText },
 ];
 
 function SquadOverviewPane({
@@ -947,7 +952,7 @@ function SquadOverviewPane({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -968,7 +973,7 @@ function SquadOverviewPane({
   // Optional — only passed when the current user can manage the squad
   // (workspace owner/admin or the creator). Hidden otherwise so viewers
   // don't see a button they can't action.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1009,7 +1014,7 @@ function SquadOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
+            {t(($) => $.detail_tabs[tab.id])}
           </button>
         ))}
       </div>
@@ -1025,7 +1030,7 @@ function SquadOverviewPane({
               isArchived={isArchived}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
-              onCreateAgentClick={onCreateAgentClick}
+              createAgentHref={createAgentHref}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -1090,7 +1095,7 @@ function SquadMembersTab({
   isArchived,
   getEntityName,
   onAddMemberClick,
-  onCreateAgentClick,
+  createAgentHref,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -1106,7 +1111,7 @@ function SquadMembersTab({
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
   // Hidden for viewers who can't manage — see SquadOverviewPane.
-  onCreateAgentClick?: () => void;
+  createAgentHref?: string;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1126,8 +1131,13 @@ function SquadMembersTab({
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
-            {onCreateAgentClick && (
-              <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
+            {createAgentHref && (
+              <Button
+                size="sm"
+                variant="outline"
+                render={<AppLink href={createAgentHref} />}
+                nativeButton={false}
+              >
                 <Plus className="size-3.5 mr-1.5" />
                 {t(($) => $.members_tab.create_agent_button)}
               </Button>
@@ -1176,7 +1186,9 @@ function SquadMembersTab({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-body font-medium">{getEntityName(m.member_type, m.member_id)}</span>
-                  <span className="text-caption text-muted-foreground capitalize">{m.member_type}</span>
+                  <span className="text-caption text-muted-foreground">
+                    {t(($) => $.member_type[m.member_type])}
+                  </span>
                   {isLeader(m) && (
                     <span className="inline-flex items-center gap-0.5 text-caption bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
                       <Crown className="size-3" />
@@ -1357,7 +1369,7 @@ function SquadInstructionsTab({
           onUpdate={canManage ? setValue : () => {}}
           placeholder={
             canManage
-              ? "e.g. Always start by writing a failing test. Prefer small, atomic commits."
+              ? t(($) => $.instructions_tab.placeholder)
               : ""
           }
           debounceMs={150}

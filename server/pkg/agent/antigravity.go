@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,7 +60,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// resolve the value itself rather than blocking the run on a discovery
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", execPath)
+		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
 		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
@@ -80,9 +79,9 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -98,7 +97,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[agy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		_ = os.Remove(logPath)
 		return nil, fmt.Errorf("start agy: %w", err)
@@ -125,19 +124,28 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		finalStatus := "completed"
 		var finalError string
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
 		for scanner.Scan() {
 			line := scanner.Text()
+			// The daemon concatenates streamed MessageText with no separator
+			// (pendingText.WriteString), so the streamed text must carry the
+			// line breaks itself. Mirror output's construction — prefix the
+			// newline on every line after the first, and stream blank lines
+			// too — so the persisted task_message text reconstructs output
+			// exactly. Emitting bare, blank-skipped lines dropped every newline,
+			// collapsing block markdown (headings, lists) onto one line in
+			// chat (#6149).
+			chunk := line
 			if output.Len() > 0 {
 				output.WriteByte('\n')
+				chunk = "\n" + line
 			}
 			output.WriteString(line)
-			if strings.TrimSpace(line) != "" {
-				trySend(msgCh, Message{Type: MessageText, Content: line})
+			if chunk != "" {
+				trySend(msgCh, Message{Type: MessageText, Content: chunk})
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -145,6 +153,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 
 		waitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		sessionID := readAntigravityConversationID(logPath)
@@ -353,8 +362,7 @@ func readAntigravityTranscriptOutput(logPath, conversationID string) string {
 	defer f.Close()
 
 	var parts []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(f)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -426,16 +434,17 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <display name>]
+//	agy -p <prompt> --dangerously-skip-permissions [--model <catalog id>]
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
 // agy 1.0.6 added a `--model` flag (MUL-3125), so opts.Model is now wired
-// through when set. The value is the exact human display string `agy models`
-// prints (e.g. "Claude Opus 4.6 (Thinking)"), NOT a provider/model slug —
-// it's passed verbatim as a single exec arg, so spaces and parens need no
-// shell quoting. agy still exposes no --system-prompt; runtime instructions
-// are delivered via AGENTS.md in the task workdir.
+// through when set. The value is the catalog identifier parseAntigravityModels
+// read out of `agy models`: a slug (e.g. "gemini-3.6-flash-high") on agy
+// 1.1.11+, or the verbatim single-column value (e.g. "Claude Opus 4.6
+// (Thinking)") on older output. Either shape ships as one exec arg, so spaces
+// and parens need no shell quoting. agy still exposes no --system-prompt;
+// runtime instructions are delivered via AGENTS.md in the task workdir.
 //
 // agy silently no-ops on a model string it doesn't recognise (empty output,
 // exit 0), so Execute validates opts.Model against the `agy models` catalog
@@ -475,7 +484,7 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 // returns nil otherwise. An empty `available` means discovery couldn't produce
 // a catalog (agy missing, transient failure) — we fail OPEN there and let agy
 // resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise display string; a near-miss
+// exact because agy's --model wants the precise catalog identifier; a near-miss
 // (extra space, dropped suffix) is correctly rejected since agy would silently
 // no-op on it anyway.
 func antigravityModelError(model string, available []Model) error {
@@ -499,9 +508,10 @@ func antigravityModelError(model string, available []Model) error {
 // configures no wall-clock cap (opts.Timeout <= 0). agy's --print-timeout has no
 // "disabled" sentinel and falls back to a 5-minute default when omitted, so "no
 // cap" must instead be a value large enough that agy's own guillotine never
-// fires before the daemon's idle (30m) / tool (2h) watchdogs reclaim a genuinely
-// stuck run. 24h is effectively unbounded for any real turn while still being a
-// finite duration agy can parse.
+// fires before the daemon's inactivity watchdog reclaims a genuinely stuck run.
+// 24h is effectively unbounded for any real turn while still being a finite
+// duration agy can parse, and it stays above the watchdog budget even when an
+// operator raises MULTICA_AGENT_IDLE_WATCHDOG well past its default.
 const antigravityNoCapPrintTimeout = 24 * time.Hour
 
 // antigravityPrintTimeout resolves the wall-clock budget handed to agy's

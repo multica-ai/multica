@@ -10,7 +10,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
+import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
@@ -24,6 +24,7 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
@@ -32,6 +33,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 
 /**
@@ -57,7 +59,7 @@ export function ChatPage() {
   const { t } = useT("chat");
   const { searchParams, replace } = useNavigation();
   const wsPaths = useWorkspacePaths();
-  const isMobile = useIsMobile();
+  const isCompact = useIsCompact();
 
   const c = useChatController({ isActive: true });
   const { data: quickActionsPending = null } = useQuery(
@@ -73,7 +75,7 @@ export function ChatPage() {
   const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
-  // session exists. On mobile this decides list-vs-conversation; on desktop the
+  // session exists. At compact widths this decides list-vs-conversation; on desktop the
   // conversation pane is always mounted so it only needs to reset itself once a
   // real session takes over.
   const [composingNew, setComposingNew] = useState(false);
@@ -139,13 +141,13 @@ export function ChatPage() {
 
   // Single archive path for both entry points (thread-list row + conversation
   // header). When the archived chat is the one in view, move the pane off it:
-  // on desktop advance to the next chat (Inbox-style); on mobile drop back to
+  // on desktop advance to the next chat (Inbox-style); when compact drop back to
   // the list, which reads more naturally than being thrown into an unrelated
   // conversation full-screen. Archiving any other chat leaves the view put.
   const handleArchive = (session: ChatSession) => {
     supersedeAgentIntent();
     if (session.id === c.activeSessionId) {
-      if (isMobile) {
+      if (isCompact) {
         c.setActiveSession(null);
         setComposingNew(false);
       } else {
@@ -168,8 +170,9 @@ export function ChatPage() {
     if (projectId === c.activeProjectId) return;
     c.handleProjectChange(projectId);
     // Removing a project stays in the current conversation. Choosing a
-    // project for an existing conversation starts a clean session, and mobile
-    // must remain in the compose pane after activeSessionId is cleared.
+    // project for an existing conversation starts a clean session, and a
+    // compact layout must stay in the compose pane after activeSessionId is
+    // cleared.
     if (!c.currentSession || projectId !== null) setComposingNew(true);
   };
 
@@ -214,10 +217,8 @@ export function ChatPage() {
   );
 
   const listHeader = (
-    <PageHeader className="justify-between">
-      <div className="flex items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-      </div>
+    <PageHeader>
+      <h1 className="flex-1 text-body font-semibold">{t(($) => $.page.title)}</h1>
       {newChatButton}
     </PageHeader>
   );
@@ -240,6 +241,7 @@ export function ChatPage() {
   // No compose-box agent selector — the agent is fixed when the chat starts.
   // `@container`: the conversation column's gutter (CHAT_GUTTER) widens with
   // THIS pane, which the user resizes independently of the browser window.
+  const queuedTasks = c.pendingTask?.queued_tasks ?? [];
   const conversation = (
     <div className="flex flex-1 flex-col min-h-0 @container">
       {c.currentSession && (
@@ -266,6 +268,7 @@ export function ChatPage() {
             !!c.pendingTaskId ||
             c.isSessionArchived ||
             c.isAgentArchived ||
+            c.isAgentAccessRevoked ||
             !c.isAgentRuntimeBound ||
             c.noAgent
           }
@@ -280,10 +283,17 @@ export function ChatPage() {
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
-        <EmptyState agent={c.activeAgent} />
+        <EmptyState
+          agent={c.activeAgent}
+          hasSessions={c.sessions.length > 0}
+          onPickPrompt={c.prefillConversationStarter}
+          customizeHref={c.customizeConversationStartersHref}
+        />
       )}
 
-      {c.noAgent ? (
+      {c.isAgentAccessRevoked ? (
+        <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
+      ) : c.noAgent ? (
         <NoAgentBanner />
       ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={c.activeAgent?.name} />
@@ -296,18 +306,35 @@ export function ChatPage() {
         <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
       )}
 
+      <ChatQueue
+        tasks={queuedTasks}
+        headStatus={c.pendingTask?.status}
+        onSendNow={c.handleSendQueuedTaskNow}
+        sendNowDisabled={c.isAgentAccessRevoked}
+        onEdit={c.handleEditQueuedTask}
+        onRemove={c.handleRemoveQueuedTask}
+        onClear={c.handleClearQueuedTasks}
+      />
+
       <ChatInput
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
+        conversationStarterRequest={c.conversationStarterRequest}
+        onConversationStarterApplied={c.handleConversationStarterApplied}
         onRestoreDraftApplied={c.handleRestoreDraftApplied}
-        uploadEnabled={c.uploadEnabled}
+        uploadEnabled={c.uploadEnabled && !c.isAgentAccessRevoked}
         onStop={c.handleStop}
         isRunning={!!c.pendingTaskId}
+        allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         disabled={
-          c.isSessionArchived || c.isAgentArchived || !c.isAgentRuntimeBound
+          c.isSessionArchived ||
+          c.isAgentArchived ||
+          c.isAgentAccessRevoked ||
+          !c.isAgentRuntimeBound
         }
         noAgent={c.noAgent}
         agentArchived={c.isAgentArchived}
+        agentAccessRevoked={c.isAgentAccessRevoked}
         agentRuntimeRequired={!c.isAgentRuntimeBound}
         agentName={c.activeAgent?.name}
         projects={c.projects}
@@ -320,8 +347,8 @@ export function ChatPage() {
     </div>
   );
 
-  // -- Mobile: list / conversation toggle -----------------------------------
-  if (isMobile) {
+  // -- Compact: list / conversation toggle -----------------------------------
+  if (isCompact) {
     if (c.activeSessionId || composingNew) {
       return (
         <div className="flex flex-1 flex-col min-h-0">

@@ -10,6 +10,11 @@
     "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Apply link",
+      "remove": "Remove link",
+      "close": "Close link editor"
+    },
     "heading_dropdown": {
       "text": "Text",
       "normal_text": "Normal Text",
@@ -35,7 +40,11 @@
     "delete": "Delete",
     "link_copied": "Link copied",
     "copy_link_failed": "Failed to copy link",
-    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size."
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
+    "previous": "Previous image",
+    "next": "Next image",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "That image is no longer available — skipped it."
   },
   "canvas": {
     "zoom_in": "Zoom in",
@@ -64,11 +73,14 @@
     "group_users": "Users",
     "group_issues": "Issues",
     "all_members": "All members",
+    "agent_badge": "Agent",
+    "squad_badge": "Squad",
     "searching": "Searching...",
     "no_results": "No results",
     "group_current": "Current page",
     "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_search": "Search results",
+    "group_cancelled": "Cancelled"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",
@@ -78,6 +90,7 @@
     }
   },
   "code_block": {
+    "html_preview": "HTML preview",
     "copy_code": "Copy code",
     "show_preview": "Show preview",
     "show_source": "Show source",
@@ -98,6 +111,7 @@
     "title_aria_label": "Title"
   },
   "mermaid": {
+    "diagram_label": "Mermaid diagram",
     "render_error": "Unable to render Mermaid diagram.",
     "rendering": "Rendering diagram…",
     "viewer_title": "Diagram",

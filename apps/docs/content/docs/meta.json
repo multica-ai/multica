@@ -38,6 +38,8 @@
     "channels",
     "lark-bot-integration",
     "slack-bot-integration",
+    "dingtalk-bot-integration",
+    "telegram-bot-integration",
     "github-integration",
     "vcs-integration",
     "---Apps---",
@@ -51,6 +53,8 @@
     "---Reference---",
     "cli",
     "auth-tokens",
+    "---Community---",
+    "community-maintained",
     "---Development---",
     "developers"
   ]

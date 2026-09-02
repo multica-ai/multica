@@ -1,0 +1,98 @@
+---
+title: 钉钉 Bot
+description: 把智能体接入钉钉，在私聊或群聊中直接交代工作。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+把[智能体](/agents)接入钉钉后，智能体所在工作区的成员可以私聊 Bot、在群里 @ Bot，或用 `/issue` 指令直接创建 Multica [任务](/issues)。对话和执行记录会保存到 Multica 工作区。
+
+<Callout type="info">
+钉钉集成[由社区维护](/community-maintained)，不提供官方支持 SLA。遇到问题请提交到 [GitHub 任务](https://github.com/multica-ai/multica/issues)。
+</Callout>
+
+
+## 连接 Bot
+
+智能体创建者或工作区 owner/admin 可以将智能体接入钉钉，智能体跟钉钉 Bot 是 1:1 的连接关系。
+
+## 1. 创建 Stream 模式机器人
+
+1. 在[钉钉开放平台](https://open-dev.dingtalk.com)创建一个**企业内部应用**。
+2. 开启机器人能力，其中**消息接收模式**设为 **Stream 模式**。
+
+## 2. 给机器人授权
+
+默认已添加“机器人发消息权限”（`qyapi_robot_sendmsg`）。如需在 Multica 平台显示 Bot 名称，需手动添加“钉群基础信息管理权限”（`qyapi_chat_manage`）。
+
+## 3. 获取应用凭证
+
+进入**凭证与基础信息**页面，复制 **Client ID（AppKey）** 和 **Client Secret（AppSecret）**。
+
+## 4. 把智能体接入钉钉
+
+1. 回到 Multica，打开 **智能体 → _你的智能体_ → 能力 → 集成**。
+2. 点击**连接钉钉**。
+3. 填入 **AppKey** 和 **AppSecret** 后提交。
+
+## 5. 关联钉钉账号与 Multica 平台账号
+
+在钉钉上跟 Bot 私聊，或者在群里 @ Bot，触发一次关联请求，你会在 Bot 私聊对话框中收到一个链接（有效期约 15 分钟），点击链接后看到连接成功的提示即大功告成。
+
+
+## 在钉钉中给智能体交代工作
+
+### 私聊
+
+直接给 Bot 发消息即可。智能体处理完任务后，会将结果回复至私聊对话框中。
+
+### 群聊
+
+把 Bot 加入钉群，再发送 `@your-bot <消息>`。每次追问都要重新 @，Bot 只处理 @ 它的消息。
+
+### 发送图片
+
+私聊和群聊都支持图文混排消息，图片支持 PNG、JPEG、GIF、WebP 和 BMP；每条消息最多 4 张，每张不超过 10 MB。暂不支持文件和语音消息。
+
+### 使用 `/issue` 创建任务
+
+发送 `/issue <标题>` 或者 `/issue <标题>{换行}<详细描述>`，就可以创建一个新 Multica 任务，并自动指派给 Bot 连接着的智能体。同一条消息内的图片也会以附件的形式添加到该任务中。跟普通对话消息不一样的是，`/issue` 指令不会在 Multica 的“[对话](/chat)”中留下记录。
+
+### 使用 `/new` 新建 Chat
+
+发送 `/new` 会创建一个新的空 Multica Chat，后续钉钉消息会路由到新 Chat。发送 `/new <消息>` 会创建新 Chat，并把消息作为第一轮。之前的 Chat 仍保存在 Multica 中，可以继续使用。
+
+### 使用 `/clear` 清空当前上下文
+
+发送 `/clear` 会保留当前 Multica Chat，并把新的智能体可见上下文应用到下一条消息。发送 `/clear <消息>` 会把消息作为边界后的第一轮。完整 Chat 历史仍会显示在 Multica 中。
+
+## 管理连接
+
+- 在**智能体 → _你的智能体_ → 能力 → 集成**页面，智能体创建者、工作区 owner/admin 可以在此连接钉钉，或者断开连接。连接上钉钉后，这里会显示 Bot 名称和已成功处理过消息的钉群，以及 Bot 在钉群内的活跃状态数据，有智能体读权限的工作区成员都能看到这些信息。最近 90 天没有成功处理消息的群会归入**长期未活跃**，展开时再加载。
+- 在**设置 → 集成**页面，显示当前工作区内所有有读权限且连接了钉钉的智能体列表，以及 Bot 在钉群内的活跃状态数据。工作区 owner/admin 还可以在此直接断开列表中任意智能体的钉钉连接。断开后 Bot 停止接收消息，安装记录仍会保留用于审计。工作区 owner/admin 还可以忘记某个群。忘记只会从列表中移除该群，不会删除对话和消息。如果已关联钉钉账号的工作区成员以后在该群再次 @ Bot，且 Multica 成功接收这条消息，群会重新出现。
+
+
+## 自部署配置
+
+Multica Cloud 用户可跳过本节。自托管部署需要先设置一个用于加密钉钉 `AppSecret` 的密钥：
+
+```dotenv
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+可以这样生成：
+
+```bash
+openssl rand -base64 32
+```
+
+重启 API 服务后，再连接钉钉。该密钥需要长期保存：更换或丢失后，已有 token 无法解密，需要重新连接。
+
+账号绑定链接使用 `MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`；它需要指向成员可以访问的 Multica 地址。
+
+
+## 接下来
+
+- [聊天集成](/channels) —— Channel 引擎、会话与授权是怎么运作的
+- [智能体](/agents) · [Chat](/chat) · [任务](/issues)
+- [环境变量](/environment-variables) —— 完整的自部署配置参考

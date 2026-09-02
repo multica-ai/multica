@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import { Virtuoso, type Components } from "react-virtuoso";
+import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -33,6 +33,8 @@ import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
+import { ImageSequenceProvider } from "../../editor";
+import { collectImageSequence } from "@multica/core/attachments/image-sequence";
 import type { AgentAvailability } from "@multica/core/agents";
 import { resolveFailureReasonKey } from "@multica/core/agents";
 import type {
@@ -43,8 +45,11 @@ import type {
 } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
 import { buildTimeline } from "../../common/task-transcript";
+import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
+import { LIVE_END_ROW_ATTR, useStickToBottom } from "./stick-to-bottom";
 import { formatElapsedMs } from "../lib/format";
 import { splitTimeline, extractCopyText } from "../lib/copy-text";
 import { stripChatQuickActionsProtocol } from "../lib/quick-actions";
@@ -148,15 +153,15 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // constant bottom inset: without it the last row's own py-2 was the only gap
 // between the final reply (and its follow-up pills) and the composer.
 function ChatListFooter({ context }: { context?: ChatListContext }) {
-  if (!context) return null;
-  if (!context.showStatusPill || !context.pendingTask) return null;
   return (
     <div className={cn(CHAT_COLUMN, "pb-4 space-y-4")}>
-      <TaskStatusPill
-        pendingTask={context.pendingTask}
-        taskMessages={context.liveTaskMessages ?? []}
-        availability={context.availability}
-      />
+      {context?.showStatusPill && context.pendingTask ? (
+        <TaskStatusPill
+          pendingTask={context.pendingTask}
+          taskMessages={context.liveTaskMessages ?? []}
+          availability={context.availability}
+        />
+      ) : null}
     </div>
   );
 }
@@ -182,11 +187,21 @@ export function ChatMessageList({
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
-  const [isNearBottom, setIsNearBottom] = useState(true);
   const setScrollContainerRef = useCallback((node: HTMLDivElement | null) => {
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // The bottom-stick corrects through Virtuoso, never by writing `scrollTop`
+  // on the container: `scrollHeight` is an estimate over the unrendered rows,
+  // so the pixel bottom moves as Virtuoso measures (see stick-to-bottom.ts).
+  const pinToLiveEnd = useCallback(() => {
+    virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
+  }, []);
+  const { isFollowing, onContentHeightChanged, hasReachedLiveEnd } = useStickToBottom(
+    scrollContainerEl,
+    pinToLiveEnd,
+  );
   // Soft edge fade hinting more content above/below. Kept small so it barely
   // grazes full-bleed previews (image / HTML) at the edges.
   const fadeStyle = useScrollFade(scrollRef, 16);
@@ -203,6 +218,18 @@ export function ChatMessageList({
     }
     return null;
   }, [messages]);
+
+  // Mika's onboarding opening self-describes (message_kind stamped by the
+  // completion path — the hidden kickoff row never reaches clients) and
+  // carries the product's starter cards instead of that turn's quick-action
+  // chips (MUL-5765).
+  const starterCardsMessageId = useMemo(
+    () =>
+      messages.find(
+        (m) => m.role === "assistant" && m.message_kind === "onboarding_opening",
+      )?.id ?? null,
+    [messages],
+  );
 
   // Once the assistant message for this pending task has landed in the
   // messages list, AssistantMessage owns its rendering — suppress the live
@@ -228,14 +255,18 @@ export function ChatMessageList({
   // Persisted messages plus, while a task is in flight, one synthetic trailing
   // row for it. When the assistant message persists, `hasLive` goes false and
   // the message takes the SAME key at the SAME position — an in-place data
-  // swap, not a remount.
+  // swap, not a remount. The onboarding kickoff is a server-authored carrier
+  // for Mika's first task, not something the member typed, so it never becomes
+  // a visible bubble.
   const renderItems: ChatRenderItem[] = useMemo(() => {
-    const items: ChatRenderItem[] = messages.map((message) => ({
-      key: messageRowKey(message),
-      kind: "message" as const,
-      message,
-      taskId: message.task_id ?? null,
-    }));
+    const items: ChatRenderItem[] = messages
+      .filter((message) => message.message_kind !== "onboarding_kickoff")
+      .map((message) => ({
+        key: messageRowKey(message),
+        kind: "message" as const,
+        message,
+        taskId: message.task_id ?? null,
+      }));
     if (hasLive && pendingTaskId) {
       items.push({ key: `task:${pendingTaskId}`, kind: "live", taskId: pendingTaskId });
     }
@@ -243,6 +274,7 @@ export function ChatMessageList({
   }, [messages, hasLive, pendingTaskId]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
+  const liveEndKey = renderItems[renderItems.length - 1]?.key ?? null;
 
   const listContext: ChatListContext = {
     isFetchingOlderMessages,
@@ -252,7 +284,27 @@ export function ChatMessageList({
     availability,
   };
 
+  // Every image in this session, in message order, so opening one lets the
+  // reader page through the rest (MUL-5752). Built from the message data, not
+  // from what Virtuoso currently has mounted.
+  //
+  // Persisted messages only: a task transcript's own attachments live behind a
+  // separate query and its blocks are collapsed by default, so an image in
+  // there keeps its standalone preview instead of entering a sequence the
+  // reader can't see the rest of.
+  const imageSequence = useMemo(
+    () =>
+      collectImageSequence(
+        messages.map((message) => ({
+          content: message.content,
+          attachments: message.attachments,
+        })),
+      ),
+    [messages],
+  );
+
   return (
+    <ImageSequenceProvider items={imageSequence}>
     <div
       ref={setScrollContainerRef}
       data-tab-scroll-root
@@ -260,7 +312,11 @@ export function ChatMessageList({
       // The gutter lives on the scroll container, so it applies once to the
       // whole list — rows, header, footer — and the scrollbar still rides the
       // surface edge rather than being inset with the text.
-      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER)}
+      // Hidden until Virtuoso has actually landed on the newest message. The
+      // container paints nothing for that whole window anyway — the rows are
+      // not measured yet — so this costs no visible time and spares the
+      // reader a frame of the wrong messages (see stick-to-bottom.ts).
+      className={cn("flex-1 overflow-y-auto", CHAT_GUTTER, !hasReachedLiveEnd && "invisible")}
     >
       {/* Already inside the gutter + column, so this pre-mount frame renders the
        *  skeleton BODY rather than <ChatMessageSkeleton>, which brings its own
@@ -275,6 +331,7 @@ export function ChatMessageList({
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
       <Virtuoso
+        ref={virtuosoRef}
         customScrollParent={scrollContainerEl}
         data={renderItems}
         firstItemIndex={firstIndex}
@@ -289,9 +346,20 @@ export function ChatMessageList({
         // than the viewport, so switching sessions always shows the latest reply.
         initialTopMostItemIndex={{ index: "LAST", align: "end" }}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        atBottomThreshold={120}
-        atBottomStateChange={setIsNearBottom}
-        followOutput={() => (!isFetchingOlderMessages && isNearBottom ? "smooth" : false)}
+        atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+        // Follow rapid streamed output only while Virtuoso says the reader is
+        // at the live end. An in-flight smooth animation temporarily reports
+        // "not at bottom" on the next append and permanently drops the follow
+        // (#6697), so live growth must use an immediate scroll. `isFollowing`
+        // narrows this further: the reader may have scrolled away by input the
+        // 120px `atBottom` band forgives (see stick-to-bottom.ts).
+        followOutput={(atBottom) =>
+          !isFetchingOlderMessages && atBottom && isFollowing() ? "auto" : false
+        }
+        // `followOutput` never fires for a single row growing mid-stream, so
+        // content resizes route to the bottom-stick through Virtuoso's own
+        // height signal instead.
+        totalListHeightChanged={onContentHeightChanged}
         startReached={() => {
           if (hasOlderMessages && !isFetchingOlderMessages) {
             onLoadOlderMessages?.();
@@ -301,7 +369,10 @@ export function ChatMessageList({
         context={listContext}
         components={LIST_COMPONENTS}
         itemContent={(_, item) => (
-          <div className={cn(CHAT_COLUMN, "py-2")}>
+          <div
+            className={cn(CHAT_COLUMN, "py-2")}
+            {...(item.key === liveEndKey ? { [LIVE_END_ROW_ATTR]: "" } : {})}
+          >
             <MessageBubble
               item={item}
               isPending={!!pendingTaskId && item.taskId === pendingTaskId}
@@ -311,6 +382,7 @@ export function ChatMessageList({
               onRegenerateQuickActions={onRegenerateQuickActions}
               latestAssistantMessageId={latestAssistantMessageId}
               quickActionsPendingMessageId={quickActionsPendingMessageId}
+              starterCardsMessageId={starterCardsMessageId}
             />
           </div>
         )}
@@ -318,6 +390,7 @@ export function ChatMessageList({
       </RichContentScrollRootProvider>
       )}
     </div>
+    </ImageSequenceProvider>
   );
 }
 
@@ -374,6 +447,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerateQuickActions,
   latestAssistantMessageId,
   quickActionsPendingMessageId,
+  starterCardsMessageId,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
@@ -383,6 +457,7 @@ const MessageBubble = memo(function MessageBubble({
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   latestAssistantMessageId: string | null;
   quickActionsPendingMessageId: string | null;
+  starterCardsMessageId: string | null;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -437,6 +512,7 @@ const MessageBubble = memo(function MessageBubble({
       onRegenerateQuickActions={onRegenerateQuickActions}
       canRegenerateQuickActions={message.id === latestAssistantMessageId}
       quickActionsPending={quickActionsPendingMessageId === message.id}
+      showStarterCards={message.id === starterCardsMessageId}
     />
   );
 });
@@ -468,6 +544,7 @@ function AssistantMessage({
   onRegenerateQuickActions,
   canRegenerateQuickActions = false,
   quickActionsPending = false,
+  showStarterCards = false,
 }: {
   taskId: string | null;
   message?: ChatMessage;
@@ -478,6 +555,8 @@ function AssistantMessage({
   onRegenerateQuickActions?: (message: ChatMessage) => void | Promise<unknown>;
   canRegenerateQuickActions?: boolean;
   quickActionsPending?: boolean;
+  /** This turn is Mika's onboarding opening — render starter cards, not chips. */
+  showStarterCards?: boolean;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -553,7 +632,14 @@ function AssistantMessage({
             timeline={timeline}
             isPending={isPending}
           />
-          {onQuickAction && (message.quick_actions?.length ?? 0) > 0 ? (
+          {onQuickAction && showStarterCards ? (
+            // The opening's starter cards own this turn's suggestion strip
+            // (MUL-5765); the server skips chip generation for it.
+            <OnboardingStarterCards
+              onPick={onQuickAction}
+              disabled={quickActionsDisabled || isPending}
+            />
+          ) : onQuickAction && (message.quick_actions?.length ?? 0) > 0 ? (
             <QuickActions
               actions={message.quick_actions ?? []}
               disabled={quickActionsDisabled || isPending}
@@ -651,7 +737,10 @@ function QuickActions({
 
   return (
     <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
-      <div className="flex flex-wrap items-center gap-2" aria-label="Suggested follow-ups">
+      <div
+        className="flex flex-wrap items-center gap-2"
+        aria-label={t(($) => $.message_list.quick_actions_aria)}
+      >
         <QuickActionsHeading />
         {actions.slice(0, 3).map((action, index) => (
           // The whole pill previews its hidden prompt on hover: clicking
@@ -893,6 +982,8 @@ function FailureBubble({
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),
     skill_bundle_unavailable: t(($) => $.message_list.failure.skill_bundle_unavailable),
+    runtime_cli_timeout: t(($) => $.message_list.failure.runtime_cli_timeout),
+    environment_prepare_failed: t(($) => $.message_list.failure.environment_prepare_failed),
     "agent_error.provider_network": t(($) => $.message_list.failure.provider_network),
     "agent_error.provider_auth_or_access": t(($) => $.message_list.failure.provider_auth_or_access),
     "agent_error.provider_quota_limit": t(($) => $.message_list.failure.provider_quota_limit),

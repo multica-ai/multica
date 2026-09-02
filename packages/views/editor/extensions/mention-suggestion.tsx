@@ -13,11 +13,17 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
+import { issueStatusCategory } from "@multica/core/issues";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { api } from "@multica/core/api";
+import {
+  isIssueDirectHit,
+  isProjectDirectHit,
+} from "@multica/core/search/cancelled-rank";
 import { isImeComposing } from "@multica/core/utils";
 import type {
   Issue,
@@ -38,7 +44,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import type { IssueStatus, ProjectStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
@@ -50,9 +56,11 @@ import {
 import { matchesPinyin } from "./pinyin-match";
 import {
   createSuggestionPopupRender,
+} from "./suggestion-popup";
+import {
   isPickerAcceptKey,
   pickerNavigationDirection,
-} from "./suggestion-popup";
+} from "../../common/picker-keys";
 import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 
@@ -70,6 +78,13 @@ export interface MentionItem {
   description?: string;
   /** Issue status for StatusIcon rendering */
   status?: IssueStatus;
+  /**
+   * The category that status behaves as, carried from the issue payload so the
+   * list never has to resolve a custom key itself. Both the glyph and the
+   * "closed / demoted" rules read this — comparing the raw key left a custom
+   * done status looking and ranking like active work. (MUL-6243)
+   */
+  statusCategory?: IssueStatusCategory;
   /** Project emoji/icon snapshot for ProjectIcon rendering */
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
@@ -98,15 +113,18 @@ interface MentionGroup {
   items: MentionItem[];
 }
 
-function groupItems(items: MentionItem[]): MentionGroup[] {
+function groupItems(items: MentionItem[], query: string): MentionGroup[] {
   const current: MentionItem[] = [];
   const recent: MentionItem[] = [];
   const search: MentionItem[] = [];
   const users: MentionItem[] = [];
   const issues: MentionItem[] = [];
+  const cancelled: MentionItem[] = [];
 
   for (const item of items) {
-    if (item.group === "current") {
+    if (isDemotedCancelled(item, query)) {
+      cancelled.push(item);
+    } else if (item.group === "current") {
       current.push(item);
     } else if (item.group === "recent") {
       recent.push(item);
@@ -125,6 +143,8 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   if (search.length > 0) groups.push({ label: "Search", items: search });
   if (users.length > 0) groups.push({ label: "Users", items: users });
   if (issues.length > 0) groups.push({ label: "Issues", items: issues });
+  // Always last: no cancelled row of any type may precede a live one.
+  if (cancelled.length > 0) groups.push({ label: "Cancelled", items: cancelled });
   return groups;
 }
 
@@ -157,9 +177,93 @@ function mergeMentionItems(
   return merged;
 }
 
+/**
+ * Cancelled work is abandoned work: keep it reachable, but never ahead of a
+ * live match and never at the cost of a live match's slot.
+ *
+ * Two independent reasons the picker needs this even though the search API
+ * already ranks cancelled results last:
+ *
+ * 1. Cached rows are merged BEFORE the server rows and the list is only then
+ *    truncated to MAX_ITEMS, so a locally cached cancelled issue outranks every
+ *    backend-ranked result and can push active work out of the window.
+ * 2. Context mentions aggregate two independently ranked responses — issues
+ *    then projects, both tagged `search` — so a cancelled project still lands
+ *    above a live issue. Per-type ranking cannot fix a cross-type list.
+ *
+ * Exempt, matching the server and the other search surfaces:
+ *
+ * - Direct hits. An exact identifier, a bare number, or a full title means the
+ *   user is targeting that one record; demoting it hides exactly what they
+ *   asked for. Shared with the backend rule via isIssueDirectHit /
+ *   isProjectDirectHit so the three surfaces cannot drift.
+ * - The curated `current` / `recent` groups. They are explicit context rather
+ *   than relevance hits, and "Current" has to survive the truncation even when
+ *   the issue being viewed is itself cancelled.
+ */
+function isDemotedCancelled(item: MentionItem, query: string): boolean {
+  if (isPinnedAboveTruncation(item, query)) return false;
+  if (item.type === "issue") return item.statusCategory === "cancelled";
+  if (item.type === "project") return item.projectStatus === "cancelled";
+  return false;
+}
+
+/**
+ * Rows that must survive the MAX_ITEMS truncation: curated context and direct
+ * hits. Exempting a direct hit from the demotion is not enough on its own —
+ * `slice(0, MAX_ITEMS)` runs on the merged list, so a direct hit sitting behind
+ * 20 cached candidates would still be cut. Pinning it to the front is what
+ * actually keeps the record the user typed in full reachable, and it mirrors the
+ * server, which already ranks direct hits first.
+ *
+ * Issue mention rows carry the identifier in `label` and the title in
+ * `description`; project rows carry the title in `label`.
+ */
+function isPinnedAboveTruncation(item: MentionItem, query: string): boolean {
+  if (item.group === "current" || item.group === "recent") return true;
+  if (!query) return false;
+  if (item.type === "issue") {
+    return isIssueDirectHit(
+      { identifier: item.label, title: item.description },
+      query,
+    );
+  }
+  if (item.type === "project") {
+    return isProjectDirectHit({ title: item.label }, query);
+  }
+  return false;
+}
+
+/**
+ * Stable three-tier partition applied BEFORE the MAX_ITEMS truncation, so
+ * cancelled rows give up their slot rather than merely their position:
+ *
+ *   pinned (curated context + direct hits) → live → cancelled
+ *
+ * Relative order within each tier is untouched, leaving the backend ranking in
+ * charge of everything else. groupItems() then renders the cancelled tier as the
+ * trailing section.
+ */
+function demoteCancelledItems(items: MentionItem[], query: string): MentionItem[] {
+  const pinned: MentionItem[] = [];
+  const live: MentionItem[] = [];
+  const cancelled: MentionItem[] = [];
+
+  for (const item of items) {
+    if (isPinnedAboveTruncation(item, query)) pinned.push(item);
+    else if (isDemotedCancelled(item, query)) cancelled.push(item);
+    else live.push(item);
+  }
+
+  return pinned.length > 0 || cancelled.length > 0
+    ? [...pinned, ...live, ...cancelled]
+    : items;
+}
+
 export const MentionList = forwardRef<MentionListRef, MentionListProps>(
   function MentionList({ items, query, command, includeProjectSearch = false }, ref) {
     const { t } = useT("editor");
+    const { colorOf: statusColorOf } = useIssueStatuses(getCurrentWsId() ?? "");
     // Selection is tracked by item identity, NOT by a positional index. The
     // list is re-bucketed by groupItems() and grows asynchronously (server
     // search results), so a slot index is not a stable target — the row under
@@ -250,7 +354,10 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
     const displayItems = useMemo(() => {
       const currentServerItems = searchedQuery === normalizedQuery ? serverItems : [];
-      return mergeMentionItems(items, currentServerItems).slice(0, MAX_ITEMS);
+      return demoteCancelledItems(
+        mergeMentionItems(items, currentServerItems),
+        normalizedQuery,
+      ).slice(0, MAX_ITEMS);
     }, [items, normalizedQuery, searchedQuery, serverItems]);
 
     // The single index space for selection. groupItems() re-buckets displayItems
@@ -258,7 +365,10 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     // the popup renders, top to bottom. Keyboard nav, Enter, clicks, highlight,
     // and scroll all index THIS, so the highlighted row always equals the
     // committed item — there is no second "data order" to drift against.
-    const groups = useMemo(() => groupItems(displayItems), [displayItems]);
+    const groups = useMemo(
+      () => groupItems(displayItems, normalizedQuery),
+      [displayItems, normalizedQuery],
+    );
     const orderedItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
     // Derive the numeric index from the pinned identity. If the selected item
@@ -347,6 +457,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       if (label === "Search") return t(($) => $.mention.group_search);
       if (label === "Users") return t(($) => $.mention.group_users);
       if (label === "Issues") return t(($) => $.mention.group_issues);
+      if (label === "Cancelled") return t(($) => $.mention.group_cancelled);
       return label;
     };
 
@@ -360,6 +471,11 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
           <MentionRow
             key={`${item.type}-${item.id}`}
             item={item}
+            statusColor={
+              item.type === "issue" && item.status
+                ? statusColorOf(item.status)
+                : null
+            }
             selected={idx === selectedIndex}
             onSelect={() => selectItem(item)}
             buttonRef={(el) => { itemRefs.current[idx] = el; }}
@@ -408,11 +524,13 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
 
 function MentionRow({
   item,
+  statusColor,
   selected,
   onSelect,
   buttonRef,
 }: {
   item: MentionItem;
+  statusColor?: string | null;
   selected: boolean;
   onSelect: () => void;
   buttonRef: (el: HTMLButtonElement | null) => void;
@@ -422,7 +540,8 @@ function MentionRow({
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
-    const isClosed = item.status === "done" || item.status === "cancelled";
+    const isClosed =
+      item.statusCategory === "done" || item.statusCategory === "cancelled";
     return (
       <button
         type="button"
@@ -434,7 +553,12 @@ function MentionRow({
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center">
           {item.status ? (
-            <StatusIcon status={item.status} className="h-3.5 w-3.5" />
+            <StatusIcon
+              status={item.status}
+              category={item.statusCategory}
+              color={statusColor}
+              className="h-3.5 w-3.5"
+            />
           ) : (
             <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
           )}
@@ -510,14 +634,14 @@ function MentionRow({
         {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
       </span>
       {item.type === "agent" && (
-        // "Agent" is a glossary-protected product term — kept un-translated.
-        // eslint-disable-next-line i18next/no-literal-string
-        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">Agent</Badge>
+        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
+          {t(($) => $.mention.agent_badge)}
+        </Badge>
       )}
       {item.type === "squad" && (
-        // "Squad" is a glossary-protected product term — kept un-translated.
-        // eslint-disable-next-line i18next/no-literal-string
-        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">Squad</Badge>
+        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
+          {t(($) => $.mention.squad_badge)}
+        </Badge>
       )}
     </button>
   );
@@ -538,13 +662,16 @@ function MentionRow({
 // Suggestion config factory
 // ---------------------------------------------------------------------------
 
-function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">): MentionItem {
+function issueToMention(
+  i: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,
+): MentionItem {
   return {
     id: i.id,
     label: i.identifier,
     type: "issue" as const,
     description: i.title,
     status: i.status as IssueStatus,
+    statusCategory: issueStatusCategory(i) ?? undefined,
   };
 }
 

@@ -97,6 +97,13 @@ type MediaRef struct {
 	MimeType string
 	// SizeBytes is the object size in bytes, or 0 when unknown.
 	SizeBytes int64
+	// InlinePlaceholder is an optional exact marker in the durable message
+	// body that this attachment should replace with a stable Markdown link.
+	// Empty keeps the attachment standalone and preserves existing platform
+	// behavior. InlineIndex is the zero-based occurrence of that marker, so a
+	// partial media failure cannot shift later attachments into the wrong place.
+	InlinePlaceholder string
+	InlineIndex       int
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.
@@ -158,9 +165,20 @@ type InboundMessage struct {
 	AddressedToBot bool
 
 	// ForceFresh asks the core to start a fresh agent session for this message
-	// instead of resuming the prior one. Router recognizes the shared /new text
+	// instead of resuming the prior one. Router recognizes the shared /clear text
 	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
+
+	// SkipAgentRun asks the core to persist this message + create any
+	// engine-side artefacts (issue from /issue command, session binding
+	// row) but NOT to trigger an agent run afterwards. Set by an adapter
+	// when the message is a pure control command whose only meaningful
+	// effect is the artefact (wecom uses it for standalone /issue
+	// invocations, where an agent reply would just quote the command back
+	// as "I don't know this slash command"). Left unset by adapters where
+	// the current cross-platform behaviour — /issue triggers the agent as
+	// a normal chat turn — should be preserved (Feishu, Slack today).
+	SkipAgentRun bool
 
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /
@@ -191,4 +209,8 @@ type OutboundMessage struct {
 type SendResult struct {
 	// MessageID is the platform's identifier for the delivered message.
 	MessageID string
+	// MessageIDs contains every delivered platform message identifier when one
+	// logical reply is split into multiple messages. Adapters that never chunk
+	// may leave it empty and return only MessageID for compatibility.
+	MessageIDs []string
 }

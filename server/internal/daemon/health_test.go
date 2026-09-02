@@ -1,8 +1,11 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -15,7 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 )
 
-func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
+func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	t.Parallel()
 
 	d := &Daemon{
@@ -28,7 +31,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		workspaces: map[string]*workspaceState{},
 		logger:     slog.Default(),
 	}
-	d.activeTasks.Store(3)
+	d.activeTasks.Store(2)
+	d.runningTasks.Store(1)
+	d.resourceWaitTasks.Store(1)
 	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -41,7 +46,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 
 	// Decode into a raw map so the test locks in the exact wire-level JSON
 	// keys — the desktop TS client depends on snake_case (cli_version,
-	// active_task_count), so a silent struct-tag rename must fail here.
+	// active_task_count), so a silent struct-tag rename must fail here. The
+	// execution/wait split is additive: active_task_count keeps its ownership
+	// semantics for old clients and restart barriers.
 	var raw map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw response: %v", err)
@@ -50,8 +57,14 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 		t.Errorf("cli_version key: got %v, want %q", got, want)
 	}
 	// JSON numbers decode to float64 through map[string]any.
-	if got, want := raw["active_task_count"], float64(3); got != want {
+	if got, want := raw["active_task_count"], float64(2); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
+	}
+	if got, want := raw["running_task_count"], float64(1); got != want {
+		t.Errorf("running_task_count key: got %v, want %v", got, want)
+	}
+	if got, want := raw["resource_wait_task_count"], float64(1); got != want {
+		t.Errorf("resource_wait_task_count key: got %v, want %v", got, want)
 	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
@@ -72,9 +85,60 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if resp.CLIVersion != "v9.9.9" {
 		t.Errorf("CLIVersion: got %q, want %q", resp.CLIVersion, "v9.9.9")
 	}
-	if resp.ActiveTaskCount != 3 {
-		t.Errorf("ActiveTaskCount: got %d, want 3", resp.ActiveTaskCount)
+	if resp.ActiveTaskCount != 2 {
+		t.Errorf("ActiveTaskCount: got %d, want 2", resp.ActiveTaskCount)
 	}
+	if resp.RunningTaskCount != 1 {
+		t.Errorf("RunningTaskCount: got %d, want 1", resp.RunningTaskCount)
+	}
+	if resp.ResourceWaitTaskCount != 1 {
+		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
+	}
+}
+
+// TestHealthHandlerReportsDeferredReload covers the "while waiting to restart,
+// the reason and state are visible" criterion. When trySelfReload has confirmed
+// a multica version change but the daemon was busy at the barrier check, the
+// only way a user can tell why the daemon is still on the old version is this
+// field. It is omitempty, so an idle daemon must not emit the key at all.
+func TestHealthHandlerReportsDeferredReload(t *testing.T) {
+	t.Parallel()
+
+	newHealthProbe := func(t *testing.T) (*Daemon, func() map[string]any) {
+		t.Helper()
+		d := &Daemon{
+			cfg:        Config{CLIVersion: "0.3.7"},
+			workspaces: map[string]*workspaceState{},
+			logger:     slog.Default(),
+		}
+		d.ready.Store(true)
+		return d, func() map[string]any {
+			rec := httptest.NewRecorder()
+			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+			var raw map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+				t.Fatalf("decode raw response: %v", err)
+			}
+			return raw
+		}
+	}
+
+	t.Run("absent when nothing pending", func(t *testing.T) {
+		_, probe := newHealthProbe(t)
+		if _, present := probe()["reload_pending_reason"]; present {
+			t.Error("reload_pending_reason must be omitted when no restart is pending")
+		}
+	})
+
+	t.Run("explains a deferred restart", func(t *testing.T) {
+		d, probe := newHealthProbe(t)
+		d.setReloadPending("multica binary on disk reports 0.3.8, running 0.3.7")
+
+		got, _ := probe()["reload_pending_reason"].(string)
+		if !strings.Contains(got, "0.3.8") {
+			t.Errorf("reload_pending_reason = %q, want it to name the version on disk", got)
+		}
+	})
 }
 
 // TestHealthHandlerReportsStartingUntilReady pins the liveness/readiness split:
@@ -133,6 +197,30 @@ func TestHealthHandlerActiveTaskCountTracksCounter(t *testing.T) {
 
 	d.activeTasks.Add(-1)
 	assertActiveTaskCount(t, handler, 0)
+}
+
+func TestHealthHandlerReportsRepoCoordinationActivity(t *testing.T) {
+	t.Parallel()
+
+	cache := &activityRepoCache{
+		activity: repocache.Activity{MaintenanceActive: 1, ForegroundWaiters: 3},
+	}
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		repoCache:  cache,
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	rec := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.RepoMaintenanceActive != 1 || resp.RepoCheckoutWaiters != 3 {
+		t.Fatalf("repo activity = maintenance:%d waiters:%d, want 1/3", resp.RepoMaintenanceActive, resp.RepoCheckoutWaiters)
+	}
 }
 
 func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
@@ -234,18 +322,184 @@ func TestRepoCheckoutUsesTaskScopedProjectRefByDefault(t *testing.T) {
 	const workspaceID = "ws-checkout"
 	const repoURL = "https://github.com/org/repo.git"
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
-	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, cache)
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
 	d.registerTaskRepos(workspaceID, "task-1", []RepoData{{URL: repoURL, Ref: "release/v2"}})
 
 	rec := httptest.NewRecorder()
-	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"/tmp/work","task_id":"task-1"}`)
-	d.repoCheckoutHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/repo/checkout", body))
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","agent_name":"Other Agent","task_id":"task-1"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	if got := cache.lastCreateParams().Ref; got != "release/v2" {
 		t.Fatalf("CreateWorktree Ref = %q, want release/v2", got)
+	}
+	if got := cache.lastCreateParams().AgentName; got != "Test Agent" {
+		t.Fatalf("CreateWorktree AgentName = %q, want token-bound active agent", got)
+	}
+}
+
+// A request with no Authorization header can only come from a CLI older than
+// repoCheckoutMinCLIVersion, which is a permanent failure. The rejection has to
+// say so: the agent sees this string and nothing else (#7520).
+func TestRepoCheckoutRejectsMissingTaskCredential(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	var logs bytes.Buffer
+	d.logger = captureLogger(&logs)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/repo/checkout", body))
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
+		t.Fatalf("unauthorized checkout reached repo cache: %+v", got)
+	}
+	for _, want := range []string{
+		repoCheckoutMinCLIVersion,
+		repoCheckoutListBinariesCommand(),
+		"multica update",
+		"v1.0.0",
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("rejection body missing %q: %s", want, rec.Body.String())
+		}
+	}
+	// The endpoint serves Windows and Linux too, so the self-help commands must
+	// not be a macOS/Homebrew recipe. `multica update` resolves the install
+	// method itself; a literal `brew upgrade` is unrunnable for most readers.
+	if strings.Contains(rec.Body.String(), "brew upgrade") {
+		t.Fatalf("rejection body hardcodes a platform-specific upgrade command: %s", rec.Body.String())
+	}
+	// The silent 401 branch is what made this undiagnosable from daemon.log.
+	if !strings.Contains(logs.String(), "repo checkout rejected") || !strings.Contains(logs.String(), "no_credential") {
+		t.Fatalf("expected a log line naming the reason, got: %s", logs.String())
+	}
+	// Asserted explicitly so a later downgrade to Debug — filtered out of
+	// daemon.log by default — cannot silently pass this test.
+	if !strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("rejection must be logged at WARN, got: %s", logs.String())
+	}
+}
+
+// A token that no active task owns is a different failure with a different fix,
+// so it must not be reported as (or advised like) a stale-CLI problem.
+func TestRepoCheckoutRejectsUnknownTaskCredential(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	var logs bytes.Buffer
+	d.logger = captureLogger(&logs)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/repo/checkout", body)
+	req.Header.Set("Authorization", "Bearer mat_not_an_active_task")
+	d.repoCheckoutHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
+		t.Fatalf("unauthorized checkout reached repo cache: %+v", got)
+	}
+	if !strings.Contains(rec.Body.String(), "not bound to a task running in this daemon") {
+		t.Fatalf("rejection body should explain the task is gone: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "multica update") {
+		t.Fatalf("a live CLI must not be told to upgrade: %s", rec.Body.String())
+	}
+	if !strings.Contains(logs.String(), "unknown_credential") {
+		t.Fatalf("expected a WARN naming the reason, got: %s", logs.String())
+	}
+	// The token is a live task credential and must never reach the log.
+	if strings.Contains(logs.String(), "mat_not_an_active_task") {
+		t.Fatalf("task credential leaked into daemon.log: %s", logs.String())
+	}
+}
+
+// The daemon can name where it started from, which narrows the search — but it
+// has not probed that file's version, and the daemon explicitly supports the
+// binary being replaced out of band. So the message must describe provenance
+// and ask the reader to verify, never assert a match.
+func TestRepoCheckoutAuthErrorNamesDaemonBinaryWithoutClaimingAMatch(t *testing.T) {
+	original := resolveSelfExecutable
+	t.Cleanup(func() { resolveSelfExecutable = original })
+	resolveSelfExecutable = func() (string, error) { return "/opt/multica/bin/multica", nil }
+
+	d := &Daemon{cfg: Config{CLIVersion: "v0.4.33"}}
+	message := d.repoCheckoutAuthErrorMessage(repoCheckoutAuthNoCredential)
+	if !strings.Contains(message, "/opt/multica/bin/multica") {
+		t.Fatalf("rejection should name the daemon's own binary: %s", message)
+	}
+	if !strings.Contains(message, "check that copy's version") {
+		t.Fatalf("rejection should ask the reader to verify the version: %s", message)
+	}
+	for _, unwanted := range []string{"version-matched", "matches this daemon"} {
+		if strings.Contains(message, unwanted) {
+			t.Fatalf("rejection must not assert an unverified version match (%q): %s", unwanted, message)
+		}
+	}
+
+	resolveSelfExecutable = func() (string, error) { return "", errors.New("unresolvable") }
+	if message := d.repoCheckoutAuthErrorMessage(repoCheckoutAuthNoCredential); !strings.Contains(message, repoCheckoutMinCLIVersion) {
+		t.Fatalf("rejection must stay useful when the daemon path is unknown: %s", message)
+	}
+}
+
+// When the daemon already knows its on-disk copy drifted (a reload deferred
+// because tasks were running), staying silent would point a version-skew victim
+// at a second stale binary.
+func TestRepoCheckoutAuthErrorSurfacesDeferredReload(t *testing.T) {
+	original := resolveSelfExecutable
+	t.Cleanup(func() { resolveSelfExecutable = original })
+	resolveSelfExecutable = func() (string, error) { return "/opt/multica/bin/multica", nil }
+
+	d := &Daemon{cfg: Config{CLIVersion: "v0.4.33"}}
+	d.setReloadPending("multica binary on disk reports v0.4.20, running v0.4.33")
+
+	message := d.repoCheckoutAuthErrorMessage(repoCheckoutAuthNoCredential)
+	if !strings.Contains(message, "on-disk copy has since changed") {
+		t.Fatalf("rejection should warn that the daemon's own binary drifted: %s", message)
+	}
+	if !strings.Contains(message, "reports v0.4.20, running v0.4.33") {
+		t.Fatalf("rejection should carry the drift detail the daemon already has: %s", message)
+	}
+}
+
+func TestRepoCheckoutRejectsAnotherTaskWorkdir(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+	otherWorkDir := t.TempDir()
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + otherWorkDir + `","task_id":"task-1"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := cache.lastCreateParams(); got != (repocache.WorktreeParams{}) {
+		t.Fatalf("cross-task workdir checkout reached repo cache: %+v", got)
 	}
 }
 
@@ -255,12 +509,13 @@ func TestRepoCheckoutExplicitRefOverridesProjectDefault(t *testing.T) {
 	const workspaceID = "ws-checkout"
 	const repoURL = "https://github.com/org/repo.git"
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
-	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, cache)
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
 	d.registerTaskRepos(workspaceID, "task-1", []RepoData{{URL: repoURL, Ref: "release/v2"}})
 
 	rec := httptest.NewRecorder()
-	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"/tmp/work","task_id":"task-1","ref":"hotfix"}`)
-	d.repoCheckoutHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/repo/checkout", body))
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","ref":"hotfix"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -276,11 +531,12 @@ func TestRepoCheckoutForwardsIsolatedMode(t *testing.T) {
 	const workspaceID = "ws-checkout"
 	const repoURL = "https://github.com/org/repo.git"
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
-	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, cache)
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
 
 	rec := httptest.NewRecorder()
-	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"/tmp/work","task_id":"task-1","checkout_mode":"isolated"}`)
-	d.repoCheckoutHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/repo/checkout", body))
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","checkout_mode":"isolated"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
@@ -296,11 +552,12 @@ func TestRepoCheckoutRejectsUnknownMode(t *testing.T) {
 	const workspaceID = "ws-checkout"
 	const repoURL = "https://github.com/org/repo.git"
 	cache := &recordingRepoCache{lookupPath: "/cache/org/repo.git"}
-	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, cache)
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
 
 	rec := httptest.NewRecorder()
-	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"/tmp/work","task_id":"task-1","checkout_mode":"unsafe"}`)
-	d.repoCheckoutHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/repo/checkout", body))
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","checkout_mode":"unsafe"}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
@@ -310,7 +567,34 @@ func TestRepoCheckoutRejectsUnknownMode(t *testing.T) {
 	}
 }
 
-func newRepoCheckoutTestDaemon(t *testing.T, workspaceID, repoURL string, cache *recordingRepoCache) *Daemon {
+func TestRepoCheckoutReturnsRetryableBusyToCapableClient(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-checkout"
+	const repoURL = "https://github.com/org/repo.git"
+	cache := &busyRepoCache{recordingRepoCache: recordingRepoCache{lookupPath: "/cache/org/repo.git"}}
+	workDir := t.TempDir()
+	d := newRepoCheckoutTestDaemon(t, workspaceID, repoURL, workDir, cache)
+
+	rec := httptest.NewRecorder()
+	body := strings.NewReader(`{"url":"` + repoURL + `","workspace_id":"` + workspaceID + `","workdir":"` + workDir + `","task_id":"task-1","retry_busy":true}`)
+	d.repoCheckoutHandler().ServeHTTP(rec, authorizedRepoCheckoutRequest(body))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Retry-After"); got != "2" {
+		t.Fatalf("Retry-After = %q, want 2", got)
+	}
+	if got := rec.Header().Get(repoCheckoutRetryHeader); got != repoCheckoutRetryValueBusy {
+		t.Fatalf("%s = %q, want %q", repoCheckoutRetryHeader, got, repoCheckoutRetryValueBusy)
+	}
+	if got := cache.lastCreateParams().LockWaitTimeout; got != repoCheckoutLockWaitTimeout {
+		t.Fatalf("lock wait timeout = %s, want %s", got, repoCheckoutLockWaitTimeout)
+	}
+}
+
+func newRepoCheckoutTestDaemon(t *testing.T, workspaceID, repoURL, workDir string, cache repoCacheBackend) *Daemon {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/daemon/workspaces/"+workspaceID+"/repos" {
@@ -324,7 +608,7 @@ func newRepoCheckoutTestDaemon(t *testing.T, workspaceID, repoURL string, cache 
 		})
 	}))
 	t.Cleanup(srv.Close)
-	return &Daemon{
+	d := &Daemon{
 		cfg:       Config{CLIVersion: "v1.0.0"},
 		client:    NewClient(srv.URL),
 		repoCache: cache,
@@ -333,6 +617,38 @@ func newRepoCheckoutTestDaemon(t *testing.T, workspaceID, repoURL string, cache 
 		},
 		logger: slog.Default(),
 	}
+	d.registerActiveRepoCheckoutTask("mat_repo_checkout_test", activeRepoCheckoutTask{
+		WorkspaceID: workspaceID,
+		TaskID:      "task-1",
+		AgentID:     "agent-1",
+		AgentName:   "Test Agent",
+		WorkDir:     workDir,
+	})
+	return d
+}
+
+func authorizedRepoCheckoutRequest(body io.Reader) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/repo/checkout", body)
+	req.Header.Set("Authorization", "Bearer mat_repo_checkout_test")
+	return req
+}
+
+type busyRepoCache struct {
+	recordingRepoCache
+}
+
+type activityRepoCache struct {
+	recordingRepoCache
+	activity repocache.Activity
+}
+
+func (c *activityRepoCache) Activity() repocache.Activity { return c.activity }
+
+func (c *busyRepoCache) CreateWorktreeContext(_ context.Context, params repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	c.mu.Lock()
+	c.params = append(c.params, params)
+	c.mu.Unlock()
+	return nil, repocache.ErrRepoBusy
 }
 
 type blockingLookupRepoCache struct {
@@ -440,4 +756,65 @@ func assertActiveTaskCount(t *testing.T, h http.HandlerFunc, want int64) {
 	if resp.ActiveTaskCount != want {
 		t.Errorf("active_task_count: got %d, want %d", resp.ActiveTaskCount, want)
 	}
+}
+
+// The health port is a hash of the profile name, so distinct names collide and
+// a caller cannot otherwise tell whose daemon answered. These pin the wire
+// contract the CLI's collision check depends on (#6694).
+func TestHealthHandlerReportsProfileIdentity(t *testing.T) {
+	t.Parallel()
+
+	rawHealth := func(t *testing.T, cfg Config) map[string]any {
+		t.Helper()
+		d := &Daemon{cfg: cfg, workspaces: map[string]*workspaceState{}, logger: slog.Default()}
+		d.ready.Store(true)
+
+		rec := httptest.NewRecorder()
+		d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", rec.Code)
+		}
+		var raw map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+			t.Fatalf("decode raw response: %v", err)
+		}
+		return raw
+	}
+
+	t.Run("named profile reports its name", func(t *testing.T) {
+		t.Parallel()
+		raw := rawHealth(t, Config{Profile: "desktop-api.multica.ai", LaunchedBy: "desktop"})
+		if got, want := raw["profile"], "desktop-api.multica.ai"; got != want {
+			t.Errorf("profile key: got %v, want %q", got, want)
+		}
+		if got, want := raw["launched_by"], "desktop"; got != want {
+			t.Errorf("launched_by key: got %v, want %q", got, want)
+		}
+	})
+
+	// The empty string is the default profile identifying itself. It has to
+	// stay on the wire: a caller distinguishes "I am the default daemon" from
+	// "I am too old to say" by whether the key is present at all, so omitempty
+	// here would make every default daemon look unidentifiable.
+	t.Run("default profile still emits the key", func(t *testing.T) {
+		t.Parallel()
+		raw := rawHealth(t, Config{Profile: ""})
+		got, ok := raw["profile"]
+		if !ok {
+			t.Fatal("profile key missing for the default profile; it must be present and empty")
+		}
+		if got != "" {
+			t.Errorf("profile key: got %v, want the empty string", got)
+		}
+	})
+
+	// launched_by is display-only, so absence and empty mean the same thing
+	// and omitempty keeps a standalone daemon's payload unchanged.
+	t.Run("standalone daemon omits launched_by", func(t *testing.T) {
+		t.Parallel()
+		raw := rawHealth(t, Config{Profile: "dev"})
+		if _, ok := raw["launched_by"]; ok {
+			t.Errorf("launched_by should be omitted for a standalone daemon, got %v", raw["launched_by"])
+		}
+	})
 }

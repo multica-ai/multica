@@ -1,0 +1,98 @@
+---
+title: DingTalk Bot
+description: Connect an agent to DingTalk and give it work directly in DMs or group chats.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+After connecting an [agent](/agents) to DingTalk, members of the agent's workspace can DM the Bot, @-mention it in a group, or use the `/issue` command to create a Multica [issue](/issues) directly. Conversations and run records are saved to the Multica workspace.
+
+<Callout type="info">
+The DingTalk integration is [community-maintained](/community-maintained) and has no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+</Callout>
+
+
+## Connect the Bot
+
+The agent's creator or a workspace owner/admin can connect the agent to DingTalk. Agents and DingTalk Bots have a one-to-one connection.
+
+## 1. Create a Stream-mode robot
+
+1. Create an **enterprise internal app** in the [DingTalk Open Platform](https://open-dev.dingtalk.com).
+2. Enable the robot capability and set **Message Receiving Mode** to **Stream Mode**.
+
+## 2. Grant permissions to the robot
+
+The **Robot Message Sending** permission (`qyapi_robot_sendmsg`) is added by default. To show the Bot's name in Multica, manually add the **DingTalk Group Basic Information Management** permission (`qyapi_chat_manage`).
+
+## 3. Get the application credentials
+
+Open **Credentials & Basic Information** page and copy the **Client ID (AppKey)** and **Client Secret (AppSecret)**.
+
+## 4. Connect the agent to DingTalk
+
+1. Return to Multica and open **Agents → _your agent_ → Capabilities → Integrations**.
+2. Click **Connect DingTalk**.
+3. Enter the **AppKey** and **AppSecret**, then submit.
+
+## 5. Link your DingTalk and Multica accounts
+
+DM the Bot in DingTalk or @-mention it in a group to trigger a linking request. You will receive a link in your DM with the Bot; it is valid for about 15 minutes. Open the link. When the success message appears, account linking is complete.
+
+
+## Give the agent work in DingTalk
+
+### Direct messages
+
+Send the Bot a message. When the agent finishes the work, it replies with the result in the DM.
+
+### Group chats
+
+Add the Bot to a DingTalk group, then send `@your-bot <message>`. You must @-mention the Bot again in every follow-up. The Bot processes only messages that @-mention it.
+
+### Send images
+
+Direct messages and group chats both support messages containing text and images. Supported image formats are PNG, JPEG, GIF, WebP, and BMP. Each message can contain up to 4 images, with a maximum size of 10 MB per image. Files and voice messages are not currently supported.
+
+### Create an issue with `/issue`
+
+Send `/issue <title>` or `/issue <title>{newline}<detailed description>` to create a new Multica issue and automatically assign it to the agent connected to the Bot. Images in the same message are also added to the issue as attachments. Unlike regular chat messages, the `/issue` command leaves no record in Multica [Chat](/chat).
+
+### Start a new Chat with `/new`
+
+Send `/new` to create a new empty Multica Chat and route later DingTalk messages to it. Send `/new <message>` to create the Chat and use that message as its first turn. The previous Chat remains stored and usable in Multica.
+
+### Clear the current context with `/clear`
+
+Send `/clear` to keep the current Multica Chat while applying a fresh agent-visible context to the next message. Send `/clear <message>` to use that message as the first turn after the boundary. The complete Chat history remains visible in Multica.
+
+## Manage connections
+
+- On **Agents → _your agent_ → Capabilities → Integrations**, the agent's creator and workspace owners/admins can connect the agent to DingTalk or disconnect it. Once connected, this page shows the Bot's name, DingTalk groups where it has successfully processed messages, and its activity status data in those groups. Any workspace member with read access to the agent can see this information. Groups with no successfully processed messages in the last 90 days are placed under **Long inactive** and loaded when expanded.
+- **Settings → Integrations** lists every DingTalk-connected agent in the current workspace that the viewer can read, along with the Bot's activity status data in DingTalk groups. Workspace owners/admins can also disconnect any listed agent from DingTalk. After disconnection, the Bot stops receiving messages, while the installation record is retained for audit. Workspace owners/admins can also forget a group. This removes the group from the list without deleting conversations or messages. The group reappears if a workspace member with a linked DingTalk account later @mentions the Bot there and Multica accepts the message.
+
+
+## Self-hosting setup
+
+Multica Cloud users can skip this section. A self-hosted deployment must first set a key for encrypting the DingTalk `AppSecret`:
+
+```dotenv
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+Generate one with:
+
+```bash
+openssl rand -base64 32
+```
+
+Restart the API service, then connect DingTalk. Keep this key permanently: if it is changed or lost, existing tokens cannot be decrypted and the connection must be set up again.
+
+Account-linking URLs use `MULTICA_APP_URL`, falling back to `FRONTEND_ORIGIN` when it is unset. The URL must point to a Multica address that members can access.
+
+
+## Next
+
+- [Chat integrations](/channels) — how the Channel engine, sessions, and authorization work
+- [Agents](/agents) · [Chat](/chat) · [Issues](/issues)
+- [Environment variables](/environment-variables) — complete self-hosting configuration reference

@@ -20,15 +20,45 @@ function cleanHttpUrl(raw: string | undefined): string | undefined {
   return undefined;
 }
 
+// The API base names the backend ORIGIN, never its `/api` endpoint: every
+// caller already carries its own prefix (`packages/core/api/client.ts` sends
+// `/api/**`, avatars resolve `/uploads/**`, realtime connects `/ws`), and the
+// backend serves all three at the root (server/cmd/server/router.go). A base
+// ending in `/api` therefore yields `/api/api/**` requests and 404s every
+// upload — the most common self-hosting mistake (#6619, MUL-5922). Strip that
+// one suffix instead of honouring it. Any other path is preserved: a reverse
+// proxy may legitimately mount the whole backend under a prefix such as
+// `https://host/multica`.
+function stripApiPathSuffix(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  const pathname = url.pathname.replace(/\/+$/, "");
+  if (!pathname.endsWith("/api")) return value;
+  url.pathname = pathname.slice(0, -"/api".length);
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/+$/, "");
+}
+
+function cleanApiBaseUrl(raw: string | undefined): string | undefined {
+  const value = cleanHttpUrl(raw);
+  if (!value) return undefined;
+  return stripApiPathSuffix(value);
+}
+
 function appendPath(baseUrl: string, path: string): string {
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
 export function resolveRemoteApiUrl(env: RuntimeEnv): string | undefined {
-  const explicitRemote = cleanHttpUrl(env.REMOTE_API_URL);
+  const explicitRemote = cleanApiBaseUrl(env.REMOTE_API_URL);
   if (explicitRemote) return explicitRemote;
 
-  const publicApi = cleanHttpUrl(env.NEXT_PUBLIC_API_URL);
+  const publicApi = cleanApiBaseUrl(env.NEXT_PUBLIC_API_URL);
   if (publicApi) return publicApi;
   return undefined;
 }
@@ -60,8 +90,13 @@ export function resolveDevDocsUrl(env: RuntimeEnv): string {
   return resolveDocsUrl(env) ?? "http://localhost:4000";
 }
 
+// Same strictness as the server-side resolver above. A relative or otherwise
+// non-http value used to pass through untouched and became the XHR base, so
+// `NEXT_PUBLIC_API_URL=/api` produced `/api/api/**` and `/api/uploads/**`
+// (#6619). Returning undefined instead makes the browser fall back to
+// same-origin relative paths, which is what an unset value already does.
 export function resolveBrowserApiBaseUrl(env: RuntimeEnv): string | undefined {
-  return cleanUrl(env.NEXT_PUBLIC_API_URL);
+  return cleanApiBaseUrl(env.NEXT_PUBLIC_API_URL);
 }
 
 export function resolveBrowserWsUrl(env: RuntimeEnv): string | undefined {
@@ -87,6 +122,9 @@ export function runtimeRewriteDestination(
   const remoteApiUrl = resolveRemoteApiUrl(env);
   if (!remoteApiUrl) return undefined;
 
+  if (pathname === "/v1" || pathname.startsWith("/v1/")) {
+    return appendPath(remoteApiUrl, pathname);
+  }
   if (pathname === "/api" || pathname.startsWith("/api/")) {
     return appendPath(remoteApiUrl, pathname);
   }
@@ -95,6 +133,14 @@ export function runtimeRewriteDestination(
   }
   if (pathname === "/ws") {
     return appendPath(remoteApiUrl, "/ws");
+  }
+  // `multica setup self-host` probes `{server-url}/health` and treats any
+  // non-200 as "Server not reachable". The backend serves it, but a
+  // same-origin reverse proxy that forwards everything to the web image left
+  // the probe 404ing at the Next.js router, so setup failed against a healthy
+  // stack. Proxy the exact path like /ws.
+  if (pathname === "/health") {
+    return appendPath(remoteApiUrl, "/health");
   }
   if (isBackendAuthPath(pathname)) {
     return appendPath(remoteApiUrl, pathname);
@@ -111,6 +157,15 @@ function isBackendAuthPath(pathname: string): boolean {
   return pathname === "/auth" || pathname.startsWith("/auth/");
 }
 
+// `/ws` is appended to the api base's PATH, not to its origin, and that is
+// deliberate: the base is whatever prefix the backend is mounted under, so
+// HTTP (`<base>/api/**`) and realtime (`<base>/ws`) must share it or a
+// prefix-mounted deployment would break in one direction while working in the
+// other. `apps/desktop/src/shared/runtime-config.ts` derives it the same way,
+// so both clients read one configured value identically. The regression that
+// motivated MUL-5922 — `NEXT_PUBLIC_API_URL=https://host/api` deriving
+// `wss://host/api/ws` while the backend serves `/ws` at the root — is fixed
+// upstream in the base itself (see stripApiPathSuffix), not here.
 function tryDeriveWsUrl(apiUrl: string): string | undefined {
   let url: URL;
   try {

@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FolderGit,
   FolderOpen,
+  GitBranch,
   Pencil,
   Plus,
   Search,
@@ -22,9 +23,16 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
   GithubRepoResourceRef,
+  LocalDirectoryExecutionMode,
   LocalDirectoryResourceRef,
   ProjectResource,
 } from "@multica/core/types";
+import {
+  runtimeAdvertisesLocalWorktree,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
+import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Popover,
@@ -43,6 +51,11 @@ import {
   validateLocalDirectory,
   type ValidateLocalDirectoryResult,
 } from "../../platform";
+import {
+  LocalDirectoryModeDialog,
+  type WorktreeUnavailableReason,
+} from "./local-directory-mode-dialog";
+import { localDirectoryLabel } from "./local-directory-label";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
 
@@ -64,6 +77,31 @@ function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
   return r.resource_type === "local_directory";
 }
 
+/**
+ * Reads the execution mode off a stored ref. An absent or unrecognised value is
+ * reported as in_place, matching the server: the field is optional, and a mode
+ * written by a newer client must not render as anything other than the
+ * conservative default here.
+ */
+function executionModeOf(
+  ref: LocalDirectoryResourceRef,
+): LocalDirectoryExecutionMode {
+  return ref.execution_mode === "worktree" ? "worktree" : "in_place";
+}
+
+/** Pending mode edit — either for a directory being added, or an existing row. */
+type ModeDialogState = {
+  path: string;
+  daemonId: string | null;
+  mode: LocalDirectoryExecutionMode;
+  /** undefined = unknown (older desktop build); treated as "cannot verify". */
+  isGitRepo: boolean | undefined;
+  /** Set for an edit; absent when adding a new resource. */
+  resource?: ProjectResource & { resource_ref: LocalDirectoryResourceRef };
+  /** Only used when adding. */
+  label?: string;
+};
+
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -73,6 +111,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const [addOpen, setAddOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [picking, setPicking] = useState(false);
+  const [modeDialog, setModeDialog] = useState<ModeDialogState | null>(null);
+  const [modeSaving, setModeSaving] = useState(false);
+  const [modeError, setModeError] = useState<string | null>(null);
 
   const { data: resources = [] } = useQuery(
     projectResourcesOptions(wsId, projectId),
@@ -87,6 +128,27 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // browser.
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
+
+  // Only ever used to decide what to PRESELECT. Whether the machine can run
+  // worktree mode is the server's call — it knows its own version, the client
+  // would have to infer it from data the server wrote, and that inference is
+  // what told a user on the newest release to upgrade it (#7113). The save is
+  // gated server-side and surfaced here as an inline error instead.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // The one thing the client must still check up front: whether this server
+  // performs that gate at all. One declared boolean, no inference — servers
+  // that predate it drop execution_mode and answer 201.
+  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
+  // Keyed on the resource's OWN daemon, not the machine the browser happens to
+  // be on: a resource is pinned to one machine, and its mode can legitimately
+  // be changed from the web app or from a different device. Using the local
+  // daemon here would report "too old" for every resource whenever the viewer
+  // is not on that machine.
+  // Capability, not version, and judged by the daemon's newest runtime row —
+  // see runtimeAdvertisesLocalWorktree for why an any-match would keep saying
+  // yes after a downgrade.
+  const advertisesWorktree = (daemonId: string | null) =>
+    runtimeAdvertisesLocalWorktree(runtimes, daemonId);
 
   const attachedUrls = new Set(
     resources.filter(isGithubRef).map((r) => r.resource_ref.url),
@@ -169,15 +231,26 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         );
         return;
       }
-      await createResource.mutateAsync({
-        resource_type: "local_directory",
-        resource_ref: {
-          local_path: path,
-          daemon_id: localDaemonId,
-          label: fallbackLabel,
-        },
+      // Ask for the execution mode before creating. It is part of what the
+      // user is choosing — whether tasks edit this folder or hand back a
+      // branch — not a setting to discover afterwards.
+      setModeError(null);
+      setModeDialog({
+        path,
+        daemonId: localDaemonId,
+        // Same preselection rule as the create-project flow: a git repo this
+        // daemon can actually run worktree mode on starts on parallel, anything
+        // else starts on direct. Only the PRESELECTION differs by folder — the
+        // user still confirms, and existing resources keep whatever they have.
+        mode:
+          validation.is_git_repo === true &&
+          serverValidatesWorktree &&
+          advertisesWorktree(localDaemonId)
+            ? "worktree"
+            : "in_place",
+        isGitRepo: validation.is_git_repo,
+        label: fallbackLabel,
       });
-      toast.success(t(($) => $.resources.toast_local_attached));
       setAddOpen(false);
     } catch (err) {
       const msg =
@@ -187,6 +260,54 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       toast.error(msg);
     } finally {
       setPicking(false);
+    }
+  };
+
+  const handleConfirmMode = async (mode: LocalDirectoryExecutionMode) => {
+    if (!modeDialog || modeSaving) return;
+    setModeSaving(true);
+    setModeError(null);
+    try {
+      if (modeDialog.resource) {
+        const ref = modeDialog.resource.resource_ref;
+        if (executionModeOf(ref) === mode) {
+          setModeDialog(null);
+          return;
+        }
+        await updateResource.mutateAsync({
+          resourceId: modeDialog.resource.id,
+          data: {
+            // Spread first so every other ref field survives the edit — the
+            // server replaces the whole ref, it does not deep-merge.
+            resource_ref: { ...ref, execution_mode: mode },
+          },
+        });
+        toast.success(t(($) => $.resources.toast_local_mode_updated));
+      } else {
+        if (!localDaemonId) return;
+        await createResource.mutateAsync({
+          resource_type: "local_directory",
+          resource_ref: {
+            local_path: modeDialog.path,
+            daemon_id: localDaemonId,
+            label: modeDialog.label ?? modeDialog.path,
+            execution_mode: mode,
+          },
+        });
+        toast.success(t(($) => $.resources.toast_local_attached));
+      }
+      setModeDialog(null);
+    } catch (err) {
+      // Keep the dialog open and show the reason inline: the most likely
+      // failure is the server's daemon-version gate, and closing the dialog
+      // would leave the user with a toast and no way to act on it.
+      setModeError(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.resources.toast_local_mode_update_failed),
+      );
+    } finally {
+      setModeSaving(false);
     }
   };
 
@@ -208,17 +329,21 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     nextLabel: string,
   ) => {
     const trimmed = nextLabel.trim();
-    const previous = resource.resource_ref.label ?? resource.label ?? "";
-    if (trimmed === previous.trim()) return;
+    if (trimmed === localDirectoryLabel(resource)) return;
     try {
+      // Top-level label ONLY — renaming must not resend resource_ref.
+      //
+      // The server replaces the ref wholesale with whatever it can parse, so a
+      // server that predates a ref field drops it and answers 200. On a backend
+      // rolled back below v0.4.25 (documented as supported while the runtimes
+      // stay current) that turned "rename this folder" into "silently forget
+      // this folder was isolated", and the next task edited the working copy
+      // (#7113). Omitting the ref keeps the stored one untouched on every
+      // server version — the same reason it must not be resent for any other
+      // unrelated edit either.
       await updateResource.mutateAsync({
         resourceId: resource.id,
-        data: {
-          resource_ref: {
-            ...resource.resource_ref,
-            label: trimmed,
-          },
-        },
+        data: { label: trimmed },
       });
       toast.success(t(($) => $.resources.toast_local_renamed));
     } catch (err) {
@@ -259,6 +384,20 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                   canEdit={desktopMode}
                   onRemove={() => handleRemove(resource)}
                   onRenameLocalDirectory={handleRenameLocalDirectory}
+                  onEditLocalDirectoryMode={(target) => {
+                    setModeError(null);
+                    setModeDialog({
+                      path: target.resource_ref.local_path,
+                      daemonId: target.resource_ref.daemon_id,
+                      mode: executionModeOf(target.resource_ref),
+                      // The path is already saved, so there is nothing to
+                      // re-validate from the browser; the desktop check only
+                      // runs at pick time. Unknown means the option stays
+                      // available and the daemon has the final say.
+                      isGitRepo: undefined,
+                      resource: target,
+                    });
+                  }}
                 />
               ))}
             </div>
@@ -384,8 +523,56 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           )}
         </div>
       )}
+      {modeDialog && (
+        <LocalDirectoryModeDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) {
+              setModeDialog(null);
+              setModeError(null);
+            }
+          }}
+          path={modeDialog.path}
+          value={modeDialog.mode}
+          unavailableReason={worktreeUnavailableReason(
+            modeDialog.isGitRepo,
+            serverValidatesWorktree,
+          )}
+          errorMessage={modeError ?? undefined}
+          saving={modeSaving}
+          confirmLabel={
+            modeDialog.resource
+              ? t(($) => $.resources.mode_save)
+              : t(($) => $.resources.mode_add)
+          }
+          onConfirm={(mode) => void handleConfirmMode(mode)}
+        />
+      )}
     </div>
   );
+}
+
+/**
+ * Which blocker (if any) applies to the worktree option.
+ *
+ * `isGitRepo === false` is a hard no — the daemon would fail every task on that
+ * folder. `undefined` means we could not check (an older desktop build, or an
+ * existing row whose path was validated at pick time), and is deliberately
+ * permissive: the daemon re-checks authoritatively, so guessing "not a repo"
+ * here would block a perfectly valid setup.
+ *
+ * Daemon capability is deliberately absent. It is the server's question, asked
+ * on save; predicting it here is what produced an unfixable blocker for a user
+ * already on the newest release (#7113). Deferring to the server does require
+ * knowing it will answer, though — `serverValidates` is the server saying so.
+ */
+function worktreeUnavailableReason(
+  isGitRepo: boolean | undefined,
+  serverValidates: boolean,
+): WorktreeUnavailableReason | undefined {
+  if (isGitRepo === false) return "not_git";
+  if (!serverValidates) return "server_outdated";
+  return undefined;
 }
 
 interface ResourceRowProps {
@@ -397,6 +584,9 @@ interface ResourceRowProps {
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
     nextLabel: string,
   ) => Promise<void>;
+  onEditLocalDirectoryMode: (
+    resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
+  ) => void;
 }
 
 function ResourceRow({
@@ -405,6 +595,7 @@ function ResourceRow({
   canEdit,
   onRemove,
   onRenameLocalDirectory,
+  onEditLocalDirectoryMode,
 }: ResourceRowProps) {
   const { t } = useT("projects");
   if (isGithubRef(resource)) {
@@ -449,6 +640,7 @@ function ResourceRow({
         canEdit={canEdit}
         onRemove={onRemove}
         onRename={onRenameLocalDirectory}
+        onEditMode={onEditLocalDirectoryMode}
       />
     );
   }
@@ -479,6 +671,9 @@ interface LocalDirectoryRowProps {
     resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
     nextLabel: string,
   ) => Promise<void>;
+  onEditMode: (
+    resource: ProjectResource & { resource_ref: LocalDirectoryResourceRef },
+  ) => void;
 }
 
 function LocalDirectoryRow({
@@ -487,11 +682,12 @@ function LocalDirectoryRow({
   canEdit,
   onRemove,
   onRename,
+  onEditMode,
 }: LocalDirectoryRowProps) {
   const { t } = useT("projects");
   const ref = resource.resource_ref;
-  const display = (ref.label || resource.label || ref.local_path).trim() ||
-    ref.local_path;
+  const mode = executionModeOf(ref);
+  const display = localDirectoryLabel(resource);
   const isForeignDaemon =
     localDaemonId !== null && ref.daemon_id !== localDaemonId;
   const isLocalUnknown = localDaemonId === null;
@@ -562,6 +758,38 @@ function LocalDirectoryRow({
             </div>
           </TooltipContent>
         </Tooltip>
+      )}
+      {/* Always visible, unlike the hover-only actions: without it there is no
+          way to tell whether tasks on this folder edit it directly or hand back
+          a branch, which is the first thing someone asks when a task queues (or
+          does not). */}
+      {mode === "worktree" && !editing && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Badge variant="secondary" className="shrink-0 gap-1 font-normal">
+                <GitBranch className="size-3" />
+                {t(($) => $.resources.mode_badge_worktree)}
+              </Badge>
+            }
+          />
+          <TooltipContent side="top">
+            {t(($) => $.resources.mode_badge_worktree_tooltip)}
+          </TooltipContent>
+        </Tooltip>
+      )}
+      {/* Not gated on `mismatch`: switching the mode only rewrites a field, so
+          it works from the web app or another device, unlike rename (whose
+          label belongs to the owning machine) or the folder picker. */}
+      {!editing && (
+        <button
+          type="button"
+          onClick={() => onEditMode(resource)}
+          className="opacity-0 group-hover:opacity-100 transition-opacity rounded-sm p-0.5 hover:bg-accent"
+          title={t(($) => $.resources.mode_edit_tooltip)}
+        >
+          <GitBranch className="size-3 text-muted-foreground" />
+        </button>
       )}
       {canEdit && !mismatch && !editing && (
         <button

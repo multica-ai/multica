@@ -1,11 +1,14 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
 )
 
 // TestResolveDaemonStringOverridePrecedence pins the three-tier order:
@@ -16,11 +19,11 @@ func TestResolveDaemonStringOverridePrecedence(t *testing.T) {
 	const envName = "TEST_MULTICA_STR_OVERRIDE"
 
 	cases := []struct {
-		name   string
-		flag   string
-		env    string // "" means unset
-		cfg    string
-		want   string
+		name string
+		flag string
+		env  string // "" means unset
+		cfg  string
+		want string
 	}{
 		{"flag wins over env and cfg", "flag-val", "env-val", "cfg-val", "flag-val"},
 		{"env suppresses cfg", "", "env-val", "cfg-val", ""},
@@ -44,6 +47,56 @@ func TestResolveDaemonStringOverridePrecedence(t *testing.T) {
 	}
 }
 
+func TestResolveDaemonWorkspacesRootPrecedence(t *testing.T) {
+	home := t.TempDir()
+	flagRoot := filepath.Join(t.TempDir(), "flag")
+	envRoot := filepath.Join(t.TempDir(), "env")
+	configRoot := filepath.Join(t.TempDir(), "config")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: configRoot}, "dev"); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+	t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
+
+	got, err := resolveWorkspacesRootForProfile("dev", flagRoot)
+	if err != nil {
+		t.Fatalf("resolve flag root: %v", err)
+	}
+	if got != flagRoot {
+		t.Fatalf("flag root = %q, want %q", got, flagRoot)
+	}
+
+	got, err = resolveWorkspacesRootForProfile("dev", "")
+	if err != nil {
+		t.Fatalf("resolve env root: %v", err)
+	}
+	if got != envRoot {
+		t.Fatalf("env root = %q, want %q", got, envRoot)
+	}
+
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	got, err = resolveWorkspacesRootForProfile("dev", "")
+	if err != nil {
+		t.Fatalf("resolve config root: %v", err)
+	}
+	if got != configRoot {
+		t.Fatalf("config root = %q, want %q", got, configRoot)
+	}
+
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{}, "dev"); err != nil {
+		t.Fatalf("clear profile config: %v", err)
+	}
+	got, err = resolveWorkspacesRootForProfile("dev", "")
+	if err != nil {
+		t.Fatalf("resolve default root: %v", err)
+	}
+	wantDefault := filepath.Join(home, "multica_workspaces_dev")
+	if got != wantDefault {
+		t.Fatalf("default root = %q, want %q", got, wantDefault)
+	}
+}
+
 // TestResolveDaemonDurationOverridePrecedence covers the numeric path:
 // flag>0 wins, env suppresses cfg, cfg parsed on demand, invalid cfg
 // surfaces as an error so the daemon doesn't silently fall back.
@@ -51,12 +104,12 @@ func TestResolveDaemonDurationOverridePrecedence(t *testing.T) {
 	const envName = "TEST_MULTICA_DUR_OVERRIDE"
 
 	cases := []struct {
-		name    string
-		flag    time.Duration
-		env     string
-		cfg     string
-		want    time.Duration
-		errSub  string // substring of expected error, "" = no error
+		name   string
+		flag   time.Duration
+		env    string
+		cfg    string
+		want   time.Duration
+		errSub string // substring of expected error, "" = no error
 	}{
 		{"flag wins", 5 * time.Second, "10s", "20s", 5 * time.Second, ""},
 		{"env suppresses cfg", 0, "10s", "20s", 0, ""},
@@ -204,11 +257,12 @@ func TestResolveDaemonAgentTimeoutOverridePrecedence(t *testing.T) {
 	}
 }
 
-// TestResolveDaemonDisableAutoUpdatePrecedence pins the single-direction
-// disable signal: flag OR falsy env OR persisted cfg=true all disable
-// auto-update; a truthy env leaves the override off so LoadConfig honors
-// the raw env; missing signals return false so the default wins.
-func TestResolveDaemonDisableAutoUpdatePrecedence(t *testing.T) {
+// TestResolveDaemonDisableSignalPrecedence pins the single-direction disable
+// signal shared by --no-auto-update and --no-auto-reload: flag OR falsy env OR
+// persisted cfg=true all disable; a truthy env leaves the override off so
+// LoadConfig honors the raw env; missing signals return false so the default
+// wins.
+func TestResolveDaemonDisableSignalPrecedence(t *testing.T) {
 	const envName = "TEST_MULTICA_DAEMON_AUTO_UPDATE"
 
 	cases := []struct {
@@ -234,7 +288,7 @@ func TestResolveDaemonDisableAutoUpdatePrecedence(t *testing.T) {
 			} else {
 				t.Setenv(envName, "")
 			}
-			got := resolveDaemonDisableAutoUpdate(tc.flag, envName, tc.cfg)
+			got := resolveDaemonDisableSignal(tc.flag, envName, tc.cfg)
 			if got != tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}

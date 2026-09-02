@@ -10,6 +10,11 @@
     "task_list": "체크리스트",
     "quote": "인용",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "링크 적용",
+      "remove": "링크 제거",
+      "close": "링크 편집기 닫기"
+    },
     "heading_dropdown": {
       "text": "텍스트",
       "normal_text": "일반 텍스트",
@@ -23,9 +28,9 @@
       "task_list": "체크리스트"
     },
     "sub_issue": {
-      "tooltip": "선택 영역으로 하위 이슈 만들기",
+      "tooltip": "선택 영역으로 하위 태스크 만들기",
       "created": "{{identifier}} 생성됨",
-      "create_failed": "하위 이슈를 만들지 못했습니다"
+      "create_failed": "하위 태스크를 만들지 못했습니다"
     }
   },
   "image": {
@@ -35,7 +40,11 @@
     "delete": "삭제",
     "link_copied": "링크를 복사했습니다",
     "copy_link_failed": "링크를 복사하지 못했습니다",
-    "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다."
+    "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다.",
+    "previous": "이전 이미지",
+    "next": "다음 이미지",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "이 이미지를 불러올 수 없어 건너뛰었습니다."
   },
   "canvas": {
     "zoom_in": "확대",
@@ -62,15 +71,19 @@
   },
   "mention": {
     "group_users": "사용자",
-    "group_issues": "이슈",
+    "group_issues": "태스크",
     "all_members": "모든 멤버",
+    "agent_badge": "에이전트",
+    "squad_badge": "스쿼드",
     "searching": "검색 중...",
     "no_results": "결과 없음",
     "group_current": "현재 페이지",
     "group_recent": "최근 본 항목",
-    "group_search": "검색 결과"
+    "group_search": "검색 결과",
+    "group_cancelled": "취소됨"
   },
   "code_block": {
+    "html_preview": "HTML 미리보기",
     "copy_code": "코드 복사",
     "show_preview": "미리보기 표시",
     "show_source": "소스 표시",
@@ -91,6 +104,7 @@
     "title_aria_label": "제목"
   },
   "mermaid": {
+    "diagram_label": "Mermaid 다이어그램",
     "render_error": "Mermaid 다이어그램을 렌더링할 수 없습니다.",
     "rendering": "다이어그램 렌더링 중...",
     "viewer_title": "다이어그램",

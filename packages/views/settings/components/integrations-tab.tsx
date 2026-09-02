@@ -4,28 +4,29 @@ import { useQuery } from "@tanstack/react-query";
 import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
+import { DingTalkTab } from "./dingtalk-tab";
 import { VCSTab } from "./vcs-tab";
+import { WecomTab } from "./wecom-tab";
+import { TelegramTab } from "./telegram-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../../i18n";
 import { SettingsSection, SettingsTab } from "./settings-layout";
+import { IntegrationChannelIcon } from "./integration-channel-icon";
 
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
-// — currently Lark, Composio, Slack, and the self-hosted Git providers (Forgejo /
-// Gitea / GitLab), with Linear etc. to follow — lives in here under its own
-// section heading so additional integrations slot in without changing the IA.
-// IntegrationsTab is just the host; each integration owns its own description
-// and install flow.
+// — currently Lark, Composio, Slack, Telegram, the self-hosted Git providers
+// (Forgejo / Gitea / GitLab), and WeCom smart-bot, with Linear etc. to follow —
+// lives in here under its own section heading so additional integrations slot
+// in without changing the IA. IntegrationsTab is just the host; each
+// integration owns its own description and install flow.
 export function IntegrationsTab() {
   const { t } = useT("settings");
 
   const composioEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
-  // Composio is hidden entirely until the feature is enabled and a key is
-  // configured server-side. A 503 from the toolkits endpoint means the server
-  // withheld the integration despite the frontend flag being on.
   const composioToolkits = useQuery({
     ...composioToolkitsOptions(),
     enabled: composioEnabled,
@@ -40,7 +41,15 @@ export function IntegrationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.integrations)}>
-      <SettingsSection title={t(($) => $.lark.section_title)}>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="lark" />
+            {t(($) => $.lark.section_title)}
+          </span>
+        }
+        description={t(($) => $.lark.page_description)}
+      >
         <LarkTab />
       </SettingsSection>
       {composioEnabled && !composioUnconfigured && (
@@ -48,14 +57,55 @@ export function IntegrationsTab() {
           <ComposioTab />
         </SettingsSection>
       )}
-      <SettingsSection title={t(($) => $.slack.section_title)}>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="slack" />
+            {t(($) => $.slack.section_title)}
+          </span>
+        }
+        description={t(($) => $.slack.page_description)}
+      >
         <SlackTab />
+      </SettingsSection>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="dingtalk" />
+            {t(($) => $.dingtalk.section_title)}
+          </span>
+        }
+        description={t(($) => $.dingtalk.page_description)}
+      >
+        <DingTalkTab />
       </SettingsSection>
       {vcsAvailable && (
         <SettingsSection title={t(($) => $.vcs.section_title)}>
           <VCSTab />
         </SettingsSection>
       )}
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="wecom" />
+            {t(($) => $.wecom.section_title)}
+          </span>
+        }
+        description={t(($) => $.wecom.page_description)}
+      >
+        <WecomTab />
+      </SettingsSection>
+      <SettingsSection
+        title={
+          <span className="flex items-center gap-2">
+            <IntegrationChannelIcon channel="telegram" />
+            {t(($) => $.telegram.section_title)}
+          </span>
+        }
+        description={t(($) => $.telegram.page_description)}
+      >
+        <TelegramTab />
+      </SettingsSection>
     </SettingsTab>
   );
 }

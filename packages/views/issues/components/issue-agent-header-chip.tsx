@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Popover,
@@ -12,6 +12,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
+import { TranscriptButton } from "../../common/task-transcript";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
@@ -46,6 +47,7 @@ interface IssueAgentHeaderChipProps {
 export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
   issueId,
 }: IssueAgentHeaderChipProps) {
+  const { t } = useT("issues");
   // Same query options as ExecutionLogSection so both observe one cache entry.
   const { data: tasks = [] } = useQuery({
     queryKey: issueKeys.tasks(issueId),
@@ -74,19 +76,58 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     return { running, queued };
   }, [tasks]);
 
-  // No active work → render nothing.
-  if (running.length === 0 && queued.length === 0) return null;
+  const [openedTranscriptTaskSnapshot, setOpenedTranscriptTaskSnapshot] =
+    useState<AgentTask | null>(null);
+  const openedTranscriptTask = openedTranscriptTaskSnapshot
+    ? tasks.find((task) => task.id === openedTranscriptTaskSnapshot.id) ??
+      openedTranscriptTaskSnapshot
+    : null;
 
-  return <ActiveChip issueId={issueId} running={running} queued={queued} />;
+  // No active work → render nothing.
+  if (running.length === 0 && queued.length === 0 && !openedTranscriptTask) return null;
+
+  return (
+    <>
+      {running.length > 0 || queued.length > 0 ? (
+        <ActiveChip
+          issueId={issueId}
+          running={running}
+          queued={queued}
+          onTranscriptOpenChange={(task, open) => {
+            setOpenedTranscriptTaskSnapshot(open ? task : null);
+          }}
+        />
+      ) : null}
+      {openedTranscriptTask ? (
+        <TranscriptButton
+          task={openedTranscriptTask}
+          agentName=""
+          isLive={openedTranscriptTask.status === "running"}
+          title={t(($) => $.execution_log.transcript_tooltip)}
+          renderButton={false}
+          open
+          onOpenChange={(open) => {
+            if (!open) setOpenedTranscriptTaskSnapshot(null);
+          }}
+        />
+      ) : null}
+    </>
+  );
 });
 
 interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  onTranscriptOpenChange: (task: AgentTask, open: boolean) => void;
 }
 
-function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
+function ActiveChip({
+  issueId,
+  running,
+  queued,
+  onTranscriptOpenChange,
+}: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
 
@@ -137,7 +178,7 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
               // header. Queued-only state stays calm (no beam) to reserve the
               // motion for work that is genuinely in flight.
               className={cn(
-                "flex h-7 max-w-[11rem] items-center gap-1.5 rounded-md px-1.5 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring",
+                "flex h-9 min-w-9 max-w-[11rem] items-center justify-center gap-1.5 rounded-md px-2 text-muted-foreground outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring md:h-7 md:min-w-0 md:justify-start md:px-1.5",
                 anyRunning && "border-beam bg-brand/5",
               )}
             />
@@ -150,7 +191,10 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
             opacity={anyRunning ? "full" : "half"}
           />
           <span
-            className={`min-w-0 truncate text-caption ${anyRunning ? "text-info" : "text-muted-foreground"}`}
+            className={cn(
+              "hidden min-w-0 truncate text-caption md:inline",
+              anyRunning ? "text-info" : "text-muted-foreground",
+            )}
           >
             {label}
           </span>
@@ -167,7 +211,14 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
           </div>
           <div className="flex flex-col gap-0.5">
             {activeTasks.map((task) => (
-              <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
+              <ActiveTaskRow
+                key={task.id}
+                task={task}
+                issueId={issueId}
+                onTranscriptOpenChange={(open) => {
+                  onTranscriptOpenChange(task, open);
+                }}
+              />
             ))}
           </div>
         </PopoverContent>

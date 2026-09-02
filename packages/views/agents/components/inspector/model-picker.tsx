@@ -12,6 +12,7 @@ import {
 } from "../../../issues/components/pickers";
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
+import { UnavailableModelsNote } from "../unavailable-models-note";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -55,6 +56,11 @@ export function ModelPicker({
   // Memoise the model list so every downstream useMemo gets a stable
   // reference; `?? []` would mint a fresh array on every render and
   // invalidate filters needlessly.
+  // Advisory only — never merged into `models`, so no row below can select one.
+  const unavailableModels = useMemo(
+    () => modelsQuery.data?.unavailableModels ?? [],
+    [modelsQuery.data],
+  );
   const models = useMemo(
     () => modelsQuery.data?.models ?? [],
     [modelsQuery.data],
@@ -242,6 +248,13 @@ export function ModelPicker({
         <p className="px-3 py-3 text-center text-caption text-muted-foreground">
           {t(($) => $.pickers.model_empty)}
         </p>
+      )}
+
+      {!modelsQuery.isLoading && (
+        <UnavailableModelsNote
+          models={unavailableModels}
+          title={t(($) => $.pickers.model_unavailable_heading)}
+        />
       )}
 
       {canCreate && (

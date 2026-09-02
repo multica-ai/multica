@@ -14,6 +14,8 @@
  *   Body: 14px (text-body), line-height 1.625 (between GitHub 1.5 and Tailwind 1.714)
  *   Headings: h1=22px (1.57x), h2=18px (1.29x), h3=15px (1.07x) — compact but
  *     with clear hierarchy. Previous h3 was 14px (same as body = no differentiation).
+ *     h4=14px, h5=13px, h6=12px sit at or below body size, so below h3 the
+ *     hierarchy is carried by weight and color rather than by size alone.
  *   Paragraph spacing: 10px (was 8px; GitHub uses 10px, Tailwind prose-sm uses 16px)
  *   List indent: 20px for ul (was 16px; standard is 22-32px)
  *   Code block margin: 12px (was 8px; gives breathing room between code and prose)
@@ -60,6 +62,36 @@
   margin-top: 1rem;
   margin-bottom: 0.5rem;
   line-height: 1.4;
+}
+
+/* h4–h6: Markdown allows six levels and both renderers now emit all of them
+   (MUL-6060), but a compact 14px body leaves little room to keep stepping the
+   size down. Below h3 the hierarchy continues on weight first, then the small
+   steps the scale still has — body (14) bold, label (13), caption (12) muted —
+   so a deep heading stays legible without competing with h1–h3. */
+.rich-text-editor h4 {
+  font-size: var(--text-body);
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.45;
+}
+
+.rich-text-editor h5 {
+  font-size: var(--text-label);
+  font-weight: 600;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
+}
+
+.rich-text-editor h6 {
+  font-size: var(--text-caption);
+  font-weight: 600;
+  color: var(--muted-foreground);
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  line-height: 1.5;
 }
 
 /* Paragraphs */

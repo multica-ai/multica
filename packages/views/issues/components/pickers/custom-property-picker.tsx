@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, ExternalLink } from "lucide-react";
+import { CalendarDays, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import type { Issue, IssueProperty, IssuePropertyValue } from "@multica/core/types";
+import { hasUnknownActorRef } from "@multica/core/types";
 import {
   useSetIssueProperty,
   useUnsetIssueProperty,
@@ -21,8 +22,43 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
-import { useT } from "../../../i18n";
+import { useLocale, useT } from "../../../i18n";
 import { PropertyPicker, PickerItem } from "./property-picker";
+import { ActorPropertyPicker, ActorPropertyDisplay } from "./actor-property-picker";
+
+const EDITABLE_PROPERTY_TYPES = [
+  "select",
+  "multi_select",
+  "date",
+  "checkbox",
+  "text",
+  "number",
+  "url",
+  "actor",
+  "multi_actor",
+];
+
+/**
+ * Whether the editor must degrade to read-only (Clear is still offered, so a
+ * stale value can always be cleaned up). Three reasons:
+ *
+ *   1. The definition is archived.
+ *   2. The definition's type is newer than this build.
+ *   3. A single `actor` value references a kind this build cannot parse. It
+ *      would otherwise render as empty and the user, believing the field is
+ *      unset, would overwrite a value they were never shown. `multi_actor` is
+ *      exempt: its toggle round-trips unknown entries instead of replacing the
+ *      whole value (MUL-6286 review).
+ */
+export function isCustomPropertyReadOnly(
+  property: IssueProperty,
+  value: IssuePropertyValue | undefined,
+): boolean {
+  if (property.archived) return true;
+  if (!EDITABLE_PROPERTY_TYPES.includes(property.type)) return true;
+  if (property.type === "actor" && hasUnknownActorRef(value)) return true;
+  return false;
+}
 
 /**
  * Value editor for one custom property on one issue. The editor shape
@@ -32,6 +68,8 @@ import { PropertyPicker, PickerItem } from "./property-picker";
  *   multi_select  → PropertyPicker with toggling items (stays open)
  *   date          → Calendar popover (mirrors DueDatePicker)
  *   checkbox      → Yes / No picker
+ *   actor         → member picker (commits and closes)
+ *   multi_actor   → member picker with toggling items (stays open)
  *   text/number/url → popover with an input, Enter commits
  *
  * Archived definitions render read-only: the popover only offers Clear
@@ -123,27 +161,23 @@ export function CustomPropertyValueInput({
     </span>
   );
 
-  const clearFooter = hasValue ? (
-    <Button
-      variant="ghost"
-      size="xs"
+  // Empty value as the first row, not a footer button — the position every
+  // other picker uses for "no value", and being a real row it can carry the
+  // checkmark when the property is unset.
+  const emptyRow = (
+    <PickerItem
+      emptyValue
+      selected={!hasValue}
       onClick={() => {
         clear();
         setOpen(false);
       }}
-      className="w-full justify-start text-muted-foreground hover:text-foreground"
     >
-      {t(($) => $.pickers.custom_property.clear_action)}
-    </Button>
-  ) : undefined;
+      <span className="text-muted-foreground">{t(($) => $.pickers.custom_property.none)}</span>
+    </PickerItem>
+  );
 
-  // Archived (or unknown-type) definitions: read-only display; the only
-  // offered action is Clear so stale values can still be cleaned up.
-  const readOnly =
-    property.archived ||
-    !["select", "multi_select", "date", "checkbox", "text", "number", "url"].includes(
-      property.type,
-    );
+  const readOnly = isCustomPropertyReadOnly(property, value);
 
   if (readOnly) {
     return (
@@ -153,10 +187,12 @@ export function CustomPropertyValueInput({
         align="start"
         trigger={valueTrigger}
         triggerRender={triggerRender}
-        footer={clearFooter}
       >
+        {emptyRow}
         <p className="px-2 py-1.5 text-caption text-muted-foreground">
-          {t(($) => $.pickers.custom_property.archived_hint)}
+          {property.archived
+            ? t(($) => $.pickers.custom_property.archived_hint)
+            : t(($) => $.pickers.custom_property.unknown_value_hint)}
         </p>
       </PropertyPicker>
     );
@@ -173,8 +209,8 @@ export function CustomPropertyValueInput({
           searchable={options.length > 7}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           {options.map((option) => (
             <PickerItem
               key={option.id}
@@ -209,8 +245,8 @@ export function CustomPropertyValueInput({
           searchable={options.length > 7}
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           {options.map((option) => (
             <PickerItem
               key={option.id}
@@ -224,6 +260,20 @@ export function CustomPropertyValueInput({
         </PropertyPicker>
       );
     }
+    case "actor":
+    case "multi_actor":
+      return (
+        <ActorPropertyPicker
+          property={property}
+          value={value}
+          onChange={onChange}
+          open={open}
+          onOpenChange={setOpen}
+          trigger={valueTrigger}
+          triggerRender={triggerRender}
+          emptyRow={emptyRow}
+        />
+      );
     case "date": {
       const date = typeof value === "string" ? dateOnlyToLocalDate(value) : undefined;
       return (
@@ -235,6 +285,20 @@ export function CustomPropertyValueInput({
             {valueTrigger}
           </PopoverTrigger>
           <PopoverContent className="w-auto p-0" align="start">
+            {/* Empty value above the calendar — same position as DateOnlyPicker. */}
+            <button
+              type="button"
+              onClick={() => {
+                clear();
+                setOpen(false);
+              }}
+              className="flex w-full items-center gap-3 border-b px-3 py-2 text-left text-body transition-colors hover:bg-accent"
+            >
+              <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
+                {t(($) => $.pickers.custom_property.none)}
+              </span>
+              <Check className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${date ? "invisible" : ""}`} />
+            </button>
             <Calendar
               mode="single"
               selected={date}
@@ -244,21 +308,6 @@ export function CustomPropertyValueInput({
                 setOpen(false);
               }}
             />
-            {date && (
-              <div className="border-t px-3 py-2">
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => {
-                    clear();
-                    setOpen(false);
-                  }}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  {t(($) => $.pickers.custom_property.clear_action)}
-                </Button>
-              </div>
-            )}
           </PopoverContent>
         </Popover>
       );
@@ -271,8 +320,8 @@ export function CustomPropertyValueInput({
           align="start"
           trigger={valueTrigger}
           triggerRender={triggerRender}
-          footer={clearFooter}
         >
+          {emptyRow}
           <PickerItem
             selected={value === true}
             onClick={() => {
@@ -424,6 +473,7 @@ export function CustomPropertyValueDisplay({
   value: IssuePropertyValue | undefined;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   if (value === undefined) {
     return (
       <span className="text-muted-foreground">
@@ -473,12 +523,24 @@ export function CustomPropertyValueDisplay({
         </span>
       );
     }
+    case "actor":
+    case "multi_actor":
+      return (
+        <ActorPropertyDisplay
+          value={value}
+          emptyLabel={
+            <span className="text-muted-foreground">
+              {t(($) => $.pickers.custom_property.empty)}
+            </span>
+          }
+        />
+      );
     case "date":
       return (
         <span className="flex items-center gap-1.5">
           <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
           {typeof value === "string"
-            ? formatDateOnly(value, { month: "short", day: "numeric" }, "en-US")
+            ? formatDateOnly(value, { month: "short", day: "numeric" }, locale)
             : String(value)}
         </span>
       );

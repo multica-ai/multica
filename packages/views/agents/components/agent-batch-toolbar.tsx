@@ -140,7 +140,7 @@ export function AgentBatchToolbar({
         {rows.length > 0 && (
           <div
             key="agent-batch-toolbar"
-            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2"
+            className="absolute bottom-6 left-1/2 z-50 -translate-x-1/2 max-md:above-chat-launcher"
           >
             <motion.div
               className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"

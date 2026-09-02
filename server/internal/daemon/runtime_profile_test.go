@@ -161,7 +161,7 @@ func TestRegisterRuntimes_IncludesBuiltInQwen(t *testing.T) {
 		"qwen": {Path: "/usr/bin/true", Command: "qwen", Model: "qwen3.8-max-preview"},
 	}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestRegisterRuntimes_IncludesBuiltInQoderCN(t *testing.T) {
 		"qoderclicn": {Path: "/usr/bin/true", Command: "qoderclicn"},
 	}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// Custom-only host: no built-in agents configured.
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -258,6 +258,48 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	}
 }
 
+// TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand verifies that a
+// bare profile command can use the matching provider path already found by the
+// daemon's richer discovery logic. GUI-launched daemons may not have a CLI on
+// PATH even when discovery found it through a login shell or a provider's
+// stable user install directory.
+func TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{})
+
+	profiles := []RuntimeProfile{{
+		ID:             "prof-codearts",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "CodeArts Profile",
+		ProtocolFamily: "codearts",
+		CommandName:    "codearts",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"codearts": {
+			Path:    `C:\Users\tester\.codeartsdoer\installers\codearts.cmd`,
+			Command: "codearts",
+		},
+	}
+
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+
+	got := d.profileLaunchSpecs["prof-codearts"]
+	if got.path != `C:\Users\tester\.codeartsdoer\installers\codearts.cmd` {
+		t.Errorf("profileLaunchSpecs[prof-codearts].path = %q, want discovered CodeArts path", got.path)
+	}
+	if len(fx.sentRuntimes) != 2 {
+		t.Fatalf("sent runtimes = %d, want built-in plus profile: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	if fx.sentRuntimes[1]["profile_id"] != "prof-codearts" || fx.sentRuntimes[1]["type"] != "codearts" {
+		t.Fatalf("profile runtime = %+v, want CodeArts prof-codearts", fx.sentRuntimes[1])
+	}
+}
+
 // TestRegisterRuntimes_ReportsProfileNotOnPath verifies a profile whose command
 // is missing on this host is reported to the server as a failed profile so the
 // UI can show an actionable registration error.
@@ -277,7 +319,7 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	_, sig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -314,7 +356,7 @@ func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	_, sig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -354,7 +396,7 @@ func TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort(t *testing.T) {
 	// Built-in agent present so registration has something to register.
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registration should succeed despite profiles 404: %v", err)
 	}
@@ -389,7 +431,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/custom/company-codex"}
 
-	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
@@ -423,7 +465,7 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/stale/company-codex"}
 
-	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 

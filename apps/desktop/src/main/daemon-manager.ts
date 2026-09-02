@@ -25,6 +25,24 @@ import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import {
+  deriveProfileName,
+  healthPortForProfile,
+  profileArgs,
+  profileConfigPath,
+  profileDir,
+  profileLogPath,
+  profilePidPath,
+  profileUserIdPath,
+} from "./daemon-profile";
+import {
+  DaemonOperationGate,
+  DaemonRecoveryPolicy,
+  daemonProcessExists,
+  parseDaemonPid,
+  recoveryStartAllowed,
+  runDaemonRecoveryAttempt,
+} from "./daemon-recovery";
+import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
   normalizeHostOS,
@@ -35,7 +53,6 @@ import {
   type AuthProbeResult,
 } from "./daemon-auth-probe";
 
-const DEFAULT_HEALTH_PORT = 19514;
 const POLL_INTERVAL_MS = 5_000;
 const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
 const LOG_TAIL_RETRY_MS = 2_000;
@@ -52,11 +69,17 @@ const AUTH_PROBE_GRACE_MS = 10_000;
 // healthy-but-slow start is misreported as a failure (the detached daemon child
 // keeps running, so the UI flashes "stopped" then "running").
 const DAEMON_START_EXEC_TIMEOUT_MS = 60_000;
+const HEALTH_PROBE_TIMEOUT_MS = 2_000;
+// Five times the UI probe and equal to the auth-probe grace: a daemon that
+// misses this second independent window is no longer treated as merely busy.
+const RECOVERY_HEALTH_PROBE_TIMEOUT_MS = 10_000;
 
 const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
+// Always a resolved Desktop-owned profile. "Not resolved yet" is represented by
+// `null` at every call site, never by an empty name — see daemon-profile.ts.
 interface ActiveProfile {
-  name: string; // "" = default profile
+  name: string;
   port: number;
 }
 
@@ -64,7 +87,7 @@ let statusPollTimer: ReturnType<typeof setInterval> | null = null;
 let logTailWatcher: { path: string; listener: StatsListener } | null = null;
 let currentState: DaemonStatus["state"] = "installing_cli";
 let getMainWindow: () => BrowserWindow | null = () => null;
-let operationInProgress = false;
+let statusPollInProgress = false;
 let cachedCliBinary: string | null | undefined = undefined;
 let cliResolvePromise: Promise<string | null> | null = null;
 let cachedCliBinaryVersion: string | null | undefined = undefined;
@@ -74,6 +97,14 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 let pendingVersionRestart = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
+// Recovery is intentionally process-local: it keeps a daemon alive while the
+// Desktop main process is running, but is not an OS service/watchdog.
+let desiredDaemonRunning = false;
+// Once a foreign-OS daemon (for example WSL2) is observed on this profile, do
+// not replace it with a native daemon if its forwarded health endpoint drops.
+let externalDaemonObserved = false;
+const recoveryPolicy = new DaemonRecoveryPolicy();
+const lifecycleOperations = new DaemonOperationGate();
 
 // Auth-probe state for the current start attempt. When a start fails to reach
 // "running", we probe the daemon's token once (after AUTH_PROBE_GRACE_MS) to
@@ -89,36 +120,6 @@ let authExpired = false;
 // may try to write concurrently; chaining them avoids interleaved writes
 // corrupting the JSON.
 let configWriteChain: Promise<void> = Promise.resolve();
-
-// Keep the Go impl in sync: server/cmd/multica/cmd_daemon.go healthPortForProfile.
-function healthPortForProfile(profile: string): number {
-  if (!profile) return DEFAULT_HEALTH_PORT;
-  let sum = 0;
-  for (const b of Buffer.from(profile, "utf-8")) sum += b;
-  return DEFAULT_HEALTH_PORT + 1 + (sum % 1000);
-}
-
-function profileDir(profile: string): string {
-  return profile
-    ? join(homedir(), ".multica", "profiles", profile)
-    : join(homedir(), ".multica");
-}
-
-function profileConfigPath(profile: string): string {
-  return join(profileDir(profile), "config.json");
-}
-
-function profileLogPath(profile: string): string {
-  return join(profileDir(profile), "daemon.log");
-}
-
-// Sidecar file that records which Multica user the cached PAT in config.json
-// was minted for. The Go CLI/daemon never read or write this file, so it
-// survives Go-side config rewrites. Used to detect user switches and mint a
-// fresh PAT instead of reusing a token that belongs to a previous user.
-function profileUserIdPath(profile: string): string {
-  return join(profileDir(profile), ".desktop-user-id");
-}
 
 async function readProfileUserId(profile: string): Promise<string | null> {
   try {
@@ -184,18 +185,20 @@ interface HealthPayload {
 
 async function fetchHealthAtPort(
   port: number,
+  timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
 ): Promise<HealthPayload | null> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2_000);
     const res = await fetch(`http://127.0.0.1:${port}/health`, {
       signal: controller.signal,
     });
-    clearTimeout(timeout);
     if (!res.ok) return null;
     return (await res.json()) as HealthPayload;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -226,19 +229,6 @@ async function probeTokenValidity(profile: string): Promise<AuthProbeResult> {
     return classifyAuthProbe({ status: res.status });
   } catch {
     return classifyAuthProbe({ networkError: true });
-  }
-}
-
-// Desktop owns a dedicated CLI profile named after the target API host, so it
-// never reads or writes the user's hand-configured profiles. Profile dir:
-//   ~/.multica/profiles/desktop-<host>/
-function deriveProfileName(targetUrl: string): string {
-  try {
-    const url = new URL(targetUrl);
-    const host = url.host.replace(/:/g, "-").toLowerCase();
-    return `desktop-${host}`;
-  } catch {
-    return "desktop";
   }
 }
 
@@ -275,13 +265,14 @@ async function writeProfileConfig(
  * Returns the Desktop-owned profile for the current target API URL. Creates
  * the profile's config.json on demand with `server_url` pinned to the target.
  *
- * This function never falls back to the default profile, and never touches a
- * profile whose name doesn't start with `desktop-`, so the user's manually
- * configured CLI profiles are untouched.
+ * Returns `null` until the renderer reports its `apiUrl`. There is no profile
+ * to act on in that window, and callers must do nothing rather than reach for
+ * the user's default CLI profile at `~/.multica/` — neither its files nor its
+ * health port.
  */
-async function resolveActiveProfile(): Promise<ActiveProfile> {
+async function resolveActiveProfile(): Promise<ActiveProfile | null> {
   const target = targetApiBaseUrl;
-  if (!target) return { name: "", port: DEFAULT_HEALTH_PORT };
+  if (!target) return null;
 
   const name = deriveProfileName(target);
   const cfg = await readProfileConfig(name);
@@ -295,14 +286,33 @@ async function resolveActiveProfile(): Promise<ActiveProfile> {
   return { name, port: healthPortForProfile(name) };
 }
 
-async function ensureActiveProfile(): Promise<ActiveProfile> {
+async function ensureActiveProfile(): Promise<ActiveProfile | null> {
   if (activeProfile) return activeProfile;
+  // Only a resolved profile is cached; the target URL arrives over IPC shortly
+  // after startup, and caching "unresolved" would persist until something
+  // happened to invalidate it.
   activeProfile = await resolveActiveProfile();
   return activeProfile;
 }
 
 function invalidateActiveProfile(): void {
   activeProfile = null;
+  externalDaemonObserved = false;
+  recoveryPolicy.reset();
+}
+
+function setDesiredDaemonRunning(desired: boolean, explicit = false): void {
+  if (desiredDaemonRunning === desired && !explicit) return;
+  desiredDaemonRunning = desired;
+  recoveryPolicy.reset();
+}
+
+function observeDaemonBoundary(status: DaemonStatus): void {
+  if (status.state !== "running") return;
+  externalDaemonObserved = status.externallyManaged === true;
+  if (externalDaemonObserved) {
+    recoveryPolicy.reset();
+  }
 }
 
 async function fetchHealth(): Promise<DaemonStatus> {
@@ -314,6 +324,10 @@ async function fetchHealth(): Promise<DaemonStatus> {
   }
 
   const active = await ensureActiveProfile();
+  // No profile yet means no daemon of ours to probe. Reporting "stopped" is the
+  // honest answer; probing the default port would surface the user's own CLI
+  // daemon as if it were Desktop's.
+  if (!active) return { state: "stopped" };
   const data = await fetchHealthAtPort(active.port);
 
   if (!data || data.status !== "running") {
@@ -345,10 +359,18 @@ async function fetchHealth(): Promise<DaemonStatus> {
     // daemon booting on its own — or started via the CLI — surfaces as
     // "starting" instead of "stopped".
     if (data?.status === "starting") {
-      return { state: "starting", profile: active.name };
+      return {
+        state: "starting",
+        profile: active.name,
+      };
     }
     return {
-      state: currentState === "starting" ? "starting" : "stopped",
+      state:
+        currentState === "starting"
+          ? "starting"
+          : recoveryPolicy.isPaused
+            ? "recovery_paused"
+            : "stopped",
       profile: active.name,
     };
   }
@@ -577,6 +599,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
   "restarted" | "deferred" | "ok" | "not_running"
 > {
   const active = await ensureActiveProfile();
+  if (!active) return "not_running";
   const running = await fetchHealthAtPort(active.port);
 
   // Don't try to version-match a daemon we can't restart (e.g. WSL2). Treat it
@@ -665,14 +688,20 @@ async function mintPat(jwt: string): Promise<string> {
  *   mint a fresh PAT, overwriting any stale cached PAT. This is the critical
  *   path: without it, a previous user's PAT would be used by a new session.
  * - If the caller happens to pass a PAT directly, write it through.
- * - When we mint fresh and a daemon is already running, restart it so the
- *   new credentials take effect (the Go daemon reads config at startup).
+ * - Reports a user mismatch to the caller; the IPC boundary owns the gated
+ *   restart so internal callers such as reauthenticate never re-enter it.
  */
 async function syncToken(
   tokenFromRenderer: string,
   userId: string,
-): Promise<void> {
+): Promise<{ active: ActiveProfile; userChanged: boolean }> {
   const active = await ensureActiveProfile();
+  if (!active) {
+    // Writing here would land the token and server_url in the user's default
+    // CLI config. The renderer awaits setTargetApiUrl before calling this, so
+    // reaching this branch is a real error rather than a normal startup race.
+    throw new Error("daemon profile is not resolved yet; token sync skipped");
+  }
   const config = await readProfileConfig(active.name);
   const previousUserId = await readProfileUserId(active.name);
   const userChanged = Boolean(previousUserId) && previousUserId !== userId;
@@ -704,22 +733,31 @@ async function syncToken(
   await writeProfileConfig(active.name, config);
   await writeProfileUserId(active.name, userId);
 
+  return { active, userChanged };
+}
+
+async function restartDaemonAfterUserSwitch(
+  active: ActiveProfile,
+): Promise<void> {
   // If we just rotated credentials onto a running daemon, restart it so the
   // in-memory token in the Go process matches the new config.
-  if (userChanged) {
-    try {
-      const existing = await fetchHealthAtPort(active.port);
-      if (daemonStatusAlive(existing?.status)) {
-        // Restart whether it's "running" or still "starting" — a booting daemon
-        // already loaded the old token at startup, so it must be restarted to
-        // pick up the rotated credentials.
-        console.log(
-          "[daemon] user switched — restarting daemon with new credentials",
-        );
-        void restartDaemon();
-      }
-    } catch (err) {
-      console.warn("[daemon] restart-on-user-switch failed:", err);
+  const existing = await fetchHealthAtPort(active.port);
+  if (daemonStatusAlive(existing?.status)) {
+    // Restart whether it's "running" or still "starting" — a booting daemon
+    // already loaded the old token at startup, so it must be restarted to
+    // pick up the rotated credentials.
+    console.log(
+      "[daemon] user switched — restarting daemon with new credentials",
+    );
+    // Credential rotation is a one-shot login intent, not poll-driven
+    // maintenance: wait for bootstrap/recovery instead of dropping it.
+    const restarted = await lifecycleOperations.runForeground(() =>
+      restartDaemon(),
+    );
+    if (!restarted.success) {
+      console.warn(
+        `[daemon] restart-on-user-switch failed: ${restarted.error ?? "unknown error"}`,
+      );
     }
   }
 }
@@ -742,6 +780,9 @@ async function savePrefs(prefs: DaemonPrefs): Promise<void> {
 
 async function clearToken(): Promise<void> {
   const active = await ensureActiveProfile();
+  // Nothing of ours to clear yet, and the default CLI profile is not ours to
+  // strip a token from.
+  if (!active) return;
   const config = await readProfileConfig(active.name);
   if ("token" in config) {
     delete config.token;
@@ -798,22 +839,6 @@ async function reauthenticate(
   return { ok: true };
 }
 
-async function withGuard<T>(fn: () => Promise<T>): Promise<T | { success: false; error: string }> {
-  if (operationInProgress) {
-    return { success: false, error: "Another daemon operation is in progress" };
-  }
-  operationInProgress = true;
-  try {
-    return await fn();
-  } finally {
-    operationInProgress = false;
-  }
-}
-
-function profileArgs(active: ActiveProfile): string[] {
-  return active.name ? ["--profile", active.name] : [];
-}
-
 function successfulRuntimeProbe(
   providers: string[],
   daemonRunning: boolean,
@@ -846,10 +871,11 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
   const bin = await resolveCliBinary();
   if (!bin) return { probeResult: "error" };
   const active = await ensureActiveProfile();
+  if (!active) return { probeResult: "error" };
   return new Promise((resolve) => {
     execFile(
       bin,
-      ["daemon", "probe-runtimes", ...profileArgs(active)],
+      ["daemon", "probe-runtimes", ...profileArgs(active.name)],
       { timeout: 15_000, env: desktopSpawnEnv(), maxBuffer: 64 * 1024 },
       (error, stdout) => {
         if (error) {
@@ -909,20 +935,56 @@ function desktopSpawnEnv(): NodeJS.ProcessEnv {
   return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
 }
 
-async function startDaemon(): Promise<{ success: boolean; error?: string }> {
+function scheduleStatusRefresh(): void {
+  setTimeout(() => void pollOnce(), 0);
+}
+
+async function startDaemon(
+  recoveryProfile?: ActiveProfile,
+): Promise<{ success: boolean; error?: string }> {
   const bin = await resolveCliBinary();
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
+  if (!active) {
+    return { success: false, error: "Waiting for the service address" };
+  }
+  if (
+    recoveryProfile &&
+    !recoveryStartAllowed({
+      desiredRunning: desiredDaemonRunning,
+      externalDaemonObserved,
+      expected: recoveryProfile,
+      current: active,
+    })
+  ) {
+    return { success: false, error: "Daemon recovery was superseded" };
+  }
   const existing = await fetchHealthAtPort(active.port);
   if (daemonStatusAlive(existing?.status)) {
     // A daemon is already up ("running") or booting ("starting") on this port —
     // don't spawn a second one (the CLI rejects that as "already running").
     // Let polling track it through to "running".
-    pollOnce();
+    externalDaemonObserved = isDaemonExternallyManaged(
+      existing?.os,
+      normalizeHostOS(process.platform),
+    );
+    scheduleStatusRefresh();
     return { success: true };
   }
+  if (
+    recoveryProfile &&
+    !recoveryStartAllowed({
+      desiredRunning: desiredDaemonRunning,
+      externalDaemonObserved,
+      expected: recoveryProfile,
+      current: active,
+    })
+  ) {
+    return { success: false, error: "Daemon recovery was superseded" };
+  }
 
+  if (recoveryProfile) recoveryPolicy.recordRecoveryAttempt(Date.now());
   currentState = "starting";
   // Begin a fresh auth-probe window for this attempt.
   startingSince = Date.now();
@@ -930,7 +992,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
   authExpired = false;
   sendStatus({ state: "starting" });
 
-  const args = ["daemon", "start", ...profileArgs(active)];
+  const args = ["daemon", "start", ...profileArgs(active.name)];
 
   return new Promise((resolve) => {
     execFile(
@@ -947,7 +1009,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
         // Stay in "starting" until pollOnce confirms /health — the CLI
         // returning 0 only means the supervisor was spawned, not that the
         // daemon process is already listening.
-        pollOnce();
+        scheduleStatusRefresh();
         resolve({ success: true });
       },
     );
@@ -964,6 +1026,7 @@ async function startDaemon(): Promise<{ success: boolean; error?: string }> {
  */
 async function lifecycleBlockedByForeignDaemon(): Promise<boolean> {
   const active = await ensureActiveProfile();
+  if (!active) return false;
   return daemonLifecycleUnreachable(
     async () => (await fetchHealthAtPort(active.port))?.os,
     normalizeHostOS(process.platform),
@@ -984,13 +1047,14 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   if (!bin) return { success: false, error: "multica CLI is not installed" };
 
   const active = await ensureActiveProfile();
+  if (!active) return { success: true };
   currentState = "stopping";
   // An explicit stop is a clean reset — drop any pending auth-failure verdict.
   authExpired = false;
   startingSince = null;
   sendStatus({ state: "stopping" });
 
-  const args = ["daemon", "stop", ...profileArgs(active)];
+  const args = ["daemon", "stop", ...profileArgs(active.name)];
 
   return new Promise((resolve) => {
     execFile(bin, args, { timeout: 15_000 }, (err) => {
@@ -1016,20 +1080,148 @@ async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   return startDaemon();
 }
 
+async function daemonPidIsConfirmedAbsent(profile: string): Promise<boolean> {
+  try {
+    const raw = await readFile(profilePidPath(profile), "utf-8");
+    const pid = parseDaemonPid(raw);
+    if (pid === null) {
+      console.warn(
+        `[daemon] recovery deferred: ${profilePidPath(profile)} is invalid`,
+      );
+      return false;
+    }
+    return !daemonProcessExists(pid);
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      err.code === "ENOENT"
+    ) {
+      return true;
+    }
+    console.warn("[daemon] recovery deferred: unable to read daemon PID:", err);
+    return false;
+  }
+}
+
+async function attemptDaemonRecovery(active: ActiveProfile): Promise<void> {
+  const startAllowed = () =>
+    recoveryStartAllowed({
+      desiredRunning: desiredDaemonRunning,
+      externalDaemonObserved,
+      expected: active,
+      current: activeProfile,
+    });
+  const outcome = await runDaemonRecoveryAttempt({
+    startAllowed,
+    // A normal UI poll intentionally gives up after 2s. Before treating that
+    // as process death, use an independent longer probe so a busy daemon is
+    // not restarted merely because one health request was slow.
+    confirmAlive: async () => {
+      const health = await fetchHealthAtPort(
+        active.port,
+        RECOVERY_HEALTH_PROBE_TIMEOUT_MS,
+      );
+      if (!daemonStatusAlive(health?.status)) return false;
+      externalDaemonObserved = isDaemonExternallyManaged(
+        health?.os,
+        normalizeHostOS(process.platform),
+      );
+      recoveryPolicy.observe({
+        desiredRunning: desiredDaemonRunning,
+        externalDaemonObserved,
+        lifecycleBusy: lifecycleOperations.inProgress,
+        state: health?.status === "running" ? "running" : "starting",
+        now: Date.now(),
+      });
+      scheduleStatusRefresh();
+      return true;
+    },
+    pidConfirmedAbsent: () => daemonPidIsConfirmedAbsent(active.name),
+    recordPidDeferral: () => recoveryPolicy.recordPidDeferral(Date.now()),
+    recordPidAbsent: () => recoveryPolicy.recordPidAbsent(),
+    // Force-kill leaves daemon.pid behind, and Windows can reuse the number
+    // for another process. After three spaced deferrals, let the CLI recheck
+    // health and attempt the start; an occupied port then fails safely into
+    // the normal retry backoff and absolute budget.
+    onPidFallback: () =>
+      console.warn(
+        "[daemon] daemon PID stayed unverifiable; proceeding through CLI safety checks",
+      ),
+    start: () => {
+      console.warn("[daemon] managed daemon disappeared; attempting recovery");
+      return startDaemon(active);
+    },
+    desiredRunning: () => desiredDaemonRunning,
+    stop: () => stopDaemon(),
+  });
+
+  if (outcome.kind === "alive") {
+    console.log("[daemon] recovery cancelled: longer health probe succeeded");
+  } else if (outcome.kind === "pid_deferred") {
+    console.warn(
+      "[daemon] recovery deferred: daemon PID is still alive or could not be verified",
+    );
+  } else if (outcome.kind === "start_failed") {
+    console.warn(
+      `[daemon] recovery failed: ${outcome.error ?? "unknown error"}`,
+    );
+  }
+}
+
+function recoveryDecision(status: DaemonStatus) {
+  return recoveryPolicy.observe({
+    desiredRunning: desiredDaemonRunning,
+    externalDaemonObserved,
+    lifecycleBusy: lifecycleOperations.inProgress,
+    state: status.state,
+    now: Date.now(),
+  });
+}
+
 async function pollOnce(): Promise<void> {
-  const status = await fetchHealth();
-  currentState = status.state;
-  sendStatus(status);
-  // Retry a deferred version-mismatch restart once the daemon drains.
-  if (pendingVersionRestart && status.state === "running") {
-    void ensureRunningDaemonVersionMatches();
+  if (statusPollInProgress) return;
+  statusPollInProgress = true;
+  try {
+    const status = await fetchHealth();
+    currentState = status.state;
+    observeDaemonBoundary(status);
+    const decision = recoveryDecision(status);
+    sendStatus(
+      decision === "pause" ? { ...status, state: "recovery_paused" } : status,
+    );
+    if (decision === "confirm") {
+      const active = await ensureActiveProfile();
+      if (active) {
+        // Recovery can spend 10s confirming health plus 60s in the CLI start.
+        // Do not hold the poll lock across it: startDaemon publishes
+        // "starting" immediately, and subsequent polls keep that visible.
+        void lifecycleOperations
+          .runBackground(() => attemptDaemonRecovery(active))
+          .catch((err) => {
+            console.warn("[daemon] background recovery failed:", err);
+          });
+      }
+    }
+    // Retry a deferred version-mismatch restart once the daemon drains. Route
+    // it through the same singleflight guard as user and recovery operations.
+    if (pendingVersionRestart && status.state === "running") {
+      void lifecycleOperations
+        .runBackground(() => ensureRunningDaemonVersionMatches())
+        .catch((err) => {
+          console.warn("[daemon] deferred version restart failed:", err);
+        });
+    }
+  } finally {
+    statusPollInProgress = false;
   }
 }
 
 function startPolling(): void {
   if (statusPollTimer) return;
-  pollOnce();
-  statusPollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+  void pollOnce();
+  statusPollTimer = setInterval(() => void pollOnce(), POLL_INTERVAL_MS);
 }
 
 /**
@@ -1090,8 +1282,11 @@ function startLogTail(win: BrowserWindow, retryCount = 0): void {
   stopLogTail();
 
   void ensureActiveProfile().then(async (active) => {
-    const logPath = profileLogPath(active.name);
-    if (!existsSync(logPath)) {
+    // Before the renderer reports its apiUrl there is no Desktop-owned profile
+    // yet, and therefore no log file of ours to tail. Retry rather than reach
+    // for the default profile's log.
+    const logPath = active ? profileLogPath(active.name) : null;
+    if (!logPath || !existsSync(logPath)) {
       if (retryCount < LOG_TAIL_MAX_RETRIES) {
         setTimeout(() => startLogTail(win, retryCount + 1), LOG_TAIL_RETRY_MS);
       }
@@ -1159,14 +1354,26 @@ export function setupDaemonManager(
     const normalized = url || null;
     if (targetApiBaseUrl !== normalized) {
       console.log(`[daemon] target API URL set to ${normalized ?? "(none)"}`);
+      setDesiredDaemonRunning(false);
       targetApiBaseUrl = normalized;
       invalidateActiveProfile();
       await pollOnce();
     }
   });
-  ipcMain.handle("daemon:start", () => withGuard(() => startDaemon()));
-  ipcMain.handle("daemon:stop", () => withGuard(() => stopDaemon()));
-  ipcMain.handle("daemon:restart", () => withGuard(() => restartDaemon()));
+  ipcMain.handle("daemon:start", () => {
+    externalDaemonObserved = false;
+    setDesiredDaemonRunning(true, true);
+    return lifecycleOperations.runForeground(() => startDaemon());
+  });
+  ipcMain.handle("daemon:stop", () => {
+    setDesiredDaemonRunning(false, true);
+    return lifecycleOperations.runForeground(() => stopDaemon());
+  });
+  ipcMain.handle("daemon:restart", () => {
+    externalDaemonObserved = false;
+    setDesiredDaemonRunning(true, true);
+    return lifecycleOperations.runForeground(() => restartDaemon());
+  });
   ipcMain.handle("daemon:get-status", () => fetchHealth());
   ipcMain.handle("daemon:probe-runtimes", () => probeLocalRuntimes());
   // The host's OS name, available regardless of daemon state. The Runtimes
@@ -1176,12 +1383,25 @@ export function setupDaemonManager(
   ipcMain.handle("daemon:get-host-name", () => hostname());
   ipcMain.handle(
     "daemon:sync-token",
-    (_event, token: string, userId: string) => syncToken(token, userId),
+    async (_event, token: string, userId: string) => {
+      const result = await syncToken(token, userId);
+      if (result.userChanged) {
+        await restartDaemonAfterUserSwitch(result.active);
+      }
+    },
   );
-  ipcMain.handle("daemon:clear-token", () => clearToken());
+  ipcMain.handle("daemon:clear-token", () => {
+    setDesiredDaemonRunning(false, true);
+    return clearToken();
+  });
   ipcMain.handle(
     "daemon:reauthenticate",
-    (_event, token: string, userId: string) => reauthenticate(token, userId),
+    async (_event, token: string, userId: string): Promise<ReauthResult> => {
+      setDesiredDaemonRunning(true, true);
+      return lifecycleOperations.runForeground(() =>
+        reauthenticate(token, userId),
+      );
+    },
   );
   ipcMain.handle("daemon:is-cli-installed", async () => {
     const bin = await resolveCliBinary();
@@ -1193,7 +1413,7 @@ export function setupDaemonManager(
     // A retry-install may land a new CLI at a different version; drop the
     // cached version string so the next check re-reads the binary.
     cachedCliBinaryVersion = undefined;
-    await bootstrapCli();
+    await lifecycleOperations.runForeground(() => bootstrapCli());
   });
   ipcMain.handle("daemon:get-prefs", () => loadPrefs());
   ipcMain.handle(
@@ -1201,22 +1421,31 @@ export function setupDaemonManager(
     (_event, prefs: Partial<DaemonPrefs>) =>
       loadPrefs().then((cur) => {
         const merged = { ...cur, ...prefs };
+        // Changing the preference still affects the next logged-in launch; it
+        // does not start/stop the current session. The Settings copy explicitly
+        // states that a launched daemon is supervised while Desktop stays open.
         return savePrefs(merged).then(() => merged);
       }),
   );
   ipcMain.handle("daemon:auto-start", async () => {
     const prefs = await loadPrefs();
+    setDesiredDaemonRunning(prefs.autoStart);
     if (!prefs.autoStart) return;
-    const bin = await resolveCliBinary();
-    if (!bin) return;
-    const health = await fetchHealth();
-    if (health.state === "running") {
-      // Daemon is up but may be running an older CLI than the one we just
-      // bundled. Restart it so the new binary actually takes effect.
-      await ensureRunningDaemonVersionMatches();
-      return;
-    }
-    await startDaemon();
+    // Login auto-start is emitted once per session. Queue it behind bootstrap
+    // instead of dropping it like a retryable poll operation.
+    await lifecycleOperations.runForeground(async () => {
+      const bin = await resolveCliBinary();
+      if (!bin) return;
+      const health = await fetchHealth();
+      observeDaemonBoundary(health);
+      if (health.state === "running") {
+        // Daemon is up but may be running an older CLI than the one we just
+        // bundled. Restart it so the new binary actually takes effect.
+        await ensureRunningDaemonVersionMatches();
+        return;
+      }
+      await startDaemon();
+    });
   });
 
   ipcMain.on("daemon:start-log-stream", () => {
@@ -1233,8 +1462,8 @@ export function setupDaemonManager(
   // (full history, complex search, copy-to-clipboard at scale).
   ipcMain.handle("daemon:open-log-file", async () => {
     const active = await ensureActiveProfile();
-    const logPath = profileLogPath(active.name);
-    if (!existsSync(logPath)) {
+    const logPath = active ? profileLogPath(active.name) : null;
+    if (!logPath || !existsSync(logPath)) {
       return { success: false, error: "Log file not found yet" };
     }
     // shell.openPath returns "" on success, error string on failure.
@@ -1246,11 +1475,12 @@ export function setupDaemonManager(
   // until the managed binary is on disk (instant on subsequent launches).
   currentState = "installing_cli";
   sendStatus({ state: "installing_cli" });
-  void bootstrapCli();
+  void lifecycleOperations.runBackground(() => bootstrapCli());
 
   let isQuitting = false;
   app.on("before-quit", (event) => {
     if (isQuitting) return;
+    setDesiredDaemonRunning(false);
     stopPolling();
     stopLogTail();
 

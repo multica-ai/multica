@@ -76,6 +76,9 @@ function pickStage(
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
 ): Stage {
+  // Mirrors web: deferred is an older turn waiting for retry backoff, not
+  // active model work, so it must not fall through to "Thinking".
+  if (status === "deferred") return { label: "Retrying" };
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
@@ -142,8 +145,14 @@ export function StatusPill({
 
   if (!taskId) return null;
 
+  // Deferred retries retain task messages from the earlier attempt, so the
+  // newer server status must win over those stale running hints.
   const status =
-    taskMessages.length > 0 ? "running" : pendingTask?.status;
+    pendingTask?.status === "deferred"
+      ? "deferred"
+      : taskMessages.length > 0
+        ? "running"
+        : pendingTask?.status;
   const elapsedSec = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
   const stage = pickStage(status, taskMessages, availability);
 
