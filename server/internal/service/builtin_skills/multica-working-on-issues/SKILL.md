@@ -220,6 +220,15 @@ close intent writes the literal `done` key.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
+- **Manual transitions into `done` are fail-closed on linked PR state.** The
+  issue API rejects the write with `open_pull_requests_block_done` while any
+  visible working PR is still `open` or `draft`, across GitHub and self-hosted
+  VCS providers. Custom statuses in the `done` category inherit the same gate,
+  and batch updates preflight every target before changing any of them. Merge
+  or close each working PR first; bare body mentions are reference-only and do
+  not block because they are hidden from the issue's PR list. This gate proves
+  terminal PR state, not whether closing an unmerged PR was the right product
+  decision — record that rationale in the issue comment.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going (MUL-4465). To stop a running task,

@@ -240,6 +240,65 @@ func writeIssueStatusRaceError(w http.ResponseWriter, err error) bool {
 	return false
 }
 
+// issueDoneBlockedByOpenPullRequestsError is returned when a manual status
+// write would claim delivery while a linked working PR is still in flight.
+// Reference-only links are deliberately absent from OpenCount because they are
+// hidden from the issue's PR list and do not represent work on the issue.
+type issueDoneBlockedByOpenPullRequestsError struct {
+	OpenCount int64
+}
+
+func (e *issueDoneBlockedByOpenPullRequestsError) Error() string {
+	return fmt.Sprintf(
+		"cannot move issue to a done status while %d linked pull request(s) are open or draft; merge or close them first",
+		e.OpenCount,
+	)
+}
+
+// assertIssueCanEnterStatus prevents a manual transition into the done
+// category while any linked GitHub or self-hosted working PR remains open or
+// draft. Custom statuses inherit the guard through their category. The
+// webhook auto-advance path already applies the same combined-provider open
+// count before it writes literal `done`; keeping the manual path aligned closes
+// the ghost-delivery hole where an issue could be marked done merely because a
+// PR existed rather than because it had reached a terminal state.
+func assertIssueCanEnterStatus(ctx context.Context, q *db.Queries, issue db.Issue, targetStatus string) error {
+	if targetStatus == "" || targetStatus == issue.Status {
+		return nil
+	}
+	if issuestatus.Effective(ctx, q, issue.WorkspaceID, targetStatus) != issuestatus.Done {
+		return nil
+	}
+	// Moving between two done-category labels does not make a new delivery
+	// claim, so an open PR discovered after the original transition must not
+	// make presentation-only relabeling impossible.
+	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == issuestatus.Done {
+		return nil
+	}
+
+	counts, err := q.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
+	if err != nil {
+		return fmt.Errorf("count linked pull request states before done transition: %w", err)
+	}
+	if counts.OpenCount > 0 {
+		return &issueDoneBlockedByOpenPullRequestsError{OpenCount: counts.OpenCount}
+	}
+	return nil
+}
+
+func writeIssueDoneBlockedByOpenPullRequests(w http.ResponseWriter, err error) bool {
+	var blocked *issueDoneBlockedByOpenPullRequestsError
+	if !errors.As(err, &blocked) {
+		return false
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":                   blocked.Error(),
+		"code":                    "open_pull_requests_block_done",
+		"open_pull_request_count": blocked.OpenCount,
+	})
+	return true
+}
+
 func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []string) bool {
 	for _, a := range allowed {
 		if value == a {
@@ -3264,6 +3323,9 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err != nil {
 		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
 	}
+	if err := assertIssueCanEnterStatus(ctx, qtx, current, statusKey); err != nil {
+		return db.Issue{}, current, false, err
+	}
 
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
 		return db.Issue{}, current, false, errIssueFieldConflict
@@ -3557,14 +3619,20 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			prevIssue = lockedPrev
 		}
 	} else {
-		err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
-			var innerErr error
-			issue, innerErr = q.UpdateIssue(r.Context(), params)
-			return innerErr
-		})
+		err = assertIssueCanEnterStatus(r.Context(), h.Queries, prevIssue, statusKeyForGuard)
+		if err == nil {
+			err = h.runWithIssueStatusGuard(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard, func(q *db.Queries) error {
+				var innerErr error
+				issue, innerErr = q.UpdateIssue(r.Context(), params)
+				return innerErr
+			})
+		}
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
+			return
+		}
+		if writeIssueDoneBlockedByOpenPullRequests(w, err) {
 			return
 		}
 		if errors.Is(err, errIssueFieldConflict) {
@@ -4102,6 +4170,33 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Preflight every valid target before applying the first batch mutation.
+	// Without this pass a later issue with an open PR could reject after earlier
+	// siblings had already moved to done, turning one logical batch into a
+	// misleading partial delivery claim.
+	if batchStatusKey != "" && issuestatus.Effective(r.Context(), h.Queries, wsUUID, batchStatusKey) == issuestatus.Done {
+		for _, issueID := range req.IssueIDs {
+			issueUUID, parseErr := util.ParseUUID(issueID)
+			if parseErr != nil {
+				continue
+			}
+			issue, loadErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          issueUUID,
+				WorkspaceID: wsUUID,
+			})
+			if loadErr != nil {
+				continue
+			}
+			if gateErr := assertIssueCanEnterStatus(r.Context(), h.Queries, issue, batchStatusKey); gateErr != nil {
+				if writeIssueDoneBlockedByOpenPullRequests(w, gateErr) {
+					return
+				}
+				slog.Warn("batch update: validate done transition", "issue_id", issueID, "error", gateErr)
+				writeError(w, http.StatusInternalServerError, "failed to validate linked pull request states")
+				return
+			}
+		}
+	}
 	// The batch shares one project_id, so it is checked once here rather than
 	// per issue, and rejected instead of skipped like the per-item guards in
 	// the loop: a foreign project invalidates the whole request.
@@ -4299,17 +4394,23 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				prevIssue = lockedPrev
 			}
 		} else {
-			err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
-				var innerErr error
-				issue, innerErr = q.UpdateIssue(r.Context(), params)
-				return innerErr
-			})
+			err = assertIssueCanEnterStatus(r.Context(), h.Queries, prevIssue, batchStatusKey)
+			if err == nil {
+				err = h.runWithIssueStatusGuard(r.Context(), wsUUID, batchStatusKey, func(q *db.Queries) error {
+					var innerErr error
+					issue, innerErr = q.UpdateIssue(r.Context(), params)
+					return innerErr
+				})
+			}
 		}
 		if err != nil {
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
 			if writeIssueStatusRaceError(w, err) {
+				return
+			}
+			if writeIssueDoneBlockedByOpenPullRequests(w, err) {
 				return
 			}
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)

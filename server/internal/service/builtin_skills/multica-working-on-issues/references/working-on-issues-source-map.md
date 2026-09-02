@@ -131,6 +131,7 @@ and is hidden from the PR list.
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
 | Runtime brief: status written whenever the work changes it, mid-turn included — starting the issue's own ask → `in_progress` immediately (workflow step 3); delivery → `in_review`, continuing → `in_progress`, stuck → `blocked`; a turn producing none of the issue's own deliverable → no write at any point; the activity kind never decides (research/design/planning/review count as work when they are the ask); no assignee gate; squad leader dispatch is not delivery (MUL-6417) | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowIssue`) | new citation |
+| Manual transition into a built-in or custom done-category status rejects visible working PRs still open/draft; combined GitHub + self-hosted VCS count; batch preflights all targets | `server/internal/handler/issue.go` (`assertIssueCanEnterStatus`, `writeIssueDoneBlockedByOpenPullRequests`, `UpdateIssue`, `BatchUpdateIssues`) | new citation |
 | Failed task may roll `in_progress` → `todo` when no active task remains | `server/internal/service/task.go` (`HandleFailedTasks`) | new citation |
 | Custom statuses inherit their category's behavior in full; enqueue/park contracts resolve the effective category via `issuestatus.Effective` / `Resolve` (MUL-6243) | `server/internal/issuestatus/issuestatus.go` (`Effective`, `Resolve`) | new citation |
 | Runtime brief lists the workspace's active custom statuses grouped by category; catalog rides the claim payload (MUL-6460) | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeIssueStatusCommand`); claim injection in `server/internal/handler/daemon.go` (`buildClaimedTaskResponse`, status catalog block) | new citation |
@@ -147,6 +148,15 @@ active task on it (the old #940 behavior). MUL-4465 removed that from both
 never cancels tasks now. `CancelTasksForIssue` fires only from the issue-deletion
 paths (`DeleteIssue` / `BatchDeleteIssues`), where the owning issue row is going
 away, so no task is left orphaned.
+
+Moving an issue manually into the `done` category first reads
+`GetIssueCombinedPullRequestCloseAggregate`. If any non-reference-only GitHub
+or self-hosted PR is `open`/`draft`, the API returns HTTP 409 with stable code
+`open_pull_requests_block_done` and leaves the issue unchanged. The batch path
+checks every valid target before the first mutation so one blocked issue cannot
+produce a partial batch. A closed-but-unmerged PR is terminal for this machine
+gate; the issue comment remains the audit surface for why that repair was no
+longer needed.
 
 ## Ownership-only assignment and duplicate-run awareness
 
