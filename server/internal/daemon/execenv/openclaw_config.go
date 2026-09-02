@@ -1443,14 +1443,40 @@ func isOpenclawKeyMissing(err error) bool {
 const openclawJSONErrorMaxRunes = 1024
 
 func openclawJSONErrorMessage(stdout string) (string, bool) {
-	var envelope struct {
-		Error string `json:"error"`
-	}
-	if json.Unmarshal([]byte(strings.TrimSpace(stdout)), &envelope) != nil {
+	// Older OpenClaw builds emitted a flat `{"error":"..."}` envelope. From
+	// 2026.8.x the `error` field became an object with a `message` field
+	// (e.g. {"ok":false,"error":{"type":"cli_error","message":"..."}}).
+	// Unmarshalling a non-string into a string field makes json.Unmarshal
+	// return an error, which would silently drop the message and reclassify a
+	// graceful missing-key fallback as a hard failure. Accept both shapes.
+	trimmed := strings.TrimSpace(stdout)
+	if trimmed == "" {
 		return "", false
 	}
-	message := strings.Join(strings.Fields(envelope.Error), " ")
-	return message, message != ""
+	var envelope struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(trimmed), &envelope); err != nil {
+		return "", false
+	}
+	if len(envelope.Error) == 0 {
+		return "", false
+	}
+	// error may be a plain string ("Config path not found: ...") or an
+	// object with a message field ({"type":"cli_error","message":"..."}).
+	var flat string
+	if err := json.Unmarshal(envelope.Error, &flat); err == nil {
+		message := strings.Join(strings.Fields(flat), " ")
+		return message, message != ""
+	}
+	var payload struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(envelope.Error, &payload); err == nil && payload.Message != "" {
+		message := strings.Join(strings.Fields(payload.Message), " ")
+		return message, message != ""
+	}
+	return "", false
 }
 
 // annotateOpenclawJSONError restores diagnostics for JSON-mode commands whose
@@ -1527,11 +1553,15 @@ func isOpenclawKeyMissingMessage(msg string) bool {
 	// strings.Contains on "Path not found" silently stopped matching the
 	// 2026.6.x string, turning the intended graceful-skip into a fail-closed
 	// error that broke every OpenClaw 2026.6.x runtime (see upstream #3028).
+	// OpenClaw 2026.8.x reworded it again to "Unknown config path:
+	// agents.list"; treat that as missing too so the registry fallback still
+	// engages instead of failing closed.
 	msg = strings.ToLower(msg)
 	return strings.Contains(msg, "no value at ") ||
 		strings.Contains(msg, "not set") ||
 		strings.Contains(msg, "missing key") ||
-		strings.Contains(msg, "path not found")
+		strings.Contains(msg, "path not found") ||
+		strings.Contains(msg, "unknown config path")
 }
 
 // isOpenclawUnknownSubcommand returns true when the CLI error indicates the
