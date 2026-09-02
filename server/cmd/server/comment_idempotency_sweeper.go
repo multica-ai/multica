@@ -16,6 +16,7 @@ const (
 	commentIdempotencyRetention = handler.CommentIdempotencyReplayWindow
 	// Cleanup is deliberately off the latency-sensitive comment write path.
 	commentIdempotencySweepInterval  = time.Hour
+	commentIdempotencyRecoveryBudget = 30 * time.Second
 	commentIdempotencySweepBudget    = 5 * time.Second
 	commentIdempotencySweepBatchSize = 500
 )
@@ -24,8 +25,11 @@ type deleteExpiredCommentIdempotencyFunc func(context.Context, pgtype.Timestampt
 
 func runCommentIdempotencySweeper(ctx context.Context, h *handler.Handler) {
 	runPeriodicSweep(ctx, commentIdempotencySweepInterval, func() {
-		if recovered, err := h.ReconcilePendingCommentIdempotency(ctx, commentIdempotencySweepBatchSize); err != nil {
-			slog.Warn("comment idempotency recovery failed", "recovered", recovered, "error", err)
+		recoveryCtx, recoveryCancel := context.WithTimeout(ctx, commentIdempotencyRecoveryBudget)
+		recovered, recoveryErr := h.ReconcilePendingCommentIdempotency(recoveryCtx, commentIdempotencySweepBatchSize)
+		recoveryCancel()
+		if recoveryErr != nil {
+			slog.Warn("comment idempotency recovery failed", "recovered", recovered, "error", recoveryErr)
 		} else if recovered > 0 {
 			slog.Info("comment idempotency recovery completed", "count", recovered)
 		}
