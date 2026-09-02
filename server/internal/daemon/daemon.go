@@ -9485,14 +9485,55 @@ func socketSafeTempBaseDir() string {
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-
 // configured custom_env. This prevents accidental or malicious override of
-// daemon-internal variables and critical system paths.
+// daemon-internal variables, critical system paths, and injection vectors.
 func isBlockedEnvKey(key string) bool {
 	upper := strings.ToUpper(key)
-	if strings.HasPrefix(upper, "MULTICA_") {
+	if strings.HasPrefix(upper, "MULTICA_") ||
+		strings.HasPrefix(upper, "LD_") ||
+		strings.HasPrefix(upper, "DYLD_") ||
+		strings.HasPrefix(upper, "NAPI_RS_") ||
+		strings.HasPrefix(upper, "GIT_CONFIG_") ||
+		strings.HasPrefix(upper, "BASH_FUNC_") {
 		return true
 	}
 	switch upper {
+	// Keep the existing daemon-managed denylist intact. New entries below are
+	// deliberately additive so hardening cannot reopen an existing override.
 	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+		return true
+
+	// CLI configuration and package/runtime injection.
+	case "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME",
+		"OPENCODE_CONFIG_CONTENT", "PI_SKIP_VERSION_CHECK", "PI_TELEMETRY", "PI_PACKAGE_DIR",
+		"NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED", "NODE_REPL_EXTERNAL_MODULE", "BUN_OPTIONS":
+		return true
+
+	// Proxy, trust-store, dynamic-loader, and crypto-module redirection.
+	case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+		"SSL_CERT_FILE", "SSL_CERT_DIR", "CURL_CA_BUNDLE", "REQUESTS_CA_BUNDLE", "GRPC_DEFAULT_SSL_ROOTS_FILE_PATH",
+		"AWS_CA_BUNDLE", "OPENSSL_CONF", "OPENSSL_MODULES", "SSLKEYLOGFILE", "GCONV_PATH":
+		return true
+
+	// Interpreter, shell, and JVM startup hooks.
+	case "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT", "PYTHONUSERBASE", "PYTHONEXECUTABLE", "PYTHONWARNINGS",
+		"BASH_ENV", "ENV", "PROMPT_COMMAND", "SHELLOPTS", "BASHOPTS", "CDPATH", "ZDOTDIR",
+		"RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB",
+		"JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH":
+		return true
+
+	// Git command hooks, configuration, credential UI, and trust redirection.
+	case "GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND", "GIT_CONFIG",
+		"GIT_ASKPASS", "SSH_ASKPASS", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF",
+		"GIT_SEQUENCE_EDITOR", "GIT_PROTOCOL_FROM_USER", "GIT_ALLOW_PROTOCOL", "GIT_SSL_CAINFO",
+		"GIT_TEMPLATE_DIR", "GIT_TERMINAL_PROMPT":
+		return true
+
+	// Editors and pagers are command execution sinks when a CLI invokes them.
+	case "GIT_PAGER", "GIT_EDITOR", "EDITOR", "VISUAL", "PAGER":
+		return true
+
+	// npm can redirect config, scripts, trust, and traffic through env.
+	case "NPM_CONFIG_PROXY", "NPM_CONFIG_HTTPS_PROXY", "NPM_CONFIG_CAFILE", "NPM_CONFIG_USERCONFIG", "NPM_CONFIG_SCRIPT_SHELL":
 		return true
 	}
 	return false
