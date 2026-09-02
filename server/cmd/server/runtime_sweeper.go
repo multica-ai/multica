@@ -28,6 +28,9 @@ const (
 	// latency-sensitive 30-second liveness path. GC remains independently
 	// bounded by runtimeGCTickTimeout once each hourly round begins.
 	runtimeGCSweepInterval = time.Hour
+	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
+	// recovery scan off the latency-sensitive runtime liveness path.
+	delegatedFailureRecoverySweepInterval = 5 * time.Minute
 	// staleThresholdSeconds marks runtimes offline if no heartbeat for this
 	// long. The heartbeat timing derivation lives with the shared service
 	// constant so every task release path uses the same eligibility window.
@@ -154,17 +157,20 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+	delegatedFailureRecoveryTicks := 0
 	runPeriodicSweep(ctx, sweepInterval, func() {
-		// These stages retain the existing cadence and ordering in PR1 so the
-		// rollout changes no business predicate or recovery semantics. Runtime
-		// GC is the one exception: its seven-day retention work now runs in the
-		// independent hourly loop below and cannot delay this liveness path.
+		// Every stage retains its existing order. The delegated-failure query is
+		// the only one gated to a lower cadence; the others still run every tick.
 		sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
-		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
+		delegatedFailureRecoveryTicks++
+		if delegatedFailureRecoveryTicks >= int(delegatedFailureRecoverySweepInterval/sweepInterval) {
+			sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
+			delegatedFailureRecoveryTicks = 0
+		}
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 	})
 }
