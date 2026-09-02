@@ -596,6 +596,62 @@ func (q *Queries) ListPullRequestsByIssue(ctx context.Context, issueID pgtype.UU
 	return items, nil
 }
 
+const listQueuedPullRequestIssuesByWorkspace = `-- name: ListQueuedPullRequestIssuesByWorkspace :many
+SELECT DISTINCT ON (ipr.issue_id)
+    ipr.issue_id,
+    pr.api_merge_queue_state
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.workspace_id = $1
+  AND NOT ipr.reference_only
+  AND pr.state IN ('open', 'draft')
+  AND pr.api_merge_queue_state IS NOT NULL
+  AND pr.snapshot_fetched_at IS NOT NULL
+  AND pr.snapshot_head_sha <> ''
+  AND pr.snapshot_head_sha = pr.head_sha
+ORDER BY ipr.issue_id, pr.pr_created_at DESC
+`
+
+type ListQueuedPullRequestIssuesByWorkspaceRow struct {
+	IssueID            pgtype.UUID `json:"issue_id"`
+	ApiMergeQueueState pgtype.Text `json:"api_merge_queue_state"`
+}
+
+// Backs the board card's merge-queue indicator (BUS-231). Returns one row per
+// issue in the workspace that has a pull request sitting in a repository merge
+// queue, carrying that PR's queue state.
+//
+// Deliberately workspace-wide and tiny rather than per-issue: a board renders
+// hundreds of cards, but only a handful of PRs are ever queued at once, so the
+// board fetches this once instead of issuing one PR request per card.
+//
+// The snapshot conditions mirror `currentGitHubSnapshotAvailable` so the board
+// and the issue detail card never disagree about the same PR: the stored queue
+// state is trusted only while the snapshot belongs to the PR's current head.
+// Terminal PRs are excluded because the column keeps whatever the PR last
+// reported while it was open. reference_only links are not working PRs.
+//
+// DISTINCT ON keeps the newest queued PR when an issue has several.
+func (q *Queries) ListQueuedPullRequestIssuesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListQueuedPullRequestIssuesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listQueuedPullRequestIssuesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueuedPullRequestIssuesByWorkspaceRow{}
+	for rows.Next() {
+		var i ListQueuedPullRequestIssuesByWorkspaceRow
+		if err := rows.Scan(&i.IssueID, &i.ApiMergeQueueState); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const unlinkIssueFromPullRequest = `-- name: UnlinkIssueFromPullRequest :exec
 DELETE FROM issue_pull_request
 WHERE issue_id = $1 AND pull_request_id = $2

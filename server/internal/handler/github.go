@@ -964,6 +964,58 @@ func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ── Queued PRs for a workspace ──────────────────────────────────────────────
+
+// GitHubQueuedPullRequestResponse marks one issue whose pull request is sitting
+// in a repository merge queue.
+type GitHubQueuedPullRequestResponse struct {
+	IssueID string `json:"issue_id"`
+	// MergeQueueState is the queue entry state, lowercased to match the
+	// per-issue PR payload: "queued" | "awaiting_checks" | "mergeable" |
+	// "unmergeable" | "locked".
+	MergeQueueState string `json:"merge_queue_state"`
+}
+
+// ListQueuedPullRequests returns every issue in the workspace whose PR sits in
+// a merge queue. The board calls this once per view rather than asking for each
+// card's pull requests: only a handful of PRs are ever queued at once, so the
+// response stays small no matter how many cards are on screen.
+func (h *Handler) ListQueuedPullRequests(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	out := make([]GitHubQueuedPullRequestResponse, 0)
+	// With the snapshot pipeline disabled nothing refreshes these columns, so
+	// every stored queue state is of unknown age — report none rather than
+	// pinning a card to a queue the PR may have left long ago.
+	if h.PRRefresh.Enabled() {
+		rows, err := h.Queries.ListQueuedPullRequestIssuesByWorkspace(r.Context(), wsUUID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list queued pull requests")
+			return
+		}
+		out = queuedPullRequestRowsToResponse(rows)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"queued_pull_requests": out})
+}
+
+func queuedPullRequestRowsToResponse(
+	rows []db.ListQueuedPullRequestIssuesByWorkspaceRow,
+) []GitHubQueuedPullRequestResponse {
+	out := make([]GitHubQueuedPullRequestResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, GitHubQueuedPullRequestResponse{
+			IssueID: uuidToString(row.IssueID),
+			// Lowercased to match the per-issue PR payload, which the client
+			// parses with the same union. Non-null is guaranteed by the
+			// query's IS NOT NULL filter.
+			MergeQueueState: strings.ToLower(row.ApiMergeQueueState.String),
+		})
+	}
+	return out
+}
+
 // ── List PRs for an issue ───────────────────────────────────────────────────
 
 func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Request) {
