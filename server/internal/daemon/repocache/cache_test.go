@@ -1783,3 +1783,54 @@ func TestBarePathIsIndependentOfExistence(t *testing.T) {
 		t.Error("Lookup must still report an uncached repo as absent")
 	}
 }
+
+// TestCreateWorktreeEscapesEnclosingRepoWorkingTree reproduces the HEL-377
+// incident: a task's WorkDir is already the root of another checked-out
+// repo's working tree (e.g. a local_directory task, or an agent that cd'd
+// into a sibling repo). Joining the new repo's directory name directly onto
+// WorkDir would nest its tracked files inside the outer repo's working tree.
+// The fix must redirect the checkout to a sibling of the outer repo's root
+// instead, without breaking the checkout itself.
+func TestCreateWorktreeEscapesEnclosingRepoWorkingTree(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// outerRoot simulates an existing checked-out repo whose working tree
+	// root IS the task's WorkDir — the exact scenario from the HEL-377
+	// incident (a nested Payload CMS checkout corrupting a TypeScript build).
+	outerRoot := filepath.Join(t.TempDir(), "existing-repo")
+	if err := os.MkdirAll(outerRoot, 0o755); err != nil {
+		t.Fatalf("mkdir outer repo: %v", err)
+	}
+	createTestRepoAt(t, outerRoot)
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     outerRoot,
+		AgentName:   "Nested Checkout Agent",
+		TaskID:      "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// The checkout must still succeed normally — the fix only changes where
+	// it lands, not whether it works.
+	if _, err := os.Stat(result.Path); err != nil {
+		t.Fatalf("worktree path does not exist: %v", err)
+	}
+
+	if strings.HasPrefix(result.Path, outerRoot+string(filepath.Separator)) {
+		t.Fatalf("checkout landed inside enclosing repo working tree: %s is under %s", result.Path, outerRoot)
+	}
+	if got, want := filepath.Dir(result.Path), filepath.Dir(outerRoot); got != want {
+		t.Fatalf("checkout parent dir = %s, want sibling of outer repo (%s)", got, want)
+	}
+}

@@ -563,7 +563,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
-	worktreePath := filepath.Join(params.WorkDir, dirName)
+	worktreePath := filepath.Join(resolveCheckoutWorkDir(params.WorkDir), dirName)
 
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
@@ -1349,6 +1349,30 @@ func excludeFromGit(worktreePath, pattern string) error {
 		return fmt.Errorf("write exclude pattern: %w", err)
 	}
 	return nil
+}
+
+// resolveCheckoutWorkDir returns the directory a new checkout's dirName
+// should be joined onto. If workDir sits inside (or IS the root of) an
+// existing git working tree — e.g. a local_directory task bound to an
+// existing repo, or an agent that cd'd into a sibling repo already checked
+// out under this task's workdir — joining a second repo's directory name
+// under it would nest that repo's tracked files inside the first repo's
+// working tree (HEL-377: a nested Payload CMS checkout's payload-types.ts
+// merged into the host repo's module augmentations via its tsconfig **/*.ts
+// glob, breaking every collection slug). Redirect to a sibling of the
+// enclosing repo's root instead, so two repos never share one working tree.
+// If workDir isn't inside any git working tree (the common case — a fresh
+// task workdir), it is returned unchanged.
+func resolveCheckoutWorkDir(workDir string) string {
+	out, err := runGitOutput("-C", workDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return workDir
+	}
+	toplevel := strings.TrimSpace(string(out))
+	if toplevel == "" {
+		return workDir
+	}
+	return filepath.Dir(toplevel)
 }
 
 // repoNameFromURL extracts a short directory name from a git remote URL.
