@@ -209,17 +209,17 @@ func TestPrepareCloudWorkdirReportsNoSidecarPaths(t *testing.T) {
 	}
 }
 
-// The runtime brief must not be written into a repository's tracked AGENTS.md
-// on the in_place path for a runtime that can receive it inline. This asserts
-// the execenv half of that contract: nothing writes the file unless asked.
-func TestBuildRuntimeBriefDoesNotTouchTheRepository(t *testing.T) {
+// Codex receives the runtime brief through app-server thread/inject_items on
+// the in-place path. Building that inline payload must leave the repository's
+// tracked AGENTS.md byte-exact throughout the task (GitHub #7879).
+func TestBuildCodexRuntimeBriefDoesNotTouchTrackedAgentsFile(t *testing.T) {
 	repo := newTestRepo(t)
 	agentsMD := filepath.Join(repo, "AGENTS.md")
 	writeFile(t, agentsMD, "# Project rules\n\nUse tabs.\n")
 	gitRun(t, repo, "add", "AGENTS.md")
 	gitRun(t, repo, "commit", "-m", "add agents.md")
 
-	brief := BuildRuntimeBrief("grok", TaskContextForEnv{
+	brief := BuildRuntimeBrief("codex", TaskContextForEnv{
 		IssueID: "11111111-2222-3333-4444-555555555555",
 		AgentID: "99999999-8888-7777-6666-555555555555",
 	})
@@ -228,5 +228,12 @@ func TestBuildRuntimeBriefDoesNotTouchTheRepository(t *testing.T) {
 	}
 	if status := gitRun(t, repo, "status", "--porcelain"); status != "" {
 		t.Errorf("building the brief modified the repository:\n%s", status)
+	}
+	got, err := os.ReadFile(agentsMD)
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	if want := "# Project rules\n\nUse tabs.\n"; string(got) != want {
+		t.Errorf("AGENTS.md changed while building inline brief\nwant: %q\n got: %q", want, got)
 	}
 }

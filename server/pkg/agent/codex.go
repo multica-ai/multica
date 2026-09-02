@@ -1446,6 +1446,36 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		} else {
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
+		if err := c.injectSystemPrompt(runCtx, threadID, opts.SystemPrompt); err != nil {
+			var handshakeErr *codexHandshakeTimeoutError
+			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/inject_items"
+			if timedOut {
+				signalProcessGroup(cmd, syscall.SIGKILL)
+			}
+			drainAndWait()
+			finalStatus = "failed"
+			finalError = "codex runtime brief injection failed"
+			if timedOut {
+				finalError = fmt.Sprintf("%s: %v", finalError, err)
+			} else {
+				var rpcErr *codexRPCError
+				if errors.As(err, &rpcErr) {
+					finalError = fmt.Sprintf("%s (code=%d)", finalError, rpcErr.Code)
+				}
+			}
+			// The rejected request contains the full runtime brief. Do not persist
+			// the provider's error message or stderr here: either may echo that
+			// arbitrary user/project content, which pattern redaction cannot prove
+			// safe. The method and JSON-RPC code are enough to diagnose protocol
+			// compatibility without leaking instructions.
+			b.cfg.Logger.Warn("codex runtime brief injection failed",
+				"method", "thread/inject_items",
+				"code", codexRPCErrorCode(err),
+				"timed_out", timedOut,
+			)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
 
 		// 3. Send turn and wait for completion. When a resume was expected but we
 		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
@@ -1786,6 +1816,31 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 	return []map[string]any{{"type": "text", "text": text}}
 }
 
+// injectSystemPrompt appends Multica's runtime brief to the loaded thread as a
+// developer-role Responses API item. This is additive: unlike thread/start or
+// thread/resume developerInstructions, it does not replace developer
+// instructions loaded from the user's effective Codex config. Appending after
+// a resume also makes a changed brief visible on that run's first turn instead
+// of relying on the currently stale resume override path.
+func (c *codexClient) injectSystemPrompt(ctx context.Context, threadID, systemPrompt string) error {
+	if systemPrompt == "" {
+		return nil
+	}
+	_, err := c.request(ctx, "thread/inject_items", map[string]any{
+		"threadId": threadID,
+		"items": []map[string]any{
+			{
+				"type": "message",
+				"role": "developer",
+				"content": []map[string]any{
+					{"type": "input_text", "text": systemPrompt},
+				},
+			},
+		},
+	})
+	return err
+}
+
 // startOrResumeThread picks between Codex's thread/resume and thread/start
 // based on opts.ResumeSessionID. When a prior thread ID is provided it first
 // tries thread/resume; recoverable protocol errors (unknown thread, schema
@@ -1798,8 +1853,9 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
-		// developerInstructions stays nil for the reason given on thread/start
-		// below.
+		// developerInstructions stays nil so the effective Codex config remains
+		// authoritative. An in-place runtime brief is appended after resume by
+		// injectSystemPrompt instead (GitHub #7879).
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
@@ -1828,12 +1884,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
-	// developerInstructions is always nil: a thread started with this cwd loads
-	// the per-task AGENTS.md the daemon wrote there, so the runtime brief is
-	// already in context and inlining it would duplicate it on every turn.
-	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
-	// app-server (thread/start -> turn/start) with developerInstructions unset
-	// (MUL-5392).
+	// Keep developerInstructions nil even when SystemPrompt is populated. Codex
+	// treats a non-nil value as an override of developer_instructions from the
+	// effective user/project config rather than an additive instruction. The
+	// in-place brief is appended after start by injectSystemPrompt instead.
+	// Ordinary file-based discovery was confirmed end-to-end against codex-cli
+	// 0.144.6 driving the real app-server (MUL-5392).
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -2273,6 +2329,24 @@ type rpcResult struct {
 	err    error
 }
 
+type codexRPCError struct {
+	Method  string
+	Code    int
+	Message string
+}
+
+func (e *codexRPCError) Error() string {
+	return fmt.Sprintf("%s: %s (code=%d)", e.Method, e.Message, e.Code)
+}
+
+func codexRPCErrorCode(err error) int {
+	var rpcErr *codexRPCError
+	if errors.As(err, &rpcErr) {
+		return rpcErr.Code
+	}
+	return 0
+}
+
 type codexHandshakeTimeoutError struct {
 	Method  string
 	Timeout time.Duration
@@ -2288,7 +2362,7 @@ func (e *codexHandshakeTimeoutError) Unwrap() error {
 
 func isCodexHandshakeRPC(method string) bool {
 	switch method {
-	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+	case "initialize", "thread/start", "thread/resume", "thread/inject_items", "thread/name/set", "turn/start":
 		return true
 	default:
 		return false
@@ -2544,7 +2618,7 @@ func (c *codexClient) handleResponse(raw map[string]json.RawMessage) {
 			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(errData, &rpcErr)
-		pr.ch <- rpcResult{err: fmt.Errorf("%s: %s (code=%d)", pr.method, rpcErr.Message, rpcErr.Code)}
+		pr.ch <- rpcResult{err: &codexRPCError{Method: pr.method, Message: rpcErr.Message, Code: rpcErr.Code}}
 	} else {
 		pr.ch <- rpcResult{result: raw["result"]}
 	}

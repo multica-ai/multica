@@ -1926,13 +1926,13 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 }
 
 // codexRuntimeBriefCanary stands in for the Multica runtime brief the daemon
-// would inline if developerInstructions were ever wired back up.
+// sends inline for an in-place local_directory task.
 const codexRuntimeBriefCanary = "MULTICA-RUNTIME-BRIEF-CANARY"
 
-// assertNoDeveloperInstructions pins the MUL-5392 contract: Codex loads the
-// per-task AGENTS.md from the thread's cwd, so the daemon never inlines the
-// runtime brief here. The field must still be sent — the app-server treats a
-// missing key differently from an explicit null — but always as null.
+// assertNoDeveloperInstructions pins both instruction contracts: ordinary
+// tasks load AGENTS.md, while in-place tasks append the Multica brief with
+// thread/inject_items. Neither path may replace developer_instructions loaded
+// from the user's effective Codex config.
 func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
 	t.Helper()
 	got, ok := params["developerInstructions"]
@@ -1941,11 +1941,37 @@ func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
 		return
 	}
 	if got != nil {
-		t.Errorf("developerInstructions = %v, want null: the runtime brief is delivered via the workdir AGENTS.md, not inline (MUL-5392)", got)
+		t.Errorf("developerInstructions = %v, want null: non-null overrides the user's effective Codex config", got)
 	}
 }
 
-func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
+func assertInjectedDeveloperBrief(t *testing.T, params map[string]any) {
+	t.Helper()
+	if got := params["threadId"]; got != "thr_fresh" && got != "thr_prior" && got != "thr_new" && got != "thr-inline" {
+		t.Errorf("threadId = %v, want scripted thread", got)
+	}
+	items, ok := params["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("items = %#v, want one item", params["items"])
+	}
+	item, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("item = %#v, want object", items[0])
+	}
+	if item["type"] != "message" || item["role"] != "developer" {
+		t.Errorf("item envelope = %#v, want developer message", item)
+	}
+	content, ok := item["content"].([]any)
+	if !ok || len(content) != 1 {
+		t.Fatalf("content = %#v, want one item", item["content"])
+	}
+	textItem, ok := content[0].(map[string]any)
+	if !ok || textItem["type"] != "input_text" || textItem["text"] != codexRuntimeBriefCanary {
+		t.Errorf("content item = %#v, want runtime brief input_text", content[0])
+	}
+}
+
+func TestCodexThreadStartLeavesDeveloperInstructionsNullByDefault(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
@@ -1959,7 +1985,29 @@ func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
 	})
 	defer wait()
 
-	// SystemPrompt is set deliberately; it must not reach the app-server.
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work"},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+func TestCodexThreadStartKeepsDeveloperInstructionsNullWithSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
 	if _, _, err := c.startOrResumeThread(
 		context.Background(),
 		ExecOptions{Cwd: "/work", SystemPrompt: codexRuntimeBriefCanary},
@@ -1969,7 +2017,7 @@ func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
+func TestCodexThreadResumeKeepsDeveloperInstructionsNullWithSystemPrompt(t *testing.T) {
 	t.Parallel()
 
 	c, fs, _ := newTestCodexClient(t)
@@ -1983,10 +2031,32 @@ func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
 	})
 	defer wait()
 
-	// SystemPrompt is set deliberately; it must not reach the app-server.
 	if _, _, err := c.startOrResumeThread(
 		context.Background(),
 		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", SystemPrompt: codexRuntimeBriefCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+func TestCodexThreadResumeLeavesDeveloperInstructionsNullByDefault(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/resume",
+			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior"},
 		slog.Default(),
 	); err != nil {
 		t.Fatalf("startOrResumeThread: %v", err)
@@ -2024,6 +2094,169 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 	if resumed {
 		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+func TestCodexResumeFallbackKeepsDeveloperInstructionsNull(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/resume",
+			errMsg:   "unknown thread",
+			errCode:  -32602,
+			assertFn: assertNoDeveloperInstructions,
+		},
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_new"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	threadID, resumed, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{
+			Cwd:             "/work",
+			ResumeSessionID: "thr_stale",
+			SystemPrompt:    codexRuntimeBriefCanary,
+		},
+		slog.Default(),
+	)
+	if err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+	if threadID != "thr_new" {
+		t.Errorf("threadID = %q, want thr_new", threadID)
+	}
+	if resumed {
+		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+func TestCodexInjectSystemPromptAppendsDeveloperHistory(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/inject_items",
+			result:   json.RawMessage(`{}`),
+			assertFn: assertInjectedDeveloperBrief,
+		},
+	})
+	defer wait()
+
+	if err := c.injectSystemPrompt(context.Background(), "thr_fresh", codexRuntimeBriefCanary); err != nil {
+		t.Fatalf("injectSystemPrompt: %v", err)
+	}
+}
+
+func TestCodexInjectSystemPromptEmptyIsNoOp(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+	if err := c.injectSystemPrompt(context.Background(), "thr_fresh", ""); err != nil {
+		t.Fatalf("injectSystemPrompt: %v", err)
+	}
+	if lines := fs.Lines(); len(lines) != 0 {
+		t.Fatalf("empty prompt emitted RPCs: %v", lines)
+	}
+}
+
+func TestCodexExecuteInjectsBriefBetweenThreadStartAndFirstTurn(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line; printf '%s\n' "$line" > "$DIR/thread-start.json"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-inline"}}}'`+"\n"+
+		`read line; printf '%s\n' "$line" > "$DIR/inject.json"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`read line; printf '%s\n' "$line" > "$DIR/turn-start.json"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":4,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-inline","turn":{"id":"turn-inline","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		SystemPrompt:              codexRuntimeBriefCanary,
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          time.Second,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("result = %+v", result)
+	}
+
+	readRequest := func(name string) (string, map[string]any) {
+		t.Helper()
+		data, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var request struct {
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Fatalf("decode %s: %v", name, err)
+		}
+		return request.Method, request.Params
+	}
+
+	method, startParams := readRequest("thread-start.json")
+	if method != "thread/start" {
+		t.Fatalf("first captured method = %q, want thread/start", method)
+	}
+	assertNoDeveloperInstructions(t, startParams)
+
+	method, injectParams := readRequest("inject.json")
+	if method != "thread/inject_items" {
+		t.Fatalf("second captured method = %q, want thread/inject_items", method)
+	}
+	assertInjectedDeveloperBrief(t, injectParams)
+
+	method, _ = readRequest("turn-start.json")
+	if method != "turn/start" {
+		t.Fatalf("third captured method = %q, want turn/start", method)
+	}
+}
+
+func TestCodexExecuteInjectionFailureDoesNotPersistBrief(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-inline"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '`+codexRuntimeBriefCanary+`' >&2`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"error":{"code":-32600,"message":"rejected `+codexRuntimeBriefCanary+`"}}'`+"\n")
+
+	var logs bytes.Buffer
+	result, _ := executeFakeCodexCollectingMessagesWithConfig(
+		t,
+		fakePath,
+		Config{Logger: slog.New(slog.NewJSONHandler(&logs, nil))},
+		ExecOptions{SystemPrompt: codexRuntimeBriefCanary, Timeout: 5 * time.Second},
+		10*time.Second,
+	)
+	if result.Status != "failed" || !strings.Contains(result.Error, "code=-32600") {
+		t.Fatalf("result = %+v", result)
+	}
+	if combined := result.Error + "\n" + logs.String(); strings.Contains(combined, codexRuntimeBriefCanary) {
+		t.Fatalf("runtime brief leaked into persisted diagnostics: %s", combined)
 	}
 }
 
@@ -2420,6 +2653,19 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 				`read line` + "\n" +
 				`read line` + "\n",
 			opts: ExecOptions{ResumeSessionID: "thr-prior"},
+		},
+		{
+			name:   "runtime brief injection",
+			method: "thread/inject_items",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+			opts: ExecOptions{SystemPrompt: codexRuntimeBriefCanary},
 		},
 		{
 			name:   "turn start",

@@ -736,47 +736,53 @@ func TestProviderSupportsInlineSystemPrompt(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		provider string
-		want     bool
+		provider     string
+		codexVersion string
+		want         bool
 	}{
 		// Backends that forward SystemPrompt into the turn.
-		{"grok", true},
-		{"kimi", true},
-		{"kiro", true},
-		{"openclaw", true},
-		{"qoder", true},
-		{"qoderclicn", true},
-		{"qwenpaw", true},
-		{"traecli", true},
-		{"codebuddy", true},
+		{"grok", "", true},
+		{"kimi", "", true},
+		{"kiro", "", true},
+		{"openclaw", "", true},
+		{"qoder", "", true},
+		{"qoderclicn", "", true},
+		{"qwenpaw", "", true},
+		{"traecli", "", true},
+		{"codebuddy", "", true},
+		// Codex uses additive thread/inject_items, available since v0.121.0.
+		{"codex", "codex-cli 0.121.0", true},
+		{"codex", "0.151.0-alpha.7.2", true},
+		{"codex", "0.120.0", false},
+		{"codex", "", false},
 		// Backends that documentedly drop it — these must keep getting the
 		// brief as a file, pollution or not, because inline delivery would
 		// silently deliver nothing.
-		{"claude", false},
-		{"pi", false},
-		{"opencode", false},
-		{"deveco", false},
-		{"hermes", false},
-		{"codex", false},
-		{"copilot", false},
-		{"cursor", false},
-		{"antigravity", false},
-		{"dsh", false},
-		{"reasonix", false},
-		{"qwen", false},
+		{"claude", "", false},
+		{"pi", "", false},
+		{"opencode", "", false},
+		{"deveco", "", false},
+		{"hermes", "", false},
+		{"copilot", "", false},
+		{"cursor", "", false},
+		{"antigravity", "", false},
+		{"dsh", "", false},
+		{"reasonix", "", false},
+		{"qwen", "", false},
 		// Built-in runtime identities inherit from their protocol family;
 		// omp is a pi fork, and pi drops the field.
-		{"omp", false},
+		{"omp", "", false},
 		// Unknown providers must never be assumed capable.
-		{"", false},
-		{"not-a-runtime", false},
+		{"", "", false},
+		{"not-a-runtime", "", false},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.provider, func(t *testing.T) {
+		name := tc.provider + "_" + tc.codexVersion
+		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if got := providerSupportsInlineSystemPrompt(tc.provider); got != tc.want {
-				t.Fatalf("providerSupportsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			if got := providerSupportsInlineSystemPrompt(tc.provider, tc.codexVersion); got != tc.want {
+				t.Fatalf("providerSupportsInlineSystemPrompt(%q, %q) = %v, want %v", tc.provider, tc.codexVersion, got, tc.want)
 			}
 		})
 	}
@@ -792,9 +798,99 @@ func TestProvidersNeedingInlineAlsoSupportIt(t *testing.T) {
 		if !providerNeedsInlineSystemPrompt(provider) {
 			t.Fatalf("test list is stale: %q no longer needs inline delivery", provider)
 		}
-		if !providerSupportsInlineSystemPrompt(provider) {
+		if !providerSupportsInlineSystemPrompt(provider, "") {
 			t.Errorf("%q needs the brief inline but is not listed as supporting it", provider)
 		}
+	}
+}
+
+// This exercises the same delivery function runTask calls, rather than
+// manually rebuilding its intended branch from lower-level execenv helpers.
+// If Codex is removed from the allowlist or regresses below the additive
+// protocol floor, the helper writes AGENTS.md and this test fails on bytes.
+func TestPrepareRuntimeBriefDeliveryKeepsInPlaceCodexAgentsFileExact(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	repo := createDaemonTestRepo(t)
+	agentsPath := filepath.Join(repo, "AGENTS.md")
+	const projectInstructions = "# Project rules\n\nUse tabs.\n"
+	if err := os.WriteFile(agentsPath, []byte(projectInstructions), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runGit := func(extraEnv map[string]string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = os.Environ()
+		for key, value := range extraEnv {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	runGit(map[string]string{}, "add", "AGENTS.md")
+	runGit(map[string]string{
+		"GIT_AUTHOR_NAME":     "test",
+		"GIT_AUTHOR_EMAIL":    "test@test.com",
+		"GIT_COMMITTER_NAME":  "test",
+		"GIT_COMMITTER_EMAIL": "test@test.com",
+	}, "commit", "-m", "add project instructions")
+
+	taskCtx := execenv.TaskContextForEnv{
+		IssueID: "11111111-2222-3333-4444-555555555555",
+		AgentID: "99999999-8888-7777-6666-555555555555",
+	}
+	env, err := execenv.Prepare(execenv.PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-gh7879-001",
+		TaskID:         "78790000-1111-2222-3333-444444444444",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		CodexVersion:   minCodexThreadInjectItemsVersion,
+		LocalWorkDir:   repo,
+		Task:           taskCtx,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+
+	delivery := prepareRuntimeBriefDelivery(
+		env,
+		"codex",
+		minCodexThreadInjectItemsVersion,
+		taskCtx,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
+	if !delivery.inline {
+		t.Fatal("Codex v0.121.0 delivery was not inline")
+	}
+	if strings.TrimSpace(delivery.brief) == "" {
+		t.Fatal("inline runtime brief is empty")
+	}
+
+	protection, err := execenv.PrepareGitExcludes(env.RootDir, env.WorkDir, delivery.gitExcludePaths)
+	if err != nil {
+		t.Fatalf("PrepareGitExcludes: %v", err)
+	}
+	if err := protection.Verify(protection.Env); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if status := runGit(protection.Env, "status", "--porcelain"); status != "" {
+		t.Errorf("Codex sees a dirty repository before starting work:\n%s", status)
+	}
+	runGit(protection.Env, "add", "-A")
+	if staged := runGit(protection.Env, "diff", "--cached", "--name-only"); staged != "" {
+		t.Errorf("Codex staged runtime-owned files:\n%s", staged)
+	}
+
+	got, err := os.ReadFile(agentsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != projectInstructions {
+		t.Fatalf("tracked AGENTS.md changed during delivery\nwant: %q\n got: %q", projectInstructions, got)
 	}
 }
 

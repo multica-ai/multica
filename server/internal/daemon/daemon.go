@@ -5626,20 +5626,26 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // flow can choose the delivery that does not write into the user's repository
 // (GitHub #7114).
 //
-// Membership is a property of this repository's backend code, not of the
-// vendor CLI, so it is verifiable by reading it: each provider below prepends
-// SystemPrompt to the prompt it sends (or passes it as --append-system-prompt)
-// whenever the field is non-empty — see grok.go, kimi.go, kiro.go, qoder.go,
-// qwenpaw.go, traecli.go, openclaw.go and codebuddy.go. Everything else is
-// absent deliberately: claude, pi, opencode, deveco and hermes each document
-// at their own call site why they drop the field, and a backend that ignored
-// it would leave the agent with no brief at all — which is why the default is
-// false and a new runtime has to opt in consciously.
-func providerSupportsInlineSystemPrompt(provider string) bool {
+// Membership is a property of this repository's backend code and, for Codex,
+// the installed protocol version. Each provider below consumes a non-empty
+// SystemPrompt through a verified instruction channel. Everything else is
+// absent deliberately: a backend that ignored it would leave the agent with no
+// brief at all, so the default is false and a new runtime has to opt in
+// consciously.
+const minCodexThreadInjectItemsVersion = "0.121.0"
+
+func providerSupportsInlineSystemPrompt(provider, codexVersion string) bool {
 	// Built-in runtime identities inherit their delivery from the protocol
 	// family they run on, the same resolution runtimeConfigPath does.
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
-		return providerSupportsInlineSystemPrompt(desc.ProtocolFamily)
+		return providerSupportsInlineSystemPrompt(desc.ProtocolFamily, codexVersion)
+	}
+	if provider == "codex" {
+		// thread/inject_items first appears in the v0.121.0 app-server
+		// protocol. Unknown and older versions keep file delivery: temporary
+		// repository pollution is preferable to silently dropping the brief or
+		// replacing the user's own developer_instructions.
+		return agent.CheckMinCLIVersionFor(codexVersion, minCodexThreadInjectItemsVersion) == nil
 	}
 	switch provider {
 	case "codebuddy", "grok", "kimi", "kiro", "openclaw", "qoder", "qoderclicn", "qwenpaw", "traecli":
@@ -5647,6 +5653,41 @@ func providerSupportsInlineSystemPrompt(provider string) bool {
 	default:
 		return false
 	}
+}
+
+type runtimeBriefDelivery struct {
+	brief           string
+	inline          bool
+	gitExcludePaths []string
+}
+
+// prepareRuntimeBriefDelivery is the production decision boundary between a
+// repository context file and an additive backend-native instruction. Keeping
+// the side effect and the allowlist decision together gives regression tests a
+// way to prove that Codex's in-place path never writes tracked AGENTS.md.
+func prepareRuntimeBriefDelivery(env *execenv.Environment, provider, codexVersion string, taskCtx execenv.TaskContextForEnv, logger *slog.Logger) runtimeBriefDelivery {
+	delivery := runtimeBriefDelivery{
+		inline:          env.LocalDirectory && providerSupportsInlineSystemPrompt(provider, codexVersion),
+		gitExcludePaths: env.SidecarPaths,
+	}
+	if delivery.inline {
+		delivery.brief = execenv.BuildRuntimeBrief(provider, taskCtx)
+		logger.Debug("execenv: delivering runtime brief inline; leaving the repository's runtime config file untouched",
+			"provider", provider, "work_dir", env.WorkDir)
+		return delivery
+	}
+
+	brief, created, err := execenv.InjectRuntimeConfigCreated(env.WorkDir, provider, taskCtx)
+	if err != nil {
+		logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
+	}
+	delivery.brief = brief
+	if created && env.LocalDirectory {
+		if path := execenv.RuntimeConfigPath(env.WorkDir, provider); path != "" {
+			delivery.gitExcludePaths = append(append([]string(nil), delivery.gitExcludePaths...), path)
+		}
+	}
+	return delivery
 }
 
 // gateResumeToReusedWorkdir clears the task's prior session unless this run
@@ -6761,29 +6802,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// agent runs mid-task commits it, which CleanupRuntimeConfig cannot undo
 	// after the fact (GitHub #7114). When the runtime can take the brief
 	// inline instead, take that route and leave the file untouched.
-	inlineBrief := env.LocalDirectory && providerSupportsInlineSystemPrompt(provider)
-	var runtimeBrief string
-	gitExcludePaths := env.SidecarPaths
-	if inlineBrief {
-		runtimeBrief = execenv.BuildRuntimeBrief(provider, taskCtx)
-		taskLog.Debug("execenv: delivering runtime brief inline; leaving the repository's runtime config file untouched",
-			"provider", provider, "work_dir", env.WorkDir)
-	} else {
-		brief, created, briefErr := execenv.InjectRuntimeConfigCreated(env.WorkDir, provider, taskCtx)
-		if briefErr != nil {
-			d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", briefErr)
-		}
-		runtimeBrief = brief
-		// A config file WE created is an untracked new file in the user's
-		// repo, so it can be hidden from git alongside the sidecars. One that
-		// pre-existed is the user's own (usually tracked) and no ignore rule
-		// applies to it — only the marker block inside it is ours.
-		if created && env.LocalDirectory {
-			if path := execenv.RuntimeConfigPath(env.WorkDir, provider); path != "" {
-				gitExcludePaths = append(append([]string(nil), gitExcludePaths...), path)
-			}
-		}
-	}
+	delivery := prepareRuntimeBriefDelivery(env, provider, codexVersion, taskCtx, taskLog)
+	inlineBrief := delivery.inline
+	runtimeBrief := delivery.brief
+	gitExcludePaths := delivery.gitExcludePaths
 
 	// Keep the runtime's own files out of the git view the AGENT sees for the
 	// length of the run, so it cannot sweep them into a commit in the user's
