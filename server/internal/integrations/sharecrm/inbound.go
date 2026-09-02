@@ -34,8 +34,17 @@ type botSender struct {
 }
 
 type botTextMessage struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
+	Type    string         `json:"type"`
+	Content string         `json:"content"`
+	Images  []botImageRef  `json:"images"`
+}
+
+type botImageRef struct {
+	URL      string `json:"url"`
+	Filename string `json:"filename"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	Size     int64  `json:"size"`
 }
 
 type historyMsg struct {
@@ -49,12 +58,13 @@ type historyMsg struct {
 
 // sharecrmRawEvent carries platform-only fields in InboundMessage.Raw.
 type sharecrmRawEvent struct {
-	AppID          string       `json:"app_id"`
-	BotFullID      string       `json:"bot_full_id,omitempty"`
-	SessionID      string       `json:"session_id,omitempty"`
-	ReplyMessageID *int64       `json:"reply_message_id,omitempty"`
-	History        []historyMsg `json:"history_messages,omitempty"`
-	EA             string       `json:"ea,omitempty"`
+	AppID          string        `json:"app_id"`
+	BotFullID      string        `json:"bot_full_id,omitempty"`
+	SessionID      string        `json:"session_id,omitempty"`
+	ReplyMessageID *int64        `json:"reply_message_id,omitempty"`
+	History        []historyMsg  `json:"history_messages,omitempty"`
+	EA             string        `json:"ea,omitempty"`
+	Images         []botImageRef `json:"images,omitempty"`
 }
 
 // inboundFromEvent normalizes a Gateway message into channel.InboundMessage.
@@ -77,13 +87,16 @@ func inboundFromEvent(data *botMessageData, appID, botFullID string) (channel.In
 		chatType = channel.ChatTypeGroup
 	}
 
-	text := strings.TrimSpace(data.Text)
+	caption := strings.TrimSpace(data.Text)
 	if data.Message != nil && strings.TrimSpace(data.Message.Content) != "" {
-		text = strings.TrimSpace(data.Message.Content)
+		caption = strings.TrimSpace(data.Message.Content)
 	}
+	imageMarkdown := collectInboundImageMarkdown(data)
+	text := joinNonEmpty("\n", caption, imageMarkdown)
 	// Strip a leading @bot mention leftover in group text (OpenClaw parity).
 	if chatType == channel.ChatTypeGroup {
-		text = stripLeadingMention(text, firstNonEmpty(data.BotFullID, botFullID))
+		stripped := stripLeadingMention(caption, firstNonEmpty(data.BotFullID, botFullID))
+		text = joinNonEmpty("\n", stripped, imageMarkdown)
 	}
 
 	msgID := strings.TrimSpace(data.MessageID)
@@ -94,16 +107,21 @@ func inboundFromEvent(data *botMessageData, appID, botFullID string) (channel.In
 		ReplyMessageID: data.ReplyMessageID,
 		History:        data.HistoryMessages,
 		EA:             data.EA,
+		Images:         collectInboundImages(data),
 	}
 	rawJSON, _ := json.Marshal(raw)
 
+	msgType := channel.MsgTypeText
+	if data.Message != nil && strings.EqualFold(strings.TrimSpace(data.Message.Type), "image") && caption == "" {
+		msgType = channel.MsgTypeImage
+	}
 	msg := channel.InboundMessage{
 		EventID:        msgID,
 		MessageID:      msgID,
 		AddressedToBot: true,
-		Type:           channel.MsgTypeText,
+		Type:           msgType,
 		Text:           text,
-		CommandText:    text,
+		CommandText:    caption,
 		Source: channel.Source{
 			ChannelType: TypeShareCRM,
 			ChatID:      data.ChatID,
@@ -161,6 +179,54 @@ func stripLeadingMention(text, botFullID string) string {
 		}
 	}
 	return normalized
+}
+
+func collectInboundImages(data *botMessageData) []botImageRef {
+	if data == nil || data.Message == nil {
+		return nil
+	}
+	var out []botImageRef
+	for _, image := range data.Message.Images {
+		url := strings.TrimSpace(image.URL)
+		if url == "" {
+			continue
+		}
+		name := strings.TrimSpace(image.Filename)
+		if name == "" {
+			name = "image"
+		}
+		out = append(out, botImageRef{
+			URL:      url,
+			Filename: name,
+			Width:    image.Width,
+			Height:   image.Height,
+			Size:     image.Size,
+		})
+	}
+	return out
+}
+
+func collectInboundImageMarkdown(data *botMessageData) string {
+	images := collectInboundImages(data)
+	if len(images) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(images))
+	for _, image := range images {
+		parts = append(parts, "!["+image.Filename+"]")
+	}
+	return strings.Join(parts, "\n")
+}
+
+func joinNonEmpty(sep string, parts ...string) string {
+	var out []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, sep)
 }
 
 func firstNonEmpty(vals ...string) string {

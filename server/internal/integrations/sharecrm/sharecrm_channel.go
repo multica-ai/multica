@@ -31,7 +31,7 @@ type sharecrmChannel struct {
 func (c *sharecrmChannel) Type() channel.Type { return TypeShareCRM }
 
 func (c *sharecrmChannel) Capabilities() channel.Capability {
-	return channel.CapText
+	return channel.CapText | channel.CapAttachment
 }
 
 func (c *sharecrmChannel) Disconnect(ctx context.Context) error {

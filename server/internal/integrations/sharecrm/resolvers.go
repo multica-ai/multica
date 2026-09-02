@@ -18,7 +18,7 @@ import (
 const originShareCRMChat = "sharecrm_chat"
 
 // NewShareCRMResolverSet assembles the ResolverSet over generic channel_* queries.
-func NewShareCRMResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, ack *ackNotifier) engine.ResolverSet {
+func NewShareCRMResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, ack *ackNotifier, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -30,6 +30,7 @@ func NewShareCRMResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 		})},
 		Audit:      &auditor{q: q},
 		Replier:    replier,
+		Media:      media,
 		OriginType: originShareCRMChat,
 	}
 	if ack != nil {
