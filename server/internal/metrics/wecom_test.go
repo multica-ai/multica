@@ -35,6 +35,8 @@ func TestEveryWecomCounterActuallyCounts(t *testing.T) {
 	m.RecordAuthFailure()
 	m.RecordCallbackQueued()
 	m.RecordCallbackQueueBlocked()
+	m.RecordStreamFinished()
+	m.RecordStreamFellBack()
 
 	seen := gatherWecomValues(t, reg)
 	for _, want := range []string{
@@ -42,6 +44,8 @@ func TestEveryWecomCounterActuallyCounts(t *testing.T) {
 		"multica_wecom_auth_failures_total",
 		"multica_wecom_inbound_callbacks_total",
 		"multica_wecom_inbound_queue_blocked_total",
+		"multica_wecom_stream_finished_total",
+		"multica_wecom_stream_fell_back_total",
 	} {
 		if seen[want] != 1 {
 			t.Errorf("%s = %v, want 1 — the counter is wired to nothing", want, seen[want])
@@ -93,6 +97,8 @@ func TestWecomMetricsCarryNoUnboundedLabels(t *testing.T) {
 	m.RecordAuthFailure()
 	m.RecordCallbackQueued()
 	m.RecordCallbackQueueBlocked()
+	m.RecordStreamFinished()
+	m.RecordStreamFellBack()
 
 	families, err := reg.Gather()
 	if err != nil {

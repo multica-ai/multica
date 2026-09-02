@@ -10,10 +10,16 @@ package wecom
 // wrong behaviour for the operator behind it — nothing on a dashboard changes
 // when a bot has been unable to connect for an hour.
 //
+// The same is true one layer up, of the one feature that answers a user
+// without the user being able to tell whether it worked: a bubble that refused
+// its closing frame still delivers the answer, as a new message. That reads as
+// a quiet afternoon from outside.
+//
 // The counters here are chosen for what somebody would page on rather than for
 // completeness: the connection is not coming up, and if so whether that needs a
-// person or just time; and the read loop is being made to wait by an ingest
-// worker that cannot keep up.
+// person or just time; the read loop is being made to wait by an ingest worker
+// that cannot keep up; and the bubble has stopped doing the thing it exists to
+// do.
 //
 // No installation id anywhere. It is an unbounded identifier and the metrics
 // package rejects that class of label outright (forbiddenMetricLabels in
@@ -25,7 +31,8 @@ package wecom
 // operator that some bot is behind and not which one.
 
 // Metrics is the sink this adapter reports to. Every method must tolerate being
-// called concurrently, and none of them may block: they run on the read loop.
+// called concurrently, and none of them may block: they run on the read loop
+// and on the event bus.
 type Metrics interface {
 	// RecordConnectFailure — a dial, a handshake write or a handshake read
 	// that did not complete, or a handshake the server answered with a code
@@ -52,6 +59,20 @@ type Metrics interface {
 	// engine is not keeping up with one bot's traffic, and past a point
 	// WeCom stops seeing the socket drained and replaces the connection.
 	RecordCallbackQueueBlocked()
+
+	// RecordStreamFinished / FellBack — how the bubble ended. A fall-back is
+	// an ending that arrived as a new message because the bubble could not
+	// take the closing frame; the words are not lost, but the experience is
+	// the one the bubble was built to replace. The ratio between the two is
+	// the signal; the count of bubbles opened is not, so it is not collected.
+	//
+	// Both are fed from the one line in sendersRegistry.recordEnding, and they
+	// have to stay that way for the ratio to mean anything: every closer goes
+	// through it — the answer, and the failure and cancellation notices the
+	// typing indicator writes — so a ratio read off these two covers the same
+	// population on both sides.
+	RecordStreamFinished()
+	RecordStreamFellBack()
 
 	// RecordOutboundDelivered — one reply reached the user. It is the
 	// denominator: without it a flat drop counter cannot be told apart from a
@@ -121,6 +142,8 @@ func (nopMetrics) RecordConnectFailure()              {}
 func (nopMetrics) RecordAuthFailure()                 {}
 func (nopMetrics) RecordCallbackQueued()              {}
 func (nopMetrics) RecordCallbackQueueBlocked()        {}
+func (nopMetrics) RecordStreamFinished()              {}
+func (nopMetrics) RecordStreamFellBack()              {}
 func (nopMetrics) RecordOutboundDelivered()           {}
 func (nopMetrics) RecordOutboundDropped(string)       {}
 func (nopMetrics) RecordOutboundSkipped(string)       {}

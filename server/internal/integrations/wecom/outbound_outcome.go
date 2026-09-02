@@ -91,13 +91,44 @@ const (
 	// skipNothingToSay — an empty completion carrying no file. There was never
 	// a message here.
 	skipNothingToSay skipReason = "nothing_to_say"
+
+	// skipNotWecomTurn — the turn has a delivery row and it names another
+	// platform. This subscriber sees every chat:done in the deployment, so on
+	// a workspace running Slack or Lark alongside WeCom this is ordinary and
+	// frequent. Named rather than left silent because the branch next to it —
+	// no delivery row at all — is not ordinary, and one unnamed exit shared by
+	// the two makes the abnormal one invisible.
+	skipNotWecomTurn skipReason = "not_wecom_turn"
+
+	// skipNoDeliveryRow — the turn's input came in over a channel, and no
+	// channel_task_delivery row says which one. Nothing here can address a
+	// reply, so nothing is sent.
+	//
+	// The only reason this happens in a healthy deployment is an UPGRADE: a
+	// task enqueued by a build that did not write delivery rows yet, finishing
+	// under one that reads them (service/task.go writes the row inside the
+	// enqueue transaction for every channel turn, so a steady-state channel
+	// task always has one). The user is left waiting on an answer that exists
+	// in the Multica transcript, which is the shape of #7215 all over again —
+	// so this is the one skip reason a person should act on: drain the running
+	// and queued channel tasks before swapping the image, or backfill the rows
+	// for the ones still in flight.
+	//
+	// Not a DROP: with no row this adapter cannot establish the turn was ever
+	// WeCom's, and filing another platform's turn as a WeCom delivery failure
+	// would put a number an operator pages on at the mercy of Slack's traffic.
+	skipNoDeliveryRow skipReason = "no_delivery_row"
 )
 
-// actionable reports whether a reason is one a person should look at. The
-// others are ordinary in a healthy deployment and would drown the log.
 // actionable reports whether a reason is one a person should look at. Every
 // drop is, now that the two ordinary outcomes have moved to skipReason.
 func (r dropReason) actionable() bool { return true }
+
+// actionable reports whether a skip is one a person should look at. Almost
+// none are — that is what separates this set from dropReason — so the one that
+// is gets a WARN and the rest stay at DEBUG, where they can be read as a rate
+// without drowning the log.
+func (r skipReason) actionable() bool { return r == skipNoDeliveryRow }
 
 // errNoLiveConnection — no live WebSocket for this installation in this
 // process. A sentinel rather than a fresh errors.New at the call site, so
@@ -197,16 +228,26 @@ func (o *Outbound) attachmentUnconfirmed(ctx context.Context, reason string, err
 }
 
 // skipped records one completion this adapter was never going to deliver.
-// Always DEBUG: none of these is an incident, and on a workspace where people
-// use the web UI against WeCom-bound sessions this is the busiest path here.
+// DEBUG for all but one of them: none of those is an incident, and on a
+// workspace where people use the web UI against WeCom-bound sessions this is
+// the busiest path here. skipNoDeliveryRow is the exception and logs at WARN —
+// see its comment for why an upgrade is the only thing that produces it.
 func (o *Outbound) skipped(ctx context.Context, e events.Event, reason skipReason) {
 	o.skippedFor(ctx, e.ChatSessionID, reason)
 }
 
 func (o *Outbound) skippedFor(ctx context.Context, sessionID string, reason skipReason) {
 	o.mx().RecordOutboundSkipped(string(reason))
-	o.logger.DebugContext(ctx, "wecom outbound: reply not owed to WeCom",
-		"reason", string(reason), "chat_session_id", sessionID)
+	attrs := []any{"reason", string(reason), "chat_session_id", sessionID}
+	if reason.actionable() {
+		// Its own line, not the one below at a louder level: "not owed to
+		// WeCom" is what the ordinary three mean, and the actionable one is
+		// precisely the case where the reply may well have been owed and there
+		// is no longer anything that can say to whom.
+		o.logger.WarnContext(ctx, "wecom outbound: a channel turn with no route, so nothing was sent", attrs...)
+		return
+	}
+	o.logger.DebugContext(ctx, "wecom outbound: reply not owed to WeCom", attrs...)
 }
 
 // attachmentDelivered / attachmentDropped record ONE FILE. See the note on the

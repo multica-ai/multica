@@ -50,7 +50,9 @@ func newOutcomeRig(t *testing.T, q *fakeOutboundQueries, withSocket bool) *outco
 	}
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	r.o = NewOutbound(q, reg,
+	// No round store: an outcome is what happened to the words, and these
+	// cases are all about the ordinary message path.
+	r.o = NewOutbound(q, reg, nil,
 		slog.New(slog.NewTextHandler(r.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		WithOutboundMetrics(r.mx))
 	return r
@@ -158,10 +160,15 @@ func TestDeliveredIsCounted(t *testing.T) {
 // TestNonWecomSessionIsNotADrop — this subscriber sees every chat:done in the
 // deployment, including Slack's and the web UI's. Those are not this adapter's
 // to answer and must not inflate the drop rate.
+//
+// "Another platform's turn" is a delivery row naming that platform, not a
+// missing row: a channel turn always has one (service.enqueueChatTaskTx writes
+// it in the same transaction), so a MISSING row means something else entirely
+// and has its own test below.
 func TestNonWecomSessionIsNotADrop(t *testing.T) {
 	t.Parallel()
 	q := deliverableTurn(t)
-	q.sessionErr = pgx.ErrNoRows
+	q.deliveryChannelType = "slack"
 	r := newOutcomeRig(t, q, true)
 
 	r.o.handleEvent(outcomeEvent())
@@ -169,8 +176,65 @@ func TestNonWecomSessionIsNotADrop(t *testing.T) {
 	if got := r.mx.get("outbound_dropped"); got != 0 {
 		t.Errorf("dropped = %d; another platform's session is not a WeCom drop", got)
 	}
-	if r.logs.Len() != 0 {
-		t.Errorf("logged something for another platform's session:\n%s", r.logs.String())
+	if got := r.mx.get("outbound_skipped:not_wecom_turn"); got != 1 {
+		t.Errorf("skipped{not_wecom_turn} = %d, want 1. log:\n%s", got, r.logs.String())
+	}
+	if strings.Contains(r.logs.String(), "level=WARN") {
+		t.Errorf("another platform's ordinary reply logged at WARN:\n%s", r.logs.String())
+	}
+	if n := r.frames(); n != 0 {
+		t.Errorf("frames = %d; another platform's answer was pushed into WeCom", n)
+	}
+}
+
+// TestAChannelTurnWithNoRouteIsNotSilent — the upgrade window.
+//
+// A WeCom round in flight while the image is swapped comes back to a build
+// that addresses replies by channel_task_delivery, and the row does not exist:
+// the task was enqueued before anything wrote one. The bubble went with the
+// old process's memory, so the answer takes the addressed path, finds no row,
+// and there is nothing left to send it with.
+//
+// That much is unavoidable. What is not is doing it in silence. Before this,
+// the branch returned errNothingToSay with no counter and no log line, sharing
+// an exit with "this turn belongs to Slack" — so a person asked a question,
+// waited, got nothing, and the server-side evidence was an empty grep. #7215
+// is that report.
+//
+// REVERSE VERIFICATION: delete the skippedFor call from the pgx.ErrNoRows
+// branch of sendAsMessage and this test fails on both halves — the counter is
+// 0 and the log is empty. `go build` and `go vet` stay silent through that
+// deletion: the branch still compiles, still returns the same sentinel, and
+// every other test in this package still passes. Only this one notices.
+func TestAChannelTurnWithNoRouteIsNotSilent(t *testing.T) {
+	t.Parallel()
+	q := deliverableTurn(t)
+	q.sessionErr = pgx.ErrNoRows // no channel_task_delivery row for this task
+	r := newOutcomeRig(t, q, true)
+
+	r.o.handleEvent(outcomeEvent())
+
+	if got := r.mx.get("outbound_skipped:no_delivery_row"); got != 1 {
+		t.Errorf("skipped{no_delivery_row} = %d, want 1 — a channel turn nobody can address "+
+			"left no trace at all. log:\n%s", got, r.logs.String())
+	}
+	// It must not share a name with another platform's turn: the two are the
+	// same errNothingToSay from outside, and only one of them means somebody
+	// is waiting.
+	if got := r.mx.get("outbound_skipped:not_wecom_turn"); got != 0 {
+		t.Errorf("a turn with no route was filed as another platform's (%d)", got)
+	}
+	if got := r.mx.get("outbound_dropped"); got != 0 {
+		t.Errorf("dropped = %d; with no row this adapter cannot say the turn was ever WeCom's, "+
+			"and another platform's turn must not move the number an operator pages on", got)
+	}
+	out := r.logs.String()
+	if !strings.Contains(out, "reason=no_delivery_row") {
+		t.Errorf("the log does not name the reason:\n%s", out)
+	}
+	if !strings.Contains(out, "level=WARN") {
+		t.Errorf("logged below WARN — this one is not ordinary in a healthy deployment, "+
+			"and a DEBUG line is not what a person finds after an upgrade:\n%s", out)
 	}
 }
 
@@ -208,7 +272,7 @@ func TestNilMetricsSinkIsSafe(t *testing.T) {
 	instID := mustTestUUID(t)
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	o := NewOutbound(q, reg, slog.Default()) // no WithOutboundMetrics
+	o := NewOutbound(q, reg, nil, slog.Default()) // no WithOutboundMetrics
 
 	o.handleEvent(outcomeEvent()) // no socket registered: takes the drop path
 }

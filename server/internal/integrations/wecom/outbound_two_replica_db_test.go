@@ -199,7 +199,9 @@ func newReplica(t *testing.T, pool *pgxpool.Pool, instID string, holdsSocket boo
 		}
 		reg.set(pg, r.conn.autoAck(newWSSender(r.conn, nil)))
 	}
-	o := NewOutbound(db.New(pool), reg,
+	// No round store: this rig is about which replica the words leave from,
+	// not about the bubble they might have sealed.
+	o := NewOutbound(db.New(pool), reg, nil,
 		slog.New(slog.NewTextHandler(r.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		WithOutboundMetrics(r.mx))
 	o.Register(r.bus)
@@ -423,7 +425,7 @@ func newRelayReplicaWith(t *testing.T, pool *pgxpool.Pool, instID string, holdsS
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
 
-	o := NewOutbound(db.New(pool), reg, log, WithOutboundMetrics(base.mx), WithRelay(router))
+	o := NewOutbound(db.New(pool), reg, nil, log, WithOutboundMetrics(base.mx), WithRelay(router))
 	o.Register(base.bus)
 	router.Attach(o)
 	return &relayReplica{replica: base, router: router, reg: reg, instID: pg}
@@ -705,7 +707,7 @@ func TestRelay_AttemptedWriteKeepsTheClaim(t *testing.T) {
 	t.Cleanup(func() { cancel(); router.Wait() })
 	router.Start(ctx)
 	mx := newCountingMetrics()
-	router.Attach(NewOutbound(nil, reg, slog.Default(), WithOutboundMetrics(mx)))
+	router.Attach(NewOutbound(nil, reg, nil, slog.Default(), WithOutboundMetrics(mx)))
 
 	body, _ := json.Marshal(relayFrame{
 		Kind: relayKindReply, InstallationID: util.UUIDToString(instID),
@@ -734,7 +736,7 @@ func TestDeliverRelayed_ContextErrorsDoNotRelease(t *testing.T) {
 	reg := newSendersRegistry()
 	conn := &recordingConn{}
 	reg.set(instID, conn.autoAck(newWSSender(conn, nil)))
-	o := NewOutbound(nil, reg, slog.Default())
+	o := NewOutbound(nil, reg, nil, slog.Default())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already expired: sendTextCtx fails on its pre-write check
@@ -871,7 +873,7 @@ func TestRelayedInboxPushDoesNotMoveTheReplyCounters(t *testing.T) {
 	okReg := newSendersRegistry()
 	okReg.set(instID, okConn.autoAck(newWSSender(okConn, nil)))
 	okMx := newCountingMetrics()
-	ok := NewOutbound(nil, okReg, slog.Default(), WithOutboundMetrics(okMx))
+	ok := NewOutbound(nil, okReg, nil, slog.Default(), WithOutboundMetrics(okMx))
 	if got := ok.deliverRelayed(context.Background(), relayFrame{
 		Kind: relayKindInbox, InstallationID: util.UUIDToString(instID),
 		ChatID: "T-USER", ChatType: chatTypeSingleInt, Content: "you were mentioned",
@@ -890,7 +892,7 @@ func TestRelayedInboxPushDoesNotMoveTheReplyCounters(t *testing.T) {
 	badReg := newSendersRegistry()
 	badReg.set(instID, badConn.autoAck(newWSSender(badConn, nil)))
 	badMx := newCountingMetrics()
-	bad := NewOutbound(nil, badReg, slog.Default(), WithOutboundMetrics(badMx))
+	bad := NewOutbound(nil, badReg, nil, slog.Default(), WithOutboundMetrics(badMx))
 	bad.deliverRelayed(context.Background(), relayFrame{
 		Kind: relayKindInbox, InstallationID: util.UUIDToString(instID),
 		ChatID: "T-USER", ChatType: chatTypeSingleInt, Content: "you were mentioned",

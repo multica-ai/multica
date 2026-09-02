@@ -11,6 +11,36 @@ import (
 // run, short enough that the bot's first reply is not perceptibly late.
 const DefaultChatRunBatchWindow = 3 * time.Second
 
+// RunBatchID names the set of messages this debouncer collected into one agent
+// run. It is the batcher's own verdict, not an inference from it: Schedule
+// decides under the same lock that arms and retires the window, so two
+// messages share an id if and only if the same flush will answer both.
+//
+// A platform that shows a per-run affordance (WeCom paints a streaming bubble
+// the answer later replaces in place) needs exactly this and cannot re-derive
+// it. Re-measuring the gap on the ingest path answers the same question with a
+// second clock, and the two disagree near the window boundary — the run count
+// and the affordance count then differ, which is visible to the user in both
+// directions. See wecom/stream_store.go for what the id is used for.
+//
+// Ids are unique per process and never zero. Minting starts at 1 and
+// Router.scheduleRunMode mints one line above the branch that checks for a
+// debouncer, so a notifier is never handed a zero: with batching disabled each
+// message still gets a fresh id of its own, and OnIngested only fires for a
+// message that scheduled a run. The one run that never reaches this file —
+// /new, whose task is committed inside StartSession's transaction — mints its
+// id in the Router for the same reason.
+//
+// They are NOT a clock. The counter is atomic, but it is read outside the
+// batcher's lock, so a message holding 6 can reach the batcher ahead of one
+// holding 5 — "larger id" does not order two batches minted concurrently.
+// Nothing depends on it: the only comparison in the tree is wecom's
+// queuedBehind, which chooses between two strings for an answer that came back
+// empty. What an id does guarantee is identity — two messages carry the same
+// one if and only if the same flush will answer both — and that is what a
+// per-run affordance actually needs.
+type RunBatchID uint64
+
 // stoppableTimer is the slice of *time.Timer the batcher depends on, pinned to
 // an interface so tests inject a manually-fired fake. *time.Timer satisfies it.
 type stoppableTimer interface {
@@ -52,8 +82,13 @@ type pendingBatcher struct {
 
 type pendingEntry struct {
 	timer stoppableTimer
-	flush func()
+	flush func(RunBatchID)
 	gen   uint64
+	// batch names the run this entry's messages are being collected into. It
+	// is minted once, when the entry is created, and survives every re-arm —
+	// the entry lives exactly as long as the batch does, because onFire and
+	// FlushAll delete it as they hand the flush over.
+	batch RunBatchID
 }
 
 // newPendingBatcher returns a batcher with the given silence window. A
@@ -73,13 +108,23 @@ func realAfterFunc(d time.Duration, fn func()) stoppableTimer {
 	return time.AfterFunc(d, fn)
 }
 
-// Schedule (re)arms the silence window for key. The most recent flush wins:
-// only session-level information is needed to fire a run, so keeping the latest
-// closure (which captures the latest installation/message context) suffices.
-// Calling Schedule after FlushAll runs the flush inline rather than dropping it
-// (the shutdown race where a message arrives after the drain has begun).
-func (b *pendingBatcher) Schedule(key string, flush func()) {
-	b.schedule(key, flush, true)
+// Schedule (re)arms the silence window for key and reports which run batch the
+// message belongs to: the one already collecting for this key, or newBatch when
+// this message starts one. The most recent flush wins: only session-level
+// information is needed to fire a run, so keeping the latest closure (which
+// captures the latest installation/message context) suffices. Calling Schedule
+// after FlushAll runs the flush inline rather than dropping it (the shutdown
+// race where a message arrives after the drain has begun).
+//
+// The returned id is decided under the same lock that arms and retires the
+// window, which is what makes it authoritative. A message racing the timer it
+// is about to re-arm resolves one way or the other exactly once: either this
+// call wins the lock and the entry survives (fire finds a newer gen and bails,
+// so the message joins the batch already collecting), or the fire wins and the
+// entry is gone (so the message starts newBatch and a new flush answers it).
+// Both outcomes leave one batch id per flush, with no gap and no overlap.
+func (b *pendingBatcher) Schedule(key string, newBatch RunBatchID, flush func(RunBatchID)) RunBatchID {
+	return b.schedule(key, newBatch, flush, true)
 }
 
 // ScheduleIfAbsent arms key only when this process has no live window for it.
@@ -87,38 +132,45 @@ func (b *pendingBatcher) Schedule(key string, flush func()) {
 // timer must be restored, but a message on a newer generation must not reset an
 // older generation's already-running silence window or replace its sender
 // metadata.
-func (b *pendingBatcher) ScheduleIfAbsent(key string, flush func()) {
-	b.schedule(key, flush, false)
+//
+// It reports a batch id on the same terms as Schedule: the live window's id
+// when one is already collecting for key, newBatch when this call armed it.
+func (b *pendingBatcher) ScheduleIfAbsent(key string, newBatch RunBatchID, flush func(RunBatchID)) RunBatchID {
+	return b.schedule(key, newBatch, flush, false)
 }
 
-func (b *pendingBatcher) schedule(key string, flush func(), replace bool) {
+func (b *pendingBatcher) schedule(key string, newBatch RunBatchID, flush func(RunBatchID), replace bool) RunBatchID {
 	b.mu.Lock()
 	if b.stopped {
 		b.mu.Unlock()
-		flush()
-		return
+		flush(newBatch)
+		return newBatch
 	}
 	b.seq++
 	gen := b.seq
 	fire := func() { b.onFire(key, gen) }
 	if e, ok := b.pending[key]; ok {
 		if !replace {
+			batch := e.batch
 			b.mu.Unlock()
-			return
+			return batch
 		}
 		e.timer.Stop()
 		e.flush = flush
 		e.gen = gen
 		e.timer = b.afterFunc(b.window, fire)
+		batch := e.batch
 		b.mu.Unlock()
-		return
+		return batch
 	}
 	b.pending[key] = &pendingEntry{
 		flush: flush,
 		gen:   gen,
+		batch: newBatch,
 		timer: b.afterFunc(b.window, fire),
 	}
 	b.mu.Unlock()
+	return newBatch
 }
 
 // onFire runs the flush for key if it is still the live, armed generation. It
@@ -132,12 +184,12 @@ func (b *pendingBatcher) onFire(key string, gen uint64) {
 		return
 	}
 	delete(b.pending, key)
-	flush := e.flush
+	flush, batch := e.flush, e.batch
 	b.inflight.Add(1)
 	b.mu.Unlock()
 
 	defer b.inflight.Done()
-	flush()
+	flush(batch)
 }
 
 // FlushAll stops the batcher and runs every still-pending flush exactly once,
@@ -156,7 +208,7 @@ func (b *pendingBatcher) FlushAll() {
 	b.mu.Unlock()
 
 	for _, e := range entries {
-		e.flush()
+		e.flush(e.batch)
 	}
 	b.inflight.Wait()
 }

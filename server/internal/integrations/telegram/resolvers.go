@@ -316,7 +316,11 @@ func NewTypingNotifier(decrypt Decrypter, apiBase string, client *http.Client, l
 	return &typingNotifier{decrypt: decrypt, apiBase: apiBase, client: client, logger: logger}
 }
 
-func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+// The run batch id is taken and ignored: it exists so an adapter that paints a
+// per-run indicator can tell one run's frames from the next one's, and
+// sendChatAction holds no per-run state — Telegram's typing action expires on
+// its own a few seconds after it is sent.
+func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	row, ok := inst.Platform.(db.ChannelInstallation)
 	if !ok {
 		return
@@ -339,4 +343,11 @@ func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedIns
 	}
 }
 
-func (n *typingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {}
+// OnRunStarted and OnSettled are both no-ops, for the same reason: Telegram's
+// typing action is a fire-and-forget hint the platform expires by itself. There
+// is no indicator being held open, so there is nothing to bind to a task and
+// nothing to clear.
+func (n *typingNotifier) OnRunStarted(context.Context, pgtype.UUID, engine.RunBatchID, pgtype.UUID) {
+}
+
+func (n *typingNotifier) OnSettled(context.Context, pgtype.UUID, engine.RunBatchID) {}

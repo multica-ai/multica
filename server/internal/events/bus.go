@@ -46,6 +46,18 @@ func (b *Bus) Subscribe(eventType string, h Handler) {
 	b.listeners[eventType] = append(b.listeners[eventType], h)
 }
 
+// SubscriberCount reports how many type-specific handlers are registered for
+// an event type. It exists for wiring guards: a subscriber that is never
+// registered fails silently — the events keep flowing and nobody reads them —
+// so "is anything listening" has to be assertable from outside the bus.
+// Global (SubscribeAll) handlers are not counted; they answer a different
+// question.
+func (b *Bus) SubscriberCount(eventType string) int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.listeners[eventType])
+}
+
 // SubscribeAll registers a handler that receives ALL events regardless of type.
 // Global handlers are called after type-specific handlers.
 func (b *Bus) SubscribeAll(h Handler) {
