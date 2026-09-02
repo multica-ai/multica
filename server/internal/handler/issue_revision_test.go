@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -331,28 +332,23 @@ func TestDescriptionEditAcceptsATrimmedBaseOfUntrimmedStoredMarkdown(t *testing.
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
-	issueID := insertWorkflowTestIssue(t, "untrimmed baseline", int(time.Now().UnixNano()%100000)+8_760_000)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	// Stored with a trailing newline — what every CLI/integration write that
+	// keeps one leaves behind.
+	issueID := dbfx.Issue(t, "untrimmed baseline", testutil.Cols{
+		"description": "roadmap body\n",
 	})
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $2 WHERE id = $1`, issueID, "roadmap body\n"); err != nil {
-		t.Fatalf("seed untrimmed description: %v", err)
-	}
 
-	w := httptest.NewRecorder()
-	testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
-		"description": "roadmap body edited",
-		// What the editor actually sends: the stored Markdown, trimmed.
-		"description_base": "roadmap body",
-	}), "id", issueID))
-	if w.Code != http.StatusOK {
-		t.Fatalf("edit against a trimmed base = %d, want 200: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateIssue, testutil.WithURLParams(
+		newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+			"description": "roadmap body edited",
+			// What the editor actually sends: the stored Markdown, trimmed.
+			"description_base": "roadmap body",
+		}),
+		"id", issueID,
+	)).Want(http.StatusOK)
+
 	var stored string
-	if err := testPool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&stored); err != nil {
-		t.Fatalf("reload description: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&stored)
 	if stored != "roadmap body edited" {
 		t.Fatalf("stored description = %q, want the edit", stored)
 	}
