@@ -570,9 +570,10 @@ type Daemon struct {
 	// or any task is in handleTask. Together that closes the fetch-then-claim
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	claimMu              sync.Mutex
+	pauseClaims          bool                // auto-update barrier; successful upgrades keep it set until process restart
+	admissionPauseOwners map[string]struct{} // independently owned, restart-persistent operator barriers
+	claimsInFlight       int                 // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -669,6 +670,14 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
+		admissionPauseOwners:      make(map[string]struct{}),
+	}
+	if err := d.loadAdmissionOwners(); err != nil {
+		// A corrupt/unreadable persisted barrier must fail closed. The owner is
+		// intentionally not persisted over the corrupt file; an operator must
+		// repair/remove it before admission can resume.
+		d.admissionPauseOwners["state-load-error"] = struct{}{}
+		logger.Error("admission pause state failed to load; admission remains paused", "error", err)
 	}
 	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
 	d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
@@ -4860,7 +4869,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || len(d.admissionPauseOwners) > 0 {
 		return false
 	}
 	d.claimsInFlight++

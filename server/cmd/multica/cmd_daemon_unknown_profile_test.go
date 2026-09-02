@@ -300,6 +300,8 @@ func TestDaemonLifecycleCommandsRejectUnknownProfile(t *testing.T) {
 	}{
 		{"stop", func(c *cobra.Command) error { return runDaemonStop(c, nil) }},
 		{"restart", func(c *cobra.Command) error { return runDaemonRestart(c, nil) }},
+		{"pause", func(c *cobra.Command) error { return runDaemonAdmission(c, true) }},
+		{"resume", func(c *cobra.Command) error { return runDaemonAdmission(c, false) }},
 		{"logs", func(c *cobra.Command) error { return runDaemonLogs(c, nil) }},
 	}
 	for _, tc := range cases {
@@ -310,6 +312,7 @@ func TestDaemonLifecycleCommandsRejectUnknownProfile(t *testing.T) {
 			cmd := daemonStatusCmdFor(t, "desktop-api.multica", "")
 			cmd.Flags().Bool("follow", false, "")
 			cmd.Flags().Int("lines", 50, "")
+			cmd.Flags().String("owner", "manual", "")
 
 			var unknown *unknownProfileError
 			if err := tc.run(cmd); !errors.As(err, &unknown) {
