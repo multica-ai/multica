@@ -88,6 +88,8 @@ type fakeAPIClient struct {
 	mdCardErr      error
 	mdCardReturn   string
 	bindingSent    []BindingPromptParams
+	docReplies     []DocumentCommentReplyParams
+	docVerified    []string
 	// threadReplyErr, when non-nil, is returned by the three send
 	// methods whenever the call carries a thread ReplyTarget, while the
 	// attempt is still recorded. Tests inject either a classified
@@ -165,6 +167,17 @@ func (f *fakeAPIClient) AddMessageReaction(ctx context.Context, p AddReactionPar
 	return "fake-reaction-id", nil
 }
 func (f *fakeAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error {
+	return nil
+}
+func (f *fakeAPIClient) GetDocumentCommentContext(context.Context, InstallationCredentials, DocumentCommentParams) (DocumentCommentContext, error) {
+	return DocumentCommentContext{}, nil
+}
+func (f *fakeAPIClient) ReplyDocumentComment(_ context.Context, _ InstallationCredentials, p DocumentCommentReplyParams) (string, error) {
+	f.docReplies = append(f.docReplies, p)
+	return "doc-reply-1", nil
+}
+func (f *fakeAPIClient) VerifyDocumentCommentReply(_ context.Context, _ InstallationCredentials, _ DocumentCommentParams, replyID string) error {
+	f.docVerified = append(f.docVerified, replyID)
 	return nil
 }
 
@@ -261,6 +274,27 @@ func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	if len(api.sent) != 0 || len(api.patched) != 0 {
 		t.Errorf("ChatDone must NOT send / patch any card; got sent=%d patched=%d",
 			len(api.sent), len(api.patched))
+	}
+}
+
+func TestPatcherRepliesToDocumentCommentAndReadsItBack(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee666666-ee66-ee66-ee66-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+	cfg, _ := json.Marshal(larkBindingConfig{DocumentComment: &DocumentCommentEvent{FileToken: "token", FileType: "docx", CommentID: "c1", ReplyID: "r1"}})
+	q.binding.Config = cfg
+
+	p.handleEvent(events.Event{Type: protocol.EventChatDone, TaskID: uuidString(taskID), ChatSessionID: uuidString(q.binding.ChatSessionID), Payload: protocol.ChatDonePayload{TaskID: uuidString(taskID), ChatSessionID: uuidString(q.binding.ChatSessionID), Content: "document answer"}})
+
+	if len(api.docReplies) != 1 || api.docReplies[0].Text != "document answer" {
+		t.Fatalf("docReplies = %+v", api.docReplies)
+	}
+	if len(api.docVerified) != 1 || api.docVerified[0] != "doc-reply-1" {
+		t.Fatalf("docVerified = %+v", api.docVerified)
+	}
+	if len(api.textSent) != 0 || len(api.mdCardSent) != 0 {
+		t.Fatalf("document reply must not send IM: text=%d markdown=%d", len(api.textSent), len(api.mdCardSent))
 	}
 }
 

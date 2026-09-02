@@ -2,6 +2,7 @@ package lark
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -56,6 +57,44 @@ func TestLarkJSONFrameDecoderTextMessageInP2P(t *testing.T) {
 	}
 	if msg.AddressedToBot {
 		t.Errorf("P2P AddressedToBot should not be true")
+	}
+}
+
+func TestLarkJSONFrameDecoderDocumentCommentMention(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{"schema":"2.0","header":{"event_id":"evt-comment-1","event_type":"drive.notice.comment_add_v1","app_id":"cli_app_x"},"event":{"comment_id":"comment-1","reply_id":"reply-1","is_mentioned":true,"notice_meta":{"file_token":"doc-token","file_type":"docx","notice_type":"add_reply","from_user_id":{"open_id":"ou_user"},"to_user_id":{"open_id":"ou_bot"}}}}`)
+
+	msg, ok, err := NewLarkJSONFrameDecoder().Decode(raw, Installation{BotOpenID: "ou_bot"})
+	if err != nil || !ok {
+		t.Fatalf("Decode ok=%v err=%v", ok, err)
+	}
+	if msg.DocumentComment == nil {
+		t.Fatal("DocumentComment is nil")
+	}
+	if msg.MessageID != "evt-comment-1:comment-1" {
+		t.Errorf("MessageID = %q", msg.MessageID)
+	}
+	if msg.ChatID != "document:docx:doc-token:comment-1" || !msg.AddressedToBot {
+		t.Errorf("routing = chat %q addressed=%v", msg.ChatID, msg.AddressedToBot)
+	}
+}
+
+func TestLarkJSONFrameDecoderDocumentCommentFilters(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, mentioned, from, to, notice string }{
+		{"not mentioned", "false", "ou_user", "ou_bot", "add_reply"},
+		{"self authored", "true", "ou_bot", "ou_bot", "add_reply"},
+		{"wrong receiver", "true", "ou_user", "ou_other", "add_reply"},
+		{"unsupported notice", "true", "ou_user", "ou_bot", "delete_reply"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := []byte(fmt.Sprintf(`{"schema":"2.0","header":{"event_id":"e","event_type":"drive.notice.comment_add_v1","app_id":"a"},"event":{"comment_id":"c","is_mentioned":%s,"notice_meta":{"file_token":"d","file_type":"docx","notice_type":%q,"from_user_id":{"open_id":%q},"to_user_id":{"open_id":%q}}}}`, tc.mentioned, tc.notice, tc.from, tc.to))
+			_, ok, err := NewLarkJSONFrameDecoder().Decode(raw, Installation{BotOpenID: "ou_bot"})
+			if err != nil || ok {
+				t.Fatalf("ok=%v err=%v", ok, err)
+			}
+		})
 	}
 }
 

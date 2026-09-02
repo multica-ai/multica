@@ -131,6 +131,42 @@ type APIClient interface {
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
 }
 
+// DocumentCommentAPI is the Drive comment surface implemented by the real
+// HTTP client. It stays separate so IM-only test fakes need not implement it.
+type DocumentCommentAPI interface {
+	GetDocumentCommentContext(ctx context.Context, creds InstallationCredentials, p DocumentCommentParams) (DocumentCommentContext, error)
+	ReplyDocumentComment(ctx context.Context, creds InstallationCredentials, p DocumentCommentReplyParams) (string, error)
+	VerifyDocumentCommentReply(ctx context.Context, creds InstallationCredentials, p DocumentCommentParams, replyID string) error
+}
+
+type DocumentCommentParams struct {
+	FileToken string
+	FileType  string
+	CommentID string
+	ReplyID   string
+	IsWhole   bool
+}
+
+type DocumentCommentContext struct {
+	Title    string
+	URL      string
+	Quote    string
+	IsWhole  bool
+	Timeline []DocumentCommentEntry
+}
+
+type DocumentCommentEntry struct {
+	ReplyID string
+	UserID  string
+	Text    string
+}
+
+type DocumentCommentReplyParams struct {
+	DocumentCommentParams
+	Text    string
+	IsWhole bool
+}
+
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
 // enricher needs today are exposed (ChatID, ThreadID, PageSize, EndTime);

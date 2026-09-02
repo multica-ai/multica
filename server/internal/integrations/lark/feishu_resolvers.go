@@ -169,7 +169,8 @@ type feishuSessionBinder struct{ session chatSession }
 // binding's config when the binding key is a composite (Lark topic): the real
 // chat id lives here so the outbound path can post back.
 type larkBindingConfig struct {
-	ChatID string `json:"chat_id"`
+	ChatID          string                `json:"chat_id,omitempty"`
+	DocumentComment *DocumentCommentEvent `json:"document_comment,omitempty"`
 }
 
 // larkSessionRouting derives the session-isolation key (stored as
@@ -181,6 +182,10 @@ type larkBindingConfig struct {
 // model as Slack's channel:threadRoot; see engine.EnsureSessionInput). Pure
 // function so the isolation contract is unit-tested without a DB.
 func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
+	if lm, err := larkMsgFromRaw(msg); err == nil && lm.DocumentComment != nil {
+		cfg, _ := json.Marshal(larkBindingConfig{DocumentComment: lm.DocumentComment})
+		return msg.Source.ChatID, cfg
+	}
 	chatID := msg.Source.ChatID
 	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
 		return chatID, nil
@@ -287,6 +292,9 @@ func (r *feishuTypingNotifier) OnIngested(ctx context.Context, inst engine.Resol
 		return
 	}
 	lm, _ := larkMsgFromRaw(msg)
+	if lm.DocumentComment != nil {
+		return
+	}
 	r.mgr.Add(ctx, larkInst, sessionID, msg.MessageID, lm.CreateTime)
 }
 

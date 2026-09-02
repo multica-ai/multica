@@ -59,6 +59,19 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// DocumentComment is populated only for drive.notice.comment_add_v1.
+	DocumentComment *DocumentCommentEvent
+}
+
+// DocumentCommentEvent carries the document-native reply target.
+type DocumentCommentEvent struct {
+	FileToken  string `json:"file_token"`
+	FileType   string `json:"file_type"`
+	CommentID  string `json:"comment_id"`
+	ReplyID    string `json:"reply_id,omitempty"`
+	NoticeType string `json:"notice_type"`
+	IsWhole    bool   `json:"is_whole,omitempty"`
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier

@@ -52,6 +52,9 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		return InboundMessage{}, false, nil
 	}
 
+	if env.Header.EventType == "drive.notice.comment_add_v1" {
+		return decodeDocumentComment(env, inst)
+	}
 	if env.Header.EventType != "im.message.receive_v1" {
 		return InboundMessage{}, false, nil
 	}
@@ -119,6 +122,36 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	return msg, true, nil
 }
 
+func decodeDocumentComment(env larkEventEnvelope, inst Installation) (InboundMessage, bool, error) {
+	if env.Event == nil {
+		return InboundMessage{}, false, errors.New("document comment event with empty payload")
+	}
+	var evt larkDocumentCommentEvent
+	if err := json.Unmarshal(env.Event, &evt); err != nil {
+		return InboundMessage{}, false, fmt.Errorf("document comment event: %w", err)
+	}
+	fromOpenID := evt.NoticeMeta.FromUserID.OpenID
+	toOpenID := evt.NoticeMeta.ToUserID.OpenID
+	if !evt.IsMentioned || fromOpenID == "" || fromOpenID == inst.BotOpenID || toOpenID != inst.BotOpenID {
+		return InboundMessage{}, false, nil
+	}
+	if evt.NoticeMeta.NoticeType != "add_comment" && evt.NoticeMeta.NoticeType != "add_reply" {
+		return InboundMessage{}, false, nil
+	}
+	if evt.NoticeMeta.FileToken == "" || evt.NoticeMeta.FileType == "" || evt.CommentID == "" || env.Header.EventID == "" {
+		return InboundMessage{}, false, errors.New("document comment event missing required routing fields")
+	}
+	doc := &DocumentCommentEvent{FileToken: evt.NoticeMeta.FileToken, FileType: evt.NoticeMeta.FileType, CommentID: evt.CommentID, ReplyID: evt.ReplyID, NoticeType: evt.NoticeMeta.NoticeType}
+	return InboundMessage{
+		EventType: env.Header.EventType, EventID: env.Header.EventID, AppID: env.Header.AppID,
+		ChatID: ChatID("document:" + doc.FileType + ":" + doc.FileToken + ":" + doc.CommentID), ChatType: ChatTypeGroup,
+		MessageID: env.Header.EventID + ":" + doc.CommentID, SenderOpenID: OpenID(fromOpenID),
+		Body: "[Feishu document comment context unavailable]", CommandBody: "[Feishu document comment]",
+		MessageType: "document_comment", CreateTime: env.Header.CreateTime, AddressedToBot: true,
+		DocumentComment: doc,
+	}, true, nil
+}
+
 // larkEventEnvelope mirrors the outer JSON Lark wraps every push in.
 type larkEventEnvelope struct {
 	Schema string          `json:"schema"`
@@ -165,6 +198,23 @@ type larkMessageReceiveEvent struct {
 		// is the signal that an @-mention happened inside a thread.
 		ThreadID string `json:"thread_id"`
 	} `json:"message"`
+}
+
+type larkDocumentCommentEvent struct {
+	CommentID   string `json:"comment_id"`
+	ReplyID     string `json:"reply_id"`
+	IsMentioned bool   `json:"is_mentioned"`
+	NoticeMeta  struct {
+		FileToken  string `json:"file_token"`
+		FileType   string `json:"file_type"`
+		NoticeType string `json:"notice_type"`
+		FromUserID struct {
+			OpenID string `json:"open_id"`
+		} `json:"from_user_id"`
+		ToUserID struct {
+			OpenID string `json:"open_id"`
+		} `json:"to_user_id"`
+	} `json:"notice_meta"`
 }
 
 type larkMention struct {

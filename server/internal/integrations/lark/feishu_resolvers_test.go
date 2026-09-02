@@ -95,6 +95,28 @@ func TestFeishuSessionBinder_TopicMessageIsolatesByThread(t *testing.T) {
 	}
 }
 
+func TestFeishuSessionBinder_DocumentCommentPersistsReplyTarget(t *testing.T) {
+	f := &fakeChatSession{}
+	b := &feishuSessionBinder{session: f}
+	doc := &DocumentCommentEvent{FileToken: "doc-token", FileType: "docx", CommentID: "comment-1", ReplyID: "reply-1", IsWhole: true}
+	raw, _ := json.Marshal(InboundMessage{DocumentComment: doc})
+
+	if _, err := b.EnsureSession(context.Background(), engine.EnsureSessionParams{
+		Installation: engine.ResolvedInstallation{ID: binderUUID(1), WorkspaceID: binderUUID(2), AgentID: binderUUID(3)},
+		Sender:       binderUUID(7),
+		Message:      channel.InboundMessage{Source: channel.Source{ChatID: "document:docx:doc-token", ChatType: channel.ChatTypeGroup}, Raw: raw},
+	}); err != nil {
+		t.Fatalf("EnsureSession: %v", err)
+	}
+	var cfg larkBindingConfig
+	if err := json.Unmarshal(f.ensureIn.BindingConfig, &cfg); err != nil {
+		t.Fatalf("decode BindingConfig: %v", err)
+	}
+	if cfg.DocumentComment == nil || cfg.DocumentComment.CommentID != "comment-1" || !cfg.DocumentComment.IsWhole {
+		t.Fatalf("DocumentComment = %+v", cfg.DocumentComment)
+	}
+}
+
 // TestLarkSessionRouting unit-tests the pure key-derivation contract.
 func TestLarkSessionRouting(t *testing.T) {
 	cases := []struct {

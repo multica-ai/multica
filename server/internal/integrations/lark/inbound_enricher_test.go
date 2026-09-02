@@ -125,6 +125,39 @@ func enrich(t *testing.T, fake *enricherFakeClient, msg InboundMessage, cfg Inbo
 	return e.Enrich(context.Background(), msg, InstallationCredentials{AppID: "a", AppSecret: "s"})
 }
 
+type documentCommentFakeClient struct {
+	*enricherFakeClient
+	context DocumentCommentContext
+	err     error
+}
+
+func (f *documentCommentFakeClient) GetDocumentCommentContext(context.Context, InstallationCredentials, DocumentCommentParams) (DocumentCommentContext, error) {
+	return f.context, f.err
+}
+func (f *documentCommentFakeClient) ReplyDocumentComment(context.Context, InstallationCredentials, DocumentCommentReplyParams) (string, error) {
+	return "reply", nil
+}
+func (f *documentCommentFakeClient) VerifyDocumentCommentReply(context.Context, InstallationCredentials, DocumentCommentParams, string) error {
+	return nil
+}
+
+func TestInboundEnricherDocumentCommentBuildsAnchoredPrompt(t *testing.T) {
+	fake := &documentCommentFakeClient{
+		enricherFakeClient: newEnricherFake(),
+		context: DocumentCommentContext{
+			Title: "Roadmap", URL: "https://example.feishu.cn/docx/token", Quote: "Q3 target",
+			Timeline: []DocumentCommentEntry{{ReplyID: "r1", UserID: "ou_user", Text: "Please quantify this"}},
+		},
+	}
+	doc := &DocumentCommentEvent{FileToken: "token", FileType: "docx", CommentID: "c1", ReplyID: "r1"}
+	out := NewInboundEnricher(fake, InboundEnricherConfig{}).Enrich(context.Background(), InboundMessage{EventID: "e1", DocumentComment: doc}, InstallationCredentials{AppID: "a", AppSecret: "s"})
+	for _, want := range []string{"Roadmap", "Q3 target", "Please quantify this", "file_token=token", "comment_id=c1"} {
+		if !strings.Contains(out.Body, want) {
+			t.Errorf("Body missing %q: %s", want, out.Body)
+		}
+	}
+}
+
 // TestEnrichQuotedReply covers the MUL-2951 quoted-reply example: a text
 // reply to a prior text message gets the parent inlined as a
 // <quoted_message> block ahead of the user's own prose.

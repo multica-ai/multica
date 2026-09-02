@@ -378,6 +378,23 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	if content == "" {
 		return nil
 	}
+	if target := documentCommentTarget(binding); target != nil {
+		api, ok := p.client.(DocumentCommentAPI)
+		if !ok {
+			return errors.New("lark patcher: document comment API not configured")
+		}
+		replyID, err := api.ReplyDocumentComment(ctx, creds, DocumentCommentReplyParams{
+			DocumentCommentParams: DocumentCommentParams{FileToken: target.FileToken, FileType: target.FileType, CommentID: target.CommentID, ReplyID: target.ReplyID},
+			Text:                  content, IsWhole: target.IsWhole,
+		})
+		if err != nil {
+			return fmt.Errorf("reply to document comment: %w", err)
+		}
+		if err := api.VerifyDocumentCommentReply(ctx, creds, DocumentCommentParams{FileToken: target.FileToken, FileType: target.FileType, CommentID: target.CommentID, IsWhole: target.IsWhole}, replyID); err != nil {
+			return fmt.Errorf("verify document comment reply: %w", err)
+		}
+		return nil
+	}
 	target := threadReplyTarget(binding)
 	if containsMarkdown(content) {
 		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
@@ -399,6 +416,17 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		})
 		return err
 	})
+}
+
+func documentCommentTarget(binding ChatSessionBinding) *DocumentCommentEvent {
+	if len(binding.Config) == 0 {
+		return nil
+	}
+	var cfg larkBindingConfig
+	if err := json.Unmarshal(binding.Config, &cfg); err != nil {
+		return nil
+	}
+	return cfg.DocumentComment
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The

@@ -148,6 +148,9 @@ func NewInboundEnricher(client APIClient, cfg InboundEnricherConfig) Enricher {
 // context attached to a turn a workspace member explicitly directed at
 // the Bot.
 func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+	if msg.DocumentComment != nil {
+		return e.enrichDocumentComment(ctx, msg, creds)
+	}
 	freshSource := msg.CommandBody
 	if freshSource == "" {
 		freshSource = msg.Body
@@ -246,6 +249,34 @@ func (e *inboundEnricher) Enrich(ctx context.Context, msg InboundMessage, creds 
 	}
 	b.WriteString(core)
 
+	msg.Body = b.String()
+	return msg
+}
+
+func (e *inboundEnricher) enrichDocumentComment(ctx context.Context, msg InboundMessage, creds InstallationCredentials) InboundMessage {
+	api, ok := e.client.(DocumentCommentAPI)
+	if !ok {
+		return msg
+	}
+	doc := msg.DocumentComment
+	detail, err := api.GetDocumentCommentContext(ctx, creds, DocumentCommentParams{
+		FileToken: doc.FileToken, FileType: doc.FileType, CommentID: doc.CommentID, ReplyID: doc.ReplyID,
+	})
+	if err != nil {
+		e.logger.Warn("lark enricher: document comment context fetch failed", "event_id", msg.EventID, "error", err)
+		return msg
+	}
+	doc.IsWhole = detail.IsWhole
+	var b strings.Builder
+	fmt.Fprintf(&b, "Feishu document comment explicitly mentioned you.\nDocument: %s\nURL: %s\nfile_type=%s\nfile_token=%s\ncomment_id=%s\n", detail.Title, detail.URL, doc.FileType, doc.FileToken, doc.CommentID)
+	if detail.Quote != "" {
+		fmt.Fprintf(&b, "Quoted content: %s\n", detail.Quote)
+	}
+	b.WriteString("Comment thread:\n")
+	for _, entry := range detail.Timeline {
+		fmt.Fprintf(&b, "[%s] %s\n", entry.UserID, entry.Text)
+	}
+	b.WriteString("Reply to the request. The final response is posted to this original comment thread; do not send an IM message.")
 	msg.Body = b.String()
 	return msg
 }
