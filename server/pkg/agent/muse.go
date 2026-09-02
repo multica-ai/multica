@@ -15,10 +15,12 @@ import (
 // museBackend drives Muse Code's native headless JSONL protocol:
 // muse exec --json --prompt-file <file> [--model <id>] [--reasoning-effort <level>].
 // The event schema is the unified record stream (schema_version 1) observed on
-// Muse Code 1.0.1 via `muse exec --json --provider echo` and live
-// `muse exec --json --model muse-spark-1.2` captures: payload_type values
-// include run.output.delta, task.lifecycle.output, tool.result,
-// task.lifecycle.side_effect_intent, and run.terminal.completed.
+// Muse Code 1.0.1 and 1.0.2 via `muse exec --json --provider echo` and live
+// captures against models muse-spark-1.2 and muse-spark-1.3: payload_type
+// values include run.output.delta, task.lifecycle.output, tool.result,
+// task.lifecycle.side_effect_intent, and run.terminal.completed. The model id
+// is never assumed — it is read from run.model.configured at runtime and
+// passed through from the runtime config.
 type museBackend struct {
 	cfg Config
 }

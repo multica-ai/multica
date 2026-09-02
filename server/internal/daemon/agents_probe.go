@@ -305,7 +305,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	// Muse (`muse`) is Meta's terminal coding agent, driven headlessly via
 	// `muse exec --json`. MULTICA_MUSE_MODEL seeds the daemon-wide default
-	// (e.g. muse-spark-1.2).
+	// (e.g. muse-spark-1.3); Multica pins no model of its own.
 	if e, ok := probe("MULTICA_MUSE_PATH", "muse", "MULTICA_MUSE_MODEL"); ok {
 		agents["muse"] = e
 	}

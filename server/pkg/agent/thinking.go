@@ -830,8 +830,9 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
-	// Muse (muse-spark-1.2) reasoning effort: none|minimal|low|medium|high|xhigh|ultra
-	// Verified from `muse exec --help` on 1.0.1.
+	// Muse reasoning effort: none|minimal|low|medium|high|xhigh|ultra.
+	// This is a CLI-level flag, not a per-model one — verified unchanged from
+	// `muse exec --help` on Muse Code 1.0.1 and 1.0.2.
 	"muse": {
 		"none":    true,
 		"minimal": true,

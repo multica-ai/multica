@@ -1,4 +1,4 @@
--- Add Muse (Meta Muse Code, `muse` CLI, model muse-spark-1.2) as a
+-- Add Muse (Meta Muse Code, `muse` CLI) as a
 -- first-party protocol family. NOT VALID preserves historical-row tolerance
 -- while enforcing the expanded whitelist for new rows.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
