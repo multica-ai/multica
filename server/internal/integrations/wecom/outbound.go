@@ -458,3 +458,68 @@ func (o *Outbound) tryDeliverInbox(ctx context.Context, item map[string]any, rec
 func uuidStringPub(u pgtype.UUID) string {
 	return util.UUIDToString(u)
 }
+
+// installationCheck is what one permission read established. Three outcomes,
+// because collapsing them is how the first version of this gate lost answers:
+// a lookup that failed and a row that says revoked are the same refusal for THIS
+// attempt and opposite facts about every later one.
+type installationCheck int
+
+const (
+	// installationOK — active. Write.
+	installationOK installationCheck = iota
+	// installationGone — revoked, or the row is not there. Final: nobody may
+	// write to it again, and an answer held for it is not owed to anyone.
+	installationGone
+	// installationUnreadable — the read itself failed. Nothing is established.
+	// Refuse this attempt either way; what differs is what the caller owes
+	// afterwards. An answer must NOT be reported finished — it is still the only
+	// copy and still this subscriber's to deliver. An attachment has nowhere to
+	// report to and nothing to lose by waiting: the file stays in object storage
+	// and the user can ask again, so the delivery simply stops.
+	installationUnreadable
+)
+
+// String names the outcomes for the log, so a line saying a delivery stopped
+// also says whether anything is coming back — gone is final, unreadable is this
+// read and no more. Same reason deliveryState carries one (outbound_media.go).
+func (c installationCheck) String() string {
+	switch c {
+	case installationOK:
+		return "ok"
+	case installationGone:
+		return "gone"
+	case installationUnreadable:
+		return "unreadable"
+	default:
+		return "invalid"
+	}
+}
+
+// mayStillWrite reads the installation's permission for one attempt.
+//
+// The three-way split follows the convention the rest of this file already
+// keeps: pgx.ErrNoRows is a fact, every other error is a failed question. The
+// gate that preceded this returned a bool and answered "no" to both, so a
+// database blip on one attempt confirmed a one-shot chat:done as handled and
+// threw the answer away.
+func (o *Outbound) mayStillWrite(ctx context.Context, id pgtype.UUID) installationCheck {
+	if !id.Valid {
+		return installationGone
+	}
+	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          id,
+		ChannelType: channelTypeWecom,
+	})
+	switch {
+	case err == nil:
+	case errors.Is(err, pgx.ErrNoRows):
+		return installationGone
+	default:
+		return installationUnreadable
+	}
+	if inst.Status != string(InstallationActive) {
+		return installationGone
+	}
+	return installationOK
+}
