@@ -830,6 +830,18 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
+	// Muse reasoning effort: none|minimal|low|medium|high|xhigh|ultra.
+	// This is a CLI-level flag, not a per-model one — verified unchanged from
+	// `muse exec --help` on Muse Code 1.0.1 and 1.0.2.
+	"muse": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"ultra":   true,
+	},
 }
 
 // thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is

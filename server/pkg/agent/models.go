@@ -303,6 +303,11 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		// ModelSelectionSupported. Return an empty list rather than spawning
 		// an ACP subprocess that can only ever come back empty.
 		return Catalog{Models: []Model{}}, nil
+	case "muse":
+		// Muse's `muse exec` has no account-independent headless model catalog.
+		// An empty list keeps the runtime default and manual model entry available
+		// without advertising a model that isn't authenticated.
+		return Catalog{Models: []Model{}}, nil
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}

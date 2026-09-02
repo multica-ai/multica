@@ -158,6 +158,7 @@ var (
 		"mcode":         "mcode",
 		"zeroclaw":      "zeroclaw",
 		"multica_agent": "multica_agent",
+		"muse":          "muse",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
 		"deveco":        "deveco",
