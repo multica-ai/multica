@@ -111,7 +111,7 @@ type AggregateDiskUsageReport struct {
 // permission error on the root directory itself) aborts the whole scan.
 func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (AggregateDiskUsageReport, error) {
 	agg := AggregateDiskUsageReport{GeneratedAt: time.Now().UTC()}
-	matcher := newArtifactMatcher(artifactPatterns, execenv.ManagedReclaimableArtifactSubpaths())
+	matcher := newArtifactMatcher(artifactPatterns, execenv.AllManagedReclaimableArtifactSubpaths())
 	agg.ArtifactPatterns = sortedKeys(matcher.basenames)
 	agg.ManagedArtifactSubpaths = matcher.managedSubpaths()
 
@@ -158,7 +158,7 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 		return report, fmt.Errorf("disk-usage: workspaces root is required")
 	}
 
-	matcher := newArtifactMatcher(artifactPatterns, execenv.ManagedReclaimableArtifactSubpaths())
+	matcher := newArtifactMatcher(artifactPatterns, execenv.AllManagedReclaimableArtifactSubpaths())
 	report.ArtifactPatterns = sortedKeys(matcher.basenames)
 	report.ManagedArtifactSubpaths = matcher.managedSubpaths()
 

@@ -33,6 +33,7 @@ func newGCTestDaemon(t *testing.T, handler http.Handler) *Daemon {
 		GCTTL:                    5 * 24 * time.Hour,
 		GCOrphanTTL:              30 * 24 * time.Hour,
 		GCArtifactTTL:            12 * time.Hour,
+		GCCodexTempTTL:           72 * time.Hour,
 		GCArtifactPatterns:       []string{"node_modules", ".next", ".turbo"},
 		GCRepoMaintenanceEnabled: true,
 	}

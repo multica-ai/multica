@@ -112,6 +112,36 @@ func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_CodexTempTTLDefaultsToThreeDaysAndReadsEnv(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_GC_CODEX_TEMP_TTL", "")
+	overrides := Overrides{ServerURL: "http://localhost:0", WorkspacesRoot: t.TempDir()}
+
+	cfg, err := LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with default Codex temp TTL: %v", err)
+	}
+	if cfg.GCCodexTempTTL != 72*time.Hour {
+		t.Fatalf("GCCodexTempTTL = %s, want 72h", cfg.GCCodexTempTTL)
+	}
+
+	t.Setenv("MULTICA_GC_CODEX_TEMP_TTL", "5d")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with Codex temp TTL override: %v", err)
+	}
+	if cfg.GCCodexTempTTL != 5*24*time.Hour {
+		t.Fatalf("GCCodexTempTTL = %s, want 5d", cfg.GCCodexTempTTL)
+	}
+
+	t.Setenv("MULTICA_GC_CODEX_TEMP_TTL", "invalid")
+	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_CODEX_TEMP_TTL") {
+		t.Fatalf("invalid Codex temp TTL error = %v, want named validation error", err)
+	}
+}
+
 // A localhost server URL is not the official cloud host, so this exercises the
 // self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
 // an operator opts in, and a daemon upgrade never starts deleting on its own.

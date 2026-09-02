@@ -35,10 +35,12 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 		"completed_task_ttl", d.cfg.GCCompletedTaskTTL,
 		"orphan_ttl", d.cfg.GCOrphanTTL,
 		"artifact_ttl", d.cfg.GCArtifactTTL,
+		"codex_temp_ttl", d.cfg.GCCodexTempTTL,
 		"repo_ttl", d.cfg.GCRepoTTL,
 		"repo_maintenance_enabled", d.cfg.GCRepoMaintenanceEnabled,
 		"artifact_patterns", d.cfg.GCArtifactPatterns,
 		"managed_artifact_subpaths", execenv.ManagedReclaimableArtifactSubpaths(),
+		"codex_temp_subpaths", execenv.CodexTempReclaimableArtifactSubpaths(),
 	)
 
 	// Run once at startup after a short delay (let the daemon finish initializing).
@@ -62,12 +64,13 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned         int // whole task dirs removed by a parent-lifecycle or completed-task policy
-	orphaned        int // whole task dirs removed (no meta / unreachable issue)
-	skipped         int // task dirs left untouched
-	artifactDirs    int // task dirs that had at least one artifact reclaimed
-	artifactRemoved int // count of removed artifact subdirs
-	storesReclaimed int // per-conversation Codex session stores reclaimed past their TTL
+	cleaned                int // whole task dirs removed by a parent-lifecycle or completed-task policy
+	orphaned               int // whole task dirs removed (no meta / unreachable issue)
+	skipped                int // task dirs left untouched
+	artifactDirs           int // task dirs that had at least one artifact reclaimed
+	artifactRemoved        int // count of removed artifact subdirs
+	codexTempDirsReclaimed int // exact codex-home/.tmp directories reclaimed after their longer idle TTL
+	storesReclaimed        int // per-conversation Codex session stores reclaimed past their TTL
 	// hermesMemoryStoresReclaimed is counted separately from storesReclaimed:
 	// the two stores hold different things on different TTLs, so folding them
 	// into one number would make either figure unreadable for an operator.
@@ -173,13 +176,14 @@ func (d *Daemon) runGC(ctx context.Context) {
 		}
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.codexTempDirsReclaimed > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
 			"skipped", stats.skipped,
 			"artifact_dirs", stats.artifactDirs,
 			"artifact_removed", stats.artifactRemoved,
+			"codex_temp_dirs_reclaimed", stats.codexTempDirsReclaimed,
 			"codex_session_stores_reclaimed", stats.storesReclaimed,
 			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
 			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
@@ -214,6 +218,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			stats.skipped++
 			continue
 		}
+		d.reclaimIdleCodexTemp(taskDir, stats)
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
 			if workspaceID := strings.TrimSpace(meta.WorkspaceID); workspaceID != "" {
@@ -965,6 +970,85 @@ func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes i
 		d.logger.Info("gc: artifact removed", "path", target, "bytes", size)
 	}
 	return
+}
+
+// reclaimIdleCodexTemp removes only the exact per-task Codex marketplace and
+// plugin cache after its longer idle TTL. It is intentionally independent from
+// task-exit cleanup: nearby runs reuse this cache, including while offline.
+//
+// The daemon's active-root guard and reservation close the running-task race.
+// Re-reading ownership and timestamps after the reservation prevents a reset or
+// resumed task from turning a stale decision into a deletion. The removal does
+// not pre-walk the tree to estimate bytes; on APFS that logical total can badly
+// overstate physical space reclaimed and would double the filesystem work.
+func (d *Daemon) reclaimIdleCodexTemp(taskDir string, stats *gcStats) {
+	if d.cfg.GCCodexTempTTL <= 0 || taskDir == "" || d.isActiveEnvRoot(taskDir) {
+		return
+	}
+	target, lastUsed, ok := codexTempTargetAndLastUsed(taskDir)
+	if !ok || time.Since(lastUsed) <= d.cfg.GCCodexTempTTL {
+		return
+	}
+	if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+		d.logger.Warn("gc: refusing to reclaim Codex temp from unowned task directory", "dir", taskDir, "error", err)
+		return
+	}
+	release, ok := d.reserveEnvRootForGC(taskDir)
+	if !ok {
+		return
+	}
+	defer release()
+	if _, err := d.gcTaskDirOwner(taskDir); err != nil {
+		d.logger.Warn("gc: refusing to reclaim Codex temp after ownership changed", "dir", taskDir, "error", err)
+		return
+	}
+	target, lastUsed, ok = codexTempTargetAndLastUsed(taskDir)
+	if !ok || time.Since(lastUsed) <= d.cfg.GCCodexTempTTL {
+		return
+	}
+	if err := os.RemoveAll(target); err != nil {
+		d.logger.Warn("gc: Codex temp remove failed", "path", target, "error", err)
+		return
+	}
+	stats.codexTempDirsReclaimed++
+	stats.artifactRemoved++
+	if stats.byPattern == nil {
+		stats.byPattern = map[string]int{}
+	}
+	label := managedArtifactPatternPrefix + filepath.ToSlash(filepath.Join("codex-home", ".tmp"))
+	stats.byPattern[label]++
+	d.logger.Info("gc: reclaimed idle Codex temp", "path", target, "last_used_at", lastUsed.Format(time.RFC3339))
+}
+
+func codexTempTargetAndLastUsed(taskDir string) (string, time.Time, bool) {
+	absRoot, err := filepath.Abs(taskDir)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	subpaths := execenv.CodexTempReclaimableArtifactSubpaths()
+	if len(subpaths) != 1 {
+		return "", time.Time{}, false
+	}
+	rel, ok := safeRelativePath(subpaths[0])
+	if !ok {
+		return "", time.Time{}, false
+	}
+	target, ok := managedArtifactTarget(absRoot, rel)
+	if !ok {
+		return "", time.Time{}, false
+	}
+	info, err := os.Lstat(target)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	lastUsed := info.ModTime()
+	if meta, metaErr := execenv.ReadGCMeta(taskDir); metaErr == nil && meta.CompletedAt.After(lastUsed) {
+		lastUsed = meta.CompletedAt
+	}
+	if metaInfo, metaErr := os.Lstat(filepath.Join(taskDir, ".gc_meta.json")); metaErr == nil && metaInfo.ModTime().After(lastUsed) {
+		lastUsed = metaInfo.ModTime()
+	}
+	return target, lastUsed, true
 }
 
 // managedArtifactTarget resolves one managed relative subpath under absRoot to

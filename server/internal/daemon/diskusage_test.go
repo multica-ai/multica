@@ -309,28 +309,30 @@ func TestScanDiskUsage_ManagedCodexSandboxIsExactAndDeduplicated(t *testing.T) {
 	wsID := "mmmmmmmm-mmmm-mmmm-mmmm-mmmmmmmmmmmm"
 	taskDir := filepath.Join(root, wsID, "tttttttt")
 	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+	writeFile(t, filepath.Join(taskDir, "codex-home/.tmp/plugins/cache.bin"), 200)
 	writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+	writeFile(t, filepath.Join(taskDir, "workdir/repo/.tmp/cache"), 500)
 
 	report, err := ScanDiskUsage(root, nil)
 	if err != nil {
 		t.Fatalf("ScanDiskUsage managed-only: %v", err)
 	}
-	if got := report.Tasks[0].SizeBytes; got != 700 {
-		t.Fatalf("size_bytes=%d, want 700", got)
+	if got := report.Tasks[0].SizeBytes; got != 1400 {
+		t.Fatalf("size_bytes=%d, want 1400", got)
 	}
-	if got := report.Tasks[0].ArtifactSizeBytes; got != 300 {
-		t.Fatalf("artifact_size_bytes=%d, want exact managed 300", got)
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 500 {
+		t.Fatalf("artifact_size_bytes=%d, want exact managed 500", got)
 	}
-	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
-		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	if got := strings.Join(report.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin,codex-home/.tmp" {
+		t.Fatalf("managed artifact paths=%q, want both exact Codex cache paths", got)
 	}
 
-	report, err = ScanDiskUsage(root, []string{".sandbox-bin"})
+	report, err = ScanDiskUsage(root, []string{".sandbox-bin", ".tmp"})
 	if err != nil {
 		t.Fatalf("ScanDiskUsage broad basename: %v", err)
 	}
-	if got := report.Tasks[0].ArtifactSizeBytes; got != 700 {
-		t.Fatalf("artifact_size_bytes=%d, want 700 without double counting", got)
+	if got := report.Tasks[0].ArtifactSizeBytes; got != 1400 {
+		t.Fatalf("artifact_size_bytes=%d, want 1400 without double counting", got)
 	}
 }
 
@@ -547,8 +549,8 @@ func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
 	if agg.TotalWorkspaceCount != 2 {
 		t.Fatalf("TotalWorkspaceCount = %d, want 2", agg.TotalWorkspaceCount)
 	}
-	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin" {
-		t.Fatalf("managed artifact paths=%q, want codex-home/.sandbox-bin", got)
+	if got := strings.Join(agg.ManagedArtifactSubpaths, ","); got != "codex-home/.sandbox-bin,codex-home/.tmp" {
+		t.Fatalf("managed artifact paths=%q, want both exact Codex cache paths", got)
 	}
 }
 
