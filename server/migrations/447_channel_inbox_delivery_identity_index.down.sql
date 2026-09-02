@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS channel_inbox_delivery_identity_uidx;

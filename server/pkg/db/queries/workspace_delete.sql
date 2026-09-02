@@ -347,6 +347,9 @@ deleted_issue_reactions AS (
 deleted_activity AS (
     DELETE FROM activity_log WHERE workspace_id = $1
 ),
+deleted_channel_inbox_deliveries AS (
+    DELETE FROM channel_inbox_delivery WHERE workspace_id = $1
+),
 deleted_inbox AS (
     DELETE FROM inbox_item WHERE workspace_id = $1
 ),

@@ -530,6 +530,7 @@ RETURNING id
 `, neighborSlug).Scan(&neighborWorkspaceID)
 	t.Cleanup(func() {
 		for _, workspaceID := range []string{targetWorkspaceID, neighborWorkspaceID} {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_inbox_delivery WHERE workspace_id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM task_usage_hourly_dirty WHERE workspace_id = $1`, workspaceID)
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE workspace_id = $1`, workspaceID)
@@ -546,6 +547,7 @@ VALUES ($1, $2, 'owner')
 		workspaceID string
 		mediaKey    string
 		issueID     string
+		inboxItemID string
 	}
 	fixtures := []*tenantFixture{
 		{workspaceID: targetWorkspaceID, mediaKey: targetMediaKey},
@@ -561,12 +563,20 @@ RETURNING id
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
 VALUES ($1, $2, 'member', $3, 'Workspace delete tenant isolation')
 `, fixture.issueID, fixture.workspaceID, testUserID)
-		dbfx.Exec(t, `
+		dbfx.QueryRow(t, `
 INSERT INTO inbox_item (
 	workspace_id, recipient_type, recipient_id, type, issue_id, title
 )
 VALUES ($1, 'member', $2, 'workspace-delete-test', $3, 'Workspace delete tenant isolation')
-`, fixture.workspaceID, testUserID, fixture.issueID)
+RETURNING id
+`, fixture.workspaceID, testUserID, fixture.issueID).Scan(&fixture.inboxItemID)
+		dbfx.Exec(t, `
+INSERT INTO channel_inbox_delivery (
+	inbox_item_id, workspace_id, channel_type, status, target_type,
+	provider_message_id, idempotency_key, finished_at
+)
+VALUES ($1, $2, 'feishu', 'delivered', 'direct_room', 'om_workspace_delete', $3, now())
+`, fixture.inboxItemID, fixture.workspaceID, fixture.inboxItemID)
 		dbfx.Exec(t, `
 INSERT INTO runtime_profile (
 	workspace_id, display_name, protocol_family, command_name, created_by
@@ -595,6 +605,7 @@ VALUES ($1, $2, gen_random_uuid(), 's3://workspace-delete/tenant-isolation')
 		"workspace":                    "id",
 		"issue":                        "workspace_id",
 		"comment":                      "workspace_id",
+		"channel_inbox_delivery":       "workspace_id",
 		"inbox_item":                   "workspace_id",
 		"runtime_profile":              "workspace_id",
 		"task_usage_hourly_dirty":      "workspace_id",

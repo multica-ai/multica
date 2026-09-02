@@ -93,7 +93,7 @@ func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, a
 func (f *fakePatcherQueries) FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
 	return f.inboxBinding, f.inboxBindingErr
 }
-func (f *fakePatcherQueries) GetInboxItemInWorkspace(ctx context.Context, arg db.GetInboxItemInWorkspaceParams) (db.InboxItem, error) {
+func (f *fakePatcherQueries) GetAutopilotReportInboxItemInWorkspace(ctx context.Context, arg db.GetAutopilotReportInboxItemInWorkspaceParams) (db.InboxItem, error) {
 	return f.inboxItem, f.inboxItemErr
 }
 func (f *fakePatcherQueries) GetChannelInboxDelivery(ctx context.Context, arg db.GetChannelInboxDeliveryParams) (db.ChannelInboxDelivery, error) {
@@ -138,6 +138,7 @@ type fakeAPIClient struct {
 	sendErr        error
 	patchErr       error
 	textSendErr    error
+	textSendErrs   []error
 	textSendReturn string
 	mdCardErr      error
 	mdCardReturn   string
@@ -182,6 +183,11 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	f.textSent = append(f.textSent, p)
 	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
 		return "", f.threadReplyErr
+	}
+	if len(f.textSendErrs) > 0 {
+		err := f.textSendErrs[0]
+		f.textSendErrs = f.textSendErrs[1:]
+		return f.textSendReturn, err
 	}
 	return f.textSendReturn, f.textSendErr
 }
@@ -384,6 +390,42 @@ func TestPatcherRetriesFailedInboxDeliveryWithoutRepeatingSuccess(t *testing.T) 
 	defer api.mu.Unlock()
 	if len(api.textSent) != 2 {
 		t.Fatalf("send attempts = %d, want failed attempt plus one retry", len(api.textSent))
+	}
+	if api.textSent[0].IdempotencyKey != api.textSent[1].IdempotencyKey {
+		t.Fatalf("retry keys differ: %q != %q", api.textSent[0].IdempotencyKey, api.textSent[1].IdempotencyKey)
+	}
+	if q.deliveryReceipt.Status != "delivered" || q.deliveryReceipt.ProviderMessageID.String != "lark_text_msg_1" {
+		t.Fatalf("delivered receipt = %+v", q.deliveryReceipt)
+	}
+}
+
+func TestPatcherImmediatelyRetriesAmbiguousInboxTransportFailureOnce(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.inboxBinding = db.ChannelUserBinding{
+		WorkspaceID:    uuidFromString(t, "88888888-8888-8888-8888-888888888888"),
+		MulticaUserID:  uuidFromString(t, "99999999-9999-9999-9999-999999999999"),
+		InstallationID: q.installation.ID,
+		ChannelType:    channelTypeFeishu,
+		ChannelUserID:  "ou_retry_transport_member",
+	}
+	q.inboxItem = db.InboxItem{
+		ID:            uuidFromString(t, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"),
+		WorkspaceID:   q.inboxBinding.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   q.inboxBinding.MulticaUserID,
+		Type:          "new_comment",
+		Title:         "Synthetic Autopilot report",
+		Body:          pgtype.Text{String: "【Mock】Feishu delivery smoke。", Valid: true},
+		Details:       []byte(`{}`),
+	}
+	api.textSendErrs = []error{errors.New("temporary transport failure"), nil}
+
+	p.handleInboxNew(inboxNewEvent(q.inboxItem))
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("send attempts = %d, want one attempt plus one bounded retry", len(api.textSent))
 	}
 	if api.textSent[0].IdempotencyKey != api.textSent[1].IdempotencyKey {
 		t.Fatalf("retry keys differ: %q != %q", api.textSent[0].IdempotencyKey, api.textSent[1].IdempotencyKey)

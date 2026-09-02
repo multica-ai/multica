@@ -316,6 +316,60 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 	return i, err
 }
 
+const getAutopilotReportInboxItemInWorkspace = `-- name: GetAutopilotReportInboxItemInWorkspace :one
+SELECT inbox_item.id, inbox_item.workspace_id, inbox_item.recipient_type, inbox_item.recipient_id, inbox_item.type, inbox_item.severity, inbox_item.issue_id, inbox_item.title, inbox_item.body, inbox_item.read, inbox_item.archived, inbox_item.created_at, inbox_item.actor_type, inbox_item.actor_id, inbox_item.details
+FROM inbox_item
+JOIN issue
+  ON issue.id = inbox_item.issue_id
+ AND issue.workspace_id = inbox_item.workspace_id
+JOIN comment
+  ON comment.issue_id = issue.id
+ AND comment.workspace_id = issue.workspace_id
+ AND comment.id::text = inbox_item.details ->> 'comment_id'
+JOIN autopilot_run
+  ON autopilot_run.issue_id = issue.id
+ AND autopilot_run.autopilot_id = issue.origin_id
+ AND autopilot_run.task_id = comment.source_task_id
+WHERE inbox_item.id = $1
+  AND inbox_item.workspace_id = $2
+  AND inbox_item.recipient_type = 'member'
+  AND inbox_item.type = 'new_comment'
+  AND issue.origin_type = 'autopilot'
+`
+
+type GetAutopilotReportInboxItemInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The Feishu delivery edge is intentionally narrower than generic Inbox:
+// only a comment produced by the task linked to an Autopilot run is a report.
+// This excludes the issue_subscribed notice emitted when create_issue starts,
+// unrelated comments on the generated issue, and every non-Autopilot Inbox
+// item, so one completed representative run yields one direct-room message.
+func (q *Queries) GetAutopilotReportInboxItemInWorkspace(ctx context.Context, arg GetAutopilotReportInboxItemInWorkspaceParams) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, getAutopilotReportInboxItemInWorkspace, arg.ID, arg.WorkspaceID)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
 const getChannelInboxDelivery = `-- name: GetChannelInboxDelivery :one
 SELECT inbox_item_id, workspace_id, channel_type, status, target_type, provider_message_id, idempotency_key, error_code, finished_at FROM channel_inbox_delivery
 WHERE inbox_item_id = $1 AND workspace_id = $2 AND channel_type = $3

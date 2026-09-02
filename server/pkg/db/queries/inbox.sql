@@ -89,6 +89,31 @@ WHERE id = $1;
 SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetAutopilotReportInboxItemInWorkspace :one
+-- The Feishu delivery edge is intentionally narrower than generic Inbox:
+-- only a comment produced by the task linked to an Autopilot run is a report.
+-- This excludes the issue_subscribed notice emitted when create_issue starts,
+-- unrelated comments on the generated issue, and every non-Autopilot Inbox
+-- item, so one completed representative run yields one direct-room message.
+SELECT inbox_item.*
+FROM inbox_item
+JOIN issue
+  ON issue.id = inbox_item.issue_id
+ AND issue.workspace_id = inbox_item.workspace_id
+JOIN comment
+  ON comment.issue_id = issue.id
+ AND comment.workspace_id = issue.workspace_id
+ AND comment.id::text = inbox_item.details ->> 'comment_id'
+JOIN autopilot_run
+  ON autopilot_run.issue_id = issue.id
+ AND autopilot_run.autopilot_id = issue.origin_id
+ AND autopilot_run.task_id = comment.source_task_id
+WHERE inbox_item.id = $1
+  AND inbox_item.workspace_id = $2
+  AND inbox_item.recipient_type = 'member'
+  AND inbox_item.type = 'new_comment'
+  AND issue.origin_type = 'autopilot';
+
 -- name: GetChannelInboxDelivery :one
 SELECT * FROM channel_inbox_delivery
 WHERE inbox_item_id = $1 AND workspace_id = $2 AND channel_type = $3;
