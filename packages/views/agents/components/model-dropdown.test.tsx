@@ -137,27 +137,25 @@ describe("ModelDropdown", () => {
     expect(onChange).toHaveBeenCalledWith("vertex/gemini-3.1-pro");
   });
 
-  // MUL-6961: Claude Code reports a model its own version cannot run as a
-  // disabled row rather than omitting it. Picking one is a guaranteed 400, so
-  // the row must be visible (otherwise the user reads it as "Multica doesn't
-  // support Fable 5.1") and inert (otherwise nothing has been fixed).
+  // MUL-6961: Claude Code reports a model its own version cannot run in a
+  // separate list. It must be visible — a missing row reads as "Multica doesn't
+  // support Fable 5.1" when the truth is the user's CLI is behind — and it must
+  // be impossible to pick, because picking one is a guaranteed 400.
   describe("models the runtime cannot run", () => {
-    const WITH_DISABLED: RuntimeModelsResult = {
-      models: [
-        { id: "claude-fable-5", label: "Fable", provider: "anthropic" },
+    const WITH_UNAVAILABLE: RuntimeModelsResult = {
+      models: [{ id: "claude-fable-5", label: "Fable", provider: "anthropic" }],
+      unavailableModels: [
         {
           id: "cc-update-required-1",
           label: "Fable 5.1 (disabled)",
-          provider: "anthropic",
-          disabled: true,
-          disabled_reason: "Update to 2.1.255+ to use Fable 5.1",
+          reason: "Update to 2.1.255+ to use Fable 5.1",
         },
       ],
       supported: true,
     };
 
-    it("shows the row with the runtime's upgrade hint but refuses to select it", async () => {
-      discovery = async () => WITH_DISABLED;
+    it("shows the row with the runtime's upgrade hint but renders no control for it", async () => {
+      discovery = async () => WITH_UNAVAILABLE;
       const { container, onChange } = renderDropdown();
       openDropdown(container);
 
@@ -166,36 +164,35 @@ describe("ModelDropdown", () => {
         screen.getByText("Update to 2.1.255+ to use Fable 5.1"),
       ).toBeTruthy();
 
+      // Nothing clickable was rendered for it, so there is no path to select it.
+      expect(row.closest("button")).toBeNull();
       fireEvent.click(row);
       expect(onChange).not.toHaveBeenCalled();
-      // Nothing focusable or pressable was rendered for it.
-      expect(row.closest("button")).toBeNull();
-      expect(row.closest('[aria-disabled="true"]')).toBeTruthy();
 
       // The model this CLI *can* run is still a normal pick.
       fireEvent.click(screen.getByText("Fable"));
       expect(onChange).toHaveBeenCalledWith("claude-fable-5");
     });
 
-    it("does not let a disabled row suppress manual entry of its name", async () => {
-      discovery = async () => WITH_DISABLED;
+    it("keeps the unavailable id out of the selectable catalog", async () => {
+      discovery = async () => WITH_UNAVAILABLE;
       const { container, onChange } = renderDropdown();
       openDropdown(container);
       await screen.findByText("Fable 5.1 (disabled)");
 
+      // Searching the placeholder id must not surface a selectable row for it.
+      // Manual entry stays available — that escape hatch accepts any string and
+      // is not what this guards — but it must be the only way the text reaches
+      // onChange, and only on an explicit second click.
       const input = screen.getByPlaceholderText(
         enAgents.pickers.model_search_placeholder,
       );
-      fireEvent.change(input, {
-        target: { value: "Fable 5.1 (disabled)" },
-      });
+      fireEvent.change(input, { target: { value: "cc-update-required-1" } });
 
-      // An unpickable row must not count as an exact match — that would leave
-      // the search with neither a selectable result nor the create action.
-      fireEvent.click(
-        await screen.findByText('Use "Fable 5.1 (disabled)"'),
-      );
-      expect(onChange).toHaveBeenCalledWith("Fable 5.1 (disabled)");
+      expect(
+        screen.queryByRole("button", { name: /cc-update-required-1$/ }),
+      ).toBeNull();
+      expect(onChange).not.toHaveBeenCalled();
     });
   });
 });

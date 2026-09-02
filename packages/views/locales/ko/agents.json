@@ -226,6 +226,7 @@
     "model_discovery_failed_hint": "위 입력란에 모델 ID를 직접 입력해 수동으로 지정할 수 있습니다.",
     "model_empty": "사용 가능한 모델이 없습니다",
     "model_empty_with_dot": "사용 가능한 모델이 없습니다.",
+    "model_unavailable_heading": "최신 CLI 필요",
     "model_custom_tooltip": "\"{{value}}\"을(를) 사용자 지정 모델 ID로 사용",
     "model_custom_use": "\"{{value}}\" 사용",
     "model_clear": "지우기(제공자 기본값 사용)",

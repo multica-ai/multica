@@ -226,6 +226,7 @@
     "model_discovery_failed_hint": "可在上方输入框直接键入模型 ID 手动指定。",
     "model_empty": "暂无可用模型",
     "model_empty_with_dot": "暂无可用模型。",
+    "model_unavailable_heading": "需要更新 CLI",
     "model_custom_tooltip": "使用\"{{value}}\"作为自定义模型 ID",
     "model_custom_use": "使用\"{{value}}\"",
     "model_clear": "清除（使用提供方默认）",

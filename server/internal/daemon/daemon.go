@@ -4448,12 +4448,16 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		Thinking                            *modelThinkingWire     `json:"thinking,omitempty"`
 		ServiceTiers                        []modelServiceTierWire `json:"service_tiers,omitempty"`
 		SupportsExplicitStandardServiceTier bool                   `json:"supports_explicit_standard_service_tier,omitempty"`
-		// Advertised-but-unavailable rows: the runtime named a model it will
-		// not run here (Claude Code reporting one that needs a newer CLI). The
-		// picker greys them out with the reason instead of hiding them, so the
-		// user sees the remedy rather than an unexplained gap (MUL-6961).
-		Disabled       bool   `json:"disabled,omitempty"`
-		DisabledReason string `json:"disabled_reason,omitempty"`
+	}
+	// Models the runtime named but will not run here (Claude Code reporting one
+	// that needs a newer CLI). Reported in their own list, never inside
+	// `models`: a client that does not know this field — an installed desktop
+	// build predating it — then cannot offer one as a real model, which a flag
+	// on the model itself could not guarantee (MUL-6961).
+	type unavailableModelWire struct {
+		ID     string `json:"id"`
+		Label  string `json:"label"`
+		Reason string `json:"reason,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
@@ -4463,8 +4467,6 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			Provider:                            m.Provider,
 			Default:                             m.Default,
 			SupportsExplicitStandardServiceTier: m.SupportsExplicitStandardServiceTier,
-			Disabled:                            m.Disabled,
-			DisabledReason:                      m.DisabledReason,
 		}
 		if m.Thinking != nil {
 			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
@@ -4489,10 +4491,21 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		}
 		wire = append(wire, entry)
 	}
+	unavailableWire := make([]unavailableModelWire, 0, len(catalog.Unavailable))
+	for _, m := range catalog.Unavailable {
+		unavailableWire = append(unavailableWire, unavailableModelWire{
+			ID:     m.ID,
+			Label:  m.Label,
+			Reason: m.Reason,
+		})
+	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+		// Additive: an older server drops the key and the picker simply shows
+		// no unavailable section, which is the pre-MUL-6961 behaviour.
+		"unavailable_models": unavailableWire,
 		// Additive field: the models are still worth rendering, but the server
 		// must not persist them as this runtime's real catalog (MUL-5549).
 		// Older servers ignore it and keep the previous behaviour.

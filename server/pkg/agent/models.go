@@ -44,17 +44,29 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
-	// Disabled marks a model the runtime advertises but will not run in this
-	// installation — today only Claude Code, which reports a model that needs a
-	// newer CLI than the one installed. Such a row is carried rather than
-	// dropped because absence and unavailability read identically in a picker:
-	// hiding it tells the user Multica does not support the model, when the
-	// truth is that their CLI does not yet. DisabledReason is the runtime's own
-	// remedy ("Update to 2.1.255+ to use Fable 5.1"), passed through verbatim
-	// so the copy stays right without Multica tracking upstream version floors
-	// (MUL-6961).
-	Disabled       bool   `json:"disabled,omitempty"`
-	DisabledReason string `json:"disabled_reason,omitempty"`
+}
+
+// UnavailableModel is a model the runtime named but will not run on this host —
+// today only Claude Code, reporting one that needs a newer CLI than the
+// installed one. Reason is the runtime's own remedy ("Update to 2.1.255+ to use
+// Fable 5.1"), forwarded verbatim so the copy stays right without Multica
+// tracking upstream version floors.
+//
+// It is a distinct type, and travels in a distinct list, precisely so it can
+// never be mistaken for something selectable. Marking such a row with a flag
+// inside the models list was the first attempt and it was wrong twice over:
+// every consumer that did not learn the flag (the inspector picker, the agent
+// builder) kept offering it, and — the part a flag cannot fix — an already
+// installed desktop client does not know the field at all, so it would render
+// the row as an ordinary model and persist a model id the CLI rejects. Keeping
+// the two lists separate makes old clients correct by construction, since they
+// only ever read `models` (MUL-6961).
+type UnavailableModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Reason is display copy, not a machine contract: it comes from the
+	// runtime and may be empty when it offered none.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ModelServiceTier is one runtime-native execution tier advertised for a
@@ -95,6 +107,11 @@ type ThinkingLevel struct {
 // plus whether they were actually discovered.
 type Catalog struct {
 	Models []Model
+	// Unavailable carries models the runtime named but will not run here. It is
+	// deliberately NOT part of Models: every capability lookup in this package
+	// walks Models, so keeping these out is what makes an unrunnable model fail
+	// closed everywhere without each lookup having to remember a flag.
+	Unavailable []UnavailableModel
 	// Fallback reports that discovery did not succeed and Models is a static
 	// stand-in rather than the runtime's real catalog.
 	//
@@ -120,8 +137,9 @@ func discovered(models []Model, err error) (Catalog, error) {
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
 type modelCacheEntry struct {
-	models    []Model
-	expiresAt time.Time
+	models      []Model
+	unavailable []UnavailableModel
+	expiresAt   time.Time
 }
 
 var (
@@ -490,9 +508,9 @@ func modelHasKnownPrefix(model string) bool {
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
-		out := entry.models
+		out, unavailable := entry.models, entry.unavailable
 		modelCacheMu.Unlock()
-		return Catalog{Models: out}, nil
+		return Catalog{Models: out, Unavailable: unavailable}, nil
 	}
 	modelCacheMu.Unlock()
 
@@ -517,7 +535,11 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	}
 
 	modelCacheMu.Lock()
-	modelCache[key] = modelCacheEntry{models: catalog.Models, expiresAt: time.Now().Add(modelCacheTTL)}
+	modelCache[key] = modelCacheEntry{
+		models:      catalog.Models,
+		unavailable: catalog.Unavailable,
+		expiresAt:   time.Now().Add(modelCacheTTL),
+	}
 	modelCacheMu.Unlock()
 	return catalog, nil
 }

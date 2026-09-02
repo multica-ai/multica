@@ -13,6 +13,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { UnavailableModelsNote } from "./unavailable-models-note";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -57,6 +58,11 @@ export function ModelDropdown({
     [modelsQuery.data],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
+  // Advisory only — never merged into `models`, so nothing below can select one.
+  const unavailableModels = useMemo(
+    () => modelsQuery.data?.unavailableModels ?? [],
+    [modelsQuery.data],
+  );
   // resolveRuntimeModels throws the daemon's reported error text, so this is
   // the runtime's own message (plus any hint the daemon appended). It is only
   // ever read while isError is true.
@@ -90,13 +96,8 @@ export function ModelDropdown({
   }, [grouped, search]);
 
   const trimmedSearch = search.trim();
-  // Disabled rows are excluded deliberately: they are not something the user
-  // can pick, so letting one count as an exact match would suppress the
-  // manual-entry action and leave the search with no way forward at all.
   const exactMatch = models.some(
-    (m) =>
-      m.disabled !== true &&
-      (m.id === trimmedSearch || m.label === trimmedSearch),
+    (m) => m.id === trimmedSearch || m.label === trimmedSearch,
   );
   const canCreate = trimmedSearch.length > 0 && !exactMatch;
 
@@ -198,56 +199,28 @@ export function ModelDropdown({
                       {provider}
                     </div>
                   )}
-                  {list.map((m) =>
-                    m.disabled === true ? (
-                      /* The runtime named this model but cannot run it here —
-                         a Claude Code build older than the model needs. Shown
-                         rather than filtered, because a missing row reads as
-                         "Multica doesn't support this", while the real answer
-                         is an upgrade the user can perform. Rendered as a div,
-                         not a disabled button: it is never focusable and never
-                         selectable, and the reason below is the actionable
-                         part, so it stays at readable contrast instead of
-                         being dimmed along with the label. */
-                      <div
-                        key={m.id}
-                        aria-disabled="true"
-                        className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-body"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium text-muted-foreground">
-                            {m.label}
+                  {list.map((m) => (
+                    <button
+                      type="button"
+                      key={m.id}
+                      onClick={() => select(m.id)}
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
+                        m.id === value ? "bg-accent" : "hover:bg-accent/50"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-medium">{m.label}</div>
+                        {m.label !== m.id && (
+                          <div className="truncate text-caption text-muted-foreground">
+                            {m.id}
                           </div>
-                          {m.disabled_reason && (
-                            <div className="text-caption text-muted-foreground">
-                              {m.disabled_reason}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        key={m.id}
-                        onClick={() => select(m.id)}
-                        className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
-                          m.id === value ? "bg-accent" : "hover:bg-accent/50"
-                        }`}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium">{m.label}</div>
-                          {m.label !== m.id && (
-                            <div className="truncate text-caption text-muted-foreground">
-                              {m.id}
-                            </div>
-                          )}
-                        </div>
-                        {m.id === value && (
-                          <Check className="h-4 w-4 shrink-0 text-primary" />
                         )}
-                      </button>
-                    ),
-                  )}
+                      </div>
+                      {m.id === value && (
+                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                      )}
+                    </button>
+                  ))}
                 </div>
               ))}
 
@@ -276,6 +249,13 @@ export function ModelDropdown({
                   </div>
                 </div>
               </div>
+            )}
+
+            {!modelsQuery.isLoading && !modelsQuery.isError && (
+              <UnavailableModelsNote
+                models={unavailableModels}
+                title={t(($) => $.pickers.model_unavailable_heading)}
+              />
             )}
 
             {!modelsQuery.isLoading &&

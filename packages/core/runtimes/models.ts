@@ -91,6 +91,7 @@ export async function resolveRuntimeModels(
   }
   return {
     models: current.models ?? [],
+    unavailableModels: current.unavailable_models ?? [],
     supported: current.supported !== false,
     cached: current.cached === true,
     cachedAt: current.cached_at,

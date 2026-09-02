@@ -1588,20 +1588,19 @@ describe("RuntimeModelListRequestSchema", () => {
     expect(parsed.cached).toBeUndefined();
   });
 
-  // MUL-6961: Claude Code reports a model needing a newer CLI as a disabled
-  // row. Both fields must survive parsing — without the reason the picker can
-  // grey a row out but not say why, which is the part the user can act on.
-  it("keeps the disabled marker and the runtime's reason", () => {
+  // MUL-6961: models the runtime cannot run arrive in their OWN list. The
+  // separation is the compatibility contract — a client that never learned the
+  // field reads `models` and therefore cannot offer one — so the schema must
+  // keep them apart rather than folding them together.
+  it("parses unavailable models without letting them into the selectable list", () => {
     const parsed = parseWithFallback(
       {
         ...completed,
-        models: [
+        unavailable_models: [
           {
             id: "cc-update-required-1",
             label: "Fable 5.1 (disabled)",
-            provider: "anthropic",
-            disabled: true,
-            disabled_reason: "Update to 2.1.255+ to use Fable 5.1",
+            reason: "Update to 2.1.255+ to use Fable 5.1",
           },
         ],
       },
@@ -1609,22 +1608,26 @@ describe("RuntimeModelListRequestSchema", () => {
       MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
       { endpoint: "test" },
     );
-    expect(parsed.models?.[0]?.disabled).toBe(true);
-    expect(parsed.models?.[0]?.disabled_reason).toBe(
+    expect(parsed.unavailable_models?.[0]?.id).toBe("cc-update-required-1");
+    expect(parsed.unavailable_models?.[0]?.reason).toBe(
       "Update to 2.1.255+ to use Fable 5.1",
+    );
+    expect(parsed.models?.map((m) => m.id)).not.toContain(
+      "cc-update-required-1",
     );
   });
 
-  // A daemon older than the field sends neither key. Every row must stay
-  // selectable then — defaulting to disabled would empty the picker.
-  it("leaves rows selectable when an older daemon omits the disabled marker", () => {
+  // An older daemon or server sends no such key. The picker then shows no
+  // unavailable section, which is exactly the pre-MUL-6961 behaviour.
+  it("tolerates a backend that omits unavailable models entirely", () => {
     const parsed = parseWithFallback(
       completed,
       RuntimeModelListRequestSchema,
       MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
       { endpoint: "test" },
     );
-    expect(parsed.models?.[0]?.disabled).toBeUndefined();
+    expect(parsed.unavailable_models).toBeUndefined();
+    expect(parsed.models?.length).toBe(1);
   });
 
   it("treats an older daemon that omits explicit-standard support as unsupported", () => {

@@ -129,7 +129,10 @@ func TestClaudeModelsFromInfos_CurrentCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseClaudeModelCatalog: %v", err)
 	}
-	models := claudeModelsFromInfos(infos)
+	models, unavailable := claudeModelsFromInfos(infos)
+	if len(unavailable) != 0 {
+		t.Errorf("a current CLI should report nothing unavailable, got %+v", unavailable)
+	}
 
 	wantIDs := []string{
 		"claude-opus-5[1m]",
@@ -159,9 +162,6 @@ func TestClaudeModelsFromInfos_CurrentCLI(t *testing.T) {
 	for _, m := range models {
 		if m.Provider != "anthropic" {
 			t.Errorf("%s provider = %q, want anthropic", m.ID, m.Provider)
-		}
-		if m.Disabled {
-			t.Errorf("%s is unexpectedly disabled on a current CLI", m.ID)
 		}
 	}
 
@@ -199,33 +199,30 @@ func TestClaudeModelsFromInfos_OldCLIDisabledRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseClaudeModelCatalog: %v", err)
 	}
-	models := claudeModelsFromInfos(infos)
+	models, unavailable := claudeModelsFromInfos(infos)
 
+	// The selectable list is the one every consumer reads — the picker, the
+	// builder, the capability lookups, and any client too old to know about
+	// unavailable rows. Nothing unrunnable may be in it.
 	for _, m := range models {
-		if m.ID == "claude-fable-5-1" && !m.Disabled {
-			t.Fatal("2.1.246 must never offer claude-fable-5-1 as selectable: the run 400s")
+		if m.ID == "claude-fable-5-1" || m.ID == "cc-update-required-1" {
+			t.Fatalf("%s must never be selectable on 2.1.246: the run 400s", m.ID)
 		}
 	}
 
-	var disabled *Model
-	for i := range models {
-		if models[i].Disabled {
-			disabled = &models[i]
-		}
+	if len(unavailable) != 1 {
+		t.Fatalf("got %d unavailable rows, want 1: %+v", len(unavailable), unavailable)
 	}
-	if disabled == nil {
-		t.Fatal("expected a disabled row carrying the update hint")
+	if unavailable[0].Label != "Fable 5.1 (disabled)" {
+		t.Errorf("unavailable label = %q", unavailable[0].Label)
 	}
-	if disabled.Label != "Fable 5.1 (disabled)" {
-		t.Errorf("disabled label = %q", disabled.Label)
-	}
-	if disabled.DisabledReason != "Update to 2.1.255+ to use Fable 5.1" {
-		t.Errorf("disabled reason = %q, want the runtime's own upgrade hint", disabled.DisabledReason)
+	if unavailable[0].Reason != "Update to 2.1.255+ to use Fable 5.1" {
+		t.Errorf("unavailable reason = %q, want the runtime's own upgrade hint", unavailable[0].Reason)
 	}
 	// Fable 5 is the model this CLI *can* run, and it stays selectable.
 	found := false
 	for _, m := range models {
-		if m.ID == "claude-fable-5" && !m.Disabled {
+		if m.ID == "claude-fable-5" {
 			found = true
 		}
 	}
@@ -234,19 +231,73 @@ func TestClaudeModelsFromInfos_OldCLIDisabledRow(t *testing.T) {
 	}
 }
 
+// TestClaudeModelsFromInfos_DefaultWithNoSiblingRow covers the org-restricted
+// shape where `default` resolves to a model no other row names.
+//
+// Dropping it costs more than one picker entry. ValidateThinkingLevelWith
+// resolves an empty model — "follow the CLI default", which is what most agents
+// are configured with — by looking for the catalog entry flagged Default, and
+// fails closed when there is none. With no such entry every default-model task
+// would silently lose its configured effort.
 func TestClaudeModelsFromInfos_DefaultWithNoSiblingRow(t *testing.T) {
 	t.Parallel()
-	// An org-restricted install can resolve `default` to a model no other row
-	// names. Folding the sentinel away must not drop that model entirely.
-	models := claudeModelsFromInfos([]claudeModelInfo{
-		{Value: "default", ResolvedModel: "claude-sonnet-5", DisplayName: "Default (recommended)"},
+	models, unavailable := claudeModelsFromInfos([]claudeModelInfo{
+		{
+			Value: "default", ResolvedModel: "claude-sonnet-5",
+			DisplayName:    "Default (recommended)",
+			SupportsEffort: true, SupportedEffortLevels: []string{"low", "high"},
+		},
 		{Value: "haiku", ResolvedModel: "claude-haiku-4-5-20251001", DisplayName: "Haiku"},
 	})
-	if len(models) != 1 || models[0].ID != "claude-haiku-4-5-20251001" {
-		t.Fatalf("unexpected catalog %+v", models)
+	if len(unavailable) != 0 {
+		t.Errorf("nothing here is unavailable, got %+v", unavailable)
 	}
-	if models[0].Default {
-		t.Error("a model the default row does not resolve to must not be badged")
+
+	var def *Model
+	for i := range models {
+		if models[i].Default {
+			def = &models[i]
+		}
+	}
+	if def == nil {
+		t.Fatalf("the default model must survive as a real entry, got %+v", models)
+	}
+	if def.ID != "claude-sonnet-5" {
+		t.Errorf("default entry id = %q, want claude-sonnet-5", def.ID)
+	}
+	// Materialised from the same row, so it keeps that row's capabilities
+	// rather than becoming a bare id with no effort picker.
+	if def.Thinking == nil || len(def.Thinking.SupportedLevels) != 2 {
+		t.Errorf("materialised default lost its effort catalog: %+v", def.Thinking)
+	}
+	// And it does not displace the row that was already there.
+	found := false
+	for _, m := range models {
+		if m.ID == "claude-haiku-4-5-20251001" {
+			found = true
+			if m.Default {
+				t.Error("only the model the default row resolves to may be badged")
+			}
+		}
+	}
+	if !found {
+		t.Error("haiku should still be selectable")
+	}
+}
+
+// TestClaudeModelsFromInfos_DisabledDefaultIsNotMaterialised guards the one case
+// where materialising would reintroduce the bug: a default row that is itself
+// unrunnable must not be conjured into a selectable model.
+func TestClaudeModelsFromInfos_DisabledDefaultIsNotMaterialised(t *testing.T) {
+	t.Parallel()
+	models, _ := claudeModelsFromInfos([]claudeModelInfo{
+		{Value: "default", ResolvedModel: "cc-update-required-1", DisplayName: "Nope", Disabled: true},
+		{Value: "haiku", ResolvedModel: "claude-haiku-4-5-20251001", DisplayName: "Haiku"},
+	})
+	for _, m := range models {
+		if m.ID == "cc-update-required-1" {
+			t.Fatal("an unrunnable default must never be materialised as selectable")
+		}
 	}
 }
 
@@ -275,12 +326,15 @@ func TestDiscoverClaudeModels_ArgvAndStdin(t *testing.T) {
 		"cat '" + fixture + "'\n"
 	writeTestExecutable(t, fake, []byte(script))
 
-	models, err := discoverClaudeModels(context.Background(), Command{Path: fake})
+	models, unavailable, err := discoverClaudeModels(context.Background(), Command{Path: fake})
 	if err != nil {
 		t.Fatalf("discoverClaudeModels: %v", err)
 	}
 	if len(models) != 4 {
 		t.Fatalf("got %d models, want 4", len(models))
+	}
+	if len(unavailable) != 0 {
+		t.Errorf("2.1.258 reports nothing unavailable, got %+v", unavailable)
 	}
 
 	gotArgv, err := os.ReadFile(argvFile)
@@ -319,14 +373,15 @@ func TestDiscoverClaudeModels_ErrorPaths(t *testing.T) {
 		"garbage":             "echo 'not json'\n",
 		// A well-formed reply with nothing usable must not pass as a catalog.
 		"empty catalog": `echo '{"type":"control_response","response":{"subtype":"success","request_id":"multica-list-models","response":{"models":[]}}}'` + "\n",
-		// Only the follow-the-CLI sentinel, which is not a pickable model.
-		"default row only": `echo '{"type":"control_response","response":{"subtype":"success","request_id":"multica-list-models","response":{"models":[{"value":"default","resolvedModel":"claude-opus-5"}]}}}'` + "\n",
+		// Rows that exist but none of which can be run: the picker would have
+		// nothing to offer, so the static list is the better answer.
+		"only unavailable rows": `echo '{"type":"control_response","response":{"subtype":"success","request_id":"multica-list-models","response":{"models":[{"value":"cc-update-required-1","resolvedModel":"cc-update-required-1","displayName":"Nope","disabled":true}]}}}'` + "\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			fake := filepath.Join(t.TempDir(), "claude")
 			writeTestExecutable(t, fake, []byte("#!/bin/sh\ncat > /dev/null\n"+body))
-			if _, err := discoverClaudeModels(context.Background(), Command{Path: fake}); err == nil {
+			if _, _, err := discoverClaudeModels(context.Background(), Command{Path: fake}); err == nil {
 				t.Fatal("expected an error so the caller falls back to the static catalog")
 			}
 		})
@@ -372,6 +427,91 @@ func TestDiscoverClaudeCatalog_LiveResultIsAuthoritative(t *testing.T) {
 		if m.ID == "claude-fable-5-1" {
 			t.Fatal("2.1.246's live catalog must not contain claude-fable-5-1")
 		}
+	}
+}
+
+// TestDiscoverClaudeCatalog_RemembersUnsupported is the fix for the "one cheap
+// round trip" claim that was not true.
+//
+// Every Claude task carrying a thinking_level loads the catalog before it
+// starts, and cachedDiscovery refuses to memoise a fallback — so on a CLI too
+// old to answer list_models, the probe ran once per task forever. Once the
+// binary has said it does not know the request, we stop asking it.
+func TestDiscoverClaudeCatalog_RemembersUnsupported(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	// Not parallel: mutates the package-level capability cache.
+	resetClaudeCapabilityCacheForTests()
+	t.Cleanup(resetClaudeCapabilityCacheForTests)
+
+	dir := t.TempDir()
+	countFile := filepath.Join(dir, "probes.txt")
+	fake := filepath.Join(dir, "claude")
+	// Counts only real probes: the static fallback also runs --version and
+	// --help (for the effort superset), and those are not what is being bounded.
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != \"--print\" ]; then echo '2.1.100 (Claude Code)'; exit 0; fi\n" +
+		"cat > /dev/null\n" +
+		"echo x >> '" + countFile + "'\n" +
+		`echo '{"type":"control_response","response":{"subtype":"error","request_id":"multica-list-models",` +
+		`"error":"Unsupported control request subtype: list_models"}}'` + "\n"
+	writeTestExecutable(t, fake, []byte(script))
+
+	cmd := Command{Path: fake}
+	for i := 0; i < 3; i++ {
+		catalog := discoverClaudeCatalog(context.Background(), cmd)
+		if !catalog.Fallback {
+			t.Fatalf("round %d: an old CLI must degrade to the flagged static catalog", i)
+		}
+		if len(catalog.Models) == 0 {
+			t.Fatalf("round %d: the fallback must still be usable", i)
+		}
+	}
+
+	probes := 0
+	if data, err := os.ReadFile(countFile); err == nil {
+		probes = len(splitNonEmptyLines(string(data)))
+	}
+	if probes != 1 {
+		t.Errorf("probed %d times across 3 catalog loads, want 1 — the "+
+			"unsupported answer is a property of the binary, not a bad moment", probes)
+	}
+}
+
+// TestDiscoverClaudeCatalog_DoesNotRememberTransientFailures is the other half
+// of the contract. Caching a timeout or a crash would turn one bad moment into
+// ten minutes of static catalog on a CLI that can actually answer.
+func TestDiscoverClaudeCatalog_DoesNotRememberTransientFailures(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	resetClaudeCapabilityCacheForTests()
+	t.Cleanup(resetClaudeCapabilityCacheForTests)
+
+	dir := t.TempDir()
+	countFile := filepath.Join(dir, "probes.txt")
+	fake := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != \"--print\" ]; then echo '2.1.258 (Claude Code)'; exit 0; fi\n" +
+		"cat > /dev/null\n" +
+		"echo x >> '" + countFile + "'\n" +
+		"echo 'garbage that is not a control response'\n"
+	writeTestExecutable(t, fake, []byte(script))
+
+	cmd := Command{Path: fake}
+	for i := 0; i < 3; i++ {
+		if catalog := discoverClaudeCatalog(context.Background(), cmd); !catalog.Fallback {
+			t.Fatalf("round %d: expected a fallback catalog", i)
+		}
+	}
+
+	data, err := os.ReadFile(countFile)
+	if err != nil {
+		t.Fatalf("read probe count: %v", err)
+	}
+	if probes := len(splitNonEmptyLines(string(data))); probes != 3 {
+		t.Errorf("probed %d times, want 3 — a transient failure must stay retryable", probes)
 	}
 }
 
