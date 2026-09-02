@@ -94,126 +94,238 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-// Numeric validation and import collision rules live in ../pricing-drafts.test.ts.
-it("saves the captured workspace revision without rounding small prices", async () => {
-  const { close } = open();
-  expect(screen.getByLabelText("Input")).toHaveValue(0.0028);
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
-      revision: 3,
-      overrides: { "workspace-model": rate },
-    }),
-  );
-  await waitFor(() => expect(close).toHaveBeenCalledWith(false));
-});
-
-it("stages removal until the user saves", async () => {
+// Numeric validation, dirty comparison, and import collisions live in ../pricing-drafts.test.ts.
+it("opens saved prices in browse mode with Close and no save or numeric inputs", () => {
   open();
-  fireEvent.click(screen.getByRole("button", { name: "Remove custom price" }));
-  expect(mocks.save).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
-      revision: 3,
-      overrides: {},
-    }),
-  );
+  expect(screen.getByText("Close", { selector: "button" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+  expect(screen.queryByRole("spinbutton")).toBeNull();
+  expect(
+    screen.getByRole("region", { name: "workspace-model" }),
+  ).toHaveTextContent("0.0028");
 });
 
-it("keeps a conflicting draft until the user explicitly reloads the latest revision", async () => {
-  mocks.save.mockRejectedValue(new ApiError("conflict", 409, "Conflict"));
-  mocks.get.mockResolvedValue({ ...snapshot(), revision: 4 });
-  const { close } = open();
-  fireEvent.change(screen.getByLabelText("Input"), { target: { value: "7" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText(/Another administrator updated/);
-  expect(screen.getByLabelText("Input")).toHaveValue(7);
-  expect(close).not.toHaveBeenCalled();
-  expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Discard drafts and reload" }),
-  );
-  await waitFor(() =>
-    expect(screen.getByLabelText("Input")).toHaveValue(rate.input),
-  );
-  mocks.save.mockResolvedValue({ ...snapshot(), revision: 5 });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await waitFor(() =>
-    expect(mocks.save).toHaveBeenLastCalledWith("workspace-a", {
-      revision: 4,
-      overrides: { "workspace-model": rate },
-    }),
-  );
-});
-
-it("allows members to inspect current prices without write actions", async () => {
-  mocks.role = "member";
-  const { client } = open();
-  expect(screen.getByLabelText("Input")).toBeDisabled();
-  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
-  client.setQueryData(modelPricingKey("workspace-a"), {
-    ...snapshot(),
-    revision: 4,
-    overrides: { "workspace-model": { ...rate, input: 3 } },
-  });
-  await waitFor(() => expect(screen.getByLabelText("Input")).toHaveValue(3));
-});
-
-it("requires both current membership and server permission for writes", () => {
-  open({ ...snapshot(), canManage: false });
-  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
-  expect(screen.getByLabelText("Input")).toBeDisabled();
-});
-
-it("shows precise public prices and their source without creating an override", async () => {
+it("shows a selected public price immediately without a lookup request", () => {
   const initial = snapshot();
   initial.rows["example/model"]!.cacheRead = 0.0000004 * 1_000_000;
   open(initial);
   fireEvent.change(screen.getByLabelText("Model or provider/model"), {
     target: { value: "example/model" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "View price" }));
-  const reference = screen.getByRole("region", {
-    name: "Public API reference",
-  });
+  const reference = screen.getByRole("region", { name: "example/model" });
   expect(within(reference).getByText("0.0028")).toBeInTheDocument();
   expect(within(reference).getByText("0.0145")).toBeInTheDocument();
   expect(within(reference).getByText("0.4")).toBeInTheDocument();
+  expect(within(reference).getByText("USD / 1M tokens")).toBeInTheDocument();
   expect(
     within(reference).getByRole("link", { name: "View source" }),
   ).toHaveAttribute("href", "https://example.com/prices");
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(screen.queryByRole("button", { name: "View price" })).toBeNull();
+  expect(mocks.get).not.toHaveBeenCalled();
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(mocks.refresh).not.toHaveBeenCalled();
+});
+
+it("enables saving only after existing override values actually change", () => {
+  open();
+  fireEvent.click(screen.getByRole("button", { name: "Edit prices" }));
+  const save = screen.getByRole("button", { name: "Save changes" });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Input"), {
+    target: { value: "0.002800" },
+  });
+  expect(save).toBeDisabled();
+  fireEvent.change(screen.getByLabelText("Input"), {
+    target: { value: "0.004" },
+  });
+  expect(save).toBeEnabled();
+  fireEvent.change(screen.getByLabelText("Input"), {
+    target: { value: "0.0028" },
+  });
+  expect(save).toBeDisabled();
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it("customizes a public model without a duplicate reference card or rounding its edit values", async () => {
+  const initial = snapshot();
+  initial.overrides = {};
+  const preciseRate = Number("0.12345678901234567");
+  initial.rows["example/model"]!.input = preciseRate;
+  open(initial);
+  fireEvent.change(screen.getByLabelText("Model or provider/model"), {
+    target: { value: "example/model" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Customize" }));
+  expect(screen.queryByRole("region", { name: "example/model" })).toBeNull();
+  expect(screen.getByLabelText("Input")).toHaveValue(preciseRate);
+  expect(screen.getByLabelText("Output")).toHaveValue(0.0145);
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
       revision: 3,
-      overrides: { "workspace-model": rate },
+      overrides: { "example/model": { ...rate, input: preciseRate } },
     }),
   );
 });
 
-it("previews local prices without uploading or removing them on cancel", () => {
+it("lets unknown models enter custom pricing without prematurely enabling Save", () => {
+  open({ ...snapshot(), overrides: {} });
+  fireEvent.change(screen.getByLabelText("Model or provider/model"), {
+    target: { value: "private-model" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Customize" }));
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  for (const label of ["Input", "Output", "Cache read", "Cache write"]) {
+    fireEvent.change(screen.getByLabelText(label), { target: { value: "0" } });
+  }
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+});
+
+it("stages removal and returns to browsing when editing is cancelled", () => {
+  const { close } = open();
+  fireEvent.click(screen.getByRole("button", { name: "Edit prices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove custom price" }));
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
+  expect(mocks.save).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+  expect(
+    screen.getByRole("region", { name: "workspace-model" }),
+  ).toBeInTheDocument();
+  expect(close).not.toHaveBeenCalled();
+});
+
+it("keeps an edited draft through refetch and revision conflict until explicit reload", async () => {
+  mocks.save.mockRejectedValue(new ApiError("conflict", 409, "Conflict"));
+  const { client, close } = open();
+  fireEvent.click(screen.getByRole("button", { name: "Edit prices" }));
+  fireEvent.change(screen.getByLabelText("Input"), { target: { value: "7" } });
+  const latest = {
+    ...snapshot(),
+    revision: 4,
+    overrides: { "workspace-model": { ...rate, input: 5 } },
+  };
+  mocks.get.mockResolvedValue(latest);
+  client.setQueryData(modelPricingKey("workspace-a"), latest);
+  await waitFor(() => expect(screen.getByLabelText("Input")).toHaveValue(7));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByText(/Another admin updated/);
+  expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
+    revision: 3,
+    overrides: { "workspace-model": { ...rate, input: 7 } },
+  });
+  expect(screen.getByLabelText("Input")).toHaveValue(7);
+  expect(close).not.toHaveBeenCalled();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Discard drafts and reload" }),
+  );
+  await waitFor(() => expect(screen.getByLabelText("Input")).toHaveValue(5));
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+});
+
+it("shows automatic read updates to members without edit or refresh actions", async () => {
+  mocks.role = "member";
+  const { client } = open();
+  expect(screen.queryByRole("spinbutton")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Edit prices" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Check now" })).toBeNull();
+  client.setQueryData(modelPricingKey("workspace-a"), {
+    ...snapshot(),
+    revision: 4,
+    overrides: { "workspace-model": { ...rate, input: 3 } },
+  });
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "workspace-model" })).getByText(
+        "3",
+      ),
+    ).toBeInTheDocument(),
+  );
+});
+
+it("captures the latest revision when browsing becomes editing", async () => {
+  const { client } = open();
+  client.setQueryData(modelPricingKey("workspace-a"), {
+    ...snapshot(),
+    revision: 4,
+    overrides: { "workspace-model": { ...rate, input: 3 } },
+  });
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole("region", { name: "workspace-model" })).getByText(
+        "3",
+      ),
+    ).toBeInTheDocument(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Edit prices" }));
+  fireEvent.change(screen.getByLabelText("Input"), { target: { value: "5" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
+      revision: 4,
+      overrides: { "workspace-model": { ...rate, input: 5 } },
+    }),
+  );
+});
+
+it("requires both current membership and server permission to start editing", () => {
+  open({ ...snapshot(), canManage: false });
+  expect(screen.queryByRole("button", { name: "Edit prices" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Model or provider/model"), {
+    target: { value: "example/model" },
+  });
+  expect(screen.queryByRole("button", { name: "Customize" })).toBeNull();
+  expect(screen.queryByRole("spinbutton")).toBeNull();
+});
+
+it("keeps synchronization controls and full timestamps in collapsed pricing details", () => {
+  open({ ...snapshot(), succeededAt: "2026-09-03T01:02:03Z" });
+  const details = screen.getByText("Pricing details").closest("details")!;
+  expect(details).not.toHaveAttribute("open");
+  expect(screen.getByText("Updated Sep 3")).toBeInTheDocument();
+  expect(within(details).getByText(/Checked daily at 00:00/)).not.toBeVisible();
+  const refresh = within(details).getByRole("button", {
+    name: "Check now",
+    hidden: true,
+  });
+  expect(refresh).not.toBeVisible();
+  fireEvent.click(details.querySelector("summary")!);
+  expect(refresh).toBeVisible();
+});
+
+it.each(["Local", "Malformed/Timezone"])(
+  "keeps date rendering usable when the server timezone is %s",
+  (timezone) => {
+    open({ ...snapshot(), succeededAt: "2026-09-03T01:02:03Z", timezone });
+    expect(screen.getByText("Updated Sep 3")).toBeInTheDocument();
+    const details = screen.getByText("Pricing details").closest("details")!;
+    fireEvent.click(details.querySelector("summary")!);
+    expect(within(details).getByText(/Last successful update:/)).toBeVisible();
+  },
+);
+
+it("previews local imports without a request and cancels back to browsing", () => {
   const stored = JSON.stringify({
     state: { pricings: { "local-model": rate } },
     version: 0,
   });
   localStorage.setItem(legacyKey, stored);
   const { close } = open();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Preview local prices for import" }),
-  );
+  fireEvent.click(screen.getByRole("button", { name: "Preview local prices" }));
   expect(
-    screen.getByText(/Local prices added to this preview: 1/),
+    screen.getByText("Local prices added: 1. Save to share them."),
   ).toBeInTheDocument();
-  expect(screen.getByText("local-model")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
   expect(mocks.save).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-  expect(close).toHaveBeenCalledWith(false);
+  expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
+  expect(close).not.toHaveBeenCalled();
   expect(localStorage.getItem(legacyKey)).toBe(stored);
 });
 
-it("clears only successfully imported local prices after explicit save", async () => {
+it("clears only successfully imported prices after explicit save", async () => {
   localStorage.setItem(
     legacyKey,
     JSON.stringify({
@@ -227,10 +339,8 @@ it("clears only successfully imported local prices after explicit save", async (
     }),
   );
   open();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Preview local prices for import" }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview local prices" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
   await waitFor(() =>
     expect(mocks.save).toHaveBeenCalledWith("workspace-a", {
       revision: 3,
@@ -243,4 +353,5 @@ it("clears only successfully imported local prices after explicit save", async (
       version: 0,
     }),
   );
+  expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
 });

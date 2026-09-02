@@ -14,10 +14,12 @@ It is not a bill, an additional charge, or an allocation of the monthly fee.
 - Uncosted tokens use workspace overrides, then the shared reference catalog.
 - Input, output, cache reads, and cache writes are priced separately in USD per
   million tokens. A missing cache rate in an external feed defaults to its input rate.
-- Historical estimates are recalculated with the current rates. Recorded monetary
-  cost and token counts are unchanged; no estimated amount is backfilled as actual cost.
-- Unknown prices remain unpriced. A zero-cost subscription listing is not treated
-  as a free API. Explicitly free API models can still have a zero rate.
+- Usage reports recalculate past estimates from recorded tokens at current rates.
+  Backend counters use the rates available when usage is recorded. Recorded
+  monetary cost and token counts stay unchanged.
+- Models without a reference price or workspace override remain unpriced. Zero
+  rates in recognized subscription listings do not replace the corresponding API
+  reference rates. Explicitly free APIs and zero workspace overrides remain valid.
 
 The `uncosted_*` token fields mean that the provider did not supply a monetary
 amount for those tokens. They do not, by themselves, mean that price lookup failed.
@@ -29,21 +31,31 @@ per model does not represent.
 
 ## Maintaining prices
 
-Open an existing runtime from **Runtimes**, then select **Model prices** in
-**Usage**, even when no usage has been recorded. All workspace members can
-inspect the catalog and rates; owners and admins can save workspace overrides.
-Overrides also take precedence over built-in rates. Rates and changes are shared
-between Web, Desktop, and other members of the workspace.
+Open an existing runtime from **Runtimes**, then select **Model prices** in its
+usage area, even when no usage has been recorded. Select or type a model to see
+its prices immediately. Viewing prices does not save any changes.
+
+All workspace members can browse prices. Owners and admins can select **Customize**
+for a model or **Edit prices** for existing custom prices. **Save changes** becomes
+available when a price changes. Removing a custom price falls back to the reference
+rate, if available, after saving; **Cancel** discards the draft. Changes apply to the workspace
+across updated Web and Desktop clients.
+
+The unit appears beside the prices. Expand **Pricing details** for the update
+schedule, full update time, and manual refresh. **Learn more** explains estimates
+and their limits.
 
 ![Workspace model prices showing public reference rates and the subscription API-value explanation](/images/model-pricing/after.png)
 
-Saving uses a revision check. If another admin saves first, the server returns a
-conflict and the editor retains the unsaved draft. Review the latest version before
-retrying. Workspace deletion removes its overrides in the same transaction.
+Saving uses a revision check. If another admin saves first, the editor retains the
+draft and offers **Discard drafts and reload**. Reloading replaces the draft with
+the latest prices; review them before editing again. Workspace deletion removes
+its overrides in the same transaction.
 
-Old browser-local prices are not automatically published to a workspace. An admin
-can preview an import and save it explicitly. Existing workspace overrides win
-conflicts, and only successfully imported entries are removed from local storage.
+If old browser-local prices exist, an admin can use **Preview local prices** and
+review the draft before saving it. Existing workspace overrides win conflicts.
+Only successfully imported, unchanged local entries are removed from local storage;
+canceling the preview leaves them intact.
 
 ## Catalog synchronization
 

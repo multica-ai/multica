@@ -43,6 +43,25 @@ export function parsePriceDrafts(
   return rows;
 }
 
+export function hasPriceChanges(
+  initial: Record<string, ModelPricingRow>,
+  next: Record<string, ModelPricingRow>,
+): boolean {
+  const keys = Object.keys(initial);
+  if (keys.length !== Object.keys(next).length) return true;
+  return keys.some((key) => {
+    const before = initial[key]!;
+    const after = next[key];
+    return (
+      !after ||
+      before.input !== after.input ||
+      before.output !== after.output ||
+      before.cacheRead !== after.cacheRead ||
+      before.cacheWrite !== after.cacheWrite
+    );
+  });
+}
+
 export function previewLegacyPrices(
   legacy: Record<string, ModelPricingRow>,
   overrides: Record<string, ModelPricingRow>,

@@ -2,6 +2,7 @@
 import { expect, it } from "vitest";
 import {
   formatReferenceRate,
+  hasPriceChanges,
   parsePriceDrafts,
   previewLegacyPrices,
   toPriceDraft,
@@ -15,11 +16,13 @@ it("removes feed conversion noise only from the public reference display", () =>
   expect(formatReferenceRate(0)).toBe("0");
   const row = {
     input: 0.39999999999999997,
-    output: 0.12345678901234567,
+    output: Number("0.12345678901234567"),
     cacheRead: 0,
     cacheWrite: 0,
   };
-  expect(parsePriceDrafts({ custom: toPriceDraft(row) })).toEqual({ custom: row });
+  expect(parsePriceDrafts({ custom: toPriceDraft(row) })).toEqual({
+    custom: row,
+  });
 });
 
 it("preserves sub-cent rates through editing", () => {
@@ -71,4 +74,16 @@ it("previews local imports without replacing workspace overrides or edited draft
     ),
   ).toEqual({ empty: row, added: row });
   expect(legacy).toHaveProperty("existing");
+});
+
+it("only treats model or rate changes as changed workspace prices", () => {
+  const rate = { input: 0.0028, output: 0.0145, cacheRead: 0, cacheWrite: 1 };
+  expect(
+    hasPriceChanges({ model: { ...rate, source: "custom" } }, { model: rate }),
+  ).toBe(false);
+  expect(
+    hasPriceChanges({ model: rate }, { model: { ...rate, cacheWrite: 2 } }),
+  ).toBe(true);
+  expect(hasPriceChanges({ model: rate }, {})).toBe(true);
+  expect(hasPriceChanges({}, { model: rate })).toBe(true);
 });

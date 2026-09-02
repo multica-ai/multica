@@ -1,7 +1,7 @@
 "use client";
 
-import { useId, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useId, useState, type ReactNode } from "react";
+import { ChevronRight, Trash2 } from "lucide-react";
 import { ApiError } from "@multica/core/api";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
@@ -30,6 +30,7 @@ import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import {
   formatReferenceRate,
+  hasPriceChanges,
   parsePriceDrafts,
   previewLegacyPrices,
   toPriceDraft,
@@ -43,6 +44,29 @@ interface Props {
   unmappedModels: readonly string[];
 }
 
+interface PriceSession {
+  revision: number;
+  initialOverrides: Record<string, ModelPricingRow>;
+  drafts: Record<string, PriceDraft>;
+  imported: Record<string, ModelPricingRow>;
+  importPreview: boolean;
+}
+
+function startPriceSession(snapshot: ModelPricingSnapshot): PriceSession {
+  return {
+    revision: snapshot.revision,
+    initialOverrides: snapshot.overrides,
+    drafts: Object.fromEntries(
+      Object.entries(snapshot.overrides).map(([key, row]) => [
+        key,
+        toPriceDraft(row),
+      ]),
+    ),
+    imported: {},
+    importPreview: false,
+  };
+}
+
 export function CustomPricingDialog({
   wsId,
   open,
@@ -53,7 +77,7 @@ export function CustomPricingDialog({
   const query = useModelPricing(wsId);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t(($) => $.usage.custom_pricing.title)}</DialogTitle>
           <DialogDescription>
@@ -73,16 +97,23 @@ export function CustomPricingDialog({
             }}
           />
         ) : (
-          <div role="status" className="text-caption text-muted-foreground">
-            {query.isError
-              ? t(($) => $.usage.custom_pricing.load_error)
-              : t(($) => $.usage.custom_pricing.loading)}
-            {query.isError && (
-              <Button variant="ghost" onClick={() => void query.refetch()}>
-                {t(($) => $.usage.custom_pricing.retry)}
+          <>
+            <div role="status" className="text-caption text-muted-foreground">
+              {query.isError
+                ? t(($) => $.usage.custom_pricing.load_error)
+                : t(($) => $.usage.custom_pricing.loading)}
+              {query.isError && (
+                <Button variant="ghost" onClick={() => void query.refetch()}>
+                  {t(($) => $.usage.custom_pricing.retry)}
+                </Button>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => onOpenChange(false)}>
+                {t(($) => $.usage.custom_pricing.close)}
               </Button>
-            )}
-          </div>
+            </DialogFooter>
+          </>
         )}
       </DialogContent>
     </Dialog>
@@ -102,30 +133,19 @@ function PricingEditor({
   onClose: () => void;
   onReload: () => Promise<ModelPricingSnapshot | undefined>;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const { role } = useCurrentMember(wsId);
   const canManage =
     snapshot.canManage === true && (role === "owner" || role === "admin");
   const save = useSaveModelPricing(wsId);
   const refresh = useRefreshModelPricing(wsId);
-  const [revision, setRevision] = useState(snapshot.revision);
-  const createDrafts = (prices: ModelPricingSnapshot) =>
-    Object.fromEntries(
-      [...new Set([...unmappedModels, ...Object.keys(prices.overrides)])]
-        .sort()
-        .map((key) => [key, toPriceDraft(prices.overrides[key])]),
-    );
-  // Keep drafts and their revision together until an explicit reload or save.
-  const [drafts, setDrafts] = useState<Record<string, PriceDraft>>(() =>
-    createDrafts(snapshot),
-  );
-  const visibleDrafts = canManage ? drafts : createDrafts(snapshot);
-  const [model, setModel] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
-  const [legacy] = useState(readLegacyModelPrices);
-  const [imported, setImported] = useState<Record<string, ModelPricingRow>>({});
-  const [importPreview, setImportPreview] = useState(false);
-  const [invalid, setInvalid] = useState(false);
+  // Browsing uses the current query result. An edit captures its own revision
+  // and original prices, so background refreshes cannot replace the draft.
+  const [session, setSession] = useState<PriceSession | null>(null);
+  const editing = canManage && session !== null;
+  const [model, setModel] = useState(unmappedModels[0] ?? "");
+  const selectedModel = model.trim().toLowerCase();
+  const [legacy, setLegacy] = useState(readLegacyModelPrices);
   const [reloading, setReloading] = useState(false);
   const [reloadFailed, setReloadFailed] = useState(false);
   const listId = useId();
@@ -137,36 +157,105 @@ function PricingEditor({
     ["cacheRead", t(($) => $.usage.custom_pricing.field_cache_read)],
     ["cacheWrite", t(($) => $.usage.custom_pricing.field_cache_write)],
   ] as const;
-  const publicPrices = { ...snapshot, overrides: {} };
   const reference = selectedModel
-    ? resolveModelPricing(selectedModel, undefined, publicPrices)
+    ? resolveModelPricing(selectedModel, undefined, {
+        ...snapshot,
+        overrides: {},
+      })
     : undefined;
   const effective = selectedModel
     ? resolveModelPricing(selectedModel, undefined, snapshot)
     : undefined;
+  const selectedOverrideKey = Object.keys(snapshot.overrides).find(
+    (key) => snapshot.overrides[key] === effective,
+  );
+  const selectedIsEdited =
+    editing &&
+    (selectedModel in session.drafts ||
+      (selectedOverrideKey !== undefined &&
+        selectedOverrideKey in session.initialOverrides));
+  const overrides = session ? parsePriceDrafts(session.drafts) : null;
+  const changed =
+    session && overrides
+      ? hasPriceChanges(session.initialOverrides, overrides)
+      : false;
+  const updatedAt = snapshot.succeededAt
+    ? new Date(snapshot.succeededAt)
+    : null;
+  const validUpdate =
+    updatedAt !== null && Number.isFinite(updatedAt.getTime());
+  const shortUpdate = validUpdate
+    ? updatedAt.toLocaleDateString(i18n.language, {
+        month: "short",
+        day: "numeric",
+      })
+    : t(($) => $.usage.custom_pricing.bundled);
+  const fullUpdate = validUpdate
+    ? updatedAt.toLocaleString(i18n.language, {
+        dateStyle: "medium",
+        timeStyle: "long",
+      })
+    : t(($) => $.usage.custom_pricing.bundled);
 
+  const beginEditing = (key?: string) => {
+    setReloadFailed(false);
+    save.reset();
+    setSession((previous) => {
+      const next = previous ?? startPriceSession(snapshot);
+      if (!key || key in next.drafts) return next;
+      return {
+        ...next,
+        drafts: {
+          ...next.drafts,
+          [key]: toPriceDraft(resolveModelPricing(key, undefined, snapshot)),
+        },
+      };
+    });
+  };
+  const cancelEditing = () => {
+    setSession(null);
+    setReloadFailed(false);
+    save.reset();
+  };
   const handleSave = async () => {
-    const overrides = parsePriceDrafts(drafts);
-    if (!overrides) {
-      setInvalid(true);
+    if (!editing || !session || !overrides || !changed || busy || conflict)
       return;
-    }
-    setInvalid(false);
     try {
-      await save.mutateAsync({ revision, overrides });
+      await save.mutateAsync({ revision: session.revision, overrides });
       clearImportedModelPrices(
         Object.fromEntries(
-          Object.entries(imported).filter(([key]) => key in overrides),
+          Object.entries(session.imported).filter(([key]) => key in overrides),
         ),
       );
-      onClose();
+      setLegacy(readLegacyModelPrices());
+      setSession(null);
     } catch {
-      // The mutation error is rendered below; drafts remain intact.
+      // Errors are rendered below; edits and their captured revision stay intact.
     }
   };
-  const viewModel = () => {
-    const key = model.trim().toLowerCase();
-    if (key && key.length <= 512) setSelectedModel(key);
+  const previewImport = () => {
+    setSession((previous) => {
+      const next = previous ?? startPriceSession(snapshot);
+      const additions = previewLegacyPrices(
+        legacy,
+        snapshot.overrides,
+        next.drafts,
+      );
+      return {
+        ...next,
+        imported: additions,
+        importPreview: true,
+        drafts: {
+          ...next.drafts,
+          ...Object.fromEntries(
+            Object.entries(additions).map(([key, row]) => [
+              key,
+              toPriceDraft(row),
+            ]),
+          ),
+        },
+      };
+    });
   };
   const reload = async () => {
     setReloading(true);
@@ -177,11 +266,7 @@ function PricingEditor({
         setReloadFailed(true);
         return;
       }
-      setRevision(latest.revision);
-      setDrafts(createDrafts(latest));
-      setImported({});
-      setImportPreview(false);
-      setInvalid(false);
+      setSession(startPriceSession(latest));
       save.reset();
     } finally {
       setReloading(false);
@@ -191,277 +276,344 @@ function PricingEditor({
   return (
     <>
       <div className="max-h-[60vh] space-y-4 overflow-y-auto">
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.usage.custom_pricing.api_equivalent)}
-        </p>
-        <div className="flex flex-wrap items-center justify-between gap-2 text-micro text-muted-foreground">
-          <span>
-            {t(($) => $.usage.custom_pricing.schedule, {
-              timezone: snapshot.timezone,
-            })}
-            <br />
-            {t(($) => $.usage.custom_pricing.last_update, {
-              time: snapshot.succeededAt
-                ? new Date(snapshot.succeededAt).toLocaleString()
-                : t(($) => $.usage.custom_pricing.bundled),
-            })}
-          </span>
-          {canManage && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => refresh.mutate()}
-            >
-              {t(($) => $.usage.custom_pricing.refresh)}
-            </Button>
-          )}
-        </div>
-        {(snapshot.lastError || refresh.isError) && (
-          <p role="status" className="text-caption text-warning">
-            {t(($) => $.usage.custom_pricing.refresh_error)}
-          </p>
+        <Input
+          value={model}
+          list={listId}
+          maxLength={512}
+          aria-label={t(($) => $.usage.custom_pricing.model)}
+          placeholder={t(($) => $.usage.custom_pricing.model)}
+          onChange={(event) => setModel(event.target.value)}
+        />
+        <datalist id={listId}>
+          {[
+            ...new Set([
+              ...unmappedModels,
+              ...Object.keys(snapshot.rows),
+              ...Object.keys(snapshot.aliases),
+              ...Object.keys(snapshot.overrides),
+            ]),
+          ]
+            .filter((key) => key.includes(selectedModel))
+            .sort()
+            .slice(0, 100)
+            .map((key) => (
+              <option key={key} value={key} />
+            ))}
+        </datalist>
+        {selectedModel && !selectedIsEdited && (
+          <PricePreview
+            model={selectedModel}
+            row={effective}
+            custom={effective !== undefined && effective !== reference}
+            action={
+              canManage ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy || conflict}
+                  onClick={() =>
+                    beginEditing(
+                      selectedOverrideKey === undefined
+                        ? selectedModel
+                        : undefined,
+                    )
+                  }
+                >
+                  {selectedOverrideKey === undefined
+                    ? t(($) => $.usage.custom_pricing.add)
+                    : t(($) => $.usage.custom_pricing.edit)}
+                </Button>
+              ) : undefined
+            }
+          />
         )}
-        {!canManage && (
-          <p className="text-caption text-muted-foreground">
-            {t(($) => $.usage.custom_pricing.readonly)}
-          </p>
-        )}
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <Input
-              value={model}
-              list={listId}
-              maxLength={512}
-              aria-label={t(($) => $.usage.custom_pricing.model)}
-              placeholder={t(($) => $.usage.custom_pricing.model)}
-              onChange={(event) => setModel(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  viewModel();
-                }
-              }}
-            />
-            <datalist id={listId}>
-              {[
-                ...new Set([
-                  ...Object.keys(snapshot.rows),
-                  ...Object.keys(snapshot.aliases),
-                  ...Object.keys(snapshot.overrides),
-                ]),
-              ]
-                .filter((key) => key.includes(model.trim().toLowerCase()))
-                .sort()
-                .slice(0, 100)
-                .map((key) => (
-                  <option key={key} value={key} />
-                ))}
-            </datalist>
-            <Button
-              variant="outline"
-              disabled={!model.trim() || busy}
-              onClick={viewModel}
-            >
-              {t(($) => $.usage.custom_pricing.view)}
-            </Button>
-          </div>
-          {selectedModel && (
-            <section
-              className="space-y-3 rounded-md bg-muted/40 p-3"
-              aria-label={t(($) => $.usage.custom_pricing.reference)}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <code className="break-all font-mono text-caption">
-                  {selectedModel}
-                </code>
-                {canManage && (
+        {!editing &&
+          !selectedModel &&
+          (Object.keys(snapshot.overrides).length > 0 ? (
+            <div className="space-y-3">
+              {canManage && (
+                <div className="flex justify-end">
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={busy || selectedModel in drafts}
-                    onClick={() =>
-                      setDrafts((previous) => ({
-                        ...previous,
-                        [selectedModel]: toPriceDraft(effective),
-                      }))
-                    }
+                    disabled={busy}
+                    onClick={() => beginEditing()}
                   >
-                    {t(($) => $.usage.custom_pricing.add)}
+                    {t(($) => $.usage.custom_pricing.edit)}
                   </Button>
-                )}
-              </div>
-              {reference ? (
-                <>
-                  <p className="text-micro text-muted-foreground">
-                    {t(($) => $.usage.custom_pricing.source, {
-                      source:
-                        reference.source ??
-                        t(($) => $.usage.custom_pricing.bundled),
-                    })}
-                    {reference.sourceUrl &&
-                      /^https?:\/\//.test(reference.sourceUrl) && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          <a
-                            className="underline underline-offset-2"
-                            href={reference.sourceUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {t(($) => $.usage.custom_pricing.source_link)}
-                          </a>
-                        </>
-                      )}
-                  </p>
-                  <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {fields.map(([field, label]) => (
-                      <div key={field}>
-                        <dt className="text-micro text-muted-foreground">
-                          {label}
-                        </dt>
-                        <dd className="break-all font-mono text-caption">
-                          {formatReferenceRate(reference[field])}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </>
-              ) : (
-                <p className="text-caption text-muted-foreground">
-                  {t(($) => $.usage.custom_pricing.no_reference)}
-                </p>
+                </div>
               )}
-            </section>
-          )}
-        </div>
-        {Object.entries(visibleDrafts).map(([key, draft]) => (
-          <div key={key} className="space-y-2 rounded-md border p-3">
-            <div className="flex items-center justify-between gap-2">
-              <code className="break-all font-mono text-caption">{key}</code>
-              {canManage && (
-                <Button
-                  variant="ghost"
-                  size="icon-xs"
-                  disabled={busy}
-                  aria-label={t(($) => $.usage.custom_pricing.remove_aria)}
-                  onClick={() =>
-                    setDrafts((previous) => {
-                      const next = { ...previous };
-                      delete next[key];
-                      return next;
-                    })
-                  }
-                >
-                  <Trash2 />
-                </Button>
-              )}
-            </div>
-            <p className="text-micro text-muted-foreground">
-              {t(($) => $.usage.custom_pricing.override)}
-            </p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {fields.map(([field, label]) => (
-                <PriceField
-                  key={field}
-                  label={label}
-                  value={draft[field]}
-                  disabled={!canManage || busy}
-                  onChange={(value) =>
-                    setDrafts((previous) => ({
-                      ...previous,
-                      [key]: { ...draft, [field]: value },
-                    }))
-                  }
-                />
+              {Object.entries(snapshot.overrides).map(([key, row]) => (
+                <PricePreview key={key} model={key} row={row} custom />
               ))}
             </div>
-          </div>
-        ))}
-        {Object.keys(visibleDrafts).length === 0 && (
-          <p className="text-caption text-muted-foreground">
-            {t(($) => $.usage.custom_pricing.empty)}
-          </p>
-        )}
-        {canManage && Object.keys(legacy).length > 0 && (
-          <div className="space-y-2">
-            <Button
-              variant="outline"
-              disabled={busy || importPreview}
-              onClick={() => {
-                const additions = previewLegacyPrices(
-                  legacy,
-                  snapshot.overrides,
-                  drafts,
-                );
-                setImported(additions);
-                setImportPreview(true);
-                setDrafts((previous) => ({
-                  ...previous,
-                  ...Object.fromEntries(
-                    Object.entries(additions).map(([key, row]) => [
-                      key,
-                      toPriceDraft(row),
-                    ]),
-                  ),
-                }));
-              }}
-            >
-              {t(($) => $.usage.custom_pricing.import_local)}
-            </Button>
-            {importPreview && (
+          ) : (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.usage.custom_pricing.empty)}
+            </p>
+          ))}
+        {editing && (
+          <div className="space-y-3">
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.usage.custom_pricing.edit_hint)}
+            </p>
+            {Object.entries(session.drafts).map(([key, draft]) => (
+              <div key={key} className="space-y-3 rounded-md border p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <code className="break-all font-mono text-caption">
+                    {key}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={busy}
+                    aria-label={t(($) => $.usage.custom_pricing.remove_aria)}
+                    onClick={() =>
+                      setSession((previous) => {
+                        if (!previous) return previous;
+                        const drafts = { ...previous.drafts };
+                        delete drafts[key];
+                        return { ...previous, drafts };
+                      })
+                    }
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+                <p className="text-micro text-muted-foreground">
+                  {t(($) => $.usage.custom_pricing.unit_hint)}
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {fields.map(([field, label]) => (
+                    <PriceField
+                      key={field}
+                      label={label}
+                      value={draft[field]}
+                      disabled={busy}
+                      onChange={(value) =>
+                        setSession((previous) =>
+                          previous
+                            ? {
+                                ...previous,
+                                drafts: {
+                                  ...previous.drafts,
+                                  [key]: { ...draft, [field]: value },
+                                },
+                              }
+                            : previous,
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+            {overrides === null && (
+              <p role="alert" className="text-caption text-destructive">
+                {t(($) => $.usage.custom_pricing.invalid)}
+              </p>
+            )}
+            {session.importPreview && (
               <p role="status" className="text-caption text-muted-foreground">
-                {Object.keys(imported).length > 0
+                {Object.keys(session.imported).length > 0
                   ? t(($) => $.usage.custom_pricing.import_preview, {
-                      count: Object.keys(imported).length,
+                      count: Object.keys(session.imported).length,
                     })
                   : t(($) => $.usage.custom_pricing.import_empty)}
               </p>
             )}
+            {save.isError && (
+              <p role="alert" className="text-caption text-destructive">
+                {conflict
+                  ? t(($) => $.usage.custom_pricing.conflict)
+                  : t(($) => $.usage.custom_pricing.save_error)}
+              </p>
+            )}
+            {conflict && (
+              <Button
+                variant="outline"
+                disabled={busy}
+                onClick={() => void reload()}
+              >
+                {t(($) => $.usage.custom_pricing.reload)}
+              </Button>
+            )}
+            {reloadFailed && (
+              <p role="alert" className="text-caption text-destructive">
+                {t(($) => $.usage.custom_pricing.load_error)}
+              </p>
+            )}
           </div>
         )}
-        <p className="text-micro text-muted-foreground">
-          {t(($) => $.usage.custom_pricing.unit_hint)}
-        </p>
-        {invalid && (
-          <p role="alert" className="text-caption text-destructive">
-            {t(($) => $.usage.custom_pricing.invalid)}
-          </p>
-        )}
-        {save.isError && (
-          <p role="alert" className="text-caption text-destructive">
-            {conflict
-              ? t(($) => $.usage.custom_pricing.conflict)
-              : t(($) => $.usage.custom_pricing.save_error)}
-          </p>
-        )}
-        {conflict && (
+        {canManage && Object.keys(legacy).length > 0 && (
           <Button
             variant="outline"
-            disabled={busy}
-            onClick={() => void reload()}
+            size="sm"
+            disabled={busy || conflict || session?.importPreview === true}
+            onClick={previewImport}
           >
-            {t(($) => $.usage.custom_pricing.reload)}
+            {t(($) => $.usage.custom_pricing.import_local)}
           </Button>
         )}
-        {reloadFailed && (
-          <p role="alert" className="text-caption text-destructive">
-            {t(($) => $.usage.custom_pricing.load_error)}
-          </p>
-        )}
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 rounded-sm py-1 text-caption text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <ChevronRight
+              className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90"
+              aria-hidden
+            />
+            <span>{t(($) => $.usage.custom_pricing.details)}</span>
+            <span className="ml-auto text-micro">
+              {validUpdate
+                ? t(($) => $.usage.custom_pricing.updated, {
+                    time: shortUpdate,
+                  })
+                : shortUpdate}
+            </span>
+          </summary>
+          <div className="space-y-2 pt-2 text-micro text-muted-foreground">
+            <p>
+              {t(($) => $.usage.custom_pricing.schedule, {
+                timezone: snapshot.timezone,
+              })}
+            </p>
+            <p>
+              {t(($) => $.usage.custom_pricing.last_update, {
+                time: fullUpdate,
+              })}
+            </p>
+            {(snapshot.lastError || refresh.isError) && (
+              <p role="status" className="text-warning">
+                {t(($) => $.usage.custom_pricing.refresh_error)}
+              </p>
+            )}
+            {!canManage && <p>{t(($) => $.usage.custom_pricing.readonly)}</p>}
+            <div className="flex items-center justify-between gap-2">
+              <a
+                href="https://multica.ai/docs/developers/model-pricing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2"
+              >
+                {t(($) => $.usage.custom_pricing.learn_more)}
+              </a>
+              {canManage && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => refresh.mutate()}
+                >
+                  {t(($) => $.usage.custom_pricing.refresh)}
+                </Button>
+              )}
+            </div>
+          </div>
+        </details>
       </div>
       <DialogFooter>
-        <Button variant="outline" disabled={save.isPending} onClick={onClose}>
-          {t(($) => $.usage.custom_pricing.cancel)}
-        </Button>
-        {canManage && (
-          <Button disabled={busy || conflict} onClick={() => void handleSave()}>
-            {t(($) => $.usage.custom_pricing.save)}
+        {editing ? (
+          <>
+            <Button
+              variant="outline"
+              disabled={save.isPending}
+              onClick={cancelEditing}
+            >
+              {t(($) => $.usage.custom_pricing.cancel)}
+            </Button>
+            <Button
+              disabled={busy || conflict || !changed || overrides === null}
+              onClick={() => void handleSave()}
+            >
+              {t(($) => $.usage.custom_pricing.save)}
+            </Button>
+          </>
+        ) : (
+          <Button variant="outline" onClick={onClose}>
+            {t(($) => $.usage.custom_pricing.close)}
           </Button>
         )}
       </DialogFooter>
     </>
+  );
+}
+
+function PricePreview({
+  model,
+  row,
+  custom,
+  action,
+}: {
+  model: string;
+  row?: ModelPricingRow;
+  custom: boolean;
+  action?: ReactNode;
+}) {
+  const { t } = useT("runtimes");
+  const sourceLabels: Record<string, string> = {
+    litellm: "LiteLLM",
+    "models.dev": "Models.dev",
+    bundled: t(($) => $.usage.custom_pricing.bundled),
+  };
+  const source = row?.source ?? "bundled";
+  const fields = [
+    ["input", t(($) => $.usage.custom_pricing.field_input)],
+    ["output", t(($) => $.usage.custom_pricing.field_output)],
+    ["cacheRead", t(($) => $.usage.custom_pricing.field_cache_read)],
+    ["cacheWrite", t(($) => $.usage.custom_pricing.field_cache_write)],
+  ] as const;
+  return (
+    <section
+      className="space-y-3 rounded-md bg-muted/40 p-3"
+      aria-label={model}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <code className="break-all font-mono text-caption">{model}</code>
+        {action}
+      </div>
+      {row ? (
+        <>
+          <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-micro text-muted-foreground">
+            <p>
+              {custom
+                ? t(($) => $.usage.custom_pricing.override)
+                : t(($) => $.usage.custom_pricing.source, {
+                    source: sourceLabels[source] ?? source,
+                  })}
+              {row.sourceUrl && /^https?:\/\//.test(row.sourceUrl) && (
+                <>
+                  {" · "}
+                  <a
+                    className="underline underline-offset-2"
+                    href={row.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t(($) => $.usage.custom_pricing.source_link)}
+                  </a>
+                </>
+              )}
+            </p>
+            <span>{t(($) => $.usage.custom_pricing.unit_hint)}</span>
+          </div>
+          <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {fields.map(([field, label]) => (
+              <div key={field}>
+                <dt className="text-micro text-muted-foreground">{label}</dt>
+                <dd className="break-all font-mono text-caption">
+                  {custom
+                    ? String(row[field])
+                    : formatReferenceRate(row[field])}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </>
+      ) : (
+        <p className="text-caption text-muted-foreground">
+          {t(($) => $.usage.custom_pricing.no_reference)}
+        </p>
+      )}
+    </section>
   );
 }
 
