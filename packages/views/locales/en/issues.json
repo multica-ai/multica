@@ -69,7 +69,6 @@
   "revision": {
     "conflict": "The issue or comment changed. The latest version was refreshed; compare it before saving again.",
     "compare_title": "The title was changed concurrently. Compare both versions.",
-    "compare_description": "The description was changed concurrently. Compare both versions.",
     "compare_comment": "The comment was changed concurrently. Compare both versions.",
     "server_version": "Latest server version",
     "local_version": "Your local version",

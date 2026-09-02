@@ -272,13 +272,31 @@ func TestTextBaselinesIgnoreUnrelatedAggregateRevisionChanges(t *testing.T) {
 	if text.Code != http.StatusOK {
 		t.Fatalf("text update after unrelated revision = %d: %s", text.Code, text.Body.String())
 	}
+	staleTitle := httptest.NewRecorder()
+	testHandler.UpdateIssue(staleTitle, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"title":      "stale title overwrite",
+		"title_base": "baseline title",
+	}), "id", issueID))
+	if staleTitle.Code != http.StatusConflict {
+		t.Fatalf("true issue title conflict = %d, want 409: %s", staleTitle.Code, staleTitle.Body.String())
+	}
+
+	// Descriptions are last-write-wins (MUL-6971): the baseline is merge
+	// metadata only, so a stale base overwrites instead of returning 409.
 	staleDescription := httptest.NewRecorder()
 	testHandler.UpdateIssue(staleDescription, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
 		"description":      "stale description overwrite",
 		"description_base": "baseline description",
 	}), "id", issueID))
-	if staleDescription.Code != http.StatusConflict {
-		t.Fatalf("true issue description conflict = %d, want 409: %s", staleDescription.Code, staleDescription.Body.String())
+	if staleDescription.Code != http.StatusOK {
+		t.Fatalf("stale issue description overwrite = %d, want 200: %s", staleDescription.Code, staleDescription.Body.String())
+	}
+	var storedDescription string
+	if err := testPool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&storedDescription); err != nil {
+		t.Fatalf("reload description after stale overwrite: %v", err)
+	}
+	if storedDescription != "stale description overwrite" {
+		t.Fatalf("description after stale overwrite = %q, want the overwrite", storedDescription)
 	}
 
 	// A reaction/resolve-style aggregate bump on the comment must likewise not
@@ -302,6 +320,41 @@ func TestTextBaselinesIgnoreUnrelatedAggregateRevisionChanges(t *testing.T) {
 	}), "commentId", commentID))
 	if stale.Code != http.StatusConflict {
 		t.Fatalf("true comment content conflict = %d, want 409: %s", stale.Code, stale.Body.String())
+	}
+}
+
+// A description stored with surrounding whitespace — every CLI/integration
+// write that keeps a trailing newline — used to reject EVERY edit from the web
+// editor, which sends its base trimmed. No second writer was involved, and the
+// rejection repeated for the life of the session (MUL-6971).
+func TestDescriptionEditAcceptsATrimmedBaseOfUntrimmedStoredMarkdown(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "untrimmed baseline", int(time.Now().UnixNano()%100000)+8_760_000)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $2 WHERE id = $1`, issueID, "roadmap body\n"); err != nil {
+		t.Fatalf("seed untrimmed description: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"description": "roadmap body edited",
+		// What the editor actually sends: the stored Markdown, trimmed.
+		"description_base": "roadmap body",
+	}), "id", issueID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("edit against a trimmed base = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	var stored string
+	if err := testPool.QueryRow(ctx, `SELECT description FROM issue WHERE id = $1`, issueID).Scan(&stored); err != nil {
+		t.Fatalf("reload description: %v", err)
+	}
+	if stored != "roadmap body edited" {
+		t.Fatalf("stored description = %q, want the edit", stored)
 	}
 }
 

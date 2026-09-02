@@ -1919,7 +1919,12 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("keeps a description draft visible when its captured content conflicts", async () => {
+  // Descriptions are last-write-wins (MUL-6971). The baseline still ships as
+  // channel-media merge metadata, but a rejected save no longer opens a compare
+  // panel — that panel fired on the editor's own autosave and wedged the
+  // session, and the title/comment editors keep the compare flow they can
+  // actually satisfy.
+  it("keeps editing after a failed description save without a compare panel", async () => {
     mockApiObj.updateIssue.mockRejectedValueOnce({
       body: { code: "revision_conflict" },
     });
@@ -1938,40 +1943,24 @@ describe("IssueDetail (shared)", () => {
         }),
       ),
     );
+    // The compare panel's own actions — still rendered for a title conflict,
+    // so their absence is about the description, not a missing translation.
     expect(
-      await screen.findByText("The description was changed concurrently. Compare both versions."),
-    ).toBeVisible();
-    expect(screen.getAllByText("My local description").length).toBeGreaterThan(0);
+      screen.queryByRole("button", { name: "Keep my version" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Use the latest version" }),
+    ).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("My local description")).toBeVisible();
-  });
 
-  it("restores the server description when the user takes the latest version", async () => {
-    mockApiObj.updateIssue.mockRejectedValueOnce({
-      body: { code: "revision_conflict" },
-    });
-    renderIssueDetail();
-
-    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
-    fireEvent.focus(editor);
-    fireEvent.change(editor, { target: { value: "My local description" } });
-
-    expect(
-      await screen.findByText("The description was changed concurrently. Compare both versions."),
-    ).toBeVisible();
-    const callsBeforeDiscard = mockApiObj.updateIssue.mock.calls.length;
-
-    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
-
+    // The save gate reopened: the next edit still reaches the server.
+    fireEvent.change(editor, { target: { value: "My next description" } });
     await waitFor(() =>
-      expect(
-        screen.queryByText("The description was changed concurrently. Compare both versions."),
-      ).not.toBeInTheDocument(),
+      expect(mockApiObj.updateIssue).toHaveBeenLastCalledWith(
+        "issue-1",
+        expect.objectContaining({ description: "My next description" }),
+      ),
     );
-    // A dirty editor ignores prop-driven content, so seeing the server text
-    // back in the editor proves the imperative adopt path ran.
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeVisible();
-    // Taking the server version is local-only: the server already holds it.
-    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
   });
 
   it("serializes description saves and rebases the queued draft on submitted content", async () => {
@@ -2009,32 +1998,6 @@ describe("IssueDetail (shared)", () => {
         description_base: "First local description",
       }),
     );
-  });
-
-  it("keeps the newest queued description when the in-flight save conflicts", async () => {
-    let rejectFirst!: (error: unknown) => void;
-    const firstSave = new Promise<Issue>((_resolve, reject) => {
-      rejectFirst = reject;
-    });
-    mockApiObj.updateIssue.mockReturnValueOnce(firstSave);
-    renderIssueDetail();
-
-    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
-    fireEvent.focus(editor);
-    fireEvent.change(editor, { target: { value: "First local description" } });
-    await waitFor(() => expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(1));
-    fireEvent.change(editor, { target: { value: "Newest local description" } });
-
-    await act(async () => {
-      rejectFirst({ body: { code: "revision_conflict" } });
-      await firstSave.catch(() => undefined);
-    });
-
-    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(1);
-    expect(
-      await screen.findByText("The description was changed concurrently. Compare both versions."),
-    ).toBeVisible();
-    expect(screen.getByDisplayValue("Newest local description")).toBeVisible();
   });
 
   it("ignores a late description callback after switching issues", async () => {
