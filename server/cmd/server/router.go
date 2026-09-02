@@ -968,8 +968,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 						slog.Default(),
 					)
 				}
+				// The receipt is the WeCom stand-in for a typing indicator:
+				// one aibot_respond_msg frame on ingest, addressed by the
+				// callback's req_id, over the same socket the inbound loop
+				// installs on wecomSenders. The answer keeps its own path.
 				channelRouter.Register(wecom.TypeWecom, wecom.NewResolverSet(
 					wecomStore, wecomSession, wecomReplier, wecomMedia,
+					wecom.NewReceiptNotifier(wecomSenders, slog.Default()),
 				))
 
 				// EventChatDone subscriber: pushes the agent's chat reply

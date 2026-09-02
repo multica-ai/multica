@@ -44,18 +44,22 @@ func wecomMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 }
 
 // NewResolverSet assembles the wecom ResolverSet from the store, the shared
-// chat-session service, and an outbound replier. wecom has no typing-
-// indicator affordance, so Typing is left nil — the Router treats a nil
-// Typing as a no-op.
+// chat-session service, an outbound replier, the media resolver and the
+// receipt notifier. WeCom has no typing-indicator affordance; the receipt
+// (receipt.go) stands in for one.
 //
 // The replier is optional: pass nil to disable outbound binding prompts.
 // Media is optional too: pass nil when no object-storage backend is
 // configured, and inbound attachments degrade to their placeholder text.
+// Typing is optional as well — nil leaves the Router's no-op in place. It is
+// declared as the interface so a nil argument is a nil interface; a caller
+// holding a concrete *receiptNotifier must not pass a nil one.
 func NewResolverSet(
 	store *Store,
 	session engineSessionBinder,
 	replier engine.OutboundReplier,
 	media engine.MediaResolver,
+	typing engine.TypingNotifier,
 ) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{store: store},
@@ -74,6 +78,9 @@ func NewResolverSet(
 	}
 	if replier != nil {
 		set.Replier = replier
+	}
+	if typing != nil {
+		set.Typing = typing
 	}
 	return set
 }
