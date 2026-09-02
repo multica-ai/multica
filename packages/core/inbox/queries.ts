@@ -68,17 +68,39 @@ export function unreadWorkspaceIds(summary: InboxWorkspaceUnread[]): Set<string>
 }
 
 /**
- * Unread inbox count for the given workspace, aligned with what the inbox
- * list UI renders: archived items excluded, then deduplicated by issue so a
- * single issue with three unread notifications counts once.
+ * Unread inbox count for one workspace within the cross-workspace summary.
+ * A workspace with nothing unread is absent from the response entirely, so a
+ * missing entry means zero rather than "not loaded yet".
+ */
+export function unreadCountForWorkspace(
+  summary: InboxWorkspaceUnread[],
+  wsId: string | null | undefined,
+): number {
+  if (!wsId) return 0;
+  return summary.find((s) => s.workspace_id === wsId)?.count ?? 0;
+}
+
+/**
+ * Unread inbox count for the given workspace — the number the sidebar nav
+ * badge and the desktop dock badge render.
+ *
+ * Read from the cross-workspace summary, NOT from the inbox list. The summary
+ * is one small server-computed row per workspace and the sidebar already
+ * fetches it for the workspace-switcher dot, so the badge costs no request of
+ * its own; deriving it from `listInbox()` instead downloaded the entire
+ * unbounded inbox on every app start just to render a number (MUL-6967).
+ *
+ * `GET /api/inbox/unread-count` is deliberately not the source: it counts raw
+ * notification rows, while the inbox renders one row per issue. The summary
+ * endpoint applies the same newest-per-issue rule `deduplicateInboxItems`
+ * applies client-side, so this number matches the list the user sees.
  */
 export function useInboxUnreadCount(wsId: string | null | undefined): number {
   const { data } = useQuery({
-    queryKey: inboxKeys.list(wsId ?? ""),
-    queryFn: () => api.listInbox(),
+    ...inboxUnreadSummaryOptions(),
     enabled: !!wsId,
-    select: (items: InboxItem[]) =>
-      deduplicateInboxItems(items).filter((i) => !i.read).length,
+    select: (summary: InboxWorkspaceUnread[]) =>
+      unreadCountForWorkspace(summary, wsId),
   });
   return data ?? 0;
 }

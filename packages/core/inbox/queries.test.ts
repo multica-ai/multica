@@ -5,6 +5,7 @@ import {
   deduplicateInboxItems,
   hasOtherWorkspaceUnread,
   inboxKeys,
+  unreadCountForWorkspace,
   unreadWorkspaceIds,
 } from "./queries";
 
@@ -213,5 +214,33 @@ describe("unreadWorkspaceIds", () => {
 describe("inboxKeys.unreadSummary", () => {
   it("is a stable account-level key independent of any workspace", () => {
     expect(inboxKeys.unreadSummary()).toEqual(["inbox", "unread-summary"]);
+  });
+});
+
+// The inbox nav / tab / dock badges all read this instead of counting the
+// inbox list, so that the count costs no list fetch (MUL-6967).
+describe("unreadCountForWorkspace", () => {
+  const summary: InboxWorkspaceUnread[] = [
+    { workspace_id: "ws-1", count: 3 },
+    { workspace_id: "ws-2", count: 7 },
+  ];
+
+  it("returns the requested workspace's count", () => {
+    expect(unreadCountForWorkspace(summary, "ws-2")).toBe(7);
+  });
+
+  it("reads an absent workspace as zero", () => {
+    // The endpoint omits workspaces with nothing unread rather than sending a
+    // zero row, so "missing" must mean 0 and not "unknown".
+    expect(unreadCountForWorkspace(summary, "ws-3")).toBe(0);
+  });
+
+  it("returns zero without a workspace", () => {
+    expect(unreadCountForWorkspace(summary, null)).toBe(0);
+    expect(unreadCountForWorkspace(summary, undefined)).toBe(0);
+  });
+
+  it("returns zero for an empty summary", () => {
+    expect(unreadCountForWorkspace([], "ws-1")).toBe(0);
   });
 });

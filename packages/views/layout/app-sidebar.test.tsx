@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, sidebarState, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   sidebarState: { setOpenMobile: vi.fn() },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
-  inboxItems: { current: [] as { id: string; read: boolean }[] },
   navigation: { current: { pathname: "/acme/issues" } },
   summary: { current: [] as { workspace_id: string; count: number }[] },
   workspaces: {
@@ -149,9 +148,11 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   };
 });
 vi.mock("@multica/core/inbox/queries", () => ({
-  deduplicateInboxItems: (items: unknown[]) => items,
-  inboxKeys: { list: () => ["inbox"], unreadSummary: () => ["inbox", "unread-summary"] },
   inboxUnreadSummaryOptions: () => ({ queryKey: ["inbox", "unread-summary"] }),
+  // The nav badge and the switcher dot read the SAME cross-workspace summary,
+  // so the fixture that drives one drives the other.
+  useInboxUnreadCount: (currentWsId: string | null) =>
+    summary.current.find((s) => s.workspace_id === currentWsId)?.count ?? 0,
   hasOtherWorkspaceUnread: (
     entries: { workspace_id: string; count: number }[],
     currentWsId: string | null,
@@ -181,7 +182,6 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
-    if (queryKey[0] === "inbox") return { data: inboxItems.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
@@ -336,7 +336,7 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
 describe("personal nav — Chat", () => {
   beforeEach(() => {
     chatSessions.current = [];
-    inboxItems.current = [];
+    summary.current = [];
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: null, isOpen: false };
     appForeground.current = true;
@@ -350,7 +350,7 @@ describe("personal nav — Chat", () => {
     chatNav(container)?.querySelector("number-flow-react") ?? null;
 
   it("keeps persistent Inbox and Chat counters static", () => {
-    inboxItems.current = [{ id: "inbox-1", read: false }];
+    summary.current = [{ workspace_id: "ws-1", count: 1 }];
     chatSessions.current = [{ id: "chat-1", unread_count: 2 }];
     const { container } = render(<AppSidebar />);
     const inboxBadge = container
