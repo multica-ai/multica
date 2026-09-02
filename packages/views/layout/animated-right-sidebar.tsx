@@ -12,6 +12,7 @@ import { motion } from "motion/react";
 import type { Layout, PanelSize } from "react-resizable-panels";
 import {
   isEditableShortcutTarget,
+  isPortalLayerShortcutTarget,
   shortcutMatchesEvent,
   useShortcut,
 } from "@multica/core/shortcuts";
@@ -105,6 +106,7 @@ export function useRightSidebarShortcut(
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat || isImeComposing(event)) return;
       if (isEditableShortcutTarget(event.target)) return;
+      if (isPortalLayerShortcutTarget(event.target)) return;
       if (!shortcutMatchesEvent(shortcut, event)) return;
 
       const target = targetRef.current;

@@ -106,6 +106,70 @@ describe("right sidebar shortcut", () => {
     unmount();
   });
 
+  it.each(["dialog", "menu"])(
+    "leaves Mod+/ to an open %s layer",
+    (role) => {
+      configureShortcutPlatform("macos");
+      const onToggle = vi.fn();
+      const target = document.createElement("div");
+      vi.spyOn(target, "getClientRects").mockReturnValue(
+        [{}] as unknown as DOMRectList,
+      );
+      const { unmount } = renderHook(() =>
+        useRightSidebarShortcut({ current: target }, onToggle),
+      );
+      const layer = document.createElement("div");
+      layer.setAttribute("role", role);
+      document.body.appendChild(layer);
+      const event = new KeyboardEvent("keydown", {
+        key: "/",
+        metaKey: true,
+        bubbles: true,
+        cancelable: true,
+      });
+
+      try {
+        layer.dispatchEvent(event);
+
+        expect(onToggle).not.toHaveBeenCalled();
+        expect(event.defaultPrevented).toBe(false);
+      } finally {
+        unmount();
+        layer.remove();
+      }
+    },
+  );
+
+  it("leaves Mod+/ to a modal even when focus remains on the page", () => {
+    configureShortcutPlatform("macos");
+    const onToggle = vi.fn();
+    const target = document.createElement("div");
+    vi.spyOn(target, "getClientRects").mockReturnValue(
+      [{}] as unknown as DOMRectList,
+    );
+    const { unmount } = renderHook(() =>
+      useRightSidebarShortcut({ current: target }, onToggle),
+    );
+    const inertPage = document.createElement("div");
+    inertPage.setAttribute("data-base-ui-inert", "");
+    document.body.appendChild(inertPage);
+    const event = new KeyboardEvent("keydown", {
+      key: "/",
+      metaKey: true,
+      cancelable: true,
+    });
+
+    try {
+      document.dispatchEvent(event);
+
+      expect(onToggle).not.toHaveBeenCalled();
+      expect(event.defaultPrevented).toBe(false);
+    } finally {
+      unmount();
+      inertPage.remove();
+    }
+  });
+
   it("leaves the shortcut unclaimed when its detail page is hidden", () => {
     configureShortcutPlatform("macos");
     const onToggle = vi.fn();
