@@ -77,7 +77,9 @@ func buildMuseArgs(opts ExecOptions, logger *slog.Logger, promptFile string) []s
 	if opts.Cwd != "" {
 		args = append(args, "--workspace", opts.Cwd)
 	}
-	// Enforce daemon-owned headless posture.
+	// Enforce daemon-owned headless posture. Network is enabled (vs default
+	// proxy-only) because Multica tasks routinely fetch npm/pip/cargo deps and
+	// clone repos; the outer container still governs egress.
 	args = append(args, "--trust-workspace", "--approval-mode", "never", "--sandbox-network", "enabled")
 	// Cap steps when the caller provides an explicit bound; otherwise leave the
 	// CLI's own default (headless default is generous).
@@ -258,6 +260,11 @@ type museStreamState struct {
 	// toolUseSeen deduplicates tool: side_effect_intent so a single
 	// proposal→accepted→scheduled chain does not emit three identical uses.
 	toolUseSeen map[string]bool
+	// taskIDByCallID maps the provider's call_id (call_...) → task_id so
+	// tool.result and task.lifecycle.output can correlate to the same
+	// MessageToolUse that was emitted for side_effect_intent.
+	taskIDByCallID map[string]string
+	toolByCallID   map[string]string
 }
 
 func handleMuseEvent(raw museRawEvent, ch chan<- Message, state *museStreamState) {
@@ -308,7 +315,20 @@ func handleMuseEvent(raw museRawEvent, ch chan<- Message, state *museStreamState
 			return
 		}
 		state.toolUseCount++
-		trySend(ch, Message{Type: MessageToolResult, CallID: p.CallID, Output: p.Text})
+		// Correlate to the task_id emitted for the ToolUse so the UI can
+		// pair use/result. Fall back to the raw call_id if no mapping exists
+		// (e.g. a tool that completed without a side_effect_intent).
+		callID := p.CallID
+		if state.taskIDByCallID != nil {
+			if taskID, ok := state.taskIDByCallID[callID]; ok && taskID != "" {
+				callID = taskID
+			}
+		}
+		tool := ""
+		if state.toolByCallID != nil {
+			tool = state.toolByCallID[p.CallID]
+		}
+		trySend(ch, Message{Type: MessageToolResult, Tool: tool, CallID: callID, Output: p.Text})
 	case "task.lifecycle.output":
 		var p struct {
 			Kind  string `json:"kind"`
@@ -322,6 +342,8 @@ func handleMuseEvent(raw museRawEvent, ch chan<- Message, state *museStreamState
 			return
 		}
 		if p.Event.Chunk != "" {
+			// task.lifecycle.output is a streaming chunk for the same tool
+			// task; use task_id directly so it correlates with the ToolUse.
 			trySend(ch, Message{Type: MessageToolResult, CallID: p.Event.TaskID, Output: p.Event.Chunk})
 		}
 	case "task.lifecycle.side_effect_intent":
@@ -352,13 +374,25 @@ func handleMuseEvent(raw museRawEvent, ch chan<- Message, state *museStreamState
 			return
 		}
 		state.toolUseSeen[key] = true
-		callID := p.Event.IdempotencyKey
-		if callID == "" {
-			callID = p.Event.TaskID
+		// Use task_id as the correlation ID so all three payloads
+		// (side_effect_intent, tool.result, task.lifecycle.output) share one
+		// id space. task_id is present in every payload; call_id is not.
+		callID := p.Event.TaskID
+		// Still remember the provider's call_id → task_id mapping for the
+		// later tool.result which only carries call_id.
+		providerCallID := p.Event.IdempotencyKey
+		if strings.HasPrefix(providerCallID, "tool:") {
+			providerCallID = strings.TrimPrefix(providerCallID, "tool:")
 		}
-		// Normalize idempotency_key of form "tool:<call_id>" or "tool:<id>".
-		if strings.HasPrefix(callID, "tool:") {
-			callID = strings.TrimPrefix(callID, "tool:")
+		if providerCallID != "" && providerCallID != callID {
+			if state.taskIDByCallID == nil {
+				state.taskIDByCallID = make(map[string]string)
+			}
+			state.taskIDByCallID[providerCallID] = callID
+			if state.toolByCallID == nil {
+				state.toolByCallID = make(map[string]string)
+			}
+			state.toolByCallID[providerCallID] = tool
 		}
 		state.toolUseCount++
 		trySend(ch, Message{Type: MessageToolUse, Tool: tool, CallID: callID})
