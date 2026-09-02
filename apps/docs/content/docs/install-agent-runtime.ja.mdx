@@ -39,9 +39,12 @@ Multica は現在、次のコマンドを検出します。
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
+| WorkBuddy | — | [WorkBuddy](https://www.workbuddy.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
+
+WorkBuddy は個別にインストールする必要はありません。デーモンが [WorkBuddy デスクトップアプリ](https://www.workbuddy.cn/) に同梱されている CodeBuddy CLI を検出します。Windows では、同梱 CLI は WorkBuddy が用意する Node.js ランタイム（`~/.workbuddy/binaries/node/versions/`）経由で起動され、デーモンは最新のバージョンを選択します（見つからない場合は `PATH` 上の `node` にフォールバック）。WorkBuddy デスクトップアプリで一度サインインすれば、同梱 CLI がそのセッションを共有します。検出を独自の `codebuddy` インストールで上書きするには `MULTICA_WORKBUDDY_PATH` を設定してください。
 
 ## 2. ローカル環境でログインする
 

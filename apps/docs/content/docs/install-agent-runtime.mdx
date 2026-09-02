@@ -39,9 +39,12 @@ Multica currently detects these commands:
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
+| WorkBuddy | — | [WorkBuddy](https://www.workbuddy.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
+
+WorkBuddy has no separate install: the daemon detects the CodeBuddy CLI that the [WorkBuddy desktop app](https://www.workbuddy.cn/) bundles. On Windows the bundled CLI is launched through the Node.js runtime WorkBuddy stages under `~/.workbuddy/binaries/node/versions/`; the daemon picks the newest staged version (falling back to `node` on `PATH`). Sign in to the WorkBuddy desktop app once — the bundled CLI shares its session. Set `MULTICA_WORKBUDDY_PATH` to override discovery with your own `codebuddy` install.
 
 ## 2. Sign in on your machine
 
