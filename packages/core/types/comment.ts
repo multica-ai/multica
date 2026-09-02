@@ -15,6 +15,13 @@ export interface Reaction {
   comment_revision?: number;
 }
 
+export interface SuggestedFollowUp {
+  id: string;
+  label: string;
+  prompt: string;
+  primary?: boolean;
+}
+
 export interface Comment {
   id: string;
   issue_id: string;
@@ -40,6 +47,8 @@ export interface Comment {
   // keys off the id rather than a dedicated `type`, because `type` is
   // client-supplied on the generic comment endpoint and would be forgeable.
   quick_action_id?: string | null;
+  /** Server-generated next steps attached to this agent comment. */
+  suggested_follow_ups?: SuggestedFollowUp[];
   // Per-target result of every explicit @agent / @squad mention in this comment
   // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
   trigger_outcomes?: CommentTriggerOutcome[];

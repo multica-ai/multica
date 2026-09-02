@@ -4384,6 +4384,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 				}
 			}
 		}
+		if !suppressNoActionComment {
+			s.GenerateIssueCommentFollowUpsAsync(task)
+		}
 	}
 
 	// Quick-create tasks: locate the issue the agent just created and push

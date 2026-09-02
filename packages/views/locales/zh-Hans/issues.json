@@ -344,6 +344,7 @@
     "quick_action_deferred": "{{name}} 当前离线，上线后开始",
     "quick_action_blocked": "无法触发 {{name}}",
     "quick_action_posted": "评论已发布",
+    "follow_ups_heading": "下一步",
     "quick_action_blocked_title": "你无法执行这条快捷操作",
     "quick_action_blocked_body": "\"{{name}}\"由一个你无权触发的智能体执行。可以请工作区管理员把该智能体开放给团队，或把这条操作改绑一个共享的智能体。",
     "quick_action_blocked_ok": "知道了",

@@ -344,6 +344,7 @@
     "quick_action_deferred": "{{name}} はオフラインです。復帰後に開始します",
     "quick_action_blocked": "{{name}} を実行できませんでした",
     "quick_action_posted": "コメントを投稿しました",
+    "follow_ups_heading": "次のステップ",
     "quick_action_blocked_title": "このクイックアクションは実行できません",
     "quick_action_blocked_body": "「{{name}}」は、あなたが実行を許可されていないエージェントで動作します。ワークスペース管理者にそのエージェントをチームへ公開してもらうか、共有エージェントへの変更を依頼してください。",
     "quick_action_blocked_ok": "了解",

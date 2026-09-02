@@ -1,7 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider } from "@multica/core/i18n/react";
+import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
+import enIssues from "../../locales/en/issues.json";
+
+const { runFollowUpMock } = vi.hoisted(() => ({
+  runFollowUpMock: vi.fn(),
+}));
+
+vi.mock("@multica/core/issues", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/issues")>();
+  return {
+    ...actual,
+    useRunIssueCommentFollowUp: () => ({
+      mutateAsync: runFollowUpMock,
+      isPending: false,
+      variables: undefined,
+    }),
+  };
+});
+
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Builder" }),
+}));
 
 const { getAttachmentTextContentMock } = vi.hoisted(() => ({
   getAttachmentTextContentMock: vi.fn(),
@@ -41,13 +64,21 @@ vi.mock("@multica/core/paths", async (importOriginal) => {
   };
 });
 
-import { AttachmentList } from "./comment-card";
+import { AttachmentList, CommentFollowUps } from "./comment-card";
 
 function renderWithQuery(ui: ReactElement) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+function renderFollowUps(ui: ReactElement) {
+  return renderWithQuery(
+    <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
+      <TooltipProvider>{ui}</TooltipProvider>
+    </I18nProvider>,
+  );
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -131,5 +162,53 @@ describe("AttachmentList — inline attachment filtering", () => {
 
     expect(screen.queryByText("report.pdf")).toBeNull();
     expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("CommentFollowUps", () => {
+  it("renders two safe actions and runs the selected server action id", async () => {
+    runFollowUpMock.mockResolvedValueOnce({
+      trigger_outcomes: [{ status: "queued" }],
+    });
+    const entry = {
+      type: "comment",
+      id: "comment-1",
+      actor_type: "agent",
+      actor_id: "agent-1",
+      created_at: "2026-08-31T00:00:00Z",
+      content: "The first pass is ready.",
+      suggested_follow_ups: [
+        { id: "continue-1", label: "Continue", prompt: "Continue the implementation.", primary: true },
+        { id: "review-1", label: "Review", prompt: "Review the current result." },
+      ],
+    } as any;
+
+    renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active />);
+
+    expect(screen.getByRole("button", { name: /Continue/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Review" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Continue/i }));
+
+    await waitFor(() => {
+      expect(runFollowUpMock).toHaveBeenCalledWith({
+        commentId: "comment-1",
+        actionId: "continue-1",
+      });
+    });
+  });
+
+  it("hides stale actions when the comment is not the active thread tail", () => {
+    const entry = {
+      id: "comment-1",
+      suggested_follow_ups: [
+        { id: "continue-1", label: "Continue", prompt: "Continue." },
+        { id: "review-1", label: "Review", prompt: "Review." },
+      ],
+    } as any;
+
+    renderFollowUps(<CommentFollowUps issueId="issue-1" entry={entry} active={false} />);
+
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
   });
 });

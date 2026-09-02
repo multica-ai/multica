@@ -24,6 +24,78 @@ SELECT * FROM (
 ) AS recent
 ORDER BY created_at ASC, id ASC;
 
+-- name: GetLatestAgentCommentForTask :one
+-- The last visible comment authored by this task's agent during the task. The
+-- trusted source_task_id stamp prevents an unrelated agent comment from being
+-- selected when several runs finish close together.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'agent'
+  AND author_id = @author_id
+  AND source_task_id = @source_task_id
+  AND type = 'comment'
+  AND btrim(content) <> ''
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: LockCommentFollowUpExecution :exec
+-- Serialize clicks for one suggestion source across browser tabs and API
+-- replicas. The transaction-scoped lock is released automatically at commit or
+-- rollback; the handler rechecks the thread after acquiring it.
+SELECT pg_advisory_xact_lock(
+    hashtextextended((sqlc.arg('anchor_id')::uuid)::text || ':comment_follow_up', 0)
+);
+
+-- name: GetCommentInWorkspaceForUpdate :one
+-- Pin the source comment while a follow-up is validated and inserted so an
+-- edit cannot replace or clear its server-owned suggestions mid-execution.
+SELECT * FROM comment
+WHERE id = @id AND workspace_id = @workspace_id
+FOR UPDATE;
+
+-- name: SetCommentSuggestedFollowUps :one
+UPDATE comment
+SET suggested_follow_ups = @suggested_follow_ups
+WHERE id = @id
+  AND issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND revision = @expected_revision
+  AND content = @expected_content
+RETURNING *;
+
+-- name: GetLatestCommentInThread :one
+-- Resolve the anchor's root, then return the newest row in that one thread.
+-- The endpoint uses this to reject a suggestion after a newer reply arrives.
+WITH RECURSIVE root AS (
+    SELECT c.id, c.parent_id
+    FROM comment c
+    WHERE c.id = @anchor_id
+      AND c.issue_id = @issue_id
+      AND c.workspace_id = @workspace_id
+    UNION ALL
+    SELECT parent.id, parent.parent_id
+    FROM comment parent
+    JOIN root child ON child.parent_id = parent.id
+    WHERE parent.issue_id = @issue_id
+      AND parent.workspace_id = @workspace_id
+), thread_root AS (
+    SELECT id FROM root WHERE parent_id IS NULL LIMIT 1
+), thread AS (
+    SELECT c.*
+    FROM comment c
+    JOIN thread_root tr ON c.id = tr.id
+    UNION ALL
+    SELECT child.*
+    FROM comment child
+    JOIN thread parent ON child.parent_id = parent.id
+    WHERE child.issue_id = @issue_id
+      AND child.workspace_id = @workspace_id
+)
+SELECT * FROM thread
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListCommentsByIDsForIssue :many
 -- The subset of @ids that exists within this issue and workspace.
 --
@@ -108,7 +180,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision,
+       c.source_task_id, c.quick_action_id, c.revision, c.suggested_follow_ups,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -154,7 +226,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision,
+       c.source_task_id, c.quick_action_id, c.revision, c.suggested_follow_ups,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -195,14 +267,14 @@ descendants AS (
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-           c.source_task_id, c.quick_action_id, c.revision
+           c.source_task_id, c.quick_action_id, c.revision, c.suggested_follow_ups
     FROM comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-           c.source_task_id, c.quick_action_id, c.revision
+           c.source_task_id, c.quick_action_id, c.revision, c.suggested_follow_ups
     FROM comment c
     JOIN descendants d ON c.parent_id = d.id
     WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
@@ -211,7 +283,7 @@ reply_page AS (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
            d.resolved_at, d.resolved_by_type, d.resolved_by_id,
-           d.source_task_id, d.quick_action_id, d.revision
+           d.source_task_id, d.quick_action_id, d.revision, d.suggested_follow_ups
     FROM descendants d
     WHERE d.id NOT IN (SELECT id FROM thread_root)
       AND (
@@ -224,19 +296,19 @@ reply_page AS (
 SELECT id, issue_id, author_type, author_id, content, type,
        created_at, updated_at, parent_id, workspace_id,
        resolved_at, resolved_by_type, resolved_by_id,
-       source_task_id, quick_action_id, revision
+       source_task_id, quick_action_id, revision, suggested_follow_ups
 FROM (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
            d.resolved_at, d.resolved_by_type, d.resolved_by_id,
-           d.source_task_id, d.quick_action_id, d.revision
+           d.source_task_id, d.quick_action_id, d.revision, d.suggested_follow_ups
     FROM descendants d
     JOIN thread_root tr ON d.id = tr.id
     UNION ALL
     SELECT id, issue_id, author_type, author_id, content, type,
            created_at, updated_at, parent_id, workspace_id,
            resolved_at, resolved_by_type, resolved_by_id,
-           source_task_id, quick_action_id, revision
+           source_task_id, quick_action_id, revision, suggested_follow_ups
     FROM reply_page
 ) combined
 ORDER BY created_at ASC, id ASC;
@@ -301,7 +373,7 @@ picked AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision,
+       c.source_task_id, c.quick_action_id, c.revision, c.suggested_follow_ups,
        p.root_id AS thread_root_id,
        p.last_activity_at AS thread_last_activity_at
 FROM picked p
@@ -518,6 +590,7 @@ WITH locked_issue AS MATERIALIZED (
     UPDATE comment SET
         content = $2,
         source_task_id = sqlc.narg(source_task_id)::uuid,
+        suggested_follow_ups = CASE WHEN target.did_change THEN '[]'::jsonb ELSE comment.suggested_follow_ups END,
         revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
         updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
     FROM target
@@ -527,6 +600,7 @@ WITH locked_issue AS MATERIALIZED (
               comment.parent_id, comment.workspace_id, comment.resolved_at,
               comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
               comment.quick_action_id, comment.via_plugin_id, comment.revision,
+              comment.suggested_follow_ups,
               target.did_change
 ), touched_issue AS (
     UPDATE issue
@@ -545,6 +619,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.resolved_by_type, updated_comment.resolved_by_id,
        updated_comment.source_task_id, updated_comment.quick_action_id,
        updated_comment.via_plugin_id, updated_comment.revision,
+       updated_comment.suggested_follow_ups,
        COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 FROM updated_comment;
 

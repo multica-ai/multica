@@ -557,6 +557,29 @@ describe("TimelineEntriesSchema", () => {
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
   });
+
+  it("keeps valid follow-ups when one suggestion is malformed", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "Ready for the next step.",
+        suggested_follow_ups: [
+          { id: "action-1", label: "Continue", prompt: "Continue the implementation.", primary: true },
+          { id: 42, label: "Broken", prompt: "This item must be dropped." },
+          { id: "action-2", label: "Review", prompt: "Review the current result." },
+        ],
+      },
+    ]);
+
+    expect(parsed[0]?.suggested_follow_ups?.map((action) => action.id)).toEqual([
+      "action-1",
+      "action-2",
+    ]);
+  });
 });
 
 describe("AgentTaskListSchema", () => {
