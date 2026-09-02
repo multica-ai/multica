@@ -1091,7 +1091,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				Logger:  slog.Default(),
 			})
 			ack := sharecrm.NewAckNotifier(sharecrmClient, box.Open, slog.Default())
-			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack))
+			var sharecrmMedia engine.MediaResolver
+			if store != nil {
+				sharecrmMedia = sharecrm.NewMediaResolver(store, engine.NewDBMediaIntentLedger(queries), slog.Default())
+			}
+			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack, sharecrmMedia))
 			sharecrm.NewOutbound(queries, box.Open, sharecrmClient, slog.Default()).Register(bus)
 			sharecrm.RegisterShareCRM(channelRegistry, sharecrm.ChannelDeps{
 				Decrypt: box.Open,

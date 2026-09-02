@@ -39,9 +39,9 @@ const TypeShareCRM channel.Type = "sharecrm"
 // DefaultGatewayBaseURL is the public ShareCRM IM Gateway host.
 const DefaultGatewayBaseURL = "https://open.fxiaoke.com"
 
-// GatewayProtocolVersion is sent on SSE connect so the gateway emits the v1.2+
-// structured message shape and history_messages (v1.3).
-const GatewayProtocolVersion = "1.3.0"
+// GatewayProtocolVersion is sent on SSE connect so the gateway emits the v1.4
+// structured message shape, history_messages, and inbound image URLs.
+const GatewayProtocolVersion = "1.4.0"
 
 // installConfig is the JSON shape stored in channel_installation.config.
 //

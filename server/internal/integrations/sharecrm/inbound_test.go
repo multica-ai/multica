@@ -74,6 +74,68 @@ func TestInboundFromEvent_GroupStripsMention(t *testing.T) {
 	}
 }
 
+func TestInboundFromEvent_ImageUsesSignedURL(t *testing.T) {
+	data := &botMessageData{
+		MessageID: "m3",
+		ChatID:    "0:fs:session123:",
+		ChatType:  "direct",
+		From:      botSender{ID: "E.fs.7618", Name: "7618"},
+		Message: &botTextMessage{
+			Type:    "image",
+			Content: "",
+			Images: []botImageRef{{
+				URL:      "https://img.example/sign",
+				Filename: "a.jpg",
+				Width:    10,
+				Height:   10,
+				Size:     70,
+			}},
+		},
+		EA:        "fs",
+		BotFullID: "B.fs.bot_demo",
+	}
+	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if msg.Type != channel.MsgTypeImage {
+		t.Fatalf("type = %q", msg.Type)
+	}
+	if msg.Text != "![a.jpg]" {
+		t.Fatalf("text = %q", msg.Text)
+	}
+	var raw sharecrmRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Images) != 1 || raw.Images[0].URL != "https://img.example/sign" {
+		t.Fatalf("raw images = %+v", raw.Images)
+	}
+}
+
+func TestInboundFromEvent_MixedKeepsCaptionAndImage(t *testing.T) {
+	data := &botMessageData{
+		MessageID: "m4",
+		ChatID:    "0:fs:group1:",
+		ChatType:  "group",
+		From:      botSender{ID: "7618", Name: "7618"},
+		Message: &botTextMessage{
+			Type:    "mixed",
+			Content: "@B.fs.bot_demo 图文测试",
+			Images:  []botImageRef{{URL: "https://img.example/b", Filename: "b.png"}},
+		},
+		EA:        "fs",
+		BotFullID: "B.fs.bot_demo",
+	}
+	msg, ok := inboundFromEvent(data, "app-1", "B.fs.bot_demo")
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	if msg.Text != "图文测试\n![b.png]" {
+		t.Fatalf("text = %q", msg.Text)
+	}
+}
+
 func TestInboundFromEvent_DropNoSender(t *testing.T) {
 	_, ok := inboundFromEvent(&botMessageData{ChatID: "0:fs:s:", Text: "x"}, "app", "")
 	if ok {
