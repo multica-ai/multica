@@ -24,8 +24,9 @@ import (
 // which would silently change behavior for tasks that don't even use skills and
 // would drop any home state not on the list (plugins, OAuth state, hooks, SOUL,
 // scripts, and whatever Hermes adds next) — this builds a minimal compatibility
-// overlay, and only when the agent actually has skills bound (gated at the call
-// site in Prepare/Reuse; a skill-less Hermes task keeps HERMES_HOME untouched).
+// overlay only when Multica has native Hermes-home inputs to supply (agent
+// instructions as SOUL.md or bound skills; gated at the call site in
+// Prepare/Reuse).
 //
 // The overlay:
 //   - mirrors every top-level entry of the shared ~/.hermes/ into the per-task
@@ -68,6 +69,7 @@ import (
 // reconciliation:
 //   - skills/       task-local, only the bound skills
 //   - config.yaml   derived config with absolutized external_dirs
+//   - SOUL.md       task-local, derived from the Multica agent identity
 //   - memories/     link to the agent's persistent store, isolated from the host
 //   - marker below  records that legacy shared SQLite state was detached
 //
@@ -97,6 +99,7 @@ const hermesTaskLocalStateMarker = ".multica-task-local-state-v1"
 var hermesOverriddenEntries = map[string]struct{}{
 	"skills":                   {},
 	"config.yaml":              {},
+	"SOUL.md":                  {},
 	"memories":                 {},
 	"active_profile":           {},
 	"profiles":                 {},
@@ -380,6 +383,14 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // mounted and whether the store actually holds a transcript, so the caller never
 // tells a task it can resume history that is not there.
 func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
+	return prepareHermesHomeWithSoul(hermesHome, sourceHome, sourceMustExist, "", workspaceSkills, env, memoryStore, sessionStore, logger)
+}
+
+// prepareHermesHomeWithSoul additionally renders agentSoul (the Multica agent's
+// identity/persona instructions) as the overlay's SOUL.md. An empty agentSoul
+// leaves SOUL.md absent from the overlay so the shared home's SOUL state (or
+// none) applies.
+func prepareHermesHomeWithSoul(hermesHome, sourceHome string, sourceMustExist bool, agentSoul string, workspaceSkills []SkillContextForEnv, env map[string]string, memoryStore, sessionStore string, logger *slog.Logger) (sessions hermesSessionMount, err error) {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
 		sharedHome = platformDefaultHermesHome()
@@ -432,10 +443,29 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := writeDerivedHermesEnv(sharedHome, hermesHome); err != nil {
 		return hermesSessionMount{}, fmt.Errorf("derive hermes .env: %w", err)
 	}
+	if err := writeDerivedHermesSoul(hermesHome, agentSoul); err != nil {
+		return hermesSessionMount{}, fmt.Errorf("derive hermes SOUL.md: %w", err)
+	}
 	if err := writeHermesBoundSkills(hermesHome, workspaceSkills, logger); err != nil {
 		return hermesSessionMount{}, err
 	}
 	return sessions, nil
+}
+
+// writeDerivedHermesSoul writes the agent's Multica instructions as the
+// overlay's SOUL.md, or removes a stale overlay SOUL.md when this agent has no
+// instructions (so the shared home's SOUL state, if any, applies via the
+// top-level symlink mirror instead of a stale task-local copy).
+func writeDerivedHermesSoul(hermesHome, agentSoul string) error {
+	dst := filepath.Join(hermesHome, "SOUL.md")
+	body := strings.TrimSpace(agentSoul)
+	if body == "" {
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove overlay SOUL.md: %w", err)
+		}
+		return nil
+	}
+	return writeFileAtomic(dst, []byte(body+"\n"), 0o600)
 }
 
 // writeDerivedHermesEnv writes the task-local .env: the source home's .env
@@ -668,6 +698,7 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 		if err := setHermesExternalDirs(doc, computeHermesExternalDirs(sharedHome, nil, env)); err != nil {
 			return err
 		}
+		disableHermesGatePlugins(doc)
 		return marshalYAMLToFile(doc, dstConfig)
 	}
 
@@ -685,6 +716,7 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 	// Supermemory/Hindsight/etc. bank isn't shared across managed tasks; the
 	// built-in per-task memories/ dir is already isolated above.
 	disableHermesMemoryProvider(&doc)
+	disableHermesGatePlugins(&doc)
 	return marshalYAMLToFile(&doc, dstConfig)
 }
 
@@ -704,6 +736,33 @@ func disableHermesMemoryProvider(doc *yaml.Node) {
 		yamlSetMapValue(top, "memory", memory)
 	}
 	yamlSetMapValue(memory, "provider", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: ""})
+}
+
+// disableHermesGatePlugins appends "grill-gate-guard" to plugins.disabled in
+// the derived config. That host plugin intercepts agent turns to enforce its
+// own confirmation gate, which breaks unattended Multica task runs; disabling
+// it in the overlay leaves the user's interactive home untouched.
+func disableHermesGatePlugins(doc *yaml.Node) {
+	top := yamlDocumentRoot(doc)
+	if top == nil {
+		return
+	}
+	plugins := yamlMapValue(top, "plugins")
+	if plugins == nil || plugins.Kind != yaml.MappingNode {
+		plugins = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		yamlSetMapValue(top, "plugins", plugins)
+	}
+	disabled := yamlMapValue(plugins, "disabled")
+	if disabled == nil || disabled.Kind != yaml.SequenceNode {
+		disabled = yamlStringSeq(nil)
+		yamlSetMapValue(plugins, "disabled", disabled)
+	}
+	for _, item := range disabled.Content {
+		if item.Value == "grill-gate-guard" {
+			return
+		}
+	}
+	disabled.Content = append(disabled.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "grill-gate-guard"})
 }
 
 // computeHermesExternalDirs normalizes the user's existing external_dirs to
