@@ -474,4 +474,18 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
 		}
 	}
+
+	// A doubly-tagged id must not sneak back in through the tag-stripping
+	// retry: peeling `[2m]` leaves `[1m]`, which the rule above rejected on
+	// the raw form for good reason. The frontend strips one tag and does not
+	// re-strip, so pricing these here would put two different costs on one
+	// usage row.
+	for _, model := range []string{
+		"claude-fable-5[1m][2m]",
+		"claude-fable-5-1[1m][2m]",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
 }

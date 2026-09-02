@@ -112,8 +112,9 @@ var modelPrices = map[string]ModelPrice{
 //
 // The admitted suffixes are exactly what `stripContextTag` and `stripDate`
 // remove in packages/views/runtimes/utils.ts before its exact-key lookup, so
-// both sides resolve the same set of strings. The trailing `$` is what makes
-// that true and is not optional: these rules are substring matches, so an
+// both sides accept the same suffix forms. (Only the suffixes: the Claude
+// rules are still substring matches, so a malformed PREFIX is out of scope
+// here.) The trailing `$` is what makes that true and is not optional: these rules are substring matches, so an
 // alternative that merely starts a suffix still matches when arbitrary text
 // follows it (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`),
 // which is the silent tier-borrowing this constant exists to prevent. The
@@ -232,7 +233,18 @@ func PriceForModelAlias(model string) (ModelPrice, bool) {
 	// `$`, so without this a bracketed variant would take the unpriced branch
 	// in RecordLLMUsage. Only ever turns a miss into a hit — the raw form is
 	// tried first, so an explicit bracketed rule still wins.
+	//
+	// Exactly ONE tag, matching the frontend: `canonicalCandidates` in
+	// packages/views/runtimes/utils.ts strips a single trailing tag and does
+	// not re-strip the result. Retrying a doubly-tagged id would peel `[2m]`
+	// off `claude-fable-5[1m][2m]` and let the leftover `[1m]` satisfy a rule
+	// that already, correctly, rejected the raw form — the dashboard leaves
+	// that id unmapped, so pricing it here would put two different costs on
+	// one usage row. A second tag means the id is not a shape we recognise.
 	if stripped := contextTagRe.ReplaceAllString(model, ""); stripped != model {
+		if contextTagRe.MatchString(stripped) {
+			return ModelPrice{}, false
+		}
 		return matchModelAlias(stripped)
 	}
 	return ModelPrice{}, false
