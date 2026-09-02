@@ -426,6 +426,7 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 		{model: "claude-fable-5-20260401[1m]", want: fable5},
 		{model: "claude-fable-5-1-20260901", want: fable51},
 		{model: "claude-fable-5-1-latest", want: fable51},
+		{model: "claude-fable-5-1-20260901[1m]", want: fable51},
 	}
 
 	for _, tc := range cases {
@@ -448,6 +449,26 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 		"claude-fable-5-10",
 		"claude-fable-5.10",
 		"claude-fable-5-1x",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
+		}
+	}
+
+	// An admitted suffix only counts when it ENDS the id. These rules are
+	// substring matches, so a terminator whose alternatives are not anchored
+	// still fires on anything that merely starts with one — an unknown
+	// qualifier would silently borrow the tier of whichever row it prefixed,
+	// while the frontend (which anchors both `stripDate` and the bracket tag)
+	// leaves it unmapped. Same id, two different costs.
+	for _, model := range []string{
+		"claude-fable-5-1-latest-preview",
+		"claude-fable-5-1-20260901x",
+		"claude-fable-5-1-2026-09-01-preview",
+		"claude-fable-5-1[1m]junk",
+		"claude-fable-5-latest-preview",
+		"claude-fable-5-20260401-preview",
+		"claude-fable-5[1m]junk",
 	} {
 		if got, ok := PriceForModelAlias(model); ok {
 			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)

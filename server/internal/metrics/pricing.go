@@ -104,21 +104,30 @@ var modelPrices = map[string]ModelPrice{
 	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
 
-// claudeVersionEnd matches what is allowed to follow a Claude version inside
-// a reported model id. Appending it to a rule keeps that rule from swallowing
-// a later SKU in the same family: without it, `claude-fable-5` also matches
-// `claude-fable-5-1`, whose cache reads are a quarter of Fable 5's, so those
-// reads bill at 4x.
+// claudeVersionEnd terminates a Claude family rule: at most one suffix that
+// the frontend resolver normalizes away, and then the END of the id. Appending
+// it keeps a rule from swallowing a later SKU in the same family — without it
+// `claude-fable-5` also matches `claude-fable-5-1`, whose cache reads are a
+// quarter of Fable 5's, so those reads bill at 4x.
 //
-// What it admits is exactly what the frontend resolver normalizes away before
-// its exact-key lookup (`stripContextTag` and `stripDate` in
-// packages/views/runtimes/utils.ts), so both sides resolve the same strings:
-// end of id, a `[1m]`-style context tag, a trailing date snapshot in either
-// spelling, and `-latest`. Anything else — another version digit, a
-// `-preview`-style qualifier — is a distinct SKU at an unknown rate and stays
-// unmapped until it gets a row of its own, the same "every catalog SKU needs
-// its own row" rule the frontend table states.
-const claudeVersionEnd = `($|\[|-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest)`
+// The admitted suffixes are exactly what `stripContextTag` and `stripDate`
+// remove in packages/views/runtimes/utils.ts before its exact-key lookup, so
+// both sides resolve the same set of strings. The trailing `$` is what makes
+// that true and is not optional: these rules are substring matches, so an
+// alternative that merely starts a suffix still matches when arbitrary text
+// follows it (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`),
+// which is the silent tier-borrowing this constant exists to prevent. The
+// bracket form requires a complete tag for the same reason.
+//
+// A date snapshot carrying a context tag (`claude-fable-5-20260401[1m]`) is
+// covered by the tag-stripping retry in PriceForModelAlias, so it does not
+// need a combined alternative here.
+//
+// Anything else — another version digit, a `-preview`-style qualifier — is a
+// distinct SKU at an unknown rate and stays unmapped until it gets a row of
+// its own, the same "every catalog SKU needs its own row" rule the frontend
+// table states.
+const claudeVersionEnd = `(?:-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest|\[[^\]]+\])?$`
 
 var modelAliasRules = []struct {
 	re       *regexp.Regexp
