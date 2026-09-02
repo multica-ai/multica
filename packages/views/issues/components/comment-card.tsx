@@ -642,6 +642,7 @@ function CommentRow({
           actorId={entry.actor_id}
           name={entry.actor_name}
           avatarUrl={entry.actor_avatar_url}
+          profileRequiresDirectoryEntry
           size="md"
           enableHoverCard
           showStatusDot
@@ -973,6 +974,7 @@ function CommentCardImpl({
                 actorId={entry.actor_id}
                 name={entry.actor_name}
                 avatarUrl={entry.actor_avatar_url}
+                profileRequiresDirectoryEntry
                 size="md"
                 enableHoverCard
                 showStatusDot

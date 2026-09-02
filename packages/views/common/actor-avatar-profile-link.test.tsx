@@ -15,7 +15,7 @@ import { NavigationProvider } from "../navigation/context";
 import type { NavigationAdapter } from "../navigation/types";
 import { DeferredPopup } from "./deferred-popup";
 
-const actorDirectory = vi.hoisted(() => ({ known: true }));
+const actorDirectory = vi.hoisted(() => ({ known: true as boolean | undefined }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
@@ -134,6 +134,7 @@ describe("ActorAvatar profile link", () => {
           actorId={MEMBER_ID}
           name="Former Member"
           avatarUrl="https://profiles.example.com/former.png"
+          profileRequiresDirectoryEntry
           enableHoverCard
         />
       </NavigationProvider>,
@@ -141,6 +142,38 @@ describe("ActorAvatar profile link", () => {
 
     expect(screen.getByAltText("Former Member")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
+  });
+
+  it("keeps hydrated actor interactions while the directory is loading", () => {
+    actorDirectory.known = undefined;
+    render(
+      <NavigationProvider value={makeAdapter()}>
+        <ActorAvatar
+          actorType="member"
+          actorId={MEMBER_ID}
+          name="Ada Lovelace"
+          profileRequiresDirectoryEntry
+          enableHoverCard
+        />
+      </NavigationProvider>,
+    );
+
+    expect(screen.getByRole("link")).toBeInTheDocument();
+  });
+
+  it("does not change non-timeline avatar interactions when the directory misses", () => {
+    actorDirectory.known = false;
+    render(
+      <NavigationProvider value={makeAdapter()}>
+        <ActorAvatar
+          actorType="member"
+          actorId={MEMBER_ID}
+          name="Ada Lovelace"
+        />
+      </NavigationProvider>,
+    );
+
+    expect(screen.getByRole("link")).toBeInTheDocument();
   });
 
   it("pushes on plain click", () => {

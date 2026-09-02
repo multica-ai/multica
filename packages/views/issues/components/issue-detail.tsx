@@ -633,6 +633,7 @@ function ActivityBlock({
               actorId={entry.actor_id}
               name={entry.actor_name}
               avatarUrl={entry.actor_avatar_url}
+              profileRequiresDirectoryEntry
               size="sm"
             />
           );

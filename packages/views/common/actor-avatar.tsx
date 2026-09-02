@@ -44,6 +44,12 @@ interface ActorAvatarProps {
   /** Timeline-provided identity for actors no longer in the live directory. */
   name?: string;
   avatarUrl?: string | null;
+  /**
+   * Disable profile interactions after the live directory confirms that this
+   * actor no longer has a profile. Timeline surfaces opt in because their
+   * hydrated identity remains displayable after an actor leaves.
+   */
+  profileRequiresDirectoryEntry?: boolean;
   size?: AvatarSize;
   className?: string;
   /**
@@ -83,6 +89,7 @@ export function ActorAvatar({
   actorId,
   name,
   avatarUrl,
+  profileRequiresDirectoryEntry = false,
   size,
   className,
   enableHoverCard,
@@ -90,7 +97,12 @@ export function ActorAvatar({
   hoverCardVariant = "profile",
   profileLink,
 }: ActorAvatarProps) {
-  const { getActorName, getActorAvatarUrl, hasActor } = useActorName();
+  const {
+    getActorName,
+    getActorInitials,
+    getActorAvatarUrl,
+    hasActor,
+  } = useActorName();
   const paths = useWorkspacePaths();
   const resolvedName = name ?? getActorName(actorType, actorId);
   const resolvedAvatarUrl =
@@ -99,16 +111,10 @@ export function ActorAvatar({
       : avatarUrl?.startsWith("/")
         ? resolvePublicFileUrl(avatarUrl)
         : avatarUrl;
-  const initials = resolvedName
-    .split(" ")
-    .map((word) => word[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
   const avatar = (
     <ActorAvatarBase
       name={resolvedName}
-      initials={initials}
+      initials={getActorInitials(actorType, actorId, resolvedName)}
       avatarUrl={resolvedAvatarUrl}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
@@ -131,9 +137,8 @@ export function ActorAvatar({
   ) : (
     avatar
   );
-  // The fallback keeps independently mocked/embedded consumers compatible;
-  // the production hook always supplies hasActor.
-  const profileAvailable = hasActor?.(actorType, actorId) ?? true;
+  const profileAvailable =
+    !profileRequiresDirectoryEntry || hasActor(actorType, actorId) !== false;
   const shouldLinkToProfile =
     profileAvailable &&
     (profileLink ??
