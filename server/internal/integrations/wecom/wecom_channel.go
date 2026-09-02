@@ -670,3 +670,14 @@ func newReqID() string {
 	}
 	return hex.EncodeToString(buf[:])
 }
+
+// newStreamID mints the developer-chosen id that names one streaming message.
+// Reusing an id replaces that message's body; a fresh one opens another
+// bubble, which is why this must never collide across concurrent turns.
+func newStreamID() string {
+	var buf [12]byte
+	if _, err := cryptorand.Read(buf[:]); err != nil {
+		return fmt.Sprintf("wecom-stream-%d", time.Now().UnixNano())
+	}
+	return "s" + hex.EncodeToString(buf[:])
+}
