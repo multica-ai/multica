@@ -830,6 +830,17 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":   true,
 		"max":     true,
 	},
+	// Muse (muse-spark-1.2) reasoning effort: none|minimal|low|medium|high|xhigh|ultra
+	// Verified from `muse exec --help` on 1.0.1.
+	"muse": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"ultra":   true,
+	},
 }
 
 // thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
