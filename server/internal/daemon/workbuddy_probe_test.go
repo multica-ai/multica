@@ -2,9 +2,11 @@ package daemon
 
 // Tests for the WorkBuddy desktop-app discovery probe (workbuddy_probe.go).
 //
-// The launch shape under test differs by platform:
-//   - unix:  Path=<bundle cli script>            (shebang, exec bit set)
-//   - windows: Path=<staged node.exe>, LaunchPrefix=[<bundle cli script>]
+// The launch shape is the same on every platform:
+//   Path=<staged node>, LaunchPrefix=[<bundle cli script>]
+// i.e. the codebuddy family spawns the bundled Node shebang CLI as
+// `<node> <cli script> -p ...`. No platform launches the CLI directly, so a
+// daemon whose PATH has no `node` (a GUI launch) still works.
 //
 // Node selection must be semantic-version aware (22.10.0 > 22.9.0) and the
 // probe must never mutate the daemon process environment — both are hard
@@ -12,11 +14,14 @@ package daemon
 // WorkBuddy-bundle proposal (multica-ai/multica#6624).
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // stageWorkBuddyInstall lays out a fake WorkBuddy install tree:
@@ -24,9 +29,9 @@ import (
 //	<dir>/WorkBuddy(.app)/resources/app.asar.unpacked/cli/bin/codebuddy
 //
 // and returns the WorkBuddy install root (<dir>/WorkBuddy(.app)) — the value
-// the probe's bundle-roots list is expected to contain. On windows the CLI is
-// created as a plain file (exec bits carry no meaning); on unix it gets the
-// exec bit so the shebang-script path is exercised for real.
+// the probe's bundle-roots list is expected to contain. The CLI is a Node
+// shebang file and is always run under an explicit staged node (the launch
+// prefix), never spawned directly, so it needs no exec bit on any platform.
 func stageWorkBuddyInstall(t *testing.T, dir string) string {
 	t.Helper()
 	root := filepath.Join(dir, "WorkBuddy")
@@ -155,20 +160,17 @@ func TestProbeAgentCLIs_DiscoversWorkBuddyBundle(t *testing.T) {
 	}
 
 	cli := filepath.Join(bundle, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
-	if runtime.GOOS == "windows" {
-		if entry.Path == "" || !strings.Contains(strings.ToLower(filepath.Base(entry.Path)), "node") {
-			t.Errorf("windows workbuddy Path = %q, want the staged node runtime", entry.Path)
-		}
-		if len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli {
-			t.Errorf("windows workbuddy LaunchPrefix = %v, want [%s]", entry.LaunchPrefix, cli)
-		}
-	} else {
-		if entry.Path != cli {
-			t.Errorf("workbuddy Path = %q, want %q", entry.Path, cli)
-		}
-		if len(entry.LaunchPrefix) != 0 {
-			t.Errorf("unix workbuddy LaunchPrefix = %v, want empty", entry.LaunchPrefix)
-		}
+	// The entry launches the CLI under the pinned staged node: Path is the node
+	// runtime and LaunchPrefix is the CLI script — the same shape on every
+	// platform, so a daemon whose PATH lacks node (a GUI launch) still works.
+	if entry.Path == "" || !strings.Contains(strings.ToLower(filepath.Base(entry.Path)), "node") {
+		t.Errorf("workbuddy Path = %q, want the staged node runtime", entry.Path)
+	}
+	if !strings.Contains(entry.Path, "22.22.2") {
+		t.Errorf("workbuddy Path = %q, want the staged 22.22.2 node", entry.Path)
+	}
+	if len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli {
+		t.Errorf("workbuddy LaunchPrefix = %v, want [%s]", entry.LaunchPrefix, cli)
 	}
 }
 
@@ -184,19 +186,13 @@ func TestProbeAgentCLIs_WorkBuddyBundlePicksNewestStagedNodeSemver(t *testing.T)
 	if !ok {
 		t.Fatal("workbuddy was not discovered")
 	}
-	if runtime.GOOS == "windows" {
-		if !strings.Contains(entry.Path, "22.10.0") {
-			t.Errorf("windows workbuddy Path = %q, want the 22.10.0 staged node (not lexicographic max)", entry.Path)
-		}
-	} else {
-		// unix shape does not carry the node path; verify via resolveWorkBuddyNode.
-		node, ok := resolveWorkBuddyNode()
-		if !ok {
-			t.Fatal("resolveWorkBuddyNode found no staged node")
-		}
-		if !strings.Contains(node, "22.10.0") {
-			t.Errorf("resolveWorkBuddyNode = %q, want 22.10.0 (semver max, not lexicographic)", node)
-		}
+	// Path carries the node runtime on every platform; assert the probe picked
+	// the 22.10.0 staged node (semver max), not the lexicographic max 22.9.0.
+	if !strings.Contains(entry.Path, "22.10.0") {
+		t.Errorf("workbuddy Path = %q, want the 22.10.0 staged node (not lexicographic max)", entry.Path)
+	}
+	if filepath.Base(entry.Path) == "codebuddy" {
+		t.Errorf("workbuddy Path = %q, want the staged node runtime, not the CLI script", entry.Path)
 	}
 }
 
@@ -281,6 +277,63 @@ func TestProbeAgentCLIs_WorkBuddyDiscoveryDoesNotMutateProcessPath(t *testing.T)
 	after := os.Getenv("PATH")
 	if before != after {
 		t.Fatalf("probeAgentCLIs mutated the daemon process PATH:\nbefore=%q\nafter =%q", before, after)
+	}
+}
+
+// TestProbeAgentCLIs_WorkBuddyVersionDetectionRunsNodeCli covers the actual
+// Node-dependent launch path the #6624 review asked to exercise: the entry
+// must run the bundled CLI under the pinned staged node (`<node> <cli script>
+// --version`) and report the CLI's version — not Node's. A fake "node" shim
+// answers with a Node version unless its first operand is the CLI script, so
+// the reported version proves the argv shape; a record file captures exactly
+// what node was asked to run. This is the same command the daemon's version
+// probe builds from AgentEntry{Path, LaunchPrefix}.
+func TestProbeAgentCLIs_WorkBuddyVersionDetectionRunsNodeCli(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("staged node shim is POSIX-only; the daemon suite's WorkBuddy paths run on unix CI")
+	}
+	bundle := stageWorkBuddyInstall(t, t.TempDir())
+	stubWorkBuddyDiscovery(t, []string{bundle}, "22.22.2")
+	t.Setenv("MULTICA_WORKBUDDY_PATH", "")
+
+	agents := probeAgentCLIs()
+	entry, ok := agents["workbuddy"]
+	if !ok {
+		t.Fatal("workbuddy was not discovered; test premise broken")
+	}
+	cli := filepath.Join(bundle, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+	if entry.Path == "" || len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli {
+		t.Fatalf("entry = {Path:%q LaunchPrefix:%v}, want the staged node + [cli script] launch shape", entry.Path, entry.LaunchPrefix)
+	}
+
+	// Overwrite the staged node (a plain discovery-time file) with an
+	// executable shim that reports the bundled CLI's version only when invoked
+	// as `<node> <cli> --version`; any other shape answers with a Node version.
+	record := filepath.Join(t.TempDir(), "launch-argv.txt")
+	shim := "#!/bin/sh\n" +
+		`printf '%s\n' "$@" > "` + record + `"` + "\n" +
+		`if [ "$1" = "` + cli + `" ]; then` + "\n" +
+		"  echo 'codebuddy/2.137.1'\n" +
+		"else\n" +
+		"  echo 'node/v99.0.0'\n" +
+		"fi\n"
+	if err := os.WriteFile(entry.Path, []byte(shim), 0o755); err != nil {
+		t.Fatalf("write staged node shim: %v", err)
+	}
+
+	version, err := agent.DetectVersion(context.Background(), agent.NewCommand(entry.Path, entry.LaunchPrefix))
+	if err != nil {
+		t.Fatalf("DetectVersion over the workbuddy entry: %v", err)
+	}
+	if !strings.Contains(version, "2.137.1") {
+		t.Errorf("version = %q, want the bundled CLI's version (2.137.1) — a direct node --version would report v99.0.0", version)
+	}
+	argvBytes, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatalf("read recorded launch argv: %v", err)
+	}
+	if argv := string(argvBytes); !strings.Contains(argv, cli) || !strings.Contains(argv, "--version") {
+		t.Errorf("staged node was invoked as %q, want it asked to run the CLI script with --version", argv)
 	}
 }
 

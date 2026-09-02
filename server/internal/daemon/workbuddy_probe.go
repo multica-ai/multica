@@ -10,21 +10,19 @@ package daemon
 // codebuddy) so a WorkBuddy install shows up as a usable agent runtime with
 // no extra setup.
 //
-// Two platform shapes matter:
+// One launch shape covers every platform:
 //
-//   - macOS (and any unix): the bundled CLI is a shebang script with the
-//     exec bit set and is launched directly. The shebang resolves `node`
-//     through the process PATH, so discovery still verifies a Node runtime is
-//     reachable and prefers the version WorkBuddy stages under
-//     ~/.workbuddy/binaries/node/versions/<v>/bin/node (semver-maxed).
-//
-//   - Windows: the bundled CLI is a shebang script WITHOUT an executable
-//     extension. exec.LookPath resolves only PATHEXT suffixes and
-//     CreateProcess cannot execute a bare script (ERROR_BAD_EXE_FORMAT), so
-//     the runtime cannot launch the file directly. Instead discovery pairs
-//     the CLI with a Node executable and the launch prefix carries the script
-//     path: Path=<node.exe>, LaunchPrefix=[<cli script>], which the
-//     codebuddy family then spawns as `<node.exe> <script> -p ...`.
+//   - The bundled CLI is a Node shebang script (`#!/usr/bin/env node`) that
+//     WorkBuddy never puts on PATH, so discovery can never treat it as a bare
+//     command. Spawning the file directly is fragile everywhere: Windows
+//     CreateProcess cannot run a bare extensionless script
+//     (ERROR_BAD_EXE_FORMAT), and on unix the `env node` shebang resolves
+//     `node` from the daemon process PATH, which a GUI-launched daemon
+//     frequently does not inherit even though WorkBuddy staged a runtime.
+//     Discovery therefore pairs the CLI with a Node executable and carries
+//     the script path as the launch prefix: Path=<node>, LaunchPrefix=[<cli
+//     script>], which the codebuddy family then spawns as
+//     `<node> <script> -p ...` on every OS.
 //
 // The staged Node runtime under ~/.workbuddy is preferred over PATH node for
 // two reasons: it is versioned alongside the bundled CLI that WorkBuddy
@@ -33,8 +31,9 @@ package daemon
 // WorkBuddy bundle is the only codebuddy-family CLI present. PATH node is the
 // fallback so an operator with a working node install is not forced to let
 // WorkBuddy stage one. The choice never mutates the daemon process
-// environment — the resolved Node path is carried per-entry in the launch
-// prefix, so unrelated agent launches cannot observe it.
+// environment — the chosen Node path and the CLI script it runs travel only
+// inside the entry's Path/LaunchPrefix, so unrelated agent launches cannot
+// observe them.
 
 import (
 	"os"
@@ -185,61 +184,44 @@ func probeWorkBuddyAgent() (AgentEntry, bool) {
 }
 
 // workbuddyBundleCLIUsable reports whether a bundled CLI file can back a
-// runtime. On unix the CLI is a shebang script that must carry the exec bit
-// to launch at all. On Windows the exec bit is meaningless (nothing is
-// executable by mode); the CLI launches through the staged Node interpreter
-// via the launch prefix, so existence is the only gate — the same bar the
-// Windows codex bundle probe applies to its bundled binary.
+// runtime. The file is always run under an explicit Node interpreter (the
+// launch prefix), never spawned directly, so an exec bit is not required on
+// any platform — existence is the only gate, the same bar the codex bundle
+// probe applies to its bundled binary.
 func workbuddyBundleCLIUsable(cliPath string) bool {
-	if runtime.GOOS == "windows" {
-		info, err := os.Stat(cliPath)
-		return err == nil && !info.IsDir()
-	}
-	return isExecutableFile(cliPath)
+	info, err := os.Stat(cliPath)
+	return err == nil && !info.IsDir()
 }
 
 // workbuddyEntryWithRuntime builds the launchable AgentEntry for a resolved
-// bundle CLI path. On unix the CLI launches directly (its shebang needs node
-// on PATH, verified below); on Windows the CLI is a shebang script that
-// cannot be spawned bare, so the entry launches the Node runtime with the
-// script as its launch prefix.
+// bundle CLI path: the entry runs the CLI under a pinned Node interpreter
+// (`Path` = node, `LaunchPrefix` = [cli script]), so the `<node> <script>`
+// launch shape is identical on every platform. Pinning the interpreter — and
+// never mutating the daemon environment to make it reachable — matters for two
+// reasons: Windows cannot spawn a bare extensionless shebang script at all,
+// and on unix the script's `env node` shebang would resolve `node` from the
+// daemon's process PATH, which a GUI-launched daemon may not have even though
+// WorkBuddy staged a runtime under ~/.workbuddy.
+//
+// Command is deliberately empty: the field is the daemon's handle for
+// re-resolving a vanished pinned Path (MUL-4486), and a Path that is the Node
+// runtime must never be re-resolved — node is an interpreter shared by every
+// npm-installed CLI, and "resolving" it would return an unrelated binary (or
+// the WorkBuddy CLI script itself, since Command doubles as the launch prefix
+// token here). Empty Command makes resolveAgentEntryWithHeal treat a vanished
+// node as an unrecoverable launch failure with a clear error, which is the
+// honest state: WorkBuddy stages node at install time and an operator repairs
+// a missing one by reinstalling / reconfiguring.
 func workbuddyEntryWithRuntime(cliPath, model string) (AgentEntry, bool) {
 	node, ok := resolveWorkBuddyNode()
 	if !ok {
 		return AgentEntry{}, false
 	}
-	if runtime.GOOS == "windows" {
-		// Command is deliberately empty: the field is the daemon's handle for
-		// re-resolving a vanished pinned Path (MUL-4486), and a Path that is
-		// the staged Node runtime must never be re-resolved — node is an
-		// interpreter shared by every npm-installed CLI, and "resolving" it
-		// would return an unrelated binary (or the WorkBuddy CLI script
-		// itself, since Command doubles as the launch prefix token here).
-		// Empty Command makes resolveAgentEntryWithHeal treat a vanished node
-		// as an unrecoverable launch failure with a clear error, which is the
-		// honest state: WorkBuddy stages node at install time and an operator
-		// repairs a missing one by reinstalling / reconfiguring.
-		return AgentEntry{
-			Path:         node,
-			Model:        model,
-			LaunchPrefix: []string{cliPath},
-		}, true
-	}
-	return workbuddyEntry(cliPath, model), true
-}
-
-// workbuddyEntry builds a plain AgentEntry launching cliPath directly (the
-// unix shape of the WorkBuddy bundle). Command is left empty: the daemon's
-// self-heal re-resolves a vanished pinned Path through the command name it
-// was resolved from, and a WorkBuddy bundle path is not a command that can be
-// re-resolved — the app owns it. A bundle path that vanishes (app updated or
-// moved) is an unrecoverable launch failure with a clear error, not something
-// a PATH re-resolution could repair.
-func workbuddyEntry(cliPath, model string) AgentEntry {
 	return AgentEntry{
-		Path:  cliPath,
-		Model: model,
-	}
+		Path:         node,
+		Model:        model,
+		LaunchPrefix: []string{cliPath},
+	}, true
 }
 
 // resolveWorkBuddyNode finds the Node runtime a bundled CodeBuddy CLI can run
@@ -273,9 +255,11 @@ func resolveWorkBuddyNode() (string, bool) {
 	return "", false
 }
 
-// workbuddyNodeUsable mirrors workbuddyBundleCLIUsable: exec-bit semantics on
-// unix, existence on Windows (where node.exe is a PE binary and the mode bits
-// carry no exec meaning).
+// workbuddyNodeUsable reports whether a staged node binary can be exec'd as
+// the entry's Path. Unlike the bundled CLI (always run through the launch
+// prefix, existence only), node is spawned directly, so on unix it must carry
+// an exec bit; on Windows the mode bits carry no exec meaning (node.exe is a
+// PE binary), so existence is the gate.
 func workbuddyNodeUsable(nodePath string) bool {
 	if runtime.GOOS == "windows" {
 		info, err := os.Stat(nodePath)

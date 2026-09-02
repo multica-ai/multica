@@ -44,7 +44,7 @@ Multica는 현재 다음 명령을 감지합니다.
 
 "지원됨"은 Multica가 해당 CLI를 호출할 수 있다는 뜻이며 Multica가 도구의 계정, 구독, 모델 사용량을 제공한다는 뜻은 아닙니다.
 
-WorkBuddy는 별도로 설치할 필요가 없습니다. 데몬이 [WorkBuddy 데스크톱 앱](https://www.workbuddy.cn/)에 번들된 CodeBuddy CLI를 감지합니다. Windows에서는 번들 CLI가 WorkBuddy가 준비한 Node.js 런타임(`~/.workbuddy/binaries/node/versions/`)을 통해 실행되며, 데몬은 가장 최신 버전을 선택합니다(없으면 `PATH`의 `node`로 폴백). WorkBuddy 데스크톱 앱에서 한 번 로그인하면 번들 CLI가 해당 세션을 공유합니다. 자체 `codebuddy` 설치로 감지를 덮어쓰려면 `MULTICA_WORKBUDDY_PATH`를 설정하세요.
+WorkBuddy는 별도로 설치할 필요가 없습니다. 데몬이 [WorkBuddy 데스크톱 앱](https://www.workbuddy.cn/)에 번들된 CodeBuddy CLI를 감지합니다. 모든 플랫폼에서 번들 CLI가 Node.js 런타임을 통해 실행되며, WorkBuddy가 런타임을 `~/.workbuddy/binaries/node/versions/`에 준비하고 데몬은 가장 최신 버전을 선택합니다(없으면 `PATH`의 `node`로 폴백). WorkBuddy 데스크톱 앱에서 한 번 로그인하면 번들 CLI가 해당 세션을 공유합니다. 자체 `codebuddy` 설치로 감지를 덮어쓰려면 `MULTICA_WORKBUDDY_PATH`를 설정하세요.
 
 ## 2. 로컬에서 로그인 완료
 
