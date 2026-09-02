@@ -193,6 +193,20 @@ func TestFeishuFactory_DecodesConfigCredentials(t *testing.T) {
 	}
 }
 
+func TestFeishuFactory_PreservesInstallationID(t *testing.T) {
+	installationID := uuidFromString(t, "00000000-0000-0000-0000-000000000009")
+	cfg := channel.Config{
+		Type: channel.TypeFeishu,
+		ID:   installationID,
+		Raw:  feishuConfigJSON(t, "cli_app", "lark"),
+	}
+	fc := buildFeishuChannel(t, FeishuChannelDeps{Connector: NewNoopConnector(nil)}, cfg)
+
+	if fc.inst.ID != installationID {
+		t.Fatal("installation ID was not preserved")
+	}
+}
+
 func TestFeishuFactory_MissingConnectorFails(t *testing.T) {
 	_, err := newFeishuFactory(FeishuChannelDeps{})(channel.Config{Type: channel.TypeFeishu, Raw: feishuConfigJSON(t, "cli", "feishu")})
 	if err == nil {

@@ -26,10 +26,9 @@ import (
 // through the Lark HTTP API. One instance is built per channel_installation by
 // the registered Factory; the connector is shared across instances.
 //
-// The Channel holds only the credentials it needs for Connect/Send (decoded
-// from the per-installation config blob). The installation IDENTITY
-// (workspace / agent / installer) is resolved per message by the Router's
-// InstallationResolver, so it is deliberately absent here.
+// The Channel holds connection credentials plus the durable installation row
+// ID. Workspace, agent, and installer identity are resolved per message by the
+// Router's InstallationResolver.
 type feishuChannel struct {
 	inst    Installation
 	conn    EventConnector
@@ -210,9 +209,11 @@ func newFeishuFactory(deps FeishuChannelDeps) channel.Factory {
 		}
 		// cfg.Raw is the per-installation config blob (the channel_installation
 		// .config JSONB): app_id, encrypted app_secret, tenant_key, region, ….
-		// We build a credentials-only Installation from it; the workspace /
-		// agent identity is resolved per message by the Router, not needed here.
+		// We build credentials plus the durable installation row ID from it.
+		// Workspace / agent identity is resolved per message by the Router, not
+		// needed here.
 		inst, err := installationFromRow(db.ChannelInstallation{
+			ID:          cfg.ID,
 			ChannelType: channelTypeFeishu,
 			Config:      cfg.Raw,
 		})
