@@ -29,6 +29,17 @@ import (
 // 5.1 as a disabled row carrying "Update to 2.1.255+ to use Fable 5.1", and
 // 2.1.258 returns it as a normal selectable entry.
 //
+// This governs SELECTION, and only selection. An agent already configured with
+// a model, whose CLI is downgraded afterwards, still starts and still gets the
+// upstream 400 — discovery cannot reach a value already persisted. That is the
+// accepted boundary, decided on MUL-6961 rather than assumed: the downgrade is
+// a rare case, the upstream error is accurate, and a run that fails loudly at
+// the moment it starts is a fine way to report it. Do not "improve" this by
+// clearing the configured model or substituting a runnable one when the catalog
+// no longer offers it. Clearing turns a legible error into a silent config
+// change the user did not make, and substituting is worse — it succeeds, using
+// a model nobody chose.
+//
 // No version gate guards the request, unlike codexSupportsDebugModels. It would
 // buy nothing: an unsupported subtype is answered, not ignored — every build
 // tested replies `Unsupported control request subtype: ...` in about two
