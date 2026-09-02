@@ -627,7 +627,15 @@ function ActivityBlock({
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
-          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="sm" />;
+          leadIcon = (
+            <ActorAvatar
+              actorType={entry.actor_type}
+              actorId={entry.actor_id}
+              name={entry.actor_name}
+              avatarUrl={entry.actor_avatar_url}
+              size="sm"
+            />
+          );
         }
 
         return (
@@ -636,7 +644,9 @@ function ActivityBlock({
               {leadIcon}
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="shrink-0 font-medium">
+                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+              </span>
               <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&

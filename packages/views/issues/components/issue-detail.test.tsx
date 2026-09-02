@@ -1307,6 +1307,29 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("prefers timeline identity when the actor is absent from the member directory", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "former-member-comment",
+        actor_type: "member",
+        actor_id: "former-user-1",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        content: "Authored before leaving",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    await screen.findByText("Authored before leaving");
+    expect(screen.getByText("Former Member")).toBeInTheDocument();
+  });
+
   it("reruns the source task from an agent failure comment", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       ...mockTimeline,

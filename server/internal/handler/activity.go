@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sort"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -19,6 +21,11 @@ type TimelineEntry struct {
 	ActorType string `json:"actor_type"`
 	ActorID   string `json:"actor_id"`
 	CreatedAt string `json:"created_at"`
+	// Display-only identity is hydrated from the global user row for member
+	// actors. It remains available after the member leaves this workspace;
+	// actor_type + actor_id stay the durable attribution keys.
+	ActorName      string `json:"actor_name,omitempty"`
+	ActorAvatarURL string `json:"actor_avatar_url,omitempty"`
 
 	// Activity-only fields
 	Action  *string         `json:"action,omitempty"`
@@ -204,11 +211,17 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(HeaderTimelineTruncated, kinds)
 	}
 
+	entries := h.mergeTimeline(r, comments, activities, !wantWrapped)
+	// The current-member directory deliberately excludes departed members, but
+	// timeline attribution must remain readable after they leave. Hydrate only
+	// the member ids already present in this authorised issue response; lookup
+	// failure is display-only and must not make the timeline unavailable.
+	h.hydrateTimelineMemberActors(ctx, entries)
+	if entries == nil {
+		entries = []TimelineEntry{}
+	}
+
 	if wantWrapped {
-		entries := h.mergeTimeline(r, comments, activities, false)
-		if entries == nil {
-			entries = []TimelineEntry{}
-		}
 		resp := timelinePaginatedResponse{
 			Entries:       entries,
 			HasMoreBefore: commentsTruncated || activitiesTruncated,
@@ -228,10 +241,6 @@ func (h *Handler) ListTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries := h.mergeTimeline(r, comments, activities, true)
-	if entries == nil {
-		entries = []TimelineEntry{}
-	}
 	writeJSON(w, http.StatusOK, entries)
 }
 
@@ -315,6 +324,57 @@ func activityToEntry(a db.ActivityLog) TimelineEntry {
 		Action:    &action,
 		Details:   a.Details,
 		CreatedAt: timestampToString(a.CreatedAt),
+	}
+}
+
+// hydrateTimelineMemberActors adds display identity for member-authored rows
+// without changing the active-member directory's semantics. The ids came from
+// comments/activity rows on an issue loadIssueForUser already authorised, so
+// this creates no arbitrary user lookup surface. The query is bounded by the
+// timeline hard caps and runs once for the whole response, never once per row.
+func (h *Handler) hydrateTimelineMemberActors(ctx context.Context, entries []TimelineEntry) {
+	seen := make(map[string]struct{})
+	ids := make([]pgtype.UUID, 0)
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" || entry.ActorID == "" {
+			continue
+		}
+		if _, ok := seen[entry.ActorID]; ok {
+			continue
+		}
+		id, err := util.ParseUUID(entry.ActorID)
+		if err != nil {
+			continue
+		}
+		seen[entry.ActorID] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	users, err := h.Queries.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]db.GetUsersByIDsRow, len(users))
+	for _, user := range users {
+		byID[uuidToString(user.ID)] = user
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ActorType != "member" {
+			continue
+		}
+		user, ok := byID[entry.ActorID]
+		if !ok {
+			continue
+		}
+		entry.ActorName = user.Name
+		if user.AvatarUrl.Valid {
+			entry.ActorAvatarURL = h.resolveAvatarURL(user.AvatarUrl.String)
+		}
 	}
 }
 

@@ -141,6 +141,19 @@ export function useActorName() {
     return null;
   }, [agents, members, squads]);
 
+  const hasActor = useCallback(
+    (type: string, id: string): boolean => {
+      if (type === "member") return members.some((m) => m.user_id === id);
+      if (type === "agent") return agents.some((a) => a.id === id);
+      if (type === "squad") return squads.some((s) => s.id === id);
+      if (type === "plugin") {
+        return pluginData?.plugins.some((p) => p.id === id) ?? false;
+      }
+      return type === "system";
+    },
+    [agents, members, pluginData, squads],
+  );
+
   return useMemo(
     () => ({
       getMemberName,
@@ -149,6 +162,7 @@ export function useActorName() {
       getActorName,
       getActorInitials,
       getActorAvatarUrl,
+      hasActor,
     }),
     [
       getActorAvatarUrl,
@@ -157,6 +171,7 @@ export function useActorName() {
       getAgentName,
       getMemberName,
       getSquadName,
+      hasActor,
     ],
   );
 }

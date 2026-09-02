@@ -896,6 +896,8 @@ const TimelineEntrySchema = z.object({
   actor_type: z.string(),
   actor_id: z.string(),
   created_at: z.string(),
+  actor_name: z.string().optional(),
+  actor_avatar_url: z.string().optional(),
   action: z.string().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
