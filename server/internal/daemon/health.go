@@ -215,6 +215,8 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			checkoutRef = d.taskRepoDefaultRef(req.WorkspaceID, req.TaskID, req.URL)
 		}
 
+		mirrorURL := d.repoMirrorURL(req.WorkspaceID, req.URL)
+
 		result, err := d.repoCache.CreateWorktree(repocache.WorktreeParams{
 			WorkspaceID:         req.WorkspaceID,
 			RepoURL:             req.URL,
@@ -224,6 +226,7 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			TaskID:              req.TaskID,
 			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(req.WorkspaceID),
 			IsolatedGitMetadata: req.CheckoutMode == repoCheckoutModeIsolated,
+			MirrorURL:           mirrorURL,
 		})
 		if err != nil {
 			d.logger.Error("repo checkout failed", "url", req.URL, "error", err)

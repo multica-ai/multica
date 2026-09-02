@@ -17,6 +17,7 @@ func newRepoRegistryTestCmd(serverURL string) *cobra.Command {
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().StringArray("url", nil, "")
 	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("mirror-url", "", "")
 	cmd.Flags().String("output", "json", "")
 	_ = cmd.Flags().Set("server-url", serverURL)
 	_ = cmd.Flags().Set("workspace-id", "ws-1")
@@ -102,6 +103,76 @@ func TestRunRepoAddUpdatesDescriptionForExistingRepo(t *testing.T) {
 	}
 	if len(patched) != 1 || patched[0].Description != "new" {
 		t.Fatalf("patched repos = %+v, want updated description", patched)
+	}
+}
+
+func TestRunRepoAddSetsMirrorURLForNewRepo(t *testing.T) {
+	initialRepos := []workspaceRepo{}
+	var patched []workspaceRepo
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/ws-1":
+			json.NewEncoder(w).Encode(repoWorkspaceResponse{ID: "ws-1", Repos: initialRepos})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/workspaces/ws-1":
+			var body struct {
+				Repos []workspaceRepo `json:"repos"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch body: %v", err)
+			}
+			patched = body.Repos
+			json.NewEncoder(w).Encode(repoWorkspaceResponse{ID: "ws-1", Repos: body.Repos})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := newRepoRegistryTestCmd(srv.URL)
+	if err := cmd.Flags().Set("mirror-url", "https://github.com/org/web.git"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRepoAdd(cmd, []string{"https://git.example.com/web.git"}); err != nil {
+		t.Fatalf("runRepoAdd: %v", err)
+	}
+	if len(patched) != 1 || patched[0].MirrorURL != "https://github.com/org/web.git" {
+		t.Fatalf("patched repos = %+v, want mirror url set", patched)
+	}
+}
+
+func TestRunRepoAddUpdatesMirrorURLForExistingRepo(t *testing.T) {
+	initialRepos := []workspaceRepo{{URL: "https://git.example.com/web.git", MirrorURL: "https://github.com/org/old.git"}}
+	var patched []workspaceRepo
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/ws-1":
+			json.NewEncoder(w).Encode(repoWorkspaceResponse{ID: "ws-1", Repos: initialRepos})
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/workspaces/ws-1":
+			var body struct {
+				Repos []workspaceRepo `json:"repos"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode patch body: %v", err)
+			}
+			patched = body.Repos
+			json.NewEncoder(w).Encode(repoWorkspaceResponse{ID: "ws-1", Repos: body.Repos})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	cmd := newRepoRegistryTestCmd(srv.URL)
+	if err := cmd.Flags().Set("mirror-url", "https://github.com/org/new.git"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runRepoAdd(cmd, []string{"https://git.example.com/web.git"}); err != nil {
+		t.Fatalf("runRepoAdd: %v", err)
+	}
+	if len(patched) != 1 || patched[0].MirrorURL != "https://github.com/org/new.git" {
+		t.Fatalf("patched repos = %+v, want updated mirror url", patched)
 	}
 }
 

@@ -61,6 +61,7 @@ func init() {
 
 	repoAddCmd.Flags().StringArray("url", nil, "Repository URL to add (may be repeated)")
 	repoAddCmd.Flags().String("description", "", "Optional description; only valid when adding one URL")
+	repoAddCmd.Flags().String("mirror-url", "", "GitHub (or other) mirror URL; agent pushes to this repo will also push here")
 	repoAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	repoRemoveCmd.Flags().StringArray("url", nil, "Repository URL to remove (may be repeated)")
@@ -77,6 +78,7 @@ func init() {
 type workspaceRepo struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	MirrorURL   string `json:"mirror_url,omitempty"`
 }
 
 type repoWorkspaceResponse struct {
@@ -189,8 +191,10 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	}
 	description, _ := cmd.Flags().GetString("description")
 	descriptionChanged := cmd.Flags().Changed("description")
-	if descriptionChanged && len(urls) > 1 {
-		return fmt.Errorf("--description can only be used when adding one repository URL")
+	mirrorURL, _ := cmd.Flags().GetString("mirror-url")
+	mirrorURLChanged := cmd.Flags().Changed("mirror-url")
+	if (descriptionChanged || mirrorURLChanged) && len(urls) > 1 {
+		return fmt.Errorf("--description and --mirror-url can only be used when adding one repository URL")
 	}
 
 	client, workspaceID, err := repoCommandClient(cmd)
@@ -216,8 +220,16 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 	repos := append([]workspaceRepo{}, ws.Repos...)
 	for _, u := range urls {
 		if idx, ok := indexByURL[u]; ok {
+			changed := false
 			if descriptionChanged && repos[idx].Description != description {
 				repos[idx].Description = description
+				changed = true
+			}
+			if mirrorURLChanged && repos[idx].MirrorURL != mirrorURL {
+				repos[idx].MirrorURL = mirrorURL
+				changed = true
+			}
+			if changed {
 				updated = append(updated, repos[idx])
 			}
 			continue
@@ -225,6 +237,9 @@ func runRepoAdd(cmd *cobra.Command, args []string) error {
 		repo := workspaceRepo{URL: u}
 		if descriptionChanged {
 			repo.Description = description
+		}
+		if mirrorURLChanged {
+			repo.MirrorURL = mirrorURL
 		}
 		indexByURL[u] = len(repos)
 		repos = append(repos, repo)

@@ -213,19 +213,20 @@ var (
 
 // workspaceState tracks registered runtimes for a single workspace.
 //
-// allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
-// every refresh from the server. taskRepoURLs covers repos that the server
-// surfaced through a per-task claim (project github_repo resources today,
-// possibly other typed sources later) — those don't show up in
-// GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
-// taskRepoRefs tracks optional checkout refs for the specific task that
-// surfaced each project repo so two projects using the same URL don't leak refs
-// into each other.
+// allowedRepoURLs covers the workspace-level repo bindings, keyed by repo URL
+// so its RepoData (including any registered mirror push URL) can be looked
+// up later; it gets rebuilt on every refresh from the server. taskRepoURLs
+// covers repos that the server surfaced through a per-task claim (project
+// github_repo resources today, possibly other typed sources later) — those
+// don't show up in GetWorkspaceRepos, so they would be wiped on refresh if we
+// shared one map. taskRepoRefs tracks optional checkout refs for the specific
+// task that surfaced each project repo so two projects using the same URL
+// don't leak refs into each other.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
-	allowedRepoURLs map[string]struct{}
+	allowedRepoURLs map[string]RepoData
 	taskRepoURLs    map[string]struct{}
 	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
 	settings        json.RawMessage              // workspace settings (JSONB)
@@ -1879,13 +1880,13 @@ func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion str
 	}
 }
 
-func repoAllowlist(repos []RepoData) map[string]struct{} {
-	allowed := make(map[string]struct{}, len(repos))
+func repoAllowlist(repos []RepoData) map[string]RepoData {
+	allowed := make(map[string]RepoData, len(repos))
 	for _, repo := range repos {
 		if repo.URL == "" {
 			continue
 		}
-		allowed[repo.URL] = struct{}{}
+		allowed[repo.URL] = repo
 	}
 	return allowed
 }
@@ -1912,6 +1913,19 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 		return true
 	}
 	return false
+}
+
+// repoMirrorURL returns the registered mirror push URL for repoURL in
+// workspaceID, or "" if the repo has none (or isn't a workspace-level
+// repo — task-scoped project repos never carry a mirror).
+func (d *Daemon) repoMirrorURL(workspaceID, repoURL string) string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return ""
+	}
+	return ws.allowedRepoURLs[repoURL].MirrorURL
 }
 
 // repoBarePathIsLive reports whether some watched workspace still claims the
