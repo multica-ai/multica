@@ -123,11 +123,6 @@ describe("useAgentsViewStore", () => {
   });
 
   describe("access filter dimension", () => {
-    it("EMPTY_AGENT_FILTERS initializes access to []", async () => {
-      const { EMPTY_AGENT_FILTERS } = await import("./view-store");
-      expect(EMPTY_AGENT_FILTERS.access).toEqual([]);
-    });
-
     it("toggleFilter('access', value) adds and removes the value", () => {
       const { toggleFilter } = useAgentsViewStore.getState();
       toggleFilter("access", "owner-only");

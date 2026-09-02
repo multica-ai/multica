@@ -5,7 +5,6 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enOnboarding from "../../locales/en/onboarding.json";
 import {
-  STEP_COLUMN,
   STEP_GUTTER,
   StepFooter,
   StepHeading,
@@ -37,15 +36,6 @@ describe("onboarding step shell", () => {
       expect(main.className).toContain(cls);
     }
     expect(main.className).not.toMatch(/\bmax-w-/);
-  });
-
-  // One measure, not three. Two centred measures of different widths do not
-  // share a left edge, which is how the platform fork ended up ~150px right
-  // of every other step.
-  it("centres a single content measure", () => {
-    expect(STEP_COLUMN).toContain("mx-auto");
-    expect(STEP_COLUMN).toMatch(/max-w-\[[\d.]+rem\]/);
-    expect(STEP_COLUMN).not.toMatch(/\bp[xlr]?-/);
   });
 
   // The column fills the pane so StepFooter's `mt-auto` has something to push

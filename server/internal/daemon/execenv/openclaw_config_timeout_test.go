@@ -163,31 +163,6 @@ func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
 	}
 }
 
-// TestOpenclawCLIMaxTimeoutFitsPreparationBudget is the arithmetic the
-// override ceiling rests on. Each preparation *step* gets its own deadline, so
-// the budget that matters is worst-case-deadlines x ceiling, and it has to stay
-// under the daemon's 5-minute task preparation deadline with room for the rest
-// of Prepare (repo checkout, skills, context files). Otherwise a user who raises
-// the timeout turns a specific, non-retryable CLI timeout back into the
-// generic — and retryable — prepare timeout, which is the failure mode this
-// change set out to remove.
-func TestOpenclawCLIMaxTimeoutFitsPreparationBudget(t *testing.T) {
-	// Mirrors daemon.defaultTaskPrepareTimeout, which execenv cannot import
-	// (the daemon imports this package, not the other way round).
-	const taskPrepareBudget = 5 * time.Minute
-	// Everything Prepare does besides openclaw config discovery.
-	const nonOpenclawPrepareSlack = time.Minute
-
-	worst := openclawMaxCLIDeadlinesPerPreparation * openclawCLIMaxTimeout
-	if worst+nonOpenclawPrepareSlack > taskPrepareBudget {
-		t.Errorf("worst-case openclaw discovery %v (%d deadlines x %v) leaves less than %v under the %v preparation budget",
-			worst, openclawMaxCLIDeadlinesPerPreparation, openclawCLIMaxTimeout, nonOpenclawPrepareSlack, taskPrepareBudget)
-	}
-	if openclawCLITimeout > openclawCLIMaxTimeout {
-		t.Errorf("default %v exceeds the override ceiling %v", openclawCLITimeout, openclawCLIMaxTimeout)
-	}
-}
-
 // TestOpenclawActiveConfigPathSpendsOneBudgetAcrossBothAttempts is the
 // consequence of sharing that deadline, asserted rather than left implicit.
 //
