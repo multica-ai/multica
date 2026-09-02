@@ -273,6 +273,10 @@ type Environment struct {
 	// ({RootDir}/workdir/); when the task is bound to a local_directory
 	// project_resource, it is the user's path instead. See LocalDirectory.
 	WorkDir string
+	// PreparedSkillNames contains the allocated invocation name for each input
+	// task skill, in order. It crosses the preparation-helper JSON boundary so
+	// the daemon can render names that match the files the provider discovers.
+	PreparedSkillNames []string
 	// LocalDirectory is true when WorkDir points at a user-supplied path
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
@@ -603,9 +607,12 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+	preparedSkillNames, err := writeContextFilesWithSkillNames(workDir, params.Provider, params.Task, manifest)
+	if err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
+	env.PreparedSkillNames = preparedSkillNames
+	params.Task = ApplyPreparedSkillNames(params.Task, preparedSkillNames)
 	if err := prepareOmpMcpConfig(workDir, params.Provider, params.McpConfig, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: prepare omp mcp config: %w", err)
 	}
@@ -898,9 +905,12 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// legacy local_directory Reuse fallback — skip the persist in that
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
+	preparedSkillNames, err := writeContextFilesWithSkillNames(params.WorkDir, params.Provider, params.Task, manifest)
+	if err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
+	env.PreparedSkillNames = preparedSkillNames
+	params.Task = ApplyPreparedSkillNames(params.Task, preparedSkillNames)
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
 		logger.Warn("execenv: refresh omp mcp config failed; forcing fresh prepare", "error", err)
 		return nil

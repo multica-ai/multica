@@ -147,14 +147,14 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // state for local_directory tasks. Callers that don't need cleanup —
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
-func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+func writeContextFilesWithSkillNames(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) ([]string, error) {
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
-		return err
+		return nil, err
 	}
 
 	contextDir := filepath.Join(workDir, ".agent_context")
 	if err := recordMkdirAll(contextDir, 0o755, manifest); err != nil {
-		return fmt.Errorf("create .agent_context dir: %w", err)
+		return nil, fmt.Errorf("create .agent_context dir: %w", err)
 	}
 
 	content := renderIssueContext(provider, ctx)
@@ -169,10 +169,11 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		// would, so the agent runs fine without the sidecar copy.
 		// Anything else is a real failure.
 		if !errors.Is(err, errPathPreExists) {
-			return fmt.Errorf("write issue_context.md: %w", err)
+			return nil, fmt.Errorf("write issue_context.md: %w", err)
 		}
 	}
 
+	preparedSkillNames := resolveSkillSlugs(ctx.AgentSkills)
 	if len(ctx.AgentSkills) > 0 {
 		// Hermes materializes skills into its per-task HERMES_HOME/skills during
 		// Prepare (Hermes has no workspace-relative discovery), so it needs no
@@ -181,12 +182,13 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 		if provider != "hermes" {
 			skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
 			if err != nil {
-				return fmt.Errorf("resolve skills dir: %w", err)
+				return nil, fmt.Errorf("resolve skills dir: %w", err)
 			}
 			// Codex skills are written to codex-home in Prepare; skip here.
 			if provider != "codex" {
-				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
-					return fmt.Errorf("write skill files: %w", err)
+				preparedSkillNames, err = writeSkillFilesWithNames(skillsDir, ctx.AgentSkills, manifest)
+				if err != nil {
+					return nil, fmt.Errorf("write skill files: %w", err)
 				}
 			}
 		}
@@ -198,10 +200,10 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	// meta skill content always lists what the agent should expect).
 	if err := writeProjectResources(workDir, ctx, manifest); err != nil {
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
-		return fmt.Errorf("write project resources: %w", err)
+		return preparedSkillNames, fmt.Errorf("write project resources: %w", err)
 	}
 
-	return nil
+	return preparedSkillNames, nil
 }
 
 func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
@@ -946,8 +948,15 @@ func sanitizeSkillName(name string) string {
 // skill entirely (which would silently drop a Multica skill the agent
 // expects to see).
 func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) error {
+	_, err := writeSkillFilesWithNames(skillsDir, skills, manifest)
+	return err
+}
+
+// writeSkillFilesWithNames returns the allocated invocation names in input
+// order, including suffixes needed to preserve user-owned skill directories.
+func writeSkillFilesWithNames(skillsDir string, skills []SkillContextForEnv, manifest *sidecarManifest) ([]string, error) {
 	if err := recordMkdirAll(skillsDir, 0o755, manifest); err != nil {
-		return fmt.Errorf("create skills dir: %w", err)
+		return nil, fmt.Errorf("create skills dir: %w", err)
 	}
 
 	// resolveSkillSlugs deduplicates within the batch first, so two skills whose
@@ -957,14 +966,15 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 	// allocateCollisionFreeSkillDir still runs on top, for collisions against
 	// directories we did not write (user-installed skills).
 	batchSlugs := resolveSkillSlugs(skills)
+	preparedSkillNames := make([]string, len(skills))
 
 	for i, skill := range skills {
 		slug, dir, err := allocateCollisionFreeSkillDir(skillsDir, batchSlugs[i])
 		if err != nil {
-			return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
+			return nil, fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 		}
 		if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
-			return err
+			return nil, err
 		}
 
 		// ensureSkillFrontmatter synthesises a `name:` value when the
@@ -974,7 +984,7 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 		// stay consistent.
 		body := ensureSkillFrontmatter(skill.Content, slug, skill.Description)
 		if err := recordWriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644, manifest); err != nil {
-			return err
+			return nil, err
 		}
 
 		// Write supporting files. The skill directory is collision-
@@ -996,15 +1006,16 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 			}
 			fpath := filepath.Join(dir, f.Path)
 			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
-				return err
+				return nil, err
 			}
 			if err := recordWriteFile(fpath, []byte(f.Content), 0o644, manifest); err != nil {
-				return err
+				return nil, err
 			}
 		}
+		preparedSkillNames[i] = slug
 	}
 
-	return nil
+	return preparedSkillNames, nil
 }
 
 // renderIssueContext builds the markdown content for issue_context.md.
