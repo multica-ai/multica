@@ -263,7 +263,7 @@ func TestInboundImageBecomesAnAttachmentOnTheChatMessage(t *testing.T) {
 		MediaTimeout: 20 * time.Second,
 		Logger:       testLogger(),
 	})
-	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver))
+	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver, nil))
 
 	msgID := fmt.Sprintf("MSGID-BIND-%d", time.Now().UnixNano())
 	if err := router.Handle(ctx, wecomImageCallback(t, fixture.botID, fixture.senderID, msgID, srv.URL)); err != nil {
@@ -405,7 +405,7 @@ func TestInboundImageMessageHoldsTheAgentRunUntilMediaLands(t *testing.T) {
 		MediaTimeout: 25 * time.Second,
 		Logger:       testLogger(),
 	})
-	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver))
+	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver, nil))
 
 	msgID := fmt.Sprintf("MSGID-HOLD-%d", time.Now().UnixNano())
 	if err := router.Handle(ctx, wecomImageCallback(t, fixture.botID, fixture.senderID, msgID, srv.URL)); err != nil {
@@ -521,7 +521,7 @@ func runMixedIssueThroughTheRouter(t *testing.T, botDisplayName, chatType, chatI
 		MediaTimeout: 20 * time.Second,
 		Logger:       testLogger(),
 	})
-	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver))
+	router.Register(TypeWecom, NewResolverSet(NewStore(queries), session, nil, resolver, nil))
 
 	if chatID == "" {
 		chatID = fixture.senderID
