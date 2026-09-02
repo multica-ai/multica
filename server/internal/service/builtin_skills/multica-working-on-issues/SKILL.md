@@ -194,7 +194,8 @@ multica issue list --sort property:Impact --direction desc --output json
   and date (`YYYY-MM-DD`). The reserved value `__none__` matches
   issues where the property is unset (works for every type; it is not
   index-backed, so use it for targeted audits rather than as a default
-  listing filter).
+  listing filter). Only `=` is supported today; the `>=`, `<=` and `!=`
+  spellings are reserved for comparison filters and are rejected.
 - `--sort property:<name-or-id>` orders select properties by option order —
   an ordinal scale (Low < Medium < High) sorts by meaning — and number/date/
   text/url by value; issues without the property sort last either way.

@@ -203,6 +203,12 @@ func TestRunIssueListSendsPropertyFilter(t *testing.T) {
 			flags: []string{"Spec= https://example.com/spec "},
 			want:  map[string][]string{testSpecDefID: {"https://example.com/spec"}},
 		},
+		{
+			// The store cap is 2000 runes, not bytes.
+			name:  "text value at the store length cap is sent",
+			flags: []string{"Notes=" + strings.Repeat("é", 2000)},
+			want:  map[string][]string{testNotesDefID: {strings.Repeat("é", 2000)}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -234,6 +240,12 @@ func TestRunIssueListPropertyFilterErrors(t *testing.T) {
 		{"number value must be finite", []string{"Score=NaN"}, "not a finite number"},
 		{"date value must be YYYY-MM-DD", []string{"Ship Date=28/08/2026"}, "YYYY-MM-DD"},
 		{"unknown property type is rejected", []string{"Sentiment=happy"}, "does not know how to filter"},
+		{"url must have a scheme", []string{"Spec=example.com/foo"}, "http(s) URL"},
+		{"url must be http or https", []string{"Spec=ftp://example.com/x"}, "http(s) URL"},
+		{"url must have a host", []string{"Spec=http://"}, "http(s) URL"},
+		{"url over the store length cap", []string{"Spec=https://example.com/" + strings.Repeat("a", 2048)}, "2048 characters or fewer"},
+		{"text over the store length cap", []string{"Notes=" + strings.Repeat("a", 2001)}, "2000 characters or fewer"},
+		{"comparison operators are reserved", []string{"Impact>=Medium"}, "comparison operators"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -821,6 +823,13 @@ func runIssuePropertyUnset(cmd *cobra.Command, args []string) error {
 // filtered by its UUID.
 const propertyNoValueSentinel = "__none__"
 
+// Store-side caps from validatePropertyValue in internal/handler/property.go.
+// A filter value past them could never match anything.
+const (
+	maxPropertyTextValueLen = 2000 // runes
+	maxPropertyURLValueLen  = 2048 // bytes
+)
+
 // issueSortablePropertyTypes are the property types the server gives a
 // meaningful ORDER BY (see propertySortExpr). This is an allowlist on purpose:
 // a type the CLI does not know — multi_select, checkbox, actor kinds, or a
@@ -840,6 +849,11 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 		name, rawValue, found := strings.Cut(pair, "=")
 		if !found || strings.TrimSpace(name) == "" {
 			return "", fmt.Errorf(`--property %q must be in "Name=Value" form`, pair)
+		}
+		// Reserved so scripts never come to depend on "Impact>" resolving as a
+		// property name once >=, <=, != mean comparison filters.
+		if n := strings.TrimSpace(name); strings.HasSuffix(n, "<") || strings.HasSuffix(n, ">") || strings.HasSuffix(n, "!") {
+			return "", fmt.Errorf(`--property %q: comparison operators are not supported yet; only "Name=Value" is accepted`, pair)
 		}
 		if strings.TrimSpace(rawValue) == "" {
 			return "", fmt.Errorf("--property %s: value cannot be empty (use %s to match issues where the property is unset)", name, propertyNoValueSentinel)
@@ -880,9 +894,10 @@ func buildPropertiesFilterQueryParam(ctx context.Context, client *cli.APIClient,
 //
 // Scalars match by exact containment, so whatever we send has to be spelled
 // the way the value was stored. validatePropertyValue keeps text as written,
-// trims url, and holds date to YYYY-MM-DD; the branches below follow it.
-// A value that could never match is rejected here rather than sent, because
-// an empty result reads like a real answer.
+// trims url and only stores http(s), holds date to YYYY-MM-DD, and caps text
+// and url length; the branches below follow it. A value that could never
+// match is rejected here rather than sent, because an empty result reads
+// like a real answer.
 func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, property propertyDTO, raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == propertyNoValueSentinel {
@@ -916,8 +931,17 @@ func resolvePropertyFilterValue(ctx context.Context, client *cli.APIClient, prop
 		}
 		return trimmed, nil
 	case "url":
+		if len(trimmed) > maxPropertyURLValueLen {
+			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyURLValueLen)
+		}
+		if u, err := url.Parse(trimmed); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "", fmt.Errorf("--property %s: value %q is not an http(s) URL", property.Name, trimmed)
+		}
 		return trimmed, nil
 	case "text":
+		if utf8.RuneCountInString(raw) > maxPropertyTextValueLen {
+			return "", fmt.Errorf("--property %s: value must be %d characters or fewer", property.Name, maxPropertyTextValueLen)
+		}
 		// Text is stored exactly as written, so trimming here would miss a
 		// value that genuinely has spaces around it.
 		return raw, nil
