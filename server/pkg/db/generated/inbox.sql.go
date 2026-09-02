@@ -316,6 +316,34 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 	return i, err
 }
 
+const getChannelInboxDelivery = `-- name: GetChannelInboxDelivery :one
+SELECT inbox_item_id, workspace_id, channel_type, status, target_type, provider_message_id, idempotency_key, error_code, finished_at FROM channel_inbox_delivery
+WHERE inbox_item_id = $1 AND workspace_id = $2 AND channel_type = $3
+`
+
+type GetChannelInboxDeliveryParams struct {
+	InboxItemID pgtype.UUID `json:"inbox_item_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ChannelType string      `json:"channel_type"`
+}
+
+func (q *Queries) GetChannelInboxDelivery(ctx context.Context, arg GetChannelInboxDeliveryParams) (ChannelInboxDelivery, error) {
+	row := q.db.QueryRow(ctx, getChannelInboxDelivery, arg.InboxItemID, arg.WorkspaceID, arg.ChannelType)
+	var i ChannelInboxDelivery
+	err := row.Scan(
+		&i.InboxItemID,
+		&i.WorkspaceID,
+		&i.ChannelType,
+		&i.Status,
+		&i.TargetType,
+		&i.ProviderMessageID,
+		&i.IdempotencyKey,
+		&i.ErrorCode,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getInboxItem = `-- name: GetInboxItem :one
 SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details FROM inbox_item
 WHERE id = $1
@@ -728,6 +756,61 @@ func (q *Queries) UnarchiveInboxItem(ctx context.Context, id pgtype.UUID) (Inbox
 		&i.ActorType,
 		&i.ActorID,
 		&i.Details,
+	)
+	return i, err
+}
+
+const upsertChannelInboxDelivery = `-- name: UpsertChannelInboxDelivery :one
+INSERT INTO channel_inbox_delivery (
+    inbox_item_id, workspace_id, channel_type, status, target_type,
+    provider_message_id, idempotency_key, error_code, finished_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (inbox_item_id, channel_type) DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    status = EXCLUDED.status,
+    target_type = EXCLUDED.target_type,
+    provider_message_id = EXCLUDED.provider_message_id,
+    idempotency_key = EXCLUDED.idempotency_key,
+    error_code = EXCLUDED.error_code,
+    finished_at = EXCLUDED.finished_at
+RETURNING inbox_item_id, workspace_id, channel_type, status, target_type, provider_message_id, idempotency_key, error_code, finished_at
+`
+
+type UpsertChannelInboxDeliveryParams struct {
+	InboxItemID       pgtype.UUID        `json:"inbox_item_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChannelType       string             `json:"channel_type"`
+	Status            string             `json:"status"`
+	TargetType        string             `json:"target_type"`
+	ProviderMessageID pgtype.Text        `json:"provider_message_id"`
+	IdempotencyKey    string             `json:"idempotency_key"`
+	ErrorCode         pgtype.Text        `json:"error_code"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+}
+
+func (q *Queries) UpsertChannelInboxDelivery(ctx context.Context, arg UpsertChannelInboxDeliveryParams) (ChannelInboxDelivery, error) {
+	row := q.db.QueryRow(ctx, upsertChannelInboxDelivery,
+		arg.InboxItemID,
+		arg.WorkspaceID,
+		arg.ChannelType,
+		arg.Status,
+		arg.TargetType,
+		arg.ProviderMessageID,
+		arg.IdempotencyKey,
+		arg.ErrorCode,
+		arg.FinishedAt,
+	)
+	var i ChannelInboxDelivery
+	err := row.Scan(
+		&i.InboxItemID,
+		&i.WorkspaceID,
+		&i.ChannelType,
+		&i.Status,
+		&i.TargetType,
+		&i.ProviderMessageID,
+		&i.IdempotencyKey,
+		&i.ErrorCode,
+		&i.FinishedAt,
 	)
 	return i, err
 }

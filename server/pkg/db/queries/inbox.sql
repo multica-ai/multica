@@ -89,6 +89,25 @@ WHERE id = $1;
 SELECT * FROM inbox_item
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: GetChannelInboxDelivery :one
+SELECT * FROM channel_inbox_delivery
+WHERE inbox_item_id = $1 AND workspace_id = $2 AND channel_type = $3;
+
+-- name: UpsertChannelInboxDelivery :one
+INSERT INTO channel_inbox_delivery (
+    inbox_item_id, workspace_id, channel_type, status, target_type,
+    provider_message_id, idempotency_key, error_code, finished_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (inbox_item_id, channel_type) DO UPDATE SET
+    workspace_id = EXCLUDED.workspace_id,
+    status = EXCLUDED.status,
+    target_type = EXCLUDED.target_type,
+    provider_message_id = EXCLUDED.provider_message_id,
+    idempotency_key = EXCLUDED.idempotency_key,
+    error_code = EXCLUDED.error_code,
+    finished_at = EXCLUDED.finished_at
+RETURNING *;
+
 -- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,

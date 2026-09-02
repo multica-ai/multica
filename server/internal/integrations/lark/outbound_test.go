@@ -34,6 +34,12 @@ type fakePatcherQueries struct {
 	created             []CreateOutboundCardMessageParams
 	createReturn        OutboundCardMessage
 	statusUpdates       []UpdateOutboundCardStatusParams
+	inboxBinding        db.ChannelUserBinding
+	inboxBindingErr     error
+	inboxItem           db.InboxItem
+	inboxItemErr        error
+	deliveryReceipt     db.ChannelInboxDelivery
+	deliveryReceiptSet  bool
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -83,6 +89,37 @@ func (f *fakePatcherQueries) UpdateLarkOutboundCardStatus(ctx context.Context, a
 	defer f.mu.Unlock()
 	f.statusUpdates = append(f.statusUpdates, arg)
 	return nil
+}
+func (f *fakePatcherQueries) FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error) {
+	return f.inboxBinding, f.inboxBindingErr
+}
+func (f *fakePatcherQueries) GetInboxItemInWorkspace(ctx context.Context, arg db.GetInboxItemInWorkspaceParams) (db.InboxItem, error) {
+	return f.inboxItem, f.inboxItemErr
+}
+func (f *fakePatcherQueries) GetChannelInboxDelivery(ctx context.Context, arg db.GetChannelInboxDeliveryParams) (db.ChannelInboxDelivery, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.deliveryReceiptSet {
+		return db.ChannelInboxDelivery{}, pgx.ErrNoRows
+	}
+	return f.deliveryReceipt, nil
+}
+func (f *fakePatcherQueries) UpsertChannelInboxDelivery(ctx context.Context, arg db.UpsertChannelInboxDeliveryParams) (db.ChannelInboxDelivery, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deliveryReceipt = db.ChannelInboxDelivery{
+		InboxItemID:       arg.InboxItemID,
+		WorkspaceID:       arg.WorkspaceID,
+		ChannelType:       arg.ChannelType,
+		Status:            arg.Status,
+		TargetType:        arg.TargetType,
+		ProviderMessageID: arg.ProviderMessageID,
+		IdempotencyKey:    arg.IdempotencyKey,
+		ErrorCode:         arg.ErrorCode,
+		FinishedAt:        arg.FinishedAt,
+	}
+	f.deliveryReceiptSet = true
+	return f.deliveryReceipt, nil
 }
 
 type fakeCredentials struct{ secret string }
@@ -212,6 +249,22 @@ func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient
 	return p, q, api
 }
 
+func inboxNewEvent(item db.InboxItem) events.Event {
+	return events.Event{
+		Type:        protocol.EventInboxNew,
+		WorkspaceID: uuidString(item.WorkspaceID),
+		Payload: map[string]any{"item": map[string]any{
+			"id":             uuidString(item.ID),
+			"workspace_id":   uuidString(item.WorkspaceID),
+			"recipient_type": item.RecipientType,
+			"recipient_id":   uuidString(item.RecipientID),
+			"type":           item.Type,
+			"title":          item.Title,
+			"body":           item.Body.String,
+		}},
+	}
+}
+
 // TestPatcherSendsPlainTextOnChatDone pins the new behaviour Bohan asked
 // for: when the agent finishes replying, the Patcher posts the reply as
 // a plain Lark IM text message (msg_type=text), not nested inside an
@@ -242,6 +295,101 @@ func TestPatcherSendsSealedChannelTaskReply(t *testing.T) {
 	defer api.mu.Unlock()
 	if len(api.textSent) != 1 || api.textSent[0].Text != "channel answer" {
 		t.Fatalf("sealed channel reply must reach Lark; textSent=%+v", api.textSent)
+	}
+}
+
+// A member-bound Feishu bot is also the outbound edge for Multica Inbox
+// notifications. Autopilot reports arrive here as subscriber notifications;
+// without this path a completed run is visible in Multica but never reaches
+// the member's direct room.
+func TestPatcherDeliversInboxNotificationToBoundMemberOnce(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.inboxBinding = db.ChannelUserBinding{
+		WorkspaceID:    uuidFromString(t, "22222222-2222-2222-2222-222222222222"),
+		MulticaUserID:  uuidFromString(t, "33333333-3333-3333-3333-333333333333"),
+		InstallationID: q.installation.ID,
+		ChannelType:    channelTypeFeishu,
+		ChannelUserID:  "ou_bound_member",
+	}
+	q.inboxItem = db.InboxItem{
+		ID:            uuidFromString(t, "44444444-4444-4444-4444-444444444444"),
+		WorkspaceID:   q.inboxBinding.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   q.inboxBinding.MulticaUserID,
+		Type:          "new_comment",
+		Title:         "Daily report",
+		Body:          pgtype.Text{String: "今天一切正常，无需操作。", Valid: true},
+		Details:       []byte(`{}`),
+	}
+	e := inboxNewEvent(q.inboxItem)
+
+	p.handleInboxNew(e)
+	p.handleInboxNew(e) // replay must not create a second provider message
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("direct-room sends = %d, want 1", len(api.textSent))
+	}
+	sent := api.textSent[0]
+	if sent.OpenID != OpenID("ou_bound_member") {
+		t.Fatalf("open_id = %q, want bound member target", sent.OpenID)
+	}
+	if sent.Text != "今天一切正常，无需操作。" {
+		t.Fatalf("text = %q", sent.Text)
+	}
+	if sent.IdempotencyKey != uuidString(q.inboxItem.ID) {
+		t.Fatalf("idempotency key = %q, want inbox item id", sent.IdempotencyKey)
+	}
+	if q.deliveryReceipt.ProviderMessageID.String != "lark_text_msg_1" ||
+		q.deliveryReceipt.Status != "delivered" {
+		t.Fatalf("receipt = %+v", q.deliveryReceipt)
+	}
+}
+
+func TestPatcherRetriesFailedInboxDeliveryWithoutRepeatingSuccess(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.inboxBinding = db.ChannelUserBinding{
+		WorkspaceID:    uuidFromString(t, "55555555-5555-5555-5555-555555555555"),
+		MulticaUserID:  uuidFromString(t, "66666666-6666-6666-6666-666666666666"),
+		InstallationID: q.installation.ID,
+		ChannelType:    channelTypeFeishu,
+		ChannelUserID:  "ou_retry_member",
+	}
+	q.inboxItem = db.InboxItem{
+		ID:            uuidFromString(t, "77777777-7777-7777-7777-777777777777"),
+		WorkspaceID:   q.inboxBinding.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   q.inboxBinding.MulticaUserID,
+		Type:          "new_comment",
+		Title:         "Daily report",
+		Body:          pgtype.Text{String: "重试后仅投递一次。", Valid: true},
+		Details:       []byte(`{}`),
+	}
+	e := inboxNewEvent(q.inboxItem)
+
+	api.textSendErr = &APIError{Op: "send text message", Code: 230001, Msg: "temporary"}
+	p.handleInboxNew(e)
+	if q.deliveryReceipt.Status != "failed" || q.deliveryReceipt.ErrorCode.String != "lark_230001" {
+		t.Fatalf("failed receipt = %+v", q.deliveryReceipt)
+	}
+
+	api.mu.Lock()
+	api.textSendErr = nil
+	api.mu.Unlock()
+	p.handleInboxNew(e)
+	p.handleInboxNew(e) // delivered receipt prevents another attempt
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("send attempts = %d, want failed attempt plus one retry", len(api.textSent))
+	}
+	if api.textSent[0].IdempotencyKey != api.textSent[1].IdempotencyKey {
+		t.Fatalf("retry keys differ: %q != %q", api.textSent[0].IdempotencyKey, api.textSent[1].IdempotencyKey)
+	}
+	if q.deliveryReceipt.Status != "delivered" || q.deliveryReceipt.ProviderMessageID.String != "lark_text_msg_1" {
+		t.Fatalf("delivered receipt = %+v", q.deliveryReceipt)
 	}
 }
 
