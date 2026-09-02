@@ -168,23 +168,36 @@ ORDER BY created_at ASC;
 SELECT * FROM autopilot_trigger
 WHERE id = $1;
 
+-- name: GetAutopilotTriggerForAutopilot :one
+-- Trigger lookup BOUND to the autopilot it must belong to. Since MUL-6951 the
+-- trigger row decides which human a run acts as, so an unbound `WHERE id = $1`
+-- would let a trigger id from another autopilot (or tenant) select the principal.
+-- Callers resolving an authorization principal must use this, not
+-- GetAutopilotTrigger.
+SELECT * FROM autopilot_trigger
+WHERE id = $1 AND autopilot_id = $2;
+
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
-    published_by_type, published_by_id
+    published_by_type, published_by_id,
+    created_by_type, created_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
-    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
+    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
 -- Re-stamp a single trigger's responsible publisher after a substantive edit of
 -- THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
--- become accountable to this member (MUL-4302 trigger_owner transfer).
+-- become ACCOUNTABLE to this member (MUL-4302 trigger_owner transfer). It does
+-- NOT touch created_by: since MUL-6951 the run acts as the trigger's creator, and
+-- an edit must not move that (MUL-6951, Bohan's ruling).
 UPDATE autopilot_trigger
 SET published_by_type = $2, published_by_id = $3, updated_at = now()
 WHERE id = $1;

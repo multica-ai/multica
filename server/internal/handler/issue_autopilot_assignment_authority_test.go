@@ -403,6 +403,32 @@ func TestUpdateIssue_AutopilotRunAssignsPrivateAgent(t *testing.T) {
 		}
 	})
 
+	// MUL-6951 (Elon review). A run represents its human only while it is live.
+	// Task-token revocation at the terminal transition is the primary guard, but it
+	// is best-effort and non-fatal on failure with a 24h expiry behind it, so a
+	// failed revocation would otherwise leave a finished run spending a member's
+	// invoke rights. Every terminal status must be refused.
+	for _, status := range []string{"completed", "failed", "cancelled"} {
+		t.Run("run already "+status, func(t *testing.T) {
+			workerID, ownerID, _ := privateAgentTestFixture(t)
+			fx := newRunOnlyAutopilotFixture(t, workerID, ownerID)
+			issueID := createUnassignedIssueAsRun(t, fx.LeaderAgentID, fx.LeaderTaskID)
+
+			// The originator is intact and would otherwise admit — only the task
+			// reaching a terminal state withdraws it.
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = $1 WHERE id = $2`, status, fx.LeaderTaskID)
+
+			agentAssigns(t, fx.LeaderAgentID, fx.LeaderTaskID, issueID, workerID).Want(http.StatusForbidden)
+
+			if got := assigneeOf(t, issueID); got != "" {
+				t.Fatalf("a %s run assigned the issue to %q", status, got)
+			}
+			if total, _ := tasksFor(t, issueID, workerID); total != 0 {
+				t.Fatalf("a %s run enqueued %d tasks", status, total)
+			}
+		})
+	}
+
 	t.Run("plain member is still refused", func(t *testing.T) {
 		workerID, _, plainMemberID := privateAgentTestFixture(t)
 		issueID := seedMemberIssue(t, plainMemberID)

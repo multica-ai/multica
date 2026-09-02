@@ -310,6 +310,8 @@ type AutopilotTrigger struct {
 	PublishedByType pgtype.Text `json:"published_by_type"`
 	// The member/agent currently responsible for this trigger's effective config (creator, then last substantive editor). For a member this is the accountable human of runs the trigger fires (source=trigger_owner). No FK, app-layer integrity. NULL on pre-migration triggers, which degrade to rule_owner (MUL-4302).
 	PublishedByID pgtype.UUID `json:"published_by_id"`
+	CreatedByType pgtype.Text `json:"created_by_type"`
+	CreatedByID   pgtype.UUID `json:"created_by_id"`
 }
 
 type ChannelBindingToken struct {

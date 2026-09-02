@@ -620,19 +620,62 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 // owner_fallback) — the same coarser behavior autopilots had before, so nothing
 // regresses. Never errors: attribution must not fail an enqueue.
 func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
-	if q != nil && triggerID.Valid {
-		// published_by is the member CURRENTLY responsible for this trigger's
-		// effective config: the creator until someone substantively edits it (that
-		// trigger's cron/filter/webhook, or an autopilot-level change that bumps all
-		// its triggers), then the editor. So a run attributes to whoever last shaped
-		// what fires it, not the original creator — and editing another trigger never
-		// moves this one (MUL-4302; Elon must-fix).
-		if trig, err := q.GetAutopilotTrigger(ctx, triggerID); err == nil &&
-			trig.PublishedByType.Valid && trig.PublishedByType.String == "member" && trig.PublishedByID.Valid {
-			return attribution.TriggerOwner(trig.PublishedByID, evidenceKind, evidenceRefID)
-		}
+	if principal := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, autopilotID, workspaceID); principal.Valid {
+		return attribution.TriggerOwner(principal, evidenceKind, evidenceRefID)
 	}
+	// No provable principal: degrade to the rule publisher, which is AUDIT-ONLY.
+	// rule_owner must never become an authorization identity — it is a guess at
+	// "who probably owns this rule", and promoting it would hand a legacy trigger
+	// somebody's invoke rights without that person ever arming anything. The run
+	// then carries no originator and the invoke gate fails closed (MUL-6951).
 	return ruleOwnerAttribution(ctx, q, workspaceID, autopilotID, evidenceKind, evidenceRefID)
+}
+
+// ResolveAutopilotTriggerPrincipal returns the human a schedule/webhook dispatch
+// ACTS AS, or an invalid UUID when none can be proven — in which case every
+// caller must fail closed rather than substitute a different human.
+//
+// This is the single source of that answer (MUL-6951). Admission
+// (autopilotAdmitInvoke), the originator stamped on the task, and every run
+// delegated from it all resolve through here, so one dispatch can never admit as
+// person A and then run with person B's rights — a combination neither of them
+// could produce by hand, and the exact fork Elon's review found.
+//
+// The principal is the trigger's IMMUTABLE created_by, not published_by:
+// published_by transfers to whoever last substantively edits the trigger, so
+// using it would let a collaborator adjusting a cron expression silently hand the
+// automation their own rights (MUL-6951, Bohan's ruling: the run always acts as
+// the trigger's creator).
+//
+// Three conditions, all required, all fail-closed:
+//
+//   - the trigger row is fetched BOUND to this autopilot, so a trigger id
+//     belonging to another autopilot or tenant cannot select the principal;
+//   - created_by names a member — a legacy trigger predating the column (and with
+//     no published_by to backfill from) resolves nobody rather than a guess;
+//   - that member is STILL in the autopilot's workspace, re-checked on every
+//     dispatch, so removing someone actually revokes what their triggers can do.
+func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, triggerID, autopilotID, workspaceID pgtype.UUID) pgtype.UUID {
+	if q == nil || !triggerID.Valid || !autopilotID.Valid || !workspaceID.Valid {
+		return pgtype.UUID{}
+	}
+	trig, err := q.GetAutopilotTriggerForAutopilot(ctx, db.GetAutopilotTriggerForAutopilotParams{
+		ID:          triggerID,
+		AutopilotID: autopilotID,
+	})
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	if !trig.CreatedByType.Valid || trig.CreatedByType.String != "member" || !trig.CreatedByID.Valid {
+		return pgtype.UUID{}
+	}
+	if _, err := q.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      trig.CreatedByID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		return pgtype.UUID{}
+	}
+	return trig.CreatedByID
 }
 
 // ErrAttributionFailClosed signals that a run resolved to no precise accountable

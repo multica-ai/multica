@@ -1497,10 +1497,14 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
 		// Seed the responsible publisher = creator; a later substantive edit re-stamps
-		// it to the editor so runs attribute to whoever last shaped this trigger
-		// (source=trigger_owner, MUL-4302).
+		// it to the editor so runs stay ACCOUNTABLE to whoever last shaped this
+		// trigger (source=trigger_owner, MUL-4302).
 		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 		PublishedByID:   publisherID,
+		// created_by is the AUTHORIZATION principal and is immutable: the run acts
+		// as this member forever, so no edit may move it (MUL-6951).
+		CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		CreatedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1567,6 +1571,10 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			// later substantive edit (source=trigger_owner, MUL-4302).
 			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 			PublishedByID:   publisherID,
+			// Immutable authorization principal — see the schedule path above
+			// (MUL-6951).
+			CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			CreatedByID:   publisherID,
 		})
 		if err != nil {
 			tx.Rollback(ctx)

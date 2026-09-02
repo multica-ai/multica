@@ -208,6 +208,17 @@ func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget
 // (set by the CLI on every request), matching
 // TaskService.resolveOriginatorFromTriggerComment. Returns "" when no human
 // can be attributed — canInvokeAgent then fails closed for member/team targets.
+//
+// A TERMINAL task lends nothing (MUL-6951, Elon review). A run represents its
+// human only while it is live: once the task is completed / failed / cancelled,
+// the work that human authorized is over. Task-token revocation at the terminal
+// transition is the primary guard, but it is best-effort and explicitly non-fatal
+// on failure (TaskService, MUL-2600) with a 24h token expiry behind it, so a
+// revocation that fails would otherwise leave a window in which a finished run
+// keeps spending a member's invoke rights. This check closes that window at the
+// authorization boundary rather than the auth boundary, so a terminal task can
+// still complete ordinary API work (posting its final comment) without being able
+// to start new work as its human.
 func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorID string) string {
 	if actorType == "member" {
 		return actorID
@@ -216,12 +227,28 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			if taskUUID, err := util.ParseUUID(taskIDHeader); err == nil {
 				if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil {
+					if isTerminalTaskStatus(task.Status) {
+						return ""
+					}
 					return uuidToString(task.OriginatorUserID)
 				}
 			}
 		}
 	}
 	return ""
+}
+
+// isTerminalTaskStatus reports whether a task has finished, in any of the three
+// ways it can. Mirrors the agent_task_queue status CHECK constraint; a status the
+// constraint does not know is treated as NOT terminal so an added in-flight state
+// keeps working (an added terminal state would need adding here, which the invoke
+// gate's fail-closed default makes visible rather than silent).
+func isTerminalTaskStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled":
+		return true
+	}
+	return false
 }
 
 // commentSourceTaskID returns the agent's currently-executing task (from the

@@ -1026,8 +1026,8 @@ func TestAutopilotQuotaSchedulePersistsSkippedRun(t *testing.T) {
 	}
 	var triggerID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, timezone)
-		VALUES ($1, 'schedule', true, '0 * * * *', 'UTC') RETURNING id`, autopilot.ID).Scan(&triggerID); err != nil {
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, timezone, created_by_type, created_by_id)
+		VALUES ($1, 'schedule', true, '0 * * * *', 'UTC', 'member', $2) RETURNING id`, autopilot.ID, publisherID).Scan(&triggerID); err != nil {
 		t.Fatalf("create schedule trigger: %v", err)
 	}
 	svc := &AutopilotService{

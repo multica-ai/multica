@@ -128,19 +128,19 @@ func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 	svc := &AutopilotService{Queries: q}
 
 	// Manual dispatch by the agent owner (the clicker) is admitted.
-	if reason, _, skip := svc.shouldSkipDispatch(ctx, ap, util.MustParseUUID(ownerID)); skip {
+	if reason, _, skip := svc.shouldSkipDispatch(ctx, ap, util.MustParseUUID(ownerID), pgtype.UUID{}); skip {
 		t.Fatalf("manual dispatch by the agent owner should be admitted, got skip: %q", reason)
 	}
 
-	// Automation (no human actor) falls back to the creator gate, which denies
-	// the admin-but-non-owner creator on a private agent — and the typed reason
-	// code is decided at that branch, not guessed from text.
-	reason, code, skip := svc.shouldSkipDispatch(ctx, ap, pgtype.UUID{})
+	// Automation (no human actor) resolves the trigger's creator (MUL-6951). With
+	// no trigger id there is no principal at all, so it denies — and the typed
+	// reason code is decided at that branch, not guessed from text.
+	reason, code, skip := svc.shouldSkipDispatch(ctx, ap, pgtype.UUID{}, pgtype.UUID{})
 	if !skip {
-		t.Fatalf("automation dispatch should be blocked by the creator gate")
+		t.Fatalf("automation dispatch with no resolvable principal should be blocked")
 	}
-	if !strings.Contains(strings.ToLower(reason), "creator") {
-		t.Errorf("automation skip reason = %q, want creator-gate phrasing", reason)
+	if !strings.Contains(strings.ToLower(reason), "trigger") {
+		t.Errorf("automation skip reason = %q, want the trigger-principal phrasing", reason)
 	}
 	if code != dispatch.ReasonInvocationNotAllowed {
 		t.Errorf("skip reason_code = %q, want invocation_not_allowed", code)

@@ -317,9 +317,11 @@ func TestClassifyDirect_AgentCreateInheritsOriginAsDelegation(t *testing.T) {
 // valid-originator direction. finalizeAttribution centralizes this; the test
 // guards against a future Classify path forgetting to route through it.
 //
-// Since MUL-6951 trigger_owner / rule_owner are NOT in that divergent set — an
-// armed autopilot carries its human's authorization — so they are excluded from
-// the allow-list below and the check now proves they populate the originator.
+// Since MUL-6951 trigger_owner is NOT in that divergent set — an armed autopilot
+// carries its trigger creator's authorization — so it is excluded from the
+// allow-list below and the check proves it populates the originator. rule_owner
+// stays divergent on purpose: it is a guess at who owns a rule, and must never
+// become an authorization identity (Elon review).
 func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 	results := []Result{
 		ClassifyComment(CommentFacts{CommentID: comment, AuthorType: "member", AuthorID: human}, SourceCommentSource),
@@ -333,7 +335,7 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		DirectHumanRun(human, EvidenceComment, comment),
 		DirectHumanRun(pgtype.UUID{}, "", pgtype.UUID{}),
 		Unattributed(EvidenceAutopilotRun, srcTask),
-		RuleOwner(human, ruleVer, EvidenceAutopilotRun, srcTask),         // originator = publisher (MUL-6951)
+		RuleOwner(human, ruleVer, EvidenceAutopilotRun, srcTask),         // divergent: accountable set, originator NULL
 		RuleOwner(pgtype.UUID{}, ruleVer, EvidenceAutopilotRun, srcTask), // no publisher → unattributed
 		TriggerOwner(human, EvidenceAutopilotRun, srcTask),               // originator = trigger owner (MUL-6951)
 		TriggerOwner(pgtype.UUID{}, EvidenceAutopilotRun, srcTask),       // no owner → unattributed
@@ -347,9 +349,9 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		// accountable with a NULL originator is allowed (divergence), but the
 		// reverse — originator set from accountable — must never happen implicitly.
 		if r.AccountableUserID.Valid && !r.UserID.Valid &&
-			r.Source != SourceOwnerFallback &&
+			r.Source != SourceOwnerFallback && r.Source != SourceRuleOwner &&
 			r.Source != SourceDelegation && r.Source != SourceCommentSource {
-			t.Errorf("result[%d]: accountable set with NULL originator only allowed for delegation/comment_source/owner_fallback, got source=%q", i, r.Source)
+			t.Errorf("result[%d]: accountable set with NULL originator only allowed for delegation/comment_source/rule_owner/owner_fallback, got source=%q", i, r.Source)
 		}
 	}
 }
@@ -373,14 +375,15 @@ func TestDirectHumanRun(t *testing.T) {
 }
 
 func TestRuleOwner(t *testing.T) {
-	// MUL-6951: the rule publisher is the run's ORIGINATOR, not an audit-only
-	// accountable — an armed autopilot runs with that human's authorization.
+	// The divergent case, and deliberately so (MUL-6951, Elon review): the rule
+	// publisher never armed anything, so it is accountable for audit but carries no
+	// authorization. A run that lands here fails the invoke gate closed.
 	got := RuleOwner(human, ruleVer, EvidenceAutopilotRun, issue)
 	if got.Source != SourceRuleOwner {
 		t.Fatalf("source = %q, want rule_owner", got.Source)
 	}
-	if got.UserID != human {
-		t.Errorf("originator should be the rule publisher, got %v", got.UserID)
+	if got.UserID.Valid {
+		t.Errorf("rule_owner must NOT set originator (authorization stays NULL), got %v", got.UserID)
 	}
 	if got.AccountableUserID != human {
 		t.Errorf("accountable should be the rule publisher, got %v", got.AccountableUserID)
@@ -403,9 +406,9 @@ func TestRuleOwner(t *testing.T) {
 }
 
 func TestTriggerOwner(t *testing.T) {
-	// MUL-4302 (Bohan) resolves the member responsible for the firing trigger;
-	// MUL-6951 makes that member the run's ORIGINATOR, so a scheduled fire carries
-	// the same authorization their manual "run now" would.
+	// MUL-4302 (Bohan) resolves the trigger's human; MUL-6951 makes the trigger
+	// CREATOR the run's ORIGINATOR, so a scheduled fire carries the same
+	// authorization their manual "run now" would.
 	got := TriggerOwner(human, EvidenceAutopilotRun, issue)
 	if got.Source != SourceTriggerOwner {
 		t.Fatalf("source = %q, want trigger_owner", got.Source)
@@ -414,10 +417,10 @@ func TestTriggerOwner(t *testing.T) {
 		t.Errorf("trigger_owner must be a precise source")
 	}
 	if got.UserID != human {
-		t.Errorf("originator should be the trigger owner, got %v", got.UserID)
+		t.Errorf("originator should be the trigger creator, got %v", got.UserID)
 	}
 	if got.AccountableUserID != human {
-		t.Errorf("accountable should be the trigger owner, got %v", got.AccountableUserID)
+		t.Errorf("accountable should be the trigger creator, got %v", got.AccountableUserID)
 	}
 	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != issue {
 		t.Errorf("evidence should be carried through")

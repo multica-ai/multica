@@ -16,12 +16,17 @@
 // blame. The SOURCE label is provenance only — no permission decision reads it.
 //
 // The originator (Result.UserID) IS the authorization value, and since MUL-6951
-// this package decides it for autopilot runs: TriggerOwner / RuleOwner name the
-// human an armed autopilot acts as, which canInvokeAgent and the Composio overlay
-// then honor. That grant is exactly that human's own rights — the gates are
-// unchanged, only the principal handed to them — but it does mean a change to
-// those two constructors is an AUTHORIZATION change, not a labelling one. Every
-// other constructor here still only mirrors a human the caller computed.
+// this package decides it for autopilot runs: TriggerOwner names the human an
+// armed autopilot acts as, which canInvokeAgent then honors. That grant is exactly
+// that human's own rights — the gate is unchanged, only the principal handed to it
+// — but it does mean a change to TriggerOwner is an AUTHORIZATION change, not a
+// labelling one. Every other constructor here only mirrors a human the caller
+// computed.
+//
+// It does NOT decide Composio access: since MUL-3963 the connected-apps overlay is
+// built from the AGENT OWNER's connections and allow-list and ignores the
+// originator entirely (integrations/composio/dispatch.go). Naming the originator
+// here therefore hands out no third-party credentials.
 package attribution
 
 import "github.com/jackc/pgx/v5/pgtype"
@@ -47,19 +52,19 @@ const (
 	// comment.source_task_id (a special case of delegation, MUL-4302 §3.3).
 	SourceCommentSource Source = "comment_source"
 	// SourceTriggerOwner — an autopilot schedule/webhook trigger enqueued the run;
-	// the human is the member responsible for that specific trigger (set up the
-	// schedule / registered the webhook). Preferred over rule_owner: a run belongs to
-	// whoever armed the trigger that fired it, not to whoever last published the rule
+	// the human is the member who CREATED that specific trigger (set up the schedule
+	// / registered the webhook). Preferred over rule_owner: a run belongs to whoever
+	// armed the trigger that fired it, not to whoever last published the rule
 	// (MUL-4302; Bohan's refinement). Since MUL-6951 that human is the ORIGINATOR as
 	// well as the accountable — arming a trigger authorizes the run the same way
 	// clicking "run now" does — so this label marks HOW the human was resolved, not a
 	// weaker grant. The label is what still distinguishes an autonomous fire from a
 	// manual one in the audit trail.
 	SourceTriggerOwner Source = "trigger_owner"
-	// SourceRuleOwner — an autopilot trigger enqueued the run but its owner is not
-	// recoverable (a trigger created before per-trigger owners were recorded); the
-	// human degrades to the publisher of the rule's active version (MUL-4302 §3.4).
-	// Precise, but coarser than trigger_owner.
+	// SourceRuleOwner — an autopilot trigger enqueued the run but records no
+	// provable creator (a trigger predating per-trigger creators); the ACCOUNTABLE
+	// human degrades to the publisher of the rule's active version (MUL-4302 §3.4),
+	// while authorization carries none. Precise for audit, deliberately powerless.
 	SourceRuleOwner Source = "rule_owner"
 	// SourceOwnerFallback — nothing above resolved a human, so attribution
 	// degrades to the agent owner. This is DEGRADED, not compliance-grade, and
@@ -142,15 +147,17 @@ const (
 // Result is the attribution stamped onto a queued run.
 //
 //   - UserID is the AUTHORIZATION human the caller writes into
-//     originator_user_id. It is the value canInvokeAgent and the Composio overlay
-//     read; it is legitimately invalid (NULL) when no human authorized the run.
+//     originator_user_id. It is the value canInvokeAgent reads; it is legitimately
+//     invalid (NULL) when no human authorized the run. It does NOT select Composio
+//     connections — those follow the agent owner (MUL-3963).
 //   - AccountableUserID is the AUDIT human written into accountable_user_id. The
 //     one-way invariant (enforced by finalizeAttribution): when UserID is valid,
 //     AccountableUserID equals it. When UserID is NULL (no human authorized the
-//     run), the two may diverge — owner_fallback names the agent owner as the
-//     accountable human while authorization correctly carries none. Since
-//     MUL-6951 trigger_owner / rule_owner are NOT such a case: an armed autopilot
-//     carries its owner's authorization, so both columns hold that human.
+//     run), the two may diverge — owner_fallback names the agent owner, and
+//     rule_owner the rule publisher, as the accountable human while authorization
+//     correctly carries none. trigger_owner is NOT such a case since MUL-6951: an
+//     armed autopilot carries its trigger creator's authorization, so both columns
+//     hold that human.
 //
 // The remaining fields are audit metadata written into the Phase 1 provenance
 // columns. Construct a Result through ClassifyComment / ClassifyDirect /
@@ -362,14 +369,23 @@ func Unattributed(evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 }
 
 // RuleOwner builds attribution for an autopilot-triggered run whose firing
-// trigger's owner could not be recovered (MUL-4302 §3.4) — the coarser fallback
+// trigger records no provable creator (MUL-4302 §3.4) — the coarser fallback
 // behind TriggerOwner. publisherUserID, the member who published the active rule
-// version, becomes the run's ORIGINATOR (MUL-6951; see TriggerOwner for why an
-// armed autopilot carries its human's authorization). ruleVersionID records which
-// snapshot resolved it; evidence points the caller supplies (autopilot_run for
-// run_only, the issue for create_issue). A missing publisher (system-published
-// rule, or no version resolved yet) degrades to unattributed so we never fabricate
-// a human.
+// version, becomes the AUDIT-accountable human only; UserID (the originator, the
+// authorization value) stays NULL.
+//
+// This asymmetry with TriggerOwner is deliberate (MUL-6951, Elon review). The rule
+// publisher never armed anything — it is a guess at "who probably owns this rule",
+// recovered from a version snapshot. Promoting it to the authorization principal
+// would hand a legacy trigger somebody's invoke rights without that person having
+// authorized a single run. A run that lands here therefore carries no originator
+// and the invoke gate fails closed, which is the intended outcome for a trigger
+// too old to name its creator.
+//
+// ruleVersionID records which snapshot resolved it; evidence points the caller
+// supplies (autopilot_run for run_only, the issue for create_issue). A missing
+// publisher (system-published rule, or no version resolved yet) degrades to
+// unattributed so we never fabricate a human.
 func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 	r := Result{
 		RuleVersionID: ruleVersionID,
@@ -378,7 +394,7 @@ func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind Evidence
 	}
 	if publisherUserID.Valid {
 		r.Source = SourceRuleOwner
-		r.UserID = publisherUserID
+		r.AccountableUserID = publisherUserID
 	} else {
 		r.Source = SourceUnattributed
 	}
@@ -386,8 +402,7 @@ func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind Evidence
 }
 
 // TriggerOwner builds attribution for an autopilot schedule/webhook run keyed to
-// the human currently responsible for the firing trigger (MUL-4302; Bohan's
-// refinement). Like RuleOwner it sets UserID — the ORIGINATOR — so the run carries
+// the firing trigger's CREATOR (MUL-4302; MUL-6951). It sets UserID — the ORIGINATOR — so the run carries
 // that human's authorization context, exactly as a manual "run now" by the same
 // person would (MUL-6951; Bohan's call). finalizeAttribution mirrors it onto the
 // accountable side, satisfying the originator == accountable invariant migration
@@ -404,12 +419,12 @@ func RuleOwner(publisherUserID, ruleVersionID pgtype.UUID, evidenceKind Evidence
 // rights — canInvokeAgent still runs unchanged, so this is not an escalation —
 // and lets those borrow paths be deleted.
 //
-// NOTE (MUL-6951 follow-up): the caller resolves this human from the trigger's
-// published_by, i.e. its creator UNTIL someone substantively edits it, then the
-// editor. That was chosen while this value was audit-only. Now that it is also the
-// authorization principal, a substantive trigger edit silently moves whose rights
-// the automation runs with; making that an explicit, visible act is tracked
-// separately and deliberately NOT changed here.
+// The caller (service.ResolveAutopilotTriggerPrincipal) resolves that human from
+// the trigger's IMMUTABLE created_by, never published_by: published_by transfers
+// on a substantive edit, so using it would let a collaborator editing a cron
+// expression silently move whose rights the automation runs with. The same
+// resolver feeds dispatch admission, so one run can never be admitted as one human
+// and executed as another.
 func TriggerOwner(creatorUserID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 	r := Result{
 		EvidenceKind:  evidenceKind,
