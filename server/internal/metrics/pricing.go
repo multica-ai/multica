@@ -104,6 +104,22 @@ var modelPrices = map[string]ModelPrice{
 	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
 
+// claudeVersionEnd matches what is allowed to follow a Claude version inside
+// a reported model id. Appending it to a rule keeps that rule from swallowing
+// a later SKU in the same family: without it, `claude-fable-5` also matches
+// `claude-fable-5-1`, whose cache reads are a quarter of Fable 5's, so those
+// reads bill at 4x.
+//
+// What it admits is exactly what the frontend resolver normalizes away before
+// its exact-key lookup (`stripContextTag` and `stripDate` in
+// packages/views/runtimes/utils.ts), so both sides resolve the same strings:
+// end of id, a `[1m]`-style context tag, a trailing date snapshot in either
+// spelling, and `-latest`. Anything else — another version digit, a
+// `-preview`-style qualifier — is a distinct SKU at an unknown rate and stays
+// unmapped until it gets a row of its own, the same "every catalog SKU needs
+// its own row" rule the frontend table states.
+const claudeVersionEnd = `($|\[|-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest)`
+
 var modelAliasRules = []struct {
 	re       *regexp.Regexp
 	priceKey string
@@ -126,11 +142,10 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
 	// Fable 5.1 shares Fable 5's $10 / $50 and $12.50 cache write but prices
 	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
-	// needs its own row. It is listed before Fable 5, and the Fable 5 rule
-	// stops at the version so `claude-fable-5-1` cannot fall through to it
-	// (the `[1m]` context tag and end-of-string are still admitted).
-	{regexp.MustCompile(`claude-fable-5[-.]1`), "anthropic:claude-fable-5-1"},
-	{regexp.MustCompile(`claude-fable-5($|[^-.0-9])`), "anthropic:claude-fable-5"},
+	// needs its own row, and both rules end at their own version
+	// (claudeVersionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
+	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
 	{regexp.MustCompile(`claude-opus-5`), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},

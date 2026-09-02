@@ -395,10 +395,10 @@ func TestPriceForModelAliasContextTagStripping(t *testing.T) {
 
 func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 	// Fable 5.1 is its own SKU on the same Mythos-class tier as Fable 5, but
-	// with cache reads at 0.025x input ($0.25) instead of the usual 0.1x. The
-	// unanchored Fable 5 alias would otherwise swallow the `-1` suffix and
-	// bill those reads at 4x, so every spelling below must land on the
-	// Fable 5.1 row specifically.
+	// with cache reads at 0.025x input ($0.25) instead of the usual 0.1x. A
+	// Fable 5 alias that did not stop at the version would swallow the `-1`
+	// suffix and bill those reads at 4x, so every spelling below must land on
+	// the Fable 5.1 row specifically.
 	fable51 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10, CacheReadPerM: 0.25, CacheWritePerM: 12.5, OutputPerM: 50}
 	fable5 := ModelPrice{Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10, CacheReadPerM: 1, CacheWritePerM: 12.5, OutputPerM: 50}
 	cases := []struct {
@@ -415,6 +415,17 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 		// Fable 5 must keep resolving to its own row, including its 1M form.
 		{model: "claude-fable-5", want: fable5},
 		{model: "claude-fable-5[1m]", want: fable5},
+		// The frontend resolver strips a trailing date snapshot / `-latest`
+		// before its exact-key lookup (`stripDate` in
+		// packages/views/runtimes/utils.ts), so these forms price there. Both
+		// rules have to admit them too, otherwise the dashboard and
+		// RecordLLMUsage disagree on the same id.
+		{model: "claude-fable-5-20260401", want: fable5},
+		{model: "claude-fable-5-2026-04-01", want: fable5},
+		{model: "claude-fable-5-latest", want: fable5},
+		{model: "claude-fable-5-20260401[1m]", want: fable5},
+		{model: "claude-fable-5-1-20260901", want: fable51},
+		{model: "claude-fable-5-1-latest", want: fable51},
 	}
 
 	for _, tc := range cases {
@@ -424,6 +435,22 @@ func TestPriceForModelAliasAnthropicFable51(t *testing.T) {
 		}
 		if got != tc.want {
 			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// A later Fable minor is a distinct SKU at an unknown rate: it must stay
+	// unmapped and surface in the unpriced diagnostic rather than borrow a
+	// neighbour's tier. This is the same failure the `-1` suffix had against
+	// the Fable 5 rule, so guard it on the 5.1 rule as well.
+	for _, model := range []string{
+		"claude-fable-5-2",
+		"claude-fable-5.2",
+		"claude-fable-5-10",
+		"claude-fable-5.10",
+		"claude-fable-5-1x",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Errorf("PriceForModelAlias(%q) resolved to %+v; want unmapped", model, got)
 		}
 	}
 }
