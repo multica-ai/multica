@@ -42,3 +42,20 @@ SET created_by_type = published_by_type,
 WHERE created_by_id IS NULL
   AND published_by_id IS NOT NULL
   AND published_by_type IS NOT NULL;
+
+-- Migration 189 documented published_by_* as deciding the accountable human of the
+-- runs a trigger fires. That is no longer true and the text is generated into
+-- pkg/db/generated/models.go, so it would keep asserting the old authorization
+-- model to every reader. 189 is already released and must not be edited; override
+-- the comments here instead.
+COMMENT ON COLUMN autopilot_trigger.published_by_type IS
+    'Actor type of the trigger''s current responsible publisher: member | agent. Set to the creator at creation and re-stamped to the editor on any substantive edit governing this trigger. CONFIG audit only — since MUL-6951 it decides nothing about the runs this trigger fires. NULL on triggers predating MUL-4302.';
+
+COMMENT ON COLUMN autopilot_trigger.published_by_id IS
+    'The member/agent currently responsible for this trigger''s effective config (creator, then last substantive editor). CONFIG audit only: since MUL-6951 the runs this trigger fires act as, and are accountable to, created_by_id instead, so an edit recorded here never moves a run''s authority. No FK, app-layer integrity (MUL-4302).';
+
+COMMENT ON COLUMN autopilot_trigger.created_by_type IS
+    'Actor type of the trigger''s immutable creator: member | agent. Only ''member'' yields a run principal. NULL for triggers created before MUL-6951 that had no published_by to backfill from.';
+
+COMMENT ON COLUMN autopilot_trigger.created_by_id IS
+    'The member a schedule/webhook run fires AS: dispatch admission, the task''s originator/accountable, and every delegated run all resolve to this one human (MUL-6951). Written once at creation and never re-stamped, so editing the trigger cannot re-authorize its runs as the editor. NULL means no provable principal and the dispatch fails closed. No FK; workspace membership is re-validated on every dispatch.';

@@ -541,12 +541,12 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		}
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
-	// webhook trigger attribute to the human currently RESPONSIBLE for the firing
-	// trigger's effective config (creator, then last substantive editor) —
-	// trigger_owner (MUL-4302; Elon must-fix), degrading to the rule publisher when
-	// no such member is recoverable. Since MUL-6951 that human is the originator as
-	// well as the accountable, so a create_issue-mode run carries the same
-	// authorization a manual "run now" by that member would. Resolved the same way
+	// webhook trigger attribute to the firing trigger's CREATOR — trigger_owner
+	// (MUL-4302; MUL-6951) — degrading to the audit-only rule publisher when no
+	// creator is recoverable. That human is the originator as well as the
+	// accountable, so a create_issue-mode run carries the same authorization a
+	// manual "run now" by that member would; an edit of the trigger does not move
+	// it. Resolved the same way
 	// run_only dispatch resolves it, so both autopilot execution modes attribute
 	// identically. (A manual trigger carries an actor and is already handled above.)
 	// The issue only stores the autopilot id, so bridge issue → active run →
@@ -586,9 +586,10 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 // ruleOwnerAttribution resolves the rule_owner attribution for an autopilot run
 // from its active (latest) rule version snapshot (MUL-4302 §3.4). Shared by both
 // autopilot execution modes — run_only dispatch and the create_issue enqueue path —
-// so they attribute identically. originator stays NULL (an autopilot carries no
-// human's authority); only the audit-accountable side is set, to the version's
-// member publisher. A missing version (autopilot published before this feature, or
+// so they attribute identically. originator stays NULL: an autopilot DOES carry a
+// human's authority since MUL-6951, but it comes from the trigger's creator, and
+// this is the fallback for when that creator cannot be proven. Only the
+// audit-accountable side is set, to the version's member publisher. A missing version (autopilot published before this feature, or
 // none yet) or a non-member/absent publisher degrades to unattributed rather than
 // fabricating a human. Never returns an error: attribution must not fail an
 // enqueue, and a degraded label is the honest fallback.

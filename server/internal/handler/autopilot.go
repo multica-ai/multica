@@ -1049,18 +1049,21 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A substantive change (target / enabled-state / execution mode) republishes the
-	// rule: append a new version with THIS member as publisher, so a later run
-	// attributes to whoever last changed what the rule does — not the original
-	// creator. Cosmetic edits (title / description / template) write no version and
-	// leave accountability with the previous publisher (MUL-4302 §3.4).
+	// rule: append a new version with THIS member as publisher, recording who last
+	// changed what the rule does. Cosmetic edits (title / description / template)
+	// write no version (MUL-4302 §3.4). Since MUL-6951 the rule publisher is an
+	// AUDIT value only — it is the coarse fallback a run degrades to when its
+	// trigger records no creator, and such a run carries no authorization.
 	if autopilotRuleSubstantiveChange(prev, autopilot) {
 		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 			return
 		}
-		// An autopilot-level substantive edit governs every trigger, so responsibility
-		// for each firing trigger transfers to this editor (source=trigger_owner). A
-		// trigger-scoped edit re-stamps only its own row (see UpdateAutopilotTrigger).
+		// An autopilot-level substantive edit governs every trigger, so CONFIG
+		// responsibility for each one transfers to this editor. A trigger-scoped edit
+		// re-stamps only its own row (see UpdateAutopilotTrigger). Since MUL-6951 this
+		// moves published_by alone: the runs each trigger fires keep acting as, and
+		// stay accountable to, that trigger's immutable created_by.
 		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
 			AutopilotID:     autopilot.ID,
 			PublishedByType: pgtype.Text{String: "member", Valid: true},
@@ -1569,8 +1572,9 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
-			// Seed the responsible publisher = creator; re-stamped to the editor on a
-			// later substantive edit (source=trigger_owner, MUL-4302).
+			// published_by records CONFIG responsibility only: seeded to the creator,
+			// re-stamped to a later substantive editor (MUL-4302). It has no bearing
+			// on the runs this trigger fires (MUL-6951).
 			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 			PublishedByID:   publisherID,
 			// Immutable authorization principal — see the schedule path above
@@ -2186,7 +2190,9 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	// A manual "run now" is a direct human action, so the run is attributed
 	// direct_human to the triggering member (MUL-4302 §4). Resolve the actor the
 	// same way assign/promote does; only a member actor is a human — an agent
-	// triggering via A2A yields an invalid actor and falls back to rule_owner.
+	// triggering via A2A yields an invalid actor, which then follows the automation
+	// path: the firing trigger's creator, or nobody when this entry point supplies
+	// no trigger, in which case the run carries no authorization (MUL-6951).
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return

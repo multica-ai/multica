@@ -124,8 +124,11 @@ func (s *AutopilotService) DispatchAutopilot(
 	payload []byte,
 ) (*db.AutopilotRun, error) {
 	// No member actor on this entry point (schedule / webhook / api, or a manual
-	// trigger without a resolved member): attribution resolves rule_owner. These
-	// callers don't surface a per-run reason code to a human, so it is dropped.
+	// trigger without a resolved member): the run acts as the trigger's creator
+	// (trigger_owner), degrading to the audit-only rule_owner when no creator is
+	// recoverable — in which case it carries no authorization at all (MUL-6951).
+	// These callers don't surface a per-run reason code to a human, so it is
+	// dropped.
 	// webhookDeliveryID is invalid here — durable webhook deliveries admit through
 	// AdmitAutopilotWebhookDelivery instead of this entry point.
 	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{}, pgtype.UUID{}, source+":"+newAutopilotIdempotencyKey())
@@ -133,8 +136,9 @@ func (s *AutopilotService) DispatchAutopilot(
 }
 
 // DispatchAutopilotManual is the "run now" entry point for a member manually
-// triggering an autopilot. Unlike scheduled / webhook / api dispatch (no human in
-// the loop → rule_owner), a manual trigger is a direct human action: the run is
+// triggering an autopilot. Scheduled / webhook / api dispatch acts as the firing
+// trigger's creator (MUL-6951); a manual trigger is a direct human action by the
+// CLICKER instead, so it need not consult the trigger at all: the run is
 // attributed direct_human to actorUserID, which becomes BOTH its originator
 // (authorization) and accountable human (MUL-4302 §4), across both execution modes.
 // An invalid actorUserID behaves exactly like DispatchAutopilot(source="manual").
@@ -464,9 +468,9 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	// Scheduled dispatch has no member actor → rule_owner attribution, and no
-	// human surface for a per-run reason code, so it is dropped. No webhook
-	// delivery on the scheduled-plan path.
+	// Scheduled dispatch has no member actor → it acts as the trigger's creator
+	// (trigger_owner, MUL-6951), and has no human surface for a per-run reason
+	// code, so it is dropped. No webhook delivery on the scheduled-plan path.
 	key := "schedule:" + util.UUIDToString(triggerID) + ":" + plannedAt.UTC().Format(time.RFC3339Nano)
 	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{}, pgtype.UUID{}, key)
 	return run, err
@@ -796,8 +800,9 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// actor-carrying entry points so attribution resolves direct_human to the
 	// triggering member (originator == accountable == actor, MUL-4302 §4). Schedule /
 	// webhook dispatch has no actor and takes the plain entry points, where the
-	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
-	// the existing actor-carrying enqueue methods; the handoff note is empty here.
+	// autopilot-origin issue resolves to the trigger's creator (MUL-6951). The
+	// *WithHandoff variants are the existing actor-carrying enqueue methods; the
+	// handoff note is empty here.
 	if ap.AssigneeType == "squad" {
 		// Fail-closed invocation gate: verify the admission principal (manual
 		// clicker, else creator — see autopilotAdmitInvoke) may still invoke the
