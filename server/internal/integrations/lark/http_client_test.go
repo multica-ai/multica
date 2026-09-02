@@ -635,6 +635,43 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendTextMessage_DirectOpenIDWithIdempotencyKey(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_direct", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_direct_1"},
+		},
+		func(r *http.Request, body map[string]string) {
+			if got := r.URL.Query().Get("receive_id_type"); got != "open_id" {
+				t.Errorf("receive_id_type: got %q want open_id", got)
+			}
+			if body["receive_id"] != "ou_member_1" {
+				t.Errorf("receive_id: got %q want ou_member_1", body["receive_id"])
+			}
+			if body["uuid"] != "44444444-4444-4444-4444-444444444444" {
+				t.Errorf("uuid: got %q", body["uuid"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendTextMessage(context.Background(), SendTextParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_member_1"),
+		Text:           "daily report",
+		IdempotencyKey: "44444444-4444-4444-4444-444444444444",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if msgID != "om_direct_1" {
+		t.Fatalf("message id: got %q want om_direct_1", msgID)
+	}
+}
+
 // TestHTTPClient_SendTextMessage_ReplyInThread pins the wire shape of a
 // threaded reply: when ReplyTarget is set the client must POST to the
 // reply endpoint (/messages/<id>/reply), carry reply_in_thread=true, and

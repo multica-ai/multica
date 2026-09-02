@@ -292,7 +292,15 @@ type PatchCardParams struct {
 type SendTextParams struct {
 	InstallationID InstallationCredentials
 	ChatID         ChatID
-	Text           string
+	// OpenID sends a proactive 1:1 message to a bound member. Exactly one of
+	// ChatID and OpenID must be set. This is used by the Inbox delivery path;
+	// normal channel replies continue to use ChatID.
+	OpenID OpenID
+	Text   string
+	// IdempotencyKey is forwarded as Lark's message uuid. Replaying an Inbox
+	// event with the same key returns the original provider message instead of
+	// creating a duplicate direct-room message.
+	IdempotencyKey string
 	// ReplyTarget threads the text reply back into a Lark topic; see
 	// ReplyTarget. Empty keeps the chat-level send.
 	ReplyTarget ReplyTarget

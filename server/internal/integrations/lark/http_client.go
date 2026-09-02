@@ -370,15 +370,19 @@ func (c *httpAPIClient) SendInteractiveCard(ctx context.Context, p SendCardParam
 	return resp.Data.MessageID, nil
 }
 
-// SendTextMessage posts a plain text IM message into a Lark chat.
-// This is the Patcher's primary outbound for agent chat replies —
+// SendTextMessage posts a plain text IM message into a Lark chat or directly
+// to an open_id. This is the Patcher's primary outbound for agent chat replies —
 // using a normal text bubble instead of an interactive card makes
 // free-form replies feel like a native Lark conversation. The
 // content envelope Lark expects is a JSON-encoded `{"text": "..."}`
-// blob; we encode it here so callers pass raw text.
+// blob; we encode it here so callers pass raw text. Direct sends may provide
+// a stable uuid so Lark deduplicates retries of one durable Inbox event.
 func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (string, error) {
-	if p.ChatID == "" {
-		return "", errors.New("lark http client: missing chat_id")
+	if (p.ChatID == "") == (p.OpenID == "") {
+		return "", errors.New("lark http client: exactly one of chat_id or open_id is required")
+	}
+	if p.OpenID != "" && p.ReplyTarget.IsSet() {
+		return "", errors.New("lark http client: direct open_id send cannot be a thread reply")
 	}
 	if p.Text == "" {
 		return "", errors.New("lark http client: missing text")
@@ -390,7 +394,23 @@ func (c *httpAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	if err != nil {
 		return "", fmt.Errorf("lark http client: encode text content: %w", err)
 	}
-	path, body := outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	var path string
+	var body map[string]any
+	if p.OpenID != "" {
+		q := url.Values{}
+		q.Set("receive_id_type", "open_id")
+		path = "/open-apis/im/v1/messages?" + q.Encode()
+		body = map[string]any{
+			"receive_id": string(p.OpenID),
+			"msg_type":   "text",
+			"content":    string(contentBytes),
+		}
+		if p.IdempotencyKey != "" {
+			body["uuid"] = p.IdempotencyKey
+		}
+	} else {
+		path, body = outboundMessageRequest(p.ChatID, "text", string(contentBytes), p.ReplyTarget)
+	}
 	var resp struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`

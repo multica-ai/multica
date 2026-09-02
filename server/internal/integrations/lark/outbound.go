@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -152,6 +154,10 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	GetAutopilotReportInboxItemInWorkspace(ctx context.Context, arg db.GetAutopilotReportInboxItemInWorkspaceParams) (db.InboxItem, error)
+	GetChannelInboxDelivery(ctx context.Context, arg db.GetChannelInboxDeliveryParams) (db.ChannelInboxDelivery, error)
+	UpsertChannelInboxDelivery(ctx context.Context, arg db.UpsertChannelInboxDeliveryParams) (db.ChannelInboxDelivery, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -186,9 +192,9 @@ func (c PatcherConfig) withDefaults() PatcherConfig {
 	return c
 }
 
-// Patcher reacts to task-lifecycle events on the event bus and forwards
-// chat replies to Lark as plain text IM messages. It is the outbound
-// side of §4.5 — but the original "thinking → streaming → final card"
+// Patcher reacts to task-lifecycle and Inbox events on the event bus. It
+// forwards chat replies and Autopilot report notifications to Lark. It is the
+// outbound side of §4.5 — but the original "thinking → streaming → final card"
 // lifecycle was reduced to a single plain-text reply on EventChatDone
 // after Bohan reported the card chrome made replies feel like system
 // notifications. The error path is the one survivor of card rendering:
@@ -197,9 +203,9 @@ func (c PatcherConfig) withDefaults() PatcherConfig {
 //
 // Scope:
 //
-//   - Only tasks whose chat_session has a lark_chat_session_binding
-//     produce outbound. Tasks born from the web UI or autopilot pass
-//     through unchanged.
+//   - Task events require a lark_chat_session_binding. Autopilot report Inbox
+//     events instead resolve the recipient's active channel_user_binding so
+//     non-chat reports reach the member's direct room.
 //
 //   - Each EventChatDone yields one Lark text message; there is no
 //     streaming, no throttling, no DB row to track card-state.
@@ -275,6 +281,12 @@ func (p *Patcher) SetTypingIndicatorManager(m *TypingIndicatorManager) {
 //     and task-failed race the add the same way — and closing it needs a
 //     per-session generation the add can check when its call returns.
 //
+//   - EventInboxNew — a durable notification was created. Only a report
+//     comment produced by an Autopilot run's own task is eligible; creation
+//     notices and unrelated Inbox activity stay in Multica. When the report's
+//     member recipient has an active Feishu binding, its body is sent to their
+//     direct room and the provider receipt is persisted on that Inbox item.
+//
 // We deliberately do NOT subscribe to EventTaskQueued / EventTaskRunning
 // (no thinking-card lifecycle anymore — adds noise without value) or to
 // EventTaskCompleted (chat tasks always emit EventChatDone first, which
@@ -286,6 +298,157 @@ func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
+	bus.Subscribe(protocol.EventInboxNew, p.handleInboxNew)
+}
+
+// handleInboxNew is the report-only Feishu/Lark delivery edge. Every
+// notification remains durable in Multica, but only an Autopilot report Inbox
+// item is additionally sent to a bound member's direct room and recorded in
+// the dedicated channel delivery table.
+func (p *Patcher) handleInboxNew(e events.Event) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := p.processInboxNew(ctx, e); err != nil {
+		p.cfg.Logger.WarnContext(ctx, "lark outbound: inbox delivery failed",
+			"workspace_id", e.WorkspaceID, "error", err)
+	}
+}
+
+func (p *Patcher) processInboxNew(ctx context.Context, e events.Event) error {
+	payload, ok := e.Payload.(map[string]any)
+	if !ok {
+		return nil
+	}
+	itemPayload, ok := payload["item"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	itemID, err := util.ParseUUID(stringField(itemPayload, "id"))
+	if err != nil || !itemID.Valid {
+		return nil
+	}
+	workspaceID, err := util.ParseUUID(stringField(itemPayload, "workspace_id"))
+	if err != nil || !workspaceID.Valid {
+		return nil
+	}
+	item, err := p.queries.GetAutopilotReportInboxItemInWorkspace(ctx, db.GetAutopilotReportInboxItemInWorkspaceParams{
+		ID: itemID, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load autopilot report inbox item: %w", err)
+	}
+	if item.RecipientType != "member" || !item.RecipientID.Valid {
+		return nil
+	}
+	receipt, err := p.queries.GetChannelInboxDelivery(ctx, db.GetChannelInboxDeliveryParams{
+		InboxItemID: item.ID, WorkspaceID: item.WorkspaceID, ChannelType: channelTypeFeishu,
+	})
+	if err == nil && receipt.Status == "delivered" {
+		return nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("load inbox delivery receipt: %w", err)
+	}
+
+	binding, err := p.queries.FindChannelBindingForMember(ctx, db.FindChannelBindingForMemberParams{
+		WorkspaceID: item.WorkspaceID, MulticaUserID: item.RecipientID, ChannelType: channelTypeFeishu,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("lookup member binding: %w", err)
+	}
+	inst, err := p.queries.GetLarkInstallation(ctx, binding.InstallationID)
+	if err != nil {
+		return fmt.Errorf("load installation: %w", err)
+	}
+	if InstallationStatus(inst.Status) != InstallationActive {
+		return nil
+	}
+	creds, err := p.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	content := strings.TrimSpace(item.Body.String)
+	if content == "" {
+		content = strings.TrimSpace(item.Title)
+	}
+	if content == "" {
+		return nil
+	}
+
+	key := util.UUIDToString(item.ID)
+	messageID, sendErr := p.sendInboxText(ctx, SendTextParams{
+		InstallationID: creds,
+		OpenID:         OpenID(binding.ChannelUserID),
+		Text:           content,
+		IdempotencyKey: key,
+	})
+	delivery := db.UpsertChannelInboxDeliveryParams{
+		InboxItemID:       item.ID,
+		WorkspaceID:       item.WorkspaceID,
+		ChannelType:       channelTypeFeishu,
+		Status:            "delivered",
+		TargetType:        "direct_room",
+		ProviderMessageID: util.StrToText(messageID),
+		IdempotencyKey:    key,
+		FinishedAt:        pgtype.Timestamptz{Time: p.cfg.Now().UTC(), Valid: true},
+	}
+	if sendErr != nil {
+		delivery.Status = "failed"
+		delivery.ProviderMessageID = pgtype.Text{}
+		delivery.ErrorCode = util.StrToText(inboxDeliveryErrorCode(sendErr))
+	}
+	if _, err := p.queries.UpsertChannelInboxDelivery(ctx, delivery); err != nil {
+		return fmt.Errorf("persist inbox delivery receipt: %w", err)
+	}
+	if sendErr != nil {
+		return fmt.Errorf("send inbox direct message: %w", sendErr)
+	}
+	p.cfg.Logger.InfoContext(ctx, "lark outbound: inbox notification delivered",
+		"workspace_id", util.UUIDToString(item.WorkspaceID),
+		"inbox_item_id", key,
+		"target_type", delivery.TargetType,
+		"provider_message_id", messageID,
+		"idempotency_key", key)
+	return nil
+}
+
+// sendInboxText makes one bounded repair attempt for an ambiguous transport
+// failure. Both calls carry the same provider uuid, so a response lost after a
+// successful first send cannot create a duplicate. Lark business errors are
+// durable failures and are not retried immediately.
+func (p *Patcher) sendInboxText(ctx context.Context, params SendTextParams) (string, error) {
+	messageID, err := p.client.SendTextMessage(ctx, params)
+	if err == nil || !inboxDeliveryRetryable(err) {
+		return messageID, err
+	}
+	return p.client.SendTextMessage(ctx, params)
+}
+
+func inboxDeliveryRetryable(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var apiErr *APIError
+	return !errors.As(err, &apiErr)
+}
+
+func stringField(item map[string]any, key string) string {
+	value, _ := item[key].(string)
+	return value
+}
+
+func inboxDeliveryErrorCode(err error) string {
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		return fmt.Sprintf("lark_%d", apiErr.Code)
+	}
+	return "transport_error"
 }
 
 func (p *Patcher) handleEvent(e events.Event) {

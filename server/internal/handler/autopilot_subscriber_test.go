@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -739,6 +741,126 @@ func TestAutopilotDispatchNotifiesSubscribersOnCreate(t *testing.T) {
 	}
 	if inboxTitle != title {
 		t.Fatalf("inbox title = %q, want %q (issue title)", inboxTitle, title)
+	}
+}
+
+// TestAutopilotReportInboxQueryExcludesCreateNotice pins the single-message
+// delivery boundary used by Feishu: create_issue first emits a durable
+// issue_subscribed Inbox item, but only the later comment produced by the
+// Autopilot run's own task is a report eligible for direct-room delivery.
+func TestAutopilotReportInboxQueryExcludesCreateNotice(t *testing.T) {
+	ctx := context.Background()
+	title := fmt.Sprintf("Synthetic Autopilot report %d", time.Now().UnixNano())
+	var autopilotID, issueID string
+	defer func() {
+		if issueID != "" {
+			testPool.Exec(ctx, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM comment WHERE issue_id = $1`, issueID)
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+		if autopilotID != "" {
+			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
+		}
+	}()
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load test agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":                "Single-message report contract",
+		"assignee_id":          agentID,
+		"execution_mode":       "create_issue",
+		"issue_title_template": title,
+		"subscribers": []map[string]any{
+			{"user_type": "member", "user_id": testUserID},
+		},
+	})
+	testHandler.CreateAutopilot(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var autopilot AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
+		t.Fatalf("decode autopilot: %v", err)
+	}
+	autopilotID = autopilot.ID
+
+	queries := db.New(testPool)
+	ap, err := queries.GetAutopilot(ctx, parseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("GetAutopilot: %v", err)
+	}
+	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("DispatchAutopilot: %v", err)
+	}
+	if run == nil || !run.IssueID.Valid {
+		t.Fatalf("dispatch run = %+v, want linked issue", run)
+	}
+	issueID = uuidToString(run.IssueID)
+
+	var createNoticeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM inbox_item
+		WHERE issue_id = $1 AND recipient_id = $2 AND type = 'issue_subscribed'
+	`, issueID, testUserID).Scan(&createNoticeID); err != nil {
+		t.Fatalf("load create notice: %v", err)
+	}
+	if _, err := queries.GetAutopilotReportInboxItemInWorkspace(ctx, db.GetAutopilotReportInboxItemInWorkspaceParams{
+		ID: parseUUID(createNoticeID), WorkspaceID: parseUUID(testWorkspaceID),
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("create notice report lookup error = %v, want pgx.ErrNoRows", err)
+	}
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, issueID, agentID).Scan(&taskID); err != nil {
+		t.Fatalf("load Autopilot task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE autopilot_run SET task_id = $2 WHERE id = $1`, uuidToString(run.ID), taskID); err != nil {
+		t.Fatalf("link Autopilot task: %v", err)
+	}
+
+	reportCommentID := dbfx.Insert(t, "comment", testutil.Cols{
+		"issue_id":       issueID,
+		"workspace_id":   testWorkspaceID,
+		"author_type":    "agent",
+		"author_id":      agentID,
+		"content":        "【Mock】Feishu delivery smoke。",
+		"source_task_id": taskID,
+	})
+	details, err := json.Marshal(map[string]string{"comment_id": reportCommentID})
+	if err != nil {
+		t.Fatalf("marshal report details: %v", err)
+	}
+	reportInboxID := dbfx.Insert(t, "inbox_item", testutil.Cols{
+		"workspace_id":   testWorkspaceID,
+		"recipient_type": "member",
+		"recipient_id":   testUserID,
+		"type":           "new_comment",
+		"severity":       "info",
+		"issue_id":       issueID,
+		"title":          title,
+		"body":           "【Mock】Feishu delivery smoke。",
+		"actor_type":     "agent",
+		"actor_id":       agentID,
+		"details":        details,
+	})
+	item, err := queries.GetAutopilotReportInboxItemInWorkspace(ctx, db.GetAutopilotReportInboxItemInWorkspaceParams{
+		ID: parseUUID(reportInboxID), WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load report Inbox item: %v", err)
+	}
+	if got := uuidToString(item.ID); got != reportInboxID {
+		t.Fatalf("report Inbox id = %s, want %s", got, reportInboxID)
 	}
 }
 

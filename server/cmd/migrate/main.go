@@ -276,6 +276,8 @@ var concurrentIndexCleanups = map[string]string{
 	"440_github_pr_head_sha_index":                              "idx_github_pull_request_head_sha",
 	"443_issue_project_status_index":                            "idx_issue_project_status",
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
+	"447_channel_inbox_delivery_identity_index":                 "channel_inbox_delivery_identity_uidx",
+	"448_channel_inbox_delivery_workspace_index":                "idx_channel_inbox_delivery_workspace",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

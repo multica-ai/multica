@@ -373,6 +373,18 @@ type ChannelInboundMessageDedup struct {
 	ClaimToken     pgtype.UUID        `json:"claim_token"`
 }
 
+type ChannelInboxDelivery struct {
+	InboxItemID       pgtype.UUID        `json:"inbox_item_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ChannelType       string             `json:"channel_type"`
+	Status            string             `json:"status"`
+	TargetType        string             `json:"target_type"`
+	ProviderMessageID pgtype.Text        `json:"provider_message_id"`
+	IdempotencyKey    string             `json:"idempotency_key"`
+	ErrorCode         pgtype.Text        `json:"error_code"`
+	FinishedAt        pgtype.Timestamptz `json:"finished_at"`
+}
+
 type ChannelInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
