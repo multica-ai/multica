@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -13,6 +13,7 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/github", () => ({
+  useGitHubSettings: () => githubSettings,
   queuedPullRequestsOptions: (wsId: string) => ({
     queryKey: ["github", wsId, "pull-requests", "queued"],
     queryFn: async () => mockResponse,
@@ -23,6 +24,11 @@ vi.mock("@multica/core/github", () => ({
 import { IssueMergeQueueIndicator } from "./issue-merge-queue-indicator";
 
 let mockResponse: ListGitHubQueuedPullRequestsResponse = { queued_pull_requests: [] };
+let githubSettings = { enabled: true, prSidebar: true, coAuthor: true, autoLinkPRs: true };
+
+beforeEach(() => {
+  githubSettings = { enabled: true, prSidebar: true, coAuthor: true, autoLinkPRs: true };
+});
 
 function renderIndicator(issueId = "issue-1") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -68,6 +74,18 @@ describe("IssueMergeQueueIndicator", () => {
       queued_pull_requests: [{ issue_id: "other-issue", merge_queue_state: "queued" }],
     };
     const { container } = renderIndicator("issue-1");
+    await Promise.resolve();
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("stays silent when the workspace has GitHub switched off", async () => {
+    // The query is gated off too, so no board polls GitHub in a workspace
+    // that does not use it — this asserts the visible half of that.
+    githubSettings = { enabled: false, prSidebar: false, coAuthor: false, autoLinkPRs: false };
+    mockResponse = {
+      queued_pull_requests: [{ issue_id: "issue-1", merge_queue_state: "queued" }],
+    };
+    const { container } = renderIndicator();
     await Promise.resolve();
     expect(container).toBeEmptyDOMElement();
   });

@@ -4,7 +4,7 @@ import { memo, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ListOrdered, TriangleAlert } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { queuedPullRequestsOptions } from "@multica/core/github";
+import { queuedPullRequestsOptions, useGitHubSettings } from "@multica/core/github";
 import type { ListGitHubQueuedPullRequestsResponse } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
@@ -42,8 +42,13 @@ export const IssueMergeQueueIndicator = memo(function IssueMergeQueueIndicator({
         ?.merge_queue_state ?? null,
     [issueId],
   );
+  // Every card mounts one of these, so the poll must not run at all in a
+  // workspace that has GitHub switched off.
+  const github = useGitHubSettings();
+  const options = queuedPullRequestsOptions(wsId);
   const { data: queueState = null } = useQuery({
-    ...queuedPullRequestsOptions(wsId),
+    ...options,
+    enabled: options.enabled && github.enabled,
     select,
   });
 
