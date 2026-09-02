@@ -99,6 +99,20 @@ SMTP takes priority over Resend whenever `SMTP_HOST` is non-empty.
 | `GOOGLE_CLIENT_SECRET` | empty | Google OAuth client secret |
 | `GOOGLE_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL in the Google Console |
 
+### Self-hosted Gitea OAuth
+
+| Variable | Default | Description |
+|---|---|---|
+| `GITEA_ISSUER_URL` | empty | Absolute HTTP(S) URL of the Gitea instance; it must be reachable by both the browser and API |
+| `GITEA_CLIENT_ID` | empty | Gitea OAuth application client ID |
+| `GITEA_CLIENT_SECRET` | empty | Gitea OAuth application client secret |
+| `GITEA_REDIRECT_URI` | `http://localhost:3000/auth/callback` | Must exactly match the callback URL registered in Gitea |
+
+When all four values are set, the login page shows **Gitea**. Multica starts
+the authorization flow on the API so it can validate a one-time state cookie
+and PKCE verifier; the Gitea account is linked by its stable provider ID, not
+by an email address that may later change.
+
 ### Signup scope
 
 | Variable | Default | Description |

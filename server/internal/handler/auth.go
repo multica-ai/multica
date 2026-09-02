@@ -491,6 +491,273 @@ type googleUserInfo struct {
 	Picture string `json:"picture"`
 }
 
+type GiteaLoginRequest struct {
+	Code  string `json:"code"`
+	State string `json:"state"`
+}
+
+type giteaTokenResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+}
+
+type giteaUserInfo struct {
+	ID        int64  `json:"id"`
+	Email     string `json:"email"`
+	FullName  string `json:"full_name"`
+	Login     string `json:"login"`
+	AvatarURL string `json:"avatar_url"`
+}
+
+type giteaEmailInfo struct {
+	Email    string `json:"email"`
+	Primary  bool   `json:"primary"`
+	Verified bool   `json:"verified"`
+}
+
+// GiteaStart begins an OAuth transaction. The state and PKCE verifier remain
+// server-controlled; the browser only carries the signed state back from
+// Gitea.
+func (h *Handler) GiteaStart(w http.ResponseWriter, r *http.Request) {
+	clientID := strings.TrimSpace(os.Getenv("GITEA_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("GITEA_CLIENT_SECRET"))
+	issuer, err := giteaIssuerURL()
+	if clientID == "" || clientSecret == "" || err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Gitea login is not configured")
+		return
+	}
+	redirectURI, err := giteaRedirectURI()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	state, cookieValue, verifier, err := newGiteaOAuthState(r.URL.Query().Get("state"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	auth.SetOAuthStateCookie(w, cookieValue, giteaOAuthStateTTL)
+	http.Redirect(w, r, giteaAuthorizeURL(issuer, clientID, redirectURI, state, giteaPKCEChallenge(verifier)), http.StatusFound)
+}
+
+// GiteaLogin exchanges a Gitea OAuth authorization code and then enters the
+// same Multica user/JWT/cookie path as email and Google login.
+func (h *Handler) GiteaLogin(w http.ResponseWriter, r *http.Request) {
+	var req GiteaLoginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Code) == "" {
+		writeError(w, http.StatusBadRequest, "code is required")
+		return
+	}
+
+	clientID := strings.TrimSpace(os.Getenv("GITEA_CLIENT_ID"))
+	clientSecret := strings.TrimSpace(os.Getenv("GITEA_CLIENT_SECRET"))
+	issuer, err := giteaIssuerURL()
+	if clientID == "" || clientSecret == "" || err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Gitea login is not configured")
+		return
+	}
+
+	if strings.TrimSpace(req.State) == "" {
+		writeError(w, http.StatusBadRequest, "state is required")
+		return
+	}
+	verifier, err := validateGiteaOAuthState(r, req.State)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	redirectURI, err := giteaRedirectURI()
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
+	auth.ClearOAuthStateCookie(w)
+
+	tokenRequest, err := http.NewRequestWithContext(r.Context(), http.MethodPost,
+		giteaBackendURL("/login/oauth/access_token"), strings.NewReader(url.Values{
+			"code":          {req.Code},
+			"client_id":     {clientID},
+			"client_secret": {clientSecret},
+			"redirect_uri":  {redirectURI},
+			"code_verifier": {verifier},
+			"grant_type":    {"authorization_code"},
+		}.Encode()))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	tokenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRequest.Header.Set("Accept", "application/json")
+	tokenResp, err := giteaHTTPClient().Do(tokenRequest)
+	if err != nil {
+		slog.Error("gitea oauth token exchange failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to exchange code with Git server")
+		return
+	}
+	defer tokenResp.Body.Close()
+	tokenBody, err := io.ReadAll(tokenResp.Body)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to read Git token response")
+		return
+	}
+	if tokenResp.StatusCode < http.StatusOK || tokenResp.StatusCode >= http.StatusMultipleChoices {
+		slog.Error("gitea oauth token exchange returned error", "status", tokenResp.StatusCode)
+		writeError(w, http.StatusBadRequest, "failed to exchange code with Git server")
+		return
+	}
+
+	var gToken giteaTokenResponse
+	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
+		values, parseErr := url.ParseQuery(string(tokenBody))
+		if parseErr != nil {
+			writeError(w, http.StatusBadGateway, "failed to parse Git token response")
+			return
+		}
+		gToken.AccessToken = values.Get("access_token")
+		gToken.TokenType = values.Get("token_type")
+	}
+	if strings.TrimSpace(gToken.AccessToken) == "" {
+		writeError(w, http.StatusBadGateway, "Git token response has no access token")
+		return
+	}
+
+	userInfoReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, giteaBackendURL("/api/v1/user"), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	userInfoReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
+	userInfoReq.Header.Set("Accept", "application/json")
+	userInfoResp, err := giteaHTTPClient().Do(userInfoReq)
+	if err != nil {
+		slog.Error("gitea user info fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch Git user info")
+		return
+	}
+	defer userInfoResp.Body.Close()
+	if userInfoResp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "Git server rejected the access token")
+		return
+	}
+	var gUser giteaUserInfo
+	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Git user info")
+		return
+	}
+
+	// Always require the verified primary email from the provider. The email
+	// is used only for first-time account creation; returning users are looked
+	// up by the stable Gitea subject below.
+	emailsReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, giteaBackendURL("/api/v1/user/emails"), nil)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	emailsReq.Header.Set("Authorization", "Bearer "+gToken.AccessToken)
+	emailsReq.Header.Set("Accept", "application/json")
+	emailsResp, err := giteaHTTPClient().Do(emailsReq)
+	if err != nil {
+		slog.Error("gitea user email fetch failed", "error", err)
+		writeError(w, http.StatusBadGateway, "failed to fetch verified Git email")
+		return
+	}
+	defer emailsResp.Body.Close()
+	if emailsResp.StatusCode != http.StatusOK {
+		writeError(w, http.StatusBadGateway, "Git server did not return verified email data")
+		return
+	}
+	var emails []giteaEmailInfo
+	if err := json.NewDecoder(emailsResp.Body).Decode(&emails); err != nil {
+		writeError(w, http.StatusBadGateway, "failed to parse Git email data")
+		return
+	}
+	for _, candidate := range emails {
+		if candidate.Primary && candidate.Verified {
+			gUser.Email = candidate.Email
+			break
+		}
+	}
+
+	email := strings.ToLower(strings.TrimSpace(gUser.Email))
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "Git account has no verified primary email")
+		return
+	}
+
+	if gUser.ID <= 0 {
+		writeError(w, http.StatusBadGateway, "Git user response has no stable ID")
+		return
+	}
+	user, isNew, err := h.findOrCreateGiteaUser(r.Context(), issuer.String(), fmt.Sprintf("%d", gUser.ID), email)
+	if err != nil {
+		if errors.Is(err, errGiteaIdentityAlreadyLinked) {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		var signupErr SignupError
+		if errors.As(err, &signupErr) {
+			writeError(w, http.StatusForbidden, signupErr.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+	if isNew {
+		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
+		evt.Properties["auth_method"] = "gitea"
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
+	}
+
+	needsUpdate := false
+	newName := user.Name
+	newAvatar := user.AvatarUrl
+	if profileName := strings.TrimSpace(gUser.FullName); profileName != "" && user.Name == strings.Split(email, "@")[0] {
+		newName = profileName
+		needsUpdate = true
+	} else if login := strings.TrimSpace(gUser.Login); login != "" && user.Name == strings.Split(email, "@")[0] {
+		newName = login
+		needsUpdate = true
+	}
+	if gUser.AvatarURL != "" && !user.AvatarUrl.Valid {
+		newAvatar = pgtype.Text{String: gUser.AvatarURL, Valid: true}
+		needsUpdate = true
+	}
+	if needsUpdate {
+		if updated, updateErr := h.Queries.UpdateUser(r.Context(), db.UpdateUserParams{ID: user.ID, Name: newName, AvatarUrl: newAvatar}); updateErr == nil {
+			user = updated
+		}
+	}
+
+	tokenString, err := h.issueJWT(user)
+	if err != nil {
+		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
+			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to generate token")
+		return
+	}
+	if err := auth.SetAuthCookies(w, tokenString); err != nil {
+		slog.Warn("failed to set auth cookies", "error", err)
+	}
+	if h.CFSigner != nil {
+		for _, cookie := range h.CFSigner.SignedCookies(time.Now().Add(auth.AuthTokenTTL())) {
+			http.SetCookie(w, cookie)
+		}
+	}
+
+	slog.Info("user logged in via gitea", append(logger.RequestAttrs(r), "user_id", uuidToString(user.ID), "email", user.Email)...)
+	writeJSON(w, http.StatusOK, LoginResponse{Token: tokenString, User: h.userToResponse(user)})
+}
+
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	var req GoogleLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

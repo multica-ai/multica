@@ -809,6 +809,13 @@ export class ApiClient {
     });
   }
 
+  async giteaLogin(code: string, state: string): Promise<LoginResponse> {
+    return this.fetch("/auth/gitea", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+  }
+
   async logout(): Promise<void> {
     await this.fetch("/auth/logout", { method: "POST" });
   }

@@ -34,6 +34,7 @@ const mockApiVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiSetToken = vi.hoisted(() => vi.fn());
 const mockApiGetMe = vi.hoisted(() => vi.fn());
 const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
+const mockApiGetBaseUrl = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", async () => {
@@ -66,6 +67,7 @@ vi.mock("@multica/core/api", () => ({
     setToken: mockApiSetToken,
     getMe: mockApiGetMe,
     issueCliToken: mockApiIssueCliToken,
+    getBaseUrl: mockApiGetBaseUrl,
   },
 }));
 
@@ -98,6 +100,7 @@ describe("LoginPage", () => {
     vi.clearAllMocks();
     // Default: no existing session (getMe rejects when no auth)
     mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
+    mockApiGetBaseUrl.mockReturnValue("http://api.local");
     localStorage.clear();
     // Reset window.location for tests that change it
     Object.defineProperty(window, "location", {
@@ -113,6 +116,22 @@ describe("LoginPage", () => {
   // -------------------------------------------------------------------------
   // Email step rendering
   // -------------------------------------------------------------------------
+
+  it("starts Gitea OAuth through the backend route", async () => {
+    renderWithI18n(
+      <LoginPage
+        onSuccess={onSuccess}
+        gitea={{ state: "platform:desktop" }}
+      />,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Gitea/ }));
+
+    expect(window.location.href).toBe(
+      "http://api.local/auth/gitea?state=platform%3Adesktop",
+    );
+  });
 
   it("renders email form with 'Sign in to Multica' title", () => {
     renderWithI18n(<LoginPage onSuccess={onSuccess} />);
