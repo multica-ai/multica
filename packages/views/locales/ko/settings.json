@@ -257,6 +257,8 @@
       "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
       "open_settings": "설정 열기",
       "close_tab": "활성 탭 닫기",
+      "select_tab_1_to_8": "1~8번째 탭 선택",
+      "select_last_tab": "마지막 탭 선택",
       "zoom_in": "확대",
       "zoom_out": "축소",
       "reset_zoom": "확대/축소 재설정",

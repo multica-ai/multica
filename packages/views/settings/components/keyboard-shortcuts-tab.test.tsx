@@ -38,6 +38,17 @@ describe("KeyboardShortcutsTab", () => {
     expect(within(rightSidebarRecorder).getByTitle("/")).toHaveTextContent("/");
   });
 
+  it("shows the fixed numbered tab shortcuts", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByText("Select tab 1–8")).toBeInTheDocument();
+    expect(screen.getByText("Select last tab")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Ctrl+1–8" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Ctrl+9" })).toBeInTheDocument();
+  });
+
   it("records a shortcut and applies it immediately", () => {
     renderWithI18n(<KeyboardShortcutsTab />);
     const recorder = screen.getByRole("button", {

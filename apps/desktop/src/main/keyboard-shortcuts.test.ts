@@ -16,10 +16,16 @@ function makeWc(initialLevel = 0) {
 function key(
   k: string,
   mods: Partial<Pick<ShortcutInput, "control" | "meta" | "alt" | "shift">> = {},
+  code = /^[0-9]$/.test(k)
+    ? `Digit${k}`
+    : /^[a-z]$/i.test(k)
+      ? `Key${k.toUpperCase()}`
+      : "",
 ): ShortcutInput {
   return {
     type: "keyDown",
     key: k,
+    code,
     control: false,
     meta: false,
     alt: false,
@@ -189,10 +195,14 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
     ).toBe(false);
   });
 
-  it("rejects Shift and secondary modifiers", () => {
+  it("keeps Shift available as a distinct chord and rejects secondary modifiers", () => {
     const wc = makeWc();
     expect(
-      handleAppShortcut(key("1", { meta: true, shift: true }), wc, "darwin"),
+      handleAppShortcut(
+        key("1", { meta: true, shift: true }, "Digit1"),
+        wc,
+        "darwin",
+      ),
     ).toBe(false);
     expect(
       handleAppShortcut(key("1", { meta: true, alt: true }), wc, "darwin"),
@@ -200,6 +210,61 @@ describe("handleAppShortcut — direct tab selection (Cmd/Ctrl+1..9)", () => {
     expect(
       handleAppShortcut(
         key("1", { meta: true, control: true }),
+        wc,
+        "darwin",
+      ),
+    ).toBe(false);
+  });
+
+  it("uses physical number-row codes on layouts whose logical keys are not digits", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("&", { control: true }, "Digit1"),
+        wc,
+        "win32",
+      ),
+    ).toEqual({ action: "select-tab", key: 1 });
+    expect(
+      handleAppShortcut(
+        key("ç", { control: true }, "Digit9"),
+        wc,
+        "win32",
+      ),
+    ).toEqual({ action: "select-tab", key: 9 });
+    expect(
+      handleAppShortcut(
+        key("-", { control: true }, "Digit6"),
+        wc,
+        "win32",
+      ),
+    ).toEqual({ action: "select-tab", key: 6 });
+    expect(wc.setZoomLevel).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9] as const)(
+    "maps physical Numpad%i regardless of its logical key",
+    (shortcutKey) => {
+      const wc = makeWc();
+      expect(
+        handleAppShortcut(
+          key(
+            "Unidentified",
+            { control: true },
+            `Numpad${shortcutKey}`,
+          ),
+          wc,
+          "linux",
+        ),
+      ).toEqual({ action: "select-tab", key: shortcutKey });
+    },
+  );
+
+  it("does not trust a numeric logical key from a non-number physical code", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        key("1", { meta: true }, "KeyA"),
         wc,
         "darwin",
       ),

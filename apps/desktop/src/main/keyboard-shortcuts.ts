@@ -7,6 +7,7 @@ import type { TabSelectionShortcutKey } from "../shared/main-renderer-messages";
 export type ShortcutInput = {
   type: string;
   key: string;
+  code: string;
   control: boolean;
   meta: boolean;
   alt: boolean;
@@ -76,12 +77,16 @@ export function handleAppShortcut(
   // 9 is interpreted by the renderer as "last tab" regardless of count.
   // Main owns the chord so it works while focus is inside any editor/control
   // and can prevent both renderer handlers and native accelerators from also
-  // acting. Holding the chord is swallowed without repeatedly changing MRU.
-  if (!input.shift && /^[1-9]$/.test(input.key)) {
+  // acting. Match the physical code so number-row shortcuts work on layouts
+  // where the logical key is punctuation (for example, French AZERTY). Shift
+  // remains excluded so Cmd/Ctrl+Shift+digit stays available as a distinct
+  // chord. Holding the chord is swallowed without repeatedly changing MRU.
+  const tabSelectionMatch = /^(?:Digit|Numpad)([1-9])$/.exec(input.code);
+  if (!input.shift && tabSelectionMatch) {
     if (input.isAutoRepeat) return true;
     return {
       action: "select-tab",
-      key: Number(input.key) as TabSelectionShortcutKey,
+      key: Number(tabSelectionMatch[1]) as TabSelectionShortcutKey,
     };
   }
 
