@@ -88,6 +88,7 @@ import { isImeComposing } from "@multica/core/utils";
 import { ThreadMinimap } from "./thread-minimap";
 import { ThreadNavPanel, mentionsUser, type ThreadNavThread } from "./thread-nav-panel";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
+import { buildCommentQuoteMarkdown } from "../utils/comment-quote";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -1255,6 +1256,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [restoreScrollRef],
   );
   const [pendingPostedCommentId, setPendingPostedCommentId] = useState<string | null>(null);
+  const quoteRequestSequenceRef = useRef(0);
+  const [quoteRequest, setQuoteRequest] = useState<{ id: number; markdown: string } | null>(null);
   const scrollToTimelineBottom = useCallback((commentId: string) => {
     setPendingPostedCommentId(commentId);
   }, []);
@@ -1367,6 +1370,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         : {}),
     });
   }, [issue, openModal]);
+
+  const quoteInNewComment = useCallback((entry: TimelineEntry) => {
+    setQuoteRequest({
+      id: ++quoteRequestSequenceRef.current,
+      markdown: buildCommentQuoteMarkdown(entry.content ?? ""),
+    });
+    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, []);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -2675,6 +2686,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
             onCreateSubIssue={openCommentSubIssue}
+            onQuoteInNewComment={quoteInNewComment}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
             expandedResolvedIds={expandedResolved}
@@ -3516,6 +3528,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <CommentInput
               key={id}
               issueId={id}
+              quoteRequest={quoteRequest}
               onSubmit={submitComment}
               onAccepted={scrollToTimelineBottom}
             />

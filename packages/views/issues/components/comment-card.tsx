@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Quote, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -113,6 +113,8 @@ interface CommentCardProps {
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
+  /** Quote this row into the issue-level top-level comment composer. */
+  onQuoteInNewComment?: (entry: TimelineEntry) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /**
@@ -596,6 +598,7 @@ function CommentRow({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onQuoteInNewComment,
   onResolveToggle,
 }: {
   issueId: string;
@@ -610,6 +613,7 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onCreateSubIssue?: (commentId: string) => void;
+  onQuoteInNewComment?: (entry: TimelineEntry) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
 }) {
   const { t } = useT("issues");
@@ -682,6 +686,12 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {onQuoteInNewComment && entry.comment_type === "comment" && (
+                <DropdownMenuItem onClick={() => onQuoteInNewComment(entry)}>
+                  <Quote className="h-3.5 w-3.5" aria-hidden />
+                  {t(($) => $.comment.quote_reply)}
+                </DropdownMenuItem>
+              )}
               {onCreateSubIssue && entry.comment_type === "comment" && (
                 <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                   <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
@@ -859,6 +869,7 @@ function CommentCardImpl({
   onDelete,
   onToggleReaction,
   onCreateSubIssue,
+  onQuoteInNewComment,
   onResolveToggle,
   onCollapseResolved,
   expandedResolvedIds,
@@ -1010,6 +1021,12 @@ function CommentCardImpl({
                         <Copy className="h-3.5 w-3.5" />
                         {t(($) => $.comment.copy_action)}
                       </DropdownMenuItem>
+                      {onQuoteInNewComment && entry.comment_type === "comment" && (
+                        <DropdownMenuItem onClick={() => onQuoteInNewComment(entry)}>
+                          <Quote className="h-3.5 w-3.5" aria-hidden />
+                          {t(($) => $.comment.quote_reply)}
+                        </DropdownMenuItem>
+                      )}
                       {onCreateSubIssue && entry.comment_type === "comment" && (
                         <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
                           <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
@@ -1209,6 +1226,7 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onCreateSubIssue={onCreateSubIssue}
+                    onQuoteInNewComment={onQuoteInNewComment}
                     onResolveToggle={onResolveToggle}
                   />
                 </div>
@@ -1249,6 +1267,7 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onCreateSubIssue={onCreateSubIssue}
+                    onQuoteInNewComment={onQuoteInNewComment}
                     onResolveToggle={onResolveToggle}
                   />
                 </div>

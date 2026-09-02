@@ -225,6 +225,13 @@ vi.mock("../../editor", async () => ({
       insertUploadPlaceholder: () => true,
       settleUploadPlaceholder: () => false,
       uploadFile: () => {},
+      insertMarkdownAtEnd: (markdown: string) => {
+        valueRef.current = `${valueRef.current}\n\n${markdown}`.trim();
+        dirtyRef.current = true;
+        setEditorValue(valueRef.current);
+        onUpdate?.(valueRef.current, baseRef.current);
+        return true;
+      },
     }));
     return (
       <textarea
@@ -744,6 +751,26 @@ describe("IssueDetail (shared)", () => {
       anchor_comment_id: "source-reply",
       parent_issue_id: "issue-1",
     }));
+  });
+
+  it("quotes a comment into the top-level composer instead of the thread reply composer", async () => {
+    const { container } = renderIssueDetail();
+    await screen.findByText("Started working on this");
+
+    const menuButton = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('button[aria-label="Comment actions"]'),
+    ).find((button) => button.closest("[id^='comment-']")?.id === "comment-comment-1");
+    expect(menuButton).toBeTruthy();
+    fireEvent.click(menuButton!);
+    fireEvent.click(await screen.findByText("Quote reply"));
+
+    await waitFor(() => {
+      const topLevel = screen.getByPlaceholderText("Leave a comment...") as HTMLTextAreaElement;
+      expect(topLevel.value).toBe("> Started working on this");
+    });
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "nearest" });
+    expect(screen.getAllByTestId("reply-composer-shell")).toHaveLength(2);
+    expect(screen.queryByPlaceholderText("Leave a reply...")).not.toBeInTheDocument();
   });
 
   it("does not offer source-context creation for system comments", async () => {

@@ -281,6 +281,22 @@ beforeEach(() => {
   focusCalls.blurred = 0;
 });
 
+describe("top-level comment quote insertion", () => {
+  it("activates only the top-level composer, inserts once, and focuses it", async () => {
+    const quoteRequest = {
+      id: 1,
+      markdown: "> Earlier decision",
+    };
+    renderWithProviders(
+      <CommentInput issueId="issue-1" onSubmit={vi.fn().mockResolvedValue(true)} quoteRequest={quoteRequest} />,
+    );
+
+    await waitFor(() => expect(insertMarkdownSpy).toHaveBeenCalledWith(quoteRequest.markdown));
+    expect(focusCalls.focused).toBeGreaterThan(0);
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBe(quoteRequest.markdown);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Quick action `/` menu (MUL-5588)
 // ---------------------------------------------------------------------------

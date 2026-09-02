@@ -17,6 +17,10 @@ import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
   issueId: string;
+  /** A user-selected historical comment to append to this TOP-LEVEL composer.
+   * The request id makes quoting the same comment twice a deliberate second
+   * action instead of an effect replay. */
+  quoteRequest?: { id: number; markdown: string } | null;
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
@@ -25,7 +29,7 @@ interface CommentInputProps {
   onAccepted?: (commentId: string) => void;
 }
 
-function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
+function CommentInput({ issueId, quoteRequest, onSubmit, onAccepted }: CommentInputProps) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
@@ -69,6 +73,7 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
       useCommentDraftStore.getState().getUploads(draftKey).length > 0,
     editorRef,
   });
+  const { active: editorActive, ready: editorReady, activate: activateEditor } = lazy;
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: lazy.uploadOrQueue,
   });
@@ -76,6 +81,23 @@ function CommentInput({ issueId, onSubmit, onAccepted }: CommentInputProps) {
   // composer to the bottom of the scroll viewport when enabled. Shared with
   // the host so the height cap below can never outlive the pinning.
   const sticky = useStickyComposer();
+
+  // Quoting is intentionally routed into this top-level composer, never the
+  // per-thread ReplyInput. Summon the lazy editor, wait until Tiptap is live,
+  // then append through its Markdown command so the normal onUpdate → draft
+  // persistence path remains the single writer.
+  const handledQuoteRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!quoteRequest || handledQuoteRequestRef.current === quoteRequest.id) return;
+    if (!editorActive) {
+      activateEditor();
+      return;
+    }
+    if (!editorReady) return;
+    if (editorRef.current?.insertMarkdownAtEnd(quoteRequest.markdown) !== true) return;
+    handledQuoteRequestRef.current = quoteRequest.id;
+    editorRef.current.focus();
+  }, [quoteRequest, editorActive, editorReady, activateEditor]);
 
   // Draft persistence. Hydrate from store on mount via `defaultValue` above
   // (ContentEditorRef has no setContent, so this is the only injection point).
