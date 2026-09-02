@@ -318,6 +318,12 @@ var issueSubscriberRemoveCmd = &cobra.Command{
 
 // Execution history subcommands.
 
+// headerActiveRunsTruncated mirrors handler.HeaderActiveRunsTruncated. Declared
+// as a literal rather than imported because the CLI does not depend on the
+// handler package (same convention as headerTimelineTruncated in
+// `issue timeline`).
+const headerActiveRunsTruncated = "X-Active-Runs-Truncated"
+
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
@@ -572,7 +578,7 @@ func init() {
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
 	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
-	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active; adds an ISSUE column. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active; adds an ISSUE column. Ordered running-first, newest-first within a status, and capped at 50 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -2172,8 +2178,18 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 	}
 
 	var runs []map[string]any
-	if err := client.GetJSON(ctx, path, &runs); err != nil {
+	respHeaders, err := client.GetJSONWithHeaders(ctx, path, &runs)
+	if err != nil {
 		return fmt.Errorf("list runs: %w", err)
+	}
+	// A truncated coordination read and a complete one look identical in the
+	// body, and reading the first as the second is exactly the wrong
+	// conclusion: "no run on that sibling" when the answer was simply cut off.
+	// Same stderr convention as the comment-list paging cursors.
+	if respHeaders.Get(headerActiveRunsTruncated) == "true" {
+		fmt.Fprintln(os.Stderr,
+			"warning: active runs truncated by the server cap: more runs are in flight than this read returns. "+
+				"\"No run on that issue\" cannot be concluded from this read.")
 	}
 
 	output, _ := cmd.Flags().GetString("output")

@@ -159,6 +159,9 @@ away, so no task is left orphaned.
 | Daemon prompts point to the target's comment history and concrete sibling `run-messages` commands | `server/internal/daemon/prompt.go` (`buildActiveSiblingRunsBlock`) |
 | `issue runs --active` / `--siblings` send `active=true` / `scope=family` to the task-runs endpoint | `server/cmd/multica/cmd_issue.go` (`runIssueRuns`) |
 | `scope=family` roots at the issue's parent, or the issue itself when it has none, and returns in-flight runs on that root plus all of its children | `server/internal/handler/daemon.go` (`ListTasksByIssue`), `server/pkg/db/queries/agent.sql` (`ListActiveTasksByIssueFamily`) |
+| Invalid `active` / `scope` values are rejected rather than silently answering with the full history | `server/internal/handler/daemon.go` (`ListTasksByIssue`) |
+| The family cap fetches one row past `familyActiveRunCap` and reports truncation on `X-Active-Runs-Truncated`, which the CLI surfaces on stderr | `server/internal/handler/daemon.go` (`familyActiveRunCap`, `HeaderActiveRunsTruncated`), `server/cmd/multica/cmd_issue.go` (`runIssueRuns`) |
+| The active path skips usage hydration, which is keyed by issue and spans the full history | `server/internal/handler/daemon.go` (`ListTasksByIssue`), `server/pkg/db/queries/task_usage.sql` (`ListIssueTaskUsage`) |
 
 The self-assignment guard is intentionally pair-scoped. It does not treat
 "this agent is busy on some other issue" as a reason to suppress a fresh

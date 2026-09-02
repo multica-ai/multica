@@ -46,18 +46,24 @@ func (f familyFixture) task(t *testing.T, issueID, status string) string {
 	})
 }
 
-// runsRequest drives the handler the way the router does: path params carry the
-// issue, the raw query string carries the scope.
-func runsRequest(t *testing.T, issueID, query string) []AgentTaskResponse {
+// runsResponse drives the handler the way the router does: path params carry
+// the issue, the raw query string carries the scope. Headers come back too —
+// the truncation signal rides one.
+func runsResponse(t *testing.T, issueID, query string) *testutil.Response {
 	t.Helper()
 	path := "/api/issues/" + issueID + "/task-runs"
 	if query != "" {
 		path += "?" + query
 	}
-	var out []AgentTaskResponse
-	testutil.Call(t, testHandler.ListTasksByIssue,
+	return testutil.Call(t, testHandler.ListTasksByIssue,
 		withURLParam(newRequest(http.MethodGet, path, nil), "id", issueID),
-	).Want(http.StatusOK).JSON(&out)
+	)
+}
+
+func runsRequest(t *testing.T, issueID, query string) []AgentTaskResponse {
+	t.Helper()
+	var out []AgentTaskResponse
+	runsResponse(t, issueID, query).Want(http.StatusOK).JSON(&out)
 	return out
 }
 
@@ -203,4 +209,99 @@ func TestListTasksByIssueRejectsUnknownScope(t *testing.T) {
 		withURLParam(newRequest(http.MethodGet,
 			"/api/issues/"+f.childA+"/task-runs?scope=sibling", nil), "id", f.childA),
 	).Want(http.StatusBadRequest)
+}
+
+// The whole point of --active is a cheap read. ListIssueTaskUsage returns a row
+// per (task, provider, model) for EVERY task the issue ever ran, so hydrating
+// it here would keep paying the full-history cost the filter exists to remove.
+// Usage is an execution-log concern; a coordination read must not carry it even
+// when the active task happens to have some recorded.
+func TestListTasksByIssueActiveOmitsUsage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+	running := f.task(t, f.childA, "running")
+	dbfx.Exec(t, `
+		INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks)
+		VALUES ($1, 'anthropic', 'claude-opus-5', 1000, 500, 0, 0, NULL)
+	`, running)
+
+	active := runsRequest(t, f.childA, "active=true")
+	if len(active) != 1 {
+		t.Fatalf("active runs = %d, want 1", len(active))
+	}
+	if len(active[0].Usage) != 0 {
+		t.Fatalf("active read carried usage %+v; the coordination path must not query it", active[0].Usage)
+	}
+
+	// The execution log still gets it — this is a per-path decision, not a
+	// removal of the feature.
+	history := runsRequest(t, f.childA, "")
+	if len(history) != 1 || len(history[0].Usage) != 1 {
+		t.Fatalf("history read lost its usage: %+v", history)
+	}
+}
+
+// A boolean param that only recognises the exact string "true" turns every
+// typo into a silent downgrade: `active=tru` would answer "who is here now?"
+// with the whole execution history under a 200, and the caller reads a pile of
+// finished runs as the live ones. Same reason the unknown-scope check exists.
+func TestListTasksByIssueRejectsInvalidActive(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+	f.task(t, f.childA, "completed")
+
+	for _, bad := range []string{"tru", "TRUE", "1", "yes", ""} {
+		query := "active=" + bad
+		if bad == "" {
+			// The empty value is the one non-rejection in the set: it means the
+			// caller did not ask, so the read stays the full history.
+			runsRequest(t, f.childA, query)
+			continue
+		}
+		runsResponse(t, f.childA, query).Want(http.StatusBadRequest)
+	}
+
+	// false is a real value and must not 400.
+	runsRequest(t, f.childA, "active=false")
+}
+
+// A truncated coordination read and a complete one are indistinguishable in the
+// body, and reading the first as the second produces exactly the wrong
+// conclusion — "no run on that sibling" when the answer was cut off. The cap
+// therefore has to announce itself.
+func TestListTasksByIssueFamilyScopeReportsTruncation(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+
+	// Exactly at the cap: a full page is not a truncated one.
+	for i := 0; i < familyActiveRunCap; i++ {
+		f.task(t, f.childA, "running")
+	}
+	full := runsResponse(t, f.childA, "scope=family").Want(http.StatusOK)
+	if got := full.Header().Get(HeaderActiveRunsTruncated); got != "" {
+		t.Fatalf("truncation header = %q on an exactly-full page, want empty", got)
+	}
+	var atCap []AgentTaskResponse
+	full.JSON(&atCap)
+	if len(atCap) != familyActiveRunCap {
+		t.Fatalf("rows at cap = %d, want %d", len(atCap), familyActiveRunCap)
+	}
+
+	// One past it: the response is capped AND says so.
+	f.task(t, f.childB, "running")
+	over := runsResponse(t, f.childA, "scope=family").Want(http.StatusOK)
+	if got := over.Header().Get(HeaderActiveRunsTruncated); got != "true" {
+		t.Fatalf("truncation header = %q past the cap, want \"true\"", got)
+	}
+	var truncated []AgentTaskResponse
+	over.JSON(&truncated)
+	if len(truncated) != familyActiveRunCap {
+		t.Fatalf("rows past cap = %d, want them trimmed to %d", len(truncated), familyActiveRunCap)
+	}
 }

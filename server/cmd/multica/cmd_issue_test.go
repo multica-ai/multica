@@ -4138,3 +4138,57 @@ func TestRunIssueRunsSiblingsTableCarriesIssueColumn(t *testing.T) {
 		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
 	}
 }
+
+// A capped family read and a complete one are identical in the body. If the CLI
+// swallows the server's truncation header, an agent reads "no run on that
+// sibling" off a list that was simply cut off — the one wrong conclusion this
+// command exists to prevent.
+func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name      string
+		truncated bool
+	}{
+		{"truncated read warns", true},
+		{"complete read stays quiet", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					if tc.truncated {
+						w.Header().Set(headerActiveRunsTruncated, "true")
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{
+						"id": "abcd1234-0000-0000-0000-000000000000", "status": "running",
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			if err := cmd.Flags().Set("siblings", "true"); err != nil {
+				t.Fatalf("set --siblings: %v", err)
+			}
+
+			capture := captureStderr(t)
+			_, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+			stderr := capture.read()
+			if err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			warned := strings.Contains(stderr, "truncated")
+			if warned != tc.truncated {
+				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
+			}
+		})
+	}
+}

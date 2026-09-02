@@ -267,6 +267,11 @@ child of that parent — and labels each row with the issue it belongs to, which
 is how you find another agent already working on a sibling sub-issue before you
 open a second PR against the same code.
 
+Rows come back running-first, newest-first within a status, and the family read
+is capped at 50. When the cap truncates the answer the CLI prints a warning on
+stderr — read it. Without that warning a short list means "nobody else is
+there"; with it, the list proves nothing about the runs it did not return.
+
 Both are advisory reads. Nothing here reserves an issue or serialises anything:
 a run you see may finish a second later, and one you don't see may start a
 second later. Coordinate through the issue's comments — the reads tell you whom

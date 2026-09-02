@@ -4880,13 +4880,28 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// familyActiveRunCap bounds a scope=family read. A defensive ceiling, not a
-// product limit: the coordination question ("is anyone else already working in
-// this sub-issue family?") is answered by the first few rows, and a parent that
-// fanned out hundreds of children must not be able to turn one advisory read
-// into an unbounded response. The query orders running-first so the rows this
-// drops are the least interesting ones.
+// familyActiveRunCap bounds a scope=family read.
+//
+// A runaway guard, not a display limit. Real concurrency in a family is bounded
+// far below this by runtime capacity and per-agent task limits, so 50 is chosen
+// to sit above any legitimate answer while still capping what a parent that
+// fanned out hundreds of children can make one advisory read return. The
+// coordination question is answered by the first few rows, and the query orders
+// running-first, so what the cap drops is the least decision-relevant.
+//
+// A cap that silently truncates would be worse than no cap: "I saw no run on
+// that sibling" and "the answer was cut off" would look identical, and an agent
+// would read the second as the first. So the handler asks for one row more than
+// it will return, and says so in HeaderActiveRunsTruncated when that extra row
+// comes back.
 const familyActiveRunCap = 50
+
+// HeaderActiveRunsTruncated tells a caller its coordination read hit
+// familyActiveRunCap and is therefore an incomplete picture of who is working
+// in this family. Same shape and convention as HeaderTimelineTruncated: the
+// signal rides a header because the response body is a bare array that existing
+// callers parse positionally.
+const HeaderActiveRunsTruncated = "X-Active-Runs-Truncated"
 
 // ListTasksByIssue returns tasks for an issue — the execution history behind
 // the issue-detail sidebar, and the coordination reads behind
@@ -4915,7 +4930,22 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "scope must be 'issue' or 'family'")
 		return
 	}
-	activeOnly := r.URL.Query().Get("active") == "true"
+	// Parse rather than compare. `active=tru` answering with the full history
+	// under a 200 is the same silent-downgrade failure the unknown-scope check
+	// above rejects: the caller asked who is here NOW and would be handed every
+	// run that ever finished, which reads as "nobody is here" only after it has
+	// paid for the whole log. Same shape as the comment-list boolean params.
+	activeOnly := false
+	if activeStr := r.URL.Query().Get("active"); activeStr != "" {
+		switch activeStr {
+		case "true":
+			activeOnly = true
+		case "false":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid active parameter; expected boolean")
+			return
+		}
+	}
 
 	workspaceID := uuidToString(issue.WorkspaceID)
 
@@ -4928,27 +4958,30 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		if issue.ParentIssueID.Valid {
 			root = issue.ParentIssueID
 		}
+		// One row beyond the cap, so a full page can be told apart from a
+		// truncated one without a second count query.
 		rows, err := h.Queries.ListActiveTasksByIssueFamily(r.Context(), db.ListActiveTasksByIssueFamilyParams{
 			WorkspaceID: issue.WorkspaceID,
 			RootIssueID: root,
-			RowLimit:    familyActiveRunCap,
+			RowLimit:    familyActiveRunCap + 1,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list tasks")
 			return
+		}
+		if len(rows) > familyActiveRunCap {
+			rows = rows[:familyActiveRunCap]
+			w.Header().Set(HeaderActiveRunsTruncated, "true")
 		}
 		resp := make([]AgentTaskResponse, len(rows))
 		for i, row := range rows {
 			resp[i] = taskToResponse(row.AgentTaskQueue, workspaceID)
 			// Rows span several issues here, so each one has to carry the issue
 			// it belongs to — a caller cannot label it from the task alone.
-			resp[i].IssueIdentifier = fmt.Sprintf("%s-%d", row.IssuePrefix, row.IssueNumber)
+			resp[i].IssueIdentifier = service.IssueIdentifier(row.IssuePrefix, row.IssueNumber)
 			resp[i].IssueTitle = row.IssueTitle
 		}
 		h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-		// No usage hydration: ListIssueTaskUsage is keyed by a single issue, so
-		// a family read would need one query per issue to fill a column that is
-		// near-empty for in-flight runs anyway.
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -4973,7 +5006,14 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
 	// one batch) — otherwise the badge falls back to "someone" on issue detail.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-	h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+	// Usage belongs to the execution log, not to a coordination read.
+	// ListIssueTaskUsage returns a row per (task, provider, model) for EVERY
+	// task the issue ever ran, so hydrating it on the active path would keep
+	// paying the full-history cost this filter exists to remove — and pay it
+	// for a column that is near-empty on runs that have not finished.
+	if !activeOnly {
+		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
