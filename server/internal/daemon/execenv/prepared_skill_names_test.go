@@ -185,17 +185,34 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 					t.Fatalf("%s: no private discovery root for %s", phase, provider)
 				}
 				want := []string{"review", "review-multica"}
-				if !reflect.DeepEqual(env.PreparedSkillNames, want) {
-					t.Fatalf("%s: names = %v, want %v", phase, env.PreparedSkillNames, want)
+				if provider == "codex" {
+					// Batch suffixes must not claim a user skill's name during seeding.
+					want[1] = "review-multica-multica"
+					if got, err := os.ReadFile(filepath.Join(discoveryRoot, "skills", "review-multica", "SKILL.md")); err != nil || string(got) != userSkill {
+						t.Errorf("%s: user skill is no longer discoverable: %q, %v", phase, got, err)
+					}
 				}
+				if !reflect.DeepEqual(env.PreparedSkillNames, want) {
+					t.Errorf("%s: names = %v, want %v", phase, env.PreparedSkillNames, want)
+				}
+				brief := buildMetaSkillContent(provider, ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames))
 				for i, name := range want {
+					if !strings.Contains(brief, "**"+name+"**") {
+						t.Errorf("%s: runtime brief does not list allocated name %q", phase, name)
+					}
 					data, err := os.ReadFile(filepath.Join(discoveryRoot, "skills", name, "SKILL.md"))
 					if err != nil {
-						t.Fatalf("%s: read discovered skill %q: %v", phase, name, err)
+						t.Errorf("%s: read discovered skill %q: %v", phase, name, err)
+						continue
 					}
 					if !strings.Contains(string(data), "\nname: "+name+"\n") || !strings.Contains(string(data), params.Task.AgentSkills[i].Content) {
 						t.Errorf("%s: discovered skill %q has wrong name or content: %s", phase, name, data)
 					}
+				}
+				if provider == "codex" && strings.Contains(brief, "**review-multica**") {
+					t.Errorf("%s: runtime brief advertises the user skill as an assigned skill", phase)
+				}
+				for _, name := range []string{"review", "review-multica"} {
 					if got, err := os.ReadFile(filepath.Join(sharedHome, "skills", name, "SKILL.md")); err != nil || string(got) != userSkill {
 						t.Fatalf("%s: source user skill changed: %q, %v", phase, got, err)
 					}
@@ -205,24 +222,99 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 	}
 }
 
-func TestPrepareQwenpawUsesAllocatedWorkdirSkillNames(t *testing.T) {
+func TestPrepareQwenpawKeepsPrivateSkillNamesIndependent(t *testing.T) {
 	t.Parallel()
-	workDir := t.TempDir()
-	mustWrite(t, filepath.Join(skillsDirPath(workDir, "qwenpaw"), "review", "SKILL.md"), "User-owned skill.")
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-qwenpaw", TaskID: "task-qwenpaw",
-		Provider: "qwenpaw", LocalWorkDir: workDir,
-		Task: TaskContextForEnv{AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}}},
-	}, testLogger())
-	if err != nil {
+	for _, mode := range []string{"prepare", "reuse"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			params := PrepareParams{
+				WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-qwenpaw", TaskID: "task-qwenpaw",
+				Provider: "qwenpaw",
+				Task:     TaskContextForEnv{AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}}},
+			}
+			workDir := t.TempDir()
+			phases := []string{"prepare"}
+			if mode == "reuse" {
+				initial := params
+				initial.Task.AgentSkills = nil
+				env, err := Prepare(initial, testLogger())
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer env.Cleanup(true)
+				workDir = env.WorkDir
+				phases = []string{"reuse", "reuse-again"}
+			}
+			skillsDir := skillsDirPath(workDir, params.Provider)
+			const userSkill = "User-owned skill."
+			mustWrite(t, filepath.Join(skillsDir, "review", "SKILL.md"), userSkill)
+			for _, phase := range phases {
+				var env *Environment
+				if mode == "prepare" {
+					params.LocalWorkDir = workDir
+					var err error
+					env, err = Prepare(params, testLogger())
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer env.Cleanup(true)
+				} else {
+					env = Reuse(ReuseParams{
+						WorkspacesRoot: params.WorkspacesRoot, WorkDir: workDir, Provider: params.Provider, Task: params.Task,
+					}, testLogger())
+					if env == nil {
+						t.Fatalf("%s returned no environment", phase)
+					}
+				}
+				if !reflect.DeepEqual(env.PreparedSkillNames, []string{"review"}) {
+					t.Errorf("%s: prepared names = %v, want [review]", phase, env.PreparedSkillNames)
+				}
+				// QwenPaw discovers the isolated --workspace, not the workdir sidecar.
+				data, err := os.ReadFile(filepath.Join(env.QwenpawWorkspace, "skills", "review", "SKILL.md"))
+				if err != nil || !strings.Contains(string(data), "\nname: review\n") {
+					t.Errorf("%s: workdir collision changed the independent private skill name: %s, %v", phase, data, err)
+				}
+				brief := buildMetaSkillContent(params.Provider, ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames))
+				if !strings.Contains(brief, "**review**") || strings.Contains(brief, "**review-multica**") {
+					t.Errorf("%s: runtime brief does not advertise the private discovery name", phase)
+				}
+				if _, err := os.Stat(filepath.Join(skillsDir, "review-multica", "SKILL.md")); err != nil {
+					t.Errorf("%s: workdir sidecar did not use a collision-free name: %v", phase, err)
+				}
+				if got, err := os.ReadFile(filepath.Join(skillsDir, "review", "SKILL.md")); err != nil || string(got) != userSkill {
+					t.Fatalf("%s: user-owned workdir skill changed: %q, %v", phase, got, err)
+				}
+			}
+		})
+	}
+}
+
+func TestHydrateCodexSkillsReturnsNamesOnConfigError(t *testing.T) {
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+	mustWrite(t, filepath.Join(sharedHome, "skills", "review-multica", "SKILL.md"), "User-owned skill.")
+	codexHome := t.TempDir()
+	// Force a policy-config error after skill materialization has completed.
+	if err := os.Mkdir(filepath.Join(codexHome, "config.toml"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	defer env.Cleanup(true)
-	if !reflect.DeepEqual(env.PreparedSkillNames, []string{"review-multica"}) {
-		t.Fatalf("prepared names = %v, want [review-multica]", env.PreparedSkillNames)
+	skills := []SkillContextForEnv{
+		{Name: "Review", Content: "First assigned review."},
+		{Name: "Review", Content: "Second assigned review."},
 	}
-	data, err := os.ReadFile(filepath.Join(env.QwenpawWorkspace, "skills", "review-multica", "SKILL.md"))
-	if err != nil || !strings.Contains(string(data), "\nname: review-multica\n") {
-		t.Fatalf("private discovery path did not preserve allocated workdir name: %s, %v", data, err)
+	names, err := hydrateCodexSkills(codexHome, skills, []RuntimeSkillRefForEnv{
+		{Root: "provider", Key: "review-multica"},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("expected the user skill's disabled-policy config write to fail")
+	}
+	want := []string{"review", "review-multica-multica"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("allocated names lost after config failure: %v, want %v", names, want)
+	}
+	for _, name := range names {
+		if _, err := os.Stat(filepath.Join(codexHome, "skills", name, "SKILL.md")); err != nil {
+			t.Errorf("returned name %q has no materialized skill: %v", name, err)
+		}
 	}
 }
