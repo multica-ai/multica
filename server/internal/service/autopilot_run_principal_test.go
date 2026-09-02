@@ -209,6 +209,34 @@ func TestResolveAutopilotTriggerPrincipal_FailsClosed(t *testing.T) {
 		}
 	})
 
+	t.Run("autopilot in another workspace resolves nobody", func(t *testing.T) {
+		// The membership check alone cannot catch this: it only proves the resolved
+		// human belongs to the workspace passed in. A member of TWO workspaces
+		// satisfies that even when the trigger came from the other tenant, so the
+		// lookup itself has to bind the autopilot to the workspace (Elon review).
+		var otherWorkspaceID string
+		if err := pool.QueryRow(ctx, `INSERT INTO workspace (name, slug) VALUES ('other ws', $1) RETURNING id`,
+			fmt.Sprintf("other-ws-%d", seq+1000)).Scan(&otherWorkspaceID); err != nil {
+			t.Fatalf("seed other workspace: %v", err)
+		}
+		t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID) })
+		// The SAME human is a member of both workspaces, so membership passes on
+		// either side and only the autopilot binding can reject.
+		if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`,
+			otherWorkspaceID, creatorID); err != nil {
+			t.Fatalf("join other workspace: %v", err)
+		}
+
+		triggerID := seedTrigger("member", creatorID)
+		if got := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, apUUID, wsUUID); !got.Valid {
+			t.Fatal("precondition: the trigger must resolve in its own workspace")
+		}
+		got := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, apUUID, util.MustParseUUID(otherWorkspaceID))
+		if got.Valid {
+			t.Fatalf("a foreign workspace resolved %q; the autopilot is not bound to it", util.UUIDToString(got))
+		}
+	})
+
 	t.Run("creator removed from the workspace resolves nobody", func(t *testing.T) {
 		removed := seedExtraMember(t, pool, workspaceID, "principal-removed")
 		triggerID := seedTrigger("member", removed)

@@ -1496,9 +1496,11 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
-		// Seed the responsible publisher = creator; a later substantive edit re-stamps
-		// it to the editor so runs stay ACCOUNTABLE to whoever last shaped this
-		// trigger (source=trigger_owner, MUL-4302).
+		// published_by records who is currently responsible for this trigger's
+		// CONFIG: seeded to the creator, re-stamped to whoever later substantively
+		// edits it (MUL-4302). Since MUL-6951 it no longer decides anything about a
+		// run — neither authorization nor the task's accountable human — so an edit
+		// moves this column alone.
 		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 		PublishedByID:   publisherID,
 		// created_by is the AUTHORIZATION principal and is immutable: the run acts

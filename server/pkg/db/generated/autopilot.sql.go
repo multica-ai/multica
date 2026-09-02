@@ -1036,22 +1036,27 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 }
 
 const getAutopilotTriggerForAutopilot = `-- name: GetAutopilotTriggerForAutopilot :one
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, published_by_type, published_by_id, created_by_type, created_by_id FROM autopilot_trigger
-WHERE id = $1 AND autopilot_id = $2
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.published_by_type, t.published_by_id, t.created_by_type, t.created_by_id FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE t.id = $1 AND t.autopilot_id = $2 AND a.workspace_id = $3
 `
 
 type GetAutopilotTriggerForAutopilotParams struct {
 	ID          pgtype.UUID `json:"id"`
 	AutopilotID pgtype.UUID `json:"autopilot_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Trigger lookup BOUND to the autopilot it must belong to. Since MUL-6951 the
-// trigger row decides which human a run acts as, so an unbound `WHERE id = $1`
-// would let a trigger id from another autopilot (or tenant) select the principal.
-// Callers resolving an authorization principal must use this, not
-// GetAutopilotTrigger.
+// Trigger lookup BOUND to both the autopilot it must belong to AND that
+// autopilot's workspace. Since MUL-6951 the trigger row decides which human a run
+// acts as, so an unbound `WHERE id = $1` would let a trigger id from another
+// autopilot select the principal. The workspace join closes the other half: the
+// caller's membership check proves the resolved human belongs to the workspace it
+// passed, not that the AUTOPILOT does, and a member of two workspaces would
+// satisfy the former while the trigger came from the other tenant. Callers
+// resolving an authorization principal must use this, not GetAutopilotTrigger.
 func (q *Queries) GetAutopilotTriggerForAutopilot(ctx context.Context, arg GetAutopilotTriggerForAutopilotParams) (AutopilotTrigger, error) {
-	row := q.db.QueryRow(ctx, getAutopilotTriggerForAutopilot, arg.ID, arg.AutopilotID)
+	row := q.db.QueryRow(ctx, getAutopilotTriggerForAutopilot, arg.ID, arg.AutopilotID, arg.WorkspaceID)
 	var i AutopilotTrigger
 	err := row.Scan(
 		&i.ID,
@@ -1933,10 +1938,14 @@ type SetAutopilotTriggerPublisherParams struct {
 }
 
 // Re-stamp a single trigger's responsible publisher after a substantive edit of
-// THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
-// become ACCOUNTABLE to this member (MUL-4302 trigger_owner transfer). It does
-// NOT touch created_by: since MUL-6951 the run acts as the trigger's creator, and
-// an edit must not move that (MUL-6951, Bohan's ruling).
+// THAT trigger (cron / filter / enabled / webhook security), recording who is now
+// responsible for its config (MUL-4302).
+//
+// Since MUL-6951 this changes NOTHING about the runs it fires: they act as, and
+// are accountable to, the trigger's immutable created_by. An edit must not be able
+// to re-authorize the automation as the editor (Bohan's ruling), so this statement
+// deliberately does not touch created_by, and published_by is now a config-audit
+// column only.
 func (q *Queries) SetAutopilotTriggerPublisher(ctx context.Context, arg SetAutopilotTriggerPublisherParams) error {
 	_, err := q.db.Exec(ctx, setAutopilotTriggerPublisher, arg.ID, arg.PublishedByType, arg.PublishedByID)
 	return err

@@ -13,14 +13,22 @@
 -- created_by_* is written once at creation and never rewritten by the edit
 -- paths; published_by keeps its existing audit meaning unchanged.
 --
--- BACKFILL is best-effort and deliberately incomplete: for a trigger nobody has
--- edited, published_by IS the creator, so it recovers the right human. For an
--- already-edited trigger it recovers the last editor — the closest recoverable
--- human, and no worse than the behaviour shipping today. A trigger with no
--- published_by at all stays NULL, and dispatch fails closed rather than guessing
--- a principal. The table holds one row per configured trigger (small, bounded by
--- autopilot count), so this runs as a single statement rather than a batched
--- backfill.
+-- BACKFILL is best-effort and knowingly imprecise. For a trigger nobody has
+-- edited, published_by IS the creator and this recovers the right human. For an
+-- ALREADY-EDITED trigger it freezes the last recoverable EDITOR as the immutable
+-- creator — not necessarily the historical creator, which the schema never
+-- recorded and which is therefore unrecoverable. That is accepted (MUL-6951, Elon
+-- review): it is no wider than the authority those runs carry today, and the
+-- alternative is stopping every existing autopilot.
+--
+-- A trigger with no published_by at all (predating migration 186) stays NULL.
+-- Dispatch then fails closed rather than guessing a principal, and there is
+-- deliberately NO recovery path — re-saving such a trigger re-stamps published_by,
+-- not created_by, so it stays unresolvable (Bohan: leave them empty). Its runs are
+-- refused with a recorded failure_reason.
+--
+-- The table holds one row per configured trigger (small, bounded by autopilot
+-- count), so this runs as a single statement rather than a batched backfill.
 --
 -- No foreign key by house rule; the referenced member is re-validated in
 -- application code on every dispatch, which is what actually matters here since

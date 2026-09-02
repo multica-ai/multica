@@ -610,15 +610,19 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 	return attribution.RuleOwner(publisher, ver.ID, evidenceKind, evidenceRefID)
 }
 
-// triggerOwnerAttribution resolves an autopilot schedule/webhook run to the human
-// currently RESPONSIBLE for the firing trigger's effective config (MUL-4302; Bohan +
-// Elon must-fix). triggerID is the autopilot_run's trigger_id. The trigger row's
-// published_by starts at the creator and transfers to whoever later substantively
-// edits it, so the run attributes to whoever last shaped what fires it — not the
-// original creator. A trigger with no recorded publisher (predating this migration)
-// or an agent publisher degrades to ruleOwnerAttribution (rule publisher, then
-// owner_fallback) — the same coarser behavior autopilots had before, so nothing
-// regresses. Never errors: attribution must not fail an enqueue.
+// triggerOwnerAttribution resolves an autopilot schedule/webhook run to the firing
+// trigger's CREATOR (MUL-4302; MUL-6951). triggerID is the autopilot_run's
+// trigger_id.
+//
+// The creator is immutable — a substantive edit re-stamps published_by, not
+// created_by, so it cannot re-authorize the automation as the editor (MUL-6951,
+// Bohan's ruling). Because the DB invariant forces accountable == originator once
+// the originator is set, BOTH columns on the task name the creator; the editor's
+// responsibility for the config lives on autopilot_trigger.published_by.
+//
+// A trigger with no recoverable creator degrades to ruleOwnerAttribution, which is
+// audit-only — the run then carries no originator and the invoke gate fails closed.
+// Never errors: attribution must not fail an enqueue.
 func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
 	if principal := ResolveAutopilotTriggerPrincipal(ctx, q, triggerID, autopilotID, workspaceID); principal.Valid {
 		return attribution.TriggerOwner(principal, evidenceKind, evidenceRefID)
@@ -649,8 +653,11 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 //
 // Three conditions, all required, all fail-closed:
 //
-//   - the trigger row is fetched BOUND to this autopilot, so a trigger id
-//     belonging to another autopilot or tenant cannot select the principal;
+//   - the trigger row is fetched BOUND to this autopilot AND its workspace, so a
+//     trigger id from another autopilot, or from an autopilot in another tenant,
+//     cannot select the principal. The membership check below is not a substitute:
+//     it proves the resolved human is in the workspace passed in, which a member of
+//     two workspaces satisfies even when the trigger came from the other one;
 //   - created_by names a member — a legacy trigger predating the column (and with
 //     no published_by to backfill from) resolves nobody rather than a guess;
 //   - that member is STILL in the autopilot's workspace, re-checked on every
@@ -662,6 +669,7 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 	trig, err := q.GetAutopilotTriggerForAutopilot(ctx, db.GetAutopilotTriggerForAutopilotParams{
 		ID:          triggerID,
 		AutopilotID: autopilotID,
+		WorkspaceID: workspaceID,
 	})
 	if err != nil {
 		return pgtype.UUID{}

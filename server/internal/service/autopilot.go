@@ -967,16 +967,16 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// Attribution splits on the trigger only to pick WHICH human and which source
 	// label; both branches now produce a real originator. A MANUAL trigger is a
 	// direct human action: the triggering member is direct_human (MUL-4302 §4). A
-	// schedule / webhook trigger resolves the member currently RESPONSIBLE for the
-	// firing trigger's effective config (its creator, then whoever last substantively
-	// edited it) — trigger_owner, resolved from run.TriggerID (MUL-4302; Elon
-	// must-fix) — degrading to the rule version publisher (rule_owner) when no such
-	// member is recoverable, then to unattributed. Since MUL-6951 that human is the
-	// originator too, so an armed autopilot runs with its owner's authorization
-	// instead of borrowing narrowly-scoped capabilities per surface; the source label
-	// is what keeps "fired on a schedule" distinguishable from "a human clicked run".
-	// Either way evidence points at the autopilot run and the row is never a
-	// NULL-source bypass.
+	// schedule / webhook trigger resolves the firing trigger's immutable CREATOR —
+	// trigger_owner, from run.TriggerID (MUL-4302; MUL-6951) — degrading to the rule
+	// version publisher (rule_owner, audit-only) when no creator is recoverable, then
+	// to unattributed. An edit of the trigger does NOT move this: published_by
+	// transfers, created_by does not. Since MUL-6951 that human is the originator
+	// too, so an armed autopilot runs with its creator's authorization instead of
+	// borrowing narrowly-scoped capabilities per surface; the source label is what
+	// keeps "fired on a schedule" distinguishable from "a human clicked run". Either
+	// way evidence points at the autopilot run and the row is never a NULL-source
+	// bypass.
 	var autopilotAttr attribution.Result
 	if actorUserID.Valid {
 		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
