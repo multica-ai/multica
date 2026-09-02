@@ -97,6 +97,7 @@ var corsExposedHeaders = []string{
 	"X-Request-ID",
 	handler.HeaderCommentsTruncated,
 	handler.HeaderTimelineTruncated,
+	handler.HeaderActiveRunsTruncated,
 }
 
 func registerPluginActionRoutes(r chi.Router, h *handler.Handler) {

@@ -2038,12 +2038,67 @@ WHERE acknowledged.id = (
   ) >= @max_attempts::int
 RETURNING acknowledged.*;
 
+-- name: SettleDelegatedFailureRecoveriesForTask :execrows
+-- Retire every delegated-failure recovery comment this task actually received.
+--
+-- Callers MUST run this inside the same transaction that makes the task
+-- terminal, and only there. While a task is still dispatched its receipt is
+-- REPLACED rather than appended (SetTaskDeliveredCommentIDs), because a reclaim
+-- by a differently-capable daemon must be able to drop an id it will not
+-- deliver. Settling at receipt-write time would freeze that legitimate
+-- transient window into a permanently lost recovery. Once the task is terminal
+-- the receipt is final, which is exactly the guarantee this marker records.
+--
+-- A comment that was only planned into the task and never delivered is absent
+-- from delivered_comment_ids, so an automatic cancellation correctly leaves it
+-- pending for the sweeper to replay.
+--
+-- The terminal-status predicate is the guarantee itself, not a caller
+-- convention. Settling a dispatched or running task's receipt would freeze the
+-- reclaim window into a permanently lost recovery, and this marker is
+-- monotonic — there is no later pass that could undo it. A caller that passes a
+-- non-terminal task therefore updates nothing rather than silently destroying
+-- the obligation.
+UPDATE comment recovery
+SET recovery_settled_at = now()
+FROM agent_task_queue task
+WHERE task.id = @task_id
+  AND task.status IN ('completed', 'failed', 'cancelled')
+  AND recovery.id = ANY(task.delivered_comment_ids)
+  AND recovery.author_type = 'system'
+  AND recovery.type = 'progress_update'
+  AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL;
+
+-- name: SettleDelegatedFailureRecoveryComment :execrows
+-- Retire one recovery comment by id, for the terminal outcomes that are not a
+-- task reaching a terminal status: exhaustion of the bounded automatic attempts
+-- writes its receipt onto an attempt row that may still be running, and the
+-- user-visible explanation comment is what closes the obligation. Callers run
+-- this in the same transaction that records that outcome.
+UPDATE comment
+SET recovery_settled_at = now()
+WHERE id = @comment_id
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id IS NOT NULL
+  AND recovery_settled_at IS NULL;
+
 -- name: ListPendingDelegatedFailureRecoveries :many
 -- Durable outbox scan for platform recovery comments that are not yet owned by
 -- an executable task and have no terminal delivery receipt. Starting from the
 -- explicit recovery signal avoids retroactively waking unrelated historical
 -- delegated failures. A bounded runtime sweeper replays these comments after a
 -- transient dispatch error or process restart.
+--
+-- recovery_settled_at is what keeps this scan from growing with history. Every
+-- other exclusion below is reversible — an issue can leave 'done', a cancelled
+-- retry can be superseded — so none of them can be frozen into the index
+-- predicate. A delivery receipt on a terminal task cannot be taken back, so
+-- that one condition is recorded as durable state instead of being re-proven
+-- through four joins and two NOT EXISTS subqueries on every tick. The predicate
+-- of idx_comment_delegated_failure_unsettled matches the first four conditions,
+-- so LIMIT now bounds the rows CHECKED and not just the rows RETURNED.
 SELECT recovery.*
 FROM comment recovery
 JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
@@ -2056,6 +2111,7 @@ LEFT JOIN issue_status source_status
 WHERE recovery.author_type = 'system'
   AND recovery.type = 'progress_update'
   AND recovery.source_task_id IS NOT NULL
+  AND recovery.recovery_settled_at IS NULL
   AND recovery.issue_id = source_issue.id
   AND recovery.workspace_id = source_issue.workspace_id
   AND failed.status = 'failed'
@@ -2360,6 +2416,60 @@ SELECT * FROM cancelled;
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC;
+
+-- name: ListActiveTasksByIssueFamily :many
+-- Cross-issue coordination read for parallel sub-issue work (#7768). Given a
+-- family root — the target issue's parent, or the target itself when it has
+-- none — return every in-flight task on the root and on all of its children,
+-- so a run can see who else is already working in the family before it starts
+-- overlapping work. Advisory only: nothing here gates, queues, or serialises
+-- anything.
+--
+-- Same active set as ListActiveTasksByIssue, including 'queued': a queued
+-- sibling cannot answer you yet, but it is about to touch the same code, which
+-- is exactly what the caller is trying to find out. The status column tells the
+-- two apart.
+--
+-- Issue identity is joined in because the caller renders runs from several
+-- issues in one list and cannot label a row from the task alone. agent_id is
+-- here for the same reason: unlike ListActiveSiblingIssueTasks, whose rows all
+-- belong to the claiming agent by construction, this read spans agents — which
+-- one is on a sibling is the answer, not a detail.
+--
+-- Columns are named rather than embedded. This is the coordination question,
+-- not the execution log: result and context are JSONB blobs, and work_dir /
+-- trigger_summary / the attribution ids are all execution-log fields that a
+-- caller asking "who else is here?" never reads. Selecting them would make
+-- Postgres detoast and ship roughly 5x the bytes per row for nothing.
+--
+-- Ordered running-first so the truncation the LIMIT may impose drops the least
+-- interesting rows, and bounded because a parent with hundreds of children must
+-- not turn one coordination read into an unbounded scan.
+SELECT
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = @workspace_id
+  AND (i.id = @root_issue_id::uuid OR i.parent_issue_id = @root_issue_id::uuid)
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'dispatched' THEN 1
+        WHEN 'waiting_local_directory' THEN 2
+        ELSE 3
+    END,
+    atq.created_at DESC
+LIMIT @row_limit;
 
 -- name: GetWorkspaceAgentRunCounts :many
 -- Total task runs per agent over the trailing 30 days, used by the Agents

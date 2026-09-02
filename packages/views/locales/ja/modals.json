@@ -170,6 +170,19 @@
       "portal_action": "請求ポータルを開く",
       "billing_action": "請求設定を表示"
     },
+    "autopilot_quota_limit": {
+      "title": "このワークスペースはオートパイロット実行数の上限に達しました",
+      "checking_description": "このワークスペースで利用可能な請求操作を確認しています…",
+      "upgrade_description": "Pro にアップグレードすると、オートパイロット実行を再開できます。",
+      "portal_description": "請求ポータルを開いてワークスペースのサブスクリプションを管理し、オートパイロット実行を再開してください。",
+      "contact_description": "ワークスペースの所有者または管理者に Pro へのアップグレードを依頼してください。",
+      "billing_description": "請求設定を開いて、このワークスペースで利用可能なアップグレードオプションを確認してください。",
+      "billing_unavailable_description": "請求操作を読み込めませんでした。請求設定を開いて再試行してください。",
+      "billing_disabled_description": "現在の実行枠がリセットされるまで待つか、ワークスペースの管理者に連絡してください。",
+      "upgrade_action": "Pro にアップグレード",
+      "portal_action": "請求ポータルを開く",
+      "billing_action": "請求設定を表示"
+    },
     "toast_link_subissues_all_failed": "サブタスクをリンクできませんでした",
     "toast_link_subissues_partial": "サブタスク {{total}} 件中 {{failed}} 件をリンクできませんでした",
     "toast_link_labels_failed": "ラベルを付けられませんでした",

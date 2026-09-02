@@ -43,6 +43,7 @@ vi.mock("../../issues/utils/status-label", () => ({
 // test fails if the unconfirmed case is ever re-pointed at a label that
 // carries failure wording.
 vi.mock("../../i18n", () => ({
+  useLocale: () => "zh-Hans",
   useT: (namespace: string) => ({
     t: (accessor: (dict: unknown) => string, params?: Record<string, string>) => {
       const template = accessor(namespace === "issues" ? zhHansIssues : en);
@@ -134,5 +135,16 @@ describe("InboxDetailLabel localized values", () => {
 
     expect(container.textContent).toContain("高");
     expect(container.textContent).not.toContain("High");
+  });
+
+  it("formats calendar dates with the selected UI locale", () => {
+    const { container } = render(
+      <InboxDetailLabel
+        item={item({ type: "due_date_changed", details: { to: "2026-08-21" } })}
+      />,
+    );
+
+    expect(container.textContent).toContain("8月21日");
+    expect(container.textContent).not.toContain("Aug");
   });
 });

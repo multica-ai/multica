@@ -59,7 +59,7 @@ import {
   AutopilotRowActions,
 } from "./autopilot-list-actions";
 import type { ScheduleConfig } from "./schedule-editor/model";
-import { useT, useTimeAgo } from "../../i18n";
+import { useLocale, useT, useTimeAgo } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills list (see list-grid.tsx and the comment
@@ -600,6 +600,7 @@ function LoadingSkeleton() {
 
 export function AutopilotsPage() {
   const { t } = useT("autopilots");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
@@ -937,7 +938,7 @@ export function AutopilotsPage() {
                       )}
                       {isColVisible("created") ? (
                         <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
-                          {new Date(autopilot.created_at).toLocaleDateString()}
+                          {new Date(autopilot.created_at).toLocaleDateString(locale)}
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />

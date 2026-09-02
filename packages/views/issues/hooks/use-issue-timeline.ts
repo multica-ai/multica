@@ -91,7 +91,11 @@ function applyCommentSnapshot(
         return entry;
       }
       return acceptsCommentRevision(entry, comment)
-        ? commentToTimelineEntry(comment)
+        ? {
+            ...commentToTimelineEntry(comment),
+            actor_name: entry.actor_name,
+            actor_avatar_url: entry.actor_avatar_url,
+          }
         : entry;
     }),
   );

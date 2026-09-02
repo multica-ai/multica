@@ -179,6 +179,28 @@ multica issue property unset <issue-id> --name Environment
 - Property vs metadata: if the value is workflow state a human should see and
   filter by, and a definition exists, prefer the property. Metadata stays the
   free-form bag for durable custom issue state.
+- `issue list` filters and sorts by property with the same name addressing:
+
+```bash
+multica issue list --property "Impact=High" --property "Impact=Medium" --output json
+multica issue list --property "QA Status=__none__" --status in_review --output json
+multica issue list --sort property:Impact --direction desc --output json
+```
+
+- `--property` takes one `Name=Value` per flag. Repeating the same property
+  matches ANY of its values; different properties must ALL match. Values are
+  option names or ids (select types), `true`/`false` (checkbox), a member
+  name/email/id (actor types), or the value itself for text, url, number,
+  and date (`YYYY-MM-DD`). The reserved value `__none__` matches
+  issues where the property is unset (works for every type; it is not
+  index-backed, so use it for targeted audits rather than as a default
+  listing filter). Only `=` is supported today; the `>=`, `<=` and `!=`
+  spellings are reserved for comparison filters and are rejected.
+- `--sort property:<name-or-id>` orders select properties by option order —
+  an ordinal scale (Low < Medium < High) sorts by meaning — and number/date/
+  text/url by value; issues without the property sort last either way.
+  Archived properties and types without an order (multi_select, checkbox,
+  actor kinds) are rejected up front.
 
 ## Status changes have server side effects
 
@@ -247,6 +269,39 @@ work in flight). The server also suppresses a trusted self-assignment when the
 exact target `(issue, agent)` pair already has a non-terminal task, but it
 deliberately keeps same-agent handoffs to a fresh issue starting runs: cross-issue
 serial chains and triage batches rely on that.
+
+## Who else is running right now
+
+The `## Active sibling runs` block covers only YOUR OWN other in-flight tasks.
+It says nothing about another agent working next to you, and it is a claim-time
+snapshot that does not refresh mid-turn. Ask the server when you need the
+current answer:
+
+```bash
+multica issue runs <issue-id> --active --output json     # in-flight runs on this issue
+multica issue runs <issue-id> --siblings --output json   # ...and across the sub-issue family
+```
+
+`--active` drops the execution history and returns only `queued` / `dispatched`
+/ `running` / `waiting_local_directory` runs. `--siblings` widens the same read
+to the issue's family — its parent (or itself, when it has no parent) plus every
+child of that parent — and labels each row with the issue it belongs to, which
+is how you find another agent already working on a sibling sub-issue before you
+open a second PR against the same code.
+
+The family read returns a compact row — task, issue, agent, status, started —
+not the full execution-log record. If you need a run's detail, follow the task
+id with `multica issue run-messages`.
+
+Rows come back running-first, newest-first within a status, and the family read
+is capped at 20. When the cap truncates the answer the CLI prints a warning on
+stderr — read it. Without that warning a short list means "nobody else is
+there"; with it, the list proves nothing about the runs it did not return.
+
+Both are advisory reads. Nothing here reserves an issue or serialises anything:
+a run you see may finish a second later, and one you don't see may start a
+second later. Coordinate through the issue's comments — the reads tell you whom
+to coordinate with.
 
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 

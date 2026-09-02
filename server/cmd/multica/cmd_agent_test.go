@@ -1966,6 +1966,16 @@ func TestAgentServiceTierFlagsAndBodies(t *testing.T) {
 	if agentUpdateCmd.Flag("service-tier") == nil {
 		t.Error("agent update must expose --service-tier")
 	}
+	for name, usage := range map[string]string{
+		"create": agentCreateCmd.Flag("service-tier").Usage,
+		"update": agentUpdateCmd.Flag("service-tier").Usage,
+	} {
+		for _, contract := range []string{"empty", "default", "Standard", "priority", "Fast"} {
+			if !strings.Contains(usage, contract) {
+				t.Errorf("agent %s --service-tier help = %q, want three-state contract to mention %q", name, usage, contract)
+			}
+		}
+	}
 
 	t.Run("create sends catalog id", func(t *testing.T) {
 		var gotBody map[string]any

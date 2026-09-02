@@ -8,7 +8,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { childIssueProgressOptions } from "@multica/core/issues/queries";
 import { issueSurfaceGanttOptions } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory, PropertyFilterValue } from "@multica/core/types";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { issueBehavesAsAny, statusFilterColumns } from "@multica/core/issues";
 import {
@@ -140,7 +140,7 @@ export function useIssueSurfaceData({
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
-  propertyFilters: Record<string, string[]>;
+  propertyFilters: Record<string, PropertyFilterValue[]>;
   /** Distinct running-task issue ids projected by `/api/working-agents`. */
   workingIssueIDs: ReadonlySet<string>;
   showSubIssues: boolean;

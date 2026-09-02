@@ -67,11 +67,54 @@ describe("resolveRuntimeModels", () => {
 
     expect(result).toEqual({
       models: catalog,
+      unavailableModels: [],
       supported: true,
       cached: true,
       cachedAt: "2026-07-29T00:00:00Z",
     });
     expect(getListModelsResult).not.toHaveBeenCalled();
+  });
+
+  // MUL-6961. This is the single guarantee three separate consumers depend on
+  // — the create dropdown, the inspector picker, and the agent builder all read
+  // `models` and would each have to be taught otherwise. Models the runtime
+  // cannot run stay out of it, so none of them can offer one, and so can no
+  // already-installed client that never heard of the second list.
+  it("keeps unavailable models out of the selectable list", async () => {
+    const unavailable = [
+      {
+        id: "cc-update-required-1",
+        label: "Fable 5.1 (disabled)",
+        reason: "Update to 2.1.255+ to use Fable 5.1",
+      },
+    ];
+    initiateListModels.mockResolvedValue(
+      request({
+        status: "completed",
+        models: catalog,
+        unavailable_models: unavailable,
+      }),
+    );
+
+    const result = await resolveRuntimeModels("rt-1");
+
+    expect(result.models).toEqual(catalog);
+    expect(result.models.map((m) => m.id)).not.toContain(
+      "cc-update-required-1",
+    );
+    expect(result.unavailableModels).toEqual(unavailable);
+  });
+
+  // A daemon or server older than the field sends no key at all. That must read
+  // as "nothing to warn about", never as a missing list the UI trips over.
+  it("defaults unavailable models to empty when the backend omits them", async () => {
+    initiateListModels.mockResolvedValue(
+      request({ status: "completed", models: catalog }),
+    );
+
+    const result = await resolveRuntimeModels("rt-1");
+
+    expect(result.unavailableModels).toEqual([]);
   });
 
   it("marks a live discovery as not cached", async () => {
@@ -209,14 +252,14 @@ describe("staleTimeFor", () => {
   // observable staleness would be server window + client window. Zero keeps the
   // bound at the server's window alone.
   it("treats a cached answer as immediately revalidatable", () => {
-    expect(staleTimeFor({ models: catalog, supported: true, cached: true })).toBe(0);
+    expect(staleTimeFor({ models: catalog, unavailableModels: [], supported: true, cached: true })).toBe(0);
   });
 
   it("trusts a live answer for the full window", () => {
-    expect(staleTimeFor({ models: catalog, supported: true, cached: false })).toBe(
+    expect(staleTimeFor({ models: catalog, unavailableModels: [], supported: true, cached: false })).toBe(
       LIVE_MODELS_STALE_TIME_MS,
     );
-    expect(staleTimeFor({ models: catalog, supported: true })).toBe(
+    expect(staleTimeFor({ models: catalog, unavailableModels: [], supported: true })).toBe(
       LIVE_MODELS_STALE_TIME_MS,
     );
   });

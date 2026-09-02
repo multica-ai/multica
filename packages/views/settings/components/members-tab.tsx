@@ -315,6 +315,7 @@ function ShareLinkRow({
   onCopy: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const roleConfig = useRoleLabels();
   const rc = roleConfig[link.role];
   const navigation = useOptionalNavigation();
@@ -328,7 +329,7 @@ function ShareLinkRow({
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-1 text-body font-medium">
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
-          {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString() })}</span>}
+          {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString(locale) })}</span>}
         </div>
         <div
           className="truncate font-mono text-caption text-muted-foreground"

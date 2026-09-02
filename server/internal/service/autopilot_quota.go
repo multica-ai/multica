@@ -59,6 +59,7 @@ type autopilotQuotaPolicy struct {
 	resetAt             time.Time
 	policyRevision      int64
 	subscriptionVersion int64
+	notifications       *entitlement.NotificationPolicy
 }
 
 func newAutopilotIdempotencyKey() string { return uuid.NewString() }
@@ -100,6 +101,7 @@ func (s *AutopilotService) quotaPolicy(ctx context.Context, workspaceID pgtype.U
 		resetAt:             gate.ResetAt.UTC(),
 		policyRevision:      decision.PolicyRevision,
 		subscriptionVersion: decision.SubscriptionVersion,
+		notifications:       gate.Notifications,
 	}, true
 }
 
@@ -170,15 +172,20 @@ func (s *AutopilotService) createAutopilotRunWithQuota(
 
 	wouldBlock := period.UsedCount+period.ReservedCount >= policy.limit
 	if wouldBlock && policy.action == entitlement.ActionEnforce {
-		if _, err := qtx.IncrementAutopilotQuotaBlocked(ctx, db.IncrementAutopilotQuotaBlockedParams{
+		period, err = qtx.IncrementAutopilotQuotaBlocked(ctx, db.IncrementAutopilotQuotaBlockedParams{
 			Source: source, WorkspaceID: workspaceID,
 			PeriodStart: periodArgs.PeriodStart, PeriodEnd: periodArgs.PeriodEnd,
-		}); err != nil {
+		})
+		if err != nil {
 			return db.AutopilotRun{}, false, fmt.Errorf("record blocked quota admission: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return db.AutopilotRun{}, false, fmt.Errorf("commit blocked quota admission: %w", err)
 		}
+		// Inbox delivery is presentation-only. It runs after the admission
+		// transaction commits so a malformed notification marker or failed insert
+		// can never turn the quota response into a 500 or roll back blocked counts.
+		s.deliverAutopilotQuotaRejectionNotice(ctx, policy, workspaceID, source, params)
 		s.recordAutopilotQuotaDecision(policy.action, source, "blocked")
 		return db.AutopilotRun{}, false, &AutopilotQuotaExceededError{
 			Used: period.UsedCount, Reserved: period.ReservedCount,

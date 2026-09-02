@@ -36,7 +36,7 @@ import { api } from "@multica/core/api";
 import type { SlackInstallation } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { openExternal } from "../../platform";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 // SlackTab is the workspace settings panel for Slack bot installations.
 // Listing is member-visible; the disconnect action is admin-only (the backend
@@ -192,6 +192,7 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
+  const locale = useLocale();
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
@@ -216,7 +217,7 @@ function InstallationRow({
           </p>
           <p className="text-micro text-muted-foreground">
             {t(($) => $.slack.installed_at_label, {
-              when: new Date(installation.installed_at).toLocaleString(),
+              when: new Date(installation.installed_at).toLocaleString(locale),
             })}
           </p>
         </div>

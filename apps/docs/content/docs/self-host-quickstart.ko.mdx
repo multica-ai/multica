@@ -261,7 +261,7 @@ multica daemon status
 
 ## 6. 첫 실행 완료
 
-Multica로 돌아옵니다. 런타임 목록에 온라인 런타임이 나타나면 에이전트를 만들고 첫 이슈를 할당합니다.
+Multica로 돌아옵니다. 런타임 목록에 온라인 런타임이 나타나면 에이전트를 만들고 첫 태스크를 할당합니다.
 
 실행 로그가 "완료됨"으로 바뀌고 타임라인에 에이전트의 답변이 나타나면 자체 호스팅 서비스, 실행 컴퓨터, AI 코딩 도구가 연결된 것입니다. 자세한 단계는 [빠른 시작](/cloud-quickstart)의 3~5단계를 참고하세요.
 
@@ -380,7 +380,7 @@ Helm은 자체 업그레이드 경로가 있습니다. values 파일에서 `imag
 | 인증 코드를 받지 못함 | 인증 코드를 한 번 요청한 뒤 backend 로그에서 `Verification code`를 찾습니다. |
 | `setup self-host`에 server 접근 불가가 표시됨 | 실행 컴퓨터에서 `https://api.example.com/health`를 요청해 DNS, TLS, reverse proxy에 모두 접근할 수 있는지 확인합니다. 404가 반환되면 프록시가 `/health`를 이 경로를 전달하지 않는 구버전 web 릴리스로 보내고 있다는 뜻이니 backend로 직접 라우팅해야 합니다([문제 해결](/troubleshooting#multica-setup이-서버에-도달할-수-없다고-보고함)). |
 | 데몬의 `Agents`가 비어 있음 | AI 코딩 도구가 `PATH`에 있고 로그인되어 있는지 확인한 뒤 `multica daemon restart`를 실행합니다. |
-| 이슈가 계속 큐에서 기다림 | `multica daemon status`를 실행해 데몬이 실행 중이며 워크스페이스에 연결되었는지 확인합니다. |
+| 태스크가 계속 큐에서 기다림 | `multica daemon status`를 실행해 데몬이 실행 중이며 워크스페이스에 연결되었는지 확인합니다. |
 
 더 많은 경우는 [문제 해결](/troubleshooting)을 참고하세요.
 

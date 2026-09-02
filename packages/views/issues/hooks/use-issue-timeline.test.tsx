@@ -342,6 +342,54 @@ describe("useIssueTimeline", () => {
     expect(cacheUpdates.last).toEqual(queryState.data);
   });
 
+  it("preserves hydrated actor identity when applying a comment update", () => {
+    queryState.data = [
+      {
+        type: "comment",
+        id: "c1",
+        actor_type: "member",
+        actor_id: "departed-user",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        content: "before",
+        parent_id: null,
+        created_at: "2026-05-06T01:00:00Z",
+        updated_at: "2026-05-06T01:00:00Z",
+        revision: 1,
+        reactions: [],
+        attachments: [],
+      },
+    ];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "departed-user",
+          content: "after",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          revision: 2,
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toMatchObject([
+      {
+        content: "after",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+      },
+    ]);
+  });
+
   it("refetches instead of applying an unversioned event over versioned cache state", () => {
     queryState.data = [{
       type: "comment",
@@ -394,6 +442,8 @@ describe("useIssueTimeline", () => {
         id: "c1",
         actor_type: "member",
         actor_id: "u",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
         content: "hello",
         parent_id: null,
         created_at: "2026-05-06T01:00:00Z",
@@ -448,11 +498,17 @@ describe("useIssueTimeline", () => {
       resolved_at: string | null;
       resolved_by_type: string | null;
       resolved_by_id: string | null;
+      actor_name?: string;
+      actor_avatar_url?: string;
     }>;
     expect(updated.map((e) => e.id)).toEqual(["c1", "c2"]);
     expect(updated[0]!.resolved_at).toBe("2026-05-06T03:00:00Z");
     expect(updated[0]!.resolved_by_type).toBe("member");
     expect(updated[0]!.resolved_by_id).toBe("u");
+    expect(updated[0]!.actor_name).toBe("Former Member");
+    expect(updated[0]!.actor_avatar_url).toBe(
+      "https://profiles.example.com/former.png",
+    );
     // Sibling entry must not change (identity preserved by .map).
     expect(updated[1]!.resolved_at).toBeNull();
   });

@@ -5,7 +5,7 @@ description: エージェントを DingTalk に接続し、DM やグループチ
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-[エージェント](/agents)を DingTalk に接続すると、そのエージェントが属するワークスペースのメンバーは、Bot に DM を送ったり、グループで @ メンションしたり、`/issue` コマンドで Multica [タスク](/issues)を直接作成したりできます。会話と実行記録は Multica ワークスペースに保存されます。
+[エージェント](/agents)を DingTalk に接続すると、そのエージェントが属するワークスペースのメンバーは、Bot に DM を送ったり、グループで @ メンションしたり、`/issue` コマンドで Multica [作業](/issues)を直接作成したりできます。会話と実行記録は Multica ワークスペースに保存されます。
 
 <Callout type="info">
 DingTalk 連携は[コミュニティがメンテナンス](/community-maintained)しており、公式サポートの SLA はありません。問題がある場合は [GitHub issues](https://github.com/multica-ai/multica/issues) に報告してください。
@@ -54,9 +54,9 @@ Bot を DingTalk グループに追加し、`@your-bot <メッセージ>` を送
 
 DM とグループチャットのどちらでも、テキストと画像を混在させたメッセージを送れます。PNG、JPEG、GIF、WebP、BMP に対応し、1 メッセージあたり最大 4 枚、1 枚あたり 10 MB までです。ファイルと音声メッセージには現在対応していません。
 
-### `/issue` でタスクを作成する
+### `/issue` で作業を作成する
 
-`/issue <タイトル>` または `/issue <タイトル>{改行}<詳細説明>` を送ると、新しい Multica タスクが作成され、Bot に接続されたエージェントに自動的に割り当てられます。同じメッセージの画像も、添付ファイルとしてタスクに追加されます。通常の会話メッセージとは異なり、`/issue` コマンドは Multica の「[チャット](/chat)」に記録されません。
+`/issue <タイトル>` または `/issue <タイトル>{改行}<詳細説明>` を送ると、新しい Multica 作業が作成され、Bot に接続されたエージェントに自動的に割り当てられます。同じメッセージの画像も、添付ファイルとして作業に追加されます。通常の会話メッセージとは異なり、`/issue` コマンドは Multica の「[チャット](/chat)」に記録されません。
 
 ### `/new` で新しい Chat を開始する
 
@@ -94,5 +94,5 @@ API サービスを再起動した後、DingTalk に接続します。このキ�
 ## 次に
 
 - [チャット連携](/channels) —— Channel エンジン、セッション、認可の仕組み
-- [エージェント](/agents) · [Chat](/chat) · [タスク](/issues)
+- [エージェント](/agents) · [Chat](/chat) · [作業](/issues)
 - [環境変数](/environment-variables) —— セルフホスト設定の完全なリファレンス

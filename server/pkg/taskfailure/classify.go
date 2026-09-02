@@ -406,6 +406,16 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 	"agent_error":                      true,
 }
 
+// legacyEnvironmentPrepareWitnesses are the two wrappers the daemon puts on a
+// failed execenv.Prepare / execenv.Reuse. Each opens the error at character
+// zero, and no other code path emits them, so the prefix alone establishes
+// that the run died setting up its workspace directory and never reached an
+// agent.
+var legacyEnvironmentPrepareWitnesses = []string{
+	"prepare execution environment:",
+	"reuse execution environment:",
+}
+
 func isPiProviderNetworkError(lower string) bool {
 	for _, message := range []string{"connection error.", "request timed out."} {
 		if lower == message ||
@@ -497,6 +507,19 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 		containsAll(strings.ToLower(rawError), legacyOpenclawCLITimeoutWitnesses...) {
 		return ReasonRuntimeCLITimeout
 	}
+	// #7913: the same mixed-version gap on environment preparation. A daemon
+	// predating the structural tag classifies the host's own filesystem error
+	// from its text and reports some agent_error.* value — the catchall today,
+	// provider_server_error on the report that opened the issue. Every one of
+	// them is wrong by construction: the prefix proves the task died before an
+	// agent process existed, so the whole agent_error.* namespace is upgraded
+	// here rather than an enumerated subset of it.
+	//
+	// Last, so the openclaw rule above keeps its own preparation failure: that
+	// one names a specific cause inside this same phase and says strictly more.
+	if isAgentSideReason(reason) && hasAnyPrefix(lowerError, legacyEnvironmentPrepareWitnesses...) {
+		return ReasonEnvironmentPrepareFailed
+	}
 	return Reason(reason)
 }
 
@@ -511,6 +534,28 @@ func containsAll(s string, subs ...string) bool {
 		}
 	}
 	return len(subs) > 0
+}
+
+// hasAnyPrefix reports whether s starts with any of the supplied prefixes.
+// Used where the witness is the wrapper opening an error rather than a phrase
+// somewhere inside it, which is what makes it unambiguous. Caller
+// pre-lowercases s, same contract as containsAny.
+func hasAnyPrefix(s string, prefixes ...string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(s, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// isAgentSideReason reports whether a wire value blames the agent process —
+// any refined agent_error.* sub-reason, or the pre-MUL-1949 coarse bucket they
+// were split out of. Used by normalization rules whose witness proves the run
+// never reached an agent, so that every such label is known to be wrong
+// without enumerating them.
+func isAgentSideReason(reason string) bool {
+	return Reason(reason).IsAgentError() || reason == "agent_error"
 }
 
 // containsAny reports whether s contains any of the supplied substrings.

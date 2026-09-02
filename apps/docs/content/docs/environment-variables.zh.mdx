@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica 在进程启动时读取环境变量。修改后通常需要重启对应的 API、Web 或守护进程。Docker Compose 的 `docker compose restart` 不会重新读取 `.env`，要用 `up -d` 重建容器才能生效。
 
-本页只列面向部署者的配置；测试变量和内部任务变量不在这里展开。本页是分组参考；完整部署步骤见[自托管快速上手](/self-host-quickstart)。
+本页只列面向部署者的配置；测试变量和内部 task 变量不在这里展开。本页是分组参考；完整部署步骤见[自托管快速上手](/self-host-quickstart)。
 
 ## 生产环境最小配置
 
@@ -191,7 +191,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 ## 服务端 LLM
 
-这组配置用于服务端的辅助生成能力，例如对话标题；它不是智能体执行任务时使用的 AI 编程工具凭据。
+这组配置用于服务端的辅助生成能力，例如对话标题；它不是智能体 task 时使用的 AI 编程工具凭据。
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
@@ -210,7 +210,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 API key 与 base URL 都为空时，这一层关闭，不会发出任何上游请求——上面两个功能都不再发送内容。如果你的政策不允许这一层把聊天内容发到部署之外，这就是受支持的配置方式：对话继续使用客户端根据第一条消息生成的标题，后续提问按钮不再出现，其余功能不受影响。
 
 <Callout type="info">
-这只覆盖辅助生成这一层。智能体执行是另一条数据路径：智能体回复对话时，由你的守护进程调用该智能体的 AI 编程工具，用的是那个工具自己的凭据，守护进程不会把上面的 `MULTICA_LLM_*` 配置传给它。（智能体自身需要的任务级 Multica 连接变量由守护进程单独注入。）把上面的变量留空不影响这条路径——它由智能体的运行时配置决定。
+这只覆盖辅助生成这一层。智能体执行是另一条数据路径：智能体回复对话时，由你的守护进程调用该智能体的 AI 编程工具，用的是那个工具自己的凭据，守护进程不会把上面的 `MULTICA_LLM_*` 配置传给它。（智能体自身需要的 task 级 Multica 连接变量由守护进程单独注入。）把上面的变量留空不影响这条路径——它由智能体的运行时配置决定。
 </Callout>
 
 ## 守护进程配置
@@ -222,9 +222,9 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket 地址，也接受 `http(s)` |
 | `MULTICA_DAEMON_DEVICE_NAME` | 主机名 | 运行时列表中的设备名 |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | 运行时显示名 |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | 没有唤醒事件时的执行任务轮询间隔 |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | 没有唤醒事件时的 task 轮询间隔 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳间隔 |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发执行任务上限 |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 单个守护进程的并发 task 上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次执行的绝对时限；`0` 表示不设置 |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 没有输出且没有工具执行时的静默上限；`0` 表示整套 watchdog 关闭 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | 同 `MULTICA_AGENT_IDLE_WATCHDOG` | 单个工具调用持续静默的上限；只有希望工具比模型有更多余量时才单独设置，`0` 表示工具执行期间永不强制停止 |
@@ -235,9 +235,9 @@ API key 与 base URL 都为空时，这一层关闭，不会发出任何上游�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`；自托管 `false` | 是否自动检查并更新 CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 检查更新的间隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 是否在 `multica` 二进制被带外替换（`brew upgrade`、重新下载、本地构建）后重启到新二进制。与 `MULTICA_DAEMON_AUTO_UPDATE` 相互独立 |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 执行任务工作目录的根目录 |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | task 工作目录的根目录 |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留执行任务目录用于调试 |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留 task 目录用于调试 |
 
 各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。ZeroClaw 支持 `MULTICA_ZEROCLAW_PATH`，但没有模型变量；模型由 ZeroClaw 的智能体配置管理。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
@@ -266,9 +266,9 @@ multica config show
 | `workspace_id` | 空 | 默认工作区 |
 | `device_name` | 主机名 | 运行时列表中的设备名 |
 | `runtime_name` | `Local Agent` | 运行时显示名 |
-| `workspaces_root` | `~` 下按 profile 区分的路径 | 执行任务工作目录的根目录 |
-| `max_concurrent_tasks` | `20` | 并发执行任务上限；`0` 或留空表示未设置 |
-| `poll_interval` | `30s` | 执行任务轮询间隔 |
+| `workspaces_root` | `~` 下按 profile 区分的路径 | task 工作目录的根目录 |
+| `max_concurrent_tasks` | `20` | 并发 task 上限；`0` 或留空表示未设置 |
+| `poll_interval` | `30s` | task 轮询间隔 |
 | `heartbeat_interval` | `15s` | 心跳间隔 |
 | `agent_timeout` | 不限制 | 单次执行的绝对时限 |
 | `codex_semantic_inactivity_timeout` | 派生 | Codex 语义静默阈值。未设置时取 idle 与 tool watchdog 预算中较大的那个；tool 预算为 `0` 时回落到 idle 预算；只有整套 watchdog 关闭时才保留 Codex 自己的 `10m` |

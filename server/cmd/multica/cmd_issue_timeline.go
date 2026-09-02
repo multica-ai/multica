@@ -227,16 +227,23 @@ func printIssueTimelineTable(entries []map[string]any, actors actorDisplayLookup
 		rows = append(rows, []string{
 			when,
 			kind,
-			timelineActor(strVal(e, "actor_type"), strVal(e, "actor_id"), actors, fullID),
+			timelineActor(
+				strVal(e, "actor_type"),
+				strVal(e, "actor_id"),
+				strVal(e, "actor_name"),
+				actors,
+				fullID,
+			),
 			timelineDetail(e, actors, fullID),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 }
 
-// timelineActor renders an actor as "member:Alice", falling back to a shortened
-// id when the workspace lookup cannot name it (deleted member, foreign id).
-func timelineActor(actorType, actorID string, actors actorDisplayLookup, fullID bool) string {
+// timelineActor renders an actor as "member:Alice". The timeline-provided name
+// wins because it remains available after the member leaves the workspace;
+// live directory lookup and then a shortened id are compatibility fallbacks.
+func timelineActor(actorType, actorID, actorName string, actors actorDisplayLookup, fullID bool) string {
 	switch {
 	case actorType == "" && actorID == "":
 		return ""
@@ -251,6 +258,9 @@ func timelineActor(actorType, actorID string, actors actorDisplayLookup, fullID 
 			return actorID
 		}
 		return truncateID(actorID)
+	}
+	if actorName != "" {
+		return actorType + ":" + actorName
 	}
 	display := actors.actor(actorType, actorID)
 	if !fullID && strings.HasSuffix(display, ":"+actorID) {
@@ -285,8 +295,8 @@ func timelineDetail(entry map[string]any, actors actorDisplayLookup, fullID bool
 	// is absent when that side was unassigned.
 	if hasAnyKey(details, "from_type", "from_id", "to_type", "to_id") {
 		return transitionText(
-			timelineActor(strVal(details, "from_type"), strVal(details, "from_id"), actors, fullID),
-			timelineActor(strVal(details, "to_type"), strVal(details, "to_id"), actors, fullID),
+			timelineActor(strVal(details, "from_type"), strVal(details, "from_id"), "", actors, fullID),
+			timelineActor(strVal(details, "to_type"), strVal(details, "to_id"), "", actors, fullID),
 		)
 	}
 
