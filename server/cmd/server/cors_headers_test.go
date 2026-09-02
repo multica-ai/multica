@@ -32,8 +32,8 @@ func TestCORSAllowedHeaders_IncludeIdempotencyKey(t *testing.T) {
 	}
 }
 
-// Timeline and comment-list endpoints report defensive hard-cap clamps with
-// custom response headers.
+// Timeline, comment-list and active-run reads report defensive hard-cap clamps
+// with custom response headers.
 // Custom response headers are not readable from browser JS unless the server
 // exposes them, and only the CORS-safelisted headers are exposed by default — so
 // an entry missing here is not a degraded signal, it is no signal at all: the
@@ -42,6 +42,7 @@ func TestCORSExposedHeaders_IncludeTruncationSignals(t *testing.T) {
 	for _, want := range []string{
 		handler.HeaderCommentsTruncated,
 		handler.HeaderTimelineTruncated,
+		handler.HeaderActiveRunsTruncated,
 	} {
 		if !slices.Contains(corsExposedHeaders, want) {
 			t.Errorf("%s missing from CORS exposed headers: %v", want, corsExposedHeaders)

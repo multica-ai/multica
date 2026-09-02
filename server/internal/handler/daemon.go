@@ -4882,18 +4882,22 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 
 // familyActiveRunCap bounds a scope=family read.
 //
-// A runaway guard, not a display limit. Real concurrency in a family is bounded
-// far below this by runtime capacity and per-agent task limits, so 50 is chosen
-// to sit above any legitimate answer while still capping what a parent that
-// fanned out hundreds of children can make one advisory read return. The
-// coordination question is answered by the first few rows, and the query orders
-// running-first, so what the cap drops is the least decision-relevant.
+// It is a response-size budget, chosen so one advisory read stays small enough
+// for an agent to hold in context — NOT a bound derived from how much work can
+// really be in flight. A family can legitimately exceed it: a single agent may
+// be configured up to agentconfig.MaxMaxConcurrentTasks (50) on its own, this
+// feature exists precisely for the case where SEVERAL agents work a family at
+// once, and the returned set includes queued / dispatched /
+// waiting_local_directory rows, which no execution-slot limit bounds at all —
+// a parent that fans out 200 children can have 200 of them enqueued.
 //
-// A cap that silently truncates would be worse than no cap: "I saw no run on
-// that sibling" and "the answer was cut off" would look identical, and an agent
-// would read the second as the first. So the handler asks for one row more than
-// it will return, and says so in HeaderActiveRunsTruncated when that extra row
-// comes back.
+// So truncation here is an ordinary outcome, not a pathological one, and that
+// is exactly why it must be reported. A cap that truncated silently would be
+// worse than no cap: "I saw no run on that sibling" and "the answer was cut
+// off" would look identical, and an agent would read the second as the first.
+// The handler asks for one row more than it will return and sets
+// HeaderActiveRunsTruncated when that extra row comes back. The query orders
+// running-first, so what the budget drops is the least decision-relevant.
 const familyActiveRunCap = 50
 
 // HeaderActiveRunsTruncated tells a caller its coordination read hit
