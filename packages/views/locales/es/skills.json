@@ -1,0 +1,248 @@
+{
+  "page": {
+    "title": "Skills",
+    "tagline": "Instrucciones que cualquier agente de este workspace puede usar.",
+    "learn_more": "Más información →",
+    "new_skill": "Nuevo skill",
+    "search_placeholder": "Buscar skills…",
+    "scopes": {
+      "all": { "label": "Todos", "description": "Todos los skills de este workspace" },
+      "used": { "label": "En uso", "description": "Skills asignados a al menos un agente" },
+      "unused": { "label": "Sin usar", "description": "Skills no asignados a ningún agente" },
+      "mine": { "label": "Creados por mí", "description": "Skills que creaste" }
+    },
+    "empty": {
+      "title": "No hay skills todavía",
+      "description": "Creá tu primer skill, importá uno desde una URL, o copiá uno desde un runtime conectado — y cada agente del workspace va a poder usarlo."
+    },
+    "no_matches": {
+      "title": "Sin resultados",
+      "with_query": "Ningún skill coincide con \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " en este filtro",
+      "filter_only": "Ningún skill coincide con este filtro.",
+      "try_different": " Probá con otra búsqueda."
+    },
+    "intro_banner": {
+      "title": "Compartidos con tu workspace.",
+      "body": "Cualquiera puede crear un skill, importar uno desde una URL o copiarlo desde su runtime local — y cada agente puede usarlo.",
+      "highlight": "Los skills del runtime local se mantienen privados hasta que copiés uno acá."
+    },
+    "list_error": {
+      "title": "No se pudieron cargar los skills",
+      "fallback": "Algo salió mal al obtener la lista de skills.",
+      "retry": "Reintentar"
+    },
+    "supporting_data_warning": "Algunos datos del workspace no se pudieron cargar. La atribución de creador, nombres de runtime o permisos de edición pueden aparecer incompletos."
+  },
+  "table": {
+    "name": "Nombre",
+    "used_by": "Usado por",
+    "source": "Origen · Agregado por",
+    "updated": "Actualizado",
+    "no_description": "Sin descripción",
+    "lock_tooltip": "Solo lectura — solo el creador o un admin puede editar",
+    "unused": "— sin usar",
+    "by_creator": "por {{name}}",
+    "source_manual": "Creado manualmente",
+    "source_runtime_named": "Desde {{name}}",
+    "source_runtime_provider": "Desde runtime {{provider}}",
+    "source_runtime_unknown": "Desde un runtime",
+    "source_clawhub": "Desde ClawHub",
+    "source_skills_sh": "Desde Skills.sh",
+    "source_github": "Desde GitHub"
+  },
+  "detail": {
+    "all_skills": "Todos los skills",
+    "read_only": "Solo lectura",
+    "delete_aria": "Eliminar skill",
+    "delete_tooltip": "Eliminar skill",
+    "supporting_data_warning": "Algunos datos del workspace no se pudieron cargar. La atribución de creador, nombres de runtime o permisos de edición pueden aparecer incompletos hasta la próxima actualización.",
+    "files_label": "Archivos · {{count}}",
+    "add_file_aria": "Agregar archivo",
+    "add_file_tooltip": "Agregar archivo",
+    "delete_file": "Eliminar archivo",
+    "name_aria": "Nombre del skill",
+    "name_placeholder": "skill-name",
+    "description_label": "Descripción",
+    "description_placeholder": "Una oración describiendo cuándo un agente debería usar este skill…",
+    "subline": {
+      "origin_runtime_named": "Runtime local · {{name}}",
+      "origin_runtime_provider": "Runtime local · {{provider}}",
+      "origin_runtime_unknown": "Runtime local",
+      "origin_clawhub": "Importado · ClawHub",
+      "origin_skills_sh": "Importado · Skills.sh",
+      "origin_github": "Importado · GitHub",
+      "origin_workspace": "Workspace",
+      "updated_label": "Actualizado {{when}}",
+      "by_creator": "por {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Alguien más actualizó este skill",
+      "body": "Tus ediciones se mantienen. Descartá para traer sus cambios, o Guardá para sobreescribir."
+    },
+    "save_bar": {
+      "unsaved": "Cambios sin guardar — van a sobreescribir el skill activo al guardar",
+      "discard": "Descartar",
+      "save": "Guardar cambios",
+      "saving": "Guardando…"
+    },
+    "sidebar": {
+      "metadata": "Metadatos",
+      "created": "Creado",
+      "updated": "Actualizado",
+      "created_by": "Creado por",
+      "files": "Archivos",
+      "id": "ID",
+      "origin": "Origen",
+      "used_by_one": "Usado por {{count}} agente",
+      "used_by_other": "Usado por {{count}} agentes",
+      "permissions": "Permisos",
+      "permissions_owner": "Podés editar y eliminar este skill. Los cambios se aplican en la próxima ejecución del agente.",
+      "permissions_locked_creator": "Solo el creador ({{name}}) o un admin del workspace puede editar este skill.",
+      "permissions_locked": "Solo el creador o un admin del workspace puede editar este skill.",
+      "used_by_empty": "No está asignado a ningún agente todavía. Abrí la pestaña Skills de un agente para asignarlo."
+    },
+    "origin_card": {
+      "imported_runtime": "Importado desde runtime local",
+      "imported_clawhub": "Importado desde ClawHub",
+      "imported_skills_sh": "Importado desde Skills.sh",
+      "imported_github": "Importado desde GitHub",
+      "provider": "provider · {{provider}}"
+    },
+    "not_found": {
+      "title": "Skill no encontrado",
+      "fallback": "Este skill puede haber sido eliminado o perdiste acceso.",
+      "back": "Volver a Skills"
+    },
+    "toast_saved": "Skill guardado",
+    "toast_save_failed": "Error al guardar el skill",
+    "toast_deleted": "Skill eliminado",
+    "toast_delete_failed": "Error al eliminar el skill",
+    "delete_dialog": {
+      "title": "¿Eliminar skill?",
+      "description_with_agents_one": "Esto va a eliminar permanentemente \"{{name}}\" y sacarlo de {{count}} agente que lo está usando.",
+      "description_with_agents_other": "Esto va a eliminar permanentemente \"{{name}}\" y sacarlo de {{count}} agentes que lo están usando.",
+      "description_no_agents": "Esto va a eliminar permanentemente \"{{name}}\" y sacarlo de todos los agentes.",
+      "warning": "Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar permanentemente",
+      "deleting": "Eliminando…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Agregar",
+      "cancel": "Cancelar",
+      "errors": {
+        "empty": "La ruta no puede estar vacía.",
+        "absolute": "No se permiten rutas absolutas.",
+        "double_dot": "Las rutas no pueden contener \"..\".",
+        "reserved": "SKILL.md está reservado para el archivo principal.",
+        "exists": "Ya existe un archivo en esta ruta."
+      }
+    }
+  },
+  "create": {
+    "back": "Volver",
+    "back_aria": "Volver al selector de método",
+    "close": "Cerrar",
+    "close_aria": "Cerrar",
+    "method": {
+      "chooser": {
+        "title": "Nuevo skill",
+        "desc": "Elegí cómo querés agregar un skill a este workspace."
+      },
+      "manual": {
+        "title": "Crear manualmente",
+        "desc": "Escribí un nuevo SKILL.md desde cero."
+      },
+      "url": {
+        "title": "Importar desde URL",
+        "desc": "Obtené un skill publicado por URL. Los archivos se descargan del lado del servidor."
+      },
+      "runtime": {
+        "title": "Copiar desde runtime",
+        "desc": "Escaneá un runtime local y promové uno de sus skills on-disk a este workspace."
+      }
+    },
+    "method_card": {
+      "manual_title": "Crear manualmente",
+      "manual_desc": "Empezá desde un SKILL.md en blanco y escribí tus propias instrucciones.",
+      "url_title": "Importar desde URL",
+      "url_desc": "Descargá un skill publicado desde ClawHub o Skills.sh.",
+      "runtime_title": "Copiar desde runtime",
+      "runtime_desc": "Promové un skill ya instalado en tu runtime local."
+    },
+    "manual": {
+      "name_label": "Nombre",
+      "name_placeholder": "ej. review-helper",
+      "name_hint": "Tiene que ser único dentro del workspace.",
+      "description_label": "Descripción",
+      "description_placeholder": "Una oración sobre cuándo asignar este skill a un agente.",
+      "name_conflict_hint": " Probá con otro nombre y enviá de nuevo.",
+      "fallback_error": "Error al crear el skill",
+      "cancel": "Cancelar",
+      "submit": "Crear skill",
+      "submitting": "Creando…",
+      "toast_created": "Skill creado"
+    },
+    "url": {
+      "url_label": "URL del skill",
+      "supported_sources": "Fuentes soportadas",
+      "import": "Importar",
+      "importing": "Importando…",
+      "importing_clawhub": "Importando desde ClawHub…",
+      "importing_skills_sh": "Importando desde Skills.sh…",
+      "importing_github": "Importando desde GitHub…",
+      "name_conflict_hint": " El nombre del skill importado ya existe — eliminá el existente antes de reintentar.",
+      "fallback_error": "Error al importar",
+      "cancel": "Cancelar",
+      "toast_imported": "Skill importado"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Runtime",
+    "runtime_placeholder": "Seleccioná un runtime local",
+    "no_local_runtimes_title": "No hay runtimes locales disponibles",
+    "no_local_runtimes_hint": "Conectá un runtime local para explorar e importar sus skills locales.",
+    "choose_runtime": "Elegí un runtime para continuar",
+    "must_be_online": "El runtime tiene que estar online para explorar los skills locales.",
+    "load_failed": "Error al cargar los skills locales del runtime",
+    "not_supported": "Este provider de runtime no expone inventario de skills locales todavía.",
+    "no_skills_title": "No se encontraron skills locales",
+    "no_skills_hint": "Este runtime no tiene skills locales descubribles todavía.",
+    "ignored_files_hint": "Symlinks, archivos ilegibles, archivos demasiado grandes y bundles muy grandes se ignoran durante la importación.",
+    "ready": "Listo para importar",
+    "into_workspace": "a este workspace.",
+    "select_skill": "Seleccioná un skill para continuar.",
+    "import_button": "Importar al Workspace",
+    "importing": "Importando…",
+    "skill_files_one": "{{count}} archivo",
+    "skill_files_other": "{{count}} archivos",
+    "skill_name_label": "Nombre del skill en el workspace",
+    "skill_description_label": "Descripción",
+    "skill_description_placeholder": "Opcional — describí cuándo un agente debería usar este skill.",
+    "toast_imported": "Skill importado",
+    "toast_import_failed": "Error al importar el skill",
+    "select_all": "Seleccionar todos ({{count}})",
+    "bulk_ready": "{{count}} skills seleccionados",
+    "bulk_import_button": "Importar {{count}} Skills",
+    "bulk_progress": "Importando {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Cancelar",
+    "bulk_complete_hint": "Importación completa.",
+    "bulk_cancelled_hint": "Importación cancelada.",
+    "bulk_done_button": "Listo",
+    "bulk_summary_imported": "Importados",
+    "bulk_summary_skipped": "Omitidos",
+    "bulk_summary_failed": "Fallidos"
+  },
+  "file_tree": {
+    "no_files": "Sin archivos"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Editar",
+    "preview_tooltip": "Vista previa",
+    "no_content": "*Sin contenido todavía*",
+    "markdown_placeholder": "Escribí contenido markdown...",
+    "raw_placeholder": "Contenido del archivo..."
+  }
+}

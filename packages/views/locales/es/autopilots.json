@@ -1,0 +1,344 @@
+{
+  "page": {
+    "title": "Autopilot",
+    "new_autopilot": "Nuevo autopilot",
+    "start_blank": "Empezar de cero",
+    "table": {
+      "name": "Nombre",
+      "agent": "Agent",
+      "mode": "Modo",
+      "status": "Estado",
+      "last_run": "Última ejecución"
+    },
+    "last_run_empty": "--",
+    "empty": {
+      "title": "Todavía no hay autopilots",
+      "hint": "Programá tareas recurrentes para tus agents de IA. Elegí una plantilla o empezá de cero."
+    }
+  },
+  "status": {
+    "active": "Activo",
+    "paused": "Pausado",
+    "archived": "Archivado"
+  },
+  "execution_mode": {
+    "create_issue": "Crear Issue",
+    "run_only": "Solo ejecutar"
+  },
+  "relative_date": {
+    "today": "Hoy",
+    "one_day_ago": "hace 1d",
+    "days_ago": "hace {{count}}d",
+    "months_ago": "hace {{count}}mes"
+  },
+  "templates": {
+    "daily_news": {
+      "title": "Resumen de noticias diario",
+      "summary": "Buscar y resumir las noticias del día para el equipo"
+    },
+    "pr_review": {
+      "title": "Recordatorio de revisión de PR",
+      "summary": "Marcar pull requests estancados que necesitan revisión"
+    },
+    "bug_triage": {
+      "title": "Triaje de bugs",
+      "summary": "Evaluar y priorizar nuevos reportes de bugs"
+    },
+    "weekly_progress": {
+      "title": "Informe semanal de progreso",
+      "summary": "Compilar un resumen semanal del progreso del equipo"
+    },
+    "dependency_audit": {
+      "title": "Auditoría de dependencias",
+      "summary": "Escanear vulnerabilidades de seguridad y paquetes desactualizados"
+    },
+    "documentation_check": {
+      "title": "Verificación de documentación",
+      "summary": "Revisar cambios recientes para detectar gaps en la documentación"
+    }
+  },
+  "detail": {
+    "not_found": "Autopilot no encontrado",
+    "pause_aria": "Pausar autopilot",
+    "activate_aria": "Activar autopilot",
+    "edit": "Editar",
+    "run_now": "Ejecutar ahora",
+    "running": "Ejecutando...",
+    "toast_triggered": "Autopilot disparado",
+    "toast_trigger_failed": "Falló al disparar el autopilot",
+    "section_properties": "Propiedades",
+    "section_triggers": "Triggers",
+    "section_run_history": "Historial de ejecuciones",
+    "section_danger": "Zona de peligro",
+    "field_agent": "Agent",
+    "field_output_mode": "Modo de salida",
+    "field_project": "Proyecto",
+    "no_project": "Sin proyecto",
+    "project_unavailable": "Proyecto no disponible",
+    "field_prompt": "Prompt",
+    "add_trigger": "Agregar trigger",
+    "no_triggers": "No hay triggers configurados. Agregá una programación para que se ejecute automáticamente.",
+    "no_runs": "Todavía no hay ejecuciones. Hacé clic en \"Ejecutar ahora\" para dispararlo manualmente.",
+    "delete_button": "Eliminar autopilot",
+    "toast_deleted": "Autopilot eliminado",
+    "toast_delete_failed": "Falló al eliminar el autopilot",
+    "delete_dialog": {
+      "title": "Eliminar autopilot",
+      "description": "Esto eliminará permanentemente \"{{title}}\", junto con sus triggers e historial de ejecuciones. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    }
+  },
+  "run_status": {
+    "issue_created": "Issue creado",
+    "running": "Ejecutándose",
+    "skipped": "Omitido",
+    "completed": "Completado",
+    "failed": "Falló"
+  },
+  "run_source": {
+    "schedule": "Programación",
+    "manual": "Manual",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "run": {
+    "issue_linked": "Issue vinculado",
+    "view_log": "Ver log de ejecución",
+    "skipped_group": {
+      "label": "Omitidas",
+      "summary": "{{count}} ejecuciones omitidas"
+    }
+  },
+  "webhook_payload": {
+    "label": "Evento webhook:",
+    "unknown_event": "webhook.received",
+    "payload": "Payload",
+    "content_type": "Content-Type: {{type}}",
+    "copy": "Copiar",
+    "copied": "Payload del webhook copiado",
+    "copied_short": "Copiado",
+    "copy_failed": "Falló al copiar",
+    "truncated_marker": "[truncado — hacé clic en Copiar para obtener el payload completo]"
+  },
+  "trigger_kind": {
+    "schedule": "Programación",
+    "webhook": "Webhook",
+    "api": "API"
+  },
+  "trigger_row": {
+    "disabled_badge": "Desactivado",
+    "deprecated_badge": "Deprecado",
+    "next_label": "Próximo: {{date}}",
+    "webhook_url_label": "URL del webhook",
+    "copy_url": "Copiar URL",
+    "url_copied": "URL del webhook copiada",
+    "url_copy_failed": "Falló al copiar",
+    "rotate_url": "Rotar URL",
+    "rotate_confirm_title": "Rotar URL del webhook",
+    "rotate_confirm_description": "La URL actual dejará de funcionar inmediatamente. Todos los sistemas externos que la llamen deben actualizarse con la nueva URL. ¿Continuar?",
+    "rotate_confirm_cancel": "Cancelar",
+    "rotate_confirm_action": "Rotar URL",
+    "rotate_in_progress": "Rotando...",
+    "toast_rotated": "URL del webhook rotada",
+    "toast_rotate_failed": "Falló al rotar la URL",
+    "toast_deleted": "Trigger eliminado",
+    "toast_delete_failed": "Falló al eliminar el trigger",
+    "delete_dialog": {
+      "title": "Eliminar trigger",
+      "description": "Este trigger será eliminado y el autopilot dejará de ejecutarse en esta programación. Esta acción no se puede deshacer.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar",
+      "deleting": "Eliminando..."
+    }
+  },
+  "deliveries": {
+    "section_title": "Entregas de webhook",
+    "empty": "Todavía no hay entregas de webhook. Enviá un POST a la URL del webhook para ver entradas acá.",
+    "row": {
+      "attempts": "{{count}}× intentos",
+      "replay_badge": "Replay"
+    },
+    "status": {
+      "queued": "En cola",
+      "dispatched": "Despachado",
+      "rejected": "Rechazado",
+      "ignored": "Ignorado",
+      "failed": "Falló"
+    },
+    "signature": {
+      "not_required": "Sin firma",
+      "valid": "Firma válida",
+      "invalid": "Firma inválida",
+      "missing": "Falta la firma"
+    },
+    "detail": {
+      "title": "Entrega",
+      "received_at": "Recibido",
+      "last_attempt_at": "Último intento",
+      "attempt_count": "Intentos",
+      "response_status": "Respuesta",
+      "dedupe_key": "Clave de deduplicación",
+      "dedupe_source": "Origen de deduplicación",
+      "content_type": "Content-Type",
+      "replayed_from": "Reproducido desde",
+      "error_label": "Error",
+      "raw_body": "Cuerpo crudo",
+      "selected_headers": "Headers",
+      "response_body": "Cuerpo de la respuesta"
+    },
+    "replay": {
+      "action": "Reproducir",
+      "in_progress": "Reproduciendo...",
+      "toast_success": "Entrega reproducida",
+      "toast_failed": "Falló al reproducir",
+      "disabled_invalid_signature": "No se puede reproducir — la firma era inválida",
+      "disabled_rejected": "No se puede reproducir una entrega rechazada",
+      "disabled_queued": "Todavía en cola — reproducila cuando se procese"
+    }
+  },
+  "add_trigger_dialog": {
+    "title": "Agregar Trigger",
+    "type_label": "Tipo",
+    "type_schedule": "Programación",
+    "type_webhook": "Webhook",
+    "label_field": "Etiqueta (opcional)",
+    "label_placeholder": "ej. Mañana de lunes a viernes",
+    "webhook_help": "Multica generará una URL de webhook después de guardar. Enviá cualquier JSON por POST para disparar este autopilot.",
+    "submit": "Agregar trigger",
+    "submitting": "Agregando...",
+    "toast_added_schedule": "Trigger de programación agregado",
+    "toast_added_webhook": "Trigger de webhook agregado",
+    "toast_add_failed": "Falló al agregar el trigger"
+  },
+  "dialog": {
+    "sr_create": "Nuevo Autopilot",
+    "sr_edit": "Editar Autopilot",
+    "header_create": "Nuevo autopilot",
+    "header_edit": "Editar autopilot",
+    "subtitle": "Una tarea de IA recurrente",
+    "expand": "Expandir",
+    "collapse": "Colapsar",
+    "close": "Cerrar",
+    "title_placeholder": "Nombre del autopilot",
+    "runbook_label": "Runbook",
+    "runbook_hint": "Leído por el agent en cada ejecución",
+    "description_placeholder": "# Objetivo\n¿Qué debería lograr el agent?\n\n# Contexto\n¿Para quién es? ¿Alguna restricción?\n\n# Pasos\n1. …\n2. …",
+    "auto_run_hint": "Una vez guardado, se ejecuta automáticamente hasta que se pause.",
+    "cancel": "Cancelar",
+    "create": "Crear autopilot",
+    "save": "Guardar",
+    "creating": "Creando...",
+    "saving": "Guardando...",
+    "toast_created": "Autopilot creado",
+    "toast_create_partial": "Autopilot creado, pero falló al guardar la programación",
+    "toast_create_partial_with_reason": "Autopilot creado, pero falló al guardar la programación: {{reason}}",
+    "toast_create_failed": "Falló al crear el autopilot",
+    "toast_updated": "Autopilot actualizado",
+    "toast_update_partial": "Autopilot actualizado, pero falló al guardar la programación",
+    "toast_update_partial_with_reason": "Autopilot actualizado, pero falló al guardar la programación: {{reason}}",
+    "toast_update_failed": "Falló al actualizar el autopilot",
+    "section_agent": "Agent",
+    "section_assignee": "Asignado a",
+    "select_agent": "Seleccionar agent",
+    "select_assignee": "Seleccionar agent o squad",
+    "section_project": "Proyecto",
+    "no_project": "Sin proyecto",
+    "section_output_mode": "Modo de salida",
+    "section_schedule": "Programación",
+    "section_trigger_kind": "Trigger",
+    "trigger_kind_schedule": "Programación",
+    "trigger_kind_webhook": "Webhook",
+    "section_webhook": "Webhook",
+    "webhook_help_create": "Multica generará una URL de webhook después de crear este autopilot. Enviá cualquier JSON por POST a esa URL para dispararlo.",
+    "webhook_help_edit": "Este autopilot se dispara por webhook. Gestioná la URL (copiar / rotar) en la página de detalle del autopilot.",
+    "webhook_created_title": "Autopilot por webhook listo",
+    "webhook_created_description": "Enviá cualquier JSON por POST a la URL de abajo y el autopilot se disparará. Copiala ahora — también podés encontrarla y rotarla en la página de detalle del autopilot.",
+    "webhook_created_warning": "Tratá esta URL como una contraseña. Quien la tenga puede disparar el autopilot.",
+    "webhook_created_done": "Listo",
+    "schedule_disabled_reason": "Este autopilot tiene múltiples programaciones — editalas en la página de detalle.",
+    "next_run_label": "Próxima ejecución:",
+    "output_modes": {
+      "create_issue": {
+        "label": "Crear issue",
+        "description": "Cada ejecución crea un issue rastreado"
+      },
+      "run_only": {
+        "label": "Solo ejecutar",
+        "description": "Ejecución silenciosa, no se crea ningún issue"
+      }
+    },
+    "frequency_long": {
+      "hourly": "Cada hora",
+      "daily": "Cada día",
+      "weekdays": "Días hábiles",
+      "weekly": "Cada semana",
+      "custom": "Cron personalizado"
+    },
+    "days": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    }
+  },
+  "trigger_config": {
+    "frequencies": {
+      "hourly": "Cada hora",
+      "daily": "Diario",
+      "weekdays": "Días hábiles",
+      "weekly": "Días",
+      "custom": "Personalizado"
+    },
+    "days_short": {
+      "sun": "Dom",
+      "mon": "Lun",
+      "tue": "Mar",
+      "wed": "Mié",
+      "thu": "Jue",
+      "fri": "Vie",
+      "sat": "Sáb"
+    },
+    "cron_label": "Expresión Cron",
+    "cron_hint": "Cron estándar de 5 campos (min hora dma mes dds)",
+    "minute_label": "Minuto",
+    "time_label": "Hora",
+    "timezone_label": "Zona horaria",
+    "days_label": "Días",
+    "summary": {
+      "hourly": "Cada hora · :{{min}}",
+      "daily": "Diario {{time}}",
+      "weekdays": "Días hábiles {{time}}",
+      "weekly": "{{days}} {{time}}",
+      "custom": "Cron personalizado",
+      "no_days": "—"
+    },
+    "describe": {
+      "hourly": "Se ejecuta cada hora a :{{min}}",
+      "daily": "Se ejecuta todos los días a las {{time}} {{offset}}",
+      "weekdays": "Se ejecuta días hábiles a las {{time}} {{offset}}",
+      "weekly": "Se ejecuta cada {{days}} a las {{time}} {{offset}}",
+      "custom": "Programación personalizada: {{cron}}"
+    },
+    "countdown": {
+      "days_hours": "{{days}}d {{hours}}h",
+      "hours_minutes": "{{hours}}h {{minutes}}m",
+      "minutes": "{{minutes}}m",
+      "less_than_minute": "<1m"
+    }
+  },
+  "agent_picker": {
+    "filter_placeholder": "Filtrar agents o squads...",
+    "select_agent": "Seleccionar agent",
+    "select_assignee": "Seleccionar agent o squad",
+    "agents_group": "Agents",
+    "squads_group": "Squads"
+  },
+  "timezone_picker": {
+    "search_placeholder": "Buscar zona horaria..."
+  }
+}
