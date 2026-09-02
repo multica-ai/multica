@@ -9,6 +9,8 @@ Connect any [agent](/agents) to a ShareCRM bot and your team can work with it fr
 
 ShareCRM support is [community-maintained](/community-maintained): it ships in every release, but it carries no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
 
+Inbound image and mixed image+text messages require ShareCRM IM Gateway protocol **1.4.0**. The adapter receives signed download URLs; outbound replies remain plain text.
+
 ShareCRM uses a **bring-your-own-app (BYO)** model: a workspace admin creates bot credentials on the ShareCRM open platform and pastes them into Multica. Each agent gets **its own** ShareCRM bot — so several agents can each have a distinct, separately @-mentionable bot in the same organization. (This differs from [Lark](/lark-bot-integration), where binding is a scan-to-install flow.)
 
 The whole setup is below and takes about five minutes. You'll end up with two credentials to paste into Multica:
