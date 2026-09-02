@@ -5,7 +5,8 @@ This directory contains two deliberately small host-safety jobs:
 - `storage_guard.py` samples the host once per minute and applies configured
   low-water admission controls. It never archives or deletes data.
 - `retention_worker.py` is the single owner of external-volume canaries,
-  workspace GC eligibility, and transactional archives.
+  workspace GC eligibility, transactional archives, and the monthly ST-1
+  Electron updater residue audit.
 
 ## Safe rollout
 
@@ -48,6 +49,34 @@ unauthorized. The guard reports that amount as
 `workspace_gc_eligible_bytes` for capacity planning, while
 `workspace_gc_deletion_eligible_bytes` remains the stricter control-plane and
 lease-gated value. The stale signal never supplies an archive approval token.
+
+## ST-1 Electron updater audit
+
+The retention worker also owns the read-only monthly audit for Electron updater
+residue. On or after `electron_updater_audit.day_of_month`, it scans only the
+configured home-relative globs and atomically writes
+`st1-electron-updater-audit-YYYY-MM.json` below the configured report directory.
+It does this before external-volume checks, so an unavailable archive disk does
+not erase the month's ST-1 evidence.
+
+Matches are de-duplicated and recursively sized without following symlinks.
+The report records file counts, bytes, mtimes, stale candidates, and threshold
+reasons. It never moves or deletes a match. `attention` sends the existing Lark
+alert once for that month's report; an incomplete `red` scan fails the formal
+worker closed. A valid `green` or `attention` report suppresses later scans in
+the same Shanghai calendar month.
+
+Commission the exact same scanner without cron lineage or the external archive:
+
+```bash
+/usr/bin/python3 /Users/example/.local/libexec/storage-governance/retention_worker.py \
+  --config /Users/example/.local/libexec/storage-governance/retention-config.json \
+  --electron-audit-only
+```
+
+Audit-only mode still takes the retention worker's single-instance lock and
+forces a fresh report. It is for commissioning and incident response; scheduled
+evidence continues to come from the existing formal cron owner.
 
 ## Formal cron lineage
 

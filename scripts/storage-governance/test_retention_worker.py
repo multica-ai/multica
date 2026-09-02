@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import fcntl
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
@@ -20,8 +22,12 @@ from retention_worker import (  # noqa: E402
     GCEvaluator,
     SingleInstanceLock,
     _latest_mtime_size_and_unsafe_symlinks,
+    audit_electron_updaters,
     build_workspace_stale_report,
     consumed_approval_tokens,
+    main,
+    maybe_run_electron_updater_audit,
+    run_worker,
     send_alert,
     tree_manifest,
     verify_cron_bridge,
@@ -469,6 +475,232 @@ class WorkspaceStaleDryRunTest(unittest.TestCase):
             self.assertFalse(report["delete_authorized"])
             self.assertFalse(report["deletion_performed"])
             self.assertTrue(report["stale_workdir_candidates"][0]["observation_only"])
+
+
+class ElectronUpdaterAuditTest(unittest.TestCase):
+    def make_config(self, root: Path) -> tuple[dict, Path]:
+        home = root / "home"
+        home.mkdir()
+        return (
+            {
+                "electron_updater_audit": {
+                    "enabled": True,
+                    "timezone": "Asia/Shanghai",
+                    "day_of_month": 15,
+                    "home_path": str(home),
+                    "report_dir": str(root / "reports"),
+                    "patterns": [
+                        {"label": "electron_updater_cache", "glob": "Library/Caches/*-updater"},
+                        {"label": "pending_update_zip", "glob": "Library/Caches/*-updater/*.zip"},
+                    ],
+                    "warn_total_gib": 5,
+                    "warn_candidate_gib": 1,
+                    "stale_days": 45,
+                    "stale_min_mib": 100,
+                }
+            },
+            home,
+        )
+
+    def test_discovers_deduplicates_and_does_not_modify_updater_residue(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            updater = home / "Library" / "Caches" / "demo-updater"
+            updater.mkdir(parents=True)
+            (updater / "update.zip").write_bytes(b"z" * 128)
+            (updater / "metadata.json").write_bytes(b"m" * 64)
+            before = {
+                path.relative_to(updater).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns)
+                for path in updater.iterdir()
+            }
+
+            report = audit_electron_updaters(
+                config,
+                now=lambda: datetime(2026, 8, 5, tzinfo=timezone.utc),
+                invocation_source="test",
+            )
+
+            self.assertEqual(report["schema"], "multica.st1-electron-updater-audit.v1")
+            self.assertEqual(report["audit_month"], "2026-08")
+            self.assertEqual(report["status"], "green")
+            self.assertEqual(report["candidate_count"], 1)
+            self.assertEqual(report["total_bytes"], 192)
+            self.assertEqual(report["candidates"][0]["file_count"], 2)
+            self.assertEqual(
+                report["candidates"][0]["matched_labels"],
+                ["electron_updater_cache", "pending_update_zip"],
+            )
+            after = {
+                path.relative_to(updater).as_posix(): (path.stat().st_size, path.stat().st_mtime_ns)
+                for path in updater.iterdir()
+            }
+            self.assertEqual(after, before)
+            self.assertEqual(json.loads(Path(report["report_path"]).read_text()), report)
+
+    def test_records_a_symlink_match_without_following_or_counting_its_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            cache = home / "Library" / "Caches"
+            cache.mkdir(parents=True)
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "payload.bin").write_bytes(b"x" * 4096)
+            (cache / "escape-updater").symlink_to(outside, target_is_directory=True)
+
+            report = audit_electron_updaters(
+                config,
+                now=lambda: datetime(2026, 8, 5, tzinfo=timezone.utc),
+                invocation_source="test",
+            )
+
+            self.assertEqual(report["status"], "green")
+            self.assertEqual(report["candidate_count"], 0)
+            self.assertEqual(report["total_bytes"], 0)
+            self.assertEqual(report["errors"], [])
+            self.assertEqual(len(report["excluded_symlink_matches"]), 1)
+            self.assertEqual(
+                report["excluded_symlink_matches"][0]["path"],
+                str(cache.resolve() / "escape-updater"),
+            )
+            self.assertIn("not traversed", report["excluded_symlink_matches"][0]["reason"])
+            self.assertEqual((outside / "payload.bin").read_bytes(), b"x" * 4096)
+
+    def test_rejects_unbounded_recursive_globs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config, _ = self.make_config(Path(tmp))
+            config["electron_updater_audit"]["patterns"] = [
+                {"label": "too_broad", "glob": "Library/**/update.zip"}
+            ]
+
+            with self.assertRaisesRegex(ArchiveError, "recursive"):
+                audit_electron_updaters(config)
+
+    def test_marks_large_or_stale_candidates_for_attention_without_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            audit_config = config["electron_updater_audit"]
+            audit_config["warn_total_gib"] = 0.0000001
+            audit_config["warn_candidate_gib"] = 0.0000001
+            audit_config["stale_min_mib"] = 0.0001
+            updater = home / "Library" / "Caches" / "old-updater"
+            updater.mkdir(parents=True)
+            payload = updater / "update.zip"
+            payload.write_bytes(b"x" * 512)
+            old = datetime(2026, 5, 1, tzinfo=timezone.utc).timestamp()
+            import os
+
+            os.utime(payload, (old, old))
+            os.utime(updater, (old, old))
+
+            report = audit_electron_updaters(
+                config,
+                now=lambda: datetime(2026, 8, 5, tzinfo=timezone.utc),
+                invocation_source="test",
+            )
+
+            self.assertEqual(report["status"], "attention")
+            reasons = " ".join(report["attention_reasons"])
+            self.assertIn("total", reasons)
+            self.assertIn("candidate", reasons)
+            self.assertIn("stale", reasons)
+            self.assertTrue(payload.exists())
+
+    def test_month_gate_runs_once_and_force_bypasses_day_and_existing_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            updater = home / "Library" / "Caches" / "demo-updater"
+            updater.mkdir(parents=True)
+            (updater / "update.zip").write_bytes(b"z")
+            before_due = lambda: datetime(2026, 8, 5, tzinfo=timezone.utc)
+            on_due = lambda: datetime(2026, 8, 15, tzinfo=timezone.utc)
+
+            skipped = maybe_run_electron_updater_audit(config, now=before_due)
+            self.assertEqual(skipped["status"], "skipped")
+            self.assertIn("before day", skipped["reason"])
+
+            forced = maybe_run_electron_updater_audit(config, now=before_due, force=True)
+            self.assertEqual(forced["status"], "green")
+            report_path = Path(forced["report_path"])
+            self.assertTrue(report_path.is_file())
+            # The production gate deliberately verifies the evidence file's
+            # calendar-month mtime. Pin it to the test clock so this time-travel
+            # test remains deterministic after August 2026.
+            os.utime(report_path, (before_due().timestamp(), before_due().timestamp()))
+
+            already_recorded = maybe_run_electron_updater_audit(config, now=on_due)
+            self.assertEqual(already_recorded["status"], "skipped")
+            self.assertIn("already exists", already_recorded["reason"])
+
+            rerun = maybe_run_electron_updater_audit(config, now=on_due, force=True)
+            self.assertEqual(rerun["status"], "green")
+            self.assertEqual(rerun["audit_month"], "2026-08")
+
+    def test_formal_worker_audits_before_external_volume_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "external" / "archive"
+            archive.mkdir(parents=True)
+            config = {
+                "require_cron_lineage": False,
+                "delete_source": False,
+                "external_path": str(root / "external"),
+                "archive_root": str(archive),
+                "external_volume_uuid": "volume-uuid",
+                "external_min_free_gib": 1,
+                "workspace_roots": [],
+            }
+            events: list[str] = []
+
+            def audit(*args: object, **kwargs: object) -> dict:
+                events.append("audit")
+                return {"status": "skipped", "reason": "test"}
+
+            def external_check(*args: object, **kwargs: object) -> dict:
+                events.append("external")
+                raise ArchiveError("stop after ordering proof")
+
+            with mock.patch(
+                "retention_worker.maybe_run_electron_updater_audit", side_effect=audit
+            ), mock.patch.object(ExternalVolumeGuard, "check", side_effect=external_check):
+                with self.assertRaisesRegex(ArchiveError, "ordering proof"):
+                    run_worker(config)
+
+            self.assertEqual(events, ["audit", "external"])
+
+    def test_audit_only_cli_bypasses_cron_lineage_and_external_volume(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config, home = self.make_config(root)
+            config.update(
+                {
+                    "require_cron_lineage": True,
+                    "lock_path": str(root / "worker.lock"),
+                    "external_path": str(root / "missing-external"),
+                    "archive_root": str(root / "missing-external" / "archive"),
+                }
+            )
+            updater = home / "Library" / "Caches" / "demo-updater"
+            updater.mkdir(parents=True)
+            (updater / "update.zip").write_bytes(b"z")
+            config_path = root / "config.json"
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            output = io.StringIO()
+
+            with mock.patch.object(
+                sys,
+                "argv",
+                ["retention_worker.py", "--config", str(config_path), "--electron-audit-only"],
+            ), redirect_stdout(output):
+                exit_code = main()
+
+            self.assertEqual(exit_code, 0)
+            summary = json.loads(output.getvalue())
+            self.assertEqual(summary["status"], "green")
+            self.assertTrue(Path(summary["report_path"]).is_file())
 
 
 if __name__ == "__main__":

@@ -11,11 +11,13 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import fcntl
+import glob
 import hashlib
 import json
 import os
 import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 
 GIB = 1024**3
@@ -205,6 +208,268 @@ def read_volume_uuid(path: Path) -> str:
 def available_bytes(path: Path) -> int:
     stat = os.statvfs(str(path))
     return stat.f_bavail * stat.f_frsize
+
+
+def _audit_clock(now: Callable[[], datetime], timezone_name: str) -> Tuple[datetime, datetime]:
+    checked_at = now()
+    if checked_at.tzinfo is None:
+        checked_at = checked_at.replace(tzinfo=timezone.utc)
+    checked_at = checked_at.astimezone(timezone.utc)
+    try:
+        local_time = checked_at.astimezone(ZoneInfo(timezone_name))
+    except Exception as error:
+        raise ArchiveError("electron updater audit timezone is invalid: %s" % timezone_name) from error
+    return checked_at, local_time
+
+
+def _audit_report_path(audit_config: Dict[str, Any], local_time: datetime) -> Path:
+    report_dir = Path(str(audit_config["report_dir"]))
+    return report_dir / ("st1-electron-updater-audit-%04d-%02d.json" % (local_time.year, local_time.month))
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
+def _updater_candidate_metrics(path: Path) -> Tuple[Dict[str, Any], List[str]]:
+    errors: List[str] = []
+    file_count = 0
+    total_bytes = 0
+    skipped_symlink_count = 0
+    mtimes: List[float] = []
+    try:
+        root_stat = path.lstat()
+        mtimes.append(root_stat.st_mtime)
+        if path.is_file():
+            if stat.S_ISREG(root_stat.st_mode):
+                file_count = 1
+                total_bytes = root_stat.st_size
+        elif path.is_dir():
+            def record_walk_error(error: OSError) -> None:
+                errors.append("filesystem scan failed for %s: %s" % (path, error))
+
+            for current, dirnames, filenames in os.walk(
+                str(path),
+                topdown=True,
+                followlinks=False,
+                onerror=record_walk_error,
+            ):
+                current_path = Path(current)
+                kept_directories: List[str] = []
+                for name in sorted(dirnames):
+                    child = current_path / name
+                    if child.is_symlink():
+                        skipped_symlink_count += 1
+                        continue
+                    try:
+                        mtimes.append(child.lstat().st_mtime)
+                    except OSError as error:
+                        errors.append("filesystem metadata failed for %s: %s" % (child, error))
+                        continue
+                    kept_directories.append(name)
+                dirnames[:] = kept_directories
+                for name in sorted(filenames):
+                    child = current_path / name
+                    try:
+                        child_stat = child.lstat()
+                    except OSError as error:
+                        errors.append("filesystem metadata failed for %s: %s" % (child, error))
+                        continue
+                    if stat.S_ISLNK(child_stat.st_mode):
+                        skipped_symlink_count += 1
+                        continue
+                    mtimes.append(child_stat.st_mtime)
+                    if stat.S_ISREG(child_stat.st_mode):
+                        file_count += 1
+                        total_bytes += child_stat.st_size
+        else:
+            errors.append("unsupported updater residue type: %s" % path)
+    except OSError as error:
+        errors.append("filesystem scan failed for %s: %s" % (path, error))
+    metrics = {
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "skipped_symlink_count": skipped_symlink_count,
+        "oldest_mtime": datetime.fromtimestamp(min(mtimes), timezone.utc).isoformat() if mtimes else None,
+        "newest_mtime": datetime.fromtimestamp(max(mtimes), timezone.utc).isoformat() if mtimes else None,
+        "newest_mtime_epoch": max(mtimes) if mtimes else None,
+    }
+    return metrics, errors
+
+
+def audit_electron_updaters(
+    config: Dict[str, Any],
+    *,
+    now: Callable[[], datetime] = utc_now,
+    invocation_source: str = "manual",
+) -> Dict[str, Any]:
+    audit_config = config.get("electron_updater_audit")
+    if not isinstance(audit_config, dict):
+        raise ArchiveError("electron_updater_audit config is missing")
+    checked_at, local_time = _audit_clock(now, str(audit_config.get("timezone") or "Asia/Shanghai"))
+    home_path = Path(str(audit_config["home_path"]))
+    if home_path.is_symlink() or not home_path.is_dir():
+        raise ArchiveError("electron updater audit home must be a real directory: %s" % home_path)
+    home = home_path.resolve(strict=True)
+    raw_matches: Dict[Path, set[str]] = {}
+    excluded_symlink_matches: Dict[str, Dict[str, str]] = {}
+    errors: List[str] = []
+    patterns = audit_config.get("patterns")
+    if not isinstance(patterns, list) or not patterns:
+        raise ArchiveError("electron updater audit patterns must be a non-empty list")
+    for value in patterns:
+        if not isinstance(value, dict) or not value.get("label") or not value.get("glob"):
+            raise ArchiveError("electron updater audit pattern entries require label and glob")
+        label = str(value["label"])
+        relative_pattern = Path(str(value["glob"]))
+        if relative_pattern.is_absolute() or ".." in relative_pattern.parts:
+            raise ArchiveError("electron updater audit glob must stay relative to home: %s" % relative_pattern)
+        if "**" in relative_pattern.parts:
+            raise ArchiveError("electron updater audit recursive globs are not allowed: %s" % relative_pattern)
+        absolute_pattern = str(home / relative_pattern)
+        for matched in glob.glob(absolute_pattern):
+            path = Path(matched)
+            if path.is_symlink():
+                try:
+                    target = os.readlink(str(path))
+                except OSError as error:
+                    errors.append("updater residue symlink is unreadable: %s: %s" % (path, error))
+                    continue
+                excluded_symlink_matches[str(path)] = {
+                    "path": str(path),
+                    "target": target,
+                    "reason": "symlink match was not traversed or counted",
+                }
+                continue
+            try:
+                resolved = path.resolve(strict=True)
+            except OSError as error:
+                errors.append("updater residue match is unreadable: %s: %s" % (path, error))
+                continue
+            if not _path_is_within(resolved, home):
+                errors.append("updater residue match escaped home: %s" % path)
+                continue
+            raw_matches.setdefault(resolved, set()).add(label)
+
+    roots: List[Dict[str, Any]] = []
+    for path, labels in sorted(raw_matches.items(), key=lambda item: (len(item[0].parts), str(item[0]))):
+        parent = next((item for item in roots if _path_is_within(path, Path(str(item["path"])))), None)
+        if parent is not None:
+            parent["matched_labels"] = sorted(set(parent["matched_labels"]) | labels)
+            continue
+        roots.append({"path": str(path), "matched_labels": sorted(labels)})
+
+    candidates: List[Dict[str, Any]] = []
+    attention_reasons: List[str] = []
+    warn_candidate_bytes = int(float(audit_config.get("warn_candidate_gib", 1)) * GIB)
+    stale_seconds = int(float(audit_config.get("stale_days", 45)) * 86400)
+    stale_min_bytes = int(float(audit_config.get("stale_min_mib", 100)) * 1024**2)
+    for root in roots:
+        path = Path(str(root["path"]))
+        metrics, scan_errors = _updater_candidate_metrics(path)
+        errors.extend(scan_errors)
+        newest_epoch = metrics.pop("newest_mtime_epoch")
+        age_seconds = max(0.0, checked_at.timestamp() - newest_epoch) if newest_epoch is not None else None
+        candidate = {
+            **root,
+            **metrics,
+            "age_seconds": age_seconds,
+            "stale": bool(
+                age_seconds is not None
+                and age_seconds >= stale_seconds
+                and int(metrics["total_bytes"]) >= stale_min_bytes
+            ),
+        }
+        candidates.append(candidate)
+        if warn_candidate_bytes > 0 and int(candidate["total_bytes"]) >= warn_candidate_bytes:
+            attention_reasons.append(
+                "candidate exceeds %.3f GiB threshold: %s"
+                % (float(audit_config.get("warn_candidate_gib", 1)), candidate["path"])
+            )
+        if candidate["stale"]:
+            attention_reasons.append(
+                "stale candidate exceeds %.3f MiB floor: %s"
+                % (float(audit_config.get("stale_min_mib", 100)), candidate["path"])
+            )
+
+    total_bytes = sum(int(candidate["total_bytes"]) for candidate in candidates)
+    warn_total_bytes = int(float(audit_config.get("warn_total_gib", 5)) * GIB)
+    if warn_total_bytes > 0 and total_bytes >= warn_total_bytes:
+        attention_reasons.insert(
+            0,
+            "total updater residue exceeds %.3f GiB threshold"
+            % float(audit_config.get("warn_total_gib", 5)),
+        )
+    status = "red" if errors else ("attention" if attention_reasons else "green")
+    report_path = _audit_report_path(audit_config, local_time)
+    report: Dict[str, Any] = {
+        "schema": "multica.st1-electron-updater-audit.v1",
+        "duty": "ST-1",
+        "status": status,
+        "audit_month": "%04d-%02d" % (local_time.year, local_time.month),
+        "recorded_at": checked_at.isoformat(),
+        "recorded_at_local": local_time.isoformat(),
+        "timezone": str(audit_config.get("timezone") or "Asia/Shanghai"),
+        "invocation_source": invocation_source,
+        "report_path": str(report_path),
+        "candidate_count": len(candidates),
+        "total_bytes": total_bytes,
+        "stale_candidate_count": sum(1 for candidate in candidates if candidate["stale"]),
+        "attention_reasons": attention_reasons,
+        "errors": errors,
+        "excluded_symlink_matches": [
+            excluded_symlink_matches[path] for path in sorted(excluded_symlink_matches)
+        ],
+        "candidates": candidates,
+        "destructive_actions": [],
+    }
+    atomic_write_json(report_path, report)
+    return report
+
+
+def maybe_run_electron_updater_audit(
+    config: Dict[str, Any],
+    *,
+    now: Callable[[], datetime] = utc_now,
+    force: bool = False,
+    invocation_source: str = "manual",
+) -> Dict[str, Any]:
+    audit_config = config.get("electron_updater_audit")
+    if not isinstance(audit_config, dict) or not audit_config.get("enabled", False):
+        return {"status": "skipped", "reason": "electron updater audit is disabled"}
+    _, local_time = _audit_clock(now, str(audit_config.get("timezone") or "Asia/Shanghai"))
+    due_day = int(audit_config.get("day_of_month", 15))
+    if due_day < 1 or due_day > 28:
+        raise ArchiveError("electron updater audit day_of_month must be between 1 and 28")
+    if not force and local_time.day < due_day:
+        return {"status": "skipped", "reason": "current month is before day %d" % due_day}
+    report_path = _audit_report_path(audit_config, local_time)
+    if not force and report_path.is_file():
+        try:
+            existing = json.loads(report_path.read_text(encoding="utf-8"))
+            modified = datetime.fromtimestamp(report_path.stat().st_mtime, ZoneInfo(str(audit_config.get("timezone") or "Asia/Shanghai")))
+        except (OSError, ValueError, json.JSONDecodeError):
+            existing = {}
+            modified = None
+        if (
+            isinstance(existing, dict)
+            and existing.get("schema") == "multica.st1-electron-updater-audit.v1"
+            and existing.get("audit_month") == "%04d-%02d" % (local_time.year, local_time.month)
+            and existing.get("status") in {"green", "attention"}
+            and modified is not None
+            and (modified.year, modified.month) == (local_time.year, local_time.month)
+        ):
+            return {
+                "status": "skipped",
+                "reason": "valid current-month evidence already exists",
+                "report_path": str(report_path),
+                "evidence_status": existing["status"],
+            }
+    return audit_electron_updaters(config, now=now, invocation_source=invocation_source)
 
 
 class Canary:
@@ -967,6 +1232,25 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         trigger, cron_lineage = verify_cron_bridge(config)
         config["_verified_cron_token"] = str(trigger["token"])
         write_cron_bridge_receipt(config, token=str(trigger["token"]), status="running")
+    electron_audit = maybe_run_electron_updater_audit(
+        config,
+        invocation_source="verified-cron-launchd-bridge" if trigger else "manual-worker",
+    )
+    if electron_audit.get("status") == "attention":
+        send_alert(
+            config,
+            "ST-1 Electron updater audit needs review: %d candidates, %.3f GiB; report: %s"
+            % (
+                int(electron_audit.get("candidate_count") or 0),
+                int(electron_audit.get("total_bytes") or 0) / GIB,
+                str(electron_audit.get("report_path") or "missing"),
+            ),
+        )
+    elif electron_audit.get("status") == "red":
+        raise ArchiveError(
+            "ST-1 Electron updater audit was incomplete: %s"
+            % "; ".join(str(value) for value in electron_audit.get("errors") or ["unknown error"])
+        )
     if config.get("delete_source", False):
         raise ArchiveError("source deletion requires a producer lease and remains disabled")
     external_path = Path(str(config["external_path"]))
@@ -1015,6 +1299,7 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
         "cron_bridge_ancestry": cron_lineage,
         "cron_trigger_token": trigger.get("token") if trigger else None,
         "canary": canary,
+        "electron_updater_audit": electron_audit,
         "gc_mode": "dry-run",
         "gc_candidates": candidates,
         "eligible_count": sum(1 for candidate in candidates if candidate["eligible"]),
@@ -1053,18 +1338,32 @@ def run_worker(config: Dict[str, Any]) -> Dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--workspace-stale-dry-run",
         action="store_true",
         help="only list old task directories and bytes; never archive or delete",
     )
+    mode.add_argument(
+        "--electron-audit-only",
+        action="store_true",
+        help="force the read-only ST-1 updater audit without cron lineage or external-volume checks",
+    )
     args = parser.parse_args()
+    config: Dict[str, Any] = {}
     stale_only_report: Optional[Dict[str, Any]] = None
+    audit_only_report: Optional[Dict[str, Any]] = None
     try:
         config = json.loads(Path(args.config).read_text(encoding="utf-8"))
         with SingleInstanceLock(Path(str(config["lock_path"]))):
             if args.workspace_stale_dry_run:
                 stale_only_report = run_workspace_stale_dry_run(config)
+            elif args.electron_audit_only:
+                audit_only_report = maybe_run_electron_updater_audit(
+                    config,
+                    force=True,
+                    invocation_source="manual-audit-only",
+                )
             else:
                 report = run_worker(config)
     except BlockingIOError:
@@ -1120,6 +1419,22 @@ def main() -> int:
             )
         )
         return 1 if stale_only_report["status"] == "red" else 0
+    if audit_only_report is not None:
+        print(
+            json.dumps(
+                {
+                    "status": audit_only_report["status"],
+                    "audit_month": audit_only_report["audit_month"],
+                    "candidate_count": audit_only_report["candidate_count"],
+                    "stale_candidate_count": audit_only_report["stale_candidate_count"],
+                    "total_bytes": audit_only_report["total_bytes"],
+                    "report_path": audit_only_report["report_path"],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        )
+        return 1 if audit_only_report["status"] == "red" else 0
     print(
         json.dumps(
             {
