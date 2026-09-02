@@ -331,11 +331,14 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 
 // InitiateListModels answers a "list this runtime's models" request.
 //
-// Fast path: a cached catalog younger than modelCatalogServeWindow is returned
-// as an already-completed request, so the picker renders immediately instead of
-// waiting for the daemon (stale-while-revalidate). Serving a snapshot older than
+// Fast path: unless force=true, a cached catalog younger than
+// modelCatalogServeWindow is returned as an already-completed request, so the
+// picker renders immediately instead of waiting for the daemon
+// (stale-while-revalidate). Serving a snapshot older than
 // modelCatalogRevalidateAfter also enqueues a background refresh, which nobody
-// polls — its only job is to warm the cache for the next open.
+// polls — its only job is to warm the cache for the next open. force=true is the
+// picker refresh action: it skips this server cache and waits for a live daemon
+// result.
 //
 // Slow path: enqueue a pending request the daemon claims on its next heartbeat,
 // and push a wakeup hint so "next heartbeat" is now rather than up to one
@@ -352,28 +355,30 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	resolvedRuntimeID := uuidToString(rt.ID)
 
-	if cached := h.cachedModelCatalog(r.Context(), resolvedRuntimeID); cached != nil {
-		age := cached.Age(time.Now())
-		if age >= modelCatalogRevalidateAfter {
-			h.revalidateModelCatalog(r.Context(), resolvedRuntimeID)
+	if r.URL.Query().Get("force") != "true" {
+		if cached := h.cachedModelCatalog(r.Context(), resolvedRuntimeID); cached != nil {
+			age := cached.Age(time.Now())
+			if age >= modelCatalogRevalidateAfter {
+				h.revalidateModelCatalog(r.Context(), resolvedRuntimeID)
+			}
+			storedAt := cached.StoredAt
+			writeJSON(w, http.StatusOK, &ModelListRequest{
+				// Synthetic ID: no store record backs a cache hit. Clients only poll
+				// GET /models/{id} while status is pending/running, which this
+				// response never is.
+				ID:                randomID(),
+				RuntimeID:         resolvedRuntimeID,
+				Status:            ModelListCompleted,
+				Models:            cached.Models,
+				UnavailableModels: cached.UnavailableModels,
+				Supported:         cached.Supported,
+				CreatedAt:         storedAt,
+				UpdatedAt:         storedAt,
+				Cached:            true,
+				CachedAt:          &storedAt,
+			})
+			return
 		}
-		storedAt := cached.StoredAt
-		writeJSON(w, http.StatusOK, &ModelListRequest{
-			// Synthetic ID: no store record backs a cache hit. Clients only poll
-			// GET /models/{id} while status is pending/running, which this
-			// response never is.
-			ID:                randomID(),
-			RuntimeID:         resolvedRuntimeID,
-			Status:            ModelListCompleted,
-			Models:            cached.Models,
-			UnavailableModels: cached.UnavailableModels,
-			Supported:         cached.Supported,
-			CreatedAt:         storedAt,
-			UpdatedAt:         storedAt,
-			Cached:            true,
-			CachedAt:          &storedAt,
-		})
-		return
 	}
 
 	req, err := h.ModelListStore.Create(r.Context(), resolvedRuntimeID)

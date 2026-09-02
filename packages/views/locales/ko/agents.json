@@ -222,6 +222,8 @@
     "model_managed_by_runtime": "런타임에서 관리",
     "model_search_placeholder": "모델 ID 검색 또는 입력",
     "model_discovering": "모델 찾는 중...",
+    "model_refresh": "모델 새로고침",
+    "model_refreshing": "모델 새로고침 중...",
     "model_discovery_failed_title": "이 런타임의 모델을 가져오지 못했습니다.",
     "model_discovery_failed_hint": "위 입력란에 모델 ID를 직접 입력해 수동으로 지정할 수 있습니다.",
     "model_empty": "사용 가능한 모델이 없습니다",

@@ -1,19 +1,22 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus, Check, Info } from "lucide-react";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
+import {
+  refreshRuntimeModels,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import type { RuntimeModel } from "@multica/core/types";
 import {
   Popover,
   PopoverTrigger,
   PopoverContent,
 } from "@multica/ui/components/ui/popover";
-import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
 import { UnavailableModelsNote } from "./unavailable-models-note";
+import { ModelSearchHeader } from "./model-search-header";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -43,6 +46,7 @@ export function ModelDropdown({
   disabled?: boolean;
 }) {
   const { t } = useT("agents");
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -105,6 +109,14 @@ export function ModelDropdown({
     onChange(id);
     setOpen(false);
     setSearch("");
+  };
+
+  const refresh = () => {
+    if (!runtimeId || !runtimeOnline) return;
+    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+      // React Query owns the error state rendered below. Swallow the returned
+      // promise rejection so a failed manual refresh is not also unhandled.
+    });
   };
 
   const triggerLabel =
@@ -174,13 +186,13 @@ export function ModelDropdown({
           align="start"
           className="w-[var(--anchor-width)] p-0 overflow-hidden"
         >
-          <div className="border-b border-border p-2">
-            <Input
-              autoFocus
-              placeholder={t(($) => $.pickers.model_search_placeholder)}
+          <div className="border-b border-border">
+            <ModelSearchHeader
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-8"
+              onChange={setSearch}
+              onRefresh={refresh}
+              refreshing={modelsQuery.isFetching}
+              refreshDisabled={!runtimeOnline || !runtimeId}
             />
           </div>
           <div className="max-h-72 overflow-y-auto p-1">

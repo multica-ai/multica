@@ -214,6 +214,8 @@
     "model_managed_by_runtime": "ランタイムで管理",
     "model_search_placeholder": "モデル ID を検索または入力",
     "model_discovering": "モデルを検出中...",
+    "model_refresh": "モデルを更新",
+    "model_refreshing": "モデルを更新中...",
     "model_discovery_failed_title": "このランタイムのモデルを取得できませんでした。",
     "model_discovery_failed_hint": "上の入力欄にモデル ID を直接入力して手動で指定できます。",
     "model_empty": "利用可能なモデルがありません",
