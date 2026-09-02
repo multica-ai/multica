@@ -372,8 +372,9 @@ func (h *Handler) autopilotAssignAuthorityFromRequest(r *http.Request, scope ass
 //   - the assignment is bound to work this run verifiably owns —
 //     issueBoundToAutopilotTask for an existing issue (which for a run_only-created
 //     issue re-proves the run_only lineage, so a create_issue task cannot escape
-//     its same-issue bound via a fresh top-level issue), or the task's own
-//     verified autopilot run when creating a parentless issue;
+//     its same-issue bound via a fresh top-level issue), an existing member-created
+//     issue whose creator is exactly the run's accountable human, or the task's
+//     own verified autopilot run when creating a parentless issue;
 //   - the issue (when there is one) is in the request's workspace;
 //   - the accountable human is STILL a member of that workspace.
 //
@@ -401,9 +402,13 @@ func (h *Handler) autopilotTaskAssignAuthority(ctx context.Context, scope assign
 	default:
 		return ""
 	}
+	accountable := uuidToString(task.AccountableUserID)
+	if accountable == "" {
+		return ""
+	}
 
 	switch scope.Kind {
-	case scopeKindChildOf, scopeKindExistingIssue:
+	case scopeKindChildOf:
 		if scope.Issue == nil {
 			return ""
 		}
@@ -411,6 +416,21 @@ func (h *Handler) autopilotTaskAssignAuthority(ctx context.Context, scope assign
 			return ""
 		}
 		if !h.issueBoundToAutopilotTask(ctx, *scope.Issue, task, workspaceID) {
+			return ""
+		}
+	case scopeKindExistingIssue:
+		if scope.Issue == nil {
+			return ""
+		}
+		if uuidToString(scope.Issue.WorkspaceID) != workspaceID {
+			return ""
+		}
+		boundToTask := h.issueBoundToAutopilotTask(ctx, *scope.Issue, task, workspaceID)
+		ownedByAccountableMember := scope.Issue.CreatorType == "member" &&
+			scope.Issue.CreatorID.Valid &&
+			uuidToString(scope.Issue.CreatorID) == accountable &&
+			h.taskRunsAutopilotInWorkspace(ctx, task, workspaceID)
+		if !boundToTask && !ownedByAccountableMember {
 			return ""
 		}
 	case scopeKindNewTopLevelIssue:
@@ -421,10 +441,6 @@ func (h *Handler) autopilotTaskAssignAuthority(ctx context.Context, scope assign
 		return ""
 	}
 
-	accountable := uuidToString(task.AccountableUserID)
-	if accountable == "" {
-		return ""
-	}
 	if _, err := h.getWorkspaceMember(ctx, accountable, workspaceID); err != nil {
 		return ""
 	}
@@ -450,9 +466,11 @@ func (h *Handler) autopilotTaskAssignAuthority(ctx context.Context, scope assign
 //     runs of the same autopilot from borrowing on each other's issues, and needs
 //     no migration or backfill.
 //
-// A run_only leader therefore reaches only the issues it created (and, through
-// the child scope, their children) — never a pre-existing or foreign issue. A
-// create_issue leader reaches only the autopilot's own issue.
+// A run_only leader therefore reaches the issues it created and, only for the
+// assign-existing operation, pre-existing issues created by its accountable
+// human. It never reaches another member's or another run's issue. Through the
+// child scope it reaches only its own issue tree. A create_issue leader reaches
+// only the autopilot's own issue.
 func (h *Handler) issueBoundToAutopilotTask(ctx context.Context, issue db.Issue, task db.AgentTaskQueue, workspaceID string) bool {
 	if !issue.OriginType.Valid || !issue.OriginID.Valid || !issue.ID.Valid {
 		return false

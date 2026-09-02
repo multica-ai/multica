@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync/atomic"
@@ -89,6 +90,23 @@ func newRunOnlyAutopilotFixture(t *testing.T, targetAgentID, accountableUserID s
 		RunID:         runID,
 		RuntimeID:     runtimeID,
 	}
+}
+
+func seedMemberIssue(t *testing.T, creatorMemberID string) string {
+	t.Helper()
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, status, number)
+		VALUES ($1, 'member', $2, 'MUL-6691 member-created issue', 'todo', $3) RETURNING id
+	`, testWorkspaceID, creatorMemberID, nextWorkspaceIssueNumber(t)).Scan(&issueID); err != nil {
+		t.Fatalf("seed member issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
 }
 
 // topLevelIssueRequest is a parentless `issue create` with an assignee, spoken by
@@ -480,6 +498,36 @@ func TestUpdateIssue_AutopilotLeaderAssignsPrivateWorker(t *testing.T) {
 		}
 	})
 
+	t.Run("run_only run assigns an issue created by its accountable member", func(t *testing.T) {
+		workerID, ownerID, _ := privateAgentTestFixture(t)
+		fx := newRunOnlyAutopilotFixture(t, workerID, ownerID)
+		issueID := seedMemberIssue(t, ownerID)
+
+		agentAssigns(t, fx.LeaderAgentID, fx.LeaderTaskID, issueID, workerID).Want(http.StatusOK)
+
+		if got := assigneeOf(t, issueID); got != workerID {
+			t.Fatalf("accountable member issue assignee = %q, want %q", got, workerID)
+		}
+		if total, _ := tasksFor(t, issueID, workerID); total != 1 {
+			t.Fatalf("accountable member issue enqueued %d tasks, want 1", total)
+		}
+	})
+
+	t.Run("run_only run cannot assign another member's issue", func(t *testing.T) {
+		workerID, ownerID, otherMemberID := privateAgentTestFixture(t)
+		fx := newRunOnlyAutopilotFixture(t, workerID, ownerID)
+		issueID := seedMemberIssue(t, otherMemberID)
+
+		agentAssigns(t, fx.LeaderAgentID, fx.LeaderTaskID, issueID, workerID).Want(http.StatusForbidden)
+
+		if got := assigneeOf(t, issueID); got != "" {
+			t.Fatalf("foreign member issue was assigned to %q", got)
+		}
+		if total, _ := tasksFor(t, issueID, workerID); total != 0 {
+			t.Fatalf("foreign member issue enqueued %d tasks", total)
+		}
+	})
+
 	t.Run("run_only run cannot assign an issue created by a sibling run", func(t *testing.T) {
 		workerID, ownerID, _ := privateAgentTestFixture(t)
 		owning := newRunOnlyAutopilotFixture(t, workerID, ownerID)
@@ -565,6 +613,26 @@ func TestBatchUpdateIssues_AutopilotAuthorityIsPerIssue(t *testing.T) {
 		}
 		if total, _ := tasksFor(t, foreignIssueID, workerID); total != 0 {
 			t.Fatalf("foreign issue enqueued %d tasks", total)
+		}
+	})
+
+	t.Run("accountable member issue is updated and another member issue is not", func(t *testing.T) {
+		workerID, ownerID, otherMemberID := privateAgentTestFixture(t)
+		fx := newRunOnlyAutopilotFixture(t, workerID, ownerID)
+		ownIssueID := seedMemberIssue(t, ownerID)
+		foreignIssueID := seedMemberIssue(t, otherMemberID)
+
+		batchAssignAsRun(t, otherMemberID, fx.LeaderAgentID, fx.LeaderTaskID, workerID, ownIssueID, foreignIssueID).
+			Want(http.StatusOK)
+
+		if got := assigneeOf(t, ownIssueID); got != workerID {
+			t.Fatalf("accountable member issue assignee = %q, want %q", got, workerID)
+		}
+		if got := assigneeOf(t, foreignIssueID); got != "" {
+			t.Fatalf("foreign member issue in the same batch was assigned to %q", got)
+		}
+		if total, _ := tasksFor(t, foreignIssueID, workerID); total != 0 {
+			t.Fatalf("foreign member issue enqueued %d tasks", total)
 		}
 	})
 
