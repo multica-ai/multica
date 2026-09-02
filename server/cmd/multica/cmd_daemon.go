@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -49,6 +50,24 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE:  runDaemonStatus,
+}
+
+var daemonPauseCmd = &cobra.Command{
+	Use:   "pause",
+	Short: "Pause admission of new tasks without cancelling active tasks",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runDaemonAdmission(cmd, true)
+	},
+}
+
+var daemonResumeCmd = &cobra.Command{
+	Use:   "resume",
+	Short: "Resume admission of new tasks",
+	Args:  cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runDaemonAdmission(cmd, false)
+	},
 }
 
 var daemonProbeRuntimesCmd = &cobra.Command{
@@ -112,6 +131,10 @@ func init() {
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonPauseCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonResumeCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonPauseCmd.Flags().String("owner", "manual", "Independent pause owner (for example: manual or storage-guard)")
+	daemonResumeCmd.Flags().String("owner", "manual", "Release only this pause owner")
 
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
@@ -142,6 +165,8 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonPauseCmd)
+	daemonCmd.AddCommand(daemonResumeCmd)
 	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
@@ -1341,6 +1366,84 @@ func requestDaemonShutdown(healthPort int) error {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
+	return nil
+}
+
+type daemonAdmissionState struct {
+	AdmissionPaused      bool     `json:"admission_paused"`
+	AdmissionPauseOwners []string `json:"admission_pause_owners"`
+	Owner                string   `json:"owner"`
+	OwnerPaused          bool     `json:"owner_paused"`
+	ClaimsInFlight       int      `json:"claims_in_flight"`
+	ActiveTaskCount      int64    `json:"active_task_count"`
+}
+
+func requestDaemonAdmission(client *http.Client, baseURL string, paused bool, owner string) (daemonAdmissionState, error) {
+	action := "resume"
+	if paused {
+		action = "pause"
+	}
+	endpoint := strings.TrimRight(baseURL, "/") + "/admission/" + action + "?" + url.Values{"owner": {owner}}.Encode()
+	req, err := http.NewRequest(http.MethodPost, endpoint, nil)
+	if err != nil {
+		return daemonAdmissionState{}, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return daemonAdmissionState{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return daemonAdmissionState{}, fmt.Errorf("daemon admission endpoint returned status %d", resp.StatusCode)
+	}
+	var state daemonAdmissionState
+	if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+		return daemonAdmissionState{}, fmt.Errorf("decode daemon admission response: %w", err)
+	}
+	return state, nil
+}
+
+func runDaemonAdmission(cmd *cobra.Command, paused bool) error {
+	action := "daemon resume"
+	if paused {
+		action = "daemon pause"
+	}
+	if err := requireHumanLocalCommand(action); err != nil {
+		return err
+	}
+	profile := resolveProfile(cmd)
+	if err := requireKnownProfile(profile); err != nil {
+		return err
+	}
+	port := healthPortForProfile(profile)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	health := checkDaemonHealthOnPort(ctx, port)
+	if !daemonAlive(health) {
+		return fmt.Errorf("daemon is not running")
+	}
+	// The profile port is a bounded hash, so a different profile can answer
+	// here. Verify the daemon identity before changing its admission state;
+	// otherwise a collision lets `--profile a daemon pause` silently brake b.
+	if err := daemonIdentityMismatch(health, profile, port); err != nil {
+		return err
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	owner, _ := cmd.Flags().GetString("owner")
+	state, err := requestDaemonAdmission(client, fmt.Sprintf("http://127.0.0.1:%d", port), paused, owner)
+	if err != nil {
+		return err
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(cmd.OutOrStdout(), state)
+	}
+	action = "resumed"
+	if paused {
+		action = "paused"
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "Daemon admission %s (active tasks: %d, claims draining: %d).\n", action, state.ActiveTaskCount, state.ClaimsInFlight)
 	return nil
 }
 

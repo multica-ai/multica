@@ -1,0 +1,55 @@
+{
+  "internal_path": "/",
+  "external_path": "/Volumes/MacMini-HotSSD",
+  "level1_free_gib": 25,
+  "level1_clear_gib": 28,
+  "level2_free_gib": 18,
+  "level2_clear_gib": 21,
+  "external_min_free_gib": 100,
+  "safety_floor_gib": 25,
+  "burst_reserve_gib": 10,
+  "minimum_observation_hours": 48,
+  "maximum_observation_hours": 72,
+  "expected_interval_seconds": 60,
+  "minimum_sample_coverage": 0.8,
+  "growth_scan_interval_seconds": 900,
+  "growth_scan_budget_seconds": 5,
+  "required_field_max_gap_seconds": 1800,
+  "retention_report_max_age_seconds": 1800,
+  "shadow_runs_path": "/Users/example/path/to/m0-shadow-observer/data/runs",
+  "workspace_roots": [
+    "/Users/example/multica_workspaces",
+    "/Users/example/multica_workspaces_desktop-api.multica.ai"
+  ],
+  "retention_report_path": "/Users/example/.local/state/storage-governance/gc-dry-run.json",
+  "workspace_stale_report_path": "/Users/example/.local/state/storage-governance/workspace-stale-dry-run.json",
+  "retention_days": 7,
+  "cursor_path": "/Users/example/Library/Application Support/Cursor",
+  "logs_paths": [
+    "/Users/example/.multica",
+    "/Users/example/Library/Logs"
+  ],
+  "required_growth_fields": [
+    "shadow_runs_bytes",
+    "workspace_total_bytes",
+    "workspace_inflight_bytes",
+    "workspace_gc_eligible_bytes",
+    "workspace_gc_backlog_bytes",
+    "workspace_unclassified_bytes",
+    "cursor_bytes",
+    "logs_bytes",
+    "swap_used_bytes",
+    "external_free_bytes"
+  ],
+  "observer_labels": [
+    "ai.multica.ws2512.m0-shadow-observer"
+  ],
+  "nonproduction_launchagents": [],
+  "lark_open_id": "",
+  "alert_cooldown_seconds": 3600,
+  "legacy_sigstop_fallback": false,
+  "state_path": "/Users/example/.local/state/storage-governance/guard-state.json",
+  "growth_cache_path": "/Users/example/.local/state/storage-governance/growth-metrics-cache.json",
+  "metrics_path": "/Users/example/.local/state/storage-governance/host-samples.jsonl",
+  "capacity_report_path": "/Users/example/.local/state/storage-governance/capacity-report.json"
+}
