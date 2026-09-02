@@ -902,6 +902,8 @@ const TimelineEntrySchema = z.object({
   actor_type: z.string(),
   actor_id: z.string(),
   created_at: z.string(),
+  actor_name: z.string().optional(),
+  actor_avatar_url: z.string().optional(),
   action: z.string().optional(),
   details: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
@@ -2969,11 +2971,24 @@ const RuntimeModelSchema = z.object({
   supports_explicit_standard_service_tier: z.boolean().optional(),
 }).loose();
 
+// A row the runtime named but will not run (MUL-6961). Parsed from its own
+// top-level list, never from `models`, so nothing here can become a selectable
+// value. `id` is required for the same reason it is on RuntimeModelSchema — a
+// row without one cannot even be keyed in a list.
+const RuntimeUnavailableModelSchema = z.object({
+  id: z.string(),
+  label: z.string().default(""),
+  reason: z.string().optional(),
+}).loose();
+
 export const RuntimeModelListRequestSchema = z.object({
   id: z.string().default(""),
   runtime_id: z.string().default(""),
   status: z.string(),
   models: z.array(RuntimeModelSchema).optional(),
+  // Absent on any daemon or server older than the field, which simply means
+  // the picker shows no unavailable section.
+  unavailable_models: z.array(RuntimeUnavailableModelSchema).optional(),
   supported: z.boolean().default(true),
   error: z.string().optional(),
   created_at: z.string().default(""),

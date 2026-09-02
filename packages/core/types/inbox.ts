@@ -24,7 +24,11 @@ export type InboxItemType =
   // Quick create whose outcome could not be verified. Distinct from
   // quick_create_failed because it must NOT be rendered with failure framing:
   // the issue may actually have been created.
-  | "quick_create_unconfirmed";
+  | "quick_create_unconfirmed"
+  // System notifications are intentionally issue-less. Keep them in the
+  // same Inbox model so read/archive/realtime behavior remains consistent.
+  | "autopilot_paused"
+  | "autopilot_quota_exceeded";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

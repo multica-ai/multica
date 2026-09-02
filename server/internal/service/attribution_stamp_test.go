@@ -395,8 +395,9 @@ func TestTriggerOwnerAttribution_ScheduleTriggerCreator(t *testing.T) {
 	// Schedule trigger whose responsible publisher is the creating member.
 	var triggerID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
-		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2) RETURNING id`,
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression,
+			published_by_type, published_by_id, created_by_type, created_by_id)
+		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2, 'member', $2) RETURNING id`,
 		autopilotID, creatorID).Scan(&triggerID); err != nil {
 		t.Fatalf("seed trigger: %v", err)
 	}
@@ -407,8 +408,10 @@ func TestTriggerOwnerAttribution_ScheduleTriggerCreator(t *testing.T) {
 	if got.Source != attribution.SourceTriggerOwner {
 		t.Fatalf("source = %q, want trigger_owner", got.Source)
 	}
-	if got.UserID.Valid {
-		t.Errorf("trigger_owner is audit-only; originator must stay NULL, got %s", util.UUIDToString(got.UserID))
+	// MUL-6951: the trigger owner is the ORIGINATOR, not an audit-only accountable —
+	// arming a trigger authorizes its runs the same way clicking "run now" does.
+	if !got.UserID.Valid || got.UserID.Bytes != util.MustParseUUID(creatorID).Bytes {
+		t.Errorf("originator = %s, want trigger creator %s", util.UUIDToString(got.UserID), creatorID)
 	}
 	if !got.AccountableUserID.Valid || got.AccountableUserID.Bytes != util.MustParseUUID(creatorID).Bytes {
 		t.Errorf("accountable = %s, want trigger creator %s", util.UUIDToString(got.AccountableUserID), creatorID)
@@ -482,11 +485,17 @@ func seedExtraMember(t *testing.T, pool *pgxpool.Pool, workspaceID, label string
 // TestTriggerOwnerAttribution_TransfersToSubstantiveEditor is Elon's must-fix
 // acceptance test: it drives the REAL triggerOwnerAttribution resolver (not the
 // ruleOwnerAttribution helper) across the SAME queries the handlers use, and proves
-// both halves of the pinned model — (1) responsibility TRANSFERS from the creator to
-// whoever substantively edits the trigger, and (2) a trigger-scoped edit re-stamps
-// ONLY that trigger, never a sibling. It also proves an autopilot-level edit bumps
-// every trigger together (MUL-4302).
-func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
+// the model MUL-6951 settled: the run's human is the trigger's IMMUTABLE creator and
+// a substantive edit does NOT move it, while published_by still transfers so the
+// trigger row keeps recording who last took responsibility for its config.
+//
+// Bohan's ruling on the MUL-6951 thread: collaborative editing is an edge case, and
+// making an edit silently re-authorize the automation as the editor is worse than
+// keeping it on the creator. Note the consequence this locks in — because the DB
+// invariant (migrations 190/197) forces accountable == originator whenever the
+// originator is set, the TASK row now names the creator on both columns. The
+// editor's responsibility is still recorded, on autopilot_trigger.published_by.
+func TestTriggerOwnerAttribution_StaysWithTriggerCreator(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -507,8 +516,9 @@ func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
 	seedTrigger := func(cron string) string {
 		var id string
 		if err := pool.QueryRow(ctx, `
-			INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
-			VALUES ($1, 'schedule', true, $2, 'member', $3) RETURNING id`,
+			INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression,
+				published_by_type, published_by_id, created_by_type, created_by_id)
+			VALUES ($1, 'schedule', true, $2, 'member', $3, 'member', $3) RETURNING id`,
 			autopilotID, cron, creatorA).Scan(&id); err != nil {
 			t.Fatalf("seed trigger: %v", err)
 		}
@@ -517,25 +527,26 @@ func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
 	trigger1 := seedTrigger("0 * * * *")
 	trigger2 := seedTrigger("0 0 * * *")
 
-	accountableOf := func(triggerID string) string {
+	principalOf := func(triggerID string) string {
 		got := triggerOwnerAttribution(ctx, q,
 			util.MustParseUUID(triggerID), util.MustParseUUID(workspaceID), util.MustParseUUID(autopilotID),
 			attribution.EvidenceAutopilotRun, util.MustParseUUID(autopilotID))
 		if got.Source != attribution.SourceTriggerOwner {
 			t.Fatalf("trigger %s: source = %q, want trigger_owner", triggerID, got.Source)
 		}
-		if got.UserID.Valid {
-			t.Fatalf("trigger_owner is audit-only; originator must stay NULL, got %s", util.UUIDToString(got.UserID))
+		if got.UserID != got.AccountableUserID {
+			t.Fatalf("trigger %s: originator %s and accountable %s must be the same human",
+				triggerID, util.UUIDToString(got.UserID), util.UUIDToString(got.AccountableUserID))
 		}
-		return util.UUIDToString(got.AccountableUserID)
+		return util.UUIDToString(got.UserID)
 	}
 
-	// Baseline: both triggers attribute to creator A.
-	if a := accountableOf(trigger1); a != creatorA {
-		t.Fatalf("trigger1 baseline accountable = %s, want creator %s", a, creatorA)
+	// Baseline: both triggers run as creator A.
+	if a := principalOf(trigger1); a != creatorA {
+		t.Fatalf("trigger1 baseline principal = %s, want creator %s", a, creatorA)
 	}
-	if a := accountableOf(trigger2); a != creatorA {
-		t.Fatalf("trigger2 baseline accountable = %s, want creator %s", a, creatorA)
+	if a := principalOf(trigger2); a != creatorA {
+		t.Fatalf("trigger2 baseline principal = %s, want creator %s", a, creatorA)
 	}
 
 	// B substantively edits trigger1 — the SAME query UpdateAutopilotTrigger runs.
@@ -547,13 +558,23 @@ func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
 		t.Fatalf("SetAutopilotTriggerPublisher: %v", err)
 	}
 
-	// Transfer: trigger1 now attributes to editor B, NOT the original creator.
-	if a := accountableOf(trigger1); a != editorB {
-		t.Fatalf("after edit, trigger1 accountable = %s, want editor %s (responsibility must transfer)", a, editorB)
+	// The edit moves published_by but NOT the run's human: an editor must not be
+	// able to re-point the automation at their own rights (MUL-6951).
+	var published1 pgtype.UUID
+	if err := pool.QueryRow(ctx, `SELECT published_by_id FROM autopilot_trigger WHERE id = $1`,
+		util.MustParseUUID(trigger1)).Scan(&published1); err != nil {
+		t.Fatalf("read published_by: %v", err)
 	}
-	// Isolation: editing trigger1 must NOT move trigger2 — it stays with creator A.
-	if a := accountableOf(trigger2); a != creatorA {
-		t.Fatalf("trigger2 accountable = %s, want creator %s (editing a sibling must not transfer)", a, creatorA)
+	if util.UUIDToString(published1) != editorB {
+		t.Fatalf("published_by = %s, want editor %s (trigger-level responsibility must still transfer)",
+			util.UUIDToString(published1), editorB)
+	}
+	if a := principalOf(trigger1); a != creatorA {
+		t.Fatalf("after edit, trigger1 principal = %s, want creator %s (an edit must not re-authorize)", a, creatorA)
+	}
+	// Isolation is unchanged: neither trigger's principal moves.
+	if a := principalOf(trigger2); a != creatorA {
+		t.Fatalf("trigger2 principal = %s, want creator %s", a, creatorA)
 	}
 
 	// C makes an autopilot-level substantive edit — the SAME bump-all query
@@ -565,12 +586,15 @@ func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("SetAutopilotTriggerPublishersByAutopilot: %v", err)
 	}
-	if a := accountableOf(trigger1); a != editorC {
-		t.Fatalf("after autopilot-level edit, trigger1 accountable = %s, want %s", a, editorC)
+	// Same rule at the autopilot level: the bump-all edit moves published_by on both
+	// triggers, and neither run's human moves with it.
+	if a := principalOf(trigger1); a != creatorA {
+		t.Fatalf("after autopilot-level edit, trigger1 principal = %s, want creator %s", a, creatorA)
 	}
-	if a := accountableOf(trigger2); a != editorC {
-		t.Fatalf("after autopilot-level edit, trigger2 accountable = %s, want %s", a, editorC)
+	if a := principalOf(trigger2); a != creatorA {
+		t.Fatalf("after autopilot-level edit, trigger2 principal = %s, want creator %s", a, creatorA)
 	}
+	_ = editorC
 }
 
 // TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner is the acceptance test for
@@ -631,8 +655,12 @@ func TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner(t *testing.T) {
 	if source.String != string(attribution.SourceRuleOwner) {
 		t.Errorf("originator_source = %q, want rule_owner", source.String)
 	}
+	// rule_owner stays AUDIT-ONLY (MUL-6951, Elon review): the rule publisher never
+	// armed anything, so promoting that guess to an authorization identity would
+	// hand a legacy trigger somebody's invoke rights. Originator stays NULL and the
+	// invoke gate fails closed.
 	if originator.Valid {
-		t.Errorf("autopilot run must NOT set originator (authorization stays NULL), got %s", util.UUIDToString(originator))
+		t.Errorf("rule_owner must not set originator, got %s", util.UUIDToString(originator))
 	}
 	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(publisherID).Bytes {
 		t.Errorf("accountable_user_id = %s, want rule publisher %s", util.UUIDToString(accountable), publisherID)
@@ -809,8 +837,9 @@ func TestDispatchRunOnlyScheduleStampsRuleOwnerRow(t *testing.T) {
 	if source.String != string(attribution.SourceRuleOwner) {
 		t.Errorf("originator_source = %q, want rule_owner", source.String)
 	}
+	// rule_owner stays AUDIT-ONLY — see the create_issue case above (MUL-6951).
 	if originator.Valid {
-		t.Errorf("run_only autopilot must NOT set originator, got %s", util.UUIDToString(originator))
+		t.Errorf("rule_owner must not set originator, got %s", util.UUIDToString(originator))
 	}
 	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(publisherID).Bytes {
 		t.Errorf("accountable_user_id = %s, want publisher %s", util.UUIDToString(accountable), publisherID)
@@ -883,15 +912,13 @@ func TestDispatchRunOnlyManualStampsDirectHuman(t *testing.T) {
 	}
 }
 
-// TestDispatchRunOnlyScheduleTransfersToEditor is Elon's must-fix REAL dispatch test:
-// it drives dispatchRunOnly end to end (schedule-style, no member actor) and asserts
-// the PERSISTED agent_task_queue row's accountable_user_id follows the trigger's
-// current responsible publisher after a substantive edit — the creator seeds it, then
-// a later editor's re-stamp (the same SetAutopilotTriggerPublisher the UpdateTrigger
-// handler runs) makes future runs attribute to the editor, with originator still NULL
-// (MUL-4302). The resolver-level before/after and per-trigger isolation are covered by
-// TestTriggerOwnerAttribution_TransfersToSubstantiveEditor.
-func TestDispatchRunOnlyScheduleTransfersToEditor(t *testing.T) {
+// TestDispatchRunOnlyScheduleStaysWithTriggerCreator drives dispatchRunOnly end to
+// end (schedule-style, no member actor) and asserts the PERSISTED
+// agent_task_queue row names the trigger's CREATOR on both attribution columns even
+// after a substantive edit re-stamped published_by to someone else — the run must not
+// be re-authorized by an edit (MUL-6951). The resolver-level before/after and
+// per-trigger isolation are covered by TestTriggerOwnerAttribution_StaysWithTriggerCreator.
+func TestDispatchRunOnlyScheduleStaysWithTriggerCreator(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -910,8 +937,9 @@ func TestDispatchRunOnlyScheduleTransfersToEditor(t *testing.T) {
 	// Schedule trigger initially published by creator A, then edited by B.
 	var triggerID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
-		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2) RETURNING id`,
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression,
+			published_by_type, published_by_id, created_by_type, created_by_id)
+		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2, 'member', $2) RETURNING id`,
 		autopilotID, creatorA).Scan(&triggerID); err != nil {
 		t.Fatalf("seed trigger: %v", err)
 	}
@@ -956,12 +984,15 @@ func TestDispatchRunOnlyScheduleTransfersToEditor(t *testing.T) {
 	if source.String != string(attribution.SourceTriggerOwner) {
 		t.Errorf("originator_source = %q, want trigger_owner", source.String)
 	}
-	if originator.Valid {
-		t.Errorf("schedule dispatch must NOT set originator, got %s", util.UUIDToString(originator))
+	// MUL-6951: B's edit re-stamped published_by, but the run still executes with
+	// A's rights. An editor changing a cron expression must not be able to hand the
+	// automation their own access.
+	if !originator.Valid || originator.Bytes != util.MustParseUUID(creatorA).Bytes {
+		t.Errorf("originator_user_id = %s, want trigger creator %s (not editor %s)",
+			util.UUIDToString(originator), creatorA, editorB)
 	}
-	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(editorB).Bytes {
-		t.Errorf("accountable_user_id = %s, want editor %s (dispatch must follow the transferred publisher, not creator %s)",
-			util.UUIDToString(accountable), editorB, creatorA)
+	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(creatorA).Bytes {
+		t.Errorf("accountable_user_id = %s, want trigger creator %s", util.UUIDToString(accountable), creatorA)
 	}
 }
 

@@ -76,7 +76,7 @@ func TestRedisModelListStore_CreateGetComplete(t *testing.T) {
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 	}
-	if err := store.Complete(ctx, req.ID, models, true); err != nil {
+	if err := store.Complete(ctx, req.ID, models, nil, true); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 

@@ -2557,7 +2557,6 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		r.Context(), r, workspaceID,
 		pgtype.Text{String: "agent", Valid: true},
 		agentUUID,
-		scopeNoDelegation(),
 	); status != 0 {
 		writeError(w, status, msg)
 		return
@@ -2855,13 +2854,17 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var parentIssueID pgtype.UUID
 	var projectID pgtype.UUID
-	var parentIssue *db.Issue
 	if req.ParentIssueID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ParentIssueID, "parent_issue_id")
 		if !ok {
 			return
 		}
 		parentIssueID = id
+		// The parent is loaded only to reject a cross-workspace or missing one
+		// BEFORE the assignee gate runs, so the caller gets 400 "parent issue not
+		// found" rather than a 403 that leaks nothing about which input was wrong.
+		// The row itself is no longer needed: the assignee gate keys on the actor's
+		// originator, not on a scope bound to the parent (MUL-6951).
 		if assigneeType.Valid && (assigneeType.String == "agent" || assigneeType.String == "squad") {
 			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          parentIssueID,
@@ -2871,21 +2874,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 				return
 			}
-			parentIssue = &parent
 		}
 	}
 
-	// An agent/squad assignee on a PARENTLESS create has no issue to bind an
-	// autopilot authority to, so the scope names the create itself: only a
-	// verified, still-running run_only autopilot task may borrow there
-	// (MUL-6691 — the reported flow, where the leader creates DRA-109/DRA-110
-	// from scratch rather than under an autopilot-created issue).
-	assignScope := scopeChildOf(parentIssue)
-	if req.ParentIssueID == nil {
-		assignScope = scopeNewTopLevelIssue()
-	}
-
-	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID, assignScope); status != 0 {
+	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
 		writeError(w, status, msg)
 		return
 	}
@@ -3282,12 +3274,21 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			currentDescription = current.Description.String
 		}
 		incomingDescription := params.Description.String
-		if descriptionBase != nil && currentDescription != *descriptionBase && currentDescription != incomingDescription {
-			baseWithLateMedia := mergeIssueChannelMediaDescription(currentDescription, *descriptionBase, descriptionBase, attachments)
-			if currentDescription != baseWithLateMedia {
-				return db.Issue{}, current, false, errIssueFieldConflict
-			}
-		}
+		// No baseline REJECTION here, deliberately: the description editor
+		// autosaves on a debounce, and its base could not be kept in step with
+		// what the server had already accepted — a save whose own echo landed
+		// while the editor was dirty, or any stored description that was not
+		// byte-identical to its own trimmed form, reported a conflict with no
+		// second writer present and then wedged the editor for the session
+		// (MUL-6971). The guard also never covered the writers most likely to
+		// race a human here — mobile and the CLI/agent path send no base at
+		// all — so it mostly rejected the user's own autosave.
+		//
+		// `descriptionBase` stays in the request: it is ALSO the merge metadata
+		// below, which is what lets a user delete channel media the editor had
+		// adopted instead of having it restored on every save. Description
+		// writes are last-write-wins; concurrent edits are recorded by the
+		// `description_updated` activity.
 		params.Description = pgtype.Text{
 			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
 			Valid:  true,
@@ -3535,7 +3536,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	_, touchedType := rawFields["assignee_type"]
 	_, touchedID := rawFields["assignee_id"]
 	if touchedType || touchedID {
-		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status != 0 {
+		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
 			return
 		}
@@ -3689,16 +3690,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 // That means owner-only for a private agent, with NO workspace-admin bypass
 // and NO unconditional agent-to-agent bypass — an agent caller (X-Agent-ID) is
 // judged by the top-of-chain human originator like everywhere else.
-// scope names the work the assignment belongs to. An unattributed autopilot
-// run may borrow an autopilot authority only within it — the parent issue for
-// child creation, the issue itself for an update, or the run's own verified
-// autopilot when creating a parentless issue (MUL-4857, MUL-6691). It never
-// changes the new issue's or task's attribution.
+// An autopilot run needs no special case here: since MUL-6951 a scheduled run
+// carries its trigger owner's originator, so it is judged by exactly the same
+// predicate as that human acting directly.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
 // to the client.
-func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, scope assignAuthorityScope) (int, string) {
+func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID) (int, string) {
 	// Both unset → unassigned issue, valid.
 	if !assigneeType.Valid && !assigneeID.Valid {
 		return 0, ""
@@ -3732,7 +3731,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "cannot assign to archived agent"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		effectiveInvoker := h.effectiveInvocationAuthorityFromRequest(r, scope, actorType, actorID, workspaceID)
+		effectiveInvoker := h.invokeOriginatorFromRequest(r, actorType, actorID)
 		if !h.canInvokeAgent(ctx, agent, actorType, actorID, effectiveInvoker, workspaceID) {
 			// Names the missing permission, not the target's configuration: the
 			// old "private agent" wording both disclosed the agent's permission
@@ -3761,7 +3760,7 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		effectiveInvoker := h.effectiveInvocationAuthorityFromRequest(r, scope, actorType, actorID, workspaceID)
+		effectiveInvoker := h.invokeOriginatorFromRequest(r, actorType, actorID)
 		if !h.canInvokeAgent(ctx, leader, actorType, actorID, effectiveInvoker, workspaceID) {
 			// Same wording rule as the agent branch above; "this squad"
 			// avoids disclosing the leader agent's permission mode.
@@ -3809,7 +3808,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
-	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers
@@ -4281,7 +4280,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
 		if batchTouchedType || batchTouchedID {
-			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID, scopeExistingIssue(&prevIssue)); status != 0 {
+			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
 			}
 		}

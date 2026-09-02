@@ -68,7 +68,6 @@
   "revision": {
     "conflict": "태스크 또는 댓글이 변경되었습니다. 최신 버전으로 새로 고쳤으니 비교한 후 다시 저장하세요.",
     "compare_title": "제목이 동시에 변경되었습니다. 두 버전을 비교하세요.",
-    "compare_description": "설명이 동시에 변경되었습니다. 두 버전을 비교하세요.",
     "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
     "server_version": "서버의 최신 버전",
     "local_version": "내 로컬 버전",

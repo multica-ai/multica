@@ -224,7 +224,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 
 | 명령 | 하위 명령 | 용도 | 주요 flag |
 | --- | --- | --- | --- |
-| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--metadata`(반복 가능), `--limit`, `--offset`, `--sort`, `--full-id` |
+| `issue` | `list` | 태스크 목록 | `--status`, `--priority`, `--assignee`, `--project`, `--metadata`(반복 가능), `--property`(반복 가능, `"이름=값"`; `__none__`은 미설정과 일치), `--limit`, `--offset`, `--sort`(`property:<이름 또는 id>` 지원), `--full-id` |
 | | `get <id>` | 태스크 하나 확인 | |
 | | `create` | 태스크 생성 | `--title`(필수), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment`(반복 가능) |
 | | `update <id>` | 태스크 필드 업데이트 | `create`와 같은 종류의 필드에 `--position`, `--no-start` 추가 |

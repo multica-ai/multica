@@ -55,6 +55,13 @@ vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
 }));
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => ({
+    colorOf: (status: string) =>
+      status === "awaiting_response" ? "#f97316" : null,
+  }),
+}));
+
 // Mock the API so we control search responses + observe calls.
 const searchIssuesMock = vi.fn();
 const searchProjectsMock = vi.fn();
@@ -629,6 +636,32 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
+  });
+
+  it("paints issue suggestions with their custom status color", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            {
+              id: "issue-6956",
+              label: "MUL-6956",
+              type: "issue",
+              status: "awaiting_response",
+              statusCategory: "in_review",
+            },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    const statusIcon = screen
+      .getByText("MUL-6956")
+      .closest("button")
+      ?.querySelector("svg");
+    expect(statusIcon).toHaveStyle({ color: "#f97316" });
   });
 
   it("does not inject current/recent chat context into the normal @ results", () => {

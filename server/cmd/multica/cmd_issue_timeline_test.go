@@ -237,17 +237,20 @@ func TestTimelineDetail(t *testing.T) {
 func TestTimelineActorSystemWithoutIDRendersType(t *testing.T) {
 	var actors actorDisplayLookup
 
-	if got := timelineActor("system", "", actors, false); got != "system" {
+	if got := timelineActor("system", "", "", actors, false); got != "system" {
 		t.Fatalf("system actor = %q, want %q", got, "system")
 	}
-	if got := timelineActor("", "", actors, false); got != "" {
+	if got := timelineActor("", "", "", actors, false); got != "" {
 		t.Fatalf("empty actor = %q, want empty", got)
 	}
-	if got := timelineActor("member", "abcdefgh1234", actors, false); got != "member:abcdefgh" {
+	if got := timelineActor("member", "abcdefgh1234", "", actors, false); got != "member:abcdefgh" {
 		t.Fatalf("member actor = %q, want member:abcdefgh", got)
 	}
-	if got := timelineActor("member", "abcdefgh1234", actors, true); got != "member:abcdefgh1234" {
+	if got := timelineActor("member", "abcdefgh1234", "", actors, true); got != "member:abcdefgh1234" {
 		t.Fatalf("member actor with --full-id = %q, want the full id", got)
+	}
+	if got := timelineActor("member", "abcdefgh1234", "Former Member", actors, false); got != "member:Former Member" {
+		t.Fatalf("hydrated former member = %q, want member:Former Member", got)
 	}
 }
 

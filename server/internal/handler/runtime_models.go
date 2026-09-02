@@ -57,15 +57,18 @@ const (
 // `json:"-"` because it's a server-side bookkeeping field — the UI only
 // needs Status / UpdatedAt to drive the polling loop.
 type ModelListRequest struct {
-	ID           string          `json:"id"`
-	RuntimeID    string          `json:"runtime_id"`
-	Status       ModelListStatus `json:"status"`
-	Models       []ModelEntry    `json:"models,omitempty"`
-	Supported    bool            `json:"supported"`
-	Error        string          `json:"error,omitempty"`
-	CreatedAt    time.Time       `json:"created_at"`
-	UpdatedAt    time.Time       `json:"updated_at"`
-	RunStartedAt *time.Time      `json:"-"`
+	ID        string          `json:"id"`
+	RuntimeID string          `json:"runtime_id"`
+	Status    ModelListStatus `json:"status"`
+	Models    []ModelEntry    `json:"models,omitempty"`
+	// UnavailableModels is advisory display copy, never a source of pickable
+	// values. Older daemons omit it and older clients ignore it.
+	UnavailableModels []UnavailableModelEntry `json:"unavailable_models,omitempty"`
+	Supported         bool                    `json:"supported"`
+	Error             string                  `json:"error,omitempty"`
+	CreatedAt         time.Time               `json:"created_at"`
+	UpdatedAt         time.Time               `json:"updated_at"`
+	RunStartedAt      *time.Time              `json:"-"`
 	// Cached marks a response answered from the server-side catalog cache
 	// instead of a live daemon round trip (MUL-5444). Purely informational —
 	// Status is already "completed" and Models is already populated, so a client
@@ -88,6 +91,9 @@ type ModelListRequest struct {
 // thinking_level selector. Older daemons (pre-2026-05) won't send this
 // field, which is fine: the UI hides the selector and the agent runs
 // with the runtime default.
+//
+// Every entry here is selectable. Models the runtime named but will not run are
+// carried separately in UnavailableModelEntry — see the invariant there.
 type ModelEntry struct {
 	ID                                  string             `json:"id"`
 	Label                               string             `json:"label"`
@@ -96,6 +102,22 @@ type ModelEntry struct {
 	Thinking                            *ModelThinking     `json:"thinking,omitempty"`
 	ServiceTiers                        []ModelServiceTier `json:"service_tiers,omitempty"`
 	SupportsExplicitStandardServiceTier bool               `json:"supports_explicit_standard_service_tier,omitempty"`
+}
+
+// UnavailableModelEntry is a model the runtime named but will not run on that
+// host — Claude Code reports one needing a newer CLI this way. `Reason` is the
+// runtime's own upgrade hint, shown so the gap reads as "your CLI is behind"
+// rather than "Multica does not support this model" (MUL-6961).
+//
+// INVARIANT: these never appear in `models`. A client that does not know this
+// field is an installed desktop build predating it, and such a client must not
+// be able to render one as a selectable model and persist an id its CLI
+// rejects. Keeping the lists disjoint is what makes that true without the old
+// client having to do anything.
+type UnavailableModelEntry struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type ModelServiceTier struct {
@@ -155,7 +177,7 @@ type ModelListStore interface {
 	// PopPending handles "queue empty after probe" by returning nil.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*ModelListRequest, error)
-	Complete(ctx context.Context, id string, models []ModelEntry, supported bool) error
+	Complete(ctx context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -273,13 +295,14 @@ func (s *InMemoryModelListStore) PopPending(_ context.Context, runtimeID string)
 	return oldest, nil
 }
 
-func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, supported bool) error {
+func (s *InMemoryModelListStore) Complete(_ context.Context, id string, models []ModelEntry, unavailable []UnavailableModelEntry, supported bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if req, ok := s.requests[id]; ok {
 		req.Status = ModelListCompleted
 		req.Models = models
+		req.UnavailableModels = unavailable
 		req.Supported = supported
 		req.UpdatedAt = time.Now()
 	}
@@ -339,15 +362,16 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 			// Synthetic ID: no store record backs a cache hit. Clients only poll
 			// GET /models/{id} while status is pending/running, which this
 			// response never is.
-			ID:        randomID(),
-			RuntimeID: resolvedRuntimeID,
-			Status:    ModelListCompleted,
-			Models:    cached.Models,
-			Supported: cached.Supported,
-			CreatedAt: storedAt,
-			UpdatedAt: storedAt,
-			Cached:    true,
-			CachedAt:  &storedAt,
+			ID:                randomID(),
+			RuntimeID:         resolvedRuntimeID,
+			Status:            ModelListCompleted,
+			Models:            cached.Models,
+			UnavailableModels: cached.UnavailableModels,
+			Supported:         cached.Supported,
+			CreatedAt:         storedAt,
+			UpdatedAt:         storedAt,
+			Cached:            true,
+			CachedAt:          &storedAt,
 		})
 		return
 	}
@@ -478,10 +502,13 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var body struct {
-		Status    string       `json:"status"` // "completed" or "failed"
-		Models    []ModelEntry `json:"models"`
-		Supported *bool        `json:"supported"`
-		Error     string       `json:"error"`
+		Status string       `json:"status"` // "completed" or "failed"
+		Models []ModelEntry `json:"models"`
+		// UnavailableModels is what the runtime named but will not run. Older
+		// daemons omit it; absent simply means no advisory rows to show.
+		UnavailableModels []UnavailableModelEntry `json:"unavailable_models"`
+		Supported         *bool                   `json:"supported"`
+		Error             string                  `json:"error"`
 		// Fallback marks a completed report whose models are a static
 		// stand-in the provider substituted after discovery failed, not the
 		// runtime's real catalog. Older daemons omit it; absent means "this
@@ -500,7 +527,7 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, supported); err != nil {
+		if err := h.ModelListStore.Complete(r.Context(), requestID, body.Models, body.UnavailableModels, supported); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK
@@ -527,7 +554,7 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 		if h.ModelCatalogCache != nil {
 			switch modelCatalogCacheDecision(body.Models, supported, body.Fallback) {
 			case modelCatalogCacheStore:
-				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, supported); err != nil {
+				if err := h.ModelCatalogCache.Put(r.Context(), runtimeID, body.Models, body.UnavailableModels, supported); err != nil {
 					slog.Warn("model catalog cache write failed", "error", err, "runtime_id", runtimeID)
 				}
 			case modelCatalogCacheDrop:

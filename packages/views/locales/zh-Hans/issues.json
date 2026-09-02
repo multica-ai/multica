@@ -68,7 +68,6 @@
   "revision": {
     "conflict": "任务或评论已发生变化。已刷新到最新版本，请比较后重新保存。",
     "compare_title": "标题存在并发修改，请比较两个版本。",
-    "compare_description": "描述存在并发修改，请比较两个版本。",
     "compare_comment": "评论存在并发修改，请比较两个版本。",
     "server_version": "服务端最新版本",
     "local_version": "你的本地版本",
