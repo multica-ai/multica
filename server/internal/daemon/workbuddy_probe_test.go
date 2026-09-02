@@ -91,6 +91,14 @@ func stubWorkBuddyDiscovery(t *testing.T, bundleDirs []string, stagedVersions ..
 	resolveAgentsViaLoginShell = func([]string) map[string]string { return map[string]string{} }
 	t.Cleanup(func() { resolveAgentsViaLoginShell = origShell })
 	resetShellResolveCacheForTest(t)
+
+	// probeAgentCLIs() probes every built-in agent CLI it can resolve, and the
+	// dsh probe actually executes the resolved binary (probeDshMulticaProfile).
+	// Point PATH at an empty directory so no ambient CLI on the test host — or
+	// the CI agent-CLI guard — is ever resolved and executed, matching the
+	// isolation the other probeAgentCLIs() tests use. WorkBuddy bundle and
+	// staged-node discovery above do not depend on PATH.
+	t.Setenv("PATH", t.TempDir())
 }
 
 // TestResolveWorkBuddyNode_WindowsFlatLayout guards the real-world Windows
