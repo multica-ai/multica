@@ -10,12 +10,14 @@ import (
 )
 
 // TestTaskRunFailureReasonLabelsEnvironmentSetup is the daemon half of #7913.
-// These four messages are the real ones: the Windows lock from the original
-// report, and the three shapes main produces today. Every one of them is the
-// host's own filesystem talking, and every one of them used to be handed to
-// taskfailure.Classify — a classifier that only knows how to read agent and
-// provider output — so they landed in agent_error.* and made a full disk look
-// like a model-provider fault on the board.
+// The first four messages are the real ones: the Windows lock from the
+// original report, and the three shapes main produces today. The last two are
+// the other half of what preparation does — the per-provider local config it
+// writes and validates. Every one of them is the machine running the agent
+// talking, and every one of them used to be handed to taskfailure.Classify —
+// a classifier that only knows how to read agent and provider output — so
+// they landed in agent_error.* and made a host problem look like a
+// model-provider fault on the board.
 func TestTaskRunFailureReasonLabelsEnvironmentSetup(t *testing.T) {
 	cases := map[string]error{
 		"windows lock": asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w",
@@ -27,6 +29,18 @@ func TestTaskRunFailureReasonLabelsEnvironmentSetup(t *testing.T) {
 			errors.New("execenv: open ownership manifest: permission denied"))),
 		"reuse io error": asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w",
 			errors.New("stat workdir: input/output error"))),
+		// Not every preparation failure is the filesystem. Prepare also writes
+		// and validates the per-provider local config — Codex home, the Hermes
+		// overlay, Cursor MCP, and an OpenClaw config it deliberately fails
+		// closed on when the CLI cannot read it (execenv.Prepare). Those are
+		// the same verdict: the machine running the agent could not set the run
+		// up. Losing them to Classify would put a broken local config back in
+		// the provider's namespace, and the user-facing copy must stay wide
+		// enough to send the reader to the raw error rather than only to df.
+		"malformed openclaw config": asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w",
+			errors.New("execenv: prepare openclaw config: read openclaw agents.list: exit status 1"))),
+		"codex home": asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w",
+			errors.New("execenv: prepare codex-home: seed config.toml: invalid TOML at line 3"))),
 	}
 
 	want := taskfailure.ReasonEnvironmentPrepareFailed.String()

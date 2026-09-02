@@ -5555,9 +5555,12 @@ func (e *worktreePreservedError) Unwrap() error { return e.err }
 
 // environmentSetupError marks a failure to build or re-open the task's
 // execution environment: everything execenv.Prepare / execenv.Reuse does on
-// this host before the agent process exists. Its causes are local — a full
+// this host before the agent process exists — the workspace directory and its
+// overlay homes, plus the per-provider local config written or validated
+// inside it. Its causes are local, and not only filesystem ones: a full
 // volume, a read-only or permission-denied workspaces root, a directory
-// another process still holds open, an I/O error on the disk underneath.
+// another process still holds open, an I/O error on the disk underneath, or a
+// local runtime config the daemon refuses to boot past.
 //
 // It carries the wrapped error's message unchanged and exists purely so
 // taskRunFailureReason can recognise the phase structurally. Without it the
@@ -5604,8 +5607,10 @@ func taskRunFailureReason(err error) string {
 	// environment. Last of the structural branches: the four sentinels above
 	// each name a cause the daemon already recognises on its own (task
 	// identity, the prepare budget, skill downloads, the local runtime CLI)
-	// and stay the better label. What is left is the host's own filesystem
-	// errors, whose text Classify can only read as agent output (#7913).
+	// and stay the better label. What is left is the rest of preparation on
+	// this host — filesystem faults, and the per-provider local config
+	// Prepare writes or validates — whose text Classify can only read as
+	// agent output (#7913).
 	var envSetupErr *environmentSetupError
 	if errors.As(err, &envSetupErr) {
 		return taskfailure.ReasonEnvironmentPrepareFailed.String()

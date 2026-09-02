@@ -4,16 +4,17 @@ import "testing"
 
 // TestNormalizeDaemonReasonUpgradesEnvironmentPrepare covers the mixed-version
 // window for #7913. Installed daemons update on their own cadence, so until a
-// host carries the structural tag it keeps classifying its own filesystem
-// errors with a classifier built for agent output — and reports a non-empty
+// host carries the structural tag it keeps classifying its own setup errors
+// with a classifier built for agent output — and reports a non-empty
 // agent_error.* value, which FailTask's "classify only when empty" branch
 // deliberately leaves alone. Recognising the wrapper the daemon has always
 // written moves those rows out of the agent namespace the moment the server
 // deploys.
 //
 // The witnesses are the real messages from the report and from main: the
-// Windows lock that opened the issue, a full volume, a denied permission, and
-// a reuse that could not stat the prior workdir.
+// Windows lock that opened the issue, a full volume, a denied permission, a
+// reuse that could not stat the prior workdir, and a local runtime config the
+// daemon refused to boot past.
 func TestNormalizeDaemonReasonUpgradesEnvironmentPrepare(t *testing.T) {
 	t.Parallel()
 
@@ -24,6 +25,12 @@ func TestNormalizeDaemonReasonUpgradesEnvironmentPrepare(t *testing.T) {
 		"disk full":         "prepare execution environment: execenv: mkdir /home/u/multica_workspaces/ws: no space left on device",
 		"permission denied": "prepare execution environment: execenv: open ownership manifest: permission denied",
 		"reuse io error":    "reuse execution environment: stat workdir: input/output error",
+		// Preparation is not only filesystem work: it also writes and validates
+		// the per-provider local config. "exit status 1" is exactly the text
+		// Classify reads as agent_error.process_failure, and a config the
+		// OpenClaw CLI cannot parse is not a process the agent ran.
+		"malformed openclaw config": "prepare execution environment: execenv: prepare openclaw config: " +
+			"read openclaw agents.list: exit status 1",
 	}
 
 	// Every agent-side label an older daemon can produce here is wrong for the
@@ -103,8 +110,8 @@ func TestNormalizeDaemonReasonEnvironmentPrepareStaysNarrow(t *testing.T) {
 
 // TestClassifyStillReadsPrepareErrorsAsAgentErrors documents what the text
 // classifier does with these messages on its own, and why the fix could not be
-// a new Classify rule. Classify is handed agent and provider output; a host's
-// filesystem error is neither, and no bucket it owns is correct. The
+// a new Classify rule. Classify is handed agent and provider output; a host
+// that could not set the run up is neither, and no bucket it owns is correct. The
 // classification has to happen upstream — structurally in the daemon, or from
 // the wrapper prefix at the normalization boundary.
 func TestClassifyStillReadsPrepareErrorsAsAgentErrors(t *testing.T) {

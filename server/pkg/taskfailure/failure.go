@@ -133,12 +133,24 @@ const (
 	ReasonRuntimeCLITimeout Reason = "runtime_cli_timeout"
 
 	// ReasonEnvironmentPrepareFailed: the daemon could not build or re-open
-	// the task's execution environment on this host — the workspace
-	// directory, its overlay homes, and the per-task config files — so the
-	// agent process was never launched. Every cause is local to the machine
-	// running the daemon: a full volume, a read-only or permission-denied
-	// workspaces root, a directory another process still holds open
-	// (Windows), an I/O error on the underlying disk.
+	// the task's execution environment on this host, so the agent process was
+	// never launched.
+	//
+	// That phase is everything execenv.Prepare / Reuse does before launch —
+	// the workspace directory and its overlay homes, AND the per-provider
+	// local config written or validated inside it (Codex home, Hermes
+	// overlay, Cursor MCP, OpenClaw config, which fails closed on a config
+	// the CLI cannot read). So the causes are wider than a disk fault: a full
+	// volume, a read-only or permission-denied workspaces root, a directory
+	// another process still holds open (Windows) and an I/O error all land
+	// here, and so does a malformed local runtime config. What they share is
+	// the machine — every one is fixed on the host running the daemon, and
+	// the raw error is what names which step failed.
+	//
+	// Copy that narrows this to "check your disk" therefore sends the user
+	// past half the real causes, which is the same defect in miniature that
+	// this reason exists to fix. Read the wording in the chat bundles and the
+	// docs failure-reason table as part of the contract.
 	//
 	// Platform-side, and that is the point (#7913). Before this reason
 	// existed the wrapped OS error went through Classify — a classifier

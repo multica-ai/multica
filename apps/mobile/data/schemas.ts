@@ -404,9 +404,11 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
 // Mirrors AgentTask in packages/core/types/agent.ts. Backend handlers:
 //   GET  /api/issues/{id}/active-task → { tasks: AgentTask[] } (may be empty)
 //   GET  /api/issues/{id}/task-runs   → AgentTask[]
-// Lenient on every field — status / kind / failure_reason all use `.catch()`
-// so a future server-side enum value renders a generic fallback rather than
-// crashing the row (root CLAUDE.md "Enum drift downgrades, not crashes").
+// Lenient on every field — status / kind use `.catch()` so a future
+// server-side enum value renders a generic fallback rather than crashing the
+// row (root CLAUDE.md "Enum drift downgrades, not crashes"). failure_reason is
+// an open string instead: its taxonomy grows on the backend's cadence, so a
+// value this build has never seen must survive parsing and degrade at render.
 
 export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   id: z.string(),
@@ -422,14 +424,27 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   completed_at: z.string().nullable().default(null),
   result: z.unknown().default(null),
   error: z.string().nullable().default(null),
+  // Open string, not an enum — same contract as `failure_reason` in
+  // packages/core/types/agent.ts and as the chat message schema above. The
+  // backend taxonomy passed the six coarse values at MUL-1949 and keeps
+  // growing (26 canonical reasons today), so an installed build meets reasons
+  // it predates.
+  //
+  // This field WAS a closed six-value enum, which made the whole thing moot:
+  // `.catch("")` erased every refined reason to `undefined`, so run-row's
+  // badge map has been unreachable for anything but the coarse values since
+  // MUL-5370 widened it, and every agent_error.* / skill_bundle_unavailable /
+  // environment_prepare_failed run rendered a bare "Failed" (#7913). Unknown
+  // reasons are the badge map's problem to degrade, not the parser's to drop.
+  //
   // Backend uses empty string ("") as the "not failed" sentinel (Go
   // `omitempty` on a custom string-typed enum). Normalize that to `undefined`
   // so downstream truthy checks (`if (task.failure_reason)`) don't have to
   // special-case both null/undefined AND "".
   failure_reason: z
-    .enum(["agent_error", "timeout", "runtime_offline", "runtime_recovery", "manual", ""])
+    .string()
     .optional()
-    .catch("")
+    .catch(undefined)
     .transform((v) => (v === "" ? undefined : v)),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),

@@ -70,11 +70,11 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // fix is on the host running the daemon — a faster CLI or a raised timeout —
   // not with the model provider, which was never contacted.
   runtime_cli_timeout: "runtime",
-  // The daemon could not build or re-open the task's workspace directory on
-  // its own host — full disk, denied permission, directory held open. The
-  // reason this class exists at all: these rows used to arrive as
-  // agent_error.* and inflated the agent class with problems only a machine
-  // owner can fix (#7913).
+  // The daemon could not build or re-open the task's execution environment on
+  // its own host — its workspace directory, or the local runtime config
+  // written into it. The reason this class exists at all: these rows used to
+  // arrive as agent_error.* and inflated the agent class with problems only a
+  // machine owner can fix (#7913).
   environment_prepare_failed: "runtime",
 
   // The agent process itself produced the failure.
