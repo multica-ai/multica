@@ -416,17 +416,16 @@ func outboundChatID(b ChatSessionBinding) ChatID {
 	return ChatID(b.ChannelChatID)
 }
 
-// threadReplyTarget derives the outbound reply target from the chat
-// binding's most-recent inbound trigger. We thread the reply ONLY when
-// that trigger was itself inside a Lark topic (last_lark_thread_id
-// present): normal group / p2p chats keep the unchanged chat-level send
-// path, and only an @-mention that happened inside a thread gets a
-// threaded reply (replying to last_lark_message_id with reply_in_thread).
-// The zero ReplyTarget means "send at the chat level".
+// threadReplyTarget derives the outbound reply target from the binding's
+// most-recent inbound trigger. Every trigger with a message id uses Lark's
+// native reply endpoint; topic messages additionally request an in-thread
+// reply. The zero target is reserved for bindings without a message id.
 func threadReplyTarget(binding ChatSessionBinding) ReplyTarget {
-	if binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-		binding.LastMessageID.Valid && binding.LastMessageID.String != "" {
-		return ReplyTarget{MessageID: binding.LastMessageID.String, InThread: true}
+	if binding.LastMessageID.Valid && binding.LastMessageID.String != "" {
+		return ReplyTarget{
+			MessageID: binding.LastMessageID.String,
+			InThread:  binding.LastThreadID.Valid && binding.LastThreadID.String != "",
+		}
 	}
 	return ReplyTarget{}
 }
@@ -451,7 +450,7 @@ func sendWithThreadFallback(log *slog.Logger, op string, target ReplyTarget, sen
 	if err == nil {
 		return nil
 	}
-	if target.IsSet() && isThreadReplyUnsupported(err) {
+	if target.InThread && isThreadReplyUnsupported(err) {
 		log.Warn("lark: thread reply unsupported for target, retrying at chat level",
 			"op", op, "reply_message_id", target.MessageID, "error", err)
 		if fallbackErr := send(ReplyTarget{}); fallbackErr != nil {
@@ -460,7 +459,7 @@ func sendWithThreadFallback(log *slog.Logger, op string, target ReplyTarget, sen
 		return nil
 	}
 	if target.IsSet() {
-		log.Warn("lark: thread reply failed; not falling back (non-classified error)",
+		log.Warn("lark: reply failed; not falling back",
 			"op", op, "reply_message_id", target.MessageID, "error", err)
 	}
 	return fmt.Errorf("%s: %w", op, err)

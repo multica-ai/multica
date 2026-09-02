@@ -260,15 +260,12 @@ func (r *LarkOutcomeReplier) sendIssueCreated(ctx context.Context, inst Installa
 	})
 }
 
-// inboundReplyTarget threads an outbound reply off the inbound trigger
-// message when that message lived inside a Lark topic (话题). It mirrors
-// threadReplyTarget (used by the event-driven Patcher) but reads the
-// live InboundMessage the replier already holds, so it needs no DB
-// round-trip. An empty thread_id yields the zero ReplyTarget — a
-// chat-level send, i.e. the unchanged behavior for non-thread messages.
+// inboundReplyTarget attaches an outbound reply to the inbound trigger when
+// Lark supplied a message id. InThread only controls whether the reply stays
+// in a topic; ordinary p2p and group messages use quote replies too.
 func inboundReplyTarget(msg InboundMessage) ReplyTarget {
-	if msg.ThreadID != "" && msg.MessageID != "" {
-		return ReplyTarget{MessageID: msg.MessageID, InThread: true}
+	if msg.MessageID != "" {
+		return ReplyTarget{MessageID: msg.MessageID, InThread: msg.ThreadID != ""}
 	}
 	return ReplyTarget{}
 }

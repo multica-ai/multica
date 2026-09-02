@@ -659,22 +659,43 @@ func TestPatcherLegacyBindingFallsBackToKey(t *testing.T) {
 	}
 }
 
-// TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
-// (no last_lark_thread_id on the binding) keeps the historical
-// chat-level send: ReplyTarget stays empty so SendTextMessage targets
-// the chat by chat_id. This is the no-behavior-change guarantee for
-// normal group / p2p chats.
-func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
+func TestPatcherRepliesToTriggerWhenNoThread(t *testing.T) {
+	for _, chatType := range []string{"p2p", "group"} {
+		t.Run(chatType, func(t *testing.T) {
+			p, q, api := newTestPatcher(t)
+			q.binding.ChatType = chatType
+			q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+			taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+
+			p.handleEvent(events.Event{
+				Type:          protocol.EventChatDone,
+				TaskID:        uuidString(taskID),
+				ChatSessionID: uuidString(q.binding.ChatSessionID),
+				Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+			})
+
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if len(api.textSent) != 1 {
+				t.Fatalf("expected one text send; got %d", len(api.textSent))
+			}
+			got := api.textSent[0].ReplyTarget
+			if got.MessageID != "om_trigger" || got.InThread {
+				t.Errorf("ordinary trigger must use quote reply without topic threading; got %+v", got)
+			}
+		})
+	}
+}
+
+func TestPatcherSendsToChatWhenMessageIDMissing(t *testing.T) {
 	p, q, api := newTestPatcher(t)
-	// binding has a message id but NO thread id → must not thread.
-	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
-	taskID := uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")
+	q.binding.LastMessageID = pgtype.Text{}
 
 	p.handleEvent(events.Event{
 		Type:          protocol.EventChatDone,
-		TaskID:        uuidString(taskID),
+		TaskID:        uuidString(uuidFromString(t, "ee777777-ee77-ee77-ee77-eeeeeeeeeeee")),
 		ChatSessionID: uuidString(q.binding.ChatSessionID),
-		Payload:       protocol.ChatDonePayload{Content: "plain reply"},
+		Payload:       protocol.ChatDonePayload{Content: "legacy reply"},
 	})
 
 	api.mu.Lock()
@@ -683,8 +704,21 @@ func TestPatcherSendsToChatWhenNoThread(t *testing.T) {
 		t.Fatalf("expected one text send; got %d", len(api.textSent))
 	}
 	if api.textSent[0].ReplyTarget.IsSet() {
-		t.Errorf("non-thread trigger must NOT route through the reply endpoint; got %+v",
-			api.textSent[0].ReplyTarget)
+		t.Errorf("missing message id must use chat-level send; got %+v", api.textSent[0].ReplyTarget)
+	}
+}
+
+func TestQuoteReplyDoesNotUseThreadUnsupportedFallback(t *testing.T) {
+	attempts := 0
+	err := sendWithThreadFallback(newDiscardLogger(), "send", ReplyTarget{MessageID: "om_trigger"}, func(ReplyTarget) error {
+		attempts++
+		return errThreadReplyClassified
+	})
+	if err == nil {
+		t.Fatal("ordinary quote reply failure must be returned")
+	}
+	if attempts != 1 {
+		t.Fatalf("ordinary quote reply must not fall back; got %d attempts", attempts)
 	}
 }
 

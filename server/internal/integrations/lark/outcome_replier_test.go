@@ -355,7 +355,7 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 
 	inst := Installation{AppID: "cli_x"}
 	inst.ID = mustUUID("11111111-1111-1111-1111-111111111111")
-	msg := InboundMessage{ChatID: "oc_chat_42", SenderOpenID: "ou_user"}
+	msg := InboundMessage{ChatID: "oc_chat_42", ChatType: ChatTypeP2P, MessageID: "om_issue", SenderOpenID: "ou_user"}
 	rep.Reply(context.Background(), inst, msg, DispatchResult{
 		Outcome:         OutcomeIngested,
 		IssueID:         mustUUID("22222222-2222-2222-2222-222222222222"),
@@ -382,10 +382,43 @@ func TestLarkOutcomeReplierIssueCreatedSendsConfirmation(t *testing.T) {
 	if !strings.Contains(got.Text, "https://multica.test/issues/MUL-42") {
 		t.Errorf("text should embed the deep link back to Multica; got %q", got.Text)
 	}
+	if got.ReplyTarget.MessageID != "om_issue" || got.ReplyTarget.InThread {
+		t.Errorf("p2p /issue confirmation must quote the trigger; got %+v", got.ReplyTarget)
+	}
 	// No interactive card on this path — the confirmation must be
 	// plain text, matching how chat replies render.
 	if len(stub.interactiveOut) != 0 {
 		t.Errorf("issue-created confirmation must not send a card; got %d cards", len(stub.interactiveOut))
+	}
+}
+
+func TestLarkOutcomeReplierGroupNoticeRepliesToTrigger(t *testing.T) {
+	t.Parallel()
+	stub := &stubAPIClientWithRecorder{configured: true}
+	rep := NewLarkOutcomeReplier(OutcomeReplierConfig{
+		APIClient:   stub,
+		BindingSvc:  &BindingTokenService{},
+		Credentials: stubCredentialsResolver{secret: "s"},
+		Queries:     stubReplierQueries{},
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	msg := InboundMessage{ChatID: "oc_group", ChatType: ChatTypeGroup, MessageID: "om_notice"}
+	rep.Reply(context.Background(), Installation{}, msg, DispatchResult{Outcome: OutcomeAgentArchived})
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.interactiveOut) != 1 {
+		t.Fatalf("expected one notice, got %d", len(stub.interactiveOut))
+	}
+	got := stub.interactiveOut[0].ReplyTarget
+	if got.MessageID != "om_notice" || got.InThread {
+		t.Errorf("ordinary group notice must quote the trigger; got %+v", got)
+	}
+}
+
+func TestInboundReplyTargetFallsBackWithoutMessageID(t *testing.T) {
+	if got := inboundReplyTarget(InboundMessage{ChatID: "oc_group", ThreadID: "omt_topic"}); got.IsSet() {
+		t.Fatalf("missing message id must use chat-level send; got %+v", got)
 	}
 }
 
