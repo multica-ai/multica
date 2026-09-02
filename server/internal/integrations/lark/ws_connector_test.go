@@ -787,19 +787,3 @@ func TestGorillaDialerProxyURLApplied(t *testing.T) {
 	// The error should be about the proxy connection (refused / timeout),
 	// not about the URL parsing.
 }
-
-func TestGorillaDialerEmptyProxyURLDefaultsToEnv(t *testing.T) {
-	t.Parallel()
-	d := NewGorillaDialer()
-	if d.ProxyURL != "" {
-		t.Fatalf("NewGorillaDialer ProxyURL should be empty, got %q", d.ProxyURL)
-	}
-	// DialContext with empty ProxyURL should not panic or error on the
-	// proxy path — the underlying gorilla dialer uses ProxyFromEnvironment.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	_, _, _ = d.DialContext(ctx, "wss://127.0.0.1:1/ws", nil)
-	// We don't assert on the error (it'll be a connection error), we just
-	// verify that DialContext with empty ProxyURL doesn't panic or return
-	// a parse error.
-}

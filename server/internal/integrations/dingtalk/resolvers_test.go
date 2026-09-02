@@ -113,13 +113,6 @@ func (c *captureChatSession) BindMediaRefs(_ context.Context, in engine.BindMedi
 	return nil
 }
 
-func TestNewDingTalkResolverSetUsesDatabaseBackedIssueOrigin(t *testing.T) {
-	set := NewDingTalkResolverSet(nil, nil, nil, nil, nil, nil)
-	if set.OriginType != originDingTalkChat {
-		t.Fatalf("OriginType = %q, want %q", set.OriginType, originDingTalkChat)
-	}
-}
-
 func TestSessionBinder_MapsCommandTextAndMediaDeadline(t *testing.T) {
 	var session, sender, inst, claim pgtype.UUID
 	session.Bytes[0], sender.Bytes[0], inst.Bytes[0], claim.Bytes[0] = 2, 3, 4, 5

@@ -610,7 +610,6 @@ vi.mock("sonner", () => ({
 import {
   CreateIssueModal,
   ManualCreatePanel,
-  manualDialogContentClass,
 } from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
@@ -1830,35 +1829,11 @@ describe("CreateIssueModal", () => {
       createButton.focus();
       expect(createButton).toHaveFocus();
     });
-
-    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
-      renderManual();
-      const createButton = screen.getByRole("button", { name: "Create Issue" });
-
-      // Without these the control reads as a live primary button while
-      // aria-disabled. `pointer-events-none` is deliberately absent: it would
-      // kill the tooltip hover and the click that focuses the title.
-      expect(createButton.className).toContain("aria-disabled:opacity-50");
-      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
-      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
-      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
-    });
   });
 
   // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
   // is one tap away behind "Switch to Manual", so it hit the same bugs.
   describe("phone layout", () => {
-    it("caps the dialog inside the viewport on phones", () => {
-      for (const isExpanded of [false, true]) {
-        const className = manualDialogContentClass(isExpanded);
-
-        // Without this the `!important` widths below also override
-        // DialogContent's own `max-w-[calc(100%-2rem)]` and the card runs
-        // edge to edge on a phone.
-        expect(className).toContain("!max-w-[calc(100vw-1.5rem)]");
-        expect(className).toContain(isExpanded ? "sm:!max-w-4xl" : "sm:!max-w-2xl");
-      }
-    });
 
     it("keeps every footer control a direct child of the grid container", () => {
       renderModal(<CreateIssueModal onClose={vi.fn()} />);

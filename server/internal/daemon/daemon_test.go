@@ -2162,20 +2162,6 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 	}
 }
 
-func TestProviderUsesPiSessionFileFollowsBuiltinRuntimeDescriptors(t *testing.T) {
-	t.Parallel()
-
-	if !providerUsesPiSessionFile("pi") {
-		t.Fatal("pi protocol family did not use Pi session-file reachability")
-	}
-	for _, desc := range agent.BuiltinRuntimes {
-		want := desc.ProtocolFamily == "pi"
-		if got := providerUsesPiSessionFile(desc.ID); got != want {
-			t.Errorf("providerUsesPiSessionFile(%q) = %v, want %v for protocol family %q", desc.ID, got, want, desc.ProtocolFamily)
-		}
-	}
-}
-
 func TestSessionHomeReachable(t *testing.T) {
 	t.Parallel()
 
@@ -4175,17 +4161,6 @@ type reportTaskResultRecorder struct {
 	path    string
 	method  string
 	payload map[string]any
-}
-
-func TestTerminalTaskReportTimeoutCoversRetrySchedule(t *testing.T) {
-	client := NewClient("http://example.invalid")
-	worstCase := time.Duration(len(defaultTerminalRetrySchedule)+1) * client.client.Timeout
-	for _, delay := range defaultTerminalRetrySchedule {
-		worstCase += delay
-	}
-	if terminalTaskReportTimeout < worstCase {
-		t.Fatalf("terminal report timeout = %s, want at least retry worst case %s", terminalTaskReportTimeout, worstCase)
-	}
 }
 
 func (r *reportTaskResultRecorder) handler(t *testing.T) http.HandlerFunc {

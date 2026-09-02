@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsZeroclawBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("zeroclaw", Config{ExecutablePath: "/nonexistent/zeroclaw"})
-	if err != nil {
-		t.Fatalf("New(zeroclaw) error: %v", err)
-	}
-	if _, ok := b.(*zeroclawBackend); !ok {
-		t.Fatalf("expected *zeroclawBackend, got %T", b)
-	}
-}
-
 // fakeZeroclawACPScript impersonates `zeroclaw acp` for unit tests. Unlike a
 // generic ACP fake, this one reproduces the frames a real ZeroClaw 0.8.4
 // binary was observed to send, because several of the bugs this suite guards

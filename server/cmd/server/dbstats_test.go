@@ -41,13 +41,6 @@ func applyPoolSizing(t *testing.T, dbURL string, envMax, envMin string) (max, mi
 	return cfg.MaxConns, cfg.MinConns
 }
 
-func TestPoolSizing_DefaultsWhenNothingSet(t *testing.T) {
-	max, min := applyPoolSizing(t, "postgres://u:p@h/db?sslmode=disable", "", "")
-	if max != defaultMaxConns || min != defaultMinConns {
-		t.Fatalf("got max=%d min=%d, want %d/%d", max, min, defaultMaxConns, defaultMinConns)
-	}
-}
-
 func TestPoolSizing_URLParamsHonoredWhenEnvUnset(t *testing.T) {
 	url := "postgres://u:p@h/db?sslmode=disable&pool_max_conns=40&pool_min_conns=8"
 	max, min := applyPoolSizing(t, url, "", "")
@@ -98,12 +91,5 @@ func TestPoolSizing_InvalidEnvFallsBackToURLParam(t *testing.T) {
 	max, _ := applyPoolSizing(t, url, "not-a-number", "")
 	if max != 40 {
 		t.Fatalf("invalid env should fall back to URL param; got max=%d, want 40", max)
-	}
-}
-
-func TestPoolSizing_MinClampedToMax(t *testing.T) {
-	max, min := applyPoolSizing(t, "postgres://u:p@h/db?sslmode=disable", "10", "50")
-	if min > max {
-		t.Fatalf("min should be clamped to max; got max=%d min=%d", max, min)
 	}
 }

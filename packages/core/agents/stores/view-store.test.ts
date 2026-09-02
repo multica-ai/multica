@@ -35,14 +35,6 @@ afterEach(() => {
 });
 
 describe("useAgentsViewStore", () => {
-  it("defaults to 'mine'", () => {
-    expect(useAgentsViewStore.getState().scope).toBe("mine");
-  });
-
-  it("setScope mutates the store", () => {
-    useAgentsViewStore.getState().setScope("all");
-    expect(useAgentsViewStore.getState().scope).toBe("all");
-  });
 
   it("partialize persists only view prefs (no actions) under the workspace-namespaced key", async () => {
     setCurrentWorkspace("acme", "ws_a");

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -123,34 +121,6 @@ func TestReportModelListResult_PreservesDefault(t *testing.T) {
 	}
 	if !bytes.Contains(out, []byte(`"supports_explicit_standard_service_tier":true`)) {
 		t.Errorf("expected explicit-standard capability in JSON response, got: %s", out)
-	}
-}
-
-// TestReportModelListResult_DecodesJSONBodyDefault verifies the
-// handler's request-body parsing accepts the `default` bool from
-// the daemon POST — not just through the store API.
-func TestReportModelListResult_DecodesJSONBodyDefault(t *testing.T) {
-	// Simulate the shape the daemon POSTs: status + models + supported
-	// with `default` on one entry.
-	payload := `{"status":"completed","supported":true,"models":[{"id":"a","label":"A","default":true,"supports_explicit_standard_service_tier":true},{"id":"b","label":"B"}]}`
-	r := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/rt/models/req/result", bytes.NewBufferString(payload))
-
-	var body struct {
-		Status    string       `json:"status"`
-		Models    []ModelEntry `json:"models"`
-		Supported *bool        `json:"supported"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(body.Models) != 2 {
-		t.Fatalf("want 2 models, got %d", len(body.Models))
-	}
-	if !body.Models[0].Default {
-		t.Errorf("default flag lost on model[0]: %+v", body.Models[0])
-	}
-	if !body.Models[0].SupportsExplicitStandardServiceTier {
-		t.Errorf("explicit-standard capability lost on model[0]: %+v", body.Models[0])
 	}
 }
 

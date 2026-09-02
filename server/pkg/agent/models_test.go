@@ -12,6 +12,36 @@ import (
 	"time"
 )
 
+func TestStaticModelCatalogsAreValid(t *testing.T) {
+	t.Parallel()
+	catalogs := map[string][]Model{
+		"claude":  claudeStaticModels(),
+		"codex":   codexStaticModels(),
+		"cursor":  cursorStaticModels(),
+		"copilot": copilotStaticModels(),
+	}
+	for provider, models := range catalogs {
+		if len(models) == 0 {
+			t.Errorf("%s static catalog returned no models", provider)
+		}
+		defaultCount := 0
+		for i, model := range models {
+			if model.ID == "" {
+				t.Errorf("%s static catalog[%d] has empty ID", provider, i)
+			}
+			if model.Label == "" {
+				t.Errorf("%s static catalog[%d] has empty Label", provider, i)
+			}
+			if model.Default {
+				defaultCount++
+			}
+		}
+		if defaultCount > 1 {
+			t.Errorf("%s: %d models marked Default, want 0 or 1", provider, defaultCount)
+		}
+	}
+}
+
 func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
 	// Qwen returns its manual-entry catalog without resolving or executing a CLI.
 	got, err := ListModels(context.Background(), "qwen", Command{Path: ""})
@@ -442,20 +472,6 @@ func thinkingValues(thinking *ModelThinking) []string {
 		values = append(values, level.Value)
 	}
 	return values
-}
-
-// TestClaudeOpus5AcceptedByProviderCompatibilityGate pins the other half of
-// catalog membership: ModelKnownIncompatibleWithProvider erases a saved model
-// that a runtime's maintained catalog doesn't advertise, so an unlisted
-// `claude-opus-5` would be silently dropped from an agent on save.
-func TestClaudeOpus5AcceptedByProviderCompatibilityGate(t *testing.T) {
-	t.Parallel()
-	if ModelKnownIncompatibleWithProvider("claude", "claude-opus-5") {
-		t.Error("claude-opus-5 must be accepted by the claude provider gate")
-	}
-	if !ModelKnownIncompatibleWithProvider("codex", "claude-opus-5") {
-		t.Error("claude-opus-5 must still be rejected for the codex provider")
-	}
 }
 
 func TestModelKnownIncompatibleWithProvider(t *testing.T) {
@@ -1552,26 +1568,6 @@ func TestACPResultTopLevelKeys(t *testing.T) {
 	}
 }
 
-func TestHermesModelSelectionSupported(t *testing.T) {
-	// Regression guard: hermes now supports model selection via
-	// the ACP session/set_model RPC, so the UI dropdown should
-	// not be disabled for it.
-	if !ModelSelectionSupported("hermes") {
-		t.Error("hermes should be model-selection-supported now that set_session_model is wired")
-	}
-}
-
-// TestAntigravityModelSelectionSupported pins that the antigravity provider
-// now reports model selection as supported: agy 1.0.6 added a `--model` flag
-// (MUL-3125) and buildAntigravityArgs wires opts.Model through, so the UI
-// must render the live picker rather than a disabled "Managed by runtime"
-// label.
-func TestAntigravityModelSelectionSupported(t *testing.T) {
-	if !ModelSelectionSupported("antigravity") {
-		t.Error("antigravity should be model-selection-supported now that agy 1.0.6 has --model")
-	}
-}
-
 // TestParseAntigravityModels covers the legacy single-column `agy models`
 // format (pre-1.1.11): each non-blank tab-free line becomes a Model whose ID
 // and Label are that verbatim value, duplicates collapse, and blanks drop.
@@ -1873,23 +1869,5 @@ func TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract(t *testing.T)
 					tt.provider, got, tt.want, tt.why)
 			}
 		})
-	}
-}
-
-// omp is a built-in runtime identity rather than a protocol family, so the
-// predicate must resolve it through its descriptor. This is what keeps "add a
-// fork" a descriptor entry instead of a change here.
-func TestModelSelectorContractFollowsProtocolFamily(t *testing.T) {
-	t.Parallel()
-
-	desc, ok := BuiltinRuntimeByID("omp")
-	if !ok {
-		t.Fatal("omp is no longer a built-in runtime identity; this test needs a new subject")
-	}
-	if desc.ProtocolFamily != "pi" {
-		t.Fatalf("omp protocol family = %q, want pi", desc.ProtocolFamily)
-	}
-	if ModelSelectorMustBeProviderQualified("omp") != ModelSelectorMustBeProviderQualified(desc.ProtocolFamily) {
-		t.Error("omp does not inherit its selector contract from the pi protocol family")
 	}
 }

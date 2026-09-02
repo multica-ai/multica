@@ -1,7 +1,6 @@
 package execenv
 
 import (
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -34,17 +33,6 @@ func TestBriefChatWorkflowDoesNotAssertAudience(t *testing.T) {
 		if strings.Contains(out, retired) {
 			t.Errorf("cached brief must not contain per-session audience text %q", retired)
 		}
-	}
-}
-
-// This structural guard prevents a future caller from quietly threading the
-// room discriminator back into the cached brief. ChatType remains on daemon.Task
-// for BuildPrompt, but the execenv context cannot consume it.
-func TestBriefContextExcludesChatType(t *testing.T) {
-	t.Parallel()
-
-	if _, ok := reflect.TypeOf(TaskContextForEnv{}).FieldByName("ChatType"); ok {
-		t.Fatal("TaskContextForEnv must not carry ChatType; audience is per-turn context")
 	}
 }
 

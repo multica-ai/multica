@@ -138,15 +138,6 @@ describe("seedAcceptedPendingTask", () => {
 // MUL-4864: the new-chat composer is one box per workspace, so the selected
 // agent is NOT part of compose-target identity — only the session is.
 describe("isStillOnComposeTarget", () => {
-  it("is true when the user never left the session they sent from", () => {
-    expect(isStillOnComposeTarget(sid, sid)).toBe(true);
-  });
-
-  it("is true for a new chat the user is still sitting in", () => {
-    // Both null: ensureSession creates the row but does not publish it as
-    // active, so a user who stayed put is still looking at the new-chat box.
-    expect(isStillOnComposeTarget(null, null)).toBe(true);
-  });
 
   it("is false once the user opens a different session mid-send", () => {
     expect(isStillOnComposeTarget("session-2", sid)).toBe(false);

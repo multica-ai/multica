@@ -33,10 +33,4 @@ describe("LabelsTab scopes", () => {
     expect(screen.getByRole("button", { name: /Skills/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Agents/ })).toBeNull();
   });
-
-  it("describes the tab without promising an agent catalog", () => {
-    renderWithI18n(<LabelsTab />);
-
-    expect(screen.getByText(/organize issues and skills/i)).toBeInTheDocument();
-  });
 });

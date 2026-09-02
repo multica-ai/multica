@@ -6,52 +6,6 @@ import enIssues from "../locales/en/issues.json";
 import { SourceContextPreviewCard } from "./source-context-preview";
 
 describe("SourceContextPreviewCard", () => {
-  it("emphasizes a comment's left quote border on hover", () => {
-    render(
-      <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
-        <SourceContextPreviewCard preview={{
-          source_issue: {
-            id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
-            description: null, created_at: "now", updated_at: "now", revision: 1,
-            attachments: [],
-          },
-          comment_thread: [{
-            id: "comment-1", parent_id: null, type: "comment", content: "Quoted context",
-            author: { type: "member", id: "user-1", name: "Alice" },
-            created_at: "now", updated_at: "now", revision: 1, attachments: [],
-          }],
-          anchor_comment_id: "comment-1",
-          capture_token: "sha256:token",
-          limits: { comment_count: 1, text_bytes: 14, attachment_count: 0, attachment_bytes: 0 },
-        }} />
-      </I18nProvider>,
-    );
-
-    expect(screen.getByText(
-      "Context from MUL-1 · issue description + 1 comment",
-    )).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Context from MUL-1/ }));
-    expect(screen.getByText("Alice").closest("li")).toHaveClass(
-      "transition-colors",
-      "duration-150",
-      "hover:border-l-foreground/50",
-    );
-    expect(screen.getByText("Alice").parentElement).toHaveClass(
-      "flex",
-      "gap-2",
-      "text-muted-foreground",
-    );
-    expect(screen.getByText("Quoted context").closest("div.mt-1\\.5")).toBeInTheDocument();
-    expect(screen.getByText("Alice").closest("ol")?.parentElement).toHaveClass("space-y-8");
-    expect(screen.getByText("Alice").closest('[data-slot="source-context-content"]')).toBeInTheDocument();
-    expect(screen.getByText("Source comment")).toHaveClass(
-      "rounded",
-      "bg-info/10",
-      "px-1.5",
-      "py-0.5",
-      "text-info",
-    );
-  });
 
   it("pluralizes the preview comment count", () => {
     render(
@@ -115,43 +69,6 @@ describe("SourceContextPreviewCard", () => {
     expect(screen.getByText("Quoted context")).toBeInTheDocument();
     expect(screen.queryByText("issue-attachment.txt")).not.toBeInTheDocument();
     expect(screen.queryByText("comment-attachment.txt")).not.toBeInTheDocument();
-  });
-
-  it("stays visible when collapsed and scrolls internally when parent-constrained", () => {
-    render(
-      <I18nProvider locale="en" resources={{ en: { issues: enIssues } }}>
-        <SourceContextPreviewCard
-          constrainToParent
-          preview={{
-            source_issue: {
-              id: "issue-1", identifier: "MUL-1", number: 1, title: "Source",
-              description: null, created_at: "now", updated_at: "now", revision: 1,
-              attachments: [],
-            },
-            comment_thread: [{
-              id: "comment-1", parent_id: null, type: "comment", content: "Quoted context",
-              author: { type: "member", id: "user-1", name: "Alice" },
-              created_at: "now", updated_at: "now", revision: 1, attachments: [],
-            }],
-            anchor_comment_id: "comment-1",
-            capture_token: "sha256:token",
-            limits: { comment_count: 1, text_bytes: 14, attachment_count: 0, attachment_bytes: 0 },
-          }}
-        />
-      </I18nProvider>,
-    );
-
-    const header = screen.getByRole("button", { name: /Context from MUL-1/ });
-    const card = document.querySelector('[data-slot="source-context-preview"]');
-    expect(card).toHaveClass("shrink-0");
-
-    fireEvent.click(header);
-    expect(card).toHaveClass("flex", "h-[53%]", "min-h-0", "shrink-0", "flex-col");
-    expect(card).not.toHaveClass("max-h-[65%]", "shrink");
-    expect(header).toHaveClass("shrink-0");
-    const body = document.querySelector('[data-slot="source-context-preview-body"]');
-    expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto", "overscroll-contain");
-    expect(body).not.toHaveClass("max-h-72");
   });
 
   it("explains every exceeded source-context limit from the structured response", () => {

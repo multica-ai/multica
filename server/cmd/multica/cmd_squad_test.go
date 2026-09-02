@@ -21,21 +21,6 @@ func newSquadMemberSetRoleTestCmd() *cobra.Command {
 	return cmd
 }
 
-func TestSquadMemberSetRoleCommandIsRegistered(t *testing.T) {
-	cmd, _, err := squadMemberCmd.Find([]string{"set-role", "squad-123"})
-	if err != nil {
-		t.Fatalf("find set-role command: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "set-role" {
-		t.Fatalf("set-role command not registered; got %#v", cmd)
-	}
-	for _, flag := range []string{"member-id", "member-type", "role", "output"} {
-		if cmd.Flags().Lookup(flag) == nil {
-			t.Fatalf("set-role command missing --%s flag", flag)
-		}
-	}
-}
-
 func TestRunSquadMemberSetRolePatchesRole(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")

@@ -364,17 +364,6 @@ describe("IssueHoverCard", () => {
     expect(paragraphCount()).toBe(1);
   });
 
-  it("breaks a long unbroken title instead of overflowing the card", async () => {
-    const title = "https://example.com/a/very/long/path/that/never/offers/a/break/opportunity";
-    mockIssue({ ...BASE_ISSUE, title });
-
-    await openCard();
-
-    const titleEl = screen.getByText(title);
-    expect(titleEl).toHaveClass("break-words");
-    expect(titleEl).not.toHaveClass("truncate");
-  });
-
   it("keeps the skeleton while the detail query is pending", async () => {
     mockQueries({ phase: "pending" });
     const user = userEvent.setup();

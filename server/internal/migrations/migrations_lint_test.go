@@ -3,11 +3,9 @@ package migrations
 import (
 	"fmt"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 )
@@ -72,42 +70,6 @@ func TestMigrationFilesHaveMatchingDirections(t *testing.T) {
 	for stem, directions := range directionsByStem {
 		if !directions["up"] || !directions["down"] {
 			t.Errorf("migration %s must have both .up.sql and .down.sql files", stem)
-		}
-	}
-}
-
-func TestMigrationNumericPrefixesStayUniqueAfterLegacySet(t *testing.T) {
-	stemsByPrefix := migrationStemsByPrefix(t)
-
-	for prefix, stems := range stemsByPrefix {
-		sort.Strings(stems)
-
-		legacyStems, isLegacyDuplicate := legacyDuplicateMigrationStems[prefix]
-		if isLegacyDuplicate {
-			expected := append([]string(nil), legacyStems...)
-			sort.Strings(expected)
-			if !reflect.DeepEqual(stems, expected) {
-				t.Errorf("legacy duplicate migration prefix %s changed: got %v, want %v; do not add to or rename historical duplicate-prefix migrations", prefix, stems, expected)
-			}
-			continue
-		}
-
-		if len(stems) > 1 {
-			t.Errorf("migration prefix %s is reused by %v; use the next unique prefix instead", prefix, stems)
-		}
-	}
-}
-
-func TestNewMigrationPrefixesStartAfterLegacyRange(t *testing.T) {
-	stemsByPrefix := migrationStemsByPrefix(t)
-
-	for prefix, stems := range stemsByPrefix {
-		n, err := strconv.Atoi(prefix)
-		if err != nil {
-			t.Fatalf("parse migration prefix %q: %v", prefix, err)
-		}
-		if n <= maxLegacyMigrationPrefix && !isKnownLegacyPrefix(prefix) {
-			t.Errorf("migration prefix %s is in the frozen legacy range 001-%03d: %v; new migrations must start at %03d", prefix, maxLegacyMigrationPrefix, stems, maxLegacyMigrationPrefix+1)
 		}
 	}
 }

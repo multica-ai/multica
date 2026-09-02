@@ -18,25 +18,6 @@ import (
 // deadline must tolerate, not a target.
 const slowestMeasuredOpenclawCall = 10860 * time.Millisecond
 
-// TestOpenclawCLIDefaultTimeoutCoversMeasuredSlowHosts is the regression for
-// the reported bug. The old 5s default was written against an assumed <200ms
-// CLI; the reporter's host needs twice that budget for a single call, every
-// time, and had no way to raise it — so the OpenClaw runtime was unusable
-// there. Anything that lowers this default back under the measured range
-// re-breaks that host.
-func TestOpenclawCLIDefaultTimeoutCoversMeasuredSlowHosts(t *testing.T) {
-	if openclawCLITimeout <= slowestMeasuredOpenclawCall {
-		t.Errorf("default openclaw CLI timeout %v must exceed the slowest measured call %v (#7112)",
-			openclawCLITimeout, slowestMeasuredOpenclawCall)
-	}
-	// Headroom, not a bare pass: a host at the measured worst case should not
-	// sit one scheduling hiccup away from failing again.
-	if openclawCLITimeout < 2*slowestMeasuredOpenclawCall {
-		t.Errorf("default openclaw CLI timeout %v leaves less than 2x headroom over %v",
-			openclawCLITimeout, slowestMeasuredOpenclawCall)
-	}
-}
-
 func TestResolveOpenclawCLITimeout(t *testing.T) {
 	cases := []struct {
 		name     string

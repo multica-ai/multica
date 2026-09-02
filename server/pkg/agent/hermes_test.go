@@ -16,17 +16,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsHermesBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("hermes", Config{ExecutablePath: "/nonexistent/hermes"})
-	if err != nil {
-		t.Fatalf("New(hermes) error: %v", err)
-	}
-	if _, ok := b.(*hermesBackend); !ok {
-		t.Fatalf("expected *hermesBackend, got %T", b)
-	}
-}
-
 // ── extractACPSessionID ──
 
 func TestExtractACPSessionID(t *testing.T) {

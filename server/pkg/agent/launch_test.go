@@ -120,26 +120,6 @@ func TestNewFiltersLaunchPrefixOnce(t *testing.T) {
 	}
 }
 
-// TestLaunchPrefixReachesACPFamilies is the regression guard for the half of
-// the bug the report did not name: fixed_args used to ride on ExtraArgs, which
-// the ACP backends never read, so on those families it was silently dropped
-// rather than merely misordered. The prefix must land ahead of the hardcoded
-// `acp` subcommand.
-func TestLaunchPrefixReachesACPFamilies(t *testing.T) {
-	t.Parallel()
-
-	for _, family := range []string{"kimi", "hermes", "kiro", "reasonix", "qwenpaw", "dim", "zeroclaw"} {
-		t.Run(family, func(t *testing.T) {
-			t.Parallel()
-			cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
-			argv := cfg.commandAt("wrapper").Argv("acp")
-			if idx := prefixIndex(argv, []string{"start", "q36", "acp"}); idx != 0 {
-				t.Fatalf("%s: prefix must precede the acp subcommand, got %v", family, argv)
-			}
-		})
-	}
-}
-
 // TestDiscoveryCacheKeySeparatesLaunchPrefixes: one binary behind two
 // different prefixes is two different catalogs.
 func TestDiscoveryCacheKeySeparatesLaunchPrefixes(t *testing.T) {

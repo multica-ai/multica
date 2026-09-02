@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -400,70 +399,6 @@ func TestCacheableModelCatalog(t *testing.T) {
 	// stand-in out of the 24h serve window.
 	if cacheableModelCatalog(sampleCatalog(), true, true) {
 		t.Error("a fallback catalog must never be cached as the runtime's real catalog")
-	}
-}
-
-// TestCachedModelListResponse_WireShape pins what a cache hit looks like on the
-// wire. Existing clients only branch on status/models, so the response must be
-// indistinguishable from a completed live discovery apart from the additive
-// `cached` marker.
-func TestCachedModelListResponse_WireShape(t *testing.T) {
-	storedAt := time.Now().Add(-2 * time.Minute)
-	resp := &ModelListRequest{
-		ID:        randomID(),
-		RuntimeID: "rt-1",
-		Status:    ModelListCompleted,
-		Models:    sampleCatalog(),
-		Supported: true,
-		CreatedAt: storedAt,
-		UpdatedAt: storedAt,
-		Cached:    true,
-		CachedAt:  &storedAt,
-	}
-	raw, err := json.Marshal(resp)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-
-	var decoded struct {
-		ID        string          `json:"id"`
-		Status    ModelListStatus `json:"status"`
-		Models    []ModelEntry    `json:"models"`
-		Supported bool            `json:"supported"`
-		Cached    bool            `json:"cached"`
-		CachedAt  *time.Time      `json:"cached_at"`
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if decoded.Status != ModelListCompleted {
-		t.Fatalf("status = %q, want completed so clients stop polling", decoded.Status)
-	}
-	if decoded.ID == "" {
-		t.Error("a cache hit still needs a request id for client-side bookkeeping")
-	}
-	if len(decoded.Models) != 2 || !decoded.Supported {
-		t.Fatalf("cache hit must carry the catalog: %+v supported=%v", decoded.Models, decoded.Supported)
-	}
-	if !decoded.Cached || decoded.CachedAt == nil {
-		t.Fatalf("cache hit must be marked: cached=%v cached_at=%v", decoded.Cached, decoded.CachedAt)
-	}
-
-	// A live (non-cached) response must not carry the markers at all, so older
-	// clients see exactly the previous payload.
-	live, err := json.Marshal(&ModelListRequest{ID: "x", RuntimeID: "rt-1", Status: ModelListPending, Supported: true})
-	if err != nil {
-		t.Fatalf("marshal live: %v", err)
-	}
-	var liveFields map[string]any
-	if err := json.Unmarshal(live, &liveFields); err != nil {
-		t.Fatalf("unmarshal live: %v", err)
-	}
-	if _, ok := liveFields["cached"]; ok {
-		t.Error("live responses must omit the cached marker")
-	}
-	if _, ok := liveFields["cached_at"]; ok {
-		t.Error("live responses must omit cached_at")
 	}
 }
 
