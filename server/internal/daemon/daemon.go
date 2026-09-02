@@ -7468,8 +7468,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if env != nil && lockedPriorInfo != nil {
 			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
 			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
-				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment",
-					"task", task.ID)
+				// No "task" field here: taskLog already carries the full id.
+				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
 				env = nil
 			}
 		}
