@@ -578,7 +578,7 @@ func init() {
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
 	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
-	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active; adds an ISSUE column. Ordered running-first, newest-first within a status, and capped at 50 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (task, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -2199,13 +2199,33 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 
 	actors := loadActorDisplayLookup(ctx, client)
 	fullID, _ := cmd.Flags().GetBool("full-id")
-	// A family read mixes runs from several issues, so the row has to say which
-	// one it belongs to. On a single-issue read that column would repeat the
-	// argument on every line, so it stays off.
-	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+
+	// The family read returns a different, deliberately smaller row than the
+	// execution log — no completed_at or error, because every row in it is
+	// still in flight — and it spans issues, so it needs a column saying which.
+	// On a single-issue read that column would repeat the argument on every
+	// line, so it stays off there.
 	if siblings {
-		headers = []string{"ID", "ISSUE", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+		headers := []string{"TASK", "ISSUE", "AGENT", "STATUS", "STARTED"}
+		rows := make([][]string, 0, len(runs))
+		for _, r := range runs {
+			started := strVal(r, "started_at")
+			if len(started) >= 16 {
+				started = started[:16]
+			}
+			rows = append(rows, []string{
+				displayID(strVal(r, "task_id"), fullID),
+				strVal(r, "issue_identifier"),
+				actors.agent(strVal(r, "agent_id")),
+				strVal(r, "status"),
+				started,
+			})
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
 	}
+
+	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -2221,18 +2241,14 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			runes := []rune(errMsg)
 			errMsg = string(runes[:47]) + "..."
 		}
-		row := []string{displayID(strVal(r, "id"), fullID)}
-		if siblings {
-			row = append(row, strVal(r, "issue_identifier"))
-		}
-		row = append(row,
+		rows = append(rows, []string{
+			displayID(strVal(r, "id"), fullID),
 			actors.agent(strVal(r, "agent_id")),
 			strVal(r, "status"),
 			started,
 			completed,
 			errMsg,
-		)
-		rows = append(rows, row)
+		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil

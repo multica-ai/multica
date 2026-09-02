@@ -67,10 +67,30 @@ func runsRequest(t *testing.T, issueID, query string) []AgentTaskResponse {
 	return out
 }
 
+// familyRequest decodes the family read's own payload. It is a different,
+// deliberately smaller type than the execution log's row, so the tests decode
+// it as one rather than through AgentTaskResponse — a struct that silently
+// accepted both would stop noticing if the two shapes merged again.
+func familyRequest(t *testing.T, issueID, query string) []ActiveRunSummary {
+	t.Helper()
+	var out []ActiveRunSummary
+	runsResponse(t, issueID, query).Want(http.StatusOK).JSON(&out)
+	return out
+}
+
 func taskIDs(runs []AgentTaskResponse) []string {
 	ids := make([]string, len(runs))
 	for i, r := range runs {
 		ids[i] = r.ID
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func summaryIDs(runs []ActiveRunSummary) []string {
+	ids := make([]string, len(runs))
+	for i, r := range runs {
+		ids[i] = r.TaskID
 	}
 	sort.Strings(ids)
 	return ids
@@ -145,16 +165,18 @@ func TestListTasksByIssueFamilyScopeSpansSiblings(t *testing.T) {
 	f.task(t, f.childB, "completed")
 	f.task(t, f.unrelated, "running")
 
-	runs := runsRequest(t, f.childA, "scope=family&active=true")
-	if want := sortedCopy(onSelf, onSibling, onParent); !sameIDs(taskIDs(runs), want) {
+	runs := familyRequest(t, f.childA, "scope=family&active=true")
+	if want := sortedCopy(onSelf, onSibling, onParent); !sameIDs(summaryIDs(runs), want) {
 		t.Fatalf("family runs = %v, want %v (self + sibling + parent, no terminal, no unrelated issue)",
-			taskIDs(runs), want)
+			summaryIDs(runs), want)
 	}
 
 	for _, run := range runs {
-		if run.IssueIdentifier == "" || run.IssueTitle == "" {
-			t.Fatalf("run %s carries no issue identity (%q / %q); a family row cannot be labelled from the task alone",
-				run.ID, run.IssueIdentifier, run.IssueTitle)
+		// Issue identity labels the row; agent identity IS the answer, since
+		// this read exists to find the agent working next to you.
+		if run.IssueIdentifier == "" || run.IssueTitle == "" || run.AgentID == "" {
+			t.Fatalf("run %s carries no issue/agent identity (%q / %q / %q); a family row cannot be attributed from the task alone",
+				run.TaskID, run.IssueIdentifier, run.IssueTitle, run.AgentID)
 		}
 	}
 }
@@ -171,7 +193,7 @@ func TestListTasksByIssueFamilyScopeFromParentSeesChildren(t *testing.T) {
 	onParent := f.task(t, f.parentID, "queued")
 	f.task(t, f.unrelated, "running")
 
-	got := taskIDs(runsRequest(t, f.parentID, "scope=family"))
+	got := summaryIDs(familyRequest(t, f.parentID, "scope=family"))
 	if want := sortedCopy(onChild, onParent); !sameIDs(got, want) {
 		t.Fatalf("family runs from parent = %v, want %v", got, want)
 	}
@@ -189,7 +211,7 @@ func TestListTasksByIssueFamilyScopeOnStandaloneIssue(t *testing.T) {
 	f.task(t, f.unrelated, "completed")
 	f.task(t, f.childA, "running")
 
-	got := taskIDs(runsRequest(t, f.unrelated, "scope=family"))
+	got := summaryIDs(familyRequest(t, f.unrelated, "scope=family"))
 	if want := sortedCopy(own); !sameIDs(got, want) {
 		t.Fatalf("family runs from standalone issue = %v, want %v", got, want)
 	}
@@ -287,7 +309,7 @@ func TestListTasksByIssueFamilyScopeReportsTruncation(t *testing.T) {
 	if got := full.Header().Get(HeaderActiveRunsTruncated); got != "" {
 		t.Fatalf("truncation header = %q on an exactly-full page, want empty", got)
 	}
-	var atCap []AgentTaskResponse
+	var atCap []ActiveRunSummary
 	full.JSON(&atCap)
 	if len(atCap) != familyActiveRunCap {
 		t.Fatalf("rows at cap = %d, want %d", len(atCap), familyActiveRunCap)
@@ -299,9 +321,47 @@ func TestListTasksByIssueFamilyScopeReportsTruncation(t *testing.T) {
 	if got := over.Header().Get(HeaderActiveRunsTruncated); got != "true" {
 		t.Fatalf("truncation header = %q past the cap, want \"true\"", got)
 	}
-	var truncated []AgentTaskResponse
+	var truncated []ActiveRunSummary
 	over.JSON(&truncated)
 	if len(truncated) != familyActiveRunCap {
 		t.Fatalf("rows past cap = %d, want them trimmed to %d", len(truncated), familyActiveRunCap)
+	}
+}
+
+// The family read's payload is its product, not an implementation detail: it is
+// an agent spending its own context on the answer. The execution-log row costs
+// roughly 5x the bytes — attribution alone was the largest field on it and
+// needed a second query — and a caller asking "who else is here?" reads none of
+// it. Pinning the exact key set is what stops the two shapes from quietly
+// merging back together the next time someone reuses taskToResponse here.
+func TestListTasksByIssueFamilyScopePayloadStaysLean(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	f := newFamilyFixture(t)
+	f.task(t, f.childB, "running")
+
+	var raw []map[string]any
+	runsResponse(t, f.childA, "scope=family").Want(http.StatusOK).JSON(&raw)
+	if len(raw) != 1 {
+		t.Fatalf("family rows = %d, want 1", len(raw))
+	}
+
+	want := map[string]bool{
+		"task_id": true, "issue_id": true, "issue_identifier": true,
+		"issue_title": true, "agent_id": true, "status": true,
+		"created_at": true, "started_at": true,
+	}
+	for key := range raw[0] {
+		if !want[key] {
+			t.Errorf("family row carries execution-log field %q; this read is a coordination payload", key)
+		}
+	}
+	// started_at is omitempty (a queued run has none), so only the rest are
+	// guaranteed present on a running row.
+	for key := range want {
+		if _, ok := raw[0][key]; !ok && key != "started_at" {
+			t.Errorf("family row missing %q", key)
+		}
 	}
 }

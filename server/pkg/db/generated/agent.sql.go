@@ -5340,7 +5340,12 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 
 const listActiveTasksByIssueFamily = `-- name: ListActiveTasksByIssueFamily :many
 SELECT
-    atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name, atq.durable_work_dir, atq.channel_context_revision,
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
     w.issue_prefix,
     i.number AS issue_number,
     i.title AS issue_title
@@ -5368,10 +5373,15 @@ type ListActiveTasksByIssueFamilyParams struct {
 }
 
 type ListActiveTasksByIssueFamilyRow struct {
-	AgentTaskQueue AgentTaskQueue `json:"agent_task_queue"`
-	IssuePrefix    string         `json:"issue_prefix"`
-	IssueNumber    int32          `json:"issue_number"`
-	IssueTitle     string         `json:"issue_title"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	IssuePrefix string             `json:"issue_prefix"`
+	IssueNumber int32              `json:"issue_number"`
+	IssueTitle  string             `json:"issue_title"`
 }
 
 // Cross-issue coordination read for parallel sub-issue work (#7768). Given a
@@ -5387,10 +5397,20 @@ type ListActiveTasksByIssueFamilyRow struct {
 // two apart.
 //
 // Issue identity is joined in because the caller renders runs from several
-// issues in one list and cannot label a row from the task alone. Ordered
-// running-first so the truncation the LIMIT may impose drops the least
-// interesting rows, and bounded because a parent with hundreds of children
-// must not turn one coordination read into an unbounded scan.
+// issues in one list and cannot label a row from the task alone. agent_id is
+// here for the same reason: unlike ListActiveSiblingIssueTasks, whose rows all
+// belong to the claiming agent by construction, this read spans agents — which
+// one is on a sibling is the answer, not a detail.
+//
+// Columns are named rather than embedded. This is the coordination question,
+// not the execution log: result and context are JSONB blobs, and work_dir /
+// trigger_summary / the attribution ids are all execution-log fields that a
+// caller asking "who else is here?" never reads. Selecting them would make
+// Postgres detoast and ship roughly 5x the bytes per row for nothing.
+//
+// Ordered running-first so the truncation the LIMIT may impose drops the least
+// interesting rows, and bounded because a parent with hundreds of children must
+// not turn one coordination read into an unbounded scan.
 func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActiveTasksByIssueFamilyParams) ([]ListActiveTasksByIssueFamilyRow, error) {
 	rows, err := q.db.Query(ctx, listActiveTasksByIssueFamily, arg.WorkspaceID, arg.RootIssueID, arg.RowLimit)
 	if err != nil {
@@ -5401,60 +5421,12 @@ func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActi
 	for rows.Next() {
 		var i ListActiveTasksByIssueFamilyRow
 		if err := rows.Scan(
-			&i.AgentTaskQueue.ID,
-			&i.AgentTaskQueue.AgentID,
-			&i.AgentTaskQueue.IssueID,
-			&i.AgentTaskQueue.Status,
-			&i.AgentTaskQueue.Priority,
-			&i.AgentTaskQueue.DispatchedAt,
-			&i.AgentTaskQueue.StartedAt,
-			&i.AgentTaskQueue.CompletedAt,
-			&i.AgentTaskQueue.Result,
-			&i.AgentTaskQueue.Error,
-			&i.AgentTaskQueue.CreatedAt,
-			&i.AgentTaskQueue.Context,
-			&i.AgentTaskQueue.RuntimeID,
-			&i.AgentTaskQueue.SessionID,
-			&i.AgentTaskQueue.WorkDir,
-			&i.AgentTaskQueue.TriggerCommentID,
-			&i.AgentTaskQueue.ChatSessionID,
-			&i.AgentTaskQueue.AutopilotRunID,
-			&i.AgentTaskQueue.Attempt,
-			&i.AgentTaskQueue.MaxAttempts,
-			&i.AgentTaskQueue.ParentTaskID,
-			&i.AgentTaskQueue.FailureReason,
-			&i.AgentTaskQueue.TriggerSummary,
-			&i.AgentTaskQueue.ForceFreshSession,
-			&i.AgentTaskQueue.IsLeaderTask,
-			&i.AgentTaskQueue.WaitReason,
-			&i.AgentTaskQueue.InitiatorUserID,
-			&i.AgentTaskQueue.HandoffNote,
-			&i.AgentTaskQueue.PrepareLeaseExpiresAt,
-			&i.AgentTaskQueue.SquadID,
-			&i.AgentTaskQueue.RuntimeMcpOverlay,
-			&i.AgentTaskQueue.EscalationForTaskID,
-			&i.AgentTaskQueue.FireAt,
-			&i.AgentTaskQueue.OriginatorUserID,
-			&i.AgentTaskQueue.RuntimeConnectedApps,
-			&i.AgentTaskQueue.CoalescedCommentIds,
-			&i.AgentTaskQueue.DeliveredCommentIds,
-			&i.AgentTaskQueue.ChatInputTaskID,
-			&i.AgentTaskQueue.ChatFinalizeDeferredAt,
-			&i.AgentTaskQueue.OriginatorSource,
-			&i.AgentTaskQueue.DelegatedFromTaskID,
-			&i.AgentTaskQueue.RetryOfTaskID,
-			&i.AgentTaskQueue.RerunOfTaskID,
-			&i.AgentTaskQueue.RuleVersionID,
-			&i.AgentTaskQueue.TriggerEvidenceKind,
-			&i.AgentTaskQueue.TriggerEvidenceRefID,
-			&i.AgentTaskQueue.AccountableUserID,
-			&i.AgentTaskQueue.SessionRolloutMissing,
-			&i.AgentTaskQueue.RetiredSessionID,
-			&i.AgentTaskQueue.QuickActionsDisabled,
-			&i.AgentTaskQueue.RegenerateQuickActionsFor,
-			&i.AgentTaskQueue.BranchName,
-			&i.AgentTaskQueue.DurableWorkDir,
-			&i.AgentTaskQueue.ChannelContextRevision,
+			&i.TaskID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.StartedAt,
 			&i.IssuePrefix,
 			&i.IssueNumber,
 			&i.IssueTitle,

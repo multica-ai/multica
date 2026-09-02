@@ -271,7 +271,7 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 		// coordination they exist to prompt.
 		"covers only YOUR OWN other in-flight tasks",
 		"multica issue runs <issue-id> --siblings --output json",
-		"capped at 50",
+		"capped at 20",
 		"Nothing here reserves an issue or serialises anything",
 	}
 	for _, want := range mustContain {

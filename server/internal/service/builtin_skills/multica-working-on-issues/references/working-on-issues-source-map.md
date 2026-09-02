@@ -162,6 +162,7 @@ away, so no task is left orphaned.
 | Invalid `active` / `scope` values are rejected rather than silently answering with the full history | `server/internal/handler/daemon.go` (`ListTasksByIssue`) |
 | The family cap fetches one row past `familyActiveRunCap` and reports truncation on `X-Active-Runs-Truncated`, which the CLI surfaces on stderr | `server/internal/handler/daemon.go` (`familyActiveRunCap`, `HeaderActiveRunsTruncated`), `server/cmd/multica/cmd_issue.go` (`runIssueRuns`) |
 | The active path skips usage hydration, which is keyed by issue and spans the full history | `server/internal/handler/daemon.go` (`ListTasksByIssue`), `server/pkg/db/queries/task_usage.sql` (`ListIssueTaskUsage`) |
+| The family read returns its own compact row rather than the execution-log record, and skips usage and attribution hydration | `server/internal/handler/daemon.go` (`ActiveRunSummary`), `server/pkg/db/queries/agent.sql` (`ListActiveTasksByIssueFamily`) |
 
 The self-assignment guard is intentionally pair-scoped. It does not treat
 "this agent is busy on some other issue" as a reason to suppress a fresh

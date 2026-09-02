@@ -4882,14 +4882,15 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 
 // familyActiveRunCap bounds a scope=family read.
 //
-// It is a response-size budget, chosen so one advisory read stays small enough
-// for an agent to hold in context — NOT a bound derived from how much work can
-// really be in flight. A family can legitimately exceed it: a single agent may
-// be configured up to agentconfig.MaxMaxConcurrentTasks (50) on its own, this
-// feature exists precisely for the case where SEVERAL agents work a family at
-// once, and the returned set includes queued / dispatched /
-// waiting_local_directory rows, which no execution-slot limit bounds at all —
-// a parent that fans out 200 children can have 200 of them enqueued.
+// It is a response-size budget set to the shape of the normal case — a handful
+// of runs in flight at once (maintainer call, MUL-6846) — NOT a bound derived
+// from how much work can really be in flight. A family can legitimately exceed
+// it by a lot: a single agent may be configured up to
+// agentconfig.MaxMaxConcurrentTasks (50) on its own, this feature exists
+// precisely for the case where SEVERAL agents work a family at once, and the
+// returned set includes queued / dispatched / waiting_local_directory rows,
+// which no execution-slot limit bounds at all — a parent that fans out 200
+// children can have 200 of them enqueued.
 //
 // So truncation here is an ordinary outcome, not a pathological one, and that
 // is exactly why it must be reported. A cap that truncated silently would be
@@ -4898,7 +4899,7 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 // The handler asks for one row more than it will return and sets
 // HeaderActiveRunsTruncated when that extra row comes back. The query orders
 // running-first, so what the budget drops is the least decision-relevant.
-const familyActiveRunCap = 50
+const familyActiveRunCap = 20
 
 // HeaderActiveRunsTruncated tells a caller its coordination read hit
 // familyActiveRunCap and is therefore an incomplete picture of who is working
@@ -4906,6 +4907,33 @@ const familyActiveRunCap = 50
 // signal rides a header because the response body is a bare array that existing
 // callers parse positionally.
 const HeaderActiveRunsTruncated = "X-Active-Runs-Truncated"
+
+// ActiveRunSummary is one in-flight run as the coordination read reports it:
+// which issue, which agent, what state, since when, and the task id to follow
+// up with `multica issue run-messages`.
+//
+// Deliberately NOT AgentTaskResponse. That type is the execution log's row —
+// result, work_dir, attribution, coalesced comment ids — and it costs roughly
+// 5x the bytes of this one. A caller asking "is anyone working next to me?"
+// reads none of those fields, and it is an agent spending its own context on
+// the answer, so the payload is cut to what the question needs.
+//
+// It is also not ActiveSiblingRunData, which the daemon claim payload uses.
+// That one describes the claiming agent's OWN other runs, so it has no agent
+// field; this read spans agents, and which agent is on a sibling is the answer.
+// Sharing one struct across both would put an optional field on it that only
+// one caller ever sets — the exact shape this change removed from
+// AgentTaskResponse.
+type ActiveRunSummary struct {
+	TaskID          string  `json:"task_id"`
+	IssueID         string  `json:"issue_id"`
+	IssueIdentifier string  `json:"issue_identifier"`
+	IssueTitle      string  `json:"issue_title"`
+	AgentID         string  `json:"agent_id"`
+	Status          string  `json:"status"`
+	CreatedAt       string  `json:"created_at"`
+	StartedAt       *string `json:"started_at,omitempty"`
+}
 
 // ListTasksByIssue returns tasks for an issue — the execution history behind
 // the issue-detail sidebar, and the coordination reads behind
@@ -4977,16 +5005,25 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 			rows = rows[:familyActiveRunCap]
 			w.Header().Set(HeaderActiveRunsTruncated, "true")
 		}
-		resp := make([]AgentTaskResponse, len(rows))
+		summaries := make([]ActiveRunSummary, len(rows))
 		for i, row := range rows {
-			resp[i] = taskToResponse(row.AgentTaskQueue, workspaceID)
-			// Rows span several issues here, so each one has to carry the issue
-			// it belongs to — a caller cannot label it from the task alone.
-			resp[i].IssueIdentifier = service.IssueIdentifier(row.IssuePrefix, row.IssueNumber)
-			resp[i].IssueTitle = row.IssueTitle
+			summaries[i] = ActiveRunSummary{
+				TaskID:  uuidToString(row.TaskID),
+				IssueID: uuidToString(row.IssueID),
+				// Rows span several issues here, so each one has to carry the
+				// issue it belongs to — a caller cannot label it from the task.
+				IssueIdentifier: service.IssueIdentifier(row.IssuePrefix, row.IssueNumber),
+				IssueTitle:      row.IssueTitle,
+				AgentID:         uuidToString(row.AgentID),
+				Status:          row.Status,
+				CreatedAt:       timestampToString(row.CreatedAt),
+				StartedAt:       timestampToPtr(row.StartedAt),
+			}
 		}
-		h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
-		writeJSON(w, http.StatusOK, resp)
+		// No attribution hydration either: it was the single largest field on
+		// the old payload and needed its own query, and "on behalf of whom" is
+		// an execution-log question, not a coordination one.
+		writeJSON(w, http.StatusOK, summaries)
 		return
 	}
 

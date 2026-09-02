@@ -4087,22 +4087,33 @@ func TestRunIssueRunsScopeFlagsBuildQuery(t *testing.T) {
 	}
 }
 
-// A family read mixes runs from several issues, so every row has to name its
-// own issue. Without the column the table is a list of task ids the reader
-// cannot attribute — which is the entire question --siblings was added to
-// answer.
-func TestRunIssueRunsSiblingsTableCarriesIssueColumn(t *testing.T) {
+// The two modes return different payloads, so they render through different
+// column sets. The family row names its issue — without that the table is a
+// list of task ids the reader cannot attribute, which is the whole question
+// --siblings answers — and it drops COMPLETED / ERROR, which are empty on
+// every row of a read that only returns work still in flight.
+func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
 	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/issues/" + issueID + "/task-runs":
+			if r.URL.Query().Get("scope") == "family" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{
+					"task_id":          "abcd1234-0000-0000-0000-000000000000",
+					"issue_id":         "5678abcd-0000-0000-0000-000000000000",
+					"issue_identifier": "MUL-7001",
+					"issue_title":      "sibling work",
+					"agent_id":         "agent-1",
+					"status":           "running",
+					"created_at":       "2026-09-02T07:00:00Z",
+					"started_at":       "2026-09-02T07:00:01Z",
+				}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode([]map[string]any{{
-				"id":               "abcd1234-0000-0000-0000-000000000000",
-				"agent_id":         "agent-1",
-				"status":           "running",
-				"issue_identifier": "MUL-7001",
-				"issue_title":      "sibling work",
+				"id": "abcd1234-0000-0000-0000-000000000000", "agent_id": "agent-1",
+				"status": "completed", "error": "boom",
 			}})
 		default:
 			// Actor lookups for the AGENT column are best-effort; 404 is fine.
@@ -4123,12 +4134,20 @@ func TestRunIssueRunsSiblingsTableCarriesIssueColumn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue runs: %v", err)
 	}
-	if !strings.Contains(out, "ISSUE") || !strings.Contains(out, "MUL-7001") {
-		t.Fatalf("table output missing issue column:\n%s", out)
+	// The task id has to survive the new payload's task_id key — reading `id`
+	// here would render a column of blanks and lose the run-messages target.
+	for _, want := range []string{"TASK", "ISSUE", "MUL-7001", "abcd1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("family table missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"COMPLETED", "ERROR"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("family table carries %q, which is empty on every in-flight row:\n%s", unwanted, out)
+		}
 	}
 
-	// The same rows without --siblings come from one known issue, so repeating
-	// it on every line would be noise.
+	// The execution log keeps its own columns: same command, different question.
 	plain := newIssueRunsTestCmd(t, "table")
 	out, err = captureStdout(t, func() error { return runIssueRuns(plain, []string{issueID}) })
 	if err != nil {
@@ -4136,6 +4155,9 @@ func TestRunIssueRunsSiblingsTableCarriesIssueColumn(t *testing.T) {
 	}
 	if strings.Contains(out, "ISSUE") {
 		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
+	}
+	if !strings.Contains(out, "ERROR") || !strings.Contains(out, "boom") {
+		t.Fatalf("execution log lost its error column:\n%s", out)
 	}
 }
 

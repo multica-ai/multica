@@ -2431,12 +2431,27 @@ ORDER BY created_at DESC;
 -- two apart.
 --
 -- Issue identity is joined in because the caller renders runs from several
--- issues in one list and cannot label a row from the task alone. Ordered
--- running-first so the truncation the LIMIT may impose drops the least
--- interesting rows, and bounded because a parent with hundreds of children
--- must not turn one coordination read into an unbounded scan.
+-- issues in one list and cannot label a row from the task alone. agent_id is
+-- here for the same reason: unlike ListActiveSiblingIssueTasks, whose rows all
+-- belong to the claiming agent by construction, this read spans agents — which
+-- one is on a sibling is the answer, not a detail.
+--
+-- Columns are named rather than embedded. This is the coordination question,
+-- not the execution log: result and context are JSONB blobs, and work_dir /
+-- trigger_summary / the attribution ids are all execution-log fields that a
+-- caller asking "who else is here?" never reads. Selecting them would make
+-- Postgres detoast and ship roughly 5x the bytes per row for nothing.
+--
+-- Ordered running-first so the truncation the LIMIT may impose drops the least
+-- interesting rows, and bounded because a parent with hundreds of children must
+-- not turn one coordination read into an unbounded scan.
 SELECT
-    sqlc.embed(atq),
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
     w.issue_prefix,
     i.number AS issue_number,
     i.title AS issue_title

@@ -267,8 +267,12 @@ child of that parent — and labels each row with the issue it belongs to, which
 is how you find another agent already working on a sibling sub-issue before you
 open a second PR against the same code.
 
+The family read returns a compact row — task, issue, agent, status, started —
+not the full execution-log record. If you need a run's detail, follow the task
+id with `multica issue run-messages`.
+
 Rows come back running-first, newest-first within a status, and the family read
-is capped at 50. When the cap truncates the answer the CLI prints a warning on
+is capped at 20. When the cap truncates the answer the CLI prints a warning on
 stderr — read it. Without that warning a short list means "nobody else is
 there"; with it, the list proves nothing about the runs it did not return.
 
