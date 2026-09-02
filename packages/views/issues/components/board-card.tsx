@@ -27,6 +27,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { IssueMergeQueueIndicator } from "./issue-merge-queue-indicator";
 import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 function formatDate(date: string, locale: string): string {
@@ -175,13 +176,19 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   return (
     <div className="rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover">
-      {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
+      {/* Row 1: priority + identifier (left), merge queue + agent activity (right).
+          The merge-queue chip lives here rather than in the chip row below
+          because that row only mounts when some other chip exists, and whether
+          this one renders is known only inside the indicator. */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
         </div>
-        <IssueAgentActivityIndicator issueId={issue.id} />
+        <div className="flex shrink-0 items-center gap-1.5">
+          <IssueMergeQueueIndicator issueId={issue.id} />
+          <IssueAgentActivityIndicator issueId={issue.id} />
+        </div>
       </div>
 
       {/* Row 2: Title */}

@@ -195,6 +195,8 @@ export type {
   GitHubPullRequestMergeQueueState,
   GitHubPullRequestMergeStateStatus,
   GitHubPullRequestState,
+  GitHubQueuedPullRequest,
+  ListGitHubQueuedPullRequestsResponse,
   ListGitHubInstallationsResponse,
   GitHubRepository,
   ListGitHubRepositoriesResponse,

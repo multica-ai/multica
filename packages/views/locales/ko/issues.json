@@ -664,6 +664,8 @@
     "cancel": "취소"
   },
   "card": {
+    "merge_queue": "병합 대기열에 있음",
+    "merge_queue_blocked": "병합 대기열에서 차단됨",
     "update_failed": "태스크를 업데이트하지 못했습니다",
     "updated_ago": "{{time}} 수정됨"
   },

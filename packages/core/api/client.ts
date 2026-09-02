@@ -164,6 +164,7 @@ import type {
   PluginConfigRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
+  ListGitHubQueuedPullRequestsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
   ListVCSConnectionsResponse,
@@ -406,9 +407,11 @@ import {
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
+  ListGitHubQueuedPullRequestsResponseSchema,
   ListGitHubRepositoriesResponseSchema,
   EMPTY_GITHUB_CONNECT_RESPONSE,
   EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
+  EMPTY_LIST_GITHUB_QUEUED_PULL_REQUESTS_RESPONSE,
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
@@ -4309,6 +4312,20 @@ export class ApiClient {
       ListGitHubInstallationsResponseSchema,
       EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/github/installations" },
+    );
+  }
+
+  async listGitHubQueuedPullRequests(
+    workspaceId: string,
+  ): Promise<ListGitHubQueuedPullRequestsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/github/pull-requests/queued`,
+    );
+    return parseWithFallback(
+      raw,
+      ListGitHubQueuedPullRequestsResponseSchema,
+      EMPTY_LIST_GITHUB_QUEUED_PULL_REQUESTS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/pull-requests/queued" },
     );
   }
 

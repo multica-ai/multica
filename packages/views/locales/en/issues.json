@@ -695,6 +695,8 @@
     "cancel": "Cancel"
   },
   "card": {
+    "merge_queue": "In merge queue",
+    "merge_queue_blocked": "Merge queue blocked",
     "update_failed": "Failed to update issue",
     "updated_ago": "Updated {{time}}"
   },

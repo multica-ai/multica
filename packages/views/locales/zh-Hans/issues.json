@@ -664,6 +664,8 @@
     "cancel": "取消"
   },
   "card": {
+    "merge_queue": "在合并队列中",
+    "merge_queue_blocked": "合并队列中被阻塞",
     "update_failed": "更新任务失败",
     "updated_ago": "更新于 {{time}}"
   },

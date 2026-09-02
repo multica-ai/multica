@@ -664,6 +664,8 @@
     "cancel": "キャンセル"
   },
   "card": {
+    "merge_queue": "マージキュー待ち",
+    "merge_queue_blocked": "マージキューでブロック中",
     "update_failed": "タスクを更新できませんでした",
     "updated_ago": "{{time}} に更新"
   },

@@ -167,3 +167,15 @@ export interface ListGitHubRepositoriesResponse {
   total_count: number;
   next_page: number | null;
 }
+
+/** One issue whose pull request is sitting in a repository merge queue.
+ * Returned by the workspace-wide queued-PR endpoint that backs the board
+ * card indicator — the board has no other source of PR data. */
+export interface GitHubQueuedPullRequest {
+  issue_id: string;
+  merge_queue_state: GitHubPullRequestMergeQueueState;
+}
+
+export interface ListGitHubQueuedPullRequestsResponse {
+  queued_pull_requests: GitHubQueuedPullRequest[];
+}
