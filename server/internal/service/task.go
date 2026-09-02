@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/pricing"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -37,13 +38,14 @@ import (
 )
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Analytics analytics.Client
-	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	ModelPricing *pricing.Service
+	Queries      *db.Queries
+	TxStarter    TxStarter
+	Hub          *realtime.Hub
+	Bus          *events.Bus
+	Analytics    analytics.Client
+	Metrics      *obsmetrics.BusinessMetrics
+	Wakeup       TaskWakeupNotifier
 	// Entitlements supplies Cloud's workspace-scoped issue-count instruction.
 	// Nil keeps self-hosted and isolated test services unlimited.
 	Entitlements entitlement.Provider
@@ -858,6 +860,31 @@ func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQue
 		return
 	}
 	source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
+	if s.ModelPricing != nil {
+		workspaceID, parseErr := util.ParseUUID(s.taskAnalyticsContext(ctx, task).WorkspaceID)
+		if parseErr != nil {
+			s.Metrics.RecordLLMUsage(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks)
+			return
+		}
+		catalog, err := s.ModelPricing.Snapshot(ctx, workspaceID)
+		if err == nil {
+			row, found := pricing.Resolve(catalog.Catalog, catalog.Overrides, model, provider)
+			price := obsmetrics.ModelPrice{Provider: row.Provider, Model: row.Model, InputPerM: row.Input, OutputPerM: row.Output, CacheReadPerM: row.CacheRead, CacheWritePerM: row.CacheWrite}
+			// Preserve established monitoring labels while using the shared rates.
+			if known, ok := obsmetrics.PriceForModelAlias(model); ok && (row.Provider == "" || row.Provider == known.Provider) {
+				price.Provider, price.Model = known.Provider, known.Model
+			}
+			if price.Provider == "" {
+				price.Provider = obsmetrics.NormalizeRuntimeProvider(provider)
+			}
+			if price.Model == "" {
+				price.Model = obsmetrics.NormalizeModelAlias(model)
+			}
+			s.Metrics.RecordLLMUsageWithPrice(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks, price, found)
+			return
+		}
+		slog.Warn("model prices unavailable for usage metrics", "error", err)
+	}
 	s.Metrics.RecordLLMUsage(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks)
 }
 

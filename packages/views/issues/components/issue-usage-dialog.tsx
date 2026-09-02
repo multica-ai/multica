@@ -1,5 +1,6 @@
 "use client";
 
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useMemo } from "react";
 import type { AgentTask } from "@multica/core/types";
 import {
@@ -10,7 +11,7 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
@@ -48,14 +49,8 @@ export function IssueUsageDialog({
   identifier: string;
   tasks: AgentTask[];
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
-  // `estimateCost` reads custom rates imperatively out of the Zustand store,
-  // so nothing re-renders this dialog when the user saves a new rate. Subscribe
-  // to the snapshot and carry it into every memo that prices usage — otherwise
-  // the totals, the per-run costs, and the "unmapped model" notice all keep
-  // showing the old price until the task list happens to refetch. Same reason
-  // the runtime usage page subscribes in usage-section.tsx.
-  const pricings = useCustomPricingStore((s) => s.pricings);
 
   // Only runs that actually recorded usage earn a row: a run with no figure
   // contributes nothing to compare and would just add an all-em-dash line.
@@ -67,7 +62,7 @@ export function IssueUsageDialog({
   const unpricedCount = tasks.length - priced.length;
 
   const total = useMemo(
-    () => summarizeTaskUsageAcross(priced.map((task) => task.usage)),
+    () => summarizeTaskUsageAcross(priced.map((task) => task.usage), pricings),
     [priced, pricings],
   );
 
@@ -80,7 +75,7 @@ export function IssueUsageDialog({
   // tokens are counted but their spend is not, so the totals below understate
   // reality. Saying so is the difference between an estimate and a wrong number.
   const unmapped = useMemo(
-    () => collectUnmappedModels(priced.flatMap((task) => task.usage ?? [])),
+    () => collectUnmappedModels(priced.flatMap((task) => task.usage ?? []), pricings),
     [priced, pricings],
   );
 
@@ -183,12 +178,13 @@ function CostConcentrationHint({
   tasks: AgentTask[];
   total: TaskUsageSummary;
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
   const failed = tasks.filter((task) => task.status === "failed");
   if (failed.length === 0 || total.cost <= 0) return null;
 
   const failedCost = failed.reduce(
-    (sum, task) => sum + (summarizeTaskUsage(task.usage)?.cost ?? 0),
+    (sum, task) => sum + (summarizeTaskUsage(task.usage, pricings)?.cost ?? 0),
     0,
   );
   if (failedCost <= 0) return null;
@@ -215,15 +211,15 @@ function CostByAgent({
   agentIds: string[];
   total: TaskUsageSummary;
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const pricings = useCustomPricingStore((s) => s.pricings);
 
   const rows = useMemo(() => {
     return agentIds
       .map((agentId) => {
         const own = tasks.filter((task) => task.agent_id === agentId);
-        const summary = summarizeTaskUsageAcross(own.map((task) => task.usage));
+        const summary = summarizeTaskUsageAcross(own.map((task) => task.usage), pricings);
         return { agentId, cost: summary?.cost ?? 0, tokens: summary?.tokens ?? 0 };
       })
       .toSorted((a, b) => b.cost - a.cost);
@@ -271,9 +267,10 @@ function CostByAgent({
 }
 
 function RunTable({ tasks, total }: { tasks: AgentTask[]; total: TaskUsageSummary }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
   const maxTokens = tasks.reduce(
-    (m, task) => Math.max(m, summarizeTaskUsage(task.usage)?.tokens ?? 0),
+    (m, task) => Math.max(m, summarizeTaskUsage(task.usage, pricings)?.tokens ?? 0),
     0,
   );
 
@@ -324,10 +321,11 @@ function RunTable({ tasks, total }: { tasks: AgentTask[]; total: TaskUsageSummar
 }
 
 function RunRow({ task, maxTokens }: { task: AgentTask; maxTokens: number }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("issues");
   const trigger = useTriggerText(task);
   const statusLabel = useStatusLabel(task.status);
-  const summary = summarizeTaskUsage(task.usage);
+  const summary = summarizeTaskUsage(task.usage, pricings);
   if (!summary) return null;
 
   const duration =

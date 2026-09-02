@@ -3,7 +3,7 @@ import type {
   RuntimeUsage,
   RuntimeUsageByAgent,
 } from "@multica/core/types";
-import { getCustomPricing } from "@multica/core/runtimes/custom-pricing-store";
+import { resolveModelPricing as resolvePricing, type PricingContext } from "@multica/core/runtimes/pricing";
 
 // A live local daemon re-registers itself within seconds of a server-side
 // delete (daemon self-heal, #2404), so deleting an online local runtime from
@@ -151,407 +151,20 @@ export function formatUsd(n: number): string {
 // Cost estimation
 // ---------------------------------------------------------------------------
 
-// Pricing per million tokens (USD). Sources, each authoritative for the
-// rows tagged under it — keep in sync when providers release new models
-// or adjust prices.
-//
-//   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
-//   OpenAI:    https://openai.com/api/pricing
-//   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
-//   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
-//   Zhipu:     https://docs.z.ai/guides/overview/pricing
-//   xAI:       https://docs.x.ai/developers/pricing
-//
-// Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
-// daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
-// the safest / cheapest assumption (matches the API default). DeepSeek,
-// Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
-// is just discounted on subsequent reads), so cacheWrite mirrors input there.
-// OpenAI historically did the same, but its GPT-5.6+ generation bills cache
-// writes at 1.25× input (cache reads still get the 90% cached-input
-// discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
-// yet stream cache-write tokens, so that rate isn't exercised today.
-//
-// The resolver matches exact keys after stripping a trailing date snapshot
-// (see `resolvePricing` below). It deliberately does NOT do startsWith
-// fallbacks: every catalog SKU needs its own row. That keeps unfamiliar
-// variants (`gpt-5.5-mini`, hypothetical `gpt-5.4-foo`) from silently
-// inheriting the price of a near-named relative; they surface in the
-// unmapped diagnostic instead. Mirror new entries in
-// `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
-//
-// Provider-qualified keys: a model id that is NOT vendor-prefixed
-// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`,
-// `grok-*`) and is
-// not the provider name itself can collide across providers — more than one
-// provider may report the same generic id like `auto`. Such generic ids MUST be keyed as
-// `${provider}/${model}` (e.g. `cursor/auto`). `resolvePricing` tries the
-// `${provider}/…` form first, then the bare form, so vendor-prefixed SKUs
-// stay unqualified and still resolve.
-const MODEL_PRICING: Record<
-  string,
-  { input: number; output: number; cacheRead: number; cacheWrite: number }
-> = {
-  // -- Anthropic: current generation. Sonnet 5 uses Anthropic's published
-  //    intro launch rate ($2 / $10 through 2026-08-31). This static map has
-  //    no future-dated pricing support yet, so update the row when the
-  //    post-intro $3 / $15 rate takes effect. Fable 5 and 5.1 are Mythos-class
-  //    SKUs at 10/50 (5.1 prices cache reads at 0.025x input, a quarter of the
-  //    usual 0.1x); Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier. --
-  "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
-  "claude-fable-5-1":   { input: 10,   output: 50,   cacheRead: 0.25, cacheWrite: 12.50 },
-  "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
-  "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
-  "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
-  "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
-  "claude-opus-4-5":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-opus-4-6":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-opus-4-7":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-  "claude-opus-4-8":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
-
-  // -- Anthropic: pre-4.5 Opus (legacy, still served at original price tier) --
-  "claude-opus-4-1":    { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
-  "claude-opus-4":      { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
-
-  // -- Anthropic: Sonnet 4.0 (deprecated; same price as the 4.x family) --
-  "claude-sonnet-4":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
-
-  // -- Anthropic: older Haiku tier (defensive entry for the rare runtime still on it) --
-  "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
-
-  // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
-  //    independently — no fallback to `gpt-5`. Entries track
-  //    `server/pkg/agent/models.go` (Codex provider list).
-  //    gpt-5.6 (sol/terra/luna) uses OpenAI's official announcement rates.
-  //    5.6+ is the first OpenAI generation to bill cache writes separately:
-  //    cacheRead = 0.1x input (90% cached-input discount), cacheWrite = 1.25x
-  //    input (see the header note above). Codex usage doesn't yet report
-  //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
-  //    is kept correct for when it is.
-  "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
-  "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
-  "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },
-  "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
-  "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
-  "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
-  "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
-
-  // -- OpenAI: GPT-5 family (Codex CLI's default is gpt-5-codex; -codex/-mini/-nano variants priced per OpenAI tiers) --
-  "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
-  "gpt-5-mini":         { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0.25 },
-  "gpt-5-nano":         { input: 0.05, output: 0.40, cacheRead: 0.005, cacheWrite: 0.05 },
-  "gpt-5":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
-
-  // -- OpenAI: o-series reasoning models --
-  "o3-mini":            { input: 1.10, output: 4.40, cacheRead: 0.55,  cacheWrite: 1.10 },
-  "o3":                 { input: 2,    output: 8,    cacheRead: 0.50,  cacheWrite: 2 },
-  "o4-mini":            { input: 1.10, output: 4.40, cacheRead: 0.275, cacheWrite: 1.10 },
-
-  // -- OpenAI: GPT-4o family (legacy, kept for runtimes still configured against it) --
-  "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
-  "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
-
-  // -- DeepSeek (api-docs.deepseek.com/quick_start/pricing).
-  //    The official catalog lists exactly two current SKUs; `deepseek-chat`
-  //    and `deepseek-reasoner` are aliases that route to `deepseek-v4-flash`
-  //    (non-thinking and thinking mode respectively) per the same page.
-  //    `deepseek-v4-pro` is currently under a 75%-off promo that ends
-  //    2026-05-31 15:59 UTC; we price at the post-promo standard rate
-  //    ($1.74/$3.48) so the dashboard does not jump 4× on June 1 — accept
-  //    a brief over-estimate during the promo over a sudden cliff after it. --
-  "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
-  "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-  "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
-
-  // -- Moonshot Kimi (kimi.com/resources/kimi-k2-6-pricing).
-  //    Only K2.6 is on the official price sheet today; earlier K2 variants
-  //    are intentionally omitted until Moonshot publishes their rates. --
-  "kimi-k2.6":          { input: 0.95, output: 4.00, cacheRead: 0.16,   cacheWrite: 0.95 },
-  // Kimi K3 (platform.kimi.ai/docs/pricing/chat-k3 via models.dev
-  // providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
-  // cache write, so cacheWrite mirrors input (same convention as kimi-k2.6).
-  "kimi-k3":            { input: 3.0,  output: 15.0,  cacheRead: 0.30,   cacheWrite: 3.0 },
-  // Kimi Code CLI reports the same model as `kimi-code/k3`; provider-qualified
-  // because `k3` is a generic id (see the provider-qualified keys note above).
-  "kimi/k3":            { input: 3.0,  output: 15.0,  cacheRead: 0.30,   cacheWrite: 3.0 },
-
-  // -- Zhipu z.ai (docs.z.ai/guides/overview/pricing). Free flash tiers
-  //    are priced at 0 so they resolve cleanly instead of falling through
-  //    to the "unmapped" diagnostic. --
-  "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
-  "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
-  "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
-  "glm-4.7":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
-  "glm-4.7-flashx":     { input: 0.07, output: 0.4,  cacheRead: 0.01,   cacheWrite: 0.07 },
-  "glm-4.7-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
-  "glm-4.6":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
-  "glm-4.5":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
-  "glm-4.5-x":          { input: 2.2,  output: 8.9,  cacheRead: 0.45,   cacheWrite: 2.2 },
-  "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
-  "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
-  "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
-
-  // -- Alibaba Qwen (International ≤256K tier; official sources:
-  //    alibabacloud.com/help/model-studio pricing sheet and
-  //    qwencloud.com/models/<model> pages, accessed 2026-08-12).
-  //    qwen3.7-plus: input $0.40 / output $1.60; qwen3.6-flash: input
-  //    $0.25 / output $1.50. Cache prices: Explicit Cache Creation = 1.25×
-  //    input (qwen3.7-plus $0.50, qwen3.6-flash $0.3125); Explicit Cache
-  //    Read = 10% of input (qwen3.7-plus $0.04, qwen3.6-flash $0.025).
-  // qwen3.8-max is priced at the published pay-as-you-go rate
-  // (qwencloud.com/models/qwen3.8-max: Input $2, Output $6, Implicit
-  // Cache $0.25, Creation $2.5, Explicit Cache Read $0.17; also listed on
-  // alibabacloud.com/help model-pricing) so the dashboard shows the
-  // absolute cost even though the runtime reaches it through an Alibaba
-  // Token/Coding Plan subscription. qwen3.8-max-preview stays at 0:
-  //    it is only served through the subscription (token-plan.cn-beijing.
-  //    maas.aliyuncs.com), which does not bill per token — 0 resolves
-  //    cleanly instead of tripping the unmapped diagnostic (same convention
-  //    as the free GLM flash tiers below). --
-  "qwen3.7-plus":       { input: 0.40,  output: 1.60,  cacheRead: 0.04,   cacheWrite: 0.50 },
-  "qwen3.6-flash":      { input: 0.25,  output: 1.50,  cacheRead: 0.025,  cacheWrite: 0.3125 },
-  "qwen3.8-max":        { input: 2.00,  output: 6.00,  cacheRead: 0.17,   cacheWrite: 2.5 },
-  "qwen3.8-max-preview":{ input: 0,      output: 0,     cacheRead: 0,      cacheWrite: 0 },
-
-  // -- Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
-  //    rolling alias whose target the Volcengine console can switch between
-  //    model families, so it is not a stable model identity. Daemons report
-  //    the alias itself, not the resolved model, so there is no reliable
-  //    rate to attach — it deliberately stays unmapped (same philosophy as
-  //    xAI's `grok-composer-*`, see below), surfacing in the pricing dialog
-  //    instead of inheriting a guessed rate. --
-
-  // -- xAI Grok (docs.x.ai/developers/pricing). Rates below are the
-  //    short-context tier, and are now only a FALLBACK for Grok: xAI reports
-  //    its own price per turn and `estimateCost` prefers it. That matters
-  //    because xAI bills a request at 2x once its prompt reaches 200K tokens,
-  //    and a usage row aggregates every model call in a turn — so these rates
-  //    cannot tell which tier a request hit, while xAI's own figure already
-  //    has it priced in. These rows still apply to Grok usage recorded by a
-  //    daemon too old to report cost (the same trade-off the Anthropic `[1m]`
-  //    context tag takes, see `resolvePricing`).
-  //    `cacheRead` is xAI's published "Cached" input rate; there is no
-  //    separate cache-write rate on the page (writes bill as normal input),
-  //    so cacheWrite mirrors input per the header note. Grok ids are
-  //    vendor-prefixed, so these keys stay unqualified — which is what makes
-  //    them resolve at all, since the daemon tags the rows with the runtime
-  //    provider `grok`, not `xai`.
-  //    `grok-composer-*` ships in the Grok Build catalog
-  //    (server/pkg/agent/models.go) but is absent from the price sheet; it
-  //    deliberately stays unmapped rather than inheriting a guessed rate. --
-  "grok-4.6":                     { input: 2,    output: 6,    cacheRead: 0.50, cacheWrite: 2 },
-  "grok-4.5":                     { input: 2,    output: 6,    cacheRead: 0.30, cacheWrite: 2 },
-  "grok-4.3":                     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
-  "grok-build-0.1":               { input: 1,    output: 2,    cacheRead: 0.20, cacheWrite: 1 },
-  "grok-4.20-multi-agent-0309":   { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
-  "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
-  "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
-
-  // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
-  //    cursor.com/docs/models/cursor-composer-2,
-  //    cursor.com/docs/models/cursor-composer-2-5).
-  //    Cursor's model ids are all unprefixed generic names (`auto`,
-  //    `composer-*`) that collide with other providers (another provider
-  //    could also report `auto`), so they are provider-qualified under `cursor/`.
-  //    See the `provider-qualified keys` note above. Cursor result events
-  //    often omit `model`, so the daemon falls back to the configured
-  //    runtime model or the legacy key `cursor`. Cursor does not publish a
-  //    cache-write rate for these rows; keep it at 0 so reported
-  //    cache_write_tokens don't invent spend from input pricing.
-  "cursor/auto":              { input: 1.25, output: 6,    cacheRead: 0.25,   cacheWrite: 0 },
-  "cursor/composer-2.5-fast": { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
-  "cursor/composer-2.5":      { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
-  "cursor/composer-2-fast":   { input: 1.5,  output: 7.5,  cacheRead: 0.35,   cacheWrite: 0 },
-  "cursor/composer-2":        { input: 0.5,  output: 2.5,  cacheRead: 0.2,    cacheWrite: 0 },
-  "cursor/composer-1.5":      { input: 3.5,  output: 17.5, cacheRead: 0.35,   cacheWrite: 0 },
-  "cursor/composer-1":        { input: 1.25, output: 10,   cacheRead: 0.125,  cacheWrite: 0 },
-  // Legacy fallback bucket when neither the result event nor the runtime
-  // model is known — the daemon emits the literal `cursor`. This key equals
-  // the provider name itself, so it can't collide across providers and stays
-  // unqualified. Price at the current Composer 2.5 Fast default.
-  "cursor":                   { input: 3,    output: 15,   cacheRead: 0.5,    cacheWrite: 0 },
-};
-
-// Resolve a model string to its pricing tier. Exact match, with four
-// tolerances applied in order:
-//
-//  1. Provider-prefixed IDs (`anthropic/claude-opus-4.7` from openclaw /
-//     opencode) — the `<provider>/` segment is routing metadata, not part
-//     of the SKU, so we strip it before lookup.
-//  2. Anthropic dot↔dash normalization — Claude Code reports
-//     `claude-opus-4-7`, GitHub Copilot reports `claude-opus-4.7`. Same
-//     SKU, two transports. We canonicalize `claude-*` IDs to the dashed
-//     form Anthropic itself publishes. Scoped to `claude-*` because for
-//     OpenAI the separator IS semantic (`gpt-5.4` ≠ `gpt-5-4`).
-//  3. Trailing dated snapshots (`claude-sonnet-4-5-20250929`,
-//     `gpt-5-2025-08-07`) — the family is what we price, the date is
-//     volatile, so we strip a trailing date / "latest" tag.
-//  4. Trailing context-window tag (`claude-opus-4-7[1m]`) — Anthropic's
-//     1M-context beta is the same SKU at standard rates for prompts
-//     ≤200K input tokens, with a 2× surcharge above that. Aggregated
-//     usage rows don't carry per-request prompt sizes, so we price the
-//     bracketed variant at the standard tier. Slight under-estimate
-//     beats the previous behaviour of dropping the row entirely.
-//
-// Anything still unmapped falls back to the user-supplied custom pricing
-// store. No startsWith fallback: variants like `gpt-5.5-mini` must have
-// their own row to be priced (otherwise they'd inherit `gpt-5.5`).
-//
-// `provider` disambiguates unprefixed generic ids (see the header note):
-// every candidate is tried `${provider}/…`-qualified first, then bare, so a
-// `cursor/auto` row wins for a Cursor row while an unqualified `auto` (no
-// provider) stays unmapped instead of silently borrowing Cursor's price.
-function resolvePricing(model: string, provider?: string) {
-  if (!model) return undefined;
-
-  const candidates = pricingCandidates(model, provider);
-  for (const candidate of candidates) {
-    const hit = MODEL_PRICING[candidate];
-    if (hit) return hit;
-  }
-  for (const candidate of candidates) {
-    const hit = getCustomPricing(candidate);
-    if (hit) return hit;
-  }
-  return undefined;
-}
-
-// Canonical provider token for keying: trimmed + lowercased so lookup keys,
-// storage keys, and grouping labels all tolerate case drift in the stored
-// value. Returns "" when no provider is known.
-function normalizeProvider(provider?: string): string {
-  return provider?.trim().toLowerCase() ?? "";
-}
-
-// Provider-qualify a key, skipping the prefix when the key already carries
-// this provider (an upstream-qualified `cursor/auto` must not become
-// `cursor/cursor/auto`). `provider` must already be normalized.
-function qualify(provider: string, key: string): string {
-  return key.startsWith(`${provider}/`) ? key : `${provider}/${key}`;
-}
-
-// Lookup keys for a (model, provider) pair: every canonical candidate
-// `${provider}/`-qualified first (when a provider is known), then the bare
-// candidates. Qualified-first means a provider-scoped row/override always
-// beats an unqualified one.
-function pricingCandidates(model: string, provider?: string): string[] {
-  const base = canonicalCandidates(model);
-  const p = normalizeProvider(provider);
-  if (!p) return base;
-  return [...base.map((c) => qualify(p, c)), ...base];
-}
-
-// The canonical storage/diagnostic key for a (model, provider) pair: the
-// provider-qualified form when a provider is known, else the bare model.
-// `collectUnmappedModels` returns these, and the custom-pricing dialog keys
-// overrides by them, so a user-entered rate for `cursor/auto` resolves only
-// for Cursor rows — not for another provider that also reports `auto`.
-// Provider is lowercased so lookups tolerate case drift in the stored value.
+// Both display estimates and monitoring use the backend's pricing catalog.
+// The reported provider remains a harness identity; the resolver preserves
+// explicit serving-provider keys before considering public API equivalents.
 export function pricingKey(model: string, provider?: string): string {
-  const p = normalizeProvider(provider);
-  return p ? qualify(p, model) : model;
+  const p = provider?.trim().toLowerCase();
+  return p && !model.startsWith(p + "/") ? p + "/" + model : model;
+}
+export function modelGroupingKey(model: string, provider?: string, priceContext?: PricingContext): string {
+  if (!model) return provider?.trim().toLowerCase() || "unknown";
+  return resolvePricing(model, undefined, priceContext) ? model : pricingKey(model, provider);
 }
 
-// Display/grouping key for a usage row's model. Self-resolving ids
-// (vendor-prefixed SKUs like `claude-opus-4-7`, and the legacy `cursor`
-// fallback whose key equals the provider name) stay bare; a generic id that
-// only prices under a provider (`auto`, `composer-*`) is provider-qualified
-// so two providers reporting the same bare id don't merge into one mislabelled
-// row, and the label matches what `collectUnmappedModels` / the pricing dialog
-// surface.
-export function modelGroupingKey(model: string, provider?: string): string {
-  if (!model) return normalizeProvider(provider) || "unknown";
-  return isSelfResolvingId(model) ? model : pricingKey(model, provider);
-}
-
-// Whether a model id prices on its own without a provider qualifier (a
-// vendor-prefixed SKU, or the legacy `cursor` fallback). Such ids keep a bare
-// grouping key; generic ids (`auto`, `composer-*`) stay provider-qualified.
-//
-// Probes the BARE model on purpose: forwarding a provider would let a
-// qualified row report as self-resolving and collapse back to a bare key,
-// re-merging the cross-provider collision this scheme prevents. Keep the
-// argument list provider-free so that stays true.
-function isSelfResolvingId(model: string): boolean {
-  return isModelPriced(model);
-}
-
-// Generate the lookup candidates for a model string, in priority order:
-// the raw string first (preserves explicit user / catalog spellings),
-// then the canonicalized forms. Deduped so we don't repeat lookups.
-//
-// Pure in `model`, and the aggregation loops call it 3-4x per row, so the
-// result is memoized — the model-string set is small and bounded. Callers
-// only read the array (pricingCandidates maps/spreads into a fresh one), so
-// sharing the cached reference is safe.
-// Intentionally process-lifetime: never evicted (bounded key set, see above).
-const canonicalCandidatesCache = new Map<string, string[]>();
-function canonicalCandidates(model: string): string[] {
-  const cached = canonicalCandidatesCache.get(model);
-  if (cached) return cached;
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const push = (s: string) => {
-    if (!s || seen.has(s)) return;
-    seen.add(s);
-    out.push(s);
-  };
-  const stripDate = (s: string) =>
-    s.replace(/-(20\d{2}-\d{2}-\d{2}|20\d{6}|latest)$/, "");
-  const stripProvider = (s: string) => {
-    // Routing prefixes come in two flavours: `vendor/model` (opencode-style)
-    // and `provider:model` (Hermes custom providers), and can nest
-    // (`custom:anthropic/claude-opus-4.7` is a provider-prefixed id whose
-    // model segment is itself provider-prefixed). Iteratively strip the
-    // earliest `/` or `:` separator while the preceding segment looks like a
-    // routing layer (`^[a-z][a-z0-9_-]*$`), until nothing valid remains to
-    // strip. The raw string is always the first candidate (see `push(raw)`
-    // below), so provider-qualified table keys like `cursor/composer-2.5`
-    // still resolve before any stripping happens — iterative peeling only
-    // ever adds previously-missed nested forms.
-    let out = s;
-    for (;;) {
-      const i = out.indexOf("/");
-      const j = out.indexOf(":");
-      const sep = i === -1 ? j : j === -1 ? i : Math.min(i, j);
-      if (sep <= 0 || !/^[a-z][a-z0-9_-]*$/i.test(out.slice(0, sep))) break;
-      out = out.slice(sep + 1);
-    }
-    return out;
-  };
-  // Only Anthropic IDs are dot↔dash equivalent. OpenAI separators are
-  // semantic, so we leave `gpt-5.4` etc. alone.
-  const canonAnthropic = (s: string) =>
-    s.startsWith("claude-") ? s.replace(/\./g, "-") : s;
-  // Trailing context-window tag (`claude-opus-4-7[1m]`). Same family,
-  // same price tier — see resolver comment above for the 1M-context
-  // pricing trade-off.
-  const stripContextTag = (s: string) => s.replace(/\[[^\]]+\]$/, "");
-
-  const raw = model;
-  const noProvider = stripProvider(raw);
-  const dashed = canonAnthropic(noProvider);
-  const noTag = stripContextTag(dashed);
-
-  push(raw);
-  push(noProvider);
-  push(dashed);
-  push(noTag);
-  push(stripDate(raw));
-  push(stripDate(noProvider));
-  push(stripDate(dashed));
-  push(stripDate(noTag));
-  canonicalCandidatesCache.set(model, out);
-  return out;
-}
-
-// Cheap predicate for the empty-state diagnostic: which model strings in a
-// usage batch failed pricing resolution. Useful when the user is staring at
-// "$0.00 / 2M tokens" and wants to know why.
-export function isModelPriced(model: string, provider?: string): boolean {
-  return resolvePricing(model, provider) !== undefined;
+export function isModelPriced(model: string, provider?: string, priceContext?: PricingContext): boolean {
+  return resolvePricing(model, provider, priceContext) !== undefined;
 }
 
 // Returns the unique, sorted list of pricing keys present in `rows` that
@@ -563,10 +176,10 @@ export function isModelPriced(model: string, provider?: string): boolean {
 // raise the "we can't price this model" warning — its cost is already exact,
 // and asking the user to supply a rate for it would be asking them to override
 // a real bill with a guess.
-export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
+export function collectUnmappedModels(rows: readonly Priceable[], priceContext?: PricingContext): string[] {
   const set = new Set<string>();
   for (const r of rows) {
-    if (!r.model || isModelPriced(r.model, r.provider)) continue;
+    if (!r.model || isModelPriced(r.model, r.provider, priceContext)) continue;
     const uncosted = uncostedTokens(r);
     const needsEstimate =
       uncosted.input > 0 ||
@@ -656,9 +269,9 @@ function uncostedTokens(usage: Priceable): {
 // either side of a CLI upgrade). Custom pricing overrides still apply — but
 // only to the estimated half, since they are a user's guess at a rate and the
 // authoritative half is not a guess.
-export function estimateCost(usage: Priceable): number {
+export function estimateCost(usage: Priceable, priceContext?: PricingContext): number {
   const authoritative = (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
-  const pricing = resolvePricing(usage.model, usage.provider);
+  const pricing = resolvePricing(usage.model, usage.provider, priceContext);
   if (!pricing) return authoritative;
   const uncosted = uncostedTokens(usage);
   return (
@@ -684,8 +297,8 @@ export interface CostBreakdown {
 // Only the total is authoritative — the split is presentation, and doing it
 // this way keeps the stacked chart summing to the headline figure instead of
 // silently under-drawing every Grok row.
-export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
-  const pricing = resolvePricing(usage.model, usage.provider);
+export function estimateCostBreakdown(usage: Priceable, priceContext?: PricingContext): CostBreakdown {
+  const pricing = resolvePricing(usage.model, usage.provider, priceContext);
   if (!pricing) {
     // No rates to split by, but the provider may still have priced the turn
     // itself. Returning zeros here would make the stacked chart disagree with
@@ -766,6 +379,7 @@ export interface TaskUsageSummary {
  */
 export function summarizeTaskUsage(
   usage: readonly Priceable[] | undefined,
+  priceContext?: PricingContext,
 ): TaskUsageSummary | null {
   if (!usage || usage.length === 0) return null;
 
@@ -781,8 +395,8 @@ export function summarizeTaskUsage(
     summary.output += slice.output_tokens;
     summary.cacheRead += slice.cache_read_tokens;
     summary.cacheWrite += slice.cache_write_tokens;
-    summary.cost += estimateCost(slice);
-    summary.cacheSavings += estimateCacheSavings(slice);
+    summary.cost += estimateCost(slice, priceContext);
+    summary.cacheSavings += estimateCacheSavings(slice, priceContext);
     if (slice.model && !models.includes(slice.model)) models.push(slice.model);
   }
   summary.tokens =
@@ -799,15 +413,16 @@ export function summarizeTaskUsage(
  */
 export function summarizeTaskUsageAcross(
   runs: readonly (readonly Priceable[] | undefined)[],
+  priceContext?: PricingContext,
 ): TaskUsageSummary | null {
-  return summarizeTaskUsage(runs.flatMap((u) => u ?? []));
+  return summarizeTaskUsage(runs.flatMap((u) => u ?? []), priceContext);
 }
 
 // Cache savings: what cache *reads* would have cost at full input pricing
 // minus what they actually cost at the discounted cache-hit rate. This is a
 // reconstruction of "money the cache saved you", not real-world spend.
-export function estimateCacheSavings(usage: Priceable): number {
-  const pricing = resolvePricing(usage.model, usage.provider);
+export function estimateCacheSavings(usage: Priceable, priceContext?: PricingContext): number {
+  const pricing = resolvePricing(usage.model, usage.provider, priceContext);
   if (!pricing) return 0;
   const wouldHaveCost = (usage.cache_read_tokens * pricing.input) / 1_000_000;
   const actualCost = (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000;
@@ -894,7 +509,7 @@ export interface WeeklyCostStackData {
   total: number;
 }
 
-export function aggregateByDate(usage: RuntimeUsage[]): {
+export function aggregateByDate(usage: RuntimeUsage[], priceContext?: PricingContext): {
   dailyTokens: DailyTokenData[];
   dailyCost: DailyCostData[];
   dailyCostStack: DailyCostStackData[];
@@ -922,10 +537,10 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     existing.cacheWrite += u.cache_write_tokens;
     dateMap.set(u.date, existing);
 
-    const dayCost = (costMap.get(u.date) ?? 0) + estimateCost(u);
+    const dayCost = (costMap.get(u.date) ?? 0) + estimateCost(u, priceContext);
     costMap.set(u.date, dayCost);
 
-    const breakdown = estimateCostBreakdown(u);
+    const breakdown = estimateCostBreakdown(u, priceContext);
     const stack = stackMap.get(u.date) ?? {
       input: 0,
       output: 0,
@@ -938,11 +553,11 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     stack.cacheWrite += breakdown.cacheWrite;
     stackMap.set(u.date, stack);
 
-    const modelName = modelGroupingKey(u.model, u.provider);
+    const modelName = modelGroupingKey(u.model, u.provider, priceContext);
     const m = modelMap.get(modelName) ?? { tokens: 0, cost: 0 };
     m.tokens +=
       u.input_tokens + u.output_tokens + u.cache_read_tokens + u.cache_write_tokens;
-    m.cost += estimateCost(u);
+    m.cost += estimateCost(u, priceContext);
     modelMap.set(modelName, m);
   }
 
@@ -1023,6 +638,7 @@ export function aggregateByWeek(
   usage: readonly WeeklyAggregable[],
   tz: string,
   weekCount: number,
+  priceContext?: PricingContext,
 ): {
   weeklyTokens: WeeklyTokenData[];
   weeklyCostStack: WeeklyCostStackData[];
@@ -1063,7 +679,7 @@ export function aggregateByWeek(
     tokens.cacheRead += u.cache_read_tokens;
     tokens.cacheWrite += u.cache_write_tokens;
 
-    const breakdown = estimateCostBreakdown(u);
+    const breakdown = estimateCostBreakdown(u, priceContext);
     const stack = stackMap.get(wkStart);
     if (!stack) continue;
     stack.input += breakdown.input;
@@ -1221,7 +837,7 @@ export interface CostByKey {
 // Per-(agent, model) rows → per-agent totals. Cost is summed across all
 // models for that agent, then the list is sorted by cost desc so the
 // heaviest-spending agent appears first.
-export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
+export function aggregateCostByAgent(rows: RuntimeUsageByAgent[], priceContext?: PricingContext): CostByKey[] {
   const map = new Map<string, CostByKey>();
   for (const r of rows) {
     const entry = map.get(r.agent_id) ?? {
@@ -1232,7 +848,7 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
     };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
-    entry.cost += estimateCost(r);
+    entry.cost += estimateCost(r, priceContext);
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
@@ -1241,14 +857,14 @@ export function aggregateCostByAgent(rows: RuntimeUsageByAgent[]): CostByKey[] {
 
 // Per-(date, model) rows → per-model totals (the "By model" tab reuses the
 // daily-grain data we already cache, so no extra request is needed).
-export function aggregateCostByModel(rows: RuntimeUsage[]): CostByKey[] {
+export function aggregateCostByModel(rows: RuntimeUsage[], priceContext?: PricingContext): CostByKey[] {
   const map = new Map<string, CostByKey>();
   for (const r of rows) {
-    const key = modelGroupingKey(r.model, r.provider);
+    const key = modelGroupingKey(r.model, r.provider, priceContext);
     const entry = map.get(key) ?? { key, tokens: 0, cost: 0, taskCount: 0 };
     entry.tokens +=
       r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens;
-    entry.cost += estimateCost(r);
+    entry.cost += estimateCost(r, priceContext);
     map.set(key, entry);
   }
   return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
@@ -1273,13 +889,14 @@ export function computeCostInWindow(
   daysBack: number,
   tz: string,
   offsetDays: number = 0,
+  priceContext?: PricingContext,
 ): number {
   const today = todayIso(tz);
   const isoEnd = addDaysIso(today, -offsetDays);
   const isoStart = addDaysIso(today, -offsetDays - daysBack);
   let total = 0;
   for (const r of rows) {
-    if (r.date >= isoStart && r.date < isoEnd) total += estimateCost(r);
+    if (r.date >= isoStart && r.date < isoEnd) total += estimateCost(r, priceContext);
   }
   return total;
 }

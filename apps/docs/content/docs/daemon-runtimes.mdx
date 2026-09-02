@@ -129,6 +129,14 @@ multica runtime profile unset-path <profile-id>
 
 Editing a profile only affects tasks claimed afterwards. Before deleting a profile, deal with the active agents still bound to its runtimes. Deleting only the runtime instance on one computer does not delete the profile — a running daemon will re-register it.
 
+## Usage and model prices
+
+From **Runtimes**, open an existing runtime you can view, then select **Model prices** in its usage area. This entry stays available even when the runtime has no recorded usage.
+
+Workspace members can view the shared prices; workspace owners and admins can save overrides. Subscription usage retains an API-equivalent estimate so you can see the API value of your plan's usage. It is not your subscription bill or an additional charge.
+
+Price changes recalculate historical estimates using the current rates. Provider-reported costs and recorded token counts stay unchanged. See [Model pricing](/developers/model-pricing) for details on estimates, overrides, and synchronization.
+
 ## Troubleshooting an offline runtime
 
 Check in this order:

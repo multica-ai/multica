@@ -1,6 +1,9 @@
+"use client";
+
+import { useWorkspaceId } from "@multica/core/hooks";
 import { useMemo } from "react";
 import type { RuntimeUsage } from "@multica/core/types";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
 import { addDaysIso, estimateCost, formatUsd, todayIso, weekStartIso } from "../../utils";
 import { useLocale, useT } from "../../../i18n";
 
@@ -68,19 +71,18 @@ export function ActivityHeatmap({
   usage: RuntimeUsage[];
   tz: string;
 }) {
+  const { pricing: pricings } = useModelPricing(useWorkspaceId());
   const { t } = useT("runtimes");
   const locale = useLocale();
   const weekdayLabels = useMemo(() => fmtWeekdays(locale), [locale]);
-  // Memo dep — estimateCost (called inside the body below) consults the
-  // user-override store, so saving a custom rate must invalidate the cells.
-  const pricings = useCustomPricingStore((s) => s.pricings);
+  // Recompute cells and insights when the shared workspace prices change.
   const { cells, monthLabels, insights } = useMemo(() => {
     // Sum priced cost per day. Cost (not tokens) gives the colour scale a
     // financial meaning that lines up with the rest of the page — a "hot"
     // square here means the same thing as a tall bar in Daily cost.
     const dateCost = new Map<string, number>();
     for (const u of usage) {
-      dateCost.set(u.date, (dateCost.get(u.date) ?? 0) + estimateCost(u));
+      dateCost.set(u.date, (dateCost.get(u.date) ?? 0) + estimateCost(u, pricings));
     }
 
     // Anchor the grid on the Monday of the week containing "today" in the

@@ -39,26 +39,14 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// custom-pricing-store is consumed two ways: usage-section reads the store
-// hook, and runtimes/utils reads getCustomPricing(). The hook must be both
-// callable and expose getState(), mirroring a real Zustand store. Backed by
-// a mutable holder so a test can seed saved overrides — with a hard-coded
-// empty store, `collectUnmappedModels` can never see an override and the
-// "saved rates stay editable" path below would be untestable.
+// Simulate workspace query snapshots; pricing helpers receive them explicitly.
 const pricingState = vi.hoisted(() => ({
   pricings: {} as Record<string, unknown>,
 }));
 
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const useCustomPricingStore = Object.assign(
-    (sel?: (s: typeof pricingState) => unknown) =>
-      sel ? sel(pricingState) : pricingState,
-    { getState: () => pricingState },
-  );
-  return {
-    useCustomPricingStore,
-    getCustomPricing: (model: string) => pricingState.pricings[model],
-  };
+vi.mock("@multica/core/runtimes/pricing-queries", async () => {
+ const { BUNDLED_PRICING } = await import("@multica/core/runtimes/pricing");
+ return { useModelPricing: () => ({ pricing: { ...BUNDLED_PRICING, overrides: pricingState.pricings } }) };
 });
 
 // Lets a test swap in its own usage rows (e.g. an unpriced model) without
@@ -219,15 +207,12 @@ describe("UsageSection — custom-pricing entry point", () => {
     pricingState.pricings = {};
   });
 
-  it("stays hidden when every model resolves and nothing is overridden", () => {
+  it("keeps workspace prices accessible when every model resolves", () => {
     render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
 
     expect(
-      screen.queryByRole("button", { name: "Set custom prices" }),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Edit custom prices" }),
-    ).toBeNull();
+      screen.queryByRole("button", { name: "Model prices" }),
+    ).toBeInTheDocument();
   });
 
   it("warns and offers the dialog while a model is unpriced", () => {
@@ -237,7 +222,7 @@ describe("UsageSection — custom-pricing entry point", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(UNPRICED_KEY);
     expect(
-      screen.getByRole("button", { name: "Set custom prices" }),
+      screen.getByRole("button", { name: "Model prices" }),
     ).toBeInTheDocument();
   });
 
@@ -255,7 +240,7 @@ describe("UsageSection — custom-pricing entry point", () => {
 
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Edit custom prices" }),
+      screen.getByRole("button", { name: "Model prices" }),
     ).toBeInTheDocument();
   });
 });

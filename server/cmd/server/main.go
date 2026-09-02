@@ -708,6 +708,14 @@ func main() {
 	// logging them on the tick that fails and retrying on the next
 	// cycle, so a temporary outage does not crash the server.
 	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	if err := h.ModelPricing.ConfigureFromEnvironment(); err != nil {
+		slog.Error("invalid model pricing configuration", "error", err)
+		os.Exit(1)
+	}
+	if err := schedulerMgr.Register(scheduler.ModelPricingJob(h.ModelPricing)); err != nil {
+		slog.Error("failed to register daily model pricing sync", "error", err)
+		os.Exit(1)
+	}
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
 	}

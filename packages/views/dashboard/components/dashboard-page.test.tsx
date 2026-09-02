@@ -236,14 +236,9 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const state = () => ({ pricings: {} });
-  const useCustomPricingStore = Object.assign(
-    (sel?: (s: ReturnType<typeof state>) => unknown) =>
-      sel ? sel(state()) : state(),
-    { getState: state },
-  );
-  return { useCustomPricingStore };
+vi.mock("@multica/core/runtimes/pricing-queries", async () => {
+ const { BUNDLED_PRICING } = await import("@multica/core/runtimes/pricing");
+ return { useModelPricing: () => ({ pricing: { ...BUNDLED_PRICING, overrides: {} } }) };
 });
 
 import { DashboardPage } from "./dashboard-page";

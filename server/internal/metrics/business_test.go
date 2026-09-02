@@ -293,6 +293,62 @@ func TestBusinessMetricsFallsBackToRateTableWithoutProviderCost(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsSharedPricePreservesAuthoritativeCost(t *testing.T) {
+	price := ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 7, OutputPerM: 9}
+	for _, tc := range []struct {
+		name  string
+		ticks int64
+		want  float64
+	}{
+		{name: "shared estimate", want: 16},
+		{name: "provider charge", ticks: 2 * CostUSDTicksPerUSD, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewBusinessMetrics()
+			m.RecordLLMUsageWithPrice("issue", "local", "grok", "grok-4.5", 1_000_000, 1_000_000, 0, 0, tc.ticks, price, true)
+			input := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("xai", "grok-4.5", "input", "local", "issue"))
+			output := testutil.ToFloat64(m.llmCostUSD.WithLabelValues("xai", "grok-4.5", "output", "local", "issue"))
+			if total := input + output; math.Abs(total-tc.want) > 1e-9 {
+				t.Fatalf("recorded cost = %v, want %v", total, tc.want)
+			}
+		})
+	}
+}
+
+func TestBusinessMetricsZeroReferenceRatesPreserveProviderCost(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		tokens [4]int64
+	}{
+		{name: "output only", tokens: [4]int64{0, 1_000_000, 0, 0}},
+		{name: "cache only", tokens: [4]int64{0, 0, 1_000_000, 0}},
+		{name: "no reported tokens"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewBusinessMetrics()
+			// A workspace may override every reference rate to zero. The
+			// provider's positive charge remains authoritative even when the
+			// fallback input bucket has no corresponding token count.
+			price := ModelPrice{Provider: "xai", Model: "grok-4.5"}
+			m.RecordLLMUsageWithPrice("issue", "local", "grok", "grok-4.5",
+				tc.tokens[0], tc.tokens[1], tc.tokens[2], tc.tokens[3],
+				2*CostUSDTicksPerUSD, price, true)
+
+			var total float64
+			for i, tokenType := range []string{"input", "output", "cache_read", "cache_write"} {
+				total += testutil.ToFloat64(m.llmCostUSD.WithLabelValues("xai", "grok-4.5", tokenType, "local", "issue"))
+				got := testutil.ToFloat64(m.llmTokens.WithLabelValues("xai", "grok-4.5", tokenType, "local", "issue"))
+				if got != float64(tc.tokens[i]) {
+					t.Errorf("%s tokens = %v, want %v", tokenType, got, tc.tokens[i])
+				}
+			}
+			if total != 2 {
+				t.Fatalf("recorded provider cost = %v, want 2", total)
+			}
+		})
+	}
+}
+
 func TestDistributeAuthoritativeCost(t *testing.T) {
 	t.Parallel()
 

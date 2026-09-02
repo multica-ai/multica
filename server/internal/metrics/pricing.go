@@ -3,6 +3,8 @@ package metrics
 import (
 	"regexp"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/pricing"
 )
 
 // CostUSDTicksPerUSD is the scale of provider-reported costs: xAI reports
@@ -20,89 +22,7 @@ type ModelPrice struct {
 	OutputPerM     float64
 }
 
-var modelPrices = map[string]ModelPrice{
-	// GPT-5.6 series (Codex `codex` provider). Official rates from OpenAI's
-	// GPT-5.6 announcement (openai.com/index/previewing-gpt-5-6-sol). For 5.6+
-	// cache read is the 90%-off cached-input rate (0.1x input) and cache write
-	// is billed at 1.25x the uncached input rate — unlike earlier OpenAI SKUs,
-	// which don't bill cache writes separately. NOTE: Codex's app-server usage
-	// stream (0.144.1) does not yet report cache-write tokens separately, so
-	// today those tokens fall into plain input and are billed at 1x; the
-	// CacheWrite rate below is correct but not yet exercised for Codex.
-	"openai:gpt-5.6-sol":   {Provider: "openai", Model: "gpt-5.6-sol", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 30.00},
-	"openai:gpt-5.6-terra": {Provider: "openai", Model: "gpt-5.6-terra", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 3.125, OutputPerM: 15.00},
-	"openai:gpt-5.6-luna":  {Provider: "openai", Model: "gpt-5.6-luna", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 6.00},
-	"openai:gpt-5.5":       {Provider: "openai", Model: "gpt-5.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 0.50, OutputPerM: 30.00},
-	"openai:gpt-5.4":       {Provider: "openai", Model: "gpt-5.4", InputPerM: 2.50, CacheReadPerM: 0.25, CacheWritePerM: 0.25, OutputPerM: 15.00},
-	"openai:gpt-5.4-mini":  {Provider: "openai", Model: "gpt-5.4-mini", InputPerM: 0.75, CacheReadPerM: 0.075, CacheWritePerM: 0.075, OutputPerM: 4.50},
-	"openai:gpt-5.3-codex": {Provider: "openai", Model: "gpt-5.3-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
-	"openai:gpt-5.2-codex": {Provider: "openai", Model: "gpt-5.2-codex", InputPerM: 1.75, CacheReadPerM: 0.175, CacheWritePerM: 0.175, OutputPerM: 14.00},
-	// Anthropic's Sonnet 5 launch price is $2 / $10 through 2026-08-31. This
-	// static table cannot schedule the published post-intro $3 / $15 change yet,
-	// so keep the intro rate here and update the row when catalog support exists.
-	"anthropic:claude-sonnet-5":   {Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
-	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
-	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
-	"anthropic:claude-opus-5":     {Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
-	"anthropic:claude-opus-4.8":   {Provider: "anthropic", Model: "claude-opus-4.8", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
-	"anthropic:claude-opus-4.7":   {Provider: "anthropic", Model: "claude-opus-4.7", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
-	"anthropic:claude-opus-4.6":   {Provider: "anthropic", Model: "claude-opus-4.6", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
-	"anthropic:claude-opus-4.5":   {Provider: "anthropic", Model: "claude-opus-4.5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
-	"anthropic:claude-sonnet-4.6": {Provider: "anthropic", Model: "claude-sonnet-4.6", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
-	"anthropic:claude-sonnet-4.5": {Provider: "anthropic", Model: "claude-sonnet-4.5", InputPerM: 3.00, CacheReadPerM: 0.30, CacheWritePerM: 3.75, OutputPerM: 15.00},
-	"anthropic:claude-haiku-4.5":  {Provider: "anthropic", Model: "claude-haiku-4.5", InputPerM: 1.00, CacheReadPerM: 0.10, CacheWritePerM: 1.25, OutputPerM: 5.00},
-	"deepseek:v4-pro":             {Provider: "deepseek", Model: "v4-pro", InputPerM: 1.74, CacheReadPerM: 0.0145, CacheWritePerM: 1.74, OutputPerM: 3.48},
-	"deepseek:v4-flash":           {Provider: "deepseek", Model: "v4-flash", InputPerM: 0.56, CacheReadPerM: 0.0112, CacheWritePerM: 0.56, OutputPerM: 1.12},
-	"minimax:m2.7":                {Provider: "minimax", Model: "m2.7", InputPerM: 0.30, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 1.20},
-	"minimax:m2.7-highspeed":      {Provider: "minimax", Model: "m2.7-highspeed", InputPerM: 0.60, CacheReadPerM: 0.06, CacheWritePerM: 0.375, OutputPerM: 2.40},
-	"google:gemini-3-flash":       {Provider: "google", Model: "gemini-3-flash", InputPerM: 0.50, CacheReadPerM: 0.05, CacheWritePerM: 0.50, OutputPerM: 3.00},
-	"google:gemini-3.1-pro":       {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
-	"google:gemini-2.5-pro":       {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
-	"google:gemini-2.5-flash":     {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
-	// xAI Grok (docs.x.ai/developers/pricing). Short-context tier: xAI bills
-	// a request at 2x once its prompt reaches 200K tokens, but a usage record
-	// aggregates every model call in a turn, so it cannot say which tier any
-	// individual request hit — pricing the standard tier under-estimates a
-	// long-context turn by at most 50% instead of over-estimating a short one
-	// by 100%. xAI publishes no separate cache-write rate (writes bill as
-	// normal input), so CacheWrite mirrors Input. These rows mirror
-	// packages/views/runtimes/utils.ts; keep the two tables in sync.
-	// `grok-composer-*` ships in the Grok Build catalog but is absent from the
-	// price sheet, so it stays unmapped rather than inheriting a guessed rate.
-	"xai:grok-4.6":                     {Provider: "xai", Model: "grok-4.6", InputPerM: 2.00, CacheReadPerM: 0.50, CacheWritePerM: 2.00, OutputPerM: 6.00},
-	"xai:grok-4.5":                     {Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
-	"xai:grok-4.3":                     {Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
-	"xai:grok-build-0.1":               {Provider: "xai", Model: "grok-build-0.1", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 2.00},
-	"xai:grok-4.20-multi-agent-0309":   {Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
-	"xai:grok-4.20-0309-reasoning":     {Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
-	"xai:grok-4.20-0309-non-reasoning": {Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
-	// Alibaba Qwen (models.dev providers/alibaba, accessed 2026-08-13;
-	// sourced from alibabacloud.com model-pricing — International ≤256K
-	// input tier — and the qwencloud.com model pages). qwen3.7-plus and
-	// qwen3.6-flash carry the published International ≤256K rates;
-	// CacheWritePerM is the Explicit Cache Creation rate (1.25x input) and
-	// CacheReadPerM the Explicit Cache Read rate (0.1x input). qwen3.8-max
-	// is priced at the published pay-as-you-go rate from its
-	// qwencloud.com/models/qwen3.8-max page (the source models.dev cites);
-	// qwen3.8-max-preview is served through the Alibaba Token Plan
-	// subscription, which does not bill per token, so it stays at 0 (same
-	// convention as the free GLM flash tiers). Mirror
-	// packages/views/runtimes/utils.ts.
-	"alibaba:qwen3.7-plus":        {Provider: "alibaba", Model: "qwen3.7-plus", InputPerM: 0.40, CacheReadPerM: 0.04, CacheWritePerM: 0.50, OutputPerM: 1.60},
-	"alibaba:qwen3.6-flash":       {Provider: "alibaba", Model: "qwen3.6-flash", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.3125, OutputPerM: 1.50},
-	"alibaba:qwen3.8-max":         {Provider: "alibaba", Model: "qwen3.8-max", InputPerM: 2.00, CacheReadPerM: 0.17, CacheWritePerM: 2.50, OutputPerM: 6.00},
-	"alibaba:qwen3.8-max-preview": {Provider: "alibaba", Model: "qwen3.8-max-preview", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
-	// Moonshot Kimi K3 (platform.kimi.ai/docs/pricing/chat-k3 via models.dev
-	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
-	// cache write, so CacheWritePerM mirrors Input.
-	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
-	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
-	// rolling alias whose target can be switched in the Volcengine console
-	// (across model families), so it is not a stable model identity; the
-	// daemon reports the alias itself, never the resolved model. No rate is
-	// published for the alias, so it stays unmapped rather than inheriting
-	// a guessed rate (same convention as xAI's `grok-composer-*`).
-}
+var bundledPrices = pricing.Bundled()
 
 // claudeVersionEnd terminates a Claude family rule: at most one suffix that
 // the frontend resolver normalizes away, and then the END of the id. Appending
@@ -194,11 +114,12 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)qwen3[.-]7-plus(\[[^\]]+\])?$`), "alibaba:qwen3.7-plus"},
 	{regexp.MustCompile(`(^|/|:)qwen3[.-]6-flash(\[[^\]]+\])?$`), "alibaba:qwen3.6-flash"},
 	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max(\[[^\]]+\])?$`), "alibaba:qwen3.8-max"},
-	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max-preview(\[[^\]]+\])?$`), "alibaba:qwen3.8-max-preview"},
+
 	// Kimi K3. Anchored so the distinct CodeBuddy SKU `kimi-k3-1` stays
 	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
 	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
 	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	{regexp.MustCompile(`(^|/|:)k3(-256k)?$`), "moonshotai:kimi-k3"},
 	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
 	// console-switchable rolling alias across model families, not a stable
 	// model identity, so it stays unmapped.
@@ -214,10 +135,19 @@ var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
 
 func matchModelAlias(model string) (ModelPrice, bool) {
 	for _, rule := range modelAliasRules {
-		if rule.re.MatchString(model) {
-			price, ok := modelPrices[rule.priceKey]
-			return price, ok
+		if !rule.re.MatchString(model) {
+			continue
 		}
+		parts := strings.SplitN(rule.priceKey, ":", 2)
+		id := parts[1]
+		if parts[0] == "deepseek" || parts[0] == "minimax" {
+			id = parts[0] + "-" + id
+		}
+		row, ok := pricing.Resolve(bundledPrices, nil, id, parts[0])
+		if !ok {
+			continue
+		}
+		return ModelPrice{Provider: parts[0], Model: parts[1], InputPerM: row.Input, OutputPerM: row.Output, CacheReadPerM: row.CacheRead, CacheWritePerM: row.CacheWrite}, true
 	}
 	return ModelPrice{}, false
 }

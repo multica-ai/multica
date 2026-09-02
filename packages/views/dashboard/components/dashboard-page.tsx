@@ -24,7 +24,7 @@ import {
   dashboardFailuresDailyOptions,
   dashboardFailuresByAgentOptions,
 } from "@multica/core/dashboard";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelPricing } from "@multica/core/runtimes/pricing-queries";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { CollectionPageHeader } from "../../layout/collection-page";
@@ -150,6 +150,7 @@ function useDataFreshness(
 export function DashboardPage() {
   const { t, i18n } = useT("usage");
   const wsId = useWorkspaceId();
+  const { pricing: pricings } = useModelPricing(wsId);
   const viewTZ = useViewingTimezone();
   const navigation = useNavigation();
   const locales = i18n.resolvedLanguage ?? i18n.language;
@@ -170,10 +171,6 @@ export function DashboardPage() {
     const query = params.toString();
     navigation.replace(query ? `${navigation.pathname}?${query}` : navigation.pathname);
   };
-
-  // The user can save model prices from the runtimes page; re-render when
-  // they do so the dashboard reflects the new rates.
-  useCustomPricingStore((s) => s.pricings);
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const agentsQuery = useQuery(agentListOptions(wsId));
@@ -309,12 +306,12 @@ export function DashboardPage() {
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
-    () => computeDailyTotals(dailyUsageInWindow),
-    [dailyUsageInWindow],
+    () => computeDailyTotals(dailyUsageInWindow, pricings),
+    [dailyUsageInWindow, pricings],
   );
   const dailyCost = useMemo(
-    () => aggregateDailyCost(dailyUsageInWindow),
-    [dailyUsageInWindow],
+    () => aggregateDailyCost(dailyUsageInWindow, pricings),
+    [dailyUsageInWindow, pricings],
   );
   const dailyTokens = useMemo(
     () => aggregateDailyTokens(dailyUsageInWindow),
@@ -386,8 +383,8 @@ export function DashboardPage() {
   // instead of being dropped (MUL-2382 weekly window scoping). Week
   // boundaries follow the viewer's timezone.
   const weekly = useMemo(
-    () => aggregateByWeek(dailyUsage, viewTZ, weekCount),
-    [dailyUsage, viewTZ, weekCount],
+    () => aggregateByWeek(dailyUsage, viewTZ, weekCount, pricings),
+    [dailyUsage, viewTZ, weekCount, pricings],
   );
   const weeklyCost = weekly.weeklyCostStack;
   const weeklyTokens = weekly.weeklyTokens;
@@ -404,8 +401,8 @@ export function DashboardPage() {
     [failureDailyRows, viewTZ, weekCount],
   );
   const agentTokenRows = useMemo(
-    () => aggregateAgentTokens(byAgentUsage),
-    [byAgentUsage],
+    () => aggregateAgentTokens(byAgentUsage, pricings),
+    [byAgentUsage, pricings],
   );
 
   // Run-time totals — taskCount + failedCount summed for the KPI row.

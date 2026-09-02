@@ -583,12 +583,16 @@ func (m *BusinessMetrics) ObserveChatClaimRolloutMissingQuery(seconds float64) {
 // cannot express request-level rules such as xAI's 2x surcharge above a 200K
 // prompt, so for those providers the local estimate is structurally low.
 func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks int64) {
+	price, priced := PriceForModelAlias(modelAlias)
+	m.RecordLLMUsageWithPrice(source, runtimeMode, rawProvider, modelAlias, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks, price, priced)
+}
+
+func (m *BusinessMetrics) RecordLLMUsageWithPrice(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks int64, price ModelPrice, priced bool) {
 	if m == nil {
 		return
 	}
 	source = NormalizeTaskSource(source)
 	runtimeMode = NormalizeRuntimeMode(runtimeMode)
-	price, priced := PriceForModelAlias(modelAlias)
 	if !priced {
 		provider := NormalizeRuntimeProvider(rawProvider)
 		alias := NormalizeModelAlias(modelAlias)
@@ -653,11 +657,11 @@ func distributeAuthoritativeCost(actual float64, estimated [4]float64) [4]float6
 }
 
 func (m *BusinessMetrics) recordPricedTokens(provider, model, tokenType, runtimeMode, source string, tokens int64, cost float64) {
-	if tokens <= 0 {
-		return
-	}
 	tokenType = NormalizeTokenType(tokenType)
-	m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	if tokens > 0 {
+		m.llmTokens.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(float64(tokens))
+	}
+	// An authoritative charge can occupy a bucket without reported tokens.
 	if cost > 0 {
 		m.llmCostUSD.WithLabelValues(provider, model, tokenType, runtimeMode, source).Add(cost)
 	}

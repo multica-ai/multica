@@ -37,7 +37,13 @@ import type { TaskUsage } from "@multica/core/types";
 import { act, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueKeys } from "@multica/core/issues/queries";
-import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { BUNDLED_PRICING } from "@multica/core/runtimes/pricing";
+import { modelPricingKey } from "@multica/core/runtimes/pricing-queries";
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/api", async (original) => {
+ const actual = await original<typeof import("@multica/core/api")>();
+ return { ...actual, api: { ...actual.api, getModelPricing: vi.fn(async () => ({ ...BUNDLED_PRICING, revision: 0, version: "test", canManage: false, checkedAt: null, succeededAt: null, lastError: "", timezone: "UTC" })) } };
+});
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -409,15 +415,8 @@ describe("execution log header geometry", () => {
 });
 
 describe("IssueUsageTotal pricing", () => {
-  afterEach(() => {
-    useCustomPricingStore.setState({ pricings: {} });
-  });
 
-  it("recomputes when a custom model rate is saved", () => {
-    // `estimateCost` reads the custom-rate store imperatively, so nothing
-    // re-renders this on a rate change unless the component subscribes. Before
-    // that subscription existed the figure stayed stale until the task list
-    // happened to refetch.
+  it("recomputes when shared workspace prices change", async () => {
     const unpriced: TaskUsage = {
       provider: "acme",
       model: "totally-made-up-model",
@@ -428,20 +427,16 @@ describe("IssueUsageTotal pricing", () => {
     };
     const task = makeTask({ status: "completed", usage: [unpriced] });
 
-    renderWithI18n(
-      <IssueUsageTotal tasks={[task]} alone onOpen={() => {}} />,
-    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(modelPricingKey("ws-1"), { ...BUNDLED_PRICING, revision: 0 });
+    renderWithI18n(<QueryClientProvider client={client}><IssueUsageTotal tasks={[task]} alone onOpen={() => {}} /></QueryClientProvider>);
 
     // No rate on file for this model yet.
     expect(screen.getByText("$0.00")).toBeInTheDocument();
 
-    act(() => {
-      useCustomPricingStore.getState().setCustomPricing("acme/totally-made-up-model", {
-        input: 7,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-      });
+await act(async () => {
+      client.setQueryData(modelPricingKey("ws-1"), { ...BUNDLED_PRICING, revision: 1, overrides: { "acme/totally-made-up-model": { input: 7, output: 0, cacheRead: 0, cacheWrite: 0 } } });
+      await vi.advanceTimersByTimeAsync(1);
     });
 
     // 1M input tokens at $7/M, without any refetch.

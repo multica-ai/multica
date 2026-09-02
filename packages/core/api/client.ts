@@ -236,6 +236,12 @@ import type {
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
+import {
+  modelPricingSnapshotSchema,
+  modelPricingRowToWire,
+  type ModelPricingRow,
+  type ModelPricingSnapshot,
+} from "../runtimes/pricing";
 import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
@@ -2622,6 +2628,51 @@ export class ApiClient {
     await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/mcp-servers/${encodeURIComponent(serverId)}`,
       { method: "DELETE" },
+    );
+  }
+
+  private parseModelPricing(raw: unknown): ModelPricingSnapshot {
+    const parsed = parseWithFallback<ModelPricingSnapshot | null>(
+      raw,
+      modelPricingSnapshotSchema,
+      null,
+      { endpoint: "/api/workspaces/{id}/model-pricing" },
+    );
+    if (!parsed) throw new Error("Invalid model pricing response");
+    return parsed;
+  }
+
+  async getModelPricing(workspaceId: string): Promise<ModelPricingSnapshot> {
+    return this.parseModelPricing(
+      await this.fetch<unknown>(`/api/workspaces/${workspaceId}/model-pricing`),
+    );
+  }
+
+  async saveModelPricing(
+    workspaceId: string,
+    input: { revision: number; overrides: Record<string, ModelPricingRow> },
+  ): Promise<ModelPricingSnapshot> {
+    return this.parseModelPricing(
+      await this.fetch<unknown>(`/api/workspaces/${workspaceId}/model-pricing`, {
+        method: "PUT",
+        body: JSON.stringify({
+          revision: input.revision,
+          overrides: Object.fromEntries(
+            Object.entries(input.overrides).map(([key, row]) => [
+              key,
+              modelPricingRowToWire(row),
+            ]),
+          ),
+        }),
+      }),
+    );
+  }
+
+  async refreshModelPricing(workspaceId: string): Promise<ModelPricingSnapshot> {
+    return this.parseModelPricing(
+      await this.fetch<unknown>(`/api/workspaces/${workspaceId}/model-pricing/refresh`, {
+        method: "POST",
+      }),
     );
   }
 

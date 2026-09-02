@@ -39,6 +39,7 @@ export type WSEventType =
   | "inbox:unarchived"
   | "inbox:batch-read"
   | "inbox:batch-archived"
+  | "model_pricing:updated"
   | "workspace:updated"
   | "workspace:deleted"
   | "member:added"
@@ -589,6 +590,7 @@ export interface WSEventPayloadMap {
   "inbox:unarchived": InboxUnarchivedPayload;
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;
+  "model_pricing:updated": { workspace_id: string };
   "workspace:updated": WorkspaceUpdatedPayload;
   "workspace:deleted": WorkspaceDeletedPayload;
   "member:added": MemberAddedPayload;

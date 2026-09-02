@@ -35,6 +35,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/pricing"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -44,6 +45,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -174,6 +176,7 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
+	ModelPricing           *pricing.Service
 	Queries                *db.Queries
 	DB                     dbExecutor
 	TxStarter              txStarter
@@ -478,6 +481,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	h.ModelPricing = pricing.New(queries, txStarter)
+	h.ModelPricing.OnChange = func(workspaceID string) {
+		h.publish(protocol.EventModelPricingUpdated, workspaceID, "system", "", map[string]any{"workspace_id": workspaceID})
+	}
+	taskSvc.ModelPricing = h.ModelPricing
 
 	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
 	// unconditionally but inert (every trigger no-ops) when the App private key

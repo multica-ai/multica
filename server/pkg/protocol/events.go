@@ -51,8 +51,9 @@ const (
 	EventInboxBatchArchived = "inbox:batch-archived"
 
 	// Workspace events
-	EventWorkspaceUpdated = "workspace:updated"
-	EventWorkspaceDeleted = "workspace:deleted"
+	EventModelPricingUpdated = "model_pricing:updated"
+	EventWorkspaceUpdated    = "workspace:updated"
+	EventWorkspaceDeleted    = "workspace:deleted"
 
 	// Member events
 	EventMemberAdded   = "member:added"
