@@ -126,7 +126,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 		scanner := newAgentStreamScanner(stdout)
 
-		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+		sendMessage(runCtx, msgCh, Message{Type: MessageStatus, Status: "running"})
 
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -145,7 +145,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			}
 			output.WriteString(line)
 			if chunk != "" {
-				trySend(msgCh, Message{Type: MessageText, Content: chunk})
+				sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: chunk})
 			}
 		}
 		if err := scanner.Err(); err != nil {
@@ -201,7 +201,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// final comment while the execution transcript remains blank.
 			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
 				finalOutput = recovered
-				trySend(msgCh, Message{Type: MessageText, Content: recovered})
+				sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: recovered})
 				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
 			}
 		}

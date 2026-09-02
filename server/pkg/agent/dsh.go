@@ -315,7 +315,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				continue
 			}
 			state.frameCount++
-			handleDshFrame(frame, requestID, msgCh, &state)
+			handleDshFrame(runCtx, frame, requestID, msgCh, &state)
 		}
 		scanErr := scanner.Err()
 		if scanErr != nil {
@@ -370,7 +370,7 @@ type dshRunState struct {
 	result        *Result
 }
 
-func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *dshRunState) {
+func handleDshFrame(ctx context.Context, frame dshFrame, requestID string, ch chan<- Message, state *dshRunState) {
 	if frame.Version != dshProtocolVersion {
 		state.protocolError = fmt.Sprintf("dsh returned unsupported protocol version %d", frame.Version)
 		return
@@ -383,23 +383,23 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 		state.ready = frame.Runtime == "dsh"
 	case "session":
 		state.sessionID = frame.SessionID
-		trySend(ch, Message{Type: MessageStatus, Status: "running", SessionID: frame.SessionID})
+		sendMessage(ctx, ch, Message{Type: MessageStatus, Status: "running", SessionID: frame.SessionID})
 	case "text":
 		if frame.Content != "" {
-			trySend(ch, Message{Type: MessageText, Content: frame.Content})
+			sendMessage(ctx, ch, Message{Type: MessageText, Content: frame.Content})
 		}
 	case "thinking":
 		if frame.Content != "" {
-			trySend(ch, Message{Type: MessageThinking, Content: frame.Content})
+			sendMessage(ctx, ch, Message{Type: MessageThinking, Content: frame.Content})
 		}
 	case "tool_call":
 		input := map[string]any{}
 		if frame.Arguments != "" && json.Unmarshal([]byte(frame.Arguments), &input) != nil {
 			input = map[string]any{"raw": frame.Arguments}
 		}
-		trySend(ch, Message{Type: MessageToolUse, Tool: frame.Name, CallID: frame.CallID, Input: input})
+		sendMessage(ctx, ch, Message{Type: MessageToolUse, Tool: frame.Name, CallID: frame.CallID, Input: input})
 	case "tool_result":
-		trySend(ch, Message{Type: MessageToolResult, Tool: frame.Name, CallID: frame.CallID, Output: frame.Output})
+		sendMessage(ctx, ch, Message{Type: MessageToolResult, Tool: frame.Name, CallID: frame.CallID, Output: frame.Output})
 	case "usage":
 		key := frame.Model
 		if frame.Provider != "" {

@@ -407,7 +407,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			}
 
 			for _, m := range handleCopilotEvent(evt, st) {
-				trySend(msgCh, m)
+				sendMessage(runCtx, msgCh, m)
 			}
 		}
 		if err := scanner.Err(); err != nil {

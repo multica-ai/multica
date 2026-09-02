@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -333,6 +334,87 @@ func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	}
 	if got := calls.Load(); got != 3 {
 		t.Fatalf("expected 3 attempts (2 transient + 1 success), got %d", got)
+	}
+}
+
+func TestReportTaskMessagesRetriesIdenticalBatch(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read body: %v", err)
+		}
+		bodies = append(bodies, string(body))
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	batch := []TaskMessageData{{Seq: 1, Type: "text", Content: "kept"}}
+	if err := c.ReportTaskMessagesWithRetry(context.Background(), "task-1", batch); err != nil {
+		t.Fatalf("ReportTaskMessages: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("calls = %d, want 2", got)
+	}
+	if len(bodies) != 2 || bodies[0] != bodies[1] {
+		t.Fatalf("retry bodies differ: %q", bodies)
+	}
+}
+
+func TestReportTaskMessagesDoesNotRetryWithoutServerCapability(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	err := NewClient(srv.URL).ReportTaskMessages(context.Background(), "task-1",
+		[]TaskMessageData{{Seq: 1, Type: "text", Content: "legacy-safe"}})
+	if err == nil {
+		t.Fatal("legacy one-shot report unexpectedly succeeded")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("legacy message attempts = %d, want 1", got)
+	}
+}
+
+func TestTerminalTranscriptReceiptIsSentOnCompleteAndFail(t *testing.T) {
+	wantSeq := int32(7)
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL)
+	if err := c.CompleteTaskWithTranscript(context.Background(), "complete", "done", "", "", "", false, "", "", &wantSeq); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	if err := c.FailTaskWithTranscript(context.Background(), "fail", "boom", "", "", "", "agent_error", false, "", "", &wantSeq); err != nil {
+		t.Fatalf("fail: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("terminal bodies = %d, want 2", len(bodies))
+	}
+	for i, body := range bodies {
+		if got := body["expected_message_seq"]; got != float64(wantSeq) {
+			t.Fatalf("body %d expected_message_seq = %#v, want %d", i, got, wantSeq)
+		}
 	}
 }
 

@@ -11,14 +11,17 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
 // Backend is the unified interface for executing prompts via coding agents.
 type Backend interface {
 	// Execute runs a prompt and returns a Session for streaming results.
-	// The caller should read from Session.Messages (optional) and wait on
-	// Session.Result for the final outcome.
+	// The caller must drain Session.Messages concurrently while waiting on
+	// Session.Result. Message delivery applies backpressure instead of dropping
+	// events when the channel buffer fills; cancelling ctx releases a blocked
+	// producer.
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
@@ -142,7 +145,9 @@ func runContext(ctx context.Context, timeout time.Duration) (context.Context, co
 // Session represents a running agent execution.
 type Session struct {
 	// Messages streams events as the agent works. The channel is closed
-	// when the agent finishes (before Result is sent).
+	// when the agent finishes (before Result is sent). Callers must keep draining
+	// it while the execution is active; waiting on Result alone can backpressure
+	// the producer once this channel's buffer fills.
 	Messages <-chan Message
 	// Result receives exactly one value — the final outcome — then closes.
 	Result <-chan Result
@@ -172,6 +177,53 @@ type Message struct {
 	Status    string         // agent status string (Status)
 	Level     string         // log level (Log)
 	SessionID string         // backend session id (Status), for early resume-pointer pinning
+}
+
+type messageDeliveryTrackerKey struct{}
+
+// MessageDeliveryTracker records an execution event that could not be handed
+// to the daemon because the execution context was cancelled while the message
+// channel was backpressured. A terminal receipt must stay unknown in that case.
+type MessageDeliveryTracker struct {
+	abandoned atomic.Bool
+}
+
+func WithMessageDeliveryTracker(ctx context.Context) (context.Context, *MessageDeliveryTracker) {
+	tracker := &MessageDeliveryTracker{}
+	return context.WithValue(ctx, messageDeliveryTrackerKey{}, tracker), tracker
+}
+
+func (t *MessageDeliveryTracker) Abandoned() bool {
+	return t != nil && t.abandoned.Load()
+}
+
+func markMessageDeliveryAbandoned(ctx context.Context) {
+	if tracker, ok := ctx.Value(messageDeliveryTrackerKey{}).(*MessageDeliveryTracker); ok {
+		tracker.abandoned.Store(true)
+	}
+}
+
+func messageReaderClosedBefore(ctx context.Context, readerDone <-chan struct{}) bool {
+	select {
+	case <-readerDone:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// sendMessage delivers an execution event without silently dropping it when
+// the consumer is briefly behind. The execution context is the escape hatch:
+// cancellation releases a producer blocked on a full channel so shutdown does
+// not leak the backend goroutine.
+func sendMessage(ctx context.Context, ch chan<- Message, msg Message) bool {
+	select {
+	case ch <- msg:
+		return true
+	case <-ctx.Done():
+		markMessageDeliveryAbandoned(ctx)
+		return false
+	}
 }
 
 // TokenUsage tracks token consumption for a single model.

@@ -42,7 +42,7 @@ func TestOpencodeHandleTextEvent(t *testing.T) {
 		},
 	}
 
-	b.handleTextEvent(event, ch, &output)
+	b.handleTextEvent(context.Background(), event, ch, &output)
 
 	if output.String() != "Hello from opencode" {
 		t.Errorf("output: got %q, want %q", output.String(), "Hello from opencode")
@@ -68,7 +68,7 @@ func TestOpencodeHandleTextEventEmpty(t *testing.T) {
 		Part: opencodeEventPart{Type: "text", Text: ""},
 	}
 
-	b.handleTextEvent(event, ch, &output)
+	b.handleTextEvent(context.Background(), event, ch, &output)
 
 	if output.String() != "" {
 		t.Errorf("expected empty output, got %q", output.String())
@@ -101,7 +101,7 @@ func TestOpencodeHandleToolUseEventCompleted(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch)
 
 	// Should emit both a tool-use and a tool-result message.
 	if len(ch) != 2 {
@@ -155,7 +155,7 @@ func TestOpencodeHandleToolUseEventPending(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch)
 
 	if len(ch) != 1 {
 		t.Fatalf("expected 1 message for pending tool, got %d", len(ch))
@@ -189,7 +189,7 @@ func TestOpencodeHandleToolUseEventStructuredOutput(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch)
 
 	// tool-use + tool-result
 	if len(ch) != 2 {
@@ -220,7 +220,7 @@ func TestOpencodeHandleToolUseEventNilState(t *testing.T) {
 		},
 	}
 
-	b.handleToolUseEvent(event, ch)
+	b.handleToolUseEvent(context.Background(), event, ch)
 
 	if len(ch) != 1 {
 		t.Fatalf("expected 1 message, got %d", len(ch))
@@ -252,7 +252,7 @@ func TestOpencodeHandleErrorEvent(t *testing.T) {
 		},
 	}
 
-	b.handleErrorEvent(event, ch, &status, &errMsg)
+	b.handleErrorEvent(context.Background(), event, ch, &status, &errMsg)
 
 	if status != "failed" {
 		t.Errorf("status: got %q, want %q", status, "failed")
@@ -285,7 +285,7 @@ func TestOpencodeHandleErrorEventNameOnly(t *testing.T) {
 		},
 	}
 
-	b.handleErrorEvent(event, ch, &status, &errMsg)
+	b.handleErrorEvent(context.Background(), event, ch, &status, &errMsg)
 
 	if errMsg != "RateLimitError" {
 		t.Errorf("error: got %q, want %q", errMsg, "RateLimitError")
@@ -302,7 +302,7 @@ func TestOpencodeHandleErrorEventNilError(t *testing.T) {
 
 	event := opencodeEvent{Type: "error"}
 
-	b.handleErrorEvent(event, ch, &status, &errMsg)
+	b.handleErrorEvent(context.Background(), event, ch, &status, &errMsg)
 
 	if errMsg != "unknown opencode error" {
 		t.Errorf("error: got %q, want %q", errMsg, "unknown opencode error")
@@ -509,7 +509,7 @@ func TestOpencodeProcessEventsHappyPath(t *testing.T) {
 		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_happy","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	// Verify result.
 	if result.status != "completed" {
@@ -568,7 +568,7 @@ func TestOpencodeProcessEventsErrorCausesFailedStatus(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_err","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -604,7 +604,7 @@ func TestOpencodeProcessEventsSessionIDExtracted(t *testing.T) {
 		`{"type":"text","timestamp":1001,"sessionID":"ses_updated","part":{"type":"text","text":"hi"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.sessionID != "ses_updated" {
 		t.Errorf("sessionID: got %q, want %q (should use last seen)", result.sessionID, "ses_updated")
@@ -621,7 +621,7 @@ func TestOpencodeProcessEventsScannerError(t *testing.T) {
 
 	// Use an ioErrReader that returns valid data then an I/O error, which
 	// triggers scanner.Err() and should set status to "failed".
-	result := b.processEvents(&ioErrReader{
+	result := b.processEvents(context.Background(), &ioErrReader{
 		data: `{"type":"text","sessionID":"ses_scan","part":{"text":"before error"}}` + "\n",
 	}, ch)
 
@@ -669,7 +669,7 @@ func TestOpencodeProcessEventsEmptyLines(t *testing.T) {
 		"",
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -703,7 +703,7 @@ func TestOpencodeProcessEventsErrorDoesNotRevertToCompleted(t *testing.T) {
 		`{"type":"text","sessionID":"ses_x","part":{"text":"recovered?"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q (error should stick)", result.status, "failed")
@@ -730,7 +730,7 @@ func TestOpencodeProcessEventsStreamEndsMidStep(t *testing.T) {
 		`{"type":"text","timestamp":1001,"sessionID":"ses_midstep","part":{"type":"text","text":"Let me plan the work..."}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -761,7 +761,7 @@ func TestOpencodeProcessEventsStreamEndsAfterToolBeforeStepFinish(t *testing.T) 
 		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_tool","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"go test ./..."},"output":"ok\n"}}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -793,7 +793,7 @@ func TestOpencodeProcessEventsMultiStepHappyPath(t *testing.T) {
 		`{"type":"step_finish","timestamp":1006,"sessionID":"ses_multi","part":{"type":"step-finish","reason":"stop"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -824,7 +824,7 @@ func TestOpencodeProcessEventsStreamEndsAfterToolCallsStepFinish(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolcalls","part":{"type":"step-finish","reason":"tool-calls"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -855,7 +855,7 @@ func TestOpencodeProcessEventsStreamEndsAfterToolWithStopFinish(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_stop_tool","part":{"type":"step-finish","reason":"stop"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -887,7 +887,7 @@ func TestOpencodeProcessEventsToolWithStopFinishThenContinuation(t *testing.T) {
 		`{"type":"step_finish","timestamp":1005,"sessionID":"ses_stop_continue","part":{"type":"step-finish","reason":"stop"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -913,7 +913,7 @@ func TestOpencodeProcessEventsProviderExecutedToolWithStopFinish(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_provider_tool","part":{"type":"step-finish","reason":"stop"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -941,7 +941,7 @@ func TestOpencodeProcessEventsStepFinishWithoutReasonBackcompat(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_noreason","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -972,7 +972,7 @@ func TestOpencodeProcessEventsToolErrorThenCleanFinish(t *testing.T) {
 		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_toolerr","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q (recovered tool error must not fail a healthy run)", result.status, "completed")
@@ -1034,7 +1034,7 @@ func TestOpencodeProcessEventsEmptyFinalStepFails(t *testing.T) {
 		`{"type":"step_finish","timestamp":1006,"sessionID":"ses_void","part":{"type":"step-finish","reason":"unknown","tokens":{"input":0,"output":0,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q (an empty final step must not complete the run)", result.status, "failed")
@@ -1080,7 +1080,7 @@ func TestOpencodeProcessEventsEmptyStepMidRunRecovers(t *testing.T) {
 		`{"type":"step_finish","timestamp":1004,"sessionID":"ses_recover","part":{"type":"step-finish","reason":"stop","tokens":{"input":120,"output":8,"cache":{"write":0,"read":0}}}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q (a recovered void step must not fail the run)", result.status, "completed")
@@ -1108,7 +1108,7 @@ func TestOpencodeProcessEventsToolOnlyFinalStepStaysCompleted(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolonly","part":{"type":"step-finish","reason":"stop","tokens":{"input":0,"output":0,"cache":{"write":0,"read":0}}}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q (a tool call is a productive step)", result.status, "completed")
@@ -1171,7 +1171,7 @@ func TestOpencodeProcessEventsUsageOnlyFinalStepStaysCompleted(t *testing.T) {
 				tc.final,
 			}, "\n")
 
-			result := b.processEvents(strings.NewReader(lines), ch)
+			result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 			if result.status != "completed" {
 				t.Errorf("status: got %q, want %q (reported usage proves the provider round-trip happened)", result.status, "completed")

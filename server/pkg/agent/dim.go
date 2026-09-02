@@ -140,22 +140,24 @@ func dimVersionSupported(version string) bool {
 // dimMessageStream serializes sends and the final close so a late stdout
 // reader cannot send on a closed channel. Mirrors grok/traecli/qoder.
 type dimMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newDimMessageStream(size int) *dimMessageStream {
-	return &dimMessageStream{ch: make(chan Message, size)}
+func newDimMessageStream(ctx context.Context, size int) *dimMessageStream {
+	return &dimMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *dimMessageStream) send(msg Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, msg)
+	sendMessage(s.ctx, s.ch, msg)
 }
 
 func (s *dimMessageStream) close() {
@@ -239,7 +241,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 	b.cfg.Logger.Info("dim acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgStream := newDimMessageStream(256)
+	msgStream := newDimMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 
 	// Dim streams interim narration and the final answer as the same
@@ -294,7 +296,6 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		// Cleanup ordering matters: cancel the run context first so
@@ -325,6 +326,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			// so the OS can finalize any processes that were attached to it.
 			releaseProcessGroup(cmd)
 		}()
+		defer cancel()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -636,9 +638,8 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		// Dim's ACP server may keep the process — and the stdout/stderr
 		// pipes — open briefly after session/prompt returns. Bound the drain.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), dimReaderDrainGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
+		if !messageReaderClosedBefore(drainCtx, readerDone) {
+			markMessageDeliveryAbandoned(runCtx)
 		}
 		select {
 		case <-stderrDone:

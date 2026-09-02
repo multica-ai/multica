@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -2007,6 +2008,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// not — because its absence is what tells an upgraded daemon it is talking
 	// to a server too old to have answered the question (MUL-5811).
 	resp.LeaderRoleResolved = true
+	resp.TranscriptBatchReplaySafe = true
 	// Agent-trigger plugin hooks, as tools. A failure here degrades to no
 	// tools rather than failing the claim: a plugin that cannot be listed must
 	// not stop an agent from working on the issue.
@@ -3695,6 +3697,12 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	// ExpectedMessageSeq is supplied by current daemons after every transcript
+	// batch has been acknowledged. Nil preserves compatibility with older hosts.
+	ExpectedMessageSeq *int32 `json:"expected_message_seq,omitempty"`
+	// TranscriptComplete is server-authored: client input is ignored and the
+	// terminal transaction succeeds only after verifying the contiguous range.
+	TranscriptComplete bool `json:"transcript_complete,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
@@ -3747,6 +3755,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// re-route below feeds req.Output into the failure classifier, and that
 	// classifier must see exactly the text we are going to persist.
 	sanitizeTaskCompleteRequest(&req)
+	req.TranscriptComplete = req.ExpectedMessageSeq != nil
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -3776,6 +3785,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
+			ExpectedMessageSeq:    req.ExpectedMessageSeq,
 		})
 		return
 	}
@@ -3785,7 +3795,20 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, err := h.TaskService.CompleteTaskWithTranscript(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, req.ExpectedMessageSeq)
+	if errors.Is(err, service.ErrTaskTranscriptIncomplete) {
+		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
+			Error:                 err.Error(),
+			FailureReason:         taskfailure.ReasonTranscriptIncomplete.String(),
+			SessionID:             req.SessionID,
+			WorkDir:               req.WorkDir,
+			DurableWorkDir:        req.DurableWorkDir,
+			BranchName:            req.BranchName,
+			SessionRolloutMissing: req.SessionRolloutMissing,
+			RetiredSessionID:      req.RetiredSessionID,
+		})
+		return
+	}
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -3794,6 +3817,10 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		// including the single chat outcome row — lands exactly once (MUL-4351).
 		slog.Warn("complete task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if task.Status == "failed" && task.FailureReason.Valid && task.FailureReason.String == taskfailure.ReasonTranscriptIncomplete.String() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": task.Status})
 		return
 	}
 
@@ -4445,7 +4472,8 @@ type TaskFailRequest struct {
 	// (GH #6066). Distinct from an empty SessionID, which only means "nothing
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
-	RetiredSessionID string `json:"retired_session_id,omitempty"`
+	RetiredSessionID   string `json:"retired_session_id,omitempty"`
+	ExpectedMessageSeq *int32 `json:"expected_message_seq,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -4481,7 +4509,13 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
+	task, err := h.TaskService.FailTaskWithTranscript(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, req.ExpectedMessageSeq)
+	if errors.Is(err, service.ErrTaskTranscriptIncomplete) {
+		req.Error = err.Error()
+		req.FailureReason = taskfailure.ReasonTranscriptIncomplete.String()
+		req.ExpectedMessageSeq = nil
+		task, err = h.TaskService.FailTaskWithTranscript(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir, nil)
+	}
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
@@ -4493,6 +4527,10 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if task.FailureReason.Valid && task.FailureReason.String == taskfailure.ReasonTranscriptIncomplete.String() {
+		req.Error = task.Error.String
+		req.FailureReason = task.FailureReason.String
 	}
 	h.TaskService.NotifyTaskFinished(*task)
 
@@ -4565,6 +4603,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	// the large messages that are already the most expensive (MUL-6523). Empty
 	// string means SQL NULL, applied by the query's NULLIF.
 	n := len(req.Messages)
+	seenSeq := make(map[int]struct{}, n)
 	params := db.CreateTaskMessagesParams{
 		TaskID:   parseUUID(taskID),
 		Ids:      make([]pgtype.UUID, 0, n),
@@ -4576,6 +4615,16 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		Outputs:  make([]string, 0, n),
 	}
 	for _, msg := range req.Messages {
+		if msg.Seq <= 0 || msg.Seq > math.MaxInt32 {
+			writeError(w, http.StatusBadRequest, "message seq must be between 1 and 2147483647")
+			return
+		}
+		if _, exists := seenSeq[msg.Seq]; exists {
+			writeError(w, http.StatusBadRequest, "message seq must be unique within a batch")
+			return
+		}
+		seenSeq[msg.Seq] = struct{}{}
+
 		id, err := uuid.NewV7()
 		if err != nil {
 			slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
@@ -4592,8 +4641,10 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// bytes PostgreSQL refuses to store. Tool output is the likeliest
 		// carrier of a stray NUL in the whole system — an agent that cats a
 		// binary, or a Windows tool emitting UTF-16 — and this endpoint has no
-		// retry on the daemon side, so an unsanitized batch is silently lost
-		// (GH #7098). Input is a JSONB column, so it needs the deep walk: the
+		// retry on the daemon side used to make an unsanitized batch disappear;
+		// the current retry still needs sanitization because a permanent bad
+		// payload must not consume the whole retry budget (GH #7098). Input is a
+		// JSONB column, so it needs the deep walk: the
 		// offending byte can sit at any depth of a tool's arguments. Batching
 		// raises the stakes: one bad byte now fails the whole statement rather
 		// than a single row, which is inherent to one-statement writes.
@@ -4631,9 +4682,49 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		params.Outputs = append(params.Outputs, msg.Output)
 	}
 
-	created, err := h.Queries.CreateTaskMessages(r.Context(), params)
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	status, err := qtx.LockTaskForTranscriptWrite(r.Context(), params.TaskID)
+	if err != nil {
+		slog.Error("failed to lock task for transcript write", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+	// Cancellation is a two-phase protocol: the server marks the task
+	// cancelled first, then the daemon drains its transcript and sends
+	// cancel-ack. Keep accepting that final drain, but seal completed and
+	// failed tasks against late writes.
+	if status != "running" && status != "cancelled" {
+		writeError(w, http.StatusConflict, "task is no longer accepting transcript messages")
+		return
+	}
+
+	created, err := qtx.CreateTaskMessages(r.Context(), params)
 	if err != nil {
 		slog.Error("failed to create task messages", "task_id", taskID, "count", n, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to persist task message")
+		return
+	}
+	if len(created) != n {
+		// A concurrent first writer may not be visible to this statement's
+		// snapshot. Roll back and let the daemon retry against a fresh snapshot.
+		writeError(w, http.StatusInternalServerError, "failed to resolve task message replay")
+		return
+	}
+	for _, m := range created {
+		if !m.PayloadMatches {
+			writeError(w, http.StatusConflict, "message seq already exists with different payload")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Error("failed to commit task messages", "task_id", taskID, "count", n, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to persist task message")
 		return
 	}
@@ -4645,12 +4736,19 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		// guarantee, and subscribers render these events as they arrive, so the
 		// ordering lives in the query rather than in the clients.
 		for _, m := range created {
+			if !m.WasInserted {
+				continue
+			}
 			// The ordered CTE makes sqlc name the row type after the query
 			// rather than reusing the table model; the columns are the table's,
 			// in order, so the conversion is checked by the compiler and breaks
 			// loudly if the query ever stops returning the whole row.
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
-				taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)))
+				taskMessageToPayload(db.TaskMessage{
+					ID: m.ID, TaskID: m.TaskID, Seq: m.Seq, Type: m.Type,
+					Tool: m.Tool, Content: m.Content, Input: m.Input,
+					Output: m.Output, CreatedAt: m.CreatedAt,
+				}, taskID, uuidToString(task.IssueID)))
 		}
 	}
 

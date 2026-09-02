@@ -148,7 +148,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				output.WriteString(msg.Content)
 				outputMu.Unlock()
 			}
-			trySend(msgCh, msg)
+			sendMessage(runCtx, msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
 			select {

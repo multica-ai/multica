@@ -47,22 +47,24 @@ var mcodeSessionStartupReadyDelay = 100 * time.Millisecond
 var errMcodeProcessExited = errors.New("mcode process exited")
 
 type mcodeMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newMcodeMessageStream(size int) *mcodeMessageStream {
-	return &mcodeMessageStream{ch: make(chan Message, size)}
+func newMcodeMessageStream(ctx context.Context, size int) *mcodeMessageStream {
+	return &mcodeMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *mcodeMessageStream) send(message Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, message)
+	sendMessage(s.ctx, s.ch, message)
 }
 
 func (s *mcodeMessageStream) close() {
@@ -137,7 +139,7 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	b.cfg.Logger.Info("mcode acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
-	msgStream := newMcodeMessageStream(256)
+	msgStream := newMcodeMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool

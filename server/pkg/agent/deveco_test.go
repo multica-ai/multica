@@ -182,7 +182,7 @@ func TestDevecoProcessEventsHappyPath(t *testing.T) {
 		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_happy","part":{"type":"step-finish","tokens":{"total":10,"input":7,"output":3,"cache":{"read":0,"write":0}}}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
@@ -220,7 +220,7 @@ func TestDevecoProcessEventsToolErrorEmitsResult(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolerr","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 	if result.status != "completed" {
 		t.Errorf("status: got %q, want %q", result.status, "completed")
 	}
@@ -260,7 +260,7 @@ func TestDevecoProcessEventsErrorCausesFailedStatus(t *testing.T) {
 		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_err","part":{"type":"step-finish"}}`,
 	}, "\n")
 
-	result := b.processEvents(strings.NewReader(lines), ch)
+	result := b.processEvents(context.Background(), strings.NewReader(lines), ch)
 
 	if result.status != "failed" {
 		t.Errorf("status: got %q, want %q", result.status, "failed")
@@ -280,7 +280,7 @@ func TestDevecoHandleErrorEventNilError(t *testing.T) {
 	status := "completed"
 	errMsg := ""
 
-	b.handleErrorEvent(devecoEvent{Type: "error"}, ch, &status, &errMsg)
+	b.handleErrorEvent(context.Background(), devecoEvent{Type: "error"}, ch, &status, &errMsg)
 
 	if errMsg != "unknown deveco error" {
 		t.Errorf("error: got %q, want %q", errMsg, "unknown deveco error")

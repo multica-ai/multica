@@ -30,7 +30,7 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(context.Background(), msg, ch, make(map[string]TokenUsage))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "Hello world" {
@@ -70,7 +70,7 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(context.Background(), msg, ch, make(map[string]TokenUsage))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
@@ -112,7 +112,7 @@ func TestClaudeHandleUserToolResult(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	if b.handleUser(context.Background(), msg, ch) {
 		t.Fatal("did not expect async launch in ordinary tool result")
 	}
 
@@ -237,7 +237,7 @@ func TestClaudeHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
 		}),
 	}
 
-	if !b.handleUser(msg, ch) {
+	if !b.handleUser(context.Background(), msg, ch) {
 		t.Fatal("expected async launch to be detected")
 	}
 }
@@ -264,7 +264,7 @@ func TestClaudeHandleUserIgnoresAsyncLaunchedTextOutput(t *testing.T) {
 		}),
 	}
 
-	if b.handleUser(msg, ch) {
+	if b.handleUser(context.Background(), msg, ch) {
 		t.Fatal("did not expect async launch to be detected in ordinary text output")
 	}
 }
@@ -281,7 +281,7 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(context.Background(), msg, ch, make(map[string]TokenUsage))
 	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
@@ -297,23 +297,70 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 }
 
-func TestTrySendDropsWhenFull(t *testing.T) {
+func TestSendMessageBackpressuresUntilRead(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan Message, 1)
-	// Fill the channel
-	trySend(ch, Message{Type: MessageText, Content: "first"})
-	// This should not block
-	trySend(ch, Message{Type: MessageText, Content: "second"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if !sendMessage(ctx, ch, Message{Type: MessageText, Content: "first"}) {
+		t.Fatal("first send was abandoned")
+	}
+	done := make(chan bool, 1)
+	go func() {
+		done <- sendMessage(ctx, ch, Message{Type: MessageText, Content: "second"})
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("second send completed while the channel was full")
+	case <-time.After(25 * time.Millisecond):
+	}
 
 	m := <-ch
 	if m.Content != "first" {
 		t.Fatalf("expected 'first', got %q", m.Content)
 	}
 	select {
-	case m := <-ch:
-		t.Fatalf("expected empty channel, got %+v", m)
-	default:
+	case ok := <-done:
+		if !ok {
+			t.Fatal("second send was abandoned after capacity became available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second send stayed blocked after capacity became available")
+	}
+	if m = <-ch; m.Content != "second" {
+		t.Fatalf("expected 'second', got %q", m.Content)
+	}
+}
+
+func TestSendMessageCancellationReleasesBackpressure(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan Message, 1)
+	ch <- Message{Type: MessageText, Content: "first"}
+	ctx, tracker := WithMessageDeliveryTracker(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan bool, 1)
+	go func() {
+		done <- sendMessage(ctx, ch, Message{Type: MessageText, Content: "second"})
+	}()
+	cancel()
+
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("send succeeded even though cancellation was the only ready path")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled send stayed blocked")
+	}
+	if m := <-ch; m.Content != "first" {
+		t.Fatalf("queued message changed after cancellation: %+v", m)
+	}
+	if !tracker.Abandoned() {
+		t.Fatal("cancelled delivery did not mark the task-scoped tracker abandoned")
 	}
 }
 

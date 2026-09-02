@@ -31,11 +31,9 @@ RETURNING *;
 -- into one statement, not to the parameter shape.
 --
 -- Atomicity is a deliberate side effect, not just a speedup: the per-message
--- loop this replaces could persist part of a batch and then fail, leaving the
--- transcript with a prefix of the batch and no way to complete it — the daemon
--- does not retry this endpoint. One statement makes the batch all-or-nothing,
--- which buys consistency; a batch that fails is still lost whole, so closing
--- the gap for real needs a retry plus a (task_id, seq) uniqueness rule.
+-- loop this replaces could persist part of a batch and then fail. The daemon
+-- now retries the exact batch, while (task_id, seq) uniqueness and DO NOTHING
+-- make a lost-response replay idempotent and keep realtime events single-shot.
 --
 -- The ORDER BY is a contract, not decoration. A bare `INSERT ... RETURNING`
 -- has no defined row order, and the caller republishes these rows as realtime
@@ -43,7 +41,7 @@ RETURNING *;
 -- published in request order, so the ordering has to be restored explicitly or
 -- subscribers can see a batch out of order. seq is assigned by the daemon and
 -- increases within a batch, so it is the request order.
-WITH incoming AS (
+WITH raw_incoming AS (
     -- Several single-argument unnest calls in one SELECT list expand in
     -- lockstep (PostgreSQL 10+ set-returning-function semantics), which is the
     -- same row-wise zip the multi-argument unnest(a, b, ...) form gives — but
@@ -57,6 +55,16 @@ WITH incoming AS (
         unnest(sqlc.arg('contents')::text[]) AS content,
         unnest(sqlc.arg('inputs')::text[]) AS input,
         unnest(sqlc.arg('outputs')::text[]) AS output
+), incoming AS (
+    SELECT
+        id,
+        seq,
+        type,
+        NULLIF(tool, '') AS tool,
+        NULLIF(content, '') AS content,
+        NULLIF(input, '')::jsonb AS input,
+        NULLIF(output, '') AS output
+    FROM raw_incoming
 ), inserted AS (
     INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
     SELECT
@@ -64,14 +72,39 @@ WITH incoming AS (
         sqlc.arg('task_id')::uuid,
         m.seq,
         m.type,
-        NULLIF(m.tool, ''),
-        NULLIF(m.content, ''),
-        NULLIF(m.input, '')::jsonb,
-        NULLIF(m.output, '')
+        m.tool,
+        m.content,
+        m.input,
+        m.output
     FROM incoming AS m
+    ON CONFLICT (task_id, seq) DO NOTHING
     RETURNING *
+), resolved AS (
+    SELECT inserted.*, true AS was_inserted, true AS payload_matches
+    FROM inserted
+
+    UNION ALL
+
+    SELECT
+        existing.*,
+        false AS was_inserted,
+        existing.type = incoming.type
+            AND existing.tool IS NOT DISTINCT FROM incoming.tool
+            AND existing.content IS NOT DISTINCT FROM incoming.content
+            AND existing.input IS NOT DISTINCT FROM incoming.input
+            AND existing.output IS NOT DISTINCT FROM incoming.output
+            AS payload_matches
+    FROM incoming
+    JOIN task_message AS existing
+      ON existing.task_id = sqlc.arg('task_id')::uuid
+     AND existing.seq = incoming.seq
 )
-SELECT * FROM inserted ORDER BY seq ASC;
+SELECT * FROM resolved ORDER BY seq ASC;
+
+-- name: LockTaskForTranscriptWrite :one
+SELECT status FROM agent_task_queue
+WHERE id = $1
+FOR UPDATE;
 
 -- name: ListTaskMessages :many
 SELECT * FROM task_message
@@ -82,6 +115,14 @@ ORDER BY seq ASC;
 SELECT * FROM task_message
 WHERE task_id = $1 AND seq > $2
 ORDER BY seq ASC;
+
+-- name: GetTaskMessageSeqSummary :one
+SELECT
+    COUNT(*)::int AS message_count,
+    COALESCE(MIN(seq), 0)::int AS min_seq,
+    COALESCE(MAX(seq), 0)::int AS max_seq
+FROM task_message
+WHERE task_id = $1;
 
 -- name: DeleteTaskMessages :exec
 DELETE FROM task_message

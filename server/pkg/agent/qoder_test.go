@@ -637,8 +637,9 @@ func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 	}
 }
 
-func TestQoderMessageStreamDropsSendAfterClose(t *testing.T) {
-	stream := newQoderMessageStream(1)
+func TestQoderMessageStreamSendAfterCloseMarksDeliveryAbandoned(t *testing.T) {
+	ctx, tracker := WithMessageDeliveryTracker(context.Background())
+	stream := newQoderMessageStream(ctx, 1)
 	stream.close()
 
 	defer func() {
@@ -650,6 +651,45 @@ func TestQoderMessageStreamDropsSendAfterClose(t *testing.T) {
 
 	if _, ok := <-stream.ch; ok {
 		t.Fatal("message channel should be closed")
+	}
+	if !tracker.Abandoned() {
+		t.Fatal("late send after stream close was not marked abandoned")
+	}
+}
+
+func TestQoderMessageStreamCancellationUnblocksSendAndClose(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	stream := newQoderMessageStream(ctx, 1)
+	stream.send(Message{Type: MessageText, Content: "first"})
+
+	sendDone := make(chan struct{})
+	go func() {
+		stream.send(Message{Type: MessageText, Content: "second"})
+		close(sendDone)
+	}()
+	cancel()
+
+	select {
+	case <-sendDone:
+	case <-time.After(time.Second):
+		t.Fatal("cancelled stream send stayed blocked")
+	}
+	closeDone := make(chan struct{})
+	go func() {
+		stream.close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream close stayed blocked behind cancelled send")
+	}
+
+	if msg, ok := <-stream.ch; !ok || msg.Content != "first" {
+		t.Fatalf("queued message = %+v, open=%v; want first", msg, ok)
+	}
+	if _, ok := <-stream.ch; ok {
+		t.Fatal("message channel remained open after close")
 	}
 }
 

@@ -198,7 +198,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				msg.Tool = reasonixToolNameFromTitle(msg.Tool)
 			}
 			deliverable.observe(msg)
-			trySend(msgCh, msg)
+			sendMessage(runCtx, msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
 			if !streamingCurrentTurn.Load() {

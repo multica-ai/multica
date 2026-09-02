@@ -79,22 +79,24 @@ var (
 // grokMessageStream serializes sends and the final close so a late stdout
 // reader cannot send on a closed channel. Mirrors traecli/qoder.
 type grokMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newGrokMessageStream(size int) *grokMessageStream {
-	return &grokMessageStream{ch: make(chan Message, size)}
+func newGrokMessageStream(ctx context.Context, size int) *grokMessageStream {
+	return &grokMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *grokMessageStream) send(msg Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, msg)
+	sendMessage(s.ctx, s.ch, msg)
 }
 
 func (s *grokMessageStream) close() {
@@ -189,7 +191,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	b.cfg.Logger.Info("grok acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgStream := newGrokMessageStream(256)
+	msgStream := newGrokMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 
 	// Grok streams interim narration and the final answer as the same
@@ -253,7 +255,6 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
@@ -261,6 +262,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
 		}()
+		defer cancel()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -470,9 +472,8 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Grok ACP may keep the process — and the stdout/stderr pipes — open
 		// briefly after session/prompt returns. Bound the drain.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), grokReaderDrainGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
+		if !messageReaderClosedBefore(drainCtx, readerDone) {
+			markMessageDeliveryAbandoned(runCtx)
 		}
 		select {
 		case <-stderrDone:

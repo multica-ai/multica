@@ -7,7 +7,7 @@ package agent
 // decoupled from the OpenCode backend: it owns its own backend struct, event
 // types, blocked-args table, and process lifecycle, so a change to either agent
 // can never affect the other. The two share only the package-wide generic
-// process helpers (configureProcessGroup, filterCustomArgs, trySend, …) that
+// process helpers (configureProcessGroup, filterCustomArgs, sendMessage, …) that
 // every backend in this package reuses.
 //
 // DevEco speaks the same `run --format json` protocol and emits the same NDJSON
@@ -194,7 +194,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanResult := b.processEvents(runCtx, stdout, msgCh)
 
 		exitErr := cmd.Wait()
 		close(procDone)
@@ -302,7 +302,7 @@ type devecoEventResult struct {
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
 // the accumulated result. This is the core scanner loop, extracted for testability.
-func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEventResult {
+func (b *devecoBackend) processEvents(ctx context.Context, r io.Reader, ch chan<- Message) devecoEventResult {
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
@@ -328,13 +328,13 @@ func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEven
 
 		switch event.Type {
 		case "text":
-			b.handleTextEvent(event, ch, &output)
+			b.handleTextEvent(ctx, event, ch, &output)
 		case "tool_use":
-			b.handleToolUseEvent(event, ch)
+			b.handleToolUseEvent(ctx, event, ch)
 		case "error":
-			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
+			b.handleErrorEvent(ctx, event, ch, &finalStatus, &finalError)
 		case "step_start":
-			trySend(ch, Message{Type: MessageStatus, Status: "running"})
+			sendMessage(ctx, ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
@@ -365,24 +365,24 @@ func (b *devecoBackend) processEvents(r io.Reader, ch chan<- Message) devecoEven
 	}
 }
 
-func (b *devecoBackend) handleTextEvent(event devecoEvent, ch chan<- Message, output *strings.Builder) {
+func (b *devecoBackend) handleTextEvent(ctx context.Context, event devecoEvent, ch chan<- Message, output *strings.Builder) {
 	text := event.Part.Text
 	if text != "" {
 		output.WriteString(text)
-		trySend(ch, Message{Type: MessageText, Content: text})
+		sendMessage(ctx, ch, Message{Type: MessageText, Content: text})
 	}
 }
 
 // handleToolUseEvent processes "tool_use" events. A single tool_use event
 // contains both the call and result in part.state when the tool reaches a
 // terminal state (state.status is "completed" or "error").
-func (b *devecoBackend) handleToolUseEvent(event devecoEvent, ch chan<- Message) {
+func (b *devecoBackend) handleToolUseEvent(ctx context.Context, event devecoEvent, ch chan<- Message) {
 	var input map[string]any
 	if event.Part.State != nil && event.Part.State.Input != nil {
 		_ = json.Unmarshal(event.Part.State.Input, &input)
 	}
 
-	trySend(ch, Message{
+	sendMessage(ctx, ch, Message{
 		Type:   MessageToolUse,
 		Tool:   event.Part.Tool,
 		CallID: event.Part.CallID,
@@ -398,7 +398,7 @@ func (b *devecoBackend) handleToolUseEvent(event devecoEvent, ch chan<- Message)
 		if state.Status == "error" && state.Error != "" {
 			outputStr = state.Error
 		}
-		trySend(ch, Message{
+		sendMessage(ctx, ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
 			CallID: event.Part.CallID,
@@ -409,7 +409,7 @@ func (b *devecoBackend) handleToolUseEvent(event devecoEvent, ch chan<- Message)
 
 // handleErrorEvent processes "error" events. DevEco can exit with RC=0 even on
 // errors (e.g. invalid model), so error events are the reliable failure signal.
-func (b *devecoBackend) handleErrorEvent(event devecoEvent, ch chan<- Message, finalStatus, finalError *string) {
+func (b *devecoBackend) handleErrorEvent(ctx context.Context, event devecoEvent, ch chan<- Message, finalStatus, finalError *string) {
 	errMsg := ""
 	if event.Error != nil {
 		errMsg = event.Error.Message()
@@ -419,7 +419,7 @@ func (b *devecoBackend) handleErrorEvent(event devecoEvent, ch chan<- Message, f
 	}
 
 	b.cfg.Logger.Warn("deveco error event", "error", errMsg)
-	trySend(ch, Message{Type: MessageError, Content: errMsg})
+	sendMessage(ctx, ch, Message{Type: MessageError, Content: errMsg})
 
 	*finalStatus = "failed"
 	*finalError = errMsg

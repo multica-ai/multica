@@ -46,22 +46,24 @@ func qoderDefaultBinary(providerType string) string {
 var qoderReaderDrainGrace = 2 * time.Second
 
 type qoderMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newQoderMessageStream(size int) *qoderMessageStream {
-	return &qoderMessageStream{ch: make(chan Message, size)}
+func newQoderMessageStream(ctx context.Context, size int) *qoderMessageStream {
+	return &qoderMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *qoderMessageStream) send(msg Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, msg)
+	sendMessage(s.ctx, s.ch, msg)
 }
 
 func (s *qoderMessageStream) close() {
@@ -145,7 +147,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	b.cfg.Logger.Info("qoder acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgStream := newQoderMessageStream(256)
+	msgStream := newQoderMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 
 	// Qoder emits interim narration and the final answer as the same ACP
@@ -207,7 +209,6 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
@@ -215,6 +216,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
 		}()
+		defer cancel()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -399,9 +401,8 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// makes the provider-error promotion below see a terminal marker before
 		// we decide the final status.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), qoderReaderDrainGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
+		if !messageReaderClosedBefore(drainCtx, readerDone) {
+			markMessageDeliveryAbandoned(runCtx)
 		}
 		select {
 		case <-stderrDone:

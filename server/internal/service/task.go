@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -4213,6 +4214,86 @@ func startsWithAbsolutePath(s string) bool {
 	return false
 }
 
+func taskTranscriptMatches(ctx context.Context, queries *db.Queries, taskID pgtype.UUID, expected int32) (bool, error) {
+	if expected < 0 {
+		return false, fmt.Errorf("invalid expected transcript sequence %d", expected)
+	}
+	summary, err := queries.GetTaskMessageSeqSummary(ctx, taskID)
+	if err != nil {
+		return false, fmt.Errorf("read transcript sequence summary: %w", err)
+	}
+	if expected == 0 {
+		return summary.MessageCount == 0, nil
+	}
+	return summary.MessageCount == expected && summary.MinSeq == 1 && summary.MaxSeq == expected, nil
+}
+
+func jsonPayloadEqual(a, b []byte) bool {
+	var left, right any
+	if json.Unmarshal(a, &left) != nil || json.Unmarshal(b, &right) != nil {
+		return false
+	}
+	return reflect.DeepEqual(left, right)
+}
+
+func optionalTerminalTextMatches(stored pgtype.Text, incoming string) bool {
+	return incoming == "" || stored.Valid && stored.String == incoming
+}
+
+func failedTerminalPayloadMatches(existing db.AgentTaskQueue, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) bool {
+	if existing.Status != "failed" || !existing.Error.Valid || existing.Error.String != errMsg ||
+		!existing.FailureReason.Valid || existing.FailureReason.String != failureReason ||
+		existing.SessionRolloutMissing != sessionRolloutMissing {
+		return false
+	}
+	if sessionRolloutMissing {
+		if existing.SessionID.Valid {
+			return false
+		}
+	} else if !optionalTerminalTextMatches(existing.SessionID, sessionID) {
+		return false
+	}
+	return optionalTerminalTextMatches(existing.WorkDir, workDir) &&
+		optionalTerminalTextMatches(existing.BranchName, branchName) &&
+		optionalTerminalTextMatches(existing.RetiredSessionID, retiredSessionID) &&
+		optionalTerminalTextMatches(existing.DurableWorkDir, durableWorkDir)
+}
+
+// ErrTaskTranscriptIncomplete marks a terminal callback whose claimed final
+// sequence cannot be verified against the stored contiguous transcript.
+var ErrTaskTranscriptIncomplete = errors.New("transcript incomplete")
+
+func verifyTaskTranscript(ctx context.Context, qtx *db.Queries, taskID pgtype.UUID, expectedMessageSeq *int32) error {
+	if expectedMessageSeq == nil {
+		return nil // Legacy daemon: completeness remains unknown.
+	}
+	status, err := qtx.LockTaskForTranscriptWrite(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("lock task for transcript verification: %w", err)
+	}
+	if status != "running" {
+		return fmt.Errorf("task is not running while verifying transcript: %s", status)
+	}
+	matches, err := taskTranscriptMatches(ctx, qtx, taskID, *expectedMessageSeq)
+	if err != nil {
+		return err
+	}
+	if matches {
+		return nil
+	}
+	summary, err := qtx.GetTaskMessageSeqSummary(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("read transcript sequence summary: %w", err)
+	}
+	return fmt.Errorf("%w: expected contiguous seq 1..%d, got count=%d min=%d max=%d", ErrTaskTranscriptIncomplete,
+		*expectedMessageSeq, summary.MessageCount, summary.MinSeq, summary.MaxSeq)
+}
+
+func failedForIncompleteTranscript(task db.AgentTaskQueue) bool {
+	return task.Status == "failed" && task.FailureReason.Valid &&
+		task.FailureReason.String == taskfailure.ReasonTranscriptIncomplete.String()
+}
+
 // CompleteTask marks a task as completed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
 //
@@ -4224,6 +4305,10 @@ func startsWithAbsolutePath(s string) bool {
 // durableWorkDir is terminal delivery metadata, not a resume pointer: it is
 // populated only after the daemon confirms a disposable worktree is gone.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
+	return s.CompleteTaskWithTranscript(ctx, taskID, result, sessionID, workDir, branchName, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil)
+}
+
+func (s *TaskService) CompleteTaskWithTranscript(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir, branchName string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedMessageSeq *int32) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -4231,6 +4316,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	var chatAssistantMsg *db.ChatMessage
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
+			return err
+		}
+		if err := verifyTaskTranscript(ctx, qtx, taskID, expectedMessageSeq); err != nil {
 			return err
 		}
 		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
@@ -4309,7 +4397,15 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// … WHERE status = 'running' returns no rows in that case.
 		// Treat it as an idempotent success — same pattern as CancelTask.
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			idempotent := expectedMessageSeq == nil && errors.Is(err, pgx.ErrNoRows)
+			if expectedMessageSeq != nil && failedForIncompleteTranscript(existing) {
+				idempotent = true
+			}
+			if expectedMessageSeq != nil && existing.Status == "completed" && jsonPayloadEqual(existing.Result, result) {
+				matches, matchErr := taskTranscriptMatches(ctx, s.Queries, taskID, *expectedMessageSeq)
+				idempotent = matchErr == nil && matches
+			}
+			if idempotent {
 				slog.Info("complete task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,
@@ -4639,6 +4735,10 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string) (*db.AgentTaskQueue, error) {
+	return s.FailTaskWithTranscript(ctx, taskID, errMsg, sessionID, workDir, branchName, failureReason, sessionRolloutMissing, retiredSessionID, durableWorkDir, nil)
+}
+
+func (s *TaskService) FailTaskWithTranscript(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID, durableWorkDir string, expectedMessageSeq *int32) (*db.AgentTaskQueue, error) {
 	// Strip bytes PostgreSQL cannot store before anything else reads errMsg, so
 	// the classifier, the transaction and every downstream consumer see the one
 	// text we will actually persist (GH #7098). Kept at the service boundary
@@ -4711,6 +4811,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var retried *db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
+			return err
+		}
+		if err := verifyTaskTranscript(ctx, qtx, taskID, expectedMessageSeq); err != nil {
 			return err
 		}
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
@@ -4915,7 +5018,17 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		return nil
 	}); err != nil {
 		if existing, lookupErr := s.Queries.GetAgentTask(ctx, taskID); lookupErr == nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			idempotent := expectedMessageSeq == nil && errors.Is(err, pgx.ErrNoRows)
+			if expectedMessageSeq != nil && failedForIncompleteTranscript(existing) {
+				idempotent = true
+			}
+			if expectedMessageSeq != nil && failedTerminalPayloadMatches(existing,
+				errMsg, sessionID, workDir, branchName, failureReason,
+				sessionRolloutMissing, retiredSessionID, durableWorkDir) {
+				matches, matchErr := taskTranscriptMatches(ctx, s.Queries, taskID, *expectedMessageSeq)
+				idempotent = matchErr == nil && matches
+			}
+			if idempotent {
 				slog.Info("fail task: already finalized",
 					"task_id", util.UUIDToString(taskID),
 					"current_status", existing.Status,

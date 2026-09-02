@@ -2476,6 +2476,71 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 	}
 }
 
+func TestExecuteAndDrain_FailsWhenTranscriptRetriesExhausted(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			calls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+
+	_, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-transcript-fail", "", new(atomic.Int32), true)
+	if err == nil || !strings.Contains(err.Error(), "transcript delivery failed") {
+		t.Fatalf("executeAndDrain error = %v, want transcript delivery failure", err)
+	}
+	if !errors.Is(err, errTranscriptIncomplete) {
+		t.Fatalf("executeAndDrain error = %v, want incomplete-transcript classification", err)
+	}
+	if got := calls.Load(); got != 4 {
+		t.Fatalf("message attempts = %d, want 4", got)
+	}
+	var backoffBudget time.Duration
+	for _, delay := range taskMessageRetrySchedule {
+		backoffBudget += delay
+	}
+	if backoffBudget != 1750*time.Millisecond {
+		t.Fatalf("message retry backoff budget = %s, want 1.75s", backoffBudget)
+	}
+	if backoffBudget >= taskMessageDeliveryTimeout {
+		t.Fatalf("message retry backoff budget %s consumes 5s delivery deadline", backoffBudget)
+	}
+}
+
+func TestExecuteAndDrain_FailsWhenMessageStreamNeverCloses(t *testing.T) {
+	oldGrace, oldStop := transcriptDrainGrace, transcriptDrainStopTimeout
+	transcriptDrainGrace = 20 * time.Millisecond
+	transcriptDrainStopTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		transcriptDrainGrace = oldGrace
+		transcriptDrainStopTimeout = oldStop
+	})
+
+	d, rec := newTranscriptRecorder(t)
+	msgCh := make(chan agent.Message, 1)
+	msgCh <- agent.Message{Type: agent.MessageText, Content: "persist before refusing receipt"}
+	resultCh := make(chan agent.Result, 1)
+	resultCh <- agent.Result{Status: "completed", Output: "done"}
+	backend := sessionBackend{session: &agent.Session{Messages: msgCh, Result: resultCh}}
+
+	_, _, err := d.executeAndDrain(context.Background(), backend, "p", agent.ExecOptions{}, slog.Default(), "task-open-stream", "", new(atomic.Int32))
+	if err == nil || !strings.Contains(err.Error(), "force-stopped before the message stream closed") {
+		t.Fatalf("executeAndDrain error = %v, want force-stopped transcript failure", err)
+	}
+	if !errors.Is(err, errTranscriptIncomplete) {
+		t.Fatalf("executeAndDrain error = %v, want incomplete-transcript classification", err)
+	}
+	if got := rec.snapshot(); len(got) != 1 || got[0].Content != "persist before refusing receipt" {
+		t.Fatalf("persisted transcript before refusing receipt = %+v", got)
+	}
+}
+
 // TestExecuteAndDrain_SeqContinuesAcrossRetry pins the transcript's ordering
 // key: the server sorts a task's messages by seq alone, so a same-task resume
 // retry must keep numbering upwards instead of restarting at 1 and
@@ -2555,6 +2620,7 @@ func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T)
 
 	msgCh <- agent.Message{Type: agent.MessageText, Content: "pending tail"}
 	cancel()
+	close(msgCh)
 
 	r := <-retCh
 	if r.err != nil {
@@ -2567,6 +2633,45 @@ func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T)
 	got := rec.snapshot()
 	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "pending tail" {
 		t.Fatalf("expected the pending tail flushed before the cancelled return, got %+v", got)
+	}
+}
+
+func TestExecuteAndDrain_ContextCancelled_DrainsTailUntilStreamCloses(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	msgCh := make(chan agent.Message, 1)
+	b := sessionBackend{session: &agent.Session{Messages: msgCh, Result: make(chan agent.Result)}}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	type ret struct {
+		result agent.Result
+		err    error
+	}
+	retCh := make(chan ret, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(ctx, b, "p", agent.ExecOptions{}, slog.Default(), "task-cancel-buffered-tail", "", new(atomic.Int32))
+		retCh <- ret{result, err}
+	}()
+
+	// Cancellation asks the backend to stop, but adapters may still emit their
+	// buffered tail before closing Messages. The daemon must keep draining that
+	// tail instead of treating the cancellation signal itself as EOF.
+	cancel()
+	time.Sleep(20 * time.Millisecond)
+	msgCh <- agent.Message{Type: agent.MessageText, Content: "tail after cancel"}
+	close(msgCh)
+
+	r := <-retCh
+	if r.err != nil {
+		t.Fatalf("executeAndDrain: %v", r.err)
+	}
+	if r.result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled, got %q (err=%q)", r.result.Status, r.result.Error)
+	}
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Content != "tail after cancel" {
+		t.Fatalf("expected buffered cancellation tail to be persisted, got %+v", got)
 	}
 }
 
@@ -3378,14 +3483,18 @@ type idleWatchdogBackend struct {
 	emitOne bool // when true, emit one message before going silent; when false, never emit anything
 }
 
-func (b idleWatchdogBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+func (b idleWatchdogBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
 	msgCh := make(chan agent.Message, 1)
 	resCh := make(chan agent.Result)
 	if b.emitOne {
 		msgCh <- agent.Message{Type: agent.MessageText, Content: "hello"}
 	}
-	// Deliberately do NOT close msgCh and never write to resCh — this models
-	// a backend whose subprocess is hung and will never naturally complete.
+	// The subprocess is hung and never completes naturally, but a real backend
+	// still closes Messages after executeAndDrain cancels its process context.
+	go func() {
+		<-ctx.Done()
+		close(msgCh)
+	}()
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
@@ -3726,11 +3835,14 @@ func TestExecuteAndDrain_IdleWatchdog_PerRunOverrideStillUsesToolWindow(t *testi
 // (the MUL-3064 default), AgentToolWatchdog is the only thing that ends it.
 type stuckInFlightToolBackend struct{}
 
-func (stuckInFlightToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+func (stuckInFlightToolBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
 	msgCh := make(chan agent.Message, 2)
 	resCh := make(chan agent.Result)
 	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
-	// Deliberately leave msgCh open, never emit tool_result, never write resCh.
+	go func() {
+		<-ctx.Done()
+		close(msgCh)
+	}()
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
@@ -3765,12 +3877,15 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 // fresh; the watchdog should fire exactly one window later, not earlier.
 type tailIdleAfterToolBackend struct{}
 
-func (tailIdleAfterToolBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+func (tailIdleAfterToolBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
 	msgCh := make(chan agent.Message, 4)
 	resCh := make(chan agent.Result)
 	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "Bash", CallID: "c1"}
 	msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "Bash", CallID: "c1", Output: "ok"}
-	// Deliberately leave msgCh open and never write to resCh.
+	go func() {
+		<-ctx.Done()
+		close(msgCh)
+	}()
 	return &agent.Session{Messages: msgCh, Result: resCh}, nil
 }
 
@@ -4735,6 +4850,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// statusCallCount lets the poll goroutine return "cancelled" on first call
 	// while still handling later calls from the post-run status check.
 	var statusCallCount atomic.Int64
+	var cancelAckCalls atomic.Int32
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -4758,6 +4874,9 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte(`{"status":"running"}`))
 			}
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			cancelAckCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
 		default:
 			w.WriteHeader(http.StatusOK)
 		}
@@ -4781,7 +4900,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 			Usage: []TaskUsageEntry{
 				{Provider: "anthropic", Model: "claude-opus-4-6", InputTokens: 200, OutputTokens: 80},
 			},
-		}, nil
+		}, fmt.Errorf("%w: injected cancellation-path gap", errTranscriptIncomplete)
 	})
 
 	task := Task{
@@ -4822,6 +4941,9 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 	// given that the runner blocks on runCtx.Done().
 	if usageIdx < pollStatusIdx {
 		t.Fatalf("usage reported before poll-status (order: %v) — poll-status must come first", order)
+	}
+	if got := cancelAckCalls.Load(); got != 0 {
+		t.Fatalf("cancel acknowledgements = %d, want 0 for incomplete transcript", got)
 	}
 }
 

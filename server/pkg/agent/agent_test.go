@@ -250,3 +250,17 @@ func TestRunContextPositiveTimeoutHasDeadline(t *testing.T) {
 		t.Fatalf("unexpected deadline remaining: %s", remaining)
 	}
 }
+
+func TestMessageReaderClosedBefore(t *testing.T) {
+	closed := make(chan struct{})
+	close(closed)
+	if !messageReaderClosedBefore(context.Background(), closed) {
+		t.Fatal("closed reader was reported open")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if messageReaderClosedBefore(ctx, make(chan struct{})) {
+		t.Fatal("open reader was reported closed after timeout")
+	}
+}

@@ -331,7 +331,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 			switch evt.Type {
 			case "agent_start":
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+				sendMessage(runCtx, msgCh, Message{Type: MessageStatus, Status: "running"})
 
 			case "turn_start":
 				output.Reset()
@@ -346,11 +346,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				case "text_delta":
 					if d := drainPiTextBuffer(&textBuffer, evt.AssistantMessageEvent.Delta); d != "" {
 						output.WriteString(d)
-						trySend(msgCh, Message{Type: MessageText, Content: d})
+						sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: d})
 					}
 				case "thinking_delta":
 					if d := evt.AssistantMessageEvent.Delta; d != "" {
-						trySend(msgCh, Message{Type: MessageThinking, Content: d})
+						sendMessage(runCtx, msgCh, Message{Type: MessageThinking, Content: d})
 					}
 				}
 
@@ -359,7 +359,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				if len(evt.Args) > 0 {
 					_ = json.Unmarshal(evt.Args, &params)
 				}
-				trySend(msgCh, Message{
+				sendMessage(runCtx, msgCh, Message{
 					Type:   MessageToolUse,
 					Tool:   evt.ToolName,
 					CallID: evt.ToolCallID,
@@ -367,7 +367,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				})
 
 			case "tool_execution_end":
-				trySend(msgCh, Message{
+				sendMessage(runCtx, msgCh, Message{
 					Type:   MessageToolResult,
 					CallID: evt.ToolCallID,
 					Output: decodePiResult(evt.Result),
@@ -406,7 +406,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 			case "error":
 				errText := decodePiString(evt.Message)
-				trySend(msgCh, Message{Type: MessageError, Content: errText})
+				sendMessage(runCtx, msgCh, Message{Type: MessageError, Content: errText})
 				if finalStatus == "completed" {
 					finalStatus = "failed"
 					finalError = errText
@@ -425,7 +425,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		}
 		if d := flushPiTextBuffer(&textBuffer); d != "" {
 			output.WriteString(d)
-			trySend(msgCh, Message{Type: MessageText, Content: d})
+			sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: d})
 		}
 
 		waitErr := cmd.Wait()

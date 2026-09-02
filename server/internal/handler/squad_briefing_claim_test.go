@@ -29,10 +29,11 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 
 	var resp struct {
 		Task *struct {
-			ID                 string `json:"id"`
-			IsLeaderTask       bool   `json:"is_leader_task"`
-			LeaderRoleResolved bool   `json:"leader_role_resolved"`
-			Agent              *struct {
+			ID                        string `json:"id"`
+			IsLeaderTask              bool   `json:"is_leader_task"`
+			LeaderRoleResolved        bool   `json:"leader_role_resolved"`
+			TranscriptBatchReplaySafe bool   `json:"transcript_batch_replay_safe"`
+			Agent                     *struct {
 				Instructions string `json:"instructions"`
 			} `json:"agent"`
 		} `json:"task"`
@@ -49,6 +50,9 @@ func claimAgentInstructionsForTest(t *testing.T, runtimeID string) (taskID strin
 	// from instructions text — the bug MUL-5811 removed.
 	if !resp.Task.LeaderRoleResolved {
 		t.Fatalf("claim response must set leader_role_resolved=true: %s", w.Body.String())
+	}
+	if !resp.Task.TranscriptBatchReplaySafe {
+		t.Fatalf("claim response must set transcript_batch_replay_safe=true: %s", w.Body.String())
 	}
 	var instr string
 	if resp.Task.Agent != nil {

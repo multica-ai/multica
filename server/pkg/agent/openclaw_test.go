@@ -48,7 +48,7 @@ func TestOpenclawProcessOutputHappyPath(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -93,7 +93,7 @@ func TestOpenclawProcessOutputMultiplePayloads(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.output != "FirstSecond" {
 		t.Errorf("output: got %q, want %q", res.output, "FirstSecond")
@@ -124,7 +124,7 @@ func TestOpenclawProcessOutputEmptyPayloads(t *testing.T) {
 	result := openclawResult{Payloads: []openclawPayload{}}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -155,7 +155,7 @@ func TestOpenclawProcessOutputWithLeadingLogLines(t *testing.T) {
 	data, _ := json.Marshal(result)
 	input := "some log line\nanother log\n" + string(data)
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -179,7 +179,7 @@ func TestOpenclawProcessOutputIgnoresTrailingLogLinesAfterJSON(t *testing.T) {
 	data, _ := json.Marshal(result)
 	input := string(data) + "\npost-result log line that should not block parsing"
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -197,7 +197,7 @@ func TestOpenclawProcessOutputNoJSON(t *testing.T) {
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	res := b.processOutput(strings.NewReader("not json at all"), ch)
+	res := b.processOutput(context.Background(), strings.NewReader("not json at all"), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -215,7 +215,7 @@ func TestOpenclawProcessOutputEmptyInput(t *testing.T) {
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	res := b.processOutput(strings.NewReader(""), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(""), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -233,7 +233,7 @@ func TestOpenclawProcessOutputReadError(t *testing.T) {
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	res := b.processOutput(&ioErrReader{data: ""}, ch)
+	res := b.processOutput(context.Background(), &ioErrReader{data: ""}, ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -260,7 +260,7 @@ func TestOpenclawProcessOutputWithBracesInLogLines(t *testing.T) {
 	// with '{' are considered. The result blob on its own line is still parsed.
 	input := `[tools] exec failed: complex interpreter invocation detected. raw_params={"command":"echo hello"}` + "\n" + string(data)
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -287,7 +287,7 @@ func TestOpenclawResultBlobWithLeadingPrefixRejected(t *testing.T) {
 	data, _ := json.Marshal(result)
 	input := "some prefix " + string(data)
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	// Should fall back to raw output since the JSON has a prefix.
 	if res.status != "completed" {
@@ -314,7 +314,7 @@ func TestOpenclawStreamingTextEvents(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -352,7 +352,7 @@ func TestOpenclawStreamingToolUseEvents(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -410,7 +410,7 @@ func TestOpenclawStreamingErrorEvent(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -445,7 +445,7 @@ func TestOpenclawStreamingStepFinishUsage(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.usage.InputTokens != 200 {
 		t.Errorf("input tokens: got %d, want 200", res.usage.InputTokens)
@@ -474,7 +474,7 @@ func TestOpenclawStreamingSessionID(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.sessionID != "ses_stream_123" {
 		t.Errorf("sessionID: got %q, want %q", res.sessionID, "ses_stream_123")
@@ -497,7 +497,7 @@ func TestOpenclawStreamingMixedWithLogLines(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -530,7 +530,7 @@ func TestOpenclawLifecycleErrorPhase(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -563,7 +563,7 @@ func TestOpenclawLifecycleFailedPhase(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -586,7 +586,7 @@ func TestOpenclawLifecycleCancelledPhase(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -611,7 +611,7 @@ func TestOpenclawLifecycleRunningPhaseIgnored(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -633,7 +633,7 @@ func TestOpenclawStructuredErrorObject(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -656,7 +656,7 @@ func TestOpenclawStructuredErrorNameOnly(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.errMsg != "AuthenticationError" {
 		t.Errorf("errMsg: got %q, want %q", res.errMsg, "AuthenticationError")
@@ -676,7 +676,7 @@ func TestOpenclawStructuredErrorMessageField(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.errMsg != "rate limit exceeded" {
 		t.Errorf("errMsg: got %q, want %q", res.errMsg, "rate limit exceeded")
@@ -773,7 +773,7 @@ func TestOpenclawUsageAccumulationAcrossSteps(t *testing.T) {
 	}
 	input := strings.Join(lines, "\n")
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.usage.InputTokens != 300 {
 		t.Errorf("InputTokens: got %d, want 300", res.usage.InputTokens)
@@ -809,7 +809,7 @@ func TestOpenclawUsageFinalResultAlternativeFields(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.usage.InputTokens != 400 {
 		t.Errorf("InputTokens: got %d, want 400", res.usage.InputTokens)
@@ -846,7 +846,7 @@ func TestOpenclawProcessOutputMultilineJSON(t *testing.T) {
 	// Marshal with indentation to simulate openclaw's pretty-printed output.
 	data, _ := json.MarshalIndent(result, "", "  ")
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -881,7 +881,7 @@ func TestOpenclawProcessOutputMultilineJSONWithLeadingLogs(t *testing.T) {
 	data, _ := json.MarshalIndent(result, "", "  ")
 	input := "some startup log\nanother log line\n" + string(data)
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -1170,7 +1170,7 @@ func TestOpenclawProcessOutputExtractsModelFromAgentMeta(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.model != "deepseek-chat" {
 		t.Errorf("model: got %q, want %q", res.model, "deepseek-chat")
@@ -1208,7 +1208,7 @@ func TestOpenclawProcessOutputModelEmptyWhenAgentMetaOmitsIt(t *testing.T) {
 	}
 	data, _ := json.Marshal(result)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.model != "" {
 		t.Errorf("model: got %q, want empty", res.model)
@@ -1257,7 +1257,7 @@ func TestOpenclawProcessOutputWholeBufferPrettyJSON(t *testing.T) {
 }
 `
 
-	res := b.processOutput(strings.NewReader(input), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(input), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")
@@ -1339,7 +1339,7 @@ func TestOpenclawProcessOutputEmptyBufferCanonicalError(t *testing.T) {
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	res := b.processOutput(strings.NewReader(""), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(""), ch)
 
 	if res.status != "failed" {
 		t.Errorf("status: got %q, want %q", res.status, "failed")
@@ -1384,7 +1384,7 @@ func TestOpenclawProcessOutputStdoutFixture(t *testing.T) {
 	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	res := b.processOutput(strings.NewReader(string(data)), ch)
+	res := b.processOutput(context.Background(), strings.NewReader(string(data)), ch)
 
 	if res.status != "completed" {
 		t.Errorf("status: got %q, want %q", res.status, "completed")

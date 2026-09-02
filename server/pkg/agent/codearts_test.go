@@ -103,7 +103,7 @@ func TestCodeArtsExecuteUsesNativeRunFlagsAndStdin(t *testing.T) {
 func TestCodeArtsRejectsNonJSONSuccessOutput(t *testing.T) {
 	backend := &codeartsBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 8)
-	result := backend.processEvents(strings.NewReader("\x1b[31mError: CODEARTS_CLI_AK is not configured\x1b[0m\n"), ch)
+	result := backend.processEvents(context.Background(), strings.NewReader("\x1b[31mError: CODEARTS_CLI_AK is not configured\x1b[0m\n"), ch)
 	if result.status != "failed" {
 		t.Fatalf("status = %q, want failed", result.status)
 	}
@@ -119,7 +119,7 @@ func TestCodeArtsRejectsNonJSONSuccessOutput(t *testing.T) {
 func TestCodeArtsStreamErrorsUseCodeArtsLabel(t *testing.T) {
 	backend := &codeartsBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 8)
-	result := backend.processEvents(strings.NewReader(`{"type":"step_start","sessionID":"ses","part":{}}`+"\n"), ch)
+	result := backend.processEvents(context.Background(), strings.NewReader(`{"type":"step_start","sessionID":"ses","part":{}}`+"\n"), ch)
 	if result.status != "failed" || !strings.HasPrefix(result.errMsg, "codearts stream ended") {
 		t.Fatalf("result = %+v", result)
 	}

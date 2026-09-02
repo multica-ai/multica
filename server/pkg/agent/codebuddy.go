@@ -234,19 +234,19 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			switch msg.Type {
 			case "assistant":
 				assistantEventCount++
-				turn := b.handleAssistant(msg, msgCh, usage)
+				turn := b.handleAssistant(runCtx, msg, msgCh, usage)
 				toolUseCount += turn.toolUses
 				if !turn.understood {
 					unreadableAssistantCount++
 				}
 				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
-				b.handleUser(msg, msgCh)
+				b.handleUser(runCtx, msg, msgCh)
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
+				sendMessage(runCtx, msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
 				sawResult = true
 				finalResultText = msg.ResultText
@@ -258,7 +258,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				closeStdin()
 			case "log":
 				if msg.Log != nil {
-					trySend(msgCh, Message{
+					sendMessage(runCtx, msgCh, Message{
 						Type:    MessageLog,
 						Level:   msg.Log.Level,
 						Content: msg.Log.Message,
@@ -349,7 +349,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
+func (b *codebuddyBackend) handleAssistant(ctx context.Context, msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		// Unreadable body: understood stays false so the caller drops any
@@ -375,11 +375,11 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 		case "text":
 			if block.Text != "" {
 				assistantText.WriteString(block.Text)
-				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				sendMessage(ctx, ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
 			if block.Text != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+				sendMessage(ctx, ch, Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
 			toolUseCount++
@@ -387,7 +387,7 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
 			}
-			trySend(ch, Message{
+			sendMessage(ctx, ch, Message{
 				Type:   MessageToolUse,
 				Tool:   block.Name,
 				CallID: block.ID,
@@ -406,7 +406,7 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 	return turn
 }
 
-func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
+func (b *codebuddyBackend) handleUser(ctx context.Context, msg codebuddySDKMessage, ch chan<- Message) {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
 		return
@@ -418,7 +418,7 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 			if block.Content != nil {
 				resultStr = string(block.Content)
 			}
-			trySend(ch, Message{
+			sendMessage(ctx, ch, Message{
 				Type:   MessageToolResult,
 				CallID: block.ToolUseID,
 				Output: resultStr,

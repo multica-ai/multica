@@ -237,7 +237,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processEvents(stdout, msgCh)
+		scanResult := b.processEvents(runCtx, stdout, msgCh)
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
@@ -333,7 +333,7 @@ type codeArtsEventResult struct {
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
 // the accumulated result. This is the core scanner loop, extracted for testability.
-func (b *codeartsBackend) processEvents(r io.Reader, ch chan<- Message) codeArtsEventResult {
+func (b *codeartsBackend) processEvents(ctx context.Context, r io.Reader, ch chan<- Message) codeArtsEventResult {
 	var output strings.Builder
 	var unparsedOutput strings.Builder
 	var sessionID string
@@ -410,24 +410,24 @@ func (b *codeartsBackend) processEvents(r io.Reader, ch chan<- Message) codeArts
 
 		switch event.Type {
 		case "text":
-			b.handleTextEvent(event, ch, &output)
+			b.handleTextEvent(ctx, event, ch, &output)
 			if event.Part.Text != "" {
 				stepProducedOutput = true
 			}
 		case "tool_use":
-			b.handleToolUseEvent(event, ch)
+			b.handleToolUseEvent(ctx, event, ch)
 			stepProducedOutput = true
 			if event.Part.Metadata == nil || !event.Part.Metadata.ProviderExecuted {
 				stepHasContinuationTool = true
 			}
 		case "error":
-			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
+			b.handleErrorEvent(ctx, event, ch, &finalStatus, &finalError)
 		case "step_start":
 			openStep = true
 			stepHasContinuationTool = false
 			awaitingContinuation = false
 			stepProducedOutput = false
-			trySend(ch, Message{Type: MessageStatus, Status: "running"})
+			sendMessage(ctx, ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
 			sawStepFinish = true
@@ -534,18 +534,18 @@ func codeArtsStepReportedUsage(part *codeartsEventPart) bool {
 	return t.Cache != nil && (t.Cache.Read > 0 || t.Cache.Write > 0)
 }
 
-func (b *codeartsBackend) handleTextEvent(event codeartsEvent, ch chan<- Message, output *strings.Builder) {
+func (b *codeartsBackend) handleTextEvent(ctx context.Context, event codeartsEvent, ch chan<- Message, output *strings.Builder) {
 	text := event.Part.Text
 	if text != "" {
 		output.WriteString(text)
-		trySend(ch, Message{Type: MessageText, Content: text})
+		sendMessage(ctx, ch, Message{Type: MessageText, Content: text})
 	}
 }
 
 // handleToolUseEvent processes "tool_use" events from codearts. A single
 // tool_use event contains both the call and result in part.state when the
 // tool reaches a terminal state (state.status is "completed" or "error").
-func (b *codeartsBackend) handleToolUseEvent(event codeartsEvent, ch chan<- Message) {
+func (b *codeartsBackend) handleToolUseEvent(ctx context.Context, event codeartsEvent, ch chan<- Message) {
 	// Extract input from state.input (the tool invocation parameters).
 	var input map[string]any
 	if event.Part.State != nil && event.Part.State.Input != nil {
@@ -553,7 +553,7 @@ func (b *codeartsBackend) handleToolUseEvent(event codeartsEvent, ch chan<- Mess
 	}
 
 	// Emit the tool-use message.
-	trySend(ch, Message{
+	sendMessage(ctx, ch, Message{
 		Type:   MessageToolUse,
 		Tool:   event.Part.Tool,
 		CallID: event.Part.CallID,
@@ -569,7 +569,7 @@ func (b *codeartsBackend) handleToolUseEvent(event codeartsEvent, ch chan<- Mess
 		if state.Status == "error" && state.Error != "" {
 			outputStr = state.Error
 		}
-		trySend(ch, Message{
+		sendMessage(ctx, ch, Message{
 			Type:   MessageToolResult,
 			Tool:   event.Part.Tool,
 			CallID: event.Part.CallID,
@@ -581,7 +581,7 @@ func (b *codeartsBackend) handleToolUseEvent(event codeartsEvent, ch chan<- Mess
 // handleErrorEvent processes "error" events from codearts. CodeArts can exit
 // with RC=0 even on errors (e.g. invalid model), so error events are the
 // reliable signal for failures.
-func (b *codeartsBackend) handleErrorEvent(event codeartsEvent, ch chan<- Message, finalStatus, finalError *string) {
+func (b *codeartsBackend) handleErrorEvent(ctx context.Context, event codeartsEvent, ch chan<- Message, finalStatus, finalError *string) {
 	errMsg := ""
 	if event.Error != nil {
 		errMsg = event.Error.Message()
@@ -591,7 +591,7 @@ func (b *codeartsBackend) handleErrorEvent(event codeartsEvent, ch chan<- Messag
 	}
 
 	b.cfg.Logger.Warn("codearts error event", "error", errMsg)
-	trySend(ch, Message{Type: MessageError, Content: errMsg})
+	sendMessage(ctx, ch, Message{Type: MessageError, Content: errMsg})
 
 	*finalStatus = "failed"
 	*finalError = errMsg

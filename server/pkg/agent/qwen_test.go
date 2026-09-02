@@ -329,7 +329,7 @@ func TestQwenCode020FixtureParses(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			t.Fatalf("fixture event: %v\n%s", err, line)
 		}
-		handleQwenEvent(event, messages, &state)
+		handleQwenEvent(context.Background(), event, messages, &state)
 	}
 	if !state.sawResult || state.resultIsError || state.sessionID != "session-redacted" || state.finalResultText != "DONE" {
 		t.Fatalf("unexpected fixture state: %+v", state)
@@ -352,7 +352,7 @@ func TestQwenCode020ErrorFixturePreservesErrorMessage(t *testing.T) {
 		if err := json.Unmarshal([]byte(line), &event); err != nil {
 			t.Fatalf("fixture event: %v\n%s", err, line)
 		}
-		handleQwenEvent(event, messages, &state)
+		handleQwenEvent(context.Background(), event, messages, &state)
 	}
 	if !state.sawResult || !state.resultIsError {
 		t.Fatalf("unexpected terminal state: %+v", state)

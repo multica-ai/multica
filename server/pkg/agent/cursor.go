@@ -162,19 +162,19 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			switch evt.Type {
 			case "system":
 				if evt.Subtype == "init" {
-					trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+					sendMessage(runCtx, msgCh, Message{Type: MessageStatus, Status: "running"})
 				}
 				if evt.Subtype == "error" {
 					errMsg := cursorErrorText(&evt)
 					if errMsg != "" {
 						protocolError = errMsg
-						trySend(msgCh, Message{Type: MessageError, Content: errMsg})
+						sendMessage(runCtx, msgCh, Message{Type: MessageError, Content: errMsg})
 					}
 				}
 
 			case "assistant":
 				assistantEventCount++
-				assistantBytes += b.handleCursorAssistant(&evt, msgCh, &output)
+				assistantBytes += b.handleCursorAssistant(runCtx, &evt, msgCh, &output)
 
 			case "thinking":
 				// Reasoning is a top-level event streamed as deltas, not a
@@ -187,7 +187,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				switch evt.Subtype {
 				case "delta":
 					if content := thinking.delta(evt.Text); content != "" {
-						trySend(msgCh, Message{Type: MessageThinking, Content: content})
+						sendMessage(runCtx, msgCh, Message{Type: MessageThinking, Content: content})
 					}
 				case "completed":
 					thinking.complete()
@@ -207,7 +207,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				case "started":
 					call := parseCursorToolCall(&evt)
 					toolUseCount++
-					trySend(msgCh, Message{
+					sendMessage(runCtx, msgCh, Message{
 						Type:   MessageToolUse,
 						Tool:   call.Name,
 						CallID: call.CallID,
@@ -215,7 +215,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					})
 				case "completed":
 					call := parseCursorToolCall(&evt)
-					trySend(msgCh, Message{
+					sendMessage(runCtx, msgCh, Message{
 						Type:   MessageToolResult,
 						Tool:   call.Name,
 						CallID: call.CallID,
@@ -231,7 +231,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if evt.Parameters != nil {
 					_ = json.Unmarshal(evt.Parameters, &params)
 				}
-				trySend(msgCh, Message{
+				sendMessage(runCtx, msgCh, Message{
 					Type:   MessageToolUse,
 					Tool:   evt.ToolName,
 					CallID: evt.ToolID,
@@ -239,7 +239,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				})
 
 			case "tool_result":
-				trySend(msgCh, Message{
+				sendMessage(runCtx, msgCh, Message{
 					Type:   MessageToolResult,
 					CallID: evt.ToolID,
 					Output: evt.Output,
@@ -255,7 +255,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resultBytes = len(evt.ResultText)
 				if evt.ResultText != "" && output.Len() == 0 {
 					output.WriteString(evt.ResultText)
-					trySend(msgCh, Message{Type: MessageText, Content: evt.ResultText})
+					sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: evt.ResultText})
 				}
 				b.accumulateResultUsage(resultUsage, &evt, configuredModel)
 				if evt.hasResultUsage() {
@@ -271,7 +271,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if errMsg != "" {
 					protocolError = errMsg
 				}
-				trySend(msgCh, Message{Type: MessageError, Content: errMsg})
+				sendMessage(runCtx, msgCh, Message{Type: MessageError, Content: errMsg})
 
 			case "text":
 				if evt.Part != nil {
@@ -280,7 +280,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					if part.Text != "" {
 						output.WriteString(part.Text)
 						assistantBytes += len(part.Text)
-						trySend(msgCh, Message{Type: MessageText, Content: part.Text})
+						sendMessage(runCtx, msgCh, Message{Type: MessageText, Content: part.Text})
 					}
 				}
 
@@ -583,7 +583,7 @@ func (t *cursorUnhandledTypeTally) summary() string {
 // returns how many bytes of model-authored text it appended to output. The
 // caller tracks that separately from output.Len(), which also absorbs the
 // terminal result text.
-func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder) int {
+func (b *cursorBackend) handleCursorAssistant(ctx context.Context, evt *cursorStreamEvent, ch chan<- Message, output *strings.Builder) int {
 	if evt.Message == nil {
 		return 0
 	}
@@ -604,18 +604,18 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 			if block.Text != "" {
 				output.WriteString(block.Text)
 				written += len(block.Text)
-				trySend(ch, Message{Type: MessageText, Content: block.Text})
+				sendMessage(ctx, ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
 			if block.Text != "" {
-				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
+				sendMessage(ctx, ch, Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
 			var input map[string]any
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
 			}
-			trySend(ch, Message{
+			sendMessage(ctx, ch, Message{
 				Type:   MessageToolUse,
 				Tool:   block.Name,
 				CallID: block.ID,

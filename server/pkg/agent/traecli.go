@@ -58,22 +58,24 @@ var traecliReaderDrainGrace = 2 * time.Second
 // reader (traecli may keep the process and its pipes open briefly after
 // session/prompt returns) cannot send on a closed channel. Mirrors qoder.
 type traecliMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newTraecliMessageStream(size int) *traecliMessageStream {
-	return &traecliMessageStream{ch: make(chan Message, size)}
+func newTraecliMessageStream(ctx context.Context, size int) *traecliMessageStream {
+	return &traecliMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *traecliMessageStream) send(msg Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, msg)
+	sendMessage(s.ctx, s.ch, msg)
 }
 
 func (s *traecliMessageStream) close() {
@@ -157,7 +159,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 	b.cfg.Logger.Info("traecli acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgStream := newTraecliMessageStream(256)
+	msgStream := newTraecliMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 
 	// Traecli streams interim narration and the final answer as the same
@@ -219,7 +221,6 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
@@ -227,6 +228,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
 		}()
+		defer cancel()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -400,9 +402,8 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// cancellation tears the process down). Draining stderr is what makes
 		// the provider-error promotion below see a terminal marker.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), traecliReaderDrainGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
+		if !messageReaderClosedBefore(drainCtx, readerDone) {
+			markMessageDeliveryAbandoned(runCtx)
 		}
 		select {
 		case <-stderrDone:

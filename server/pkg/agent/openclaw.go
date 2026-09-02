@@ -132,7 +132,7 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer close(resCh)
 
 		startTime := time.Now()
-		scanResult := b.processOutput(stdout, msgCh)
+		scanResult := b.processOutput(runCtx, stdout, msgCh)
 
 		// openclaw delivered a complete result but would not exit. Cancel the
 		// run context so CommandContext kills it and cmd.Wait can return —
@@ -411,7 +411,7 @@ type openclawEventResult struct {
 // fails do we fall through to the line-by-line NDJSON scanner. This makes
 // the dominant happy path (one pretty-printed JSON blob) deterministic
 // while keeping NDJSON event support intact.
-func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclawEventResult {
+func (b *openclawBackend) processOutput(ctx context.Context, r io.Reader, ch chan<- Message) openclawEventResult {
 	buf, cutShort, readErr := readOpenclawStdout(r, openclawResultIdleGrace)
 	if readErr != nil {
 		return openclawEventResult{status: "failed", errMsg: fmt.Sprintf("read stdout: %v", readErr)}
@@ -423,7 +423,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 	// matches, we're done — no need to involve the line scanner at all.
 	if result, ok := parseWholeBufferOpenclawResult(buf); ok {
 		var output strings.Builder
-		res := b.buildOpenclawEventResult(result, ch, &output)
+		res := b.buildOpenclawEventResult(ctx, result, ch, &output)
 		res.cutShort = cutShort
 		return res
 	}
@@ -463,21 +463,21 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			case "text":
 				if event.Text != "" {
 					output.WriteString(event.Text)
-					trySend(ch, Message{Type: MessageText, Content: event.Text})
+					sendMessage(ctx, ch, Message{Type: MessageText, Content: event.Text})
 				}
 			case "tool_use":
 				var input map[string]any
 				if event.Input != nil {
 					_ = json.Unmarshal(event.Input, &input)
 				}
-				trySend(ch, Message{
+				sendMessage(ctx, ch, Message{
 					Type:   MessageToolUse,
 					Tool:   event.Tool,
 					CallID: event.CallID,
 					Input:  input,
 				})
 			case "tool_result":
-				trySend(ch, Message{
+				sendMessage(ctx, ch, Message{
 					Type:   MessageToolResult,
 					Tool:   event.Tool,
 					CallID: event.CallID,
@@ -486,7 +486,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 			case "error":
 				errMsg := event.errorMessage()
 				b.cfg.Logger.Warn("openclaw error event", "error", errMsg)
-				trySend(ch, Message{Type: MessageError, Content: errMsg})
+				sendMessage(ctx, ch, Message{Type: MessageError, Content: errMsg})
 				finalStatus = "failed"
 				finalError = errMsg
 			case "lifecycle":
@@ -494,12 +494,12 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 				if phase == "error" || phase == "failed" || phase == "cancelled" {
 					errMsg := event.errorMessage()
 					b.cfg.Logger.Warn("openclaw lifecycle failure", "phase", phase, "error", errMsg)
-					trySend(ch, Message{Type: MessageError, Content: errMsg})
+					sendMessage(ctx, ch, Message{Type: MessageError, Content: errMsg})
 					finalStatus = "failed"
 					finalError = errMsg
 				}
 			case "step_start":
-				trySend(ch, Message{Type: MessageStatus, Status: "running"})
+				sendMessage(ctx, ch, Message{Type: MessageStatus, Status: "running"})
 			case "step_finish":
 				if event.Usage != nil {
 					u := parseOpenclawUsage(event.Usage)
@@ -515,7 +515,7 @@ func (b *openclawBackend) processOutput(r io.Reader, ch chan<- Message) openclaw
 		// Try parsing as a final result blob (legacy format).
 		if result, ok := tryParseOpenclawResult(line); ok {
 			gotEvents = true
-			res := b.buildOpenclawEventResult(result, ch, &output)
+			res := b.buildOpenclawEventResult(ctx, result, ch, &output)
 			if res.sessionID != "" {
 				sessionID = res.sessionID
 			}
@@ -633,11 +633,11 @@ func tryParseOpenclawResult(raw string) (openclawResult, bool) {
 
 // buildOpenclawEventResult extracts text and metadata from a final result blob.
 // Text payloads are appended to the shared output builder and emitted to ch.
-func (b *openclawBackend) buildOpenclawEventResult(result openclawResult, ch chan<- Message, output *strings.Builder) openclawEventResult {
+func (b *openclawBackend) buildOpenclawEventResult(ctx context.Context, result openclawResult, ch chan<- Message, output *strings.Builder) openclawEventResult {
 	for _, p := range result.Payloads {
 		if p.Text != "" {
 			output.WriteString(p.Text)
-			trySend(ch, Message{Type: MessageText, Content: p.Text})
+			sendMessage(ctx, ch, Message{Type: MessageText, Content: p.Text})
 		}
 	}
 

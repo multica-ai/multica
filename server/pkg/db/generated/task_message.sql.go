@@ -55,7 +55,7 @@ func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessagePa
 }
 
 const createTaskMessages = `-- name: CreateTaskMessages :many
-WITH incoming AS (
+WITH raw_incoming AS (
     -- Several single-argument unnest calls in one SELECT list expand in
     -- lockstep (PostgreSQL 10+ set-returning-function semantics), which is the
     -- same row-wise zip the multi-argument unnest(a, b, ...) form gives — but
@@ -69,6 +69,16 @@ WITH incoming AS (
         unnest($5::text[]) AS content,
         unnest($6::text[]) AS input,
         unnest($7::text[]) AS output
+), incoming AS (
+    SELECT
+        id,
+        seq,
+        type,
+        NULLIF(tool, '') AS tool,
+        NULLIF(content, '') AS content,
+        NULLIF(input, '')::jsonb AS input,
+        NULLIF(output, '') AS output
+    FROM raw_incoming
 ), inserted AS (
     INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
     SELECT
@@ -76,14 +86,34 @@ WITH incoming AS (
         $8::uuid,
         m.seq,
         m.type,
-        NULLIF(m.tool, ''),
-        NULLIF(m.content, ''),
-        NULLIF(m.input, '')::jsonb,
-        NULLIF(m.output, '')
+        m.tool,
+        m.content,
+        m.input,
+        m.output
     FROM incoming AS m
+    ON CONFLICT (task_id, seq) DO NOTHING
     RETURNING id, task_id, seq, type, tool, content, input, output, created_at
+), resolved AS (
+    SELECT inserted.id, inserted.task_id, inserted.seq, inserted.type, inserted.tool, inserted.content, inserted.input, inserted.output, inserted.created_at, true AS was_inserted, true AS payload_matches
+    FROM inserted
+
+    UNION ALL
+
+    SELECT
+        existing.id, existing.task_id, existing.seq, existing.type, existing.tool, existing.content, existing.input, existing.output, existing.created_at,
+        false AS was_inserted,
+        existing.type = incoming.type
+            AND existing.tool IS NOT DISTINCT FROM incoming.tool
+            AND existing.content IS NOT DISTINCT FROM incoming.content
+            AND existing.input IS NOT DISTINCT FROM incoming.input
+            AND existing.output IS NOT DISTINCT FROM incoming.output
+            AS payload_matches
+    FROM incoming
+    JOIN task_message AS existing
+      ON existing.task_id = $8::uuid
+     AND existing.seq = incoming.seq
 )
-SELECT id, task_id, seq, type, tool, content, input, output, created_at FROM inserted ORDER BY seq ASC
+SELECT id, task_id, seq, type, tool, content, input, output, created_at, was_inserted, payload_matches FROM resolved ORDER BY seq ASC
 `
 
 type CreateTaskMessagesParams struct {
@@ -98,15 +128,17 @@ type CreateTaskMessagesParams struct {
 }
 
 type CreateTaskMessagesRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	TaskID    pgtype.UUID        `json:"task_id"`
-	Seq       int32              `json:"seq"`
-	Type      string             `json:"type"`
-	Tool      pgtype.Text        `json:"tool"`
-	Content   pgtype.Text        `json:"content"`
-	Input     []byte             `json:"input"`
-	Output    pgtype.Text        `json:"output"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID             pgtype.UUID        `json:"id"`
+	TaskID         pgtype.UUID        `json:"task_id"`
+	Seq            int32              `json:"seq"`
+	Type           string             `json:"type"`
+	Tool           pgtype.Text        `json:"tool"`
+	Content        pgtype.Text        `json:"content"`
+	Input          []byte             `json:"input"`
+	Output         pgtype.Text        `json:"output"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	WasInserted    bool               `json:"was_inserted"`
+	PayloadMatches bool               `json:"payload_matches"`
 }
 
 // Batch variant of CreateTaskMessage: persists a whole daemon-reported batch in
@@ -136,11 +168,9 @@ type CreateTaskMessagesRow struct {
 // into one statement, not to the parameter shape.
 //
 // Atomicity is a deliberate side effect, not just a speedup: the per-message
-// loop this replaces could persist part of a batch and then fail, leaving the
-// transcript with a prefix of the batch and no way to complete it — the daemon
-// does not retry this endpoint. One statement makes the batch all-or-nothing,
-// which buys consistency; a batch that fails is still lost whole, so closing
-// the gap for real needs a retry plus a (task_id, seq) uniqueness rule.
+// loop this replaces could persist part of a batch and then fail. The daemon
+// now retries the exact batch, while (task_id, seq) uniqueness and DO NOTHING
+// make a lost-response replay idempotent and keep realtime events single-shot.
 //
 // The ORDER BY is a contract, not decoration. A bare `INSERT ... RETURNING`
 // has no defined row order, and the caller republishes these rows as realtime
@@ -176,6 +206,8 @@ func (q *Queries) CreateTaskMessages(ctx context.Context, arg CreateTaskMessages
 			&i.Input,
 			&i.Output,
 			&i.CreatedAt,
+			&i.WasInserted,
+			&i.PayloadMatches,
 		); err != nil {
 			return nil, err
 		}
@@ -195,6 +227,28 @@ WHERE task_id = $1
 func (q *Queries) DeleteTaskMessages(ctx context.Context, taskID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteTaskMessages, taskID)
 	return err
+}
+
+const getTaskMessageSeqSummary = `-- name: GetTaskMessageSeqSummary :one
+SELECT
+    COUNT(*)::int AS message_count,
+    COALESCE(MIN(seq), 0)::int AS min_seq,
+    COALESCE(MAX(seq), 0)::int AS max_seq
+FROM task_message
+WHERE task_id = $1
+`
+
+type GetTaskMessageSeqSummaryRow struct {
+	MessageCount int32 `json:"message_count"`
+	MinSeq       int32 `json:"min_seq"`
+	MaxSeq       int32 `json:"max_seq"`
+}
+
+func (q *Queries) GetTaskMessageSeqSummary(ctx context.Context, taskID pgtype.UUID) (GetTaskMessageSeqSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getTaskMessageSeqSummary, taskID)
+	var i GetTaskMessageSeqSummaryRow
+	err := row.Scan(&i.MessageCount, &i.MinSeq, &i.MaxSeq)
+	return i, err
 }
 
 const listTaskMessages = `-- name: ListTaskMessages :many
@@ -272,4 +326,17 @@ func (q *Queries) ListTaskMessagesSince(ctx context.Context, arg ListTaskMessage
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTaskForTranscriptWrite = `-- name: LockTaskForTranscriptWrite :one
+SELECT status FROM agent_task_queue
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockTaskForTranscriptWrite(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, lockTaskForTranscriptWrite, id)
+	var status string
+	err := row.Scan(&status)
+	return status, err
 }

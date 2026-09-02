@@ -193,22 +193,24 @@ var (
 // zeroclawMessageStream serializes sends and the final close so a late
 // stdout reader cannot send on a closed channel. Mirrors dim/grok/traecli.
 type zeroclawMessageStream struct {
+	ctx    context.Context
 	ch     chan Message
 	mu     sync.Mutex
 	closed bool
 }
 
-func newZeroclawMessageStream(size int) *zeroclawMessageStream {
-	return &zeroclawMessageStream{ch: make(chan Message, size)}
+func newZeroclawMessageStream(ctx context.Context, size int) *zeroclawMessageStream {
+	return &zeroclawMessageStream{ctx: ctx, ch: make(chan Message, size)}
 }
 
 func (s *zeroclawMessageStream) send(msg Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
+		markMessageDeliveryAbandoned(s.ctx)
 		return
 	}
-	trySend(s.ch, msg)
+	sendMessage(s.ctx, s.ch, msg)
 }
 
 func (s *zeroclawMessageStream) close() {
@@ -291,7 +293,7 @@ func (b *zeroclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	b.cfg.Logger.Info("zeroclaw acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
-	msgStream := newZeroclawMessageStream(256)
+	msgStream := newZeroclawMessageStream(runCtx, 256)
 	resCh := make(chan Result, 1)
 
 	// ZeroClaw streams interim narration and the final answer as the same
@@ -363,7 +365,6 @@ func (b *zeroclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
@@ -371,6 +372,7 @@ func (b *zeroclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
 		}()
+		defer cancel()
 
 		startTime := time.Now()
 		finalStatus := "completed"
@@ -553,9 +555,8 @@ func (b *zeroclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// ZeroClaw's ACP server may keep the process — and the stdout/stderr
 		// pipes — open briefly after session/prompt returns. Bound the drain.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), zeroclawReaderDrainGrace)
-		select {
-		case <-readerDone:
-		case <-drainCtx.Done():
+		if !messageReaderClosedBefore(drainCtx, readerDone) {
+			markMessageDeliveryAbandoned(runCtx)
 		}
 		select {
 		case <-stderrDone:

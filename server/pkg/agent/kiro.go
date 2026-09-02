@@ -188,7 +188,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				}
 			}
 			deliverable.observe(msg)
-			trySend(msgCh, msg)
+			sendMessage(runCtx, msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
 			if !streamingCurrentTurn.Load() {
