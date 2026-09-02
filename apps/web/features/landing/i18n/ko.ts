@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.38",
           date: "2026-09-02",
-          title: "Claude Code 모델 목록, 사용자 지정 속성 필터, 오토파일럿 한도 알림",
+          title: "Claude Code 모델 자동 검색, 속성 필터 연산자, 세션 이어가기, 제공자 동작 안정화",
           changes: [],
           features: [
             "모델 선택에 이 컴퓨터에서 실제로 쓸 수 있는 Claude Code 모델만 표시됩니다.",
@@ -279,8 +279,6 @@ export function createKoDict(allowSignup: boolean): LandingDict {
             "Fable 5.1을 사용할 수 있고 가격도 함께 표시됩니다.",
             "텍스트, 숫자, 날짜, URL 사용자 지정 속성의 내용으로 Issue를 필터링할 수 있습니다.",
             "숫자와 날짜 속성은 범위로도 필터링할 수 있습니다.",
-            "오토파일럿이 한도를 다 쓰면 워크스페이스 소유자와 관리자에게 받은 편지함 알림이 갑니다.",
-            "그 알림에서 한도를 되돌리는 결제 절차로 바로 이동할 수 있고, 휴대폰에서도 됩니다.",
             "명령줄에서 아직 실행 중인 에이전트를 Issue와 하위 Issue까지 함께 확인할 수 있습니다.",
             "채팅의 Issue 링크, 호버 카드, 입력 추천에 사용자 지정 상태 색이 표시됩니다.",
           ],

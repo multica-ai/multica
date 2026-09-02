@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.38",
         date: "2026-09-02",
-        title: "Claude Code model list, custom property filters, and Autopilot quota alerts",
+        title: "Claude Code model discovery, property filter operators, session continuity, and steadier providers",
         changes: [],
         features: [
           "The model picker shows only the Claude Code models your machine can actually run.",
@@ -304,8 +304,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Fable 5.1 is available, with its pricing already in place.",
           "Filter Issues by what a custom text, number, date, or URL property contains.",
           "Number and date properties can also be filtered by range.",
-          "Workspace owners and admins get an Inbox notification the first time an Autopilot runs out of quota.",
-          "That notification leads straight to the billing steps that restore it, on phones too.",
           "See which agent runs are still active from the command line, across an Issue and its sub-Issues.",
           "Custom status colors show up on Issue links, hover cards, and editor suggestions in chat.",
         ],

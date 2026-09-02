@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.38",
         date: "2026-09-02",
-        title: "Claude Code 模型列表、Issue 属性筛选、Autopilot 配额提醒",
+        title: "Claude Code 动态模型发现、属性筛选运算符、本地目录会话续接、Provider 运行更稳",
         changes: [],
         features: [
           "模型选择器只显示本机 Claude Code 真正能用的模型。",
@@ -304,8 +304,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "可以使用 Fable 5.1，定价也已经补齐。",
           "Issue 可以按自定义的文本、数字、日期和 URL 属性包含什么来筛选。",
           "数字和日期属性还可以按区间筛选。",
-          "Autopilot 首次用完配额时，工作区所有者和管理员会收到收件箱通知。",
-          "这条通知可以直接进入恢复配额的计费步骤，手机上也可以。",
           "命令行可以查看还在运行的智能体任务，父 Issue 和子 Issue 一起看。",
           "聊天里的 Issue 链接、悬浮卡片和输入建议都会显示自定义状态颜色。",
         ],
