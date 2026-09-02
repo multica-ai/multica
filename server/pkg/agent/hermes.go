@@ -2755,7 +2755,12 @@ var acpErrorHeaderRe = regexp.MustCompile(`(?:⚠️|❌|\[ERROR\]).*(?:BadReque
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the subsequent lines of the error block (the one whose "Error:" or
 // "Details:" tag actually spells out what happened).
-var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:)\s*(.+)`)
+// Anchored to the line start (an optional 📝 marker and a bare identifier
+// prefix like "RuntimeError:"/"JSONDecodeError:" are allowed) so an "Error:"
+// substring in the middle of an echoed conversation/tool line cannot pose as
+// a diagnostic; the identifier prefix keeps real exception lines capturable
+// (GH #6150's "RuntimeError: No LLM provider configured").
+var acpErrorDetailRe = regexp.MustCompile(`^(?:📝\s*)?(?:\w*Error:|detail:|Details:)\s*(.+)$`)
 
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
@@ -2863,10 +2868,13 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 				continue
 			}
 		}
-		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
+		isHeader := acpErrorHeaderRe.MatchString(line)
+		if !(isHeader || acpErrorDetailRe.MatchString(line)) {
 			continue
 		}
-		if acpTerminalErrorRe.MatchString(line) {
+		// Terminal markers belong to header lines; a detail line that merely
+		// echoes a terminal marker substring must not flip the flag.
+		if isHeader && acpTerminalErrorRe.MatchString(line) {
 			s.terminal = true
 		}
 		if s.seen[line] {

@@ -1780,8 +1780,7 @@ func TestParseACPTokenUsageCostIsOptional(t *testing.T) {
 // TestParseACPModelIDFromMeta covers the shapes the `_meta` model id can
 // arrive in, and confirms a missing one degrades to empty rather than
 // inventing an attribution.
-func TestParseACPModelIDFromMeta(t *testing.T) {
-	t.Parallel()
+func TestParseACPModelIDFromMeta(t *testing.T) {	t.Parallel()
 
 	for _, tc := range []struct {
 		name string
@@ -1984,6 +1983,22 @@ func TestHermesProviderErrorSnifferHandlesPartialLines(t *testing.T) {
 	msg := s.message()
 	if !strings.Contains(msg, "something went wrong") {
 		t.Errorf("expected buffered line to be captured, got %q", msg)
+	}
+}
+
+func TestHermesProviderErrorSnifferIgnoresToolTracebacks(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	s.Write([]byte("[ERROR] mcp.client.stdio: Failed to parse JSONRPC message from server\n"))
+	s.Write([]byte("pydantic_core.ValidationError: 1 validation error for JSONRPCMessage\n"))
+	s.Write([]byte("[ERROR] tools.vision_tools: Error analyzing image: Error code: 400\n"))
+
+	if msg := s.message(); msg != "" {
+		t.Errorf("tool tracebacks are not provider errors, got %q", msg)
+	}
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("tool tracebacks must not fail an otherwise completed run, got %q", msg)
 	}
 }
 
