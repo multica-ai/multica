@@ -35,18 +35,6 @@ func TestRuntimeGCRunsOutsideTheLivenessLoop(t *testing.T) {
 	}
 }
 
-func TestDelegatedFailureRecoveryRunsEveryFiveMinutes(t *testing.T) {
-	if delegatedFailureRecoverySweepInterval != 5*time.Minute {
-		t.Fatalf("delegated failure recovery interval = %s, want 5m", delegatedFailureRecoverySweepInterval)
-	}
-	if delegatedFailureRecoverySweepInterval%sweepInterval != 0 {
-		t.Fatalf("delegated failure recovery interval %s is not a multiple of runtime sweep interval %s", delegatedFailureRecoverySweepInterval, sweepInterval)
-	}
-	if ticks := delegatedFailureRecoverySweepInterval / sweepInterval; ticks != 10 {
-		t.Fatalf("delegated failure recovery cadence = every %d runtime ticks, want 10", ticks)
-	}
-}
-
 // TestRuntimeGCDailyCandidateCapacity prevents an interval or batch-size change
 // from silently reducing the hourly GC worker below its agreed daily capacity.
 func TestRuntimeGCDailyCandidateCapacity(t *testing.T) {

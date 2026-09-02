@@ -157,21 +157,21 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
 func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
-	delegatedFailureRecoveryTicks := 0
 	runPeriodicSweep(ctx, sweepInterval, func() {
-		// Every stage retains its existing order. The delegated-failure query is
-		// the only one gated to a lower cadence; the others still run every tick.
+		// These stages retain their existing cadence and ordering. Runtime GC and
+		// delegated-failure recovery run in independent lower-frequency loops.
 		sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
-		delegatedFailureRecoveryTicks++
-		if delegatedFailureRecoveryTicks >= int(delegatedFailureRecoverySweepInterval/sweepInterval) {
-			sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
-			delegatedFailureRecoveryTicks = 0
-		}
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+	})
+}
+
+func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, delegatedFailureRecoverySweepInterval, func() {
+		sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 	})
 }
 
@@ -182,9 +182,9 @@ func runRuntimeGCSweeper(ctx context.Context, txStarter runtimeGCTxStarter, quer
 }
 
 // sweepPendingDelegatedFailureRecoveries retries durable coordinator handoffs
-// that were not acquired by an executable task. It runs even when no stale
-// task was found in this tick, which is what repairs a recovery dispatch lost
-// before a server restart.
+// that were not acquired by an executable task. It runs independently of
+// stale-task discovery, which is what repairs a recovery dispatch lost before
+// a server restart.
 func sweepPendingDelegatedFailureRecoveries(ctx context.Context, taskSvc *service.TaskService) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
