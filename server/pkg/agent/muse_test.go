@@ -46,11 +46,12 @@ func TestBuildMuseArgsKeepsProtocolManaged(t *testing.T) {
 			t.Fatalf("expected %q once in %v (got %d)", want, args, strings.Count(joined, want))
 		}
 	}
-	// Injected values must not leak.
-	for _, forbidden := range []string{"other", "evil", "/evil", "restricted", "ask"} {
-		// "other" appears in model but already checked as "other" alone would be ambiguous; check for evil-specific leakage
-		if strings.Contains(joined, "--model other") || strings.Contains(joined, "--reasoning-effort low --") || strings.Contains(joined, "evil.md") {
-			t.Fatalf("managed argument %q leaked into %v", forbidden, args)
+	// Every injected value must be dropped along with its flag. None of these
+	// substrings occurs in the daemon-owned argv above, so a plain Contains is
+	// an exact leak check rather than an approximation.
+	for _, forbidden := range []string{"other", "evil", "/evil", "/evil2", "evil.md", "restricted", "ask", "off", "999", "low", "--disable-sandbox", "--provider", "--preset"} {
+		if strings.Contains(joined, forbidden) {
+			t.Errorf("blocked value %q leaked into %v", forbidden, args)
 		}
 	}
 	if strings.Contains(joined, "evil.md") || strings.Contains(joined, "--prompt-file evil") {
