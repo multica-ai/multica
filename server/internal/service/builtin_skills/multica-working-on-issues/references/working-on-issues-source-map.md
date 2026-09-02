@@ -157,6 +157,8 @@ away, so no task is left orphaned.
 | Trusted direct self-assignment suppresses enqueue only when the target `(issue, agent)` already has a non-terminal task | `server/internal/service/issue_trigger.go` (`WillEnqueueRun`), `server/internal/handler/issue_trigger.go` (`shouldSuppressActiveSelfAssignment`) |
 | Claim responses expose a bounded, workspace-scoped snapshot of the same agent's other dispatched/running/waiting issue tasks; queued tasks are excluded | `server/pkg/db/queries/agent.sql` (`ListActiveSiblingIssueTasks`), `server/internal/handler/daemon.go` (`buildClaimedTaskResponse`) |
 | Daemon prompts point to the target's comment history and concrete sibling `run-messages` commands | `server/internal/daemon/prompt.go` (`buildActiveSiblingRunsBlock`) |
+| `issue runs --active` / `--siblings` send `active=true` / `scope=family` to the task-runs endpoint | `server/cmd/multica/cmd_issue.go` (`runIssueRuns`) |
+| `scope=family` roots at the issue's parent, or the issue itself when it has none, and returns in-flight runs on that root plus all of its children | `server/internal/handler/daemon.go` (`ListTasksByIssue`), `server/pkg/db/queries/agent.sql` (`ListActiveTasksByIssueFamily`) |
 
 The self-assignment guard is intentionally pair-scoped. It does not treat
 "this agent is busy on some other issue" as a reason to suppress a fresh

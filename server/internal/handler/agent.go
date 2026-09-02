@@ -354,13 +354,18 @@ type TaskIssueStatusData struct {
 }
 
 type AgentTaskResponse struct {
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
+	// IssueTitle is set only on the cross-issue coordination read
+	// (`GET /api/issues/{id}/task-runs?scope=family`), where rows span several
+	// issues and cannot be labelled from the task alone. Absent everywhere
+	// else, including the daemon claim payload.
+	IssueTitle           string                 `json:"issue_title,omitempty"`
 	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so

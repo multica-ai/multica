@@ -321,8 +321,13 @@ var issueSubscriberRemoveCmd = &cobra.Command{
 var issueRunsCmd = &cobra.Command{
 	Use:   "runs <issue-id>",
 	Short: "List execution history for an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueRuns,
+	Long: "List agent task runs for an issue.\n\n" +
+		"Defaults to this issue's full execution history, newest first. Narrow it to " +
+		"work in flight with --active, or widen it across the sub-issue family with " +
+		"--siblings when you need to know whether another agent is already working " +
+		"next to you.",
+	Args: exactArgs(1),
+	RunE: runIssueRuns,
 }
 
 var issueRunMessagesCmd = &cobra.Command{
@@ -566,6 +571,8 @@ func init() {
 	// issue runs
 	issueRunsCmd.Flags().String("output", "table", "Output format: table or json")
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full task UUIDs in table output")
+	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
+	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active; adds an ISSUE column. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
 
 	// issue usage
 	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
@@ -2146,8 +2153,26 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	activeOnly, _ := cmd.Flags().GetBool("active")
+	siblings, _ := cmd.Flags().GetBool("siblings")
+
+	params := url.Values{}
+	if siblings {
+		// The server implies active for a family read, so --siblings alone is
+		// enough; sending both keeps the request self-describing.
+		params.Set("scope", "family")
+		params.Set("active", "true")
+	} else if activeOnly {
+		params.Set("active", "true")
+	}
+
+	path := "/api/issues/" + issueRef.ID + "/task-runs"
+	if len(params) > 0 {
+		path += "?" + params.Encode()
+	}
+
 	var runs []map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+issueRef.ID+"/task-runs", &runs); err != nil {
+	if err := client.GetJSON(ctx, path, &runs); err != nil {
 		return fmt.Errorf("list runs: %w", err)
 	}
 
@@ -2158,7 +2183,13 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 
 	actors := loadActorDisplayLookup(ctx, client)
 	fullID, _ := cmd.Flags().GetBool("full-id")
+	// A family read mixes runs from several issues, so the row has to say which
+	// one it belongs to. On a single-issue read that column would repeat the
+	// argument on every line, so it stays off.
 	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+	if siblings {
+		headers = []string{"ID", "ISSUE", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+	}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -2174,14 +2205,18 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			runes := []rune(errMsg)
 			errMsg = string(runes[:47]) + "..."
 		}
-		rows = append(rows, []string{
-			displayID(strVal(r, "id"), fullID),
+		row := []string{displayID(strVal(r, "id"), fullID)}
+		if siblings {
+			row = append(row, strVal(r, "issue_identifier"))
+		}
+		row = append(row,
 			actors.agent(strVal(r, "agent_id")),
 			strVal(r, "status"),
 			started,
 			completed,
 			errMsg,
-		})
+		)
+		rows = append(rows, row)
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil

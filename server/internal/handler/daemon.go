@@ -4880,7 +4880,29 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
+// familyActiveRunCap bounds a scope=family read. A defensive ceiling, not a
+// product limit: the coordination question ("is anyone else already working in
+// this sub-issue family?") is answered by the first few rows, and a parent that
+// fanned out hundreds of children must not be able to turn one advisory read
+// into an unbounded response. The query orders running-first so the rows this
+// drops are the least interesting ones.
+const familyActiveRunCap = 50
+
+// ListTasksByIssue returns tasks for an issue — the execution history behind
+// the issue-detail sidebar, and the coordination reads behind
+// `multica issue runs --active` / `--siblings`.
+//
+// Two optional query params narrow or widen it; with neither, the response is
+// byte-identical to what it has always been (full history, newest first), which
+// is what the UI and the CLI's short-task-ID resolver both depend on:
+//
+//   - active=true — restrict to in-flight statuses, the same set the
+//     issue-detail "agent live" banner calls active.
+//   - scope=family — widen from this issue to its sub-issue family: the
+//     issue's parent (or the issue itself, when it has no parent) plus every
+//     child of that parent. Implies active=true, because a full execution
+//     history across a whole family is unbounded and answers no question anyone
+//     asked.
 func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)
@@ -4888,13 +4910,61 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tasks, err := h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	scope := r.URL.Query().Get("scope")
+	if scope != "" && scope != "issue" && scope != "family" {
+		writeError(w, http.StatusBadRequest, "scope must be 'issue' or 'family'")
+		return
+	}
+	activeOnly := r.URL.Query().Get("active") == "true"
+
+	workspaceID := uuidToString(issue.WorkspaceID)
+
+	if scope == "family" {
+		// Root the family at the parent when there is one, so a child sees its
+		// siblings; at the issue itself otherwise, so a parent sees its children
+		// and a standalone issue degenerates to its own active runs. One rule,
+		// both directions.
+		root := issue.ID
+		if issue.ParentIssueID.Valid {
+			root = issue.ParentIssueID
+		}
+		rows, err := h.Queries.ListActiveTasksByIssueFamily(r.Context(), db.ListActiveTasksByIssueFamilyParams{
+			WorkspaceID: issue.WorkspaceID,
+			RootIssueID: root,
+			RowLimit:    familyActiveRunCap,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list tasks")
+			return
+		}
+		resp := make([]AgentTaskResponse, len(rows))
+		for i, row := range rows {
+			resp[i] = taskToResponse(row.AgentTaskQueue, workspaceID)
+			// Rows span several issues here, so each one has to carry the issue
+			// it belongs to — a caller cannot label it from the task alone.
+			resp[i].IssueIdentifier = fmt.Sprintf("%s-%d", row.IssuePrefix, row.IssueNumber)
+			resp[i].IssueTitle = row.IssueTitle
+		}
+		h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
+		// No usage hydration: ListIssueTaskUsage is keyed by a single issue, so
+		// a family read would need one query per issue to fill a column that is
+		// near-empty for in-flight runs anyway.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	var tasks []db.AgentTaskQueue
+	var err error
+	if activeOnly {
+		tasks, err = h.Queries.ListActiveTasksByIssue(r.Context(), issue.ID)
+	} else {
+		tasks, err = h.Queries.ListTasksByIssue(r.Context(), issue.ID)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list tasks")
 		return
 	}
 
-	workspaceID := uuidToString(issue.WorkspaceID)
 	resp := make([]AgentTaskResponse, len(tasks))
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)

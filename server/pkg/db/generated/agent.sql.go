@@ -5338,6 +5338,137 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 	return items, nil
 }
 
+const listActiveTasksByIssueFamily = `-- name: ListActiveTasksByIssueFamily :many
+SELECT
+    atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name, atq.durable_work_dir, atq.channel_context_revision,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = $1
+  AND (i.id = $2::uuid OR i.parent_issue_id = $2::uuid)
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'dispatched' THEN 1
+        WHEN 'waiting_local_directory' THEN 2
+        ELSE 3
+    END,
+    atq.created_at DESC
+LIMIT $3
+`
+
+type ListActiveTasksByIssueFamilyParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RootIssueID pgtype.UUID `json:"root_issue_id"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListActiveTasksByIssueFamilyRow struct {
+	AgentTaskQueue AgentTaskQueue `json:"agent_task_queue"`
+	IssuePrefix    string         `json:"issue_prefix"`
+	IssueNumber    int32          `json:"issue_number"`
+	IssueTitle     string         `json:"issue_title"`
+}
+
+// Cross-issue coordination read for parallel sub-issue work (#7768). Given a
+// family root — the target issue's parent, or the target itself when it has
+// none — return every in-flight task on the root and on all of its children,
+// so a run can see who else is already working in the family before it starts
+// overlapping work. Advisory only: nothing here gates, queues, or serialises
+// anything.
+//
+// Same active set as ListActiveTasksByIssue, including 'queued': a queued
+// sibling cannot answer you yet, but it is about to touch the same code, which
+// is exactly what the caller is trying to find out. The status column tells the
+// two apart.
+//
+// Issue identity is joined in because the caller renders runs from several
+// issues in one list and cannot label a row from the task alone. Ordered
+// running-first so the truncation the LIMIT may impose drops the least
+// interesting rows, and bounded because a parent with hundreds of children
+// must not turn one coordination read into an unbounded scan.
+func (q *Queries) ListActiveTasksByIssueFamily(ctx context.Context, arg ListActiveTasksByIssueFamilyParams) ([]ListActiveTasksByIssueFamilyRow, error) {
+	rows, err := q.db.Query(ctx, listActiveTasksByIssueFamily, arg.WorkspaceID, arg.RootIssueID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveTasksByIssueFamilyRow{}
+	for rows.Next() {
+		var i ListActiveTasksByIssueFamilyRow
+		if err := rows.Scan(
+			&i.AgentTaskQueue.ID,
+			&i.AgentTaskQueue.AgentID,
+			&i.AgentTaskQueue.IssueID,
+			&i.AgentTaskQueue.Status,
+			&i.AgentTaskQueue.Priority,
+			&i.AgentTaskQueue.DispatchedAt,
+			&i.AgentTaskQueue.StartedAt,
+			&i.AgentTaskQueue.CompletedAt,
+			&i.AgentTaskQueue.Result,
+			&i.AgentTaskQueue.Error,
+			&i.AgentTaskQueue.CreatedAt,
+			&i.AgentTaskQueue.Context,
+			&i.AgentTaskQueue.RuntimeID,
+			&i.AgentTaskQueue.SessionID,
+			&i.AgentTaskQueue.WorkDir,
+			&i.AgentTaskQueue.TriggerCommentID,
+			&i.AgentTaskQueue.ChatSessionID,
+			&i.AgentTaskQueue.AutopilotRunID,
+			&i.AgentTaskQueue.Attempt,
+			&i.AgentTaskQueue.MaxAttempts,
+			&i.AgentTaskQueue.ParentTaskID,
+			&i.AgentTaskQueue.FailureReason,
+			&i.AgentTaskQueue.TriggerSummary,
+			&i.AgentTaskQueue.ForceFreshSession,
+			&i.AgentTaskQueue.IsLeaderTask,
+			&i.AgentTaskQueue.WaitReason,
+			&i.AgentTaskQueue.InitiatorUserID,
+			&i.AgentTaskQueue.HandoffNote,
+			&i.AgentTaskQueue.PrepareLeaseExpiresAt,
+			&i.AgentTaskQueue.SquadID,
+			&i.AgentTaskQueue.RuntimeMcpOverlay,
+			&i.AgentTaskQueue.EscalationForTaskID,
+			&i.AgentTaskQueue.FireAt,
+			&i.AgentTaskQueue.OriginatorUserID,
+			&i.AgentTaskQueue.RuntimeConnectedApps,
+			&i.AgentTaskQueue.CoalescedCommentIds,
+			&i.AgentTaskQueue.DeliveredCommentIds,
+			&i.AgentTaskQueue.ChatInputTaskID,
+			&i.AgentTaskQueue.ChatFinalizeDeferredAt,
+			&i.AgentTaskQueue.OriginatorSource,
+			&i.AgentTaskQueue.DelegatedFromTaskID,
+			&i.AgentTaskQueue.RetryOfTaskID,
+			&i.AgentTaskQueue.RerunOfTaskID,
+			&i.AgentTaskQueue.RuleVersionID,
+			&i.AgentTaskQueue.TriggerEvidenceKind,
+			&i.AgentTaskQueue.TriggerEvidenceRefID,
+			&i.AgentTaskQueue.AccountableUserID,
+			&i.AgentTaskQueue.SessionRolloutMissing,
+			&i.AgentTaskQueue.RetiredSessionID,
+			&i.AgentTaskQueue.QuickActionsDisabled,
+			&i.AgentTaskQueue.RegenerateQuickActionsFor,
+			&i.AgentTaskQueue.BranchName,
+			&i.AgentTaskQueue.DurableWorkDir,
+			&i.AgentTaskQueue.ChannelContextRevision,
+			&i.IssuePrefix,
+			&i.IssueNumber,
+			&i.IssueTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentTasks = `-- name: ListAgentTasks :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision FROM agent_task_queue
 WHERE agent_id = $1

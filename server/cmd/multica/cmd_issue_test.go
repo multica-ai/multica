@@ -4011,3 +4011,130 @@ func TestIsTerminalChildIssue(t *testing.T) {
 		})
 	}
 }
+
+// `issue runs` answers three different questions off one endpoint, and the only
+// thing telling them apart is the query string the CLI builds (#7768). These
+// tests pin that translation: a plain read must stay a plain read — the
+// short-task-ID resolver and the execution log both depend on the unfiltered
+// history — while --active and --siblings must actually reach the server.
+
+// newIssueRunsTestCmd mirrors the real flag set registered on issueRunsCmd.
+func newIssueRunsTestCmd(t *testing.T, output string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "runs"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().Bool("active", false, "")
+	cmd.Flags().Bool("siblings", false, "")
+	return cmd
+}
+
+func TestRunIssueRunsScopeFlagsBuildQuery(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  url.Values
+	}{
+		// No flags means no params: the resolver and the sidebar read the same
+		// full history they always have.
+		{"default reads full history", nil, url.Values{}},
+		{"active narrows to in-flight", []string{"active"}, url.Values{"active": {"true"}}},
+		// --siblings implies active. The CLI sends both so the request says what
+		// it means without the reader having to know the server's default.
+		{"siblings widens to the family", []string{"siblings"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+		{"siblings wins over a redundant active", []string{"siblings", "active"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					gotQuery = r.URL.Query()
+					_ = json.NewEncoder(w).Encode([]map[string]any{})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			for _, flag := range tc.flags {
+				if err := cmd.Flags().Set(flag, "true"); err != nil {
+					t.Fatalf("set --%s: %v", flag, err)
+				}
+			}
+			if _, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) }); err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			if len(gotQuery) != len(tc.want) {
+				t.Fatalf("query = %v, want %v", gotQuery, tc.want)
+			}
+			for key, want := range tc.want {
+				if got := gotQuery.Get(key); got != want[0] {
+					t.Fatalf("query %s = %q, want %q (full query %v)", key, got, want[0], gotQuery)
+				}
+			}
+		})
+	}
+}
+
+// A family read mixes runs from several issues, so every row has to name its
+// own issue. Without the column the table is a list of task ids the reader
+// cannot attribute — which is the entire question --siblings was added to
+// answer.
+func TestRunIssueRunsSiblingsTableCarriesIssueColumn(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + issueID + "/task-runs":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id":               "abcd1234-0000-0000-0000-000000000000",
+				"agent_id":         "agent-1",
+				"status":           "running",
+				"issue_identifier": "MUL-7001",
+				"issue_title":      "sibling work",
+			}})
+		default:
+			// Actor lookups for the AGENT column are best-effort; 404 is fine.
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueRunsTestCmd(t, "table")
+	if err := cmd.Flags().Set("siblings", "true"); err != nil {
+		t.Fatalf("set --siblings: %v", err)
+	}
+	out, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	if !strings.Contains(out, "ISSUE") || !strings.Contains(out, "MUL-7001") {
+		t.Fatalf("table output missing issue column:\n%s", out)
+	}
+
+	// The same rows without --siblings come from one known issue, so repeating
+	// it on every line would be noise.
+	plain := newIssueRunsTestCmd(t, "table")
+	out, err = captureStdout(t, func() error { return runIssueRuns(plain, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	if strings.Contains(out, "ISSUE") {
+		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
+	}
+}
