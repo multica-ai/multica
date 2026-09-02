@@ -25,7 +25,30 @@ function resetDocument() {
   document.close();
 }
 
-afterEach(() => {
+let hydratedRoot: Root | undefined;
+
+async function hydrateGlobalError(documentLanguage: string) {
+  const reset = vi.fn();
+  const onRecoverableError = vi.fn();
+  const element = <GlobalError error={new Error("boom")} reset={reset} />;
+
+  document.open();
+  document.write(`<!doctype html>${renderToString(element)}`);
+  document.close();
+  document.documentElement.lang = documentLanguage;
+
+  await act(async () => {
+    hydratedRoot = hydrateRoot(document, element, { onRecoverableError });
+  });
+
+  return { reset, onRecoverableError };
+}
+
+afterEach(async () => {
+  await act(async () => {
+    hydratedRoot?.unmount();
+  });
+  hydratedRoot = undefined;
   document.cookie = `${LOCALE_COOKIE}=;path=/;max-age=0`;
   setBrowserLanguages(["en-US"]);
   resetDocument();
@@ -41,26 +64,30 @@ describe("resolveEmergencyLocale", () => {
 
   it("hydrates with the browser locale when no cookie exists", async () => {
     setBrowserLanguages(["ja-JP", "ja"]);
-    const error = new Error("boom");
-    const element = <GlobalError error={error} reset={vi.fn()} />;
-    const serverMarkup = renderToString(element);
-
-    document.open();
-    document.write(`<!doctype html>${serverMarkup}`);
-    document.close();
-    document.documentElement.lang = "ja-JP";
-
-    let root: Root | undefined;
-    await act(async () => {
-      root = hydrateRoot(document, element);
-    });
+    const { reset, onRecoverableError } = await hydrateGlobalError("ja-JP");
 
     expect(document.documentElement.lang).toBe("ja-JP");
     expect(document.body).toHaveTextContent("問題が発生しました");
     expect(document.body).not.toHaveTextContent("Something went wrong");
+    expect(onRecoverableError).not.toHaveBeenCalled();
 
     await act(async () => {
-      root?.unmount();
+      document.querySelector("button")?.click();
     });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("hydrates in the cookie locale when the browser and document use another language", async () => {
+    document.cookie = `${LOCALE_COOKIE}=zh-Hans;path=/`;
+    setBrowserLanguages(["ja-JP"]);
+
+    const { onRecoverableError } = await hydrateGlobalError("ja-JP");
+
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.body).toHaveTextContent("出现了问题");
+    expect(document.querySelector("button")).toHaveTextContent("重新加载");
+    expect(document.body).not.toHaveTextContent("Something went wrong");
+    expect(document.body).not.toHaveTextContent("問題が発生しました");
+    expect(onRecoverableError).not.toHaveBeenCalled();
   });
 });

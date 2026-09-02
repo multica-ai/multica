@@ -6,7 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
-import { api, clientErrorMessage, errorCode } from "@multica/core/api";
+import { api } from "@multica/core/api";
 import { createLogger } from "@multica/core/logger";
 import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
 import {
@@ -22,10 +22,6 @@ import { Loader2 } from "lucide-react";
 import { callbackErrorFrom, type CallbackError } from "./callback-error";
 
 const authLogger = createLogger("auth.callback");
-
-function loginFailureFrom(err: unknown): CallbackError {
-  return callbackErrorFrom(errorCode(err), clientErrorMessage(err));
-}
 
 function CallbackContent() {
   const { t } = useT("auth");
@@ -93,7 +89,7 @@ function CallbackContent() {
         })
         .catch((err) => {
           authLogger.error("CLI Google OAuth callback failed", err);
-          setError(loginFailureFrom(err));
+          setError(callbackErrorFrom(err));
         });
     } else if (isDesktop) {
       // Desktop flow: exchange code for token, then redirect via deep link
@@ -105,7 +101,7 @@ function CallbackContent() {
         })
         .catch((err) => {
           authLogger.error("Desktop Google OAuth callback failed", err);
-          setError(loginFailureFrom(err));
+          setError(callbackErrorFrom(err));
         });
     } else {
       // Normal web flow
@@ -156,7 +152,7 @@ function CallbackContent() {
         })
         .catch((err) => {
           authLogger.error("Web Google OAuth callback failed", err);
-          setError(loginFailureFrom(err));
+          setError(callbackErrorFrom(err));
         });
     }
   }, [searchParams, loginWithGoogle, router, qc]);

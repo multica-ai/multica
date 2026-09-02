@@ -1,3 +1,5 @@
+import { ApiError, clientErrorMessage, errorCode } from "@multica/core/api";
+
 export type CallbackError =
   | {
       kind:
@@ -12,11 +14,14 @@ export type CallbackError =
     }
   | { kind: "raw"; text: string };
 
-export function callbackErrorFrom(
-  code: string | undefined,
-  clientMessage: string | undefined,
-): CallbackError {
-  switch (code) {
+export function callbackErrorFrom(err: unknown): CallbackError {
+  // An actionable code is meaningful only on a client error. A drifting server
+  // must not turn a provider/internal failure into a specific user diagnosis.
+  if (!(err instanceof ApiError) || err.status < 400 || err.status >= 500) {
+    return { kind: "login_failed" };
+  }
+
+  switch (errorCode(err)) {
     case "account_disabled":
       return { kind: "account_disabled" };
     case "signup_prohibited":
@@ -31,6 +36,7 @@ export function callbackErrorFrom(
       break;
   }
 
+  const clientMessage = clientErrorMessage(err);
   return clientMessage
     ? { kind: "raw", text: clientMessage }
     : { kind: "login_failed" };

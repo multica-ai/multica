@@ -508,7 +508,12 @@ func writeGoogleLoginActionableError(w http.ResponseWriter, err error) bool {
 	case errors.Is(err, ErrEmailNotAllowed):
 		writeErrorCode(w, http.StatusForbidden, googleLoginCodeEmailNotAllowed, ErrEmailNotAllowed.Error())
 	default:
-		return false
+		var signupErr SignupError
+		if !errors.As(err, &signupErr) {
+			return false
+		}
+		// Preserve the actionable fallback for signup restrictions without a code.
+		writeError(w, http.StatusForbidden, signupErr.Error())
 	}
 	return true
 }
@@ -567,13 +572,28 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if tokenResp.StatusCode != http.StatusOK {
 		slog.Error("google oauth token exchange returned error", "status", tokenResp.StatusCode, "body", string(tokenBody))
-		writeErrorCode(w, http.StatusBadRequest, googleLoginCodeInvalidOAuthCode, "failed to exchange code with Google")
+		var tokenErr struct {
+			Error string `json:"error"`
+		}
+		// Only a valid invalid_grant response identifies a rejected authorization
+		// code. Configuration, provider and malformed responses are server failures.
+		if err := json.Unmarshal(tokenBody, &tokenErr); err == nil &&
+			tokenResp.StatusCode == http.StatusBadRequest && tokenErr.Error == "invalid_grant" {
+			writeErrorCode(w, http.StatusBadRequest, googleLoginCodeInvalidOAuthCode, "failed to exchange code with Google")
+			return
+		}
+		writeError(w, http.StatusBadGateway, "failed to exchange code with Google")
 		return
 	}
 
 	var gToken googleTokenResponse
 	if err := json.Unmarshal(tokenBody, &gToken); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to parse Google token response")
+		return
+	}
+	if strings.TrimSpace(gToken.AccessToken) == "" {
+		slog.Error("google oauth token response has no access token")
+		writeError(w, http.StatusBadGateway, "invalid Google token response")
 		return
 	}
 
@@ -594,20 +614,35 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer userInfoResp.Body.Close()
 
-	var gUser googleUserInfo
+	if userInfoResp.StatusCode != http.StatusOK {
+		body, readErr := io.ReadAll(io.LimitReader(userInfoResp.Body, 4096))
+		if readErr != nil {
+			slog.Error("google userinfo error response could not be read", "status", userInfoResp.StatusCode, "error", readErr)
+		} else {
+			slog.Error("google userinfo returned error", "status", userInfoResp.StatusCode, "body", string(body))
+		}
+		writeError(w, http.StatusBadGateway, "failed to fetch user info from Google")
+		return
+	}
+
+	var gUser *googleUserInfo
 	if err := json.NewDecoder(userInfoResp.Body).Decode(&gUser); err != nil {
 		writeError(w, http.StatusBadGateway, "failed to parse Google user info")
 		return
 	}
-
-	if gUser.Email == "" {
-		writeErrorCode(w, http.StatusBadRequest, googleLoginCodeAccountWithoutEmail, "Google account has no email")
+	if gUser == nil {
+		writeError(w, http.StatusBadGateway, "invalid Google user info")
 		return
 	}
 
 	email := strings.ToLower(strings.TrimSpace(gUser.Email))
+	if email == "" {
+		writeErrorCode(w, http.StatusBadRequest, googleLoginCodeAccountWithoutEmail, "Google did not provide an email address for this sign-in")
+		return
+	}
+
 	if auth.IsTemporarilyDisabledUserEmail(email) {
-		writeGoogleLoginActionableError(w, auth.ErrTemporarilyDisabledUser)
+		writeErrorCode(w, http.StatusForbidden, googleLoginCodeAccountDisabled, auth.TemporarilyDisabledUserError)
 		return
 	}
 

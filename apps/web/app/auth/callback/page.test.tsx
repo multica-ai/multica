@@ -4,6 +4,7 @@ import type { SupportedLocale } from "@multica/core/i18n";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { paths } from "@multica/core/paths";
 import { RESOURCES } from "@multica/views/locales";
+import { ApiError } from "@multica/core/api";
 
 const {
   mockPush,
@@ -14,8 +15,6 @@ const {
   mockListMyInvitations,
   mockSetQueryData,
   mockQueryClient,
-  mockErrorCode,
-  mockClientErrorMessage,
 } = vi.hoisted(() => {
   const mockPush = vi.fn();
   const mockSetQueryData = vi.fn();
@@ -28,8 +27,6 @@ const {
     mockListMyInvitations: vi.fn(),
     mockSetQueryData,
     mockQueryClient: { setQueryData: mockSetQueryData },
-    mockErrorCode: vi.fn((): string | undefined => undefined),
-    mockClientErrorMessage: vi.fn((): string | undefined => undefined),
   };
 });
 
@@ -96,15 +93,19 @@ vi.mock("@multica/core/workspace/queries", () => ({
   },
 }));
 
-vi.mock("@multica/core/api", () => ({
-  errorCode: mockErrorCode,
-  clientErrorMessage: mockClientErrorMessage,
-  api: {
-    listWorkspaces: mockListWorkspaces,
-    listMyInvitations: mockListMyInvitations,
-    googleLogin: vi.fn(),
-  },
-}));
+vi.mock("@multica/core/api", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/api")>(
+    "@multica/core/api",
+  );
+  return {
+    ...actual,
+    api: {
+      listWorkspaces: mockListWorkspaces,
+      listMyInvitations: mockListMyInvitations,
+      googleLogin: vi.fn(),
+    },
+  };
+});
 
 import CallbackPage from "./page";
 
@@ -119,8 +120,6 @@ function renderCallback(locale: SupportedLocale = "en") {
 describe("CallbackPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockErrorCode.mockReturnValue(undefined);
-    mockClientErrorMessage.mockReturnValue(undefined);
     // Reset the source-backfill dismiss counter so a test that writes
     // it doesn't leak state into the next test (and the next test
     // doesn't inherit a cap-reached state from a previous run).
@@ -176,9 +175,11 @@ describe("CallbackPage", () => {
   });
 
   it("localizes a stable login error code", async () => {
-    mockLoginWithGoogle.mockRejectedValue(new Error("English fallback"));
-    mockErrorCode.mockReturnValue("signup_prohibited");
-    mockClientErrorMessage.mockReturnValue("English fallback");
+    mockLoginWithGoogle.mockRejectedValue(
+      new ApiError("English fallback", 403, "Forbidden", {
+        code: "signup_prohibited",
+      }),
+    );
 
     renderCallback("zh-Hans");
 
@@ -189,12 +190,70 @@ describe("CallbackPage", () => {
   });
 
   it("preserves an actionable uncoded 4xx message from an older server", async () => {
-    mockLoginWithGoogle.mockRejectedValue(new Error("legacy client error"));
-    mockClientErrorMessage.mockReturnValue("legacy client error");
+    mockLoginWithGoogle.mockRejectedValue(
+      new ApiError("legacy client error", 403, "Forbidden"),
+    );
 
     renderCallback("zh-Hans");
 
     expect(await screen.findByText("legacy client error")).toBeInTheDocument();
+  });
+
+  it("retranslates a missing-email response without repeating the single-use code exchange", async () => {
+    mockLoginWithGoogle.mockRejectedValue(
+      new ApiError("Google did not provide an email address", 400, "Bad Request", {
+        code: "google_account_no_email",
+      }),
+    );
+
+    const view = renderCallback("zh-Hans");
+    expect(
+      await screen.findByText("Google 未提供本次登录所需的邮箱地址。"),
+    ).toBeInTheDocument();
+
+    view.rerender(
+      <I18nProvider locale="ja" resources={RESOURCES}>
+        <CallbackPage />
+      </I18nProvider>,
+    );
+
+    expect(
+      await screen.findByText("Googleから今回のログインに必要なメールアドレスが提供されませんでした。"),
+    ).toBeInTheDocument();
+    expect(mockLoginWithGoogle).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  // The response matrix lives in callback-error.test.ts; this covers page wiring.
+  it("does not turn a provider failure into a user diagnosis even if it carries a known code", async () => {
+    mockLoginWithGoogle.mockRejectedValue(
+      new ApiError("internal provider detail", 502, "Bad Gateway", {
+        code: "oauth_code_invalid",
+      }),
+    );
+
+    renderCallback("zh-Hans");
+
+    expect(await screen.findByText("无法完成登录，请重试。")).toBeInTheDocument();
+    expect(screen.queryByText("internal provider detail")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["Desktop", "platform:desktop"],
+    ["CLI", "cli_callback:http://127.0.0.1:46233/callback,cli_state:test"],
+  ])("uses the same localized error handling for the %s callback", async (_flow, state) => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    vi.mocked(mockedApi.googleLogin).mockRejectedValue(
+      new ApiError("English fallback", 403, "Forbidden", { code: "signup_prohibited" }),
+    );
+    mockSearchParams.set("state", state);
+
+    renderCallback("zh-Hans");
+
+    expect(await screen.findByText("此自托管实例已禁止用户注册。")).toBeInTheDocument();
+    expect(mockedApi.googleLogin).toHaveBeenCalledTimes(1);
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
