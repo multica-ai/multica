@@ -303,7 +303,7 @@ func TestPruneKeepsLiveTurnsEvenOverTheCap(t *testing.T) {
 	// Fill past the cap with young sealed turns, which are the ones a burst
 	// produces and the only ones that may be dropped.
 	for i := 0; i < streamAcksMax; i++ {
-		sender.streams[newReqID()] = &streamAcks{sealed: true, at: time.Now()}
+		sender.streams[newReqID()] = &streamAcks{sealed: map[string]struct{}{"S": {}}, at: time.Now()}
 	}
 	sender.ackMu.Lock()
 	sender.pruneStreamsLocked()

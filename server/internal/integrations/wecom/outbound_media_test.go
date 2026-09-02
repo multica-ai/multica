@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -76,6 +77,14 @@ func (f *fakeObjectStore) readCount() int {
 // delivery instead of racing it.
 func newOutboundWithMedia(t *testing.T, q outboundQueries, objects mediaObjectStore) (*Outbound, pgtype.UUID, *mediaConn) {
 	t.Helper()
+	return newOutboundWithMediaAndStreams(t, q, objects, nil)
+}
+
+// newOutboundWithMediaAndStreams is the same rig plus the round store the
+// typing indicator writes its bubble to, for the one case where the bubble and
+// the files meet.
+func newOutboundWithMediaAndStreams(t *testing.T, q outboundQueries, objects mediaObjectStore, streams *streamStore) (*Outbound, pgtype.UUID, *mediaConn) {
+	t.Helper()
 	reg := newSendersRegistry()
 	instID := mustTestUUID(t)
 	conn := newMediaConn()
@@ -84,7 +93,7 @@ func newOutboundWithMedia(t *testing.T, q outboundQueries, objects mediaObjectSt
 	if objects != nil {
 		opts = append(opts, WithAttachments(objects))
 	}
-	o := NewOutbound(q, reg, slog.Default(), opts...)
+	o := NewOutbound(q, reg, streams, slog.Default(), opts...)
 	o.spawn = func(f func()) { f() }
 	return o, instID, conn
 }
@@ -284,6 +293,72 @@ func TestProcessEvent_EmptyCompletionStillDeliversABoundFile(t *testing.T) {
 	// A png inside the image ceiling travels as an image, not a file card.
 	if media[0]["msgtype"] != string(mediaTypeImage) {
 		t.Errorf("msgtype = %v, want image", media[0]["msgtype"])
+	}
+}
+
+// TestEmptyCompletionWithFilesDoesNotClaimNothingIsComing is the seam between
+// the two halves. #6604 sends the files an agent produced; #6606 seals the
+// bubble the question opened. Land one on top of the other and a turn whose
+// agent said nothing but produced a file seals its bubble with "nothing to
+// reply this round" and then sends the file underneath it — a bubble that
+// contradicts the very next message, with both halves working exactly as
+// written.
+func TestEmptyCompletionWithFilesDoesNotClaimNothingIsComing(t *testing.T) {
+	t.Parallel()
+	q := oneAttachmentQueries(t, db.Attachment{
+		ID:          mustTestUUID(t),
+		Filename:    "report.pdf",
+		Url:         "https://cdn.example/obj/rep",
+		ContentType: "application/pdf",
+		SizeBytes:   4,
+	})
+	streams := newStreamStore()
+	o, instID, conn := newOutboundWithMediaAndStreams(t, q,
+		&fakeObjectStore{key: "obj/rep", data: []byte("DATA")}, streams)
+	q.sessionBinding.InstallationID = instID
+	q.installation.ID = instID
+
+	sessionID, err := util.ParseUUID(testSessionID)
+	if err != nil {
+		t.Fatalf("parse session uuid: %v", err)
+	}
+	// A round with a bubble on screen, bound to the task this event answers.
+	streams.open(sessionID, 1, streamHandle{
+		ReqID: "REQ-1", StreamID: "S-1",
+		InstallationID: instID, ChatID: "CHAT_1", ChatType: chatTypeGroupInt,
+		// Stated rather than left zero: the closing words are read out of the
+		// handle's pack, and the assertion below names a pack of its own.
+		Locale: DefaultLocale,
+	})
+	streams.bind(sessionID, 1, testTaskID)
+
+	if err := o.processEvent(context.Background(), chatDoneEvent("")); err != nil {
+		t.Fatalf("processEvent: %v", err)
+	}
+
+	var sealed string
+	for _, f := range conn.cmdFrames(cmdRespondMsg) {
+		var body map[string]any
+		if err := json.Unmarshal(f.Body, &body); err != nil {
+			t.Fatalf("decode stream frame: %v", err)
+		}
+		stream, _ := body["stream"].(map[string]any)
+		if stream != nil && stream["finish"] == true {
+			sealed, _ = stream["content"].(string)
+		}
+	}
+	if want := copyFor(DefaultLocale).StreamNoReplyWithFiles; sealed != want {
+		t.Errorf("the bubble was sealed with %q, want %q — the files arrive right under it", sealed, want)
+	}
+	// And the file itself still went out: copy that promises files and then
+	// sends none is the same contradiction the other way round.
+	if n := len(mediaSends(t, conn)); n != 1 {
+		t.Errorf("media sends = %d, want 1 — the file the bubble promised never arrived", n)
+	}
+	// No plain text message: the bubble already carries every word this turn
+	// has, and repeating it underneath would be the second copy of it.
+	if got := markdownSends(t, conn); len(got) != 0 {
+		t.Errorf("text sends = %v, want none — the sealed bubble said it already", got)
 	}
 }
 
@@ -897,7 +972,7 @@ func newMediaRigWithMetrics(t *testing.T, q outboundQueries, objects mediaObject
 	if objects != nil {
 		opts = append(opts, WithAttachments(objects))
 	}
-	o := NewOutbound(q, reg, slog.Default(), opts...)
+	o := NewOutbound(q, reg, nil, slog.Default(), opts...)
 	o.spawn = func(f func()) { f() }
 	return o, instID, conn, mx
 }
@@ -1123,7 +1198,7 @@ func TestNoLiveSender_SettlesEveryKnownFile(t *testing.T) {
 	instID := mustTestUUID(t)
 	q.sessionBinding.InstallationID = instID
 	q.installation.ID = instID
-	o := NewOutbound(q, reg, slog.Default(), WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{}))
+	o := NewOutbound(q, reg, nil, slog.Default(), WithOutboundMetrics(mx), WithAttachments(&fakeObjectStore{}))
 	o.spawn = func(f func()) { f() }
 
 	o.sendAttachments(context.Background(), mustParseTaskUUID(t, testMessageID), mustParseTaskUUID(t, testWorkspaceID),

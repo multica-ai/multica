@@ -152,7 +152,7 @@ func TestSlackTypingNotifier_OnSettledClears(t *testing.T) {
 	m := newTestTyping(q, fr)
 	m.Add(context.Background(), db.ChannelInstallation{ID: uid(1), Config: slackInstallConfigJSON()}, sessionID, "C1", freshTS())
 
-	(&slackTypingNotifier{mgr: m}).OnSettled(context.Background(), sessionID)
+	(&slackTypingNotifier{mgr: m}).OnSettled(context.Background(), sessionID, 1)
 	if len(fr.removed) != 1 || fr.removed[0].Channel != "C1" {
 		t.Fatalf("OnSettled must clear the reaction, removed = %+v", fr.removed)
 	}
