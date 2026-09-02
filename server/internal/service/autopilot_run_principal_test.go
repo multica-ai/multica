@@ -31,6 +31,11 @@ var principalSeq atomic.Int64
 // principalFixture is the service-package equivalent of the handler suite's dbfx:
 // every row these tests create goes through testutil.Fixture, which registers its
 // own cleanup, so this file open-codes no INSERT / DELETE pairs.
+//
+// It deliberately does NOT reuse this package's seedAttributionFixture: that
+// helper raw-inserts its user / workspace / member / runtime / agent with matching
+// hand-written cleanups, which is the pattern CLAUDE.md prohibits for new tests,
+// and it builds an agent and issue these tests do not use.
 type principalFixture struct {
 	*testutil.Fixture
 	svc *AutopilotService
@@ -41,9 +46,21 @@ func newPrincipalFixture(t *testing.T) (principalFixture, string) {
 	t.Helper()
 	pool := newResolveOriginatorPool(t)
 	q := db.New(pool)
-	workspaceID, ownerUserID, _, _ := seedAttributionFixture(t, pool)
+
+	// Bootstrap: Fixture.User and Fixture.Workspace do not read the fixture's own
+	// WorkspaceID / UserID, so an unbound fixture can create the base identity and
+	// then adopt it. Cleanup runs in reverse creation order, so the member row goes
+	// before the workspace and user it references.
+	n := principalSeq.Add(1)
+	fx := testutil.New(pool, "", "")
+	ownerUserID := fx.User(t, "principal owner", fmt.Sprintf("principal-owner-%d@multica.test", n))
+	workspaceID := fx.Workspace(t, "principal ws", fmt.Sprintf("principal-ws-%d", n))
+	fx.Member(t, workspaceID, ownerUserID, "owner")
+	fx.WorkspaceID = workspaceID
+	fx.UserID = ownerUserID
+
 	return principalFixture{
-		Fixture: testutil.New(pool, workspaceID, ownerUserID),
+		Fixture: fx,
 		q:       q,
 		svc: &AutopilotService{
 			Queries: q, TxStarter: pool, Bus: events.New(),

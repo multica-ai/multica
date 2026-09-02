@@ -17,11 +17,17 @@
 -- edited, published_by IS the creator and this recovers the right human. For an
 -- ALREADY-EDITED trigger it freezes the last recoverable EDITOR as the immutable
 -- creator — not necessarily the historical creator, which the schema never
--- recorded and which is therefore unrecoverable. That is accepted (MUL-6951, Elon
--- review): it is no wider than the authority those runs carry today, and the
--- alternative is stopping every existing autopilot.
+-- recorded and which is therefore unrecoverable.
 --
--- A trigger with no published_by at all (predating migration 186) stays NULL.
+-- This IS a widening, and is accepted as a compatibility tradeoff (MUL-6951, Elon
+-- review). Before MUL-6951 an automatic run carried no originator at all, only a
+-- set of narrowly-scoped borrow paths; after it, a backfilled editor becomes the
+-- run's full originator and it acts with that member's own rights. The
+-- alternative — backfilling nothing — stops every existing autopilot, which is
+-- why this is preferred over precision here.
+--
+-- A trigger with no published_by at all (predating migration 189, which added
+-- published_by_* to this table) stays NULL.
 -- Dispatch then fails closed rather than guessing a principal, and there is
 -- deliberately NO recovery path — re-saving such a trigger re-stamps published_by,
 -- not created_by, so it stays unresolvable (Bohan: leave them empty). Its runs are
