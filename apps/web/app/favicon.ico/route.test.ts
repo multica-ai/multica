@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { dynamic, GET } from "./route";
+import { GET } from "./route";
 
 describe("GET /favicon.ico", () => {
   it("redirects to the SVG favicon", () => {
