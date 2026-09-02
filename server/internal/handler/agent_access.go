@@ -220,19 +220,19 @@ func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget
 // still complete ordinary API work (posting its final comment) without being able
 // to start new work as its human.
 func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorID string) string {
+	return h.invokeOriginator(r.Context(), actorType, actorID, h.commentSourceTaskID(r))
+}
+
+func (h *Handler) invokeOriginator(ctx context.Context, actorType, actorID string, sourceTaskID pgtype.UUID) string {
 	if actorType == "member" {
 		return actorID
 	}
-	if actorType == "agent" {
-		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
-			if taskUUID, err := util.ParseUUID(taskIDHeader); err == nil {
-				if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil {
-					if isTerminalTaskStatus(task.Status) {
-						return ""
-					}
-					return uuidToString(task.OriginatorUserID)
-				}
+	if actorType == "agent" && sourceTaskID.Valid {
+		if task, err := h.Queries.GetAgentTask(ctx, sourceTaskID); err == nil {
+			if isTerminalTaskStatus(task.Status) {
+				return ""
 			}
+			return uuidToString(task.OriginatorUserID)
 		}
 	}
 	return ""

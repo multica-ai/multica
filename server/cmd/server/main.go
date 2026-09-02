@@ -696,6 +696,10 @@ func main() {
 	// Source-context cleanup is object-store work, so it gets its own goroutine
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
+	// Idempotency rows are bounded operational replay state. Cleanup runs in its
+	// own hourly, lock-skipping batch worker so it cannot delay comment writes or
+	// runtime liveness.
+	go runCommentIdempotencySweeper(sweepCtx, h)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {

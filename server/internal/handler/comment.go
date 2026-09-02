@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/replyadmission"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1466,6 +1468,20 @@ type CreateCommentRequest struct {
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
 }
 
+func writeReplyAdmissionConflict(w http.ResponseWriter, decision replyadmission.Decision, err error) {
+	w.Header().Set("X-Multica-Reply-Admission", "rejected")
+	body := map[string]any{
+		"error":          err.Error(),
+		"code":           replyadmission.MissingRequesterMentionCode,
+		"retryable":      true,
+		"policy_version": decision.PolicyVersion,
+	}
+	if decision.RequesterID != "" {
+		body["required_mention"] = "mention://agent/" + decision.RequesterID
+	}
+	writeJSON(w, http.StatusConflict, body)
+}
+
 type CommentTriggerPreviewRequest struct {
 	Content          string  `json:"content"`
 	ParentID         *string `json:"parent_id"`
@@ -1701,6 +1717,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// Idempotency-Key replay is intentionally bounded to the seven-day
+	// CommentIdempotencyReplayWindow. Retries after that operational window may
+	// create a new comment, so clients that need longer-lived deduplication must
+	// retain their own business identifier and reconcile it explicitly.
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 255 {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key is too long")
+		return
+	}
 
 	// Strip bytes PostgreSQL's TEXT column rejects before the empty check. The
 	// case reachable over the JSON API is an embedded NUL (0x00, SQLSTATE
@@ -1859,7 +1884,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	createParams := db.CreateCommentParams{
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -1869,49 +1894,319 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		Type:         req.Type,
 		ParentID:     parentID,
 		SourceTaskID: sourceTaskID,
+	}
+	requestHash := replyadmission.Fingerprint(replyadmission.RequestFingerprint{
+		IssueID:          uuidToString(issue.ID),
+		WorkspaceID:      uuidToString(issue.WorkspaceID),
+		AuthorType:       authorType,
+		AuthorID:         authorID,
+		Content:          req.Content,
+		Type:             req.Type,
+		ParentID:         uuidToString(parentID),
+		SourceTaskID:     uuidToString(sourceTaskID),
+		AttachmentIDs:    canonicalUUIDStrings(attachmentIDs),
+		SuppressAgentIDs: canonicalUUIDStrings(suppressAgentIDs),
 	})
+	var created db.CreateCommentRow
+	var replayedIssueRevision int64
+	var err error
+	transactionalWrite := idempotencyKey != "" || (authorType == "agent" && parentID.Valid)
+	if transactionalWrite {
+		// Lock the exact parent until the guarded insert commits. This makes an
+		// agent edit of the request and this reply serialize, so a stale
+		// preflight cannot turn into an unmentioned persisted answer.
+		if h.TxStarter == nil {
+			writeError(w, http.StatusInternalServerError, "reply admission is unavailable")
+			return
+		}
+		tx, beginErr := h.TxStarter.Begin(r.Context())
+		if beginErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to prepare reply admission")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		if idempotencyKey != "" {
+			if lockErr := qtx.LockCommentIdempotencyKey(r.Context(), uuidToString(issue.WorkspaceID)+":"+idempotencyKey); lockErr != nil {
+				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
+				writeError(w, http.StatusInternalServerError, "failed to prepare comment retry")
+				return
+			}
+			stored, lookupErr := qtx.GetCommentIdempotency(r.Context(), db.GetCommentIdempotencyParams{
+				WorkspaceID:    issue.WorkspaceID,
+				IdempotencyKey: idempotencyKey,
+			})
+			switch {
+			case lookupErr == nil:
+				if stored.RequestHash != requestHash {
+					h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeIdempotencyConflict, "idempotency_key_reused", 0)
+					writeErrorCode(w, http.StatusConflict, "idempotency_key_reused", "Idempotency-Key was already used for a different comment request")
+					return
+				}
+				existing, commentErr := qtx.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+					ID:          stored.CommentID,
+					WorkspaceID: issue.WorkspaceID,
+				})
+				if commentErr != nil {
+					h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
+					writeError(w, http.StatusInternalServerError, "failed to load replayed comment")
+					return
+				}
+				if currentIssue, issueErr := qtx.GetIssue(r.Context(), issue.ID); issueErr == nil {
+					replayedIssueRevision = currentIssue.Revision
+				} else {
+					replayedIssueRevision = issue.Revision
+				}
+				replayNeedsRecovery := !stored.SideEffectsCompletedAt.Valid
+				replayClaimed := false
+				if replayNeedsRecovery {
+					claimed, claimErr := qtx.ClaimCommentIdempotencySideEffects(r.Context(), db.ClaimCommentIdempotencySideEffectsParams{
+						WorkspaceID:    issue.WorkspaceID,
+						IdempotencyKey: idempotencyKey,
+						RequestHash:    requestHash,
+						LeaseBefore:    pgtype.Timestamptz{Time: time.Now().UTC().Add(-commentIdempotencySideEffectsLease), Valid: true},
+					})
+					if claimErr != nil {
+						h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
+						writeError(w, http.StatusInternalServerError, "failed to claim comment retry")
+						return
+					}
+					replayClaimed = claimed > 0
+				}
+				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeIdempotencyReplay, "idempotency_replay", 0)
+				if commitErr := tx.Commit(r.Context()); commitErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed to finalize comment retry")
+					return
+				}
+				if replayNeedsRecovery && replayClaimed {
+					resp, outcomes, complete := h.runCommentPostCommitSideEffects(
+						r.Context(),
+						r,
+						issue,
+						existing,
+						replayedIssueRevision,
+						parentComment,
+						rootComment,
+						stored.AttachmentIds,
+						stored.SuppressAgentIds,
+					)
+					resp.TriggerOutcomes = outcomes
+					if complete {
+						h.markCommentIdempotencySideEffectsCompleted(r.Context(), issue.WorkspaceID, idempotencyKey, requestHash)
+					}
+					w.Header().Set("Idempotency-Replayed", "true")
+					w.Header().Set("X-Multica-Reply-Admission", "replayed")
+					writeJSON(w, http.StatusOK, resp)
+					return
+				}
+				groupedAtt := h.groupAttachments(r, []pgtype.UUID{existing.ID})
+				resp := commentToResponse(existing, nil, groupedAtt[uuidToString(existing.ID)])
+				resp.IssueRevision = replayedIssueRevision
+				w.Header().Set("Idempotency-Replayed", "true")
+				if replayNeedsRecovery {
+					// Another request or replica owns the lease. Return the single
+					// persisted comment without duplicating downstream effects; a
+					// subsequent retry or the sweeper will continue that lease.
+					w.Header().Set("X-Multica-Reply-Admission", "replay-pending")
+				} else {
+					w.Header().Set("X-Multica-Reply-Admission", "replayed")
+				}
+				writeJSON(w, http.StatusOK, resp)
+				return
+			case !errors.Is(lookupErr, pgx.ErrNoRows):
+				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
+				writeError(w, http.StatusInternalServerError, "failed to prepare comment retry")
+				return
+			}
+		}
+		lockedIssue, issueLockErr := qtx.LockIssueForDescriptionUpdate(r.Context(), db.LockIssueForDescriptionUpdateParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if issueLockErr != nil {
+			h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "transaction_error", 0)
+			writeError(w, http.StatusInternalServerError, "failed to prepare reply admission")
+			return
+		}
+		if authorType == "agent" && parentID.Valid {
+			lockedParent, parentLockErr := qtx.GetCommentForUpdate(r.Context(), parentID)
+			if parentLockErr != nil || uuidToString(lockedParent.IssueID) != uuidToString(lockedIssue.ID) || uuidToString(lockedParent.WorkspaceID) != uuidToString(lockedIssue.WorkspaceID) {
+				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, obsmetrics.ReplyAdmissionOutcomeError, "parent_lookup_error", 0)
+				writeError(w, http.StatusBadRequest, "invalid parent comment")
+				return
+			}
+			started := time.Now()
+			decision := replyadmission.Evaluate(replyadmission.Parent{
+				ID:          uuidToString(lockedParent.ID),
+				IssueID:     uuidToString(lockedParent.IssueID),
+				WorkspaceID: uuidToString(lockedParent.WorkspaceID),
+				AuthorType:  lockedParent.AuthorType,
+				AuthorID:    uuidToString(lockedParent.AuthorID),
+				Content:     lockedParent.Content,
+			}, req.Content)
+			h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathCreateComment, decision.Outcome(), decision.Reason, time.Since(started))
+			if !decision.Admitted {
+				// Admission happens before any comment, attachment, or trigger write.
+				// The 409 is actionable for the agent and safe for retries: the
+				// missing mention cannot be silently converted into a persisted reply.
+				writeReplyAdmissionConflict(w, decision, &replyadmission.MissingRequesterMentionError{RequesterID: decision.RequesterID})
+				return
+			}
+			parentComment = &lockedParent
+		}
+		created, err = qtx.CreateComment(r.Context(), createParams)
+		if err == nil && idempotencyKey != "" {
+			err = qtx.CreateCommentIdempotency(r.Context(), db.CreateCommentIdempotencyParams{
+				WorkspaceID:      issue.WorkspaceID,
+				IdempotencyKey:   idempotencyKey,
+				RequestHash:      requestHash,
+				CommentID:        created.ID,
+				AttachmentIds:    attachmentIDs,
+				SuppressAgentIds: suppressAgentIDs,
+			})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err == nil {
+			issue = lockedIssue
+		}
+	} else {
+		created, err = h.Queries.CreateComment(r.Context(), createParams)
+	}
 	if err != nil {
 		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
 	comment := created.Comment()
-
-	// Link uploaded attachments to this comment.
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
+	resp, outcomes, complete := h.runCommentPostCommitSideEffects(
+		r.Context(),
+		r,
+		issue,
+		comment,
+		created.IssueRevision,
+		parentComment,
+		rootComment,
+		attachmentIDs,
+		suppressAgentIDs,
+	)
+	resp.TriggerOutcomes = outcomes
+	if idempotencyKey != "" && complete {
+		h.markCommentIdempotencySideEffectsCompleted(r.Context(), issue.WorkspaceID, idempotencyKey, requestHash)
 	}
-
-	// Fetch linked attachments so the response includes them.
-	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
-	resp.IssueRevision = created.IssueRevision
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
+
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// canonicalUUIDStrings makes semantically identical UUID slices hash the same
+// way even when callers provide a different order. These inputs affect
+// post-commit side effects, so they are part of the idempotency identity.
+func canonicalUUIDStrings(ids []pgtype.UUID) []string {
+	values := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			values = append(values, uuidToString(id))
+		}
+	}
+	sort.Strings(values)
+	return values
+}
+
+// runCommentPostCommitSideEffects is shared by the normal create path and
+// recovery of a committed idempotent create. The comment transaction commits
+// before these effects because task dispatch and realtime publication use
+// separate subsystems; the idempotency row records completion so a retry or
+// sweeper can safely resume an interrupted pass.
+func (h *Handler) runCommentPostCommitSideEffects(
+	ctx context.Context,
+	r *http.Request,
+	issue db.Issue,
+	comment db.Comment,
+	issueRevision int64,
+	parentComment, rootComment *db.Comment,
+	attachmentIDs, suppressAgentIDs []pgtype.UUID,
+) (CommentResponse, []CommentTriggerOutcome, bool) {
+	complete := true
+	if len(attachmentIDs) > 0 {
+		linked, err := h.linkAttachmentsByIDs(ctx, comment.ID, issue.ID, attachmentIDs)
+		if err != nil {
+			complete = false
+		} else if linked != int64(uniqueUUIDCount(attachmentIDs)) {
+			// Treat invalid, wrong-issue, already-bound-to-another-comment, and
+			// otherwise missing attachment IDs as an incomplete delivery. The
+			// idempotency row must not be marked complete while the requested
+			// attachment set is only partially linked.
+			slog.Warn("comment attachment link incomplete",
+				"comment_id", uuidToString(comment.ID),
+				"issue_id", uuidToString(issue.ID),
+				"requested", uniqueUUIDCount(attachmentIDs),
+				"linked", linked,
+			)
+			complete = false
+		}
+	}
+	var groupedAtt map[string][]AttachmentResponse
+	if r != nil {
+		groupedAtt = h.groupAttachments(r, []pgtype.UUID{comment.ID})
+	} else {
+		groupedAtt = h.groupAttachmentsForWorkspace(ctx, issue.WorkspaceID, attachmentURLModeFromRequest(nil), []pgtype.UUID{comment.ID})
+	}
+	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+	resp.IssueRevision = issueRevision
+	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), comment.AuthorType, uuidToString(comment.AuthorID), map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
-		"issue_revision":      created.IssueRevision,
+		"issue_revision":      issueRevision,
 	})
 
-	// A reply in a resolved thread re-opens it. Done after CreateComment commits
-	// so the reply is visible regardless of the unresolve outcome. Shared with
-	// the agent task path (TaskService.createAgentComment) — both reply paths
-	// must keep the resolved root in sync.
-	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID)
-	if authorType == "agent" {
-		h.TaskService.CancelDeferredEscalationsForIssueAgent(r.Context(), issue.ID, comment.AuthorID)
+	// A reply in a resolved thread re-opens it. This is deliberately after the
+	// comment commit so the reply remains visible if the unresolve fails.
+	if err := h.TaskService.AutoUnresolveThreadOnReply(ctx, rootComment, uuidToString(issue.WorkspaceID), comment.AuthorType, uuidToString(comment.AuthorID)); err != nil {
+		complete = false
+	}
+	if comment.AuthorType == "agent" {
+		if err := h.TaskService.CancelDeferredEscalationsForIssueAgent(ctx, issue.ID, comment.AuthorID); err != nil {
+			complete = false
+		}
 	}
 
-	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
-	// The comment is already saved; a blocked mention must not fail the whole
-	// request. Surface the per-target outcomes so the client can show partial
-	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	originatorUserID := h.invokeOriginator(ctx, comment.AuthorType, uuidToString(comment.AuthorID), comment.SourceTaskID)
+	outcomes := h.triggerTasksForComment(ctx, issue, comment, parentComment, comment.AuthorType, uuidToString(comment.AuthorID), originatorUserID, suppressAgentIDs)
+	for _, outcome := range outcomes {
+		if outcome.Status == DispatchBlocked && outcome.ReasonCode == ReasonInternalError {
+			complete = false
+			break
+		}
+	}
+	return resp, outcomes, complete
+}
 
-	writeJSON(w, http.StatusCreated, resp)
+func uniqueUUIDCount(ids []pgtype.UUID) int {
+	seen := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		if id.Valid {
+			seen[uuidToString(id)] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
+func (h *Handler) markCommentIdempotencySideEffectsCompleted(ctx context.Context, workspaceID pgtype.UUID, key, requestHash string) bool {
+	changed, err := h.Queries.MarkCommentIdempotencySideEffectsCompleted(ctx, db.MarkCommentIdempotencySideEffectsCompletedParams{
+		WorkspaceID:    workspaceID,
+		IdempotencyKey: key,
+		RequestHash:    requestHash,
+	})
+	if err != nil {
+		slog.Warn("marking comment idempotency side effects complete failed", "workspace_id", uuidToString(workspaceID), "idempotency_key", key, "error", err)
+		return false
+	}
+	return changed > 0
 }
 
 // clientAuthorableCommentTypes is what POST /comments accepts. `status_change`
@@ -3329,6 +3624,15 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	oldContent := existing.Content
+	// Admission is keyed to the stored comment author, not the current actor.
+	// An owner/admin may edit an agent-authored reply, but must not be able to
+	// replace it with an unmentioned substantive answer. Force this path through
+	// the same transaction as the guarded update so a concurrent parent edit
+	// cannot invalidate a preflight decision.
+	admissionRequired := existing.AuthorType == "agent" && oldContent != req.Content && existing.ParentID.Valid
+	if admissionRequired {
+		strictContentEdit = true
+	}
 	// Preserve the existing authority lineage by default — this path is taken only
 	// for an UNCHANGED edit (no re-trigger). When the content changes below, the
 	// lineage is re-derived from the EDIT action itself (MUL-4857), never carried
@@ -3385,6 +3689,8 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	var comment db.Comment
 	var issueRevision int64
+	var admissionRejected bool
+	var admissionDecision replyadmission.Decision
 	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
 	if transactionalEdit {
 		// Strict body edits, attachment-set edits, and cancellation of tasks built
@@ -3400,7 +3706,41 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 		var updated db.UpdateCommentRow
-		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if admissionRequired {
+			if _, issueLockErr := qtx.LockIssueForDescriptionUpdate(r.Context(), db.LockIssueForDescriptionUpdateParams{
+				ID:          existing.IssueID,
+				WorkspaceID: existing.WorkspaceID,
+			}); issueLockErr != nil {
+				err = fmt.Errorf("load reply issue for admission: %w", issueLockErr)
+			}
+		}
+		if admissionRequired && err == nil {
+			lockedParent, lockErr := qtx.GetCommentForUpdate(r.Context(), existing.ParentID)
+			switch {
+			case lockErr != nil:
+				err = fmt.Errorf("load reply parent for admission: %w", lockErr)
+			case uuidToString(lockedParent.IssueID) != uuidToString(existing.IssueID) || uuidToString(lockedParent.WorkspaceID) != uuidToString(existing.WorkspaceID):
+				err = fmt.Errorf("reply parent scope mismatch")
+			default:
+				started := time.Now()
+				admissionDecision = replyadmission.Evaluate(replyadmission.Parent{
+					ID:          uuidToString(lockedParent.ID),
+					IssueID:     uuidToString(lockedParent.IssueID),
+					WorkspaceID: uuidToString(lockedParent.WorkspaceID),
+					AuthorType:  lockedParent.AuthorType,
+					AuthorID:    uuidToString(lockedParent.AuthorID),
+					Content:     lockedParent.Content,
+				}, req.Content)
+				h.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathUpdateComment, admissionDecision.Outcome(), admissionDecision.Reason, time.Since(started))
+				if !admissionDecision.Admitted {
+					admissionRejected = true
+					err = &replyadmission.MissingRequesterMentionError{RequesterID: admissionDecision.RequesterID}
+				}
+			}
+		}
+		if err == nil {
+			updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		}
 		if err == nil {
 			comment = updated.Comment()
 			issueRevision = updated.IssueRevision
@@ -3441,6 +3781,12 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+		if admissionRejected {
+			// Reject before cancelling trigger tasks or updating the row. An
+			// edit must have the same admission semantics as a new reply.
+			writeReplyAdmissionConflict(w, admissionDecision, err)
+			return
+		}
 		if triggerIssue != nil && !strictContentEdit {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.

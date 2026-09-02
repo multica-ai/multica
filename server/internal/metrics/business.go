@@ -15,6 +15,18 @@ var chatClaimResumeQueryDurationBuckets = []float64{0.001, 0.0025, 0.005, 0.01, 
 var runtimeSweepStageDurationBuckets = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 15, 30, 60}
 
 const (
+	ReplyAdmissionPathCreateComment          = "create_comment"
+	ReplyAdmissionPathUpdateComment          = "update_comment"
+	ReplyAdmissionPathTaskCompletion         = "task_completion"
+	ReplyAdmissionPathTaskAgentComment       = "task_agent_comment"
+	ReplyAdmissionOutcomeAllowed             = "allowed"
+	ReplyAdmissionOutcomeRejected            = "rejected"
+	ReplyAdmissionOutcomeError               = "error"
+	ReplyAdmissionOutcomeIdempotencyReplay   = "idempotency_replay"
+	ReplyAdmissionOutcomeIdempotencyConflict = "idempotency_conflict"
+)
+
+const (
 	RuntimeSweepStageLiveness                 = "runtime_liveness"
 	RuntimeSweepStageOfflineTasks             = "offline_runtime_tasks"
 	RuntimeSweepStageReconnectRetries         = "runtime_reconnect_retries"
@@ -70,6 +82,8 @@ type BusinessMetrics struct {
 	entitlementDecision            *prometheus.CounterVec
 	entitlementVersionRegression   prometheus.Counter
 	autopilotQuotaDecision         *prometheus.CounterVec
+	replyAdmissionDecisions        *prometheus.CounterVec
+	replyAdmissionDuration         *prometheus.HistogramVec
 
 	// agentRuntimeLookup counts single-row agent_runtime reads by product
 	// source. Every source shares one SQL fingerprint, so this is the only
@@ -279,6 +293,15 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
 			Help: "Total autopilot quota admission outcomes.",
 		}, metricLabels("multica_autopilot_quota_decision_total")),
+		replyAdmissionDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "reply_admission", Name: "decisions_total",
+			Help: "Reply admission decisions by server path, outcome, and reason.",
+		}, metricLabels("multica_reply_admission_decisions_total")),
+		replyAdmissionDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica", Subsystem: "reply_admission", Name: "duration_seconds",
+			Help:    "Time spent deriving and evaluating reply admission decisions.",
+			Buckets: []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+		}, metricLabels("multica_reply_admission_duration_seconds")),
 		agentRuntimeLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "agent_runtime", Name: "lookup_total",
 			Help: "Total single-row agent_runtime reads by product source and outcome.",
@@ -337,6 +360,8 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.entitlementDecision,
 		m.entitlementVersionRegression,
 		m.autopilotQuotaDecision,
+		m.replyAdmissionDecisions,
+		m.replyAdmissionDuration,
 		m.agentRuntimeLookup,
 	}, m.events.collectors()...)
 }
@@ -399,6 +424,55 @@ func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result st
 		source = "other"
 	}
 	m.autopilotQuotaDecision.WithLabelValues(action, source, result).Inc()
+}
+
+// RecordReplyAdmission records a bounded-cardinality admission decision. No
+// issue, agent, task, or requester identifiers are labels: this metric is for
+// rollout health and classifier drift, not per-record tracing.
+func (m *BusinessMetrics) RecordReplyAdmission(path, outcome, reason string, duration time.Duration) {
+	if m == nil {
+		return
+	}
+	path = normalizeReplyAdmissionPath(path)
+	outcome = normalizeReplyAdmissionOutcome(outcome)
+	reason = normalizeReplyAdmissionReason(reason)
+	if duration < 0 {
+		duration = 0
+	}
+	m.replyAdmissionDecisions.WithLabelValues(path, outcome, reason).Inc()
+	m.replyAdmissionDuration.WithLabelValues(path, outcome).Observe(duration.Seconds())
+}
+
+func normalizeReplyAdmissionPath(path string) string {
+	switch path {
+	case ReplyAdmissionPathCreateComment, ReplyAdmissionPathUpdateComment,
+		ReplyAdmissionPathTaskCompletion, ReplyAdmissionPathTaskAgentComment:
+		return path
+	default:
+		return "other"
+	}
+}
+
+func normalizeReplyAdmissionOutcome(outcome string) string {
+	switch outcome {
+	case ReplyAdmissionOutcomeAllowed, ReplyAdmissionOutcomeRejected,
+		ReplyAdmissionOutcomeError, ReplyAdmissionOutcomeIdempotencyReplay,
+		ReplyAdmissionOutcomeIdempotencyConflict:
+		return outcome
+	default:
+		return "other"
+	}
+}
+
+func normalizeReplyAdmissionReason(reason string) string {
+	switch reason {
+	case "not_applicable", "acknowledgement", "requester_mention_present",
+		"missing_requester_mention", "idempotency_replay", "idempotency_key_reused",
+		"transaction_error", "parent_lookup_error", "content_classifier":
+		return reason
+	default:
+		return "other"
+	}
 }
 
 func (m *BusinessMetrics) RecordRuntimeGCDeleted() {
