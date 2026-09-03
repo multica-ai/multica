@@ -307,3 +307,55 @@ func TestRepoCheckoutRetryDelay(t *testing.T) {
 		t.Fatalf("default delay = %s, want 1s", got)
 	}
 }
+
+// The warning has to name the branch the caller must go back to. A reused
+// checkout has already moved off it by the time this prints, so the working
+// tree no longer holds that name anywhere (#7948).
+func TestWritePriorBranchWarningNamesTheBranchToReturnTo(t *testing.T) {
+	var out strings.Builder
+	writePriorBranchWarning(&out, "agent/j/second", &priorBranchReport{
+		Branch:       "agent/j/first",
+		CommitsAhead: 3,
+	})
+
+	got := out.String()
+	for _, want := range []string{"agent/j/first", "agent/j/second", "3 commit(s)", "will NOT update a pull request"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("warning missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestWritePriorBranchWarningReportsDiscardedChangesSeparately(t *testing.T) {
+	var commitsOnly strings.Builder
+	writePriorBranchWarning(&commitsOnly, "agent/j/second", &priorBranchReport{
+		Branch:       "agent/j/first",
+		CommitsAhead: 1,
+	})
+	if strings.Contains(commitsOnly.String(), "discarded") {
+		t.Errorf("clean tree reported discarded changes:\n%s", commitsOnly.String())
+	}
+
+	// Uncommitted work is destroyed by the reset even when the branch itself
+	// carried no commits, so it has to be reportable on its own.
+	var dirtyOnly strings.Builder
+	writePriorBranchWarning(&dirtyOnly, "agent/j/second", &priorBranchReport{
+		Branch:          "agent/j/first",
+		HadLocalChanges: true,
+	})
+	if !strings.Contains(dirtyOnly.String(), "discarded") {
+		t.Errorf("discarded uncommitted changes not reported:\n%s", dirtyOnly.String())
+	}
+	if strings.Contains(dirtyOnly.String(), "commit(s)") {
+		t.Errorf("reported commits for a branch that had none:\n%s", dirtyOnly.String())
+	}
+}
+
+// Silence is the common case: an ordinary checkout must not print a warning.
+func TestWritePriorBranchWarningSaysNothingWithoutAPriorBranch(t *testing.T) {
+	var out strings.Builder
+	writePriorBranchWarning(&out, "agent/j/first", nil)
+	if out.String() != "" {
+		t.Errorf("wrote a warning for a fresh checkout: %q", out.String())
+	}
+}

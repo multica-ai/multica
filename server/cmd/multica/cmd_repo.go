@@ -416,8 +416,9 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 	}
 
 	var result struct {
-		Path       string `json:"path"`
-		BranchName string `json:"branch_name"`
+		Path        string             `json:"path"`
+		BranchName  string             `json:"branch_name"`
+		PriorBranch *priorBranchReport `json:"prior_branch"`
 	}
 	if err := json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("parse response: %w", err)
@@ -425,8 +426,42 @@ func runRepoCheckout(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stdout, "%s\n", result.Path)
 	fmt.Fprintf(os.Stderr, "Checked out %s → %s (branch: %s)\n", repoURL, result.Path, result.BranchName)
+	writePriorBranchWarning(os.Stderr, result.BranchName, result.PriorBranch)
 
 	return nil
+}
+
+// priorBranchReport is the part of the checkout response describing what a
+// reused checkout was moved off of. Absent for a fresh checkout, and for a
+// reused one whose previous branch held nothing.
+type priorBranchReport struct {
+	Branch          string `json:"branch"`
+	CommitsAhead    int    `json:"commits_ahead"`
+	HadLocalChanges bool   `json:"had_local_changes"`
+}
+
+// writePriorBranchWarning says out loud that this checkout moved off a branch
+// that still held work.
+//
+// Reusing a workdir on a follow-up turn silently swaps the branch underneath
+// the caller: a fix meant for the pull request opened last turn gets committed
+// on a fresh branch instead, and the pull request never sees it (#7948). The
+// checkout is the moment that becomes true, so it is the moment to say so —
+// and to name the branch to go back to, because "which branch was I on" is not
+// recoverable from the new working tree.
+func writePriorBranchWarning(w io.Writer, newBranch string, prior *priorBranchReport) {
+	if prior == nil {
+		return
+	}
+	if prior.CommitsAhead > 0 {
+		fmt.Fprintf(w, "warning: this working directory was on branch %s, which has %d commit(s) that %s does not.\n",
+			prior.Branch, prior.CommitsAhead, newBranch)
+		fmt.Fprintf(w, "warning: pushing %s will NOT update a pull request opened from %s. To continue that pull request, check out %s; otherwise carry the commits over before pushing.\n",
+			newBranch, prior.Branch, prior.Branch)
+	}
+	if prior.HadLocalChanges {
+		fmt.Fprintf(w, "warning: uncommitted changes in this working directory were discarded to reuse it.\n")
+	}
 }
 
 func repoCheckoutRetryDelay(value string, now time.Time) time.Duration {

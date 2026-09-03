@@ -49,6 +49,31 @@ multica repo checkout <url> --ref <branch-or-sha>
 
 `repo checkout` requires both `MULTICA_DAEMON_PORT` and the injected task-scoped `MULTICA_TOKEN`; it is intended to run inside the active daemon task and from that task's workdir (or a descendant). The local daemon authenticates the token against its active-task registry, derives workspace/task/agent identity itself, and rejects a caller-supplied workdir outside that task. If either variable is absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
 
+### Re-running checkout on a later turn moves you off the previous turn's branch
+
+The branch is named for the task, and a follow-up turn on the same issue is a
+new task. So running `repo checkout` again in a reused workdir resets the tree
+and cuts a **new** branch from the freshly fetched default branch — it does not
+continue the branch the previous turn built and pushed.
+
+That matters when the previous turn opened a pull request. Committing the
+follow-up fix after re-running checkout puts it on a branch that PR does not
+track, so pushing leaves the PR unchanged while the task reports success.
+
+When this happens the command says so on stderr, naming the branch it left:
+
+```text
+warning: this working directory was on branch agent/j/abc123, which has 2 commit(s) that agent/j/def456 does not.
+warning: pushing agent/j/def456 will NOT update a pull request opened from agent/j/abc123. To continue that pull request, check out agent/j/abc123; otherwise carry the commits over before pushing.
+```
+
+Act on it rather than pushing anyway: `git checkout <prior-branch>` to continue
+the existing PR, or cherry-pick onto the new branch and open a second PR
+deliberately. Uncommitted changes from the previous turn are discarded by the
+reuse and are reported the same way. If you do not need a fresh tree, the
+simplest way to avoid the switch is not to re-run `repo checkout` — the existing
+checkout is still there from the previous turn.
+
 ## Task CLI boundary
 
 The daemon injects a task-scoped `mat_` credential for Multica API commands and a private task-local Multica configuration root. Inside that managed task context:

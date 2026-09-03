@@ -2696,3 +2696,143 @@ func TestReconcileCoAuthoredByHookInCheckoutIgnoresLinkedWorktree(t *testing.T) 
 		t.Errorf("per-checkout reconcile disturbed the bare cache's hook: %v", err)
 	}
 }
+
+// A follow-up turn on the same issue reuses the workdir but arrives with a new
+// task id, so the checkout cuts a new branch and leaves the previous turn's
+// commits — and any pull request opened from them — behind. The switch used to
+// be silent, which is how a follow-up fix ended up on a branch other than the
+// PR it was meant to update (#7948).
+func TestCreateWorktreeReportsPriorBranchHoldingCommits(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name     string
+		isolated bool
+	}{
+		{name: "linked worktree"},
+		{name: "isolated metadata", isolated: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cache, sourceRepo := cacheWithSyncedRepo(t)
+			workDir := t.TempDir()
+
+			firstTurn := checkoutForTask(t, cache, sourceRepo, workDir, "task-one-000000000001", tc.isolated)
+			if firstTurn.PriorBranch != nil {
+				t.Fatalf("fresh checkout reported a prior branch: %+v", firstTurn.PriorBranch)
+			}
+			addEmptyCommit(t, firstTurn.Path, "work from the first turn")
+
+			secondTurn := checkoutForTask(t, cache, sourceRepo, workDir, "task-two-000000000002", tc.isolated)
+			if secondTurn.BranchName == firstTurn.BranchName {
+				t.Fatalf("second turn stayed on %q; test no longer exercises the branch switch", secondTurn.BranchName)
+			}
+			prior := secondTurn.PriorBranch
+			if prior == nil {
+				t.Fatal("second turn did not report the branch it moved off of")
+			}
+			if prior.Branch != firstTurn.BranchName {
+				t.Errorf("prior branch = %q, want %q", prior.Branch, firstTurn.BranchName)
+			}
+			if prior.CommitsAhead != 1 {
+				t.Errorf("prior commits ahead = %d, want 1", prior.CommitsAhead)
+			}
+			if prior.HadLocalChanges {
+				t.Error("prior branch reported discarded local changes; the tree was clean")
+			}
+		})
+	}
+}
+
+// The report is for work that would otherwise go unmentioned. A turn that
+// committed nothing left nothing behind, so saying so would be noise on every
+// ordinary checkout.
+func TestCreateWorktreeOmitsPriorBranchWhenNothingWasLeftBehind(t *testing.T) {
+	t.Parallel()
+	cache, sourceRepo := cacheWithSyncedRepo(t)
+	workDir := t.TempDir()
+
+	checkoutForTask(t, cache, sourceRepo, workDir, "task-one-000000000001", false)
+	secondTurn := checkoutForTask(t, cache, sourceRepo, workDir, "task-two-000000000002", false)
+
+	if secondTurn.PriorBranch != nil {
+		t.Fatalf("reported a prior branch for a turn that committed nothing: %+v", secondTurn.PriorBranch)
+	}
+}
+
+// Reusing a checkout runs `reset --hard`, so uncommitted work from the previous
+// turn is gone. That is a deletion the caller never asked for and cannot see.
+func TestCreateWorktreeReportsDiscardedLocalChanges(t *testing.T) {
+	t.Parallel()
+	cache, sourceRepo := cacheWithSyncedRepo(t)
+	workDir := t.TempDir()
+
+	firstTurn := checkoutForTask(t, cache, sourceRepo, workDir, "task-one-000000000001", false)
+	if err := os.WriteFile(filepath.Join(firstTurn.Path, "unsaved.txt"), []byte("in progress"), 0o644); err != nil {
+		t.Fatalf("write uncommitted file: %v", err)
+	}
+
+	secondTurn := checkoutForTask(t, cache, sourceRepo, workDir, "task-two-000000000002", false)
+	if secondTurn.PriorBranch == nil {
+		t.Fatal("discarded uncommitted changes were not reported")
+	}
+	if !secondTurn.PriorBranch.HadLocalChanges {
+		t.Error("HadLocalChanges = false, want true")
+	}
+}
+
+// Isolated checkouts prune earlier agent/* heads so a reused workdir does not
+// accumulate a branch per turn. Pruning one whose commits were never pushed
+// would make them reachable from nothing, so that branch has to survive.
+func TestIsolatedCheckoutKeepsPriorBranchHoldingUnpushedCommits(t *testing.T) {
+	t.Parallel()
+	cache, sourceRepo := cacheWithSyncedRepo(t)
+	workDir := t.TempDir()
+
+	unpushed := checkoutForTask(t, cache, sourceRepo, workDir, "task-one-000000000001", true)
+	addEmptyCommit(t, unpushed.Path, "committed but never pushed")
+
+	// A branch that never moved off the base carries nothing of its own: its
+	// tip is still reachable from origin, so pruning it loses nothing.
+	empty := checkoutForTask(t, cache, sourceRepo, workDir, "task-two-000000000002", true)
+
+	final := checkoutForTask(t, cache, sourceRepo, workDir, "task-three-00000000003", true)
+
+	if !localBranchExists(t, final.Path, unpushed.BranchName) {
+		t.Errorf("branch %q was pruned; its commits are now reachable from nothing", unpushed.BranchName)
+	}
+	if localBranchExists(t, final.Path, empty.BranchName) {
+		t.Errorf("branch %q held nothing of its own but survived pruning", empty.BranchName)
+	}
+}
+
+func cacheWithSyncedRepo(t *testing.T) (*Cache, string) {
+	t.Helper()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	return cache, sourceRepo
+}
+
+func checkoutForTask(t *testing.T, cache *Cache, sourceRepo, workDir, taskID string, isolated bool) *WorktreeResult {
+	t.Helper()
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:         "ws-1",
+		RepoURL:             sourceRepo,
+		WorkDir:             workDir,
+		AgentName:           "J",
+		TaskID:              taskID,
+		IsolatedGitMetadata: isolated,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree(task %s) failed: %v", taskID, err)
+	}
+	return result
+}
+
+func localBranchExists(t *testing.T, repoPath, branch string) bool {
+	t.Helper()
+	cmd := exec.Command("git", "-C", repoPath, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	return cmd.Run() == nil
+}
