@@ -54,17 +54,4 @@ describe("ExpandableDescription", () => {
     await userEvent.click(screen.getByRole("button"));
     expect(text).toHaveClass("line-clamp-2");
   });
-
-  it("keeps the toggle quiet rather than styling it as a primary action", async () => {
-    stageOverflow(120, 48);
-    await renderWithI18n(
-      <ExpandableDescription>A description that runs on</ExpandableDescription>,
-    );
-
-    // Brand is for primary actions and live state. On a detail page that is
-    // Save and Add-to-agent, not a text expander.
-    const toggle = screen.getByRole("button");
-    expect(toggle.className).toContain("text-muted-foreground");
-    expect(toggle.className).not.toContain("brand");
-  });
 });

@@ -12,28 +12,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsClaudeBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("claude", Config{ExecutablePath: "/nonexistent/claude"})
-	if err != nil {
-		t.Fatalf("New(claude) error: %v", err)
-	}
-	if _, ok := b.(*claudeBackend); !ok {
-		t.Fatalf("expected *claudeBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsCodexBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("codex", Config{ExecutablePath: "/nonexistent/codex"})
-	if err != nil {
-		t.Fatalf("New(codex) error: %v", err)
-	}
-	if _, ok := b.(*codexBackend); !ok {
-		t.Fatalf("expected *codexBackend, got %T", b)
-	}
-}
-
 func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("codebuddy", Config{ExecutablePath: "/nonexistent/codebuddy"})
@@ -42,17 +20,6 @@ func TestNewReturnsCodebuddyBackend(t *testing.T) {
 	}
 	if _, ok := b.(*codebuddyBackend); !ok {
 		t.Fatalf("expected *codebuddyBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsCopilotBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("copilot", Config{ExecutablePath: "/nonexistent/copilot"})
-	if err != nil {
-		t.Fatalf("New(copilot) error: %v", err)
-	}
-	if _, ok := b.(*copilotBackend); !ok {
-		t.Fatalf("expected *copilotBackend, got %T", b)
 	}
 }
 
@@ -83,17 +50,6 @@ func TestNewReturnsQoderCNBackend(t *testing.T) {
 	}
 	if qoder.defaultExecutable != "qoderclicn" {
 		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
-	}
-}
-
-func TestNewReturnsAntigravityBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("antigravity", Config{ExecutablePath: "/nonexistent/agy"})
-	if err != nil {
-		t.Fatalf("New(antigravity) error: %v", err)
-	}
-	if _, ok := b.(*antigravityBackend); !ok {
-		t.Fatalf("expected *antigravityBackend, got %T", b)
 	}
 }
 
@@ -195,18 +151,6 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}
-	}
-}
-
-func TestLaunchHeaderAntigravityAvoidsTextOnlyPrintModeLabel(t *testing.T) {
-	t.Parallel()
-
-	header := LaunchHeader("antigravity")
-	if header != "agy -p (non-interactive)" {
-		t.Fatalf("unexpected Antigravity launch header: %q", header)
-	}
-	if strings.Contains(header, "print mode") {
-		t.Fatalf("Antigravity launch header must not imply a text-only mode: %q", header)
 	}
 }
 

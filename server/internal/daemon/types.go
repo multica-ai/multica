@@ -55,19 +55,6 @@ type ProjectResourceData struct {
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
-// ActiveSiblingRunData mirrors the claim-time warning context returned by the
-// server for another in-flight issue task owned by this agent. Queued tasks are
-// intentionally excluded from this context.
-type ActiveSiblingRunData struct {
-	TaskID          string `json:"task_id"`
-	IssueID         string `json:"issue_id"`
-	IssueIdentifier string `json:"issue_identifier"`
-	IssueTitle      string `json:"issue_title"`
-	Status          string `json:"status"`
-	CreatedAt       string `json:"created_at"`
-	StartedAt       string `json:"started_at,omitempty"`
-}
-
 // IssueStatusData mirrors one active custom workspace status from the claim
 // payload (MUL-6460). Mirror field: internal/handler/agent.go
 // TaskIssueStatusData, same JSON names.
@@ -108,7 +95,6 @@ type Task struct {
 	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
 	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
-	ActiveSiblingRuns             []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays

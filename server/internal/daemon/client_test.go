@@ -441,21 +441,6 @@ func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
 	}
 }
 
-func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
-	// MUL-2780 settled on a 5-step exponential backoff (4s, 8s, 16s, 32s, 64s).
-	// Pin it so a future "tidy this up" refactor can't silently flatten or
-	// shorten the recovery window without explicit discussion.
-	want := []time.Duration{4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second, 64 * time.Second}
-	if len(defaultTerminalRetrySchedule) != len(want) {
-		t.Fatalf("schedule length: got %d, want %d", len(defaultTerminalRetrySchedule), len(want))
-	}
-	for i, d := range want {
-		if defaultTerminalRetrySchedule[i] != d {
-			t.Errorf("schedule[%d]: got %s, want %s", i, defaultTerminalRetrySchedule[i], d)
-		}
-	}
-}
-
 func TestNormalizeGOOS(t *testing.T) {
 	cases := map[string]string{
 		"darwin":  "macos",

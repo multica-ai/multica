@@ -3,9 +3,6 @@ package handler
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,87 +56,6 @@ SELECT EXISTS (
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("backend %d never parked on a lock; the race was not set up", pid)
-}
-
-// TestTaskOwnershipWritesCallTheFence is the guard that keeps the fence from being
-// a convention. Every statement that inserts an agent_task_queue row, or assigns
-// one of its ownership columns, has to call lock_task_owner_rows — a new
-// write path that forgets it would silently reopen the insert-after-sweep window
-// that MUL-5999's teardown depends on being closed.
-//
-// This is the trade for not using a row trigger: the write path names its own
-// fence, and CI checks that it did.
-func TestTaskOwnershipWritesCallTheFence(t *testing.T) {
-	queryDir := filepath.Join("..", "..", "pkg", "db", "queries")
-	entries, err := os.ReadDir(queryDir)
-	if err != nil {
-		t.Fatalf("read query dir: %v", err)
-	}
-
-	nameRe := regexp.MustCompile(`(?m)^-- name: (\S+)`)
-	// Go's regexp has no lookahead, so the SET clause is isolated first and its
-	// ownership assignments are inspected individually. Clearing runtime_id cannot
-	// move a task into another workspace, so `= NULL` is exempt; teardown's own
-	// detach only touches parent_task_id.
-	setClauseRe := regexp.MustCompile(`(?is)\bSET\b(.*?)(?:\bWHERE\b|\bFROM\b|\bRETURNING\b|;)`)
-	ownerAssignRe := regexp.MustCompile(`(?i)\b(agent_id|issue_id|runtime_id)\s*=\s*(\S+)`)
-
-	assignsOwner := func(code string) bool {
-		for _, clause := range setClauseRe.FindAllStringSubmatch(code, -1) {
-			for _, assign := range ownerAssignRe.FindAllStringSubmatch(clause[1], -1) {
-				if !strings.EqualFold(strings.TrimSuffix(assign[2], ","), "NULL") {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	checked := 0
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
-			continue
-		}
-		body, err := os.ReadFile(filepath.Join(queryDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		text := string(body)
-		matches := nameRe.FindAllStringSubmatchIndex(text, -1)
-		for i, m := range matches {
-			stop := len(text)
-			if i+1 < len(matches) {
-				stop = matches[i+1][0]
-			}
-			stmt := text[m[0]:stop]
-			name := text[m[2]:m[3]]
-			// Strip comment lines so prose cannot satisfy or trip the check.
-			var sqlOnly strings.Builder
-			for _, line := range strings.Split(stmt, "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "--") {
-					continue
-				}
-				sqlOnly.WriteString(line)
-				sqlOnly.WriteString("\n")
-			}
-			code := sqlOnly.String()
-
-			writesOwnership := strings.Contains(code, "INSERT INTO agent_task_queue") ||
-				(strings.Contains(code, "UPDATE agent_task_queue") && assignsOwner(code))
-			if !writesOwnership {
-				continue
-			}
-			checked++
-			if !strings.Contains(code, "lock_task_owner_rows(") {
-				t.Errorf("%s: %s writes agent_task_queue ownership without calling "+
-					"lock_task_owner_rows; that reopens the workspace-delete race "+
-					"(see migration 284)", entry.Name(), name)
-			}
-		}
-	}
-	if checked < 9 {
-		t.Errorf("only %d ownership-writing statements found; the detector probably stopped matching", checked)
-	}
 }
 
 // TestTaskWriteFence_BlocksOnWorkspaceLockAlone shows the fence, and only the

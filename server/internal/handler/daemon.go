@@ -3042,37 +3042,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 	}
 
-	// Surface a bounded snapshot of the same agent's other in-flight issue
-	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
-	// This is advisory context, not a queue gate: cross-issue parallelism and
-	// serial handoffs remain valid, while the prompt can stop an unaware second
-	// run from opening a duplicate PR. Scope the query to the already-validated
-	// runtime workspace so corrupt cross-tenant task links never leak.
-	if siblings, err := h.Queries.ListActiveSiblingIssueTasks(r.Context(), db.ListActiveSiblingIssueTasksParams{
-		AgentID:     task.AgentID,
-		TaskID:      task.ID,
-		WorkspaceID: parseUUID(resp.WorkspaceID),
-	}); err == nil {
-		resp.ActiveSiblingRuns = make([]ActiveSiblingRunData, 0, len(siblings))
-		for _, sibling := range siblings {
-			resp.ActiveSiblingRuns = append(resp.ActiveSiblingRuns, ActiveSiblingRunData{
-				TaskID:          uuidToString(sibling.TaskID),
-				IssueID:         uuidToString(sibling.IssueID),
-				IssueIdentifier: fmt.Sprintf("%s-%d", sibling.IssuePrefix, sibling.IssueNumber),
-				IssueTitle:      sibling.IssueTitle,
-				Status:          sibling.Status,
-				CreatedAt:       timestampToString(sibling.CreatedAt),
-				StartedAt:       timestampToString(sibling.StartedAt),
-			})
-		}
-	} else {
-		slog.Warn("task claim: failed to load active sibling runs",
-			"task_id", uuidToString(task.ID),
-			"agent_id", uuidToString(task.AgentID),
-			"error", err,
-		)
-	}
-
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /
@@ -4908,13 +4877,6 @@ const HeaderActiveRunsTruncated = "X-Active-Runs-Truncated"
 // 5x the bytes of this one. A caller asking "is anyone working next to me?"
 // reads none of those fields, and it is an agent spending its own context on
 // the answer, so the payload is cut to what the question needs.
-//
-// It is also not ActiveSiblingRunData, which the daemon claim payload uses.
-// That one describes the claiming agent's OWN other runs, so it has no agent
-// field; this read spans agents, and which agent is on a sibling is the answer.
-// Sharing one struct across both would put an optional field on it that only
-// one caller ever sets — the exact shape this change removed from
-// AgentTaskResponse.
 type ActiveRunSummary struct {
 	TaskID          string  `json:"task_id"`
 	IssueID         string  `json:"issue_id"`

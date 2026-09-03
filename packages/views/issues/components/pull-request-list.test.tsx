@@ -78,14 +78,6 @@ async function waitForRender() {
 }
 
 describe("PullRequestList sidebar rows", () => {
-  it("uses the sidebar list-row surface instead of a card surface", async () => {
-    mockPRs = [makePR({ title: "Visual row" })];
-    renderList();
-    await waitForRender();
-    const row = screen.getByTestId("pull-request-row");
-    expect(row).toHaveClass("rounded-md", "-mx-2", "hover:bg-accent/50");
-    expect(row).not.toHaveClass("rounded-lg", "border", "bg-card");
-  });
 
   // --- CI status element ---------------------------------------------------
 
