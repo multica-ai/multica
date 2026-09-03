@@ -255,7 +255,11 @@ type SkillContextForEnv struct {
 	Name        string
 	Description string
 	Content     string
-	Files       []SkillFileContextForEnv
+	// Source is the skill's origin ("builtin", "workspace", "plugin"). The
+	// brief uses it to name a built-in by the slug it actually landed on, which
+	// a workspace skill of the same name can otherwise take.
+	Source string
+	Files  []SkillFileContextForEnv
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.

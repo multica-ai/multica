@@ -35,8 +35,8 @@ above, so the backend never parses it and it can enqueue nothing — it is a
 render-only link every client makes navigable (a chip on web and desktop, an
 ordinary link that opens the project on tap on mobile). That is the whole point:
 a project reference should never be able to start a run. Use it freely to point
-at a project (see `references/projects.md`); everything else in this document is
-about the four types (plus `all`) the parser does recognize.
+at a project; everything else in this document is about the four types (plus
+`all`) the parser does recognize.
 
 ## Step 1 — look up the UUID
 
@@ -154,7 +154,7 @@ read. Read that array after posting — it is the only place any of this shows u
   *see* gate: a workspace admin who can open a private agent in the UI still may
   not trigger it, so being able to view the target says nothing about being able
   to mention it. (The squad assignment/promote path has its own gate; the
-  child-done wake is ungated — see `references/squads.md`.)
+  child-done wake is ungated.)
 
 ## Who the invoke gate judges
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 // This file holds the runtime brief assembler — the post-MUL-3560 path
@@ -719,7 +720,8 @@ func writeSubIssueCreation(b *strings.Builder) {
 }
 
 // platformSkillName is the built-in skill that holds Multica's platform
-// contracts. The brief names it in two places, so it is spelled once.
+// contracts. It mirrors service.PlatformSkillName, which the daemon must not
+// import; the brief's rendered-output tests pin the two together.
 const platformSkillName = "multica-platform"
 
 // writeSkills emits the Skills section: an index of invocable skill names.
@@ -746,11 +748,20 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 	b.WriteString("## Skills\n\n")
 	b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-	hasPlatformSkill := false
+	platformSlug := ""
 	for _, skill := range skills {
 		fmt.Fprintf(b, "- **%s**\n", skill.Name)
-		if skill.Name == platformSkillName {
-			hasPlatformSkill = true
+		// Match on the resolved slug, which is the name the agent must type,
+		// AND on the built-in source. A workspace skill named "multica
+		// platform" sanitizes to the same base slug and, being listed first,
+		// takes it — leaving the built-in at a suffixed slug. Naming the bare
+		// slug there would point the agent at the wrong skill and lose the
+		// platform contracts entirely, which is the one thing this line
+		// exists to prevent. The prefix test is safe because the only other
+		// built-in is multica-onboarding: a suffix can extend the slug, but
+		// nothing can shorten it.
+		if skill.Source == skillbundle.SourceBuiltin && strings.HasPrefix(skill.Name, platformSkillName) {
+			platformSlug = skill.Name
 		}
 	}
 	b.WriteString("\n")
@@ -759,9 +770,10 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	// agent already knows it is doing. Its single description now covers eight
 	// domains that used to advertise one apiece, so an agent reaching for a
 	// Multica contract has one name to guess instead of eight — this line is
-	// what keeps that consolidation from costing recall.
-	if hasPlatformSkill {
-		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — load the `" + platformSkillName + "` skill and open the one reference its routing table names.\n\n")
+	// what keeps that consolidation from costing recall, and it must therefore
+	// name the skill that actually holds those contracts.
+	if platformSlug != "" {
+		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — load the `" + platformSlug + "` skill and open the one reference its routing table names.\n\n")
 	}
 }
 

@@ -18,14 +18,14 @@ The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-2759`). Each match writes an issue to PR link row.
+(`PREFIX-NUMBER`, e.g. `MUL-123`). Each match writes an issue to PR link row.
 This is the link that `multica issue pull-requests` reads back — but see the
 reference-only rule below: a key that appears **only** as a bare mention in the
 body is linked yet hidden from that list.
 
 ```text
-MUL-2759: add built-in issue working skill        # title prefix → links, shown
-agent/matt/mul-2759-working-on-issues             # branch ref   → links, shown
+MUL-123: add the thing the issue asks for        # title prefix → links, shown
+agent/dana/mul-123-add-the-thing             # branch ref   → links, shown
 ```
 
 **Close intent** is stricter and is a separate scan over **title or body only —
@@ -35,10 +35,10 @@ adjacency is what sets the link row's close-intent flag, the gate that
 auto-advances the issue to `done` when the PR merges.
 
 ```text
-Closes MUL-2759                                    # links AND records close intent
-Fixes MUL-2759
-Resolves MUL-2759
-Fix login MUL-2759                                 # links only — keyword not adjacent
+Closes MUL-123                                    # links AND records close intent
+Fixes MUL-123
+Resolves MUL-123
+Fix login MUL-123                                 # links only — keyword not adjacent
 ```
 
 Consequence: a bare title prefix or a branch reference links the PR but does not
@@ -50,14 +50,14 @@ records close intent; on merge, that close intent can move the linked issue to
 as a bare mention in the body — no closing keyword, and not in the title or
 branch — still writes a link row, but the row is flagged `reference_only` and
 **excluded from `multica issue pull-requests`** (and the issue's right-side PR
-list in the UI). This keeps passing mentions like `Related MUL-2759` or
-`Follow up in MUL-2759` from surfacing an unrelated PR as if it were working on
+list in the UI). This keeps passing mentions like `Related MUL-123` or
+`Follow up in MUL-123` from surfacing an unrelated PR as if it were working on
 that issue. To make a PR show up for an issue, put the key in the title, the
 branch, or after a closing keyword in the body — not as a loose body reference.
 
 ```text
-Closes MUL-2759 in the body                        # links and shown
-Related to MUL-2759 in the body (no title/branch)  # links but reference_only → hidden
+Closes MUL-123 in the body                        # links and shown
+Related to MUL-123 in the body (no title/branch)  # links but reference_only → hidden
 ```
 
 ### Default for code-changing issue work
@@ -74,8 +74,8 @@ the PR back to the issue. If the PR should close the issue on merge, put the key
 immediately after a closing keyword in the title or body, for example:
 
 ```text
-MUL-2759: fix login redirect        # links only
-Closes MUL-2759                     # links and records close intent
+MUL-123: fix login redirect        # links only
+Closes MUL-123                     # links and records close intent
 ```
 
 In the final issue comment, include the PR URL when a PR exists. If the task did
@@ -359,7 +359,7 @@ PR title (link the issue):
 
 ```text
 Fix login redirect                  # incorrect — no issue key, won't link
-MUL-2759: fix login redirect        # correct — links the PR
+MUL-123: fix login redirect        # correct — links the PR
 ```
 
 Serial / phased sub-issues (don't start the whole chain at once):

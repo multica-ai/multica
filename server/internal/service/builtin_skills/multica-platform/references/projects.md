@@ -4,6 +4,14 @@ A project groups work and carries durable resources. A resource is not just
 display metadata; it is context later injected into task briefs and
 `.multica/project/resources.json`.
 
+- [Core model](#core-model)
+- [CLI](#cli)
+- [local_directory execution modes](#local_directory-execution-modes)
+- [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
+- [When to add a resource](#when-to-add-a-resource)
+- [Debugging wrong context](#debugging-wrong-context)
+- [Side effects](#side-effects)
+
 ## Core model
 
 Projects are durable context containers. Resources attached to a project can

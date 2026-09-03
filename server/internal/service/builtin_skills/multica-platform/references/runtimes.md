@@ -3,6 +3,12 @@
 A runtime is the execution target behind an agent. A daemon owns local runtime
 processes and claims queued tasks from the server.
 
+- [Core model](#core-model)
+- [CLI](#cli)
+- [Task CLI boundary](#task-cli-boundary)
+- [Debugging an agent that did not run](#debugging-an-agent-that-did-not-run)
+- [Repos](#repos)
+
 ## Core model
 
 The chain is:

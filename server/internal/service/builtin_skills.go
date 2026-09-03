@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"path"
 	"strings"
+
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 //go:embed builtin_skills
@@ -90,7 +92,13 @@ func loadBuiltinSkill(name string) (AgentSkillData, bool) {
 		// than ship an empty skill.
 		return AgentSkillData{}, false
 	}
-	skill := AgentSkillData{Name: name, Content: string(content)}
+	// Source is set here rather than inferred downstream. BuildAgentSkillBundles
+	// already derives it for the refs path, but the older inline claim path
+	// appends these straight onto the agent's skills, and the daemon needs to
+	// tell a built-in from a workspace skill that sanitizes to the same slug.
+	// Setting it changes no bundle hash: the bundle builder normalizes Source to
+	// this same value before hashing.
+	skill := AgentSkillData{Name: name, Source: skillbundle.SourceBuiltin, Content: string(content)}
 	// Any other file in the directory becomes a supporting file, preserving
 	// its relative path so subdirectories (e.g. references/issues.md) survive.
 	_ = fs.WalkDir(builtinSkillsFS, dir, func(p string, d fs.DirEntry, walkErr error) error {

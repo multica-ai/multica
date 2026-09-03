@@ -42,6 +42,12 @@ const (
 	// runtime CLI pays for it in the always-loaded skill listing. A description
 	// earns its characters two ways only: trigger wording that matches how the
 	// task actually arrives, and reverse boundaries that prevent mis-routing.
+	//
+	// Naming several domains is not the "content inventory" this rules out. The
+	// ban is on restating the BODY's section headings, which the agent reads for
+	// free once it opens the skill. Nouns like "squad" or "autopilot" are how
+	// the task arrives — they are trigger wording, and after MUL-6986 one
+	// description has to do the recall work eight used to.
 	maxDescriptionChars = 300
 )
 
@@ -236,6 +242,64 @@ func TestPlatformSkillRoutingTableMatchesItsReferences(t *testing.T) {
 	}
 }
 
+// TestPlatformSkillDescriptionNamesEveryDomain is the recall guard for the
+// nine-into-one merge (MUL-6986).
+//
+// Before the merge, each domain advertised its own description in the
+// always-loaded listing, so an agent looking for "how does squad routing work"
+// matched on the word "squad". Collapsing to one skill removes seven of those
+// eight surfaces, and the remaining description is the only thing an agent sees
+// before deciding to open the skill. If a domain's trigger word is not in it,
+// that domain became strictly harder to find than it was before — which is the
+// one regression this merge is not allowed to cause.
+//
+// The map must also stay exhaustive: adding a reference without adding its
+// trigger word ships contracts that nothing advertises.
+func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
+	// reference file -> the word an agent would use when the task arrives.
+	// These are task nouns, not section headings: a task arrives as "set up an
+	// autopilot", never as "Core model".
+	triggerWords := map[string]string{
+		"references/issues.md":       "issue",
+		"references/mentions.md":     "mention",
+		"references/agents.md":       "agent",
+		"references/squads.md":       "squad",
+		"references/autopilots.md":   "autopilot",
+		"references/projects.md":     "project",
+		"references/runtimes.md":     "runtime",
+		"references/skill-import.md": "skill import",
+	}
+
+	skill, ok := findSkill(t, PlatformSkillName)
+	if !ok {
+		return
+	}
+	fm, _, _ := splitFrontmatter(skill.Content)
+	desc := strings.ToLower(fm["description"])
+
+	for _, f := range skill.Files {
+		word, mapped := triggerWords[f.Path]
+		if !mapped {
+			t.Errorf("reference %q has no trigger word; add one here and to the description, "+
+				"or an agent has no way to learn this skill covers it", f.Path)
+			continue
+		}
+		if !strings.Contains(desc, word) {
+			t.Errorf("description never says %q, so %s is unreachable from the skill listing", word, f.Path)
+		}
+	}
+
+	shipped := make(map[string]bool, len(skill.Files))
+	for _, f := range skill.Files {
+		shipped[f.Path] = true
+	}
+	for path := range triggerWords {
+		if !shipped[path] {
+			t.Errorf("trigger word mapped for %q, which the skill no longer ships", path)
+		}
+	}
+}
+
 // TestPlatformSkillCoversPlatformContracts re-homes the per-domain contract
 // anchors that each merged skill used to assert on its own body. They are
 // anchors, not prose review: if a contract leaves the payload, the brief
@@ -289,7 +353,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"This is a default, not",
 				"Use a routable issue key in the PR title, body, or branch",
 				"include the PR URL when a PR exists",
-				"Closes MUL-2759",
+				"Closes MUL-123",
 				"--status backlog",
 				// The only sanctioned pr_url reference is the negative
 				// compatibility warning about pre-existing data — not a write
