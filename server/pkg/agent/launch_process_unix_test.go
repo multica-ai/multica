@@ -6,9 +6,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -111,6 +114,51 @@ sleep 300
 	for _, pid := range pids {
 		waitProcessGone(t, pid)
 	}
+}
+
+// TestDetectVersionTimeoutOnlyKillsItsProbeGroup guards the daemon safety
+// boundary: timing out one version probe must reap that probe's descendants
+// without signalling an unrelated task in the caller's process group.
+func TestDetectVersionTimeoutOnlyKillsItsProbeGroup(t *testing.T) {
+	tempDir := t.TempDir()
+	pidFile := filepath.Join(tempDir, "probe-child.pid")
+	probePath := filepath.Join(tempDir, "probe")
+	writeTestExecutable(t, probePath, []byte("#!/bin/sh\n"+
+		`( sleep 300 ) </dev/null >/dev/null 2>&1 &
+printf '%s\n' "$!" > "$1"
+wait
+`))
+
+	sibling := exec.Command("sleep", "300")
+	if err := sibling.Start(); err != nil {
+		t.Fatalf("start unrelated process: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = sibling.Process.Kill()
+		_ = sibling.Wait()
+	})
+
+	orig := detectVersionTimeout
+	detectVersionTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { detectVersionTimeout = orig })
+
+	_, err := detectCLIVersion(context.Background(), NewCommand(probePath, []string{pidFile}))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("detectCLIVersion error = %v, want context deadline exceeded", err)
+	}
+	if err := sibling.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("unrelated process %d was signalled by probe cleanup: %v", sibling.Process.Pid, err)
+	}
+
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read probe child pid: %v", err)
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parse probe child pid: %v", err)
+	}
+	waitProcessGone(t, childPID)
 }
 
 // TestOutputOwnedMatchesStdlibContract keeps the owned probe helpers drop-in:

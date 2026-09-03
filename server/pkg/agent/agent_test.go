@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -132,6 +133,9 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	case err := <-done:
 		if err == nil {
 			t.Fatal("expected an error from a hanging --version probe, got nil")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("error = %v, want controlled context deadline diagnostic", err)
 		}
 		if elapsed := time.Since(start); elapsed > 5*time.Second {
 			t.Fatalf("detection took %v; expected it to be bounded by the timeout", elapsed)

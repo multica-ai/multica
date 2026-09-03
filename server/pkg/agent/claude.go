@@ -1097,11 +1097,11 @@ func cleanupMcpConfigTemp(path string) {
 // wedged by a bun regression (MUL-3812) — would otherwise stall the whole
 // registration loop, the daemon would never flip /health from "starting" to
 // "running", and *every* runtime on the host would appear disconnected. A real
-// `--version` returns well under this bound even on a cold cache or with
-// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
+// `--version` returns under this bound even for source-based launchers starting
+// concurrently on a busy host; the timeout exists only to fail a wedged probe
 // in isolation so the remaining runtimes still register. A var (not const) so
 // tests can shrink it without waiting out the real bound.
-var detectVersionTimeout = 10 * time.Second
+var detectVersionTimeout = 30 * time.Second
 
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
@@ -1142,6 +1142,14 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	data, err := outputOwned(cmd, runtimeCmd.logger)
 	version, recognised := extractVersionLine(string(data))
 	if err != nil {
+		// CommandContext cancellation reaches the owned child process group through
+		// cmd.Cancel. The resulting Wait error is therefore usually the platform's
+		// exit status (for example "signal: killed"), not context.DeadlineExceeded.
+		// Attribute an expired probe to the bound that actually stopped it so daemon
+		// diagnostics distinguish a controlled timeout from an external signal.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ctxErr)
+		}
 		// recognised, not `version != ""`. The two differ exactly where it
 		// matters: extractVersionLine falls back to the trimmed raw output when
 		// no line carries a semver token, so non-empty means "the CLI printed
