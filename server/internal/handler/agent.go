@@ -259,6 +259,7 @@ func preserveMaskedGatewayToken(incoming any, persistedRuntimeConfig []byte) {
 type RepoData struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	MirrorURL   string `json:"mirror_url,omitempty"`
 	Ref         string `json:"ref,omitempty"`
 }
 

@@ -188,7 +188,7 @@ func TestHealthHandlerRespondsWhileTaskRepoLookupWaits(t *testing.T) {
 			workspaceID: {
 				workspaceID:     workspaceID,
 				runtimeIDs:      []string{"rt-1"},
-				allowedRepoURLs: map[string]struct{}{repoURL: {}},
+				allowedRepoURLs: map[string]RepoData{repoURL: {URL: repoURL}},
 				taskRepoURLs:    map[string]struct{}{},
 			},
 		},

@@ -40,7 +40,7 @@ func attachRepo(d *Daemon, workspaceID, repoURL string) {
 	defer d.mu.Unlock()
 	d.workspaces[workspaceID] = &workspaceState{
 		workspaceID:     workspaceID,
-		allowedRepoURLs: map[string]struct{}{repoURL: {}},
+		allowedRepoURLs: map[string]RepoData{repoURL: {URL: repoURL}},
 	}
 }
 
@@ -268,7 +268,7 @@ func TestRepoBarePathIsLiveCoversBothURLSets(t *testing.T) {
 	d.mu.Lock()
 	d.workspaces[wsID] = &workspaceState{
 		workspaceID:     wsID,
-		allowedRepoURLs: map[string]struct{}{workspaceRepo: {}},
+		allowedRepoURLs: map[string]RepoData{workspaceRepo: {URL: workspaceRepo}},
 		taskRepoURLs:    map[string]struct{}{taskRepo: {}},
 	}
 	d.mu.Unlock()

@@ -254,6 +254,7 @@ type UpdateWorkspaceRequest struct {
 type workspaceRepoRef struct {
 	URL         string `json:"url"`
 	Description string `json:"description,omitempty"`
+	MirrorURL   string `json:"mirror_url,omitempty"`
 }
 
 func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
@@ -272,11 +273,15 @@ func validateAndNormalizeWorkspaceRepos(value any) ([]byte, error) {
 	for i, repo := range repos {
 		repo.URL = strings.TrimSpace(repo.URL)
 		repo.Description = strings.TrimSpace(repo.Description)
+		repo.MirrorURL = strings.TrimSpace(repo.MirrorURL)
 		if repo.URL == "" {
 			return nil, fmt.Errorf("repos[%d]: url is required", i)
 		}
 		if !isValidGitRepoURL(repo.URL) {
 			return nil, fmt.Errorf("repos[%d]: url must be a valid http(s) or ssh git URL", i)
+		}
+		if repo.MirrorURL != "" && !isValidGitRepoURL(repo.MirrorURL) {
+			return nil, fmt.Errorf("repos[%d]: mirror_url must be a valid http(s) or ssh git URL", i)
 		}
 		if _, ok := seen[repo.URL]; ok {
 			continue

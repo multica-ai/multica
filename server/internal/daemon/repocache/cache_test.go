@@ -1783,3 +1783,115 @@ func TestBarePathIsIndependentOfExistence(t *testing.T) {
 		t.Error("Lookup must still report an uncached repo as absent")
 	}
 }
+
+// TestCreateWorktreeEscapesEnclosingRepoWorkingTree reproduces the HEL-377
+// incident: a task's WorkDir is already the root of another checked-out
+// repo's working tree (e.g. a local_directory task, or an agent that cd'd
+// into a sibling repo). Joining the new repo's directory name directly onto
+// WorkDir would nest its tracked files inside the outer repo's working tree.
+// The fix must redirect the checkout to a sibling of the outer repo's root
+// instead, without breaking the checkout itself.
+func TestCreateWorktreeEscapesEnclosingRepoWorkingTree(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	// outerRoot simulates an existing checked-out repo whose working tree
+	// root IS the task's WorkDir — the exact scenario from the HEL-377
+	// incident (a nested Payload CMS checkout corrupting a TypeScript build).
+	outerRoot := filepath.Join(t.TempDir(), "existing-repo")
+	if err := os.MkdirAll(outerRoot, 0o755); err != nil {
+		t.Fatalf("mkdir outer repo: %v", err)
+	}
+	createTestRepoAt(t, outerRoot)
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     outerRoot,
+		AgentName:   "Nested Checkout Agent",
+		TaskID:      "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	// The checkout must still succeed normally — the fix only changes where
+	// it lands, not whether it works.
+	if _, err := os.Stat(result.Path); err != nil {
+		t.Fatalf("worktree path does not exist: %v", err)
+	}
+
+	if strings.HasPrefix(result.Path, outerRoot+string(filepath.Separator)) {
+		t.Fatalf("checkout landed inside enclosing repo working tree: %s is under %s", result.Path, outerRoot)
+	}
+	if got, want := filepath.Dir(result.Path), filepath.Dir(outerRoot); got != want {
+		t.Fatalf("checkout parent dir = %s, want sibling of outer repo (%s)", got, want)
+	}
+}
+
+// TestCreateWorktreeAppliesMirrorPushURL covers HEL-332: when MirrorURL is
+// set, origin must push to both the primary repo URL and the mirror, while
+// fetch still targets the primary.
+func TestCreateWorktreeAppliesMirrorPushURL(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	mirrorURL := "https://github.com/example/mirror.git"
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "Mirror Push Agent",
+		TaskID:      "c3d4e5f6-a7b8-9012-cdef-123456789012",
+		MirrorURL:   mirrorURL,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	out, err := exec.Command("git", "-C", result.Path, "config", "--get-all", "remote.origin.pushurl").Output()
+	if err != nil {
+		t.Fatalf("read remote.origin.pushurl: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != 2 || lines[0] != sourceRepo || lines[1] != mirrorURL {
+		t.Fatalf("remote.origin.pushurl = %v, want [%s %s]", lines, sourceRepo, mirrorURL)
+	}
+}
+
+// TestCreateWorktreeNoMirrorPushURLWhenUnset confirms HEL-332 is a true
+// no-op for the common case: when MirrorURL is empty, origin gets no
+// explicit pushurl at all (push falls back to remote.origin.url as before).
+func TestCreateWorktreeNoMirrorPushURLWhenUnset(t *testing.T) {
+	t.Parallel()
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "No Mirror Agent",
+		TaskID:      "d4e5f6a7-b8c9-0123-defa-234567890123",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktree failed: %v", err)
+	}
+
+	if out, err := exec.Command("git", "-C", result.Path, "config", "--get", "remote.origin.pushurl").CombinedOutput(); err == nil {
+		t.Fatalf("expected no remote.origin.pushurl to be set, got %q", strings.TrimSpace(string(out)))
+	}
+}

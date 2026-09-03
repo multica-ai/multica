@@ -491,6 +491,7 @@ type WorktreeParams struct {
 	// resolved external worktree gitdir read-only even when it is explicitly
 	// listed as a writable root (multica-ai/multica#2925).
 	IsolatedGitMetadata bool
+	MirrorURL           string // when set, a second git push URL added to origin so agent pushes reach both the primary remote and this mirror (HEL-332)
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -563,7 +564,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 
 	// Derive directory name from repo URL.
 	dirName := repoNameFromURL(params.RepoURL)
-	worktreePath := filepath.Join(params.WorkDir, dirName)
+	worktreePath := filepath.Join(resolveCheckoutWorkDir(params.WorkDir), dirName)
 
 	// Once a workdir has moved to isolated metadata, keep using that safer
 	// shape even if a later task comes from an older CLI or a different runtime
@@ -592,6 +593,9 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			if err := removeCoAuthoredByHook(worktreePath); err != nil {
 				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 			}
+		}
+		if err := applyMirrorPushURL(worktreePath, params.RepoURL, params.MirrorURL); err != nil {
+			c.logger.Warn("repo checkout: apply mirror push url failed (non-fatal)", "error", err)
 		}
 
 		c.logger.Info("repo checkout: isolated checkout ready",
@@ -628,6 +632,9 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			if err := removeCoAuthoredByHook(worktreePath); err != nil {
 				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 			}
+		}
+		if err := applyMirrorPushURL(worktreePath, params.RepoURL, params.MirrorURL); err != nil {
+			c.logger.Warn("repo checkout: apply mirror push url failed (non-fatal)", "error", err)
 		}
 
 		c.logger.Info("repo checkout: existing worktree updated",
@@ -666,6 +673,9 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		if err := removeCoAuthoredByHook(worktreePath); err != nil {
 			c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 		}
+	}
+	if err := applyMirrorPushURL(worktreePath, params.RepoURL, params.MirrorURL); err != nil {
+		c.logger.Warn("repo checkout: apply mirror push url failed (non-fatal)", "error", err)
 	}
 
 	c.logger.Info("repo checkout: worktree created",
@@ -896,6 +906,28 @@ func setIsolatedCheckoutOrigin(path, repoURL string) error {
 	out, err := runGitCombinedOutput("-C", path, "remote", "set-url", "origin", repoURL)
 	if err != nil {
 		return fmt.Errorf("set origin remote: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return nil
+}
+
+// applyMirrorPushURL configures origin in gitDir to push to BOTH repoURL
+// and mirrorURL, while fetch continues to use repoURL. Git only pushes to
+// remote.<name>.pushurl entries when any exist (it does NOT also push to
+// .url as a fallback once .pushurl is set), so both must be listed
+// explicitly. Re-running this is idempotent: it always resets to exactly
+// these two entries, so a mirror added or changed later self-heals on the
+// next checkout without leaving stale entries behind. A no-op when
+// mirrorURL is empty (the vast majority of repos), leaving push
+// behaviour exactly as it was before HEL-332.
+func applyMirrorPushURL(gitDir, repoURL, mirrorURL string) error {
+	if mirrorURL == "" {
+		return nil
+	}
+	if out, err := runGitCombinedOutput("-C", gitDir, "remote", "set-url", "--push", "origin", repoURL); err != nil {
+		return fmt.Errorf("reset origin push url: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if out, err := runGitCombinedOutput("-C", gitDir, "remote", "set-url", "--push", "--add", "origin", mirrorURL); err != nil {
+		return fmt.Errorf("add mirror push url: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
@@ -1349,6 +1381,30 @@ func excludeFromGit(worktreePath, pattern string) error {
 		return fmt.Errorf("write exclude pattern: %w", err)
 	}
 	return nil
+}
+
+// resolveCheckoutWorkDir returns the directory a new checkout's dirName
+// should be joined onto. If workDir sits inside (or IS the root of) an
+// existing git working tree — e.g. a local_directory task bound to an
+// existing repo, or an agent that cd'd into a sibling repo already checked
+// out under this task's workdir — joining a second repo's directory name
+// under it would nest that repo's tracked files inside the first repo's
+// working tree (HEL-377: a nested Payload CMS checkout's payload-types.ts
+// merged into the host repo's module augmentations via its tsconfig **/*.ts
+// glob, breaking every collection slug). Redirect to a sibling of the
+// enclosing repo's root instead, so two repos never share one working tree.
+// If workDir isn't inside any git working tree (the common case — a fresh
+// task workdir), it is returned unchanged.
+func resolveCheckoutWorkDir(workDir string) string {
+	out, err := runGitOutput("-C", workDir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return workDir
+	}
+	toplevel := strings.TrimSpace(string(out))
+	if toplevel == "" {
+		return workDir
+	}
+	return filepath.Dir(toplevel)
 }
 
 // repoNameFromURL extracts a short directory name from a git remote URL.
