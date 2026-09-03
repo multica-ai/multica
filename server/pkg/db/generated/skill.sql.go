@@ -200,6 +200,38 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 	return i, err
 }
 
+const getSkillInWorkspaceForUpdate = `-- name: GetSkillInWorkspaceForUpdate :one
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at FROM skill
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type GetSkillInWorkspaceForUpdateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Row-locking read for the overwrite path. The lock holds for the rest of the
+// transaction, which turns the caller's updated_at comparison into a real
+// compare-and-set. Without it, under READ COMMITTED, a concurrent edit can
+// commit between the read and the UPDATE and be discarded unnoticed.
+func (q *Queries) GetSkillInWorkspaceForUpdate(ctx context.Context, arg GetSkillInWorkspaceForUpdateParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, getSkillInWorkspaceForUpdate, arg.ID, arg.WorkspaceID)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listAgentSkillNamesByAgentIDs = `-- name: ListAgentSkillNamesByAgentIDs :many
 SELECT ask.agent_id, s.name
 FROM agent_skill ask

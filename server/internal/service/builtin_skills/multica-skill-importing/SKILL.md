@@ -261,9 +261,11 @@ instead of retrying in a loop:
 
 - `422`: the skill has no refreshable provenance (created manually, imported
   from a local archive, or copied from a local runtime). Re-import instead.
-- `409`: the upstream renamed the skill and another workspace skill already
-  uses that name; nothing was changed.
-- `403`: caller is neither the creator nor a workspace admin.
+- `409`: either the upstream renamed the skill and another workspace skill
+  already uses that name, or someone edited the skill while the download was in
+  flight. Nothing was changed; re-read the skill before retrying.
+- `403`: caller is neither the creator nor a workspace admin, or lost that
+  standing while the download was in flight.
 - `502` / `503` / `504` / `413`: upstream fetch failed (gone, unavailable,
   timed out, or now exceeds import caps); the skill is left untouched.
 
