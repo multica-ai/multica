@@ -2943,6 +2943,7 @@ func newIssueListTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().StringArray("property", nil, "")
 	cmd.Flags().Int("limit", 50, "")
 	cmd.Flags().Int("offset", 0, "")
 	cmd.Flags().String("sort", "", "")
@@ -4007,6 +4008,209 @@ func TestIsTerminalChildIssue(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := isTerminalChildIssue(tc.issue); got != tc.want {
 				t.Errorf("isTerminalChildIssue(%v) = %v, want %v", tc.issue, got, tc.want)
+			}
+		})
+	}
+}
+
+// `issue runs` answers three different questions off one endpoint, and the only
+// thing telling them apart is the query string the CLI builds (#7768). These
+// tests pin that translation: a plain read must stay a plain read — the
+// short-task-ID resolver and the execution log both depend on the unfiltered
+// history — while --active and --siblings must actually reach the server.
+
+// newIssueRunsTestCmd mirrors the real flag set registered on issueRunsCmd.
+func newIssueRunsTestCmd(t *testing.T, output string) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{Use: "runs"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().Bool("active", false, "")
+	cmd.Flags().Bool("siblings", false, "")
+	return cmd
+}
+
+func TestRunIssueRunsScopeFlagsBuildQuery(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  url.Values
+	}{
+		// No flags means no params: the resolver and the sidebar read the same
+		// full history they always have.
+		{"default reads full history", nil, url.Values{}},
+		{"active narrows to in-flight", []string{"active"}, url.Values{"active": {"true"}}},
+		// --siblings implies active. The CLI sends both so the request says what
+		// it means without the reader having to know the server's default.
+		{"siblings widens to the family", []string{"siblings"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+		{"siblings wins over a redundant active", []string{"siblings", "active"},
+			url.Values{"scope": {"family"}, "active": {"true"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery url.Values
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					gotQuery = r.URL.Query()
+					_ = json.NewEncoder(w).Encode([]map[string]any{})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			for _, flag := range tc.flags {
+				if err := cmd.Flags().Set(flag, "true"); err != nil {
+					t.Fatalf("set --%s: %v", flag, err)
+				}
+			}
+			if _, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) }); err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			if len(gotQuery) != len(tc.want) {
+				t.Fatalf("query = %v, want %v", gotQuery, tc.want)
+			}
+			for key, want := range tc.want {
+				if got := gotQuery.Get(key); got != want[0] {
+					t.Fatalf("query %s = %q, want %q (full query %v)", key, got, want[0], gotQuery)
+				}
+			}
+		})
+	}
+}
+
+// The two modes return different payloads, so they render through different
+// column sets. The family row names its issue — without that the table is a
+// list of task ids the reader cannot attribute, which is the whole question
+// --siblings answers — and it drops COMPLETED / ERROR, which are empty on
+// every row of a read that only returns work still in flight.
+func TestRunIssueRunsSiblingsTableRendersFamilyColumns(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/issues/" + issueID + "/task-runs":
+			if r.URL.Query().Get("scope") == "family" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{{
+					"task_id":          "abcd1234-0000-0000-0000-000000000000",
+					"issue_id":         "5678abcd-0000-0000-0000-000000000000",
+					"issue_identifier": "MUL-7001",
+					"issue_title":      "sibling work",
+					"agent_id":         "agent-1",
+					"status":           "running",
+					"created_at":       "2026-09-02T07:00:00Z",
+					"started_at":       "2026-09-02T07:00:01Z",
+				}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{
+				"id": "abcd1234-0000-0000-0000-000000000000", "agent_id": "agent-1",
+				"status": "completed", "error": "boom",
+			}})
+		default:
+			// Actor lookups for the AGENT column are best-effort; 404 is fine.
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueRunsTestCmd(t, "table")
+	if err := cmd.Flags().Set("siblings", "true"); err != nil {
+		t.Fatalf("set --siblings: %v", err)
+	}
+	out, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	// The task id has to survive the new payload's task_id key — reading `id`
+	// here would render a column of blanks and lose the run-messages target.
+	for _, want := range []string{"TASK", "ISSUE", "MUL-7001", "abcd1234"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("family table missing %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"COMPLETED", "ERROR"} {
+		if strings.Contains(out, unwanted) {
+			t.Fatalf("family table carries %q, which is empty on every in-flight row:\n%s", unwanted, out)
+		}
+	}
+
+	// The execution log keeps its own columns: same command, different question.
+	plain := newIssueRunsTestCmd(t, "table")
+	out, err = captureStdout(t, func() error { return runIssueRuns(plain, []string{issueID}) })
+	if err != nil {
+		t.Fatalf("issue runs: %v", err)
+	}
+	if strings.Contains(out, "ISSUE") {
+		t.Fatalf("single-issue table should not carry an issue column:\n%s", out)
+	}
+	if !strings.Contains(out, "ERROR") || !strings.Contains(out, "boom") {
+		t.Fatalf("execution log lost its error column:\n%s", out)
+	}
+}
+
+// A capped family read and a complete one are identical in the body. If the CLI
+// swallows the server's truncation header, an agent reads "no run on that
+// sibling" off a list that was simply cut off — the one wrong conclusion this
+// command exists to prevent.
+func TestRunIssueRunsWarnsOnTruncatedFamilyRead(t *testing.T) {
+	issueID := "1881a167-4bb6-4602-944b-f40ce4192fe6"
+
+	for _, tc := range []struct {
+		name      string
+		truncated bool
+	}{
+		{"truncated read warns", true},
+		{"complete read stays quiet", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/issues/" + issueID + "/task-runs":
+					if tc.truncated {
+						w.Header().Set(headerActiveRunsTruncated, "true")
+					}
+					_ = json.NewEncoder(w).Encode([]map[string]any{{
+						"id": "abcd1234-0000-0000-0000-000000000000", "status": "running",
+					}})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			t.Setenv("MULTICA_SERVER_URL", srv.URL)
+			t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+			t.Setenv("MULTICA_TOKEN", "test-token")
+
+			cmd := newIssueRunsTestCmd(t, "json")
+			if err := cmd.Flags().Set("siblings", "true"); err != nil {
+				t.Fatalf("set --siblings: %v", err)
+			}
+
+			capture := captureStderr(t)
+			_, err := captureStdout(t, func() error { return runIssueRuns(cmd, []string{issueID}) })
+			stderr := capture.read()
+			if err != nil {
+				t.Fatalf("issue runs: %v", err)
+			}
+
+			warned := strings.Contains(stderr, "truncated")
+			if warned != tc.truncated {
+				t.Fatalf("warned = %v, want %v; stderr was %q", warned, tc.truncated, stderr)
 			}
 		})
 	}

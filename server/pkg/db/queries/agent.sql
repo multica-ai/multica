@@ -2417,6 +2417,60 @@ SELECT * FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC;
 
+-- name: ListActiveTasksByIssueFamily :many
+-- Cross-issue coordination read for parallel sub-issue work (#7768). Given a
+-- family root — the target issue's parent, or the target itself when it has
+-- none — return every in-flight task on the root and on all of its children,
+-- so a run can see who else is already working in the family before it starts
+-- overlapping work. Advisory only: nothing here gates, queues, or serialises
+-- anything.
+--
+-- Same active set as ListActiveTasksByIssue, including 'queued': a queued
+-- sibling cannot answer you yet, but it is about to touch the same code, which
+-- is exactly what the caller is trying to find out. The status column tells the
+-- two apart.
+--
+-- Issue identity is joined in because the caller renders runs from several
+-- issues in one list and cannot label a row from the task alone. agent_id is
+-- here for the same reason: unlike ListActiveSiblingIssueTasks, whose rows all
+-- belong to the claiming agent by construction, this read spans agents — which
+-- one is on a sibling is the answer, not a detail.
+--
+-- Columns are named rather than embedded. This is the coordination question,
+-- not the execution log: result and context are JSONB blobs, and work_dir /
+-- trigger_summary / the attribution ids are all execution-log fields that a
+-- caller asking "who else is here?" never reads. Selecting them would make
+-- Postgres detoast and ship roughly 5x the bytes per row for nothing.
+--
+-- Ordered running-first so the truncation the LIMIT may impose drops the least
+-- interesting rows, and bounded because a parent with hundreds of children must
+-- not turn one coordination read into an unbounded scan.
+SELECT
+    atq.id AS task_id,
+    atq.agent_id,
+    atq.issue_id,
+    atq.status,
+    atq.created_at,
+    atq.started_at,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.workspace_id = @workspace_id
+  AND (i.id = @root_issue_id::uuid OR i.parent_issue_id = @root_issue_id::uuid)
+  AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'dispatched' THEN 1
+        WHEN 'waiting_local_directory' THEN 2
+        ELSE 3
+    END,
+    atq.created_at DESC
+LIMIT @row_limit;
+
 -- name: GetWorkspaceAgentRunCounts :many
 -- Total task runs per agent over the trailing 30 days, used by the Agents
 -- list RUNS column. 30-day window keeps the count meaningful (a long-dormant

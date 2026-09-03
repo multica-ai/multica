@@ -170,6 +170,19 @@
       "portal_action": "결제 포털 열기",
       "billing_action": "결제 설정 보기"
     },
+    "autopilot_quota_limit": {
+      "title": "이 워크스페이스가 오토파일럿 실행 한도에 도달했습니다",
+      "checking_description": "이 워크스페이스에서 사용할 수 있는 결제 작업을 확인하는 중입니다…",
+      "upgrade_description": "Pro로 업그레이드하면 오토파일럿 실행을 복구할 수 있습니다.",
+      "portal_description": "결제 포털을 열어 이 워크스페이스의 구독을 관리하고 오토파일럿 실행을 복구하세요.",
+      "contact_description": "워크스페이스 소유자 또는 관리자에게 Pro 업그레이드를 요청하세요.",
+      "billing_description": "결제 설정에서 이 워크스페이스에 사용 가능한 업그레이드 옵션을 확인하세요.",
+      "billing_unavailable_description": "결제 작업을 불러오지 못했습니다. 결제 설정을 열어 다시 시도하세요.",
+      "billing_disabled_description": "현재 실행 할당량이 재설정될 때까지 기다리거나 워크스페이스 관리자에게 문의하세요.",
+      "upgrade_action": "Pro로 업그레이드",
+      "portal_action": "결제 포털 열기",
+      "billing_action": "결제 설정 보기"
+    },
     "toast_link_subissues_all_failed": "하위 태스크를 연결하지 못했습니다",
     "toast_link_subissues_partial": "하위 태스크 {{total}}개 중 {{failed}}개를 연결하지 못했습니다",
     "toast_link_labels_failed": "라벨을 연결하지 못했습니다",

@@ -301,6 +301,11 @@ type workspaceState struct {
 	settings        json.RawMessage              // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   contextLock
+	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
+	// for this workspace. Unlike the fields above it is NOT guarded by
+	// Daemon.mu: it exists precisely so the verdict can be read and written as
+	// one step without holding the daemon's central lock across file I/O.
+	coAuthorPublishMu sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
 	// profile list (MUL-3332) as last seen from the server. An on-demand
 	// refresh compares the live signature with this cached value; any drift
@@ -3204,7 +3209,241 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	}
 	d.mu.Unlock()
 
+	// Publish the refreshed Co-authored-by verdict to the repo cache. Hooks
+	// installed by earlier checkouts read that file at commit time, so this is
+	// what makes a toggled-off setting apply to checkouts that already exist
+	// instead of only to the next one (MUL-6921).
+	d.persistCoAuthoredByState(workspaceID)
+
 	return resp, nil
+}
+
+// coAuthoredByPublisher is the repo cache's half of the Co-authored-by wiring:
+// the state file every installed hook reads at commit time, and the hooks
+// themselves in the workspace's bare caches. Optional so test daemons can run
+// with a minimal repoCacheBackend.
+type coAuthoredByPublisher interface {
+	WriteCoAuthoredByState(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHooks(workspaceID string, enabled bool) error
+	ReconcileCoAuthoredByHookInCheckout(checkoutPath, workspaceID string, enabled bool) error
+}
+
+// persistCoAuthoredByState records the workspace's current Co-authored-by
+// verdict where the installed prepare-commit-msg hooks can see it, and brings
+// hooks written by earlier daemon releases — which read no state at all — in
+// line with it. Called after every settings refresh and on every workspace
+// sync; best-effort, since a failed write only leaves the previous value in
+// place.
+//
+// The daemon is the only writer of this state, and publishes under a
+// per-workspace lock with the verdict read INSIDE that lock. Two publishers
+// racing (a settings refresh and a sync tick, say) therefore serialize, and the
+// one that writes last is the one that read last — a publisher that started
+// before a settings update can never overwrite the value that update produced.
+func (d *Daemon) persistCoAuthoredByState(workspaceID string) {
+	d.publishCoAuthoredByState(workspaceID, d.workspaceCoAuthoredByEnabled)
+}
+
+// publishCoAuthoredByState is persistCoAuthoredByState with the verdict read
+// injected. Production always passes workspaceCoAuthoredByEnabled; tests pass a
+// wrapper that parks a publisher between taking the lock and reading, which is
+// the one ordering the lock exists to guarantee and cannot be observed
+// otherwise.
+func (d *Daemon) publishCoAuthoredByState(workspaceID string, verdict func(string) bool) {
+	if d.repoCache == nil || workspaceID == "" {
+		return
+	}
+	cache, ok := d.repoCache.(coAuthoredByPublisher)
+	if !ok {
+		return
+	}
+
+	d.mu.Lock()
+	ws := d.workspaces[workspaceID]
+	d.mu.Unlock()
+	if ws == nil {
+		return
+	}
+
+	ws.coAuthorPublishMu.Lock()
+	defer ws.coAuthorPublishMu.Unlock()
+
+	enabled := verdict(workspaceID)
+	if err := cache.WriteCoAuthoredByState(workspaceID, enabled); err != nil {
+		d.logger.Warn("record co-authored-by state failed", "workspace_id", workspaceID, "error", err)
+	}
+	if err := cache.ReconcileCoAuthoredByHooks(workspaceID, enabled); err != nil {
+		d.logger.Warn("reconcile co-authored-by hooks failed", "workspace_id", workspaceID, "error", err)
+	}
+	d.reconcileIsolatedCoAuthoredByHooks(cache, workspaceID, enabled)
+}
+
+// isolatedCheckoutScanDepth bounds how far below an env root the sweep looks
+// for a checkout. Repos land at <env root>/<workdir>/<repo>, so two levels
+// covers the layout with one to spare and keeps the walk from wandering into
+// the checked-out source tree.
+const isolatedCheckoutScanDepth = 2
+
+// reconcileIsolatedCoAuthoredByHooks applies the workspace setting to hooks
+// that live inside task workdirs rather than in the shared bare cache.
+//
+// Codex on Linux and the Windows sandbox check out with isolated git metadata,
+// so their hook sits in <checkout>/.git/hooks and the repo cache cannot see it.
+// Left alone, a workdir prepared by an earlier release keeps its unconditional
+// hook — and its next commit keeps adding the trailer — until that repo happens
+// to be checked out again. Env roots are attributed by their owner record, so a
+// workspace never rewrites hooks belonging to another one.
+func (d *Daemon) reconcileIsolatedCoAuthoredByHooks(cache coAuthoredByPublisher, workspaceID string, enabled bool) {
+	root := d.cfg.WorkspacesRoot
+	if root == "" || workspaceID == "" {
+		return
+	}
+	wsEntries, err := os.ReadDir(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Debug("co-authored-by sweep: read workspaces root failed", "error", err)
+		}
+		return
+	}
+
+	for _, wsEntry := range wsEntries {
+		// Dot directories are daemon-internal caches (.repos, .skill-cache),
+		// never workspace directories — the same rule runGC walks by.
+		if !wsEntry.IsDir() || strings.HasPrefix(wsEntry.Name(), ".") {
+			continue
+		}
+		wsDir := filepath.Join(root, wsEntry.Name())
+		envRoots, err := os.ReadDir(wsDir)
+		if err != nil {
+			continue
+		}
+		for _, envEntry := range envRoots {
+			if !envEntry.IsDir() || strings.HasPrefix(envEntry.Name(), ".") {
+				continue
+			}
+			envRoot := filepath.Join(wsDir, envEntry.Name())
+			if !d.envRootBelongsToWorkspace(wsEntry.Name(), envRoot, workspaceID) {
+				continue
+			}
+			for _, checkout := range isolatedCheckoutCandidates(envRoot, isolatedCheckoutScanDepth) {
+				if err := cache.ReconcileCoAuthoredByHookInCheckout(checkout, workspaceID, enabled); err != nil {
+					d.logger.Warn("reconcile co-authored-by hook in checkout failed",
+						"workspace_id", workspaceID, "path", checkout, "error", err)
+				}
+			}
+		}
+	}
+}
+
+// envRootBelongsToWorkspace reports whether an env root is this workspace's, by
+// the strongest evidence the release that created it left behind.
+//
+// Since v0.4.35 the owner record carries the workspace ID, and an exact match
+// is required. Env roots prepared before that recorded only a task ID — or, on
+// older releases still, no marker at all — and they live under the layout that
+// release used: <workspaces root>/<workspace ID>/<task key>. So for an owner
+// record that names no workspace, the directory name is the evidence, and it
+// has to BE the workspace ID. The readable layout that replaced it always
+// appends a suffix (`<slug>-<id tail>`), so a bare workspace UUID can only be
+// one of those older roots and this can never alias a modern one.
+//
+// An unreadable marker attributes nothing: skipping costs a stale hook in one
+// workdir, guessing would rewrite hooks in another workspace's.
+func (d *Daemon) envRootBelongsToWorkspace(wsDirName, envRoot, workspaceID string) bool {
+	owner, err := execenv.ReadEnvRootOwner(envRoot)
+	if err != nil || owner == nil {
+		return false
+	}
+	if owner.WorkspaceID != "" {
+		return owner.WorkspaceID == workspaceID
+	}
+	return wsDirName == workspaceID
+}
+
+// isolatedCheckoutCandidates returns directories at or below dir that hold
+// their own git metadata. A linked worktree's .git is a file, so only isolated
+// checkouts match, and matching stops descending: nothing nested inside a
+// checkout is one.
+func isolatedCheckoutCandidates(dir string, depth int) []string {
+	if depth <= 0 {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var found []string
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		child := filepath.Join(dir, entry.Name())
+		if info, err := os.Stat(filepath.Join(child, ".git")); err == nil && info.IsDir() {
+			found = append(found, child)
+			continue
+		}
+		found = append(found, isolatedCheckoutCandidates(child, depth-1)...)
+	}
+	return found
+}
+
+// publishTrackedCoAuthoredByState writes the current verdict for every tracked
+// workspace and reconciles the hooks in their bare caches. Purely local — no
+// request — and both halves skip the write when what is on disk already
+// matches, so a sync tick on a converged host costs a handful of small reads.
+func (d *Daemon) publishTrackedCoAuthoredByState() {
+	d.mu.Lock()
+	ids := make([]string, 0, len(d.workspaces))
+	for id := range d.workspaces {
+		ids = append(ids, id)
+	}
+	d.mu.Unlock()
+
+	for _, id := range ids {
+		d.persistCoAuthoredByState(id)
+	}
+}
+
+// trackedSettingsRefreshTimeout bounds one refreshTrackedWorkspaceSettings
+// pass. A workspace it does not reach keeps its cached settings and picks the
+// change up on its next repo checkout.
+const trackedSettingsRefreshTimeout = 30 * time.Second
+
+// refreshTrackedWorkspaceSettings re-reads repos and settings for workspaces
+// this daemon already tracks. Only the server's workspaces-changed hint calls
+// it: the periodic sync deliberately makes no repos request for a tracked
+// workspace (see syncWorkspacesFromAPI), so without this a settings edit —
+// the GitHub master switch, the Co-authored-by toggle — would sit unseen
+// until the workspace's next repo checkout.
+func (d *Daemon) refreshTrackedWorkspaceSettings(ctx context.Context) {
+	// The sync loop is single-threaded and still owes the hint its membership
+	// reconcile, so bound the whole pass rather than letting one slow
+	// workspace hold every other signal behind it.
+	ctx, cancel := context.WithTimeout(ctx, trackedSettingsRefreshTimeout)
+	defer cancel()
+
+	d.mu.Lock()
+	tracked := make(map[string]*workspaceState, len(d.workspaces))
+	for id, ws := range d.workspaces {
+		tracked[id] = ws
+	}
+	d.mu.Unlock()
+
+	for id, ws := range tracked {
+		if ctx.Err() != nil {
+			return
+		}
+		// Share ensureRepoReady's lock so a checkout in flight and this
+		// refresh cannot interleave their writes to the same workspace.
+		if err := ws.repoRefreshMu.Lock(ctx); err != nil {
+			return
+		}
+		_, err := d.refreshWorkspaceRepos(ctx, id)
+		ws.repoRefreshMu.Unlock()
+		if err != nil {
+			d.logger.Debug("workspace settings refresh failed", "workspace_id", id, "error", err)
+		}
+	}
 }
 
 // refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
@@ -3592,8 +3831,17 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
+			// A settings edit made while the websocket was down produced a
+			// workspaces-changed hint nobody received. Reconnecting is the
+			// daemon's chance to catch up on it: without this the stale
+			// verdict would just get republished by the sync below.
+			d.refreshTrackedWorkspaceSettings(ctx)
 			syncNow(true)
 		case <-workspaceChangesCh:
+			// The hint fires for membership changes AND for workspace edits,
+			// including settings. Refresh cached settings for the workspaces
+			// we already track before reconciling the membership set.
+			d.refreshTrackedWorkspaceSettings(ctx)
 			syncNow(false)
 		case <-timer.C:
 			syncNow(false)
@@ -3811,6 +4059,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	if registered > 0 || removed > 0 {
 		d.notifyRuntimeSetChanged()
 	}
+
+	// Republish each tracked workspace's Co-authored-by verdict. This costs no
+	// request — it writes the daemon's cached verdict where prepare-commit-msg
+	// hooks read it, and migrates hooks left by earlier releases — and is what
+	// covers the cases no refresh reaches: a toggle flipped while the daemon
+	// was down (settings arrive with the register response above), a host that
+	// just upgraded, and a state file removed by repo cache GC.
+	d.publishTrackedCoAuthoredByState()
 
 	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
 		return fmt.Errorf("failed to register runtimes for any of the %d workspace(s)", len(workspaces))
@@ -4193,6 +4449,16 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		ServiceTiers                        []modelServiceTierWire `json:"service_tiers,omitempty"`
 		SupportsExplicitStandardServiceTier bool                   `json:"supports_explicit_standard_service_tier,omitempty"`
 	}
+	// Models the runtime named but will not run here (Claude Code reporting one
+	// that needs a newer CLI). Reported in their own list, never inside
+	// `models`: a client that does not know this field — an installed desktop
+	// build predating it — then cannot offer one as a real model, which a flag
+	// on the model itself could not guarantee (MUL-6961).
+	type unavailableModelWire struct {
+		ID     string `json:"id"`
+		Label  string `json:"label"`
+		Reason string `json:"reason,omitempty"`
+	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
 		entry := modelWire{
@@ -4225,10 +4491,21 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		}
 		wire = append(wire, entry)
 	}
+	unavailableWire := make([]unavailableModelWire, 0, len(catalog.Unavailable))
+	for _, m := range catalog.Unavailable {
+		unavailableWire = append(unavailableWire, unavailableModelWire{
+			ID:     m.ID,
+			Label:  m.Label,
+			Reason: m.Reason,
+		})
+	}
 	d.reportModelListResult(ctx, rt, requestID, map[string]any{
 		"status":    "completed",
 		"models":    wire,
 		"supported": agent.ModelSelectionSupported(rt.Provider),
+		// Additive: an older server drops the key and the picker simply shows
+		// no unavailable section, which is the pre-MUL-6961 behaviour.
+		"unavailable_models": unavailableWire,
 		// Additive field: the models are still worth rendering, but the server
 		// must not persist them as this runtime's real catalog (MUL-5549).
 		// Older servers ignore it and keep the previous behaviour.
@@ -4848,9 +5125,9 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			slot := slots[i]
 			taskTarget := t.IssueID
 			if taskTarget == "" && t.ChatSessionID != "" {
-				taskTarget = "chat:" + shortID(t.ChatSessionID)
+				taskTarget = "chat:" + t.ChatSessionID
 			}
-			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
+			d.logger.Info("task received", "task", t.ID, "target", taskTarget)
 			taskWG.Add(1)
 			d.activeTasks.Add(1)
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
@@ -5059,27 +5336,32 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// like a misconfigured host and is not retried.
 	if !tracked {
 		d.logger.Warn("claimed task targets a runtime this daemon no longer hosts; failing it back for retry",
-			"task", shortID(task.ID), "runtime_id", task.RuntimeID)
+			"task", task.ID, "runtime_id", task.RuntimeID)
 		if err := d.reportTerminalTask(ctx, terminalTaskReport{
 			kind:          terminalTaskReportFail,
 			taskID:        task.ID,
 			errorMessage:  "runtime went offline before the task started",
 			failureReason: taskfailure.ReasonRuntimeOffline.String(),
 		}); err != nil {
-			d.logger.Error("fail task callback failed", "task", shortID(task.ID), "error", err)
+			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)
 		}
 		return
 	}
 	provider := rt.Provider
 
-	// Task-scoped logger with short ID for readable concurrent logs.
-	taskLog := d.logger.With("task", shortID(task.ID))
+	// Task-scoped logger. The task id goes in whole: it is the key every
+	// other surface prints (task JSON, env-root ownership manifest, server
+	// logs), so a full id is what lets a log line be joined to them. An
+	// 8-char prefix cannot — task ids are UUIDv7, whose leading 32 bits are
+	// a millisecond timestamp that only advances every ~65s, so concurrent
+	// tasks routinely share one (#7326).
+	taskLog := d.logger.With("task", task.ID)
 	agentName := "agent"
 	if task.Agent != nil {
 		agentName = task.Agent.Name
 	}
 	if task.ChatSessionID != "" {
-		taskLog.Info("picked chat task", "chat_session", shortID(task.ChatSessionID), "agent", agentName, "provider", provider)
+		taskLog.Info("picked chat task", "chat_session", task.ChatSessionID, "agent", agentName, "provider", provider)
 	} else {
 		taskLog.Info("picked task", "issue", task.IssueID, "agent", agentName, "provider", provider)
 	}
@@ -5292,6 +5574,32 @@ type worktreePreservedError struct{ err error }
 func (e *worktreePreservedError) Error() string { return e.err.Error() }
 func (e *worktreePreservedError) Unwrap() error { return e.err }
 
+// environmentSetupError marks a failure to build or re-open the task's
+// execution environment: everything execenv.Prepare / execenv.Reuse does on
+// this host before the agent process exists — the workspace directory and its
+// overlay homes, plus the per-provider local config written or validated
+// inside it. Its causes are local, and not only filesystem ones: a full
+// volume, a read-only or permission-denied workspaces root, a directory
+// another process still holds open, an I/O error on the disk underneath, or a
+// local runtime config the daemon refuses to boot past.
+//
+// It carries the wrapped error's message unchanged and exists purely so
+// taskRunFailureReason can recognise the phase structurally. Without it the
+// OS error text falls through to taskfailure.Classify, a classifier written
+// to read agent and provider output, and lands in agent_error.* — today the
+// catchall, historically provider_server_error, which pointed one bug report
+// at an LLM vendor for hours (#7913). The task never reached an agent, so no
+// reason in that namespace can be right.
+type environmentSetupError struct{ err error }
+
+func (e *environmentSetupError) Error() string { return e.err.Error() }
+func (e *environmentSetupError) Unwrap() error { return e.err }
+
+// asEnvironmentSetupFailure tags err as an execution-environment setup
+// failure. The message is untouched, so the wrapper is invisible to everything
+// except taskRunFailureReason.
+func asEnvironmentSetupFailure(err error) error { return &environmentSetupError{err: err} }
+
 func taskRunFailureReason(err error) string {
 	if errors.Is(err, errInvalidTaskIdentity) {
 		return taskfailure.ReasonInvalidTaskIdentity.String()
@@ -5315,6 +5623,18 @@ func taskRunFailureReason(err error) string {
 	// preparationErrorKind (#7112).
 	if errors.Is(err, execenv.ErrOpenclawCLITimeout) {
 		return taskfailure.ReasonRuntimeCLITimeout.String()
+	}
+	// Everything else that failed while building or re-opening the execution
+	// environment. Last of the structural branches: the four sentinels above
+	// each name a cause the daemon already recognises on its own (task
+	// identity, the prepare budget, skill downloads, the local runtime CLI)
+	// and stay the better label. What is left is the rest of preparation on
+	// this host — filesystem faults, and the per-provider local config
+	// Prepare writes or validates — whose text Classify can only read as
+	// agent output (#7913).
+	var envSetupErr *environmentSetupError
+	if errors.As(err, &envSetupErr) {
+		return taskfailure.ReasonEnvironmentPrepareFailed.String()
 	}
 	return taskfailure.Classify(err.Error()).String()
 }
@@ -5458,7 +5778,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			// client — worth doing if this hint grows, not for one parenthetical.
 			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 		}
-		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
+		taskLog.Info("local_directory: waiting on path mutex", "holder", holder)
 		if waitErr := d.client.MarkTaskWaitingLocalDirectory(ctx, task.ID, reason); waitErr != nil {
 			// Non-fatal: even if the server-side flag fails to update,
 			// we still want to block on the lock and proceed when free.
@@ -6396,12 +6716,12 @@ func (d *Daemon) lockReusablePriorEnvRoot(ctx context.Context, task Task, localA
 		return nil, "", nil, false, context.Cause(ctx)
 	case errors.Is(err, execenv.ErrEnvRootBusy):
 		d.logger.Info("prior workdir is still in use after waiting for it; starting a fresh environment",
-			"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot),
+			"task", task.ID, "prior_root", filepath.Base(priorRoot),
 			"waited", time.Since(lockStartedAt).Round(time.Millisecond), "budget", d.envRootBusyWait)
 		return nil, "", nil, false, nil
 	case err != nil:
 		d.logger.Warn("could not lock prior workdir; starting a fresh environment",
-			"task", shortID(task.ID), "error", err)
+			"task", task.ID, "error", err)
 		return nil, "", nil, false, nil
 	case claim == nil:
 		return nil, "", nil, false, nil
@@ -6409,7 +6729,7 @@ func (d *Daemon) lockReusablePriorEnvRoot(ctx context.Context, task Task, localA
 	// The lock has to have landed on the directory validation approved.
 	if !os.SameFile(validatedInfo, lockedInfo) {
 		d.logger.Info("prior workdir changed identity before it could be claimed; starting a fresh environment",
-			"task", shortID(task.ID))
+			"task", task.ID)
 		claim.Release()
 		return nil, "", nil, false, nil
 	}
@@ -6430,7 +6750,7 @@ func (d *Daemon) lockReusablePriorEnvRoot(ctx context.Context, task Task, localA
 	currentInfo, err := os.Stat(filepath.Dir(recheckedWorkDir))
 	if err != nil || !os.SameFile(lockedInfo, currentInfo) {
 		d.logger.Info("prior workdir changed identity while being claimed; starting a fresh environment",
-			"task", shortID(task.ID))
+			"task", task.ID)
 		claim.Release()
 		return nil, "", nil, false, nil
 	}
@@ -6486,7 +6806,7 @@ func (d *Daemon) lockEnvRootForReuseWaitingOutTheBusyWindow(
 			// instead of staying a guess.
 			if waited && err == nil {
 				d.logger.Info("prior workdir freed while waiting for the previous run to exit",
-					"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot),
+					"task", task.ID, "prior_root", filepath.Base(priorRoot),
 					"waited", time.Since(start).Round(time.Millisecond))
 			}
 			return claim, info, err
@@ -6494,13 +6814,13 @@ func (d *Daemon) lockEnvRootForReuseWaitingOutTheBusyWindow(
 		if !waited {
 			waited = true
 			d.logger.Info("prior workdir is still held by the previous run; waiting for it",
-				"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot),
+				"task", task.ID, "prior_root", filepath.Base(priorRoot),
 				"budget", d.envRootBusyWait)
 		}
 		select {
 		case <-ctx.Done():
 			d.logger.Info("stopped waiting for the prior workdir: the run was cancelled",
-				"task", shortID(task.ID), "prior_root", filepath.Base(priorRoot),
+				"task", task.ID, "prior_root", filepath.Base(priorRoot),
 				"waited", time.Since(start).Round(time.Millisecond))
 			// NOT the busy error the loop was carrying. A cancelled run is a
 			// third outcome, and collapsing it into "still busy" would send the
@@ -7196,7 +7516,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Task:                  taskCtx,
 		})
 		if err != nil {
-			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
+			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
 		}
 		// Reuse resolves priorWorkDir by name, so confirm what it actually
 		// opened is still the directory we hold the lock on. An fd cannot cross
@@ -7207,8 +7527,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if env != nil && lockedPriorInfo != nil {
 			usedInfo, statErr := os.Stat(filepath.Dir(env.WorkDir))
 			if statErr != nil || !os.SameFile(lockedPriorInfo, usedInfo) {
-				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment",
-					"task", shortID(task.ID))
+				// No "task" field here: taskLog already carries the full id.
+				taskLog.Info("reused workdir is not the directory that was claimed; starting a fresh environment")
 				env = nil
 			}
 		}
@@ -7285,7 +7605,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 					reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 				}
 				taskLog.Info("local_directory: worktree snapshot waiting for holder",
-					"holder", shortID(holder))
+					"holder", holder)
 				if waitErr := d.client.MarkTaskWaitingLocalDirectory(waitCtx, task.ID, reason); waitErr != nil {
 					// Non-fatal: the wait still happens, the UI just won't
 					// show the explicit "waiting" badge.
@@ -7310,7 +7630,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			release()
 			if err != nil {
-				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		} else {
 			if localAssignment != nil {
@@ -7318,7 +7638,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 			env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 			if err != nil {
-				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
+				return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w", err))
 			}
 		}
 	}
@@ -7799,7 +8119,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// refresh spinner resolves via the client's own timeout.
 	if task.RegenerateQuickActionsFor != "" {
 		taskLog.Warn("refusing quick-actions refresh task from an older server; complete the daemon upgrade by updating the server",
-			"target_task", shortID(task.RegenerateQuickActionsFor),
+			"target_task", task.RegenerateQuickActionsFor,
 		)
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
@@ -8413,7 +8733,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	var idleWatchdogThreshold atomic.Int64
 	idleWatchdogThreshold.Store(int64(idleWindow))
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -8750,7 +9070,7 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 //
 // Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
 // somewhere between its budget and budget + tick, never earlier.
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger) {
 	ticker := time.NewTicker(idleWatchdogTickInterval(window))
 	defer ticker.Stop()
 	for {
@@ -8781,8 +9101,8 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			if len(messages) > 0 {
 				continue
 			}
+			// No "task" field here: taskLog already carries the full id.
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
-				"task", shortID(taskID),
 				"idle_for", idleFor.Round(time.Second).String(),
 				"threshold", threshold.String(),
 				"tool_in_flight", toolInFlight,
@@ -8994,7 +9314,12 @@ func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) 
 	}, true
 }
 
-// shortID returns the first 8 characters of an ID for readable logs.
+// shortID returns the first 8 characters of an ID for a human-facing label.
+//
+// Display only, and only where the label is read rather than joined: the
+// waiting-reason string the UI renders as "Waiting for {reason}" is the one
+// caller left. Structured log fields must carry the FULL id — see the
+// task-scoped logger in handleTask for why a prefix cannot identify a task.
 func shortID(id string) string {
 	if len(id) <= 8 {
 		return id

@@ -627,7 +627,16 @@ function ActivityBlock({
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
-          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="sm" />;
+          leadIcon = (
+            <ActorAvatar
+              actorType={entry.actor_type}
+              actorId={entry.actor_id}
+              name={entry.actor_name}
+              avatarUrl={entry.actor_avatar_url}
+              profileRequiresDirectoryEntry
+              size="sm"
+            />
+          );
         }
 
         return (
@@ -636,7 +645,9 @@ function ActivityBlock({
               {leadIcon}
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
+              <span className="shrink-0 font-medium">
+                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+              </span>
               <span className="truncate">{formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}</span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
@@ -1992,8 +2003,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   const descriptionEditingRef = useRef(false);
-  const [descriptionConflictDraft, setDescriptionConflictDraft] = useState<string | null>(null);
-  const descriptionAttachmentIdsRef = useRef<string[]>([]);
   const descriptionSaveInFlightRef = useRef(false);
   const descriptionSaveIssueIdRef = useRef(id);
   const pendingDescriptionSaveRef = useRef<{
@@ -2015,9 +2024,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [titleResetToken, setTitleResetToken] = useState(0);
   useEffect(() => {
     setTitleConflictDraft(null);
-    setDescriptionConflictDraft(null);
     titleBaseRef.current = undefined;
-    descriptionAttachmentIdsRef.current = [];
     descriptionSaveInFlightRef.current = false;
     descriptionSaveIssueIdRef.current = id;
     pendingDescriptionSaveRef.current = null;
@@ -2270,7 +2277,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       {
         onSuccess: (serverIssue) => {
           if (descriptionSaveIssueIdRef.current !== id) return;
-          setDescriptionConflictDraft(null);
           descriptionSaveInFlightRef.current = false;
           const pending = pendingDescriptionSaveRef.current;
           pendingDescriptionSaveRef.current = null;
@@ -2285,16 +2291,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
           }
         },
-        onError: (error) => {
+        onError: () => {
           if (descriptionSaveIssueIdRef.current !== id) return;
           descriptionSaveInFlightRef.current = false;
-          const pending = pendingDescriptionSaveRef.current;
           pendingDescriptionSaveRef.current = null;
-          if (errorCode(error) === "revision_conflict") {
-            const latest = pending ?? draft;
-            descriptionAttachmentIdsRef.current = latest.attachmentIds;
-            setDescriptionConflictDraft(latest.markdown);
-          }
         },
       },
     );
@@ -2303,7 +2303,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const queueDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
   ) => {
-    descriptionAttachmentIdsRef.current = draft.attachmentIds;
     if (descriptionSaveInFlightRef.current) {
       pendingDescriptionSaveRef.current = draft;
       return;
@@ -3057,7 +3056,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             <ContentEditor
               ref={descEditorRef}
               key={id}
-              value={descriptionConflictDraft ?? issue.description ?? ""}
+              value={issue.description ?? ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md, baseMarkdown) => {
                 // Bind any pending uploads still referenced in the markdown
@@ -3095,64 +3094,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               currentIssueId={id}
               attachments={descEditorAttachments}
             />
-
-            {descriptionConflictDraft !== null ? (
-              <RevisionConflictCompare
-                className="mt-3"
-                title={t(($) => $.revision.compare_description)}
-                serverLabel={t(($) => $.revision.server_version)}
-                localLabel={t(($) => $.revision.local_version)}
-                serverValue={issue.description || ""}
-                localValue={descriptionConflictDraft}
-                serverAction={(
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      // The editor is dirty — that is why this conflict
-                      // exists — so the `value` prop cannot land: ContentEditor
-                      // deliberately refuses to clobber unsaved bytes.
-                      // adoptContent is the explicit "take this content"
-                      // channel and applies without emitting an update, so
-                      // discarding never writes.
-                      descEditorRef.current?.adoptContent(issue.description || "");
-                      descriptionAttachmentIdsRef.current = [];
-                      pendingDescriptionSaveRef.current = null;
-                      setDescriptionConflictDraft(null);
-                    }}
-                  >
-                    {t(($) => $.revision.use_server)}
-                  </Button>
-                )}
-                localAction={(
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      handleUpdateField(
-                        {
-                          description: descriptionConflictDraft,
-                          description_base: issue.description || "",
-                          attachment_ids:
-                            descriptionAttachmentIdsRef.current.length > 0
-                              ? descriptionAttachmentIdsRef.current
-                              : undefined,
-                        },
-                        {
-                          onSuccess: () => {
-                            setDescriptionConflictDraft(null);
-                          },
-                        },
-                      );
-                    }}
-                  >
-                    {t(($) => $.revision.keep_local)}
-                  </Button>
-                )}
-              />
-            ) : null}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar

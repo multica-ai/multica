@@ -447,7 +447,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
-	if req.Name != nil {
+	// A rename changes what daemons display; a settings edit changes how they
+	// behave — the GitHub master switch and the Co-authored-by toggle are read
+	// from this JSONB. Daemons cache settings and have no other way to learn
+	// they moved, so both edits have to wake every member's daemons.
+	if req.Name != nil || req.Settings != nil {
 		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
 			userIDs := make([]string, 0, len(members))
 			for _, member := range members {

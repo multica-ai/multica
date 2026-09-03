@@ -13,6 +13,7 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import { UnavailableModelsNote } from "./unavailable-models-note";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -57,6 +58,11 @@ export function ModelDropdown({
     [modelsQuery.data],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
+  // Advisory only — never merged into `models`, so nothing below can select one.
+  const unavailableModels = useMemo(
+    () => modelsQuery.data?.unavailableModels ?? [],
+    [modelsQuery.data],
+  );
   // resolveRuntimeModels throws the daemon's reported error text, so this is
   // the runtime's own message (plus any hint the daemon appended). It is only
   // ever read while isError is true.
@@ -243,6 +249,13 @@ export function ModelDropdown({
                   </div>
                 </div>
               </div>
+            )}
+
+            {!modelsQuery.isLoading && !modelsQuery.isError && (
+              <UnavailableModelsNote
+                models={unavailableModels}
+                title={t(($) => $.pickers.model_unavailable_heading)}
+              />
             )}
 
             {!modelsQuery.isLoading &&

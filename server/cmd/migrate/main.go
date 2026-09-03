@@ -61,6 +61,27 @@ var commentContentBigramIndex = usableIndexRequirement{
 	Extension:     "pg_bigm",
 }
 
+// extensionOperatorClass names an operator class a migration writes literally
+// into a CREATE INDEX, together with the extension that must own it. A
+// migration cannot both build concurrently and swallow a missing extension in a
+// DO ... EXCEPTION block, so the ones that need an optional opclass are gated on
+// this instead.
+type extensionOperatorClass struct {
+	AccessMethod  string
+	OperatorClass string
+	Extension     string
+}
+
+// issuePropertiesBigramOperatorClass gates migration 446. pg_bigm ships with
+// neither core Postgres nor the pgvector image CI and self-hosted deployments
+// run, so the index it builds is best-effort; the contains prefilter it
+// accelerates stays correct without it.
+var issuePropertiesBigramOperatorClass = extensionOperatorClass{
+	AccessMethod:  "gin",
+	OperatorClass: "gin_bigm_ops",
+	Extension:     "pg_bigm",
+}
+
 // preMigrationHooks wires migration version → hook. The version key is
 // the file basename without the `.up.sql` suffix, matching what
 // `migrations.ExtractVersion` returns.
@@ -276,6 +297,7 @@ var concurrentIndexCleanups = map[string]string{
 	"440_github_pr_head_sha_index":                              "idx_github_pull_request_head_sha",
 	"443_issue_project_status_index":                            "idx_issue_project_status",
 	"445_comment_delegated_failure_unsettled_index":             "idx_comment_delegated_failure_unsettled",
+	"446_issue_properties_bigm_index":                           "idx_issue_properties_bigm",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -379,6 +401,11 @@ var upMigrationConditions = map[string]migrationCondition{
 	// fallback only after proving the preferred index has the exact usable shape;
 	// pg_bigm-less self-hosted databases keep trgm and record 371 as a no-op.
 	"371_comment_content_search_index_strategy": whenIndexUsable(commentContentBigramIndex),
+	// The properties prefilter index is an optimization, not a correctness
+	// requirement: build it where pg_bigm exists and record a no-op everywhere
+	// else, rather than failing the run (and with it backend startup) on every
+	// database without the extension.
+	"446_issue_properties_bigm_index": whenOperatorClassAvailable(issuePropertiesBigramOperatorClass),
 }
 
 func hooksForDirection(direction string) map[string]preMigrationHook {
@@ -437,6 +464,42 @@ func whenIndexNotUsable(requirement usableIndexRequirement) migrationCondition {
 		}
 		if usable {
 			return false, fmt.Sprintf("preferred index %s is ready", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+// whenOperatorClassAvailable lets a migration's SQL run only where the operator
+// class it names is installed, owned by the expected extension, and visible on
+// the search_path the migration itself will resolve the unqualified name
+// against — the condition runs on the same pinned connection as the SQL.
+//
+// Checking the extension alone would be weaker: an opclass in a schema outside
+// the search_path still fails the CREATE INDEX, which would abort the run.
+func whenOperatorClassAvailable(opclass extensionOperatorClass) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		var available bool
+		if err := conn.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_opclass opc
+				JOIN pg_am am ON am.oid = opc.opcmethod
+				JOIN pg_depend dep
+				  ON dep.classid = 'pg_opclass'::regclass
+				 AND dep.objid = opc.oid
+				 AND dep.refclassid = 'pg_extension'::regclass
+				 AND dep.deptype = 'e'
+				JOIN pg_extension ext ON ext.oid = dep.refobjid
+				WHERE opc.opcname = $1
+				  AND am.amname = $2
+				  AND ext.extname = $3
+				  AND pg_opclass_is_visible(opc.oid)
+			)
+		`, opclass.OperatorClass, opclass.AccessMethod, opclass.Extension).Scan(&available); err != nil {
+			return false, "", fmt.Errorf("inspect operator class %q: %w", opclass.OperatorClass, err)
+		}
+		if !available {
+			return false, fmt.Sprintf("operator class %s (%s) is not installed", opclass.OperatorClass, opclass.Extension), nil
 		}
 		return true, "", nil
 	}

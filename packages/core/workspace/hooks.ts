@@ -93,9 +93,12 @@ export function buildActorNameResolver(directories: {
 
 export function useActorName() {
   const wsId = useWorkspaceId();
-  const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
-  const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
-  const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
+  const { data: memberData } = useQuery(memberListOptions(wsId));
+  const { data: agentData } = useQuery(agentListOptions(wsId));
+  const { data: squadData } = useQuery(squadListOptions(wsId));
+  const members = memberData ?? EMPTY_MEMBERS;
+  const agents = agentData ?? EMPTY_AGENTS;
+  const squads = squadData ?? EMPTY_SQUADS;
   // Only for naming a plugin-authored row. Gated on the flag so a workspace
   // without plugins does not fetch a list it can never render an author from.
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
@@ -124,15 +127,18 @@ export function useActorName() {
     [agents, members, squads, pluginData],
   );
 
-  const getActorInitials = useCallback((type: string, id: string) => {
-    const name = getActorName(type, id);
-    return name
-      .split(" ")
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase()
-      .slice(0, 2);
-  }, [getActorName]);
+  const getActorInitials = useCallback(
+    (type: string, id: string, nameOverride?: string) => {
+      const name = nameOverride ?? getActorName(type, id);
+      return name
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    },
+    [getActorName],
+  );
 
   const getActorAvatarUrl = useCallback((type: string, id: string): string | null => {
     if (type === "member") return resolvePublicFileUrl(members.find((m) => m.user_id === id)?.avatar_url);
@@ -140,6 +146,33 @@ export function useActorName() {
     if (type === "squad") return resolvePublicFileUrl(squads.find((s) => s.id === id)?.avatar_url);
     return null;
   }, [agents, members, squads]);
+
+  const hasActor = useCallback(
+    (type: string, id: string): boolean | undefined => {
+      // undefined means the relevant directory has not produced an
+      // authoritative snapshot yet; it must not be treated as a missing actor.
+      if (type === "member") {
+        return memberData === undefined
+          ? undefined
+          : members.some((m) => m.user_id === id);
+      }
+      if (type === "agent") {
+        return agentData === undefined
+          ? undefined
+          : agents.some((a) => a.id === id);
+      }
+      if (type === "squad") {
+        return squadData === undefined
+          ? undefined
+          : squads.some((s) => s.id === id);
+      }
+      if (type === "plugin") {
+        return pluginData?.plugins.some((p) => p.id === id);
+      }
+      return type === "system";
+    },
+    [agentData, agents, memberData, members, pluginData, squadData, squads],
+  );
 
   return useMemo(
     () => ({
@@ -149,6 +182,7 @@ export function useActorName() {
       getActorName,
       getActorInitials,
       getActorAvatarUrl,
+      hasActor,
     }),
     [
       getActorAvatarUrl,
@@ -157,6 +191,7 @@ export function useActorName() {
       getAgentName,
       getMemberName,
       getSquadName,
+      hasActor,
     ],
   );
 }

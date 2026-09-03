@@ -96,6 +96,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `runtime_offline` | 执行期间运行时离线 | 恢复运行时后重试，见[守护进程与运行时](/daemon-runtimes) |
 | `queued_expired` | 运行时心跳缺席超过重连宽限期，且该 task 也已排队满这么久 | 确认运行时在线后重试 |
 | `runtime_recovery` | 守护进程重启后回收了中断的执行 | 直接重试 |
+| `environment_prepare_failed` | 守护进程没能准备好本次执行的运行环境——工作目录，或写入其中的本地运行时配置 | 先看原始错误定位是哪一步失败，再检查那台机器：磁盘空间、权限、目录是否仍被占用，或 AI 编程工具的本地配置 |
 | `cancelled` | 被手动停止，或随归档、删除一并取消 | 无需处理 |
 | `timeout` | 超过守护进程配置的执行时长上限 | 缩小任务范围，或调整守护进程的 `agent_timeout` |
 | `iteration_limit` | 达到执行轮次上限 | 缩小任务范围 |

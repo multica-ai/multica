@@ -680,6 +680,66 @@ VALUES ($1, $2, 'owner')
 	}
 }
 
+// recordingWorkspaceRefreshNotifier captures the daemon wakeups a workspace
+// write fans out to its members.
+type recordingWorkspaceRefreshNotifier struct {
+	userIDs []string
+}
+
+func (n *recordingWorkspaceRefreshNotifier) NotifyWorkspacesChanged(userID string) {
+	n.userIDs = append(n.userIDs, userID)
+}
+
+// Daemons cache workspace settings and read the GitHub master switch and the
+// Co-authored-by toggle from them. A settings edit that does not wake them
+// leaves the old verdict live until the workspace's next repo checkout, which
+// is how a disabled Co-authored-by trailer kept landing in commits (MUL-6921).
+func TestUpdateWorkspace_NotifiesDaemonsOnSettingsChange(t *testing.T) {
+	ctx := context.Background()
+
+	const slug = "handler-tests-settings-notify"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":        "Handler Test Settings Notify",
+		"slug":        slug,
+		"description": "UpdateWorkspace settings notification test",
+	})
+
+	dbfx.Exec(t, `
+INSERT INTO member (workspace_id, user_id, role)
+VALUES ($1, $2, 'owner')
+`, wsID, testUserID)
+
+	notifier := &recordingWorkspaceRefreshNotifier{}
+	previous := testHandler.DaemonWorkspaceRefresh
+	testHandler.DaemonWorkspaceRefresh = notifier
+	t.Cleanup(func() { testHandler.DaemonWorkspaceRefresh = previous })
+
+	req := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"settings": map[string]any{"co_authored_by_enabled": false},
+	})
+	req = withURLParam(req, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 1 || notifier.userIDs[0] != testUserID {
+		t.Fatalf("settings update notified %v, want exactly the workspace member %s", notifier.userIDs, testUserID)
+	}
+
+	// An edit that touches neither the name nor the settings has nothing for
+	// daemons to re-read.
+	notifier.userIDs = nil
+	req2 := newRequest("PATCH", "/api/workspaces/"+wsID, map[string]any{
+		"description": "new description",
+	})
+	req2 = withURLParam(req2, "id", wsID)
+	testutil.Call(t, testHandler.UpdateWorkspace, req2).Want(http.StatusOK)
+
+	if len(notifier.userIDs) != 0 {
+		t.Fatalf("description-only update notified %v, want no daemon wakeup", notifier.userIDs)
+	}
+}
+
 func TestUpdateWorkspace_ReposValidation(t *testing.T) {
 	ctx := context.Background()
 

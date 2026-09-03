@@ -637,9 +637,18 @@ function CommentRow({
         highlighted={isHighlighted}
         className="flex items-center gap-2.5 px-4 max-md:px-3 pt-1 pb-1.5"
       >
-        <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="md" enableHoverCard showStatusDot />
+        <ActorAvatar
+          actorType={entry.actor_type}
+          actorId={entry.actor_id}
+          name={entry.actor_name}
+          avatarUrl={entry.actor_avatar_url}
+          profileRequiresDirectoryEntry
+          size="md"
+          enableHoverCard
+          showStatusDot
+        />
         <span className="cursor-pointer text-body font-medium">
-          {getActorName(entry.actor_type, entry.actor_id)}
+          {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -960,9 +969,18 @@ function CommentCardImpl({
               >
                 <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
               </button>
-              <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="md" enableHoverCard showStatusDot />
+              <ActorAvatar
+                actorType={entry.actor_type}
+                actorId={entry.actor_id}
+                name={entry.actor_name}
+                avatarUrl={entry.actor_avatar_url}
+                profileRequiresDirectoryEntry
+                size="md"
+                enableHoverCard
+                showStatusDot
+              />
               <span className="shrink-0 cursor-pointer text-body font-medium">
-                {getActorName(entry.actor_type, entry.actor_id)}
+                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
               </span>
               <Tooltip>
                 <TooltipTrigger

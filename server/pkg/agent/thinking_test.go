@@ -1390,3 +1390,30 @@ func argIndexOf(slice []string, target string) int {
 	}
 	return -1
 }
+
+func TestValidateThinkingLevel_ClaudeFable51AcceptsFullEffortRange(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	// This test resets the package-global thinking cache, so it must remain serial.
+
+	// A model missing from the Claude catalog never gets a Thinking entry, so
+	// the daemon's pre-execution guard silently drops any persisted effort for
+	// it. Fable 5.1 supports the full low..max range, so once it is in the
+	// catalog every level must round-trip.
+	fakeClaude := writeFakeClaudeHelpBinary(t)
+	resetThinkingCacheForTests()
+	defer resetThinkingCacheForTests()
+
+	ctx := context.Background()
+
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-fable-5-1", level)
+		if err != nil {
+			t.Fatalf("unexpected err for %q: %v", level, err)
+		}
+		if !ok {
+			t.Errorf("level %q must be valid on claude-fable-5-1; got false", level)
+		}
+	}
+}

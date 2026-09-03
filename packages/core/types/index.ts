@@ -67,6 +67,7 @@ export type {
   RuntimeModel,
   RuntimeModelServiceTier,
   RuntimeModelThinking,
+  RuntimeUnavailableModel,
   RuntimeModelThinkingLevel,
   RuntimeModelListRequest,
   RuntimeModelListStatus,
