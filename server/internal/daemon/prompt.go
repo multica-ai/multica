@@ -62,7 +62,6 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
-	b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
 	if task.PriorSessionResumeUnavailable {
@@ -174,40 +173,6 @@ func buildWorktreeReplayConflictBlock(files []string) string {
 	return b.String()
 }
 
-func buildActiveSiblingRunsBlock(currentIssueID string, runs []ActiveSiblingRunData) string {
-	// Sibling issue work is useful context only for another issue task. Chat,
-	// autopilot, and quick-create tasks have no current target issue whose claim
-	// history they could inspect, so rendering this block there creates an
-	// unactionable warning.
-	if currentIssueID == "" || len(runs) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Active sibling runs\n\n")
-	b.WriteString("This agent has other in-flight issue tasks. Before starting overlapping code or PR work, check this issue's comment history for a claim or handoff")
-	fmt.Fprintf(&b, " (`multica issue comment list %s --roots-only --summary --compact --output json`)", currentIssueID)
-	b.WriteString(" and inspect relevant siblings with the `run-messages` commands below — coordinate with existing work instead of opening a second PR. For writes that only record ownership or status of work already underway, use `--no-start` on `multica issue assign`/`update`/`status`.\n\n")
-	for _, run := range runs {
-		issueLabel := run.IssueIdentifier
-		if issueLabel == "" {
-			issueLabel = run.IssueID
-		}
-		fmt.Fprintf(&b, "- %s — task `%s`, status `%s`", issueLabel, run.TaskID, run.Status)
-		if run.StartedAt != "" {
-			fmt.Fprintf(&b, ", started %s", run.StartedAt)
-		} else if run.CreatedAt != "" {
-			fmt.Fprintf(&b, ", created %s", run.CreatedAt)
-		}
-		title := strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(run.IssueTitle))
-		if title != "" {
-			fmt.Fprintf(&b, ": %s", title)
-		}
-		fmt.Fprintf(&b, "; inspect: `multica issue run-messages %s`\n", run.TaskID)
-	}
-	b.WriteString("\n")
-	return b.String()
-}
-
 // BuildPrompt constructs the task prompt for an agent CLI.
 // Keep this minimal — detailed instructions live in CLAUDE.md / AGENTS.md
 // injected by execenv.InjectRuntimeConfig. The provider string is threaded
@@ -249,9 +214,8 @@ func buildPromptBody(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	// Assignment handoff (MUL-3375): a free-text instruction the person who
-	// assigned/promoted this issue left for you. Frame it as a handoff, not a
-	// comment to reply to — there is no comment thread to answer here.
+	// Assignment handoff is run-scoped data from legacy clients. Keep it in the
+	// per-turn prompt rather than the cached runtime brief (MUL-5377).
 	if task.HandoffNote != "" {
 		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
@@ -295,7 +259,6 @@ func buildQuickCreatePrompt(task Task) string {
 	b.WriteString("     CC exception: `multica issue create` has no `--subscriber` flag, and the platform auto-subscribes members whose `[@Name](mention://member/<uuid>)` link appears in the description. When the user wrote \"cc @Y\", strip the verbal \"cc\" wrapper from the User request body and append a final `CC: <mention link(s)>` line to the description so the cc routing still fires.\n\n")
 	b.WriteString("  2. **Context** — include ONLY when the input cited external resources AND you successfully fetched them AND they produced verifiable facts worth recording. Summarize facts only (e.g. \"PR #45 changes auth to JWT\"), not interpretation or unsolicited reference implementations. If you have nothing factual to add, omit the section entirely — never use it as an apology log for resources you could not fetch.\n\n")
 	b.WriteString("  Hard rules: never invent requirements, implementation details, or acceptance criteria the user did not express; never reduce multi-sentence input to a single vague sentence; never echo the title.\n\n")
-	b.WriteString("  Passing the description: a short, single-line body with no code, quotes, backticks, `$()`, or other special characters may go inline via `--description \"...\"`. Anything multi-line, or containing code snippets / file paths / quotes / backticks / `$()` / special characters, or otherwise long — which quick-create descriptions usually are — MUST be written to `./description.md` and passed with `--description-file ./description.md`; passing rich text inline lets the shell rewrite or truncate it (MUL-2904). That file MUST live inside your current working directory (e.g. `./description.md`) — never `/tmp` or any machine-shared path, where a different run may have left a stale file that would silently become this issue's description. If the file write fails for any reason, stop and fix it; never run `--description-file` against a file whose write did not succeed.\n\n")
 
 	// priority
 	if task.QuickCreatePriority != "" {
@@ -365,13 +328,11 @@ func buildQuickCreatePrompt(task Task) string {
 	b.WriteString("- **status**: omit (defaults to `todo`).\n")
 	b.WriteString("- **attachments**: `--attachment` takes LOCAL file paths, never URLs. Image URLs in the user input are already markdown — keep them inline. Files you produced: see `## Output`.\n\n")
 
-	// output format
-	b.WriteString("Output format:\n")
-	b.WriteString("- Run exactly one `multica issue create --output json` invocation. Do not retry for any reason — even on non-zero exit. The issue may already exist; another attempt would create a duplicate.\n")
-	b.WriteString("- Parse the JSON response to read the created issue's `identifier` (preferred) or `id` (fallback). Do not scrape human output and do not assume any workspace issue prefix such as `MUL-`; workspaces can use custom prefixes.\n")
-	b.WriteString("- After success, print exactly one line: `Created <identifier-or-id>: <title>` and exit. No commentary, no follow-up tool calls.\n")
-	b.WriteString("- Do NOT call `multica issue get` or `multica issue comment add` — there is no issue to query or comment on.\n")
-	b.WriteString("- On CLI error or JSON parse error, exit with the error as the only output. The platform writes a failure notification automatically.\n")
+	// How to run the create and what to print is stated once, in the brief's
+	// quick-create Workflow section (execenv.writeWorkflowQuickCreate). Those
+	// rules hold for the whole run and must survive a missing user message, so
+	// the brief is their home; this function renders only the field VALUES the
+	// modal picked, which change every run.
 	return b.String()
 }
 
@@ -469,9 +430,6 @@ func buildCommentPrompt(task Task, provider string) string {
 			}
 			fmt.Fprintf(&b, "Fetch each id you still need directly: `multica issue comment list %s --thread <comment-id> --tail 30 --compact --output json`. `--thread` accepts a reply id, not just a thread root, so you do not need to know which thread the comment lives in. If it is older than those 30 replies, page back with the `Next reply cursor` values (`--before` / `--before-id`) until it appears. Do not finish this turn until every id above is accounted for.\n\n",
 				task.IssueID)
-		}
-		if taskIsSquadLeader(task) {
-			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise. The comment prohibition is conditional on that call SUCCEEDING: if it exits non-zero, your decision has no trace anywhere, so post exactly ONE short comment stating the outcome and the error instead of exiting silently. That failure comment is this turn's only comment — it does not license a second one.\n\n", task.IssueID)
 		}
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
@@ -741,8 +699,16 @@ func buildAutopilotPrompt(task Task) string {
 	if task.AutopilotSource != "" {
 		fmt.Fprintf(&b, "Trigger source: %s\n", task.AutopilotSource)
 	}
-	if strings.TrimSpace(string(task.AutopilotTriggerPayload)) != "" {
-		fmt.Fprintf(&b, "Trigger payload:\n%s\n", strings.TrimSpace(string(task.AutopilotTriggerPayload)))
+	// Rendered whole. Ingress already bounds it — handler.maxWebhookBodyBytes
+	// caps a webhook body at 256 KiB — and this is now the payload's ONLY
+	// rendering (it used to be in the runtime brief as well), so truncating
+	// here would drop task input the agent has no way to fetch back: the
+	// full-payload read exists on the server (GET /api/autopilots/{id}/runs/
+	// {runId}) but no CLI command exposes it, and `autopilot runs` lists runs
+	// without payloads. A cap belongs with that command and a threshold picked
+	// from real payload sizes, not as a side effect of de-duplication.
+	if payload := strings.TrimSpace(string(task.AutopilotTriggerPayload)); payload != "" {
+		fmt.Fprintf(&b, "Trigger payload:\n%s\n", payload)
 	}
 	b.WriteString("\nAutopilot instructions:\n")
 	if strings.TrimSpace(task.AutopilotDescription) != "" {

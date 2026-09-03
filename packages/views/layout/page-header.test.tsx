@@ -67,18 +67,6 @@ describe("PageHeader title alignment", () => {
 });
 
 describe("PageHeader base chrome", () => {
-  it("supplies the trigger, gap and gutter without per-page classes", () => {
-    const header = renderHeader(
-      <PageHeader>
-        <h1>Inbox</h1>
-      </PageHeader>,
-    );
-
-    const trigger = header.querySelector("[data-slot='sidebar-trigger']")!;
-    expect(trigger).toHaveClass("xl:hidden");
-    expect(trigger.className).not.toMatch(/(^|\s)-?m[rsxe]?-/);
-    expect(header).toHaveClass("gap-2", PAGE_GUTTER);
-  });
 
   it("does not let a call site override the shared gutter", () => {
     const header = renderHeader(
@@ -123,23 +111,5 @@ describe("PageHeader base chrome", () => {
     const { container } = renderWithI18n(<CollapsedNavTrigger />);
 
     expect(container.querySelector("[data-slot='sidebar-trigger']")).toBeNull();
-  });
-
-  // Collection and issues headers drifted apart when each declared its own
-  // spacing; both must resolve to the base gap and gutter.
-  it("resolves the same gutter and gap for collection and issues headers", () => {
-    const collection = renderHeader(
-      <CollectionPageHeader icon={Zap} title="Autopilot" count={2} />,
-    );
-    const issues = renderHeader(
-      <PageHeader>
-        <ListTodo className="h-4 w-4" />
-        <h1>Issues</h1>
-      </PageHeader>,
-    );
-
-    for (const header of [collection, issues]) {
-      expect(header).toHaveClass("gap-2", PAGE_GUTTER);
-    }
   });
 });

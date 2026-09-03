@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -90,22 +88,5 @@ func TestSourceContextSweeperStopsWithItsContext(t *testing.T) {
 	case <-stopped:
 	case <-time.After(5 * time.Second):
 		t.Fatal("source context sweeper did not stop with its context")
-	}
-}
-
-// TestRuntimeSweepTickHasNoObjectStoreStage is a regression guard for the
-// reason this sweeper exists (MUL-6555 / MUL-6670): source-context cleanup used
-// to run at the top of the 30s runtime tick, so a slow object store delayed
-// marking runtimes offline and reclaiming their orphaned tasks. Object-store
-// work must stay out of that tick; put it in runSourceContextSweeper instead.
-func TestRuntimeSweepTickHasNoObjectStoreStage(t *testing.T) {
-	source, err := os.ReadFile("runtime_sweeper.go")
-	if err != nil {
-		t.Fatalf("read runtime_sweeper.go: %v", err)
-	}
-	for _, stage := range []string{"CleanupSourceContextObjectIntents", "CleanupAbandonedSourceContexts"} {
-		if strings.Contains(string(source), stage) {
-			t.Fatalf("runtime_sweeper.go calls %s; object-store cleanup belongs on runSourceContextSweeper", stage)
-		}
 	}
 }

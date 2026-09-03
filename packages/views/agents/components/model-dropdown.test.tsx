@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeModelsResult } from "@multica/core/types";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import enAgents from "../../locales/en/agents.json";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
@@ -31,6 +31,7 @@ const CODEX_MODELS: RuntimeModelsResult = {
 // Discovery outcome for the next render. resolveRuntimeModels rejects with the
 // daemon's reported error text, so a failure is modelled as a throwing queryFn.
 let discovery: () => Promise<RuntimeModelsResult> = async () => CODEX_MODELS;
+const mockRefreshRuntimeModels = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeModelsOptions: (runtimeId: string | null) => ({
@@ -38,6 +39,8 @@ vi.mock("@multica/core/runtimes", () => ({
     queryKey: ["runtime-models", runtimeId, discoveryKey],
     queryFn: () => discovery(),
   }),
+  refreshRuntimeModels: (...args: unknown[]) =>
+    mockRefreshRuntimeModels(...args),
 }));
 
 // Bumped per test so React Query cannot serve a previous case's cached result.
@@ -72,9 +75,14 @@ function openDropdown(container: HTMLElement) {
 }
 
 describe("ModelDropdown", () => {
+  beforeEach(() => {
+    mockRefreshRuntimeModels.mockResolvedValue(CODEX_MODELS);
+  });
+
   afterEach(() => {
     cleanup();
     discovery = async () => CODEX_MODELS;
+    mockRefreshRuntimeModels.mockReset();
     discoveryKey += 1;
   });
 
@@ -91,6 +99,21 @@ describe("ModelDropdown", () => {
 
     fireEvent.click(screen.getByText("GPT-5.6 Terra"));
     expect(onChange).toHaveBeenCalledWith("gpt-5.6-terra");
+  });
+
+  it("offers an explicit refresh that requests the runtime's live catalog", async () => {
+    const { container } = renderDropdown();
+    openDropdown(container);
+
+    await screen.findByText("GPT-5.6 Sol");
+    fireEvent.click(
+      screen.getByRole("button", { name: enAgents.pickers.model_refresh }),
+    );
+
+    expect(mockRefreshRuntimeModels).toHaveBeenCalledWith(
+      expect.any(QueryClient),
+      "rt-codex",
+    );
   });
 
   // MUL-6606: a runtime that could not enumerate its models used to report an

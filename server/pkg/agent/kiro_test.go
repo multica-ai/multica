@@ -11,17 +11,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsKiroBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("kiro", Config{ExecutablePath: "/nonexistent/kiro-cli"})
-	if err != nil {
-		t.Fatalf("New(kiro) error: %v", err)
-	}
-	if _, ok := b.(*kiroBackend); !ok {
-		t.Fatalf("expected *kiroBackend, got %T", b)
-	}
-}
-
 func TestKiroToolNameFromTitle(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

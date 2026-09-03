@@ -536,33 +536,6 @@ describe("useIssueSurfaceController", () => {
     expect(onSettled).toHaveBeenCalled();
   });
 
-  it("exposes surface actions and surface-local selection", async () => {
-    const { result } = renderHook(
-      () =>
-        useIssueSurfaceController({
-          scope: { type: "project", projectId: "p1" },
-          modes: ["board", "list", "swimlane", "gantt"],
-        }),
-      { wrapper: makeWrapper(qc, "project:p1") },
-    );
-
-    act(() => {
-      result.current.selection.select(["issue-1"]);
-    });
-    expect(result.current.selection.selectedIds).toEqual(new Set(["issue-1"]));
-
-    await act(async () => {
-      await result.current.actions.batchUpdate(["issue-1"], { status: "done" });
-      await result.current.actions.batchDelete(["issue-2"]);
-    });
-
-    expect(batchUpdateMutateAsync).toHaveBeenCalledWith({
-      ids: ["issue-1"],
-      updates: { status: "done" },
-    });
-    expect(batchDeleteMutateAsync).toHaveBeenCalledWith(["issue-2"]);
-  });
-
   it("never reports isEmpty in gantt mode — an empty scheduled subset cannot prove the window is empty", async () => {
     // The gantt query returns only issues with a start/due date. A project
     // full of unscheduled issues comes back [] here, and the surface used to

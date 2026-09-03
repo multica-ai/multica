@@ -110,6 +110,7 @@ type runtimeGCTxStarter interface {
 type runtimeGCEventPublisher interface {
 	PublishRuntimeTeardown(context.Context, service.RuntimeTeardownResult, string, string, string, string, bool)
 	PublishRuntimeRefresh(string, string, string, string)
+	NotifyRuntimeGone(string)
 }
 
 type runtimeSweepStageStats struct {
@@ -453,6 +454,7 @@ func gcRuntimesWithBudget(ctx context.Context, txStarter runtimeGCTxStarter, que
 		metrics.RecordRuntimeGCDeleted()
 		gcWorkspaces[result.workspaceID] = true
 		if publisher != nil {
+			publisher.NotifyRuntimeGone(util.UUIDToString(runtimeID))
 			publisher.PublishRuntimeTeardown(gcCtx, result.teardown, result.workspaceID, "system", "", "runtime_gc", false)
 		}
 	}

@@ -576,9 +576,19 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// downside. An empty sessionCurrentModel (older runtime or unparsable
 		// state) falls through and still sends set_model, preserving prior
 		// behaviour. See MUL-5029 / NousResearch/hermes-agent#59089.
-		if opts.Model != "" && effectiveModel == sessionCurrentModel {
+		//
+		// The comparison is provider-normalised (acpModelIDsEquivalent), not a
+		// raw string match: Hermes always reports its current model in the
+		// provider-encoded `provider:model` form, while agent.model is stored
+		// verbatim from the API and is routinely bare. A literal == therefore
+		// never matched for those agents, so the gate above was dead code and
+		// the MUL-5029 mis-routing hazard it exists to prevent stayed live for
+		// exactly the agents that hit it. See acpModelIDsEquivalent for the
+		// evidence and for what the redundant call actually costs.
+		if opts.Model != "" && acpModelIDsEquivalent(effectiveModel, sessionCurrentModel) {
 			b.cfg.Logger.Info("hermes session already on requested model; skipping redundant set_model",
 				"model", opts.Model,
+				"session_model", sessionCurrentModel,
 				"session_id", sessionID,
 			)
 		} else if opts.Model != "" {
@@ -2128,6 +2138,73 @@ func extractACPAuthMethods(result json.RawMessage) []string {
 		}
 	}
 	return ids
+}
+
+// splitACPModelID splits an ACP model id into its optional `provider:` prefix
+// and the bare model name. Ids without a colon (or with a leading colon) carry
+// no provider and return ("", id). Mirrors the prefix convention acpModelEntry
+// derives dropdown grouping from.
+//
+// Bare model names can themselves contain colons in theory, so only the FIRST
+// colon is treated as the provider separator — the remainder is the model.
+func splitACPModelID(modelID string) (provider, model string) {
+	id := strings.TrimSpace(modelID)
+	if idx := strings.Index(id, ":"); idx > 0 {
+		return id[:idx], id[idx+1:]
+	}
+	return "", id
+}
+
+// acpModelIDsEquivalent reports whether a configured model id and the id the
+// runtime reports as current denote the same selection.
+//
+// Normalisation is needed because two id namespaces meet here: agent.model is
+// persisted verbatim (handler/agent.go CreateAgent/UpdateAgent) and the CLI
+// documents the bare spelling as valid, while an ACP runtime commonly answers
+// session/new with a provider-encoded `provider:model` id. A raw == across
+// those two spellings misses, which is why the MUL-5029 skip-gate added in
+// #5690 never fired for bare-configured agents and set_model was replayed
+// every turn.
+//
+// The rules are deliberately asymmetric, because the risk is:
+//   - Either side empty → not equivalent (caller handles the empty-model case).
+//   - Bare configured id → equivalent on the model name alone. It expresses no
+//     provider preference, so the session's own provider is authoritative.
+//     This is the case the gate exists for.
+//   - Explicit configured provider → equivalent only when the session reports
+//     that same provider. A session reporting a bare id cannot confirm the
+//     match, so fall through and send set_model rather than silently swallow a
+//     provider switch the caller explicitly asked for. Bare current ids are
+//     not hypothetical: acp_effort_test.go captures an unprefixed
+//     `gpt-5.6-sol` from jcode, which routes through this same backend.
+//     Hermes Agent's encoder has a bare branch too — acp_adapter
+//     `_encode_model_choice` returns the model alone when the provider is
+//     empty — but a normally-configured install always resolves one, and a
+//     live `hermes acp` v0.20.0 session reports the prefixed form.
+//
+// Provider and model are compared case-insensitively: Hermes lowercases the
+// provider when encoding the id, so a config written as `Custom:...` would
+// otherwise miss.
+//
+// splitACPModelID cannot distinguish a provider prefix from a colon inside a
+// bare model name (Ollama-style `llama3:8b`). That degradation is safe in the
+// only direction that matters: `llama3:8b` vs `custom:llama3:8b` compares
+// unequal and falls back to sending set_model, never to a false skip.
+func acpModelIDsEquivalent(configured, current string) bool {
+	configured = strings.TrimSpace(configured)
+	current = strings.TrimSpace(current)
+	if configured == "" || current == "" {
+		return false
+	}
+	cfgProvider, cfgModel := splitACPModelID(configured)
+	curProvider, curModel := splitACPModelID(current)
+	if !strings.EqualFold(cfgModel, curModel) {
+		return false
+	}
+	if cfgProvider == "" {
+		return true
+	}
+	return strings.EqualFold(cfgProvider, curProvider)
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of

@@ -117,12 +117,12 @@ func TestEnqueueTaskForIssueStampsDirectHumanAttribution(t *testing.T) {
 	}
 }
 
-// TestEnqueueTaskForIssueWithHandoffAttributesToActor is the acceptance test for
+// TestEnqueueTaskForIssueByActorAttributesToActor is the acceptance test for
 // the assign/promote actor fix (MUL-4302 §4): when a member assigns an issue that
 // a DIFFERENT member created, the run's accountable human — and, honoring the
 // invariant, its originator — is the assigning member (the actor), not the issue
 // creator. The evidence still points at the issue.
-func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
+func TestEnqueueTaskForIssueByActorAttributesToActor(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -142,7 +142,7 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 	}
 
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
-	task, err := svc.EnqueueTaskForIssueWithHandoff(ctx, db.Issue{
+	task, err := svc.EnqueueTaskForIssueByActor(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
 		AssigneeID:   util.MustParseUUID(agentID),
 		Priority:     "medium",
@@ -150,9 +150,9 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 		CreatorID:    util.MustParseUUID(creatorID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-	}, "", util.MustParseUUID(actorID))
+	}, util.MustParseUUID(actorID))
 	if err != nil {
-		t.Fatalf("EnqueueTaskForIssueWithHandoff: %v", err)
+		t.Fatalf("EnqueueTaskForIssueByActor: %v", err)
 	}
 
 	var source pgtype.Text
@@ -1032,7 +1032,7 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	// dispatchCreateIssue routes a manual trigger through the actor-carrying enqueue.
-	task, err := svc.EnqueueTaskForIssueWithHandoff(ctx, db.Issue{
+	task, err := svc.EnqueueTaskForIssueByActor(ctx, db.Issue{
 		ID:           util.MustParseUUID(issueID),
 		AssigneeID:   util.MustParseUUID(agentID),
 		Priority:     "medium",
@@ -1042,9 +1042,9 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:     util.MustParseUUID(autopilotID),
-	}, "", util.MustParseUUID(actorID))
+	}, util.MustParseUUID(actorID))
 	if err != nil {
-		t.Fatalf("EnqueueTaskForIssueWithHandoff: %v", err)
+		t.Fatalf("EnqueueTaskForIssueByActor: %v", err)
 	}
 
 	var source pgtype.Text

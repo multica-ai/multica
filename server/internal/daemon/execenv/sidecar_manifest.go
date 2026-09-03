@@ -30,11 +30,10 @@ const sidecarManifestFile = ".multica_sidecar_manifest.json"
 //     alternative slug (see allocateCollisionFreeSkillDir) and retries
 //     so the agent still discovers the Multica skill, just under a
 //     different directory name.
-//   - For Multica-only namespaces (.agent_context/issue_context.md,
-//     .multica/project/resources.json) the caller swallows the error
-//     and proceeds — the agent's runtime brief already carries every
-//     fact that would have appeared in those files, so missing-from-
-//     disk is degraded behavior, not failure.
+//   - For the Multica-only namespace (.multica/project/resources.json)
+//     the caller swallows the error and proceeds — the agent's runtime
+//     brief already carries every fact that would have appeared in that
+//     file, so missing-from-disk is degraded behavior, not failure.
 var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing path")
 
 // sidecarManifest records the filesystem mutations writeContextFiles and

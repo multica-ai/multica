@@ -264,18 +264,16 @@ multica issue status <issue-id> in_progress --no-start
 ```
 
 Before self-assigning, check the target issue's comment history for an existing
-claim and any `## Active sibling runs` block (its `run-messages` commands show
-work in flight). The server also suppresses a trusted self-assignment when the
+claim. The server also suppresses a trusted self-assignment when the
 exact target `(issue, agent)` pair already has a non-terminal task, but it
 deliberately keeps same-agent handoffs to a fresh issue starting runs: cross-issue
 serial chains and triage batches rely on that.
 
 ## Who else is running right now
 
-The `## Active sibling runs` block covers only YOUR OWN other in-flight tasks.
-It says nothing about another agent working next to you, and it is a claim-time
-snapshot that does not refresh mid-turn. Ask the server when you need the
-current answer:
+Nothing about concurrent runs is pushed into your prompt: the answer changes
+while a turn is running, and most turns never need it. Ask the server on the
+turns that do — before opening a PR against code a sibling issue also touches:
 
 ```bash
 multica issue runs <issue-id> --active --output json     # in-flight runs on this issue

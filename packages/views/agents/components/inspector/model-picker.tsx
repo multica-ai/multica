@@ -1,10 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Cpu, Loader2, Plus } from "lucide-react";
-import { runtimeModelsOptions } from "@multica/core/runtimes";
-import { Input } from "@multica/ui/components/ui/input";
+import {
+  refreshRuntimeModels,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import { Label } from "@multica/ui/components/ui/label";
 import {
   PickerItem,
@@ -13,6 +15,7 @@ import {
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 import { UnavailableModelsNote } from "../unavailable-models-note";
+import { ModelSearchHeader } from "../model-search-header";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -46,6 +49,7 @@ export function ModelPicker({
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -88,6 +92,14 @@ export function ModelPicker({
     setOpen(false);
     setSearch("");
     if (id !== value) await onChange(id);
+  };
+
+  const refresh = () => {
+    if (!runtimeId || !runtimeOnline) return;
+    void refreshRuntimeModels(queryClient, runtimeId).catch(() => {
+      // React Query retains the last catalog and owns the error state. Avoid
+      // turning a failed button action into an unhandled promise rejection.
+    });
   };
 
   if (!supported && !modelsQuery.isLoading) {
@@ -191,18 +203,14 @@ export function ModelPicker({
         </>
       }
       header={
-        <div className="p-1.5">
-          <Input
-            autoFocus
-            name="agent-model-search"
-            autoComplete="off"
-            aria-label={t(($) => $.pickers.model_search_placeholder)}
-            placeholder={t(($) => $.pickers.model_search_placeholder)}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-7 text-caption"
-          />
-        </div>
+        <ModelSearchHeader
+          value={search}
+          onChange={setSearch}
+          onRefresh={refresh}
+          refreshing={modelsQuery.isFetching}
+          refreshDisabled={!runtimeOnline || !runtimeId}
+          compact
+        />
       }
     >
       {modelsQuery.isLoading && (

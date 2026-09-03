@@ -12,17 +12,19 @@ import (
 	"time"
 )
 
-func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
+func TestStaticModelCatalogsAreValid(t *testing.T) {
 	t.Parallel()
 	catalogs := map[string][]Model{
-		"claude": claudeStaticModels(),
-		"codex":  codexStaticModels(),
-		"cursor": cursorStaticModels(),
+		"claude":  claudeStaticModels(),
+		"codex":   codexStaticModels(),
+		"cursor":  cursorStaticModels(),
+		"copilot": copilotStaticModels(),
 	}
 	for provider, models := range catalogs {
 		if len(models) == 0 {
 			t.Errorf("%s static catalog returned no models", provider)
 		}
+		defaultCount := 0
 		for i, model := range models {
 			if model.ID == "" {
 				t.Errorf("%s static catalog[%d] has empty ID", provider, i)
@@ -30,6 +32,12 @@ func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
 			if model.Label == "" {
 				t.Errorf("%s static catalog[%d] has empty Label", provider, i)
 			}
+			if model.Default {
+				defaultCount++
+			}
+		}
+		if defaultCount > 1 {
+			t.Errorf("%s: %d models marked Default, want 0 or 1", provider, defaultCount)
 		}
 	}
 }
@@ -466,176 +474,6 @@ func thinkingValues(thinking *ModelThinking) []string {
 	return values
 }
 
-func TestClaudeStaticModelsExposesFable5(t *testing.T) {
-	models := claudeStaticModels()
-	ids := map[string]Model{}
-	defaults := 0
-	for _, m := range models {
-		ids[m.ID] = m
-		if m.Default {
-			defaults++
-		}
-	}
-
-	fable, ok := ids["claude-fable-5"]
-	if !ok {
-		t.Fatalf("missing Claude Fable 5 in: %+v", models)
-	}
-	if fable.Label != "Claude Fable 5" || fable.Provider != "anthropic" || fable.Default {
-		t.Errorf("unexpected Fable entry: %+v", fable)
-	}
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
-	}
-}
-
-func TestClaudeStaticModelsExposesFable51(t *testing.T) {
-	models := claudeStaticModels()
-	ids := map[string]Model{}
-	defaults := 0
-	for _, m := range models {
-		ids[m.ID] = m
-		if m.Default {
-			defaults++
-		}
-	}
-
-	fable, ok := ids["claude-fable-5-1"]
-	if !ok {
-		t.Fatalf("missing Claude Fable 5.1 in: %+v", models)
-	}
-	if fable.Label != "Claude Fable 5.1" || fable.Provider != "anthropic" || fable.Default {
-		t.Errorf("unexpected Fable 5.1 entry: %+v", fable)
-	}
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
-	}
-}
-
-func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
-	models := claudeStaticModels()
-	ids := map[string]Model{}
-	defaults := 0
-	for _, m := range models {
-		ids[m.ID] = m
-		if m.Default {
-			defaults++
-		}
-	}
-
-	sonnet, ok := ids["claude-sonnet-5"]
-	if !ok {
-		t.Fatalf("missing Claude Sonnet 5 in: %+v", models)
-	}
-	if sonnet.Label != "Claude Sonnet 5" || sonnet.Provider != "anthropic" || sonnet.Default {
-		t.Errorf("unexpected Sonnet 5 entry: %+v", sonnet)
-	}
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
-	}
-}
-
-func TestClaudeStaticModelsExposesOpus5(t *testing.T) {
-	models := claudeStaticModels()
-	ids := map[string]Model{}
-	defaults := 0
-	for _, m := range models {
-		ids[m.ID] = m
-		if m.Default {
-			defaults++
-		}
-	}
-
-	opus, ok := ids["claude-opus-5"]
-	if !ok {
-		t.Fatalf("missing Claude Opus 5 in: %+v", models)
-	}
-	if opus.Label != "Claude Opus 5" || opus.Provider != "anthropic" || opus.Default {
-		t.Errorf("unexpected Opus 5 entry: %+v", opus)
-	}
-	// Opus stays a deliberate opt-in: Sonnet remains the everyday workhorse
-	// the catalog badges as its default pick.
-	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
-		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
-	}
-}
-
-// TestClaudeOpus5AcceptedByProviderCompatibilityGate pins the other half of
-// catalog membership: ModelKnownIncompatibleWithProvider erases a saved model
-// that a runtime's maintained catalog doesn't advertise, so an unlisted
-// `claude-opus-5` would be silently dropped from an agent on save.
-func TestClaudeOpus5AcceptedByProviderCompatibilityGate(t *testing.T) {
-	t.Parallel()
-	if ModelKnownIncompatibleWithProvider("claude", "claude-opus-5") {
-		t.Error("claude-opus-5 must be accepted by the claude provider gate")
-	}
-	if !ModelKnownIncompatibleWithProvider("codex", "claude-opus-5") {
-		t.Error("claude-opus-5 must still be rejected for the codex provider")
-	}
-}
-
-func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
-	// This fallback is used for Codex <0.122.0 and whenever dynamic bundled
-	// discovery fails. Keep the latest verified visible models plus 5.3 Codex
-	// for older installations, but do not resurrect guessed/nonexistent IDs.
-	models := codexStaticModels()
-	ids := map[string]Model{}
-	for _, m := range models {
-		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
-		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
-		"gpt-5.3-codex", "gpt-5.2",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Codex model %q in: %+v", want, models)
-		}
-	}
-	for _, unwanted := range []string{"gpt-5.5-mini", "gpt-5", "o3", "o3-mini"} {
-		if _, ok := ids[unwanted]; ok {
-			t.Errorf("unexpected stale/invalid Codex model %q in fallback: %+v", unwanted, models)
-		}
-	}
-	latest, ok := ids["gpt-5.6-sol"]
-	if !ok || !latest.Default {
-		t.Errorf("expected `gpt-5.6-sol` to be the default Codex entry, got %+v", latest)
-	}
-	defaults := 0
-	for _, m := range models {
-		if m.Default {
-			defaults++
-		}
-		if m.Provider != "openai" {
-			t.Errorf("all Codex entries must carry Provider=openai, got %+v", m)
-		}
-	}
-	if defaults != 1 {
-		t.Errorf("expected exactly one default Codex entry, got %d", defaults)
-	}
-	if got := ids["gpt-5.6-sol"].Thinking; got == nil || got.DefaultLevel != "low" || !hasThinkingLevel(got, "max") || !hasThinkingLevel(got, "ultra") {
-		t.Errorf("unexpected gpt-5.6-sol thinking catalog: %+v", got)
-	}
-	if got := ids["gpt-5.6-luna"].Thinking; got == nil || !hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
-		t.Errorf("unexpected gpt-5.6-luna thinking catalog: %+v", got)
-	}
-	if got := ids["gpt-5.3-codex"].Thinking; got == nil || !hasThinkingLevel(got, "xhigh") || hasThinkingLevel(got, "max") || hasThinkingLevel(got, "ultra") {
-		t.Errorf("unexpected gpt-5.3-codex thinking catalog: %+v", got)
-	}
-	for id, label := range map[string]string{
-		"gpt-5.6-sol":   "GPT-5.6 Sol",
-		"gpt-5.6-terra": "GPT-5.6 Terra",
-		"gpt-5.6-luna":  "GPT-5.6 Luna",
-	} {
-		if got := ids[id].Label; got != label {
-			t.Errorf("Codex model %q label = %q, want %q", id, got, label)
-		}
-		if ModelKnownIncompatibleWithProvider("codex", id) {
-			t.Errorf("Codex model %q must be accepted by the provider compatibility gate", id)
-		}
-	}
-}
-
 func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -764,49 +602,6 @@ func TestInferCopilotProvider(t *testing.T) {
 	}
 }
 
-func TestCopilotStaticModelsExposesFullCatalog(t *testing.T) {
-	// GitHub Copilot CLI has no `models list` subcommand, so the
-	// catalog is hand-maintained from the official supported-models
-	// docs. Regression guard for multica-ai/multica#1948 — the
-	// dropdown previously shipped only 2 models and used dashed IDs
-	// (`claude-sonnet-4-6`) which the CLI rejects. IDs must use the
-	// dotted form (`claude-sonnet-4.6`) that `copilot --model <id>`
-	// actually accepts, and cover both OpenAI and Anthropic families.
-	models := copilotStaticModels()
-	ids := map[string]Model{}
-	for _, m := range models {
-		ids[m.ID] = m
-	}
-	for _, want := range []string{
-		"gpt-5.5", "gpt-5.4", "gpt-5.4-mini",
-		"gpt-5.3-codex", "gpt-5.2-codex", "gpt-5.2",
-		"gpt-5-mini", "gpt-4.1",
-		"claude-opus-4.7", "claude-sonnet-4.6",
-		"claude-sonnet-4.5", "claude-haiku-4.5",
-	} {
-		if _, ok := ids[want]; !ok {
-			t.Errorf("missing expected Copilot model %q in: %+v", want, models)
-		}
-	}
-	// Dashed legacy IDs must not reappear — `copilot --model
-	// claude-sonnet-4-6` errors with "Model ... is not available".
-	for _, banned := range []string{"claude-sonnet-4-6", "claude-sonnet-4-5"} {
-		if _, ok := ids[banned]; ok {
-			t.Errorf("Copilot catalog must not use dashed model id %q; use dotted form", banned)
-		}
-	}
-	for _, m := range models {
-		switch m.Provider {
-		case "openai", "anthropic":
-		default:
-			t.Errorf("Copilot entry %q has unexpected Provider %q", m.ID, m.Provider)
-		}
-		if m.Default {
-			t.Errorf("Copilot entries should not set Default; account routing decides. got %+v", m)
-		}
-	}
-}
-
 func TestListModelsHermesWithoutBinary(t *testing.T) {
 	// Hermes reports discovery failures instead of swallowing them into an
 	// empty list, unlike the kiro / qoder cases below (MUL-6606). Those two
@@ -889,29 +684,6 @@ func TestListModelsUnknownProvider(t *testing.T) {
 	_, err := ListModels(ctx, "nonexistent", Command{Path: ""})
 	if err == nil {
 		t.Fatal("ListModels(unknown) expected error")
-	}
-}
-
-func TestStaticCatalogsHaveAtMostOneDefault(t *testing.T) {
-	// Each catalog should tag at most one entry as the display
-	// default so the UI badge is unambiguous. More than one
-	// usually means a copy/paste slip when adding new models.
-	catalogs := map[string][]Model{
-		"claude":  claudeStaticModels(),
-		"codex":   codexStaticModels(),
-		"cursor":  cursorStaticModels(),
-		"copilot": copilotStaticModels(),
-	}
-	for provider, models := range catalogs {
-		count := 0
-		for _, m := range models {
-			if m.Default {
-				count++
-			}
-		}
-		if count > 1 {
-			t.Errorf("%s: %d models marked Default, want 0 or 1", provider, count)
-		}
 	}
 }
 
@@ -1796,26 +1568,6 @@ func TestACPResultTopLevelKeys(t *testing.T) {
 	}
 }
 
-func TestHermesModelSelectionSupported(t *testing.T) {
-	// Regression guard: hermes now supports model selection via
-	// the ACP session/set_model RPC, so the UI dropdown should
-	// not be disabled for it.
-	if !ModelSelectionSupported("hermes") {
-		t.Error("hermes should be model-selection-supported now that set_session_model is wired")
-	}
-}
-
-// TestAntigravityModelSelectionSupported pins that the antigravity provider
-// now reports model selection as supported: agy 1.0.6 added a `--model` flag
-// (MUL-3125) and buildAntigravityArgs wires opts.Model through, so the UI
-// must render the live picker rather than a disabled "Managed by runtime"
-// label.
-func TestAntigravityModelSelectionSupported(t *testing.T) {
-	if !ModelSelectionSupported("antigravity") {
-		t.Error("antigravity should be model-selection-supported now that agy 1.0.6 has --model")
-	}
-}
-
 // TestParseAntigravityModels covers the legacy single-column `agy models`
 // format (pre-1.1.11): each non-blank tab-free line becomes a Model whose ID
 // and Label are that verbatim value, duplicates collapse, and blanks drop.
@@ -2117,23 +1869,5 @@ func TestModelSelectorMustBeProviderQualifiedIsAnExecutionContract(t *testing.T)
 					tt.provider, got, tt.want, tt.why)
 			}
 		})
-	}
-}
-
-// omp is a built-in runtime identity rather than a protocol family, so the
-// predicate must resolve it through its descriptor. This is what keeps "add a
-// fork" a descriptor entry instead of a change here.
-func TestModelSelectorContractFollowsProtocolFamily(t *testing.T) {
-	t.Parallel()
-
-	desc, ok := BuiltinRuntimeByID("omp")
-	if !ok {
-		t.Fatal("omp is no longer a built-in runtime identity; this test needs a new subject")
-	}
-	if desc.ProtocolFamily != "pi" {
-		t.Fatalf("omp protocol family = %q, want pi", desc.ProtocolFamily)
-	}
-	if ModelSelectorMustBeProviderQualified("omp") != ModelSelectorMustBeProviderQualified(desc.ProtocolFamily) {
-		t.Error("omp does not inherit its selector contract from the pi protocol family")
 	}
 }

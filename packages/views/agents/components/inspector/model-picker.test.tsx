@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { RuntimeModelsResult } from "@multica/core/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,7 @@ const CLAUDE_CATALOG: RuntimeModelsResult = {
 
 let discovery: () => Promise<RuntimeModelsResult> = async () => CLAUDE_CATALOG;
 let discoveryKey = 0;
+const mockRefreshRuntimeModels = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/runtimes", () => ({
   runtimeModelsOptions: (runtimeId: string | null) => ({
@@ -40,6 +41,8 @@ vi.mock("@multica/core/runtimes", () => ({
     queryKey: ["runtime-models", runtimeId, discoveryKey],
     queryFn: () => discovery(),
   }),
+  refreshRuntimeModels: (...args: unknown[]) =>
+    mockRefreshRuntimeModels(...args),
 }));
 
 function renderPicker() {
@@ -59,7 +62,7 @@ function renderPicker() {
       </QueryClientProvider>
     </I18nProvider>,
   );
-  return { ...view, onChange };
+  return { ...view, onChange, queryClient };
 }
 
 function openPicker(container: HTMLElement) {
@@ -73,6 +76,7 @@ describe("ModelPicker (inspector)", () => {
     cleanup();
     discovery = async () => CLAUDE_CATALOG;
     discoveryKey += 1;
+    mockRefreshRuntimeModels.mockReset();
   });
 
   it("offers the runnable model", async () => {
@@ -112,5 +116,21 @@ describe("ModelPicker (inspector)", () => {
     expect(
       screen.queryByText(enAgents.pickers.model_unavailable_heading),
     ).toBeNull();
+  });
+
+  it("exposes the live-catalog refresh from the inspector picker", async () => {
+    mockRefreshRuntimeModels.mockResolvedValue(CLAUDE_CATALOG);
+    const { container, queryClient } = renderPicker();
+    openPicker(container);
+    await screen.findByText("Fable");
+    fireEvent.click(
+      screen.getByRole("button", { name: enAgents.pickers.model_refresh }),
+    );
+
+    expect(mockRefreshRuntimeModels).toHaveBeenCalledWith(
+      queryClient,
+      "rt-claude",
+    );
+    queryClient.clear();
   });
 });
