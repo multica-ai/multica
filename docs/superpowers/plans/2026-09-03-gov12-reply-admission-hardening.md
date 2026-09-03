@@ -165,3 +165,89 @@ Expected: exit 0 for all affected packages; unrelated daemon configuration leaka
 - [ ] **Step 3: Verify the exact candidate**
 
 Run: `git rev-parse HEAD` and `git diff --stat`, then record the new commit SHA and the fresh test results in the COM-104 review thread for Claude’s complete re-review.
+
+## Review Revision: 2026-09-03
+
+Claude’s re-review of `8a0b02524f8ca1b9edd8b175a615be4a61f2676e` found three remaining correctness gaps. This revision preserves the server boundary while narrowing the loop escape, making Markdown masking deterministic, and keeping a visible issue record when optional fallback delivery is rejected.
+
+### Task 6: Narrow nested reply termination without disabling review admission
+
+**Files:**
+- Modify: `server/internal/replyadmission/reply_admission.go`
+- Modify: `server/internal/replyadmission/reply_admission_test.go`
+
+Allow a direct reply to an agent reply to terminate only when the response is short and introduces no new request. A longer substantive response and a new opinion/review request must continue through the requester-mention gate.
+
+- [x] **Step 1: Write failing regression tests**
+
+Add tests proving that a bounded five-word no-new-request termination is admitted, while a 900-word nested review and a nested new opinion request still return `MissingRequesterMentionError`.
+
+- [x] **Step 2: Run the nested tests to verify RED**
+
+Run: `go test ./internal/replyadmission -run 'TestCheckNested' -count=1`
+
+Expected: the current unconditional `IsReply` return admits the long review and new opinion request, so the new tests fail.
+
+- [x] **Step 3: Implement the bounded termination predicate**
+
+Use a fixed word bound and reject responses containing a new request marker before returning the acknowledgement classification. Preserve normal root admission and all existing exact acknowledgement behavior.
+
+- [x] **Step 4: Run the nested tests to verify GREEN**
+
+Run: `go test ./internal/replyadmission -run 'TestCheckNested' -count=1`
+
+Expected: only the bounded no-new-request termination is exempt; long nested reviews and nested opinion requests still require the parent requester mention.
+
+### Task 7: Pair equal-length Markdown code delimiters
+
+**Files:**
+- Modify: `server/internal/replyadmission/reply_admission.go`
+- Modify: `server/internal/replyadmission/reply_admission_test.go`
+
+Replace the look-ahead parity heuristic with one-pass equal-length backtick-run pairing. A run closes only a code span opened with the same run length; an unclosed opening run is restored as literal text so mentions after it remain visible. Keep fenced and indented code behavior unchanged.
+
+- [x] **Step 1: Write failing parity regression tests**
+
+Add one test where a stray single backtick precedes a real mention and a later legitimate code reference; the mention must remain admitted. Add one test where the same stray tick precedes a deliberately code-formatted mention; that mention must remain rejected.
+
+- [x] **Step 2: Run the parser tests to verify RED**
+
+Run: `go test ./internal/replyadmission -run 'TestCheck(CodeSpan|AllowsMentionAfterInlineCode|TreatsUnbalancedInlineCodeAsLiteral|IgnoresCodeFormattedMention)' -count=1`
+
+Expected: the two stray-tick tests fail under the current any-later-backtick heuristic.
+
+- [x] **Step 3: Implement equal-run pairing**
+
+Scan backtick runs as delimiters, pair only equal-length runs, blank only the paired span contents, and copy unmatched runs and their following text unchanged. Continue to recognize fenced code before inline spans.
+
+- [x] **Step 4: Run the parser tests to verify GREEN**
+
+Run the same focused parser command and confirm balanced, unbalanced, stray-tick, fenced, indented, and code-formatted mention cases all pass.
+
+### Task 8: Preserve visible completion output after fallback rejection
+
+**Files:**
+- Modify: `server/internal/service/task.go`
+- Modify: `server/internal/service/reply_admission_test.go`
+
+When a synthesized fallback is rejected only for missing requester admission, keep the task terminal transition and insert one `system`-typed issue comment with the admission reason inside the same completion transaction. Do not insert the rejected agent-authored fallback or invoke admission again for the system notice.
+
+- [x] **Step 1: Extend the service regression first**
+
+Change the completion test to assert one issue comment remains, with `author_type = 'system'`, a visible admission reason, and no agent-authored fallback.
+
+- [x] **Step 2: Run the service regression to verify RED**
+
+Run: `go test ./internal/service -run 'TestCompleteTask_CompletionFallbackAdmissionRejectionCompletesTask$' -count=1`
+
+Expected: the current implementation completes with zero comments, so the new visibility assertions fail.
+
+- [x] **Step 3: Insert the system notice atomically**
+
+Create a system comment on the task issue using the existing task source context, reference the required requester mention, and preserve the existing post-commit warning. The notice must be system-typed and therefore not create an agent reply loop.
+
+- [x] **Step 4: Run service and affected verification**
+
+Run: `go test ./internal/service -run 'TestCompleteTask_CompletionFallbackAdmissionRejectionCompletesTask$' -count=1` followed by `go test ./internal/replyadmission ./internal/service ./internal/handler ./cmd/server -count=1`, `go vet ./internal/replyadmission ./internal/service ./internal/handler ./cmd/server`, and `go build ./cmd/server`.
+
+Expected: all affected checks pass; unrelated full-suite environment failures remain separately documented.

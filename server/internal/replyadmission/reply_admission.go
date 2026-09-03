@@ -73,6 +73,8 @@ const (
 	ReasonMissingRequesterMention = "missing_requester_mention"
 )
 
+const maxNestedTerminatingReplyWords = 12
+
 // Decision is the structured, server-derived admission result. Callers may
 // use it for metrics and a machine-readable response, but they cannot supply
 // or override any of these fields.
@@ -130,8 +132,9 @@ var (
 //   - the response is a short acknowledgement; or
 //   - the response contains a canonical mention://agent/<requester-id> link.
 //
-// A reply-to-reply is exempt. This gives nested conversations a terminating
-// move instead of turning every agent answer into another required handoff.
+// A bounded nested reply that introduces no new request is treated as the
+// terminating move. Longer replies and nested requests remain governed by the
+// same requester-mention requirement as thread roots.
 func Check(parent Parent, response string) error {
 	decision := Evaluate(parent, response)
 	if decision.Admitted {
@@ -152,7 +155,9 @@ func Evaluate(parent Parent, response string) Decision {
 		RequesterID:    parent.AuthorID,
 		PolicyVersion:  PolicyVersion,
 	}
-	if parent.IsReply {
+	if parent.IsReply && isNestedTerminatingReply(response) {
+		decision.Classification = ClassificationAcknowledgement
+		decision.Reason = ReasonAcknowledgement
 		return decision
 	}
 	if !isExplicitOpinionRequest(parent) {
@@ -189,6 +194,15 @@ func isExplicitOpinionRequestContent(content string) bool {
 		return true
 	}
 	return opinionMarkerRE.MatchString(content) && requestMarkerRE.MatchString(content)
+}
+
+func isNestedTerminatingReply(content string) bool {
+	if requestMarkerRE.MatchString(content) || reviewRequestRE.MatchString(content) {
+		return false
+	}
+	normalized := strings.TrimSpace(util.MentionRe.ReplaceAllString(stripCodeSpans(content), " "))
+	words := strings.Fields(normalized)
+	return len(words) > 0 && len(words) <= maxNestedTerminatingReplyWords
 }
 
 func hasRequesterMention(content, requesterID string) bool {
@@ -234,12 +248,19 @@ func isAcknowledgement(content string) bool {
 // surrounding text. Mention links inside code are examples, not delivered
 // mentions, so they must not satisfy the admission gate.
 func stripCodeSpans(content string) string {
+	return stripInlineCodeSpans(stripBlockCode(content))
+}
+
+// stripBlockCode removes fenced and indented Markdown code while preserving
+// the surrounding text. It intentionally leaves inline backticks untouched;
+// those are resolved in a separate pass so a stray delimiter cannot change
+// the interpretation of later spans.
+func stripBlockCode(content string) string {
 	var b strings.Builder
 	b.Grow(len(content))
 	inFence := false
 	fenceChar := byte(0)
 	fenceLen := 0
-	inInline := false
 	atLineStart := true
 	for i := 0; i < len(content); {
 		if inFence {
@@ -333,29 +354,85 @@ func stripCodeSpans(content string) string {
 			atLineStart = true
 			continue
 		}
-		if inInline && content[i] == '`' {
-			inInline = false
-			b.WriteByte(' ')
-			i++
-			atLineStart = false
-			continue
-		}
-		if !inInline && content[i] == '`' && strings.IndexByte(content[i+1:], '`') >= 0 {
-			inInline = true
-			b.WriteByte(' ')
-			i++
-			atLineStart = false
-			continue
-		}
-		if inInline {
-			b.WriteByte(' ')
-			i++
-			atLineStart = false
-			continue
-		}
 		b.WriteByte(content[i])
 		i++
 		atLineStart = false
 	}
 	return b.String()
+}
+
+type backtickRun struct {
+	start  int
+	end    int
+	length int
+}
+
+// stripInlineCodeSpans resolves equal-length backtick runs before masking
+// their contents. A run immediately following a word is treated as
+// punctuation, not as an opener; this keeps text such as "100` per second"
+// from shifting the interpretation of later spans. Runs are paired by
+// length, so an unmatched or differently sized run remains visible instead of
+// blanking the rest of the comment.
+func stripInlineCodeSpans(content string) string {
+	runs := make([]backtickRun, 0, strings.Count(content, "`"))
+	for i := 0; i < len(content); {
+		if content[i] != '`' {
+			i++
+			continue
+		}
+		start := i
+		for i < len(content) && content[i] == '`' {
+			i++
+		}
+		runs = append(runs, backtickRun{start: start, end: i, length: i - start})
+	}
+	if len(runs) < 2 {
+		return content
+	}
+
+	// Keep a stack per delimiter length. A single pass builds the exact byte
+	// ranges to mask; no later backtick can retroactively consume an earlier
+	// unmatched run of another length.
+	openers := make(map[int][]backtickRun)
+	masked := make([]bool, len(content))
+	for _, run := range runs {
+		stack := openers[run.length]
+		if len(stack) > 0 {
+			opening := stack[len(stack)-1]
+			openers[run.length] = stack[:len(stack)-1]
+			for i := opening.start; i < run.end; i++ {
+				masked[i] = true
+			}
+			continue
+		}
+		if isInlineCodeOpener(content, run) {
+			openers[run.length] = append(openers[run.length], run)
+		}
+	}
+
+	var b strings.Builder
+	b.Grow(len(content))
+	for i := range content {
+		if masked[i] && content[i] != '\n' {
+			b.WriteByte(' ')
+		} else {
+			b.WriteByte(content[i])
+		}
+	}
+	return b.String()
+}
+
+func isInlineCodeOpener(content string, run backtickRun) bool {
+	if run.start == 0 || isCodeSpace(content[run.start-1]) {
+		return true
+	}
+	return !isASCIIWordByte(content[run.start-1])
+}
+
+func isCodeSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+func isASCIIWordByte(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
 }

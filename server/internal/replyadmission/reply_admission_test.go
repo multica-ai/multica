@@ -2,6 +2,7 @@ package replyadmission
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +98,18 @@ func TestCheckAllowsMentionAfterInlineCode(t *testing.T) {
 	}
 }
 
+func TestCheckAllowsMentionAfterMultipleInlineAndFencedCodeSpans(t *testing.T) {
+	requesterID := "23232323-2323-4232-8232-232323232323"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "See `server/internal/service/task.go:4309` and ``server/pkg/db/query.sql:528``.\n\n```go\n[@Requester](mention://agent/"+requesterID+")\n```\n\n[@Requester](mention://agent/"+requesterID+")")
+	if err != nil {
+		t.Fatalf("mention after multiple code spans rejected: %v", err)
+	}
+}
+
 func TestCheckTreatsUnbalancedInlineCodeAsLiteral(t *testing.T) {
 	requesterID := "25252525-2525-4252-8252-252525252525"
 	err := Check(Parent{
@@ -106,6 +119,30 @@ func TestCheckTreatsUnbalancedInlineCodeAsLiteral(t *testing.T) {
 	}, "The `reference has no closing delimiter.\n\n[@Requester](mention://agent/"+requesterID+")")
 	if err != nil {
 		t.Fatalf("mention after unbalanced inline code rejected: %v", err)
+	}
+}
+
+func TestCheckStrayBacktickDoesNotHideLaterMention(t *testing.T) {
+	requesterID := "29292929-2929-4292-8292-292929292929"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "Throughput is 100` per second, so the plan holds.\n\n[@Requester](mention://agent/"+requesterID+")\n\nAlso see `comment.go:1894`.")
+	if err != nil {
+		t.Fatalf("stray backtick hid a real mention: %v", err)
+	}
+}
+
+func TestCheckStrayBacktickDoesNotExposeCodeFormattedMention(t *testing.T) {
+	requesterID := "30303030-3030-4303-8303-303030303030"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Please give your opinion on this review.",
+	}, "Cost is 100` per unit. Use `[@Requester](mention://agent/"+requesterID+")` in your reply.")
+	if err == nil {
+		t.Fatal("stray backtick exposed a code-formatted mention")
 	}
 }
 
@@ -119,6 +156,33 @@ func TestCheckNestedReplyDoesNotRequireTagBack(t *testing.T) {
 	}, "Understood, no further action needed")
 	if err != nil {
 		t.Fatalf("nested reply unexpectedly required a tag-back: %v", err)
+	}
+}
+
+func TestCheckNestedLongSubstantiveReplyStillRequiresRequesterMention(t *testing.T) {
+	requesterID := "27272727-2727-4272-8272-272727272727"
+	response := strings.TrimSpace(strings.Repeat("The review remains unresolved and requires a decision. ", 40))
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Could you review this implementation and tell me what you think?",
+		IsReply:    true,
+	}, response)
+	if err == nil {
+		t.Fatal("long nested substantive reply was admitted without requester mention")
+	}
+}
+
+func TestCheckNestedNewOpinionRequestStillRequiresRequesterMention(t *testing.T) {
+	requesterID := "28282828-2828-4282-8282-282828282828"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Could you review this implementation and tell me what you think?",
+		IsReply:    true,
+	}, "Could you give your opinion on the next option?")
+	if err == nil {
+		t.Fatal("nested opinion request was admitted without requester mention")
 	}
 }
 

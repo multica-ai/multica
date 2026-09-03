@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,6 +41,23 @@ func TestCompleteTask_CompletionFallbackAdmissionRejectionCompletesTask(t *testi
 	}
 	if comments != 0 {
 		t.Fatalf("rejected fallback persisted %d agent comments", comments)
+	}
+	var authorType, commentType, content, parent string
+	if err := p.QueryRow(ctx, `
+		SELECT author_type, type, content, parent_id::text
+		FROM comment
+		WHERE issue_id = $1 AND source_task_id = $2::uuid`, issueID, taskID).
+		Scan(&authorType, &commentType, &content, &parent); err != nil {
+		t.Fatalf("read completion rejection notice: %v", err)
+	}
+	if authorType != "system" || commentType != "system" {
+		t.Fatalf("completion rejection notice = (%q, %q), want (system, system)", authorType, commentType)
+	}
+	if parent != parentID {
+		t.Fatalf("completion rejection notice parent = %q, want %q", parent, parentID)
+	}
+	if !strings.Contains(content, "reply admission") || !strings.Contains(content, requesterID) {
+		t.Fatalf("completion rejection notice omits admission reason: %q", content)
 	}
 }
 

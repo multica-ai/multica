@@ -4316,6 +4316,8 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	var fallbackIssue *db.Issue
 	var fallbackRoot *db.Comment
 	var fallbackAdmissionRejection error
+	var fallbackAdmissionNotice *db.CreateCommentRow
+	var fallbackAdmissionNoticeIssue *db.Issue
 	var taskCompletionNoRows bool
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -4349,9 +4351,28 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			// The synthesized fallback is optional delivery. A policy rejection
 			// must not roll back the terminal task transition or leave a healthy
 			// daemon retrying the same deterministic output forever. The task
-			// result remains durable on the completed row and the rejection is
-			// logged after commit for operational follow-up.
+			// result remains durable on the completed row. Leave a system-authored
+			// notice on the issue so completion is visible even though the rejected
+			// agent fallback is not persisted.
 			fallbackAdmissionRejection = err
+			if fallback != nil {
+				notice, createErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+					ID:           dbid.NewV7(),
+					IssueID:      fallback.Issue.ID,
+					WorkspaceID:  fallback.Issue.WorkspaceID,
+					AuthorType:   "system",
+					AuthorID:     pgtype.UUID{Valid: true},
+					Content:      completionFallbackAdmissionNotice(err),
+					Type:         "system",
+					ParentID:     t.TriggerCommentID,
+					SourceTaskID: t.ID,
+				})
+				if createErr != nil {
+					return fmt.Errorf("create completion fallback admission notice: %w", createErr)
+				}
+				fallbackAdmissionNotice = &notice
+				fallbackAdmissionNoticeIssue = &fallback.Issue
+			}
 			fallback = nil
 		}
 		if fallback != nil {
@@ -4486,6 +4507,22 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			"requester_id", requesterID,
 			"error", fallbackAdmissionRejection,
 		)
+	}
+	if fallbackAdmissionNotice != nil && fallbackAdmissionNoticeIssue != nil && s.Bus != nil {
+		comment := fallbackAdmissionNotice.Comment()
+		commentFields := commentEventFields(comment)
+		commentFields["revision"] = comment.Revision
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventCommentCreated,
+			WorkspaceID: util.UUIDToString(fallbackAdmissionNoticeIssue.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"comment":        commentFields,
+				"issue_title":    fallbackAdmissionNoticeIssue.Title,
+				"issue_status":   fallbackAdmissionNoticeIssue.Status,
+				"issue_revision": fallbackAdmissionNotice.IssueRevision,
+			},
+		})
 	}
 	s.captureTaskCompleted(ctx, task)
 

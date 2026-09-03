@@ -21,6 +21,10 @@ type completionFallbackAdmission struct {
 	Parent  *db.Comment
 }
 
+func completionFallbackAdmissionNotice(err error) string {
+	return "The completion fallback was not posted because reply admission rejected it: " + err.Error()
+}
+
 // prepareCompletionFallbackAdmission checks the exact comment that
 // CompleteTask would synthesize and returns the locked parent when one is
 // needed. The caller must insert the returned comment using the same qtx before
@@ -103,7 +107,10 @@ func (s *TaskService) prepareCompletionFallbackAdmission(ctx context.Context, q 
 	}, content)
 	s.Metrics.RecordReplyAdmission(obsmetrics.ReplyAdmissionPathTaskCompletion, decision.Outcome(), decision.Reason, time.Since(started))
 	if !decision.Admitted {
-		return nil, fmt.Errorf("completion fallback reply admission: %w", &replyadmission.MissingRequesterMentionError{RequesterID: decision.RequesterID})
+		// Keep the locked issue and parent available to CompleteTask so a
+		// rejected optional fallback can leave a visible system notice without
+		// re-reading mutable context after the terminal task transition.
+		return &completionFallbackAdmission{Content: content, Issue: lockedIssue, Parent: &parent}, fmt.Errorf("completion fallback reply admission: %w", &replyadmission.MissingRequesterMentionError{RequesterID: decision.RequesterID})
 	}
 	return &completionFallbackAdmission{Content: content, Issue: lockedIssue, Parent: &parent}, nil
 }
