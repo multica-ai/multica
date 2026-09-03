@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -71,4 +74,54 @@ func assertWorkflowConstraint(t *testing.T, ctx context.Context, pool *pgxpool.P
 	if !found {
 		t.Fatalf("constraint on %s missing fragment %q", table, fragment)
 	}
+}
+
+func mustReadWorkflowMigration(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "migrations", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func assertWorkflowTablesTx(t *testing.T, ctx context.Context, tx pgx.Tx, want bool) {
+	t.Helper()
+	for _, table := range []string{"workflow_definition", "workflow_run", "workflow_transition"} {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT to_regclass('public.' || $1) IS NOT NULL`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != want {
+			t.Fatalf("table %s exists=%v, want %v", table, exists, want)
+		}
+	}
+	var indexExists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname='workflow_run_one_active_per_issue')`).Scan(&indexExists); err != nil {
+		t.Fatal(err)
+	}
+	if indexExists != want {
+		t.Fatalf("active-run index exists=%v, want %v", indexExists, want)
+	}
+}
+
+func TestWorkflowEngineV1DownUpRoundTrip(t *testing.T) {
+	pool := openTestPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	down := mustReadWorkflowMigration(t, "451_workflow_engine_v1.down.sql")
+	up := mustReadWorkflowMigration(t, "451_workflow_engine_v1.up.sql")
+	if _, err := tx.Exec(ctx, down); err != nil {
+		t.Fatalf("451 down: %v", err)
+	}
+	assertWorkflowTablesTx(t, ctx, tx, false)
+	if _, err := tx.Exec(ctx, up); err != nil {
+		t.Fatalf("451 up: %v", err)
+	}
+	assertWorkflowTablesTx(t, ctx, tx, true)
 }
