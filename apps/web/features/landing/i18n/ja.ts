@@ -272,7 +272,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.39",
           date: "2026-09-03",
-          title: "モデル一覧の手動更新、デスクトップの番号タブ、Squad の文脈の引き継ぎ、サインインの多言語表示",
+          title: "タブ切り替えのショートカット、サーバーの性能改善、Autopilot の権限の扱いの改善",
           changes: [],
           features: [
             "モデル一覧を自分で更新して、ランタイムがいま対応しているモデルをすぐ受け取れます。",

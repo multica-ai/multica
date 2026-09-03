@@ -296,7 +296,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.39",
         date: "2026-09-03",
-        title: "Manual model refresh, numbered desktop tabs, squad context continuity, and localized sign-in",
+        title: "Tab-switching shortcuts, server performance, and Autopilot identity authorization",
         changes: [],
         features: [
           "Refresh the model list yourself and get what your runtime supports right now.",

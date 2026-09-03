@@ -271,7 +271,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           version: "0.4.39",
           date: "2026-09-03",
-          title: "모델 목록 수동 새로 고침, 데스크톱 번호 탭, Squad 컨텍스트 이어가기, 로그인 다국어 표시",
+          title: "탭 전환 단축키, 서버 성능 개선, Autopilot 권한 처리 개선",
           changes: [],
           features: [
             "모델 목록을 직접 새로 고쳐 런타임이 지금 지원하는 모델을 바로 받아옵니다.",

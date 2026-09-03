@@ -296,7 +296,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         version: "0.4.39",
         date: "2026-09-03",
-        title: "模型列表手动刷新、桌面端标签快捷键、Squad 上下文续接、登录页面多语言",
+        title: "标签页切换快捷键、服务端性能优化、自动化任务身份授权改进",
         changes: [],
         features: [
           "模型列表可以手动刷新，马上拿到运行时现在支持的模型。",
