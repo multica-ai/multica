@@ -1,6 +1,12 @@
 package util
 
-import "regexp"
+import (
+	"regexp"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/text"
+)
 
 // Mention represents a parsed @mention from markdown content.
 type Mention struct {
@@ -15,24 +21,47 @@ type Mention struct {
 // enough to prevent over-matching.
 var MentionRe = regexp.MustCompile(`\[@?(.+?)\]\(mention://(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)\)`)
 
+var mentionDestRe = regexp.MustCompile(`^mention://(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)$`)
+
 // IsMentionAll returns true if the mention is an @all mention.
 func (m Mention) IsMentionAll() bool {
 	return m.Type == "all"
 }
 
 // ParseMentions extracts deduplicated mentions from markdown content.
+// Mentions inside fenced code blocks or inline code spans are ignored — they
+// document the mention syntax rather than trigger an agent run. Mentions in
+// blockquotes are still returned on purpose.
+//
+// The walk uses goldmark's CommonMark AST and only considers Link nodes, so
+// code spans, fenced blocks (including nested-in-blockquote and CommonMark
+// fence-length rules), and multiline code spans are excluded without a
+// hand-rolled scanner.
 func ParseMentions(content string) []Mention {
-	matches := MentionRe.FindAllStringSubmatch(content, -1)
+	source := []byte(content)
+	doc := goldmark.New().Parser().Parse(text.NewReader(source))
 	seen := make(map[string]bool)
 	var result []Mention
-	for _, m := range matches {
-		key := m[2] + ":" + m[3]
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		link, ok := n.(*ast.Link)
+		if !ok {
+			return ast.WalkContinue, nil
+		}
+		m := mentionDestRe.FindStringSubmatch(string(link.Destination))
+		if len(m) != 3 {
+			return ast.WalkContinue, nil
+		}
+		key := m[1] + ":" + m[2]
 		if seen[key] {
-			continue
+			return ast.WalkContinue, nil
 		}
 		seen[key] = true
-		result = append(result, Mention{Type: m[2], ID: m[3]})
-	}
+		result = append(result, Mention{Type: m[1], ID: m[2]})
+		return ast.WalkContinue, nil
+	})
 	return result
 }
 

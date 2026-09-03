@@ -351,36 +351,42 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 }
 
 // TestBuildSquadLeaderBriefing_MentionsRoundTrip is the contract test
-// guaranteeing every emitted mention markdown string parses back through
-// util.ParseMentions to its (type, id). If this ever breaks, the leader's
+// guaranteeing every roster mention is copyable inline code: the briefing
+// itself must not trigger ParseMentions, but pasting the unwrapped syntax
+// must round-trip to its (type, id). If this ever breaks, the leader's
 // dispatch comments will silently fail to trigger anyone.
 func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	leaderID, _ := seededLeaderAgent(t)
+	leaderID, leaderName := seededLeaderAgent(t)
 	squad := seedSquadForBriefing(t, leaderID, "Mention Round Trip", "")
 
 	helper := createHandlerTestAgent(t, "Round Trip Bot", []byte("[]"))
 	addAgentMember(t, squad.ID, helper, "")
 
-	memberRowID, userID, _ := seededHumanMember(t)
+	memberRowID, userID, userName := seededHumanMember(t)
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "")
 
 	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
-	mentions := util.ParseMentions(out)
+	if triggered := util.ParseMentions(out); len(triggered) != 0 {
+		t.Errorf("briefing code examples must not trigger ParseMentions, got %#v", triggered)
+	}
 
-	wantIDs := map[string]string{
-		leaderID: "agent",
-		helper:   "agent",
-		userID:   "member",
+	wants := []struct {
+		id, kind, name string
+	}{
+		{leaderID, "agent", leaderName},
+		{helper, "agent", "Round Trip Bot"},
+		{userID, "member", userName},
 	}
-	got := make(map[string]string, len(mentions))
-	for _, m := range mentions {
-		got[m.ID] = m.Type
-	}
-	for id, kind := range wantIDs {
-		if got[id] != kind {
-			t.Errorf("expected %s mention for id %s, got %q (all parsed: %#v)", kind, id, got[id], mentions)
+	for _, w := range wants {
+		md := formatMention(w.name, w.kind, w.id)
+		if !strings.Contains(out, "`"+md+"`") {
+			t.Errorf("expected copyable inline-code mention %s in roster:\n%s", md, out)
+		}
+		pasted := util.ParseMentions(md)
+		if len(pasted) != 1 || pasted[0].Type != w.kind || pasted[0].ID != w.id {
+			t.Errorf("pasted %s mention for id %s = %#v, want [{Type:%s ID:%s}]", w.kind, w.id, pasted, w.kind, w.id)
 		}
 	}
 }
