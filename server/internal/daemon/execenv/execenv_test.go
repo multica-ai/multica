@@ -6112,16 +6112,15 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			// MUL-5442: the brief keeps only what the interface cannot
 			// express — the read stance, the re-read bar, and the two
 			// write-time boundaries (secrets, length). The full ban list
-			// and the key-naming conventions live in the
-			// multica-working-on-issues skill, pinned by
-			// TestWorkingOnIssuesSkillCoversIssueLoopContracts so this
-			// pointer cannot dangle. The recommended-keys block was
+			// and the key-naming conventions live in the multica-platform
+			// skill, pinned by TestPlatformSkillCoversPlatformContracts so
+			// this pointer cannot dangle. The recommended-keys block was
 			// removed outright: metadata is deliberately free-form custom
 			// state (owner decision on MUL-5442), not a vocabulary the
 			// platform curates in every brief.
 			"never secrets or long content",
 			"multica issue metadata delete",
-			"the `multica-working-on-issues` skill",
+			"`references/issues.md` in the `multica-platform` skill",
 		},
 	}
 	withoutSection := wantSection{

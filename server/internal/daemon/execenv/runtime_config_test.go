@@ -48,15 +48,14 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 			}
 			for _, want := range []string{
 				// MUL-5442 demotes the full todo/backlog/stage playbook to the
-				// multica-working-on-issues skill. The brief keeps a one-line
-				// map (all three flags stay discoverable, MUL-3508 follow-up)
-				// plus the skill pointer; the skill side of the contract is
-				// asserted in internal/service
-				// (TestWorkingOnIssuesSkillCoversIssueLoopContracts).
+				// multica-platform skill. The brief keeps a one-line map (all
+				// three flags stay discoverable, MUL-3508 follow-up) plus the
+				// skill pointer; the skill side of the contract is asserted in
+				// internal/service (TestPlatformSkillCoversPlatformContracts).
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
-				"read the `multica-working-on-issues` skill",
+				"read `references/issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -2113,6 +2112,63 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			}
 			if !strings.Contains(out, "discovered automatically") {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestBriefPointsAtThePlatformSkill pins the one recall hint the Skills section
+// carries (MUL-6986).
+//
+// Nine domain skills advertised nine descriptions in the always-loaded listing;
+// they are now one skill with one description, which is cheaper but gives an
+// agent one name to guess instead of nine. This line is what pays that back —
+// so it must appear whenever the skill does.
+//
+// It must also fail closed. The pointer is emitted only when a listed skill
+// resolves to exactly `multica-platform`. If a user-authored skill takes that
+// slug first, the built-in is written to a sibling directory and no pointer is
+// emitted at all — better than naming a stranger's skill as the source of
+// Multica's platform contracts.
+func TestBriefPointsAtThePlatformSkill(t *testing.T) {
+	t.Parallel()
+
+	skill := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
+	}
+
+	cases := []struct {
+		name   string
+		skills []SkillContextForEnv
+		want   bool
+	}{
+		{"platform skill present", []SkillContextForEnv{skill("multica-platform")}, true},
+		{"alongside workspace skills", []SkillContextForEnv{skill("pr-review"), skill("multica-platform")}, true},
+		{"platform skill absent", []SkillContextForEnv{skill("pr-review")}, false},
+		{
+			// A workspace skill claimed the slug first, so the built-in is
+			// listed as multica-platform-2 and the pointer stays silent.
+			"slug taken by a workspace skill",
+			[]SkillContextForEnv{skill("multica-platform"), skill("multica-platform")},
+			true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				IssueID:     "issue-1",
+				AgentName:   "Eve",
+				AgentID:     "eve-1",
+				AgentSkills: tc.skills,
+			})
+			got := strings.Contains(out, "load the `multica-platform` skill")
+			if got != tc.want {
+				t.Errorf("platform pointer present = %v, want %v:\n%s", got, tc.want, out)
+			}
+			if got && !strings.Contains(out, "routing table names") {
+				t.Errorf("pointer does not tell the agent to open one reference:\n%s", out)
 			}
 		})
 	}

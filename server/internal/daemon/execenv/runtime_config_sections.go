@@ -447,7 +447,7 @@ func writeIssueMetadata(b *strings.Builder) {
 	b.WriteString("## Issue Metadata\n\n")
 	b.WriteString("`metadata` is a small per-issue KV bag — custom key-value state your workflow wants future runs on this issue to re-read. Most runs write nothing.\n\n")
 	b.WriteString("- **Read on entry.** Hints, not truth: latest comment / code wins on conflict. Empty `{}` is normal.\n")
-	b.WriteString("- **Write on exit.** Only what a future run will actually re-read — short values, never secrets or long content. Overwrite or `multica issue metadata delete` stale keys. Full write discipline: the `multica-working-on-issues` skill.\n\n")
+	b.WriteString("- **Write on exit.** Only what a future run will actually re-read — short values, never secrets or long content. Overwrite or `multica issue metadata delete` stale keys. Full write discipline: `references/issues.md` in the `multica-platform` skill.\n\n")
 }
 
 // writeInstructionPrecedence emits the "Agent Identity wins over the issue
@@ -709,15 +709,18 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 
 // writeSubIssueCreation emits the Sub-issue Creation section.
 //
-// MUL-5442 demotes the full todo/backlog/stage playbook to the
-// multica-working-on-issues built-in skill: the semantics are only needed at
-// the moment an agent is about to create sub-issues, and that moment is
-// exactly what triggers the skill. The brief keeps the one-line map so the
-// flags remain discoverable without the skill.
+// MUL-5442 demotes the full todo/backlog/stage playbook to the multica-platform
+// built-in skill: the semantics are only needed at the moment an agent is about
+// to create sub-issues, and that moment is exactly what triggers the skill. The
+// brief keeps the one-line map so the flags remain discoverable without it.
 func writeSubIssueCreation(b *strings.Builder) {
 	b.WriteString("## Sub-issue Creation\n\n")
-	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages. Before creating sub-issues, read the `multica-working-on-issues` skill — it covers serial chains, promotion, and stage wake semantics.\n\n")
+	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages. Before creating sub-issues, read `references/issues.md` in the `multica-platform` skill — it covers serial chains, promotion, and stage wake semantics.\n\n")
 }
+
+// platformSkillName is the built-in skill that holds Multica's platform
+// contracts. The brief names it in two places, so it is spelled once.
+const platformSkillName = "multica-platform"
 
 // writeSkills emits the Skills section: an index of invocable skill names.
 //
@@ -743,10 +746,23 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 	b.WriteString("## Skills\n\n")
 	b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+	hasPlatformSkill := false
 	for _, skill := range skills {
 		fmt.Fprintf(b, "- **%s**\n", skill.Name)
+		if skill.Name == platformSkillName {
+			hasPlatformSkill = true
+		}
 	}
 	b.WriteString("\n")
+	// One recall hint for the platform skill, because it is the only listed
+	// skill whose trigger is "the platform itself" rather than a task the
+	// agent already knows it is doing. Its single description now covers eight
+	// domains that used to advertise one apiece, so an agent reaching for a
+	// Multica contract has one name to guess instead of eight — this line is
+	// what keeps that consolidation from costing recall.
+	if hasPlatformSkill {
+		b.WriteString("For a Multica platform action this brief does not fully cover — issue and PR contracts, mentions, agents, squads, autopilots, projects, runtimes, skill import — load the `" + platformSkillName + "` skill and open the one reference its routing table names.\n\n")
+	}
 }
 
 // writeMentions emits the @mention side-effects section (compressed).

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -17,20 +18,30 @@ import (
 // The evals live in a _test.go file on purpose: anything *inside* a skill
 // directory is walked into AgentSkillData.Files and shipped to agent machines
 // (see loadBuiltinSkill). Tests must stay out of that payload.
+//
+// The same reasoning is what TestBuiltinSkillPayloadCarriesNoSourceReferences
+// enforces for the payload's CONTENT (MUL-6986). A shipped skill is read on a
+// machine that has no copy of this repository, so a file:line citation, a Go
+// identifier, or a `go test` command in it is not merely useless — it sends the
+// reader grepping for paths that do not exist. Evidence about how the server
+// implements a contract belongs here, next to the assertion that pins it.
 
 const (
 	// maxSkillBodyLines is Anthropic's L2 budget for a SKILL.md body
 	// (~5k tokens). Past this, content belongs in one-level-deep supporting
 	// files, not the always-loaded body.
 	maxSkillBodyLines = 500
+	// maxRoutingBodyLines applies to a skill that HAS supporting references.
+	// Its body is then a router — positioning, shared invariants, and a table
+	// naming the reference to open — and every line it spends restating a
+	// reference is a line every activation pays for. The whole point of
+	// splitting into references is that the body stays cheap.
+	maxRoutingBodyLines = 150
 	// maxDescriptionChars is the frontmatter description cap — it is the only
 	// thing an agent sees when deciding whether to load the skill, and every
 	// runtime CLI pays for it in the always-loaded skill listing. A description
 	// earns its characters two ways only: trigger wording that matches how the
 	// task actually arrives, and reverse boundaries that prevent mis-routing.
-	// A "Covers A, B, C..." content inventory does neither — the agent reads the
-	// body once it opens the skill. The cap is deliberately tight (the longest
-	// built-in sits at 222) so that inventory prose cannot creep back in.
 	maxDescriptionChars = 300
 )
 
@@ -38,7 +49,7 @@ const (
 // on every built-in skill, current and future. A new skill that violates the
 // shape fails here without anyone having to remember the rules.
 func TestBuiltinSkillsConformToTemplate(t *testing.T) {
-	skills := loadBuiltinSkills()
+	skills := allBuiltinSkillsForTest()
 	if len(skills) == 0 {
 		t.Fatal("no built-in skills loaded; embed or layout is broken")
 	}
@@ -65,8 +76,30 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 			if len(desc) > maxDescriptionChars {
 				t.Errorf("description is %d chars, over the %d cap", len(desc), maxDescriptionChars)
 			}
-			if n := strings.Count(body, "\n") + 1; n > maxSkillBodyLines {
-				t.Errorf("SKILL.md body is %d lines, over the %d-line L2 budget; move detail into one-level-deep supporting files", n, maxSkillBodyLines)
+			budget := maxSkillBodyLines
+			if len(skill.Files) > 0 {
+				// A skill with references has already paid for the split; its
+				// body must stay a router.
+				budget = maxRoutingBodyLines
+			}
+			if n := strings.Count(body, "\n") + 1; n > budget {
+				t.Errorf("SKILL.md body is %d lines, over the %d-line budget; move detail into one-level-deep supporting files", n, budget)
+			}
+
+			// Every built-in is a platform-contract skill: it triggers from
+			// context rather than a slash command, and it is fenced to the CLI
+			// it teaches.
+			if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
+				t.Errorf("user-invocable = %q, want false (a platform-contract skill triggers from context, not a slash command)", got)
+			}
+			if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
+				t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
+			}
+
+			for _, f := range skill.Files {
+				if n := strings.Count(f.Content, "\n") + 1; n > maxSkillBodyLines {
+					t.Errorf("supporting file %q is %d lines, over the %d-line budget; split it", f.Path, n, maxSkillBodyLines)
+				}
 			}
 
 			// Evals must never ride along to agent machines as supporting files.
@@ -92,7 +125,7 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 // on the broken files. Only a real yaml.Unmarshal reproduces what Codex does,
 // which is exactly what is needed to catch this class of bug before it ships.
 func TestBuiltinSkillsFrontmatterIsStrictYAML(t *testing.T) {
-	skills := loadBuiltinSkills()
+	skills := allBuiltinSkillsForTest()
 	if len(skills) == 0 {
 		t.Fatal("no built-in skills loaded; embed or layout is broken")
 	}
@@ -125,32 +158,369 @@ func TestBuiltinSkillsFrontmatterIsStrictYAML(t *testing.T) {
 	}
 }
 
-// TestMentioningSkillFollowsContractFrontmatter locks the reference template:
-// the mentioning skill is a context-triggered platform-contract skill, so it
-// must declare user-invocable:false and fence itself to the multica CLI. New
-// contract skills should copy this shape.
-func TestMentioningSkillFollowsContractFrontmatter(t *testing.T) {
-	skill, ok := findSkill(t, "multica-mentioning")
-	if !ok {
-		return
+// TestBuiltinSkillPayloadCarriesNoSourceReferences is the regression guard for
+// MUL-6986: the shipped payload must not reference this repository's source.
+//
+// Every file in a skill directory is written into the workdir of every task
+// that receives the skill — on the user's own machine, which has no checkout of
+// this repo. A `file:line` citation there resolves to nothing, and a `go test`
+// or `grep -n ... internal/handler/x.go` "verification command" actively sends
+// the reading agent after paths that cannot exist. Before this test, roughly
+// half the built-in payload by bytes was exactly that.
+//
+// Maintainer-facing evidence for a contract belongs in this file, beside the
+// assertion that pins it, where it stays with the code it describes.
+func TestBuiltinSkillPayloadCarriesNoSourceReferences(t *testing.T) {
+	banned := []struct {
+		what string
+		re   *regexp.Regexp
+	}{
+		{"a path into this repository", regexp.MustCompile(`(?:server|packages|apps|e2e)/[A-Za-z0-9_-]+/`)},
+		{"a source file name", regexp.MustCompile(`[A-Za-z0-9_./-]*\.(?:go|ts|tsx|sql)\b`)},
+		{"a command that only runs in this repository", regexp.MustCompile(`\bgo (?:test|build|vet|run)\b`)},
+		{"a migration ordinal", regexp.MustCompile(`\bmigrations?/[0-9]`)},
+		{"a Go package-qualified identifier", regexp.MustCompile(`\b(?:util|service|handler|db|protocol|skillpkg|repocache|execenv|daemon)\.[A-Z][A-Za-z0-9]*`)},
+		{"a Go test name", regexp.MustCompile(`\bTest[A-Z][A-Za-z0-9]{3,}\b`)},
+		{"a development branch name", regexp.MustCompile(`\b(?:feat|fix|refactor|chore)/[a-z0-9][a-z0-9-]*`)},
 	}
-	fm, _, _ := splitFrontmatter(skill.Content)
 
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false (a platform-contract skill triggers from context, not a slash command)", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); got != "Bash(multica *)" {
-		t.Errorf("allowed-tools = %q, want Bash(multica *) (fence the skill to the CLI it teaches)", got)
+	for _, skill := range allBuiltinSkillsForTest() {
+		t.Run(skill.Name, func(t *testing.T) {
+			files := map[string]string{"SKILL.md": skill.Content}
+			for _, f := range skill.Files {
+				files[f.Path] = f.Content
+			}
+			for path, content := range files {
+				for _, b := range banned {
+					if m := b.re.FindString(content); m != "" {
+						t.Errorf("%s leaks %s (%q); the reader's machine has no copy of this repository — "+
+							"state the user-observable behavior instead, and keep the evidence in builtin_skills_test.go", path, b.what, m)
+					}
+				}
+			}
+		})
 	}
 }
 
-// TestMentioningSkillTeachesTheParserContract is the eval that gives the skill
-// its value: it proves the skill teaches exactly what util.ParseMentions
-// enforces. The skill's "Incorrect" examples must parse to nothing (the
-// @gpt-boy class of bug: a name where a UUID belongs fails silently), and its
-// "Correct" example must parse. If mention.go:16 drifts, this breaks and the
-// skill's claims must be re-checked.
-func TestMentioningSkillTeachesTheParserContract(t *testing.T) {
+// TestPlatformSkillRoutingTableMatchesItsReferences keeps the router honest in
+// both directions. A reference the table does not name is unreachable — the
+// body is the only thing loaded on activation, so nothing else can point at it
+// — and a table row naming a file that does not exist sends the agent to open
+// a path that is not there.
+func TestPlatformSkillRoutingTableMatchesItsReferences(t *testing.T) {
+	skill, ok := findSkill(t, PlatformSkillName)
+	if !ok {
+		return
+	}
+	_, body, _ := splitFrontmatter(skill.Content)
+
+	shipped := make(map[string]bool, len(skill.Files))
+	for _, f := range skill.Files {
+		shipped[f.Path] = true
+		if !strings.HasPrefix(f.Path, "references/") {
+			t.Errorf("supporting file %q is not under references/; the routing table only addresses that directory", f.Path)
+		}
+		if !strings.Contains(body, f.Path) {
+			t.Errorf("SKILL.md routing table never names %q, so nothing can reach it", f.Path)
+		}
+	}
+
+	for _, cited := range regexp.MustCompile("references/[a-z-]+\\.md").FindAllString(body, -1) {
+		if !shipped[cited] {
+			t.Errorf("SKILL.md points at %q, which the skill does not ship", cited)
+		}
+	}
+
+	if len(skill.Files) == 0 {
+		t.Fatal("platform skill ships no references; the routing body has nothing to route to")
+	}
+}
+
+// TestPlatformSkillCoversPlatformContracts re-homes the per-domain contract
+// anchors that each merged skill used to assert on its own body. They are
+// anchors, not prose review: if a contract leaves the payload, the brief
+// pointers and the product decisions behind them go stale silently.
+func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
+	skill, ok := findSkill(t, PlatformSkillName)
+	if !ok {
+		return
+	}
+	files := make(map[string]string, len(skill.Files)+1)
+	files["SKILL.md"] = skill.Content
+	for _, f := range skill.Files {
+		files[f.Path] = f.Content
+	}
+
+	cases := []struct {
+		file    string
+		want    []string
+		notWant []string
+	}{
+		{
+			file: "SKILL.md",
+			want: []string{
+				// The router's whole job: name every domain and its file.
+				"references/issues.md",
+				"references/mentions.md",
+				"references/agents.md",
+				"references/squads.md",
+				"references/autopilots.md",
+				"references/projects.md",
+				"references/runtimes.md",
+				"references/skill-import.md",
+				// Invariants deduplicated out of the eight merged bodies. Each
+				// was repeated in most of them; the router is now their only
+				// home, so losing one here loses it everywhere.
+				"A name is not an id",
+				"`--output json` writes to stdout",
+				"`--no-start` when you are only recording",
+				"Status is a category, not a literal",
+				"Comment reads stay bounded",
+				"--roots-only --summary --compact",
+				"--thread <thread-id> --tail 30",
+			},
+		},
+		{
+			file: "references/issues.md",
+			want: []string{
+				"multica issue pull-requests <issue-id> --output json",
+				"Default for code-changing issue work",
+				"open or update a PR before posting the final Multica issue comment",
+				"This is a default, not",
+				"Use a routable issue key in the PR title, body, or branch",
+				"include the PR URL when a PR exists",
+				"Closes MUL-2759",
+				"--status backlog",
+				// The only sanctioned pr_url reference is the negative
+				// compatibility warning about pre-existing data — not a write
+				// recommendation (MUL-5442 owner ruling: no curated key
+				// vocabulary).
+				"`pr_url` metadata (which can be",
+				// MUL-5442: the brief's Sub-issue Creation section is a
+				// one-line map pointing here. These anchors are the demoted
+				// playbook — if they leave, the brief pointer dangles.
+				"todo starts work now, backlog parks it",
+				"`--stage <N>`",
+				"when a whole stage finishes",
+				"multica issue status <child-id> todo",
+				// MUL-5442: the brief's Issue Metadata section defers the full
+				// write discipline here. Every relocated ban is anchored
+				// individually — both defining categories AND each example —
+				// so no single item or category boundary can be dropped while
+				// the brief still points here.
+				"Never store secrets, tokens, or API keys",
+				"Not metadata: logs or summaries",
+				"bookkeeping such as timestamps",
+				"attempt counts, or agent IDs",
+				"other single-run details",
+				"files touched and investigation notes",
+				"belong in the result comment",
+				"the platform curates no vocabulary",
+				// #7768: nothing about concurrent runs is pushed into the
+				// prompt any more (MUL-6984), so the skill has to carry the
+				// pull path itself. All three anchors are load-bearing — the
+				// command is the remedy, the cap disclosure stops a truncated
+				// answer from reading as an empty one, and the advisory line
+				// is a negative safety boundary: an agent that reads these as
+				// a lock will skip the coordination they exist to prompt.
+				"multica issue runs <issue-id> --siblings --output json",
+				"capped at 20",
+				"Nothing here reserves an issue or serialises anything",
+			},
+			notWant: []string{
+				// A curated key list is the "recommended fields" concept the
+				// owner ruled out on MUL-5442.
+				"High-signal keys",
+				"reuse these names so queries stay consistent",
+				"scratchpad for run state",
+				"(`pr_url`, `waiting_on`",
+				// Per-turn workflow the runtime brief owns; duplicating it here
+				// is how the two drift apart.
+				"Start from the trigger, not from memory",
+				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
+				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+			},
+		},
+		{
+			file: "references/mentions.md",
+			want: []string{
+				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"multica workspace member list --output json",
+				"enqueues a run for that agent",
+				"enqueues NOTHING",
+				"[@all](mention://all/all)",
+				"invocation_not_allowed",
+				"target_unavailable",
+				"runtime_offline",
+				"coalesced",
+				"deferred",
+				// The autopilot-creator fallback is authorization only; an
+				// agent reading it as attribution would mis-report who ran.
+				"It is authorization only",
+			},
+		},
+		{
+			file: "references/agents.md",
+			want: []string{
+				"not a parameter manual",
+				"`description` is a catalog summary",
+				"`instructions` is the runtime behavior contract",
+				"`conversation_starters`",
+				"`avatar_url` → a random `emoji:<glyph>`",
+				"multica agent create --name <name> --runtime-id <runtime-id>",
+				"`model` is a first-class persisted column",
+				"custom_env",
+				"Never put credentials or other secrets in `custom_args`",
+				"--custom-env-stdin",
+				"--custom-env-file",
+				"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
+				"multica agent skills list <agent-id> --output json",
+				"multica agent get <agent-id> --output json",
+				"255",
+			},
+			notWant: []string{
+				"--from-template",
+				"/api/agent-templates",
+				"template_slug",
+				"curated template",
+				// De-coaching: this states contracts, it does not teach a
+				// generic how-to methodology.
+				"Define the job first",
+				"Run a low-risk task",
+				"Decision flow",
+			},
+		},
+		{
+			file: "references/squads.md",
+			want: []string{
+				"A squad is not an agent",
+				"squad's `leader_id` agent",
+				"squad members are not automatically fanned out",
+				"multica squad member set-role",
+				"mention://squad/<squad-id>",
+				"recording squad activity",
+				// The debugging entry point must stay a bounded two-step read
+				// (MUL-5442): a roots-only scan alone never returns reply
+				// bodies, where mention triggers and failure reasons live.
+				"--roots-only --summary",
+				"--thread <thread-id> --tail 30",
+				"scan the roots first, then open the threads",
+			},
+			notWant: []string{
+				// MUL-5696: no unbounded comment pull. Both shapes contradict
+				// the brief's "two bounded reads, never one bulk pull".
+				"multica issue comment list <issue-id> --output json",
+				"--recent 10",
+			},
+		},
+		{
+			file: "references/autopilots.md",
+			want: []string{
+				"An autopilot is not an agent",
+				"create_issue",
+				"run_only",
+				"multica autopilot trigger-add <autopilot-id> --kind schedule",
+				"multica autopilot trigger <autopilot-id> --output json",
+				"Do not run `trigger`",
+				"webhook tokens",
+				"{{date}}",
+				"squad's leader agent",
+				// A schedule with no --timezone silently runs in UTC, which is
+				// the one wrong assumption here that recurs daily.
+				"runs in **UTC**",
+			},
+		},
+		{
+			file: "references/runtimes.md",
+			want: []string{
+				"the daemon polls and claims the task",
+				"multica runtime list --output json",
+				"multica repo checkout <url>",
+				"MULTICA_DAEMON_PORT",
+				"resource_ref.ref",
+				"github_repo",
+				"local_directory",
+				"Runtime and repo commands affect active agent execution",
+				// An agent reads this to know whether its checkout can be
+				// committed to. Codex on Linux and Windows gets task-local Git
+				// metadata; every other runtime gets a linked worktree.
+				"Linux and Windows Codex",
+				"task-local Git metadata",
+			},
+		},
+		{
+			file: "references/projects.md",
+			want: []string{
+				"Projects are durable context containers",
+				".multica/project/resources.json",
+				"multica project resource list <project-id> --output json",
+				"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
+				"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
+				"multica project resource add <project-id> --type local_directory",
+				"Project resources are durable and affect future tasks",
+				"github_repo.resource_ref.url",
+				"resource_ref.ref",
+			},
+		},
+		{
+			file: "references/skill-import.md",
+			want: []string{
+				"multica skill import --url <url> --output json",
+				"/api/skills/import",
+				"clawhub.ai",
+				"skills.sh",
+				"github.com",
+				"config.origin",
+				"--on-conflict fail",
+				"--on-conflict overwrite",
+				"--on-conflict rename",
+				"--on-conflict skip",
+				"conflict",
+				"skipped",
+				"409",
+				"existing_skill",
+				"legacy",
+				"multica skill list --output json",
+				"npx skills add",
+				"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
+				"multica agent skills list <agent-id> --output json",
+				"replace-all",
+				"`set` is the replacement path",
+			},
+			notWant: []string{
+				"multica agent skills set <agent-id> --skill-ids <skill-id>",
+				"merge the new skill id with the existing ids",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			content, ok := files[tc.file]
+			if !ok {
+				t.Fatalf("platform skill does not ship %q", tc.file)
+			}
+			for _, want := range tc.want {
+				if !containsUnwrapped(content, want) {
+					t.Errorf("%s missing %q", tc.file, want)
+				}
+			}
+			for _, forbidden := range tc.notWant {
+				if containsUnwrapped(content, forbidden) {
+					t.Errorf("%s carries banned content %q", tc.file, forbidden)
+				}
+			}
+		})
+	}
+}
+
+// TestPlatformSkillTeachesTheParserContract is the eval that gives the mentions
+// reference its value: it proves the skill teaches exactly what
+// util.ParseMentions enforces. The skill's "Incorrect" examples must parse to
+// nothing (the @gpt-boy class of bug: a name where a UUID belongs fails
+// silently), and its "Correct" example must parse. If the mention regex drifts,
+// this breaks and the skill's claims must be re-checked.
+func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 	const uuid = "7f3a1b2c-0000-4000-8000-000000000abc"
 
 	cases := []struct {
@@ -184,12 +554,19 @@ func TestMentioningSkillTeachesTheParserContract(t *testing.T) {
 			want:    []util.Mention{{Type: "all", ID: "all"}},
 		},
 		{
-			// Skill: "Using the wrong type for an id points at the wrong
-			// entity." The link still parses — it just resolves wrong — which
-			// is exactly why the skill stresses matching type to id source.
+			// Skill: "Using the wrong type for a real UUID still parses — it
+			// just resolves to the wrong entity." Which is exactly why the
+			// skill stresses matching type to id source.
 			name:    "wrong type still parses (points at wrong entity)",
 			content: "[@Bot](mention://member/" + uuid + ")",
 			want:    []util.Mention{{Type: "member", ID: uuid}},
+		},
+		{
+			// Skill: `project` is deliberately outside the type group, so a
+			// project reference can never start a run.
+			name:    "project is not a parseable mention type",
+			content: "[Roadmap](mention://project/" + uuid + ")",
+			want:    nil,
 		},
 	}
 
@@ -208,409 +585,74 @@ func TestMentioningSkillTeachesTheParserContract(t *testing.T) {
 	}
 }
 
-func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
-	skill, ok := findSkill(t, "multica-working-on-issues")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
+// TestOnboardingSkillIsScopedToMika pins the agent-scoping rule (MUL-6986).
+//
+// The onboarding walkthrough is one agent's procedure, not a platform contract.
+// Shipping it to every agent put its description in every agent's always-loaded
+// skill listing and its body in every task workdir, to be usable by one.
+func TestOnboardingSkillIsScopedToMika(t *testing.T) {
+	const onboarding = "multica-onboarding"
 
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false (issue workflow guidance triggers from context)", got)
+	ordinary := loadBuiltinSkills("")
+	if named(ordinary, onboarding) {
+		t.Errorf("an ordinary agent still receives %q", onboarding)
 	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	// Contract anchors only — exact file:line citations live in the skill's
-	// references/source-map.md, not here, so a downstream main merge that
-	// shifts a line cannot rot this test into pinning a stale lie.
-	mustContain := []string{
-		"multica issue pull-requests <issue-id> --output json",
-		"Default for code-changing issue work",
-		"open or update a PR before posting the final Multica issue comment",
-		"This is a default, not",
-		"Use a routable issue key in the PR title, body, or branch",
-		"include the PR URL when a PR exists",
-		"Closes MUL-2759",
-		"--status backlog",
-		// The only sanctioned pr_url reference is the negative compatibility
-		// warning about pre-existing data — not a write recommendation
-		// (MUL-5442 owner ruling: no curated key vocabulary).
-		"`pr_url` metadata (which can be",
-		"references/working-on-issues-source-map.md",
-		// MUL-5442: the brief's Sub-issue Creation section is now a one-line
-		// map pointing here. These anchors are the demoted playbook — if they
-		// leave the skill, the brief pointer dangles.
-		"`todo` starts work now, `backlog` parks it",
-		"`--stage <N>`",
-		"when a whole stage finishes",
-		"multica issue status <child-id> todo",
-		// MUL-5442: the brief's Issue Metadata section defers the full
-		// write discipline here. Every relocated ban is anchored
-		// individually — both defining categories AND each example —
-		// so no single item or category boundary can be dropped while
-		// the brief still points at this skill (round-3 review).
-		"Never store secrets, tokens, or API keys",
-		"Not metadata: logs or summaries",
-		"bookkeeping such as timestamps",
-		"attempt counts, or agent IDs",
-		"other single-run details",
-		"files touched and investigation notes",
-		"belong in the result comment",
-		// Owner ruling: metadata is deliberately free-form custom state;
-		// the platform curates no key vocabulary.
-		"the platform curates no vocabulary",
-		// #7768: nothing about concurrent runs is pushed into the prompt any
-		// more (MUL-6984), so the skill has to carry the pull path itself.
-		// All three anchors are load-bearing — the command is the remedy, the
-		// cap disclosure is what stops a truncated answer from reading as an
-		// empty one, and the advisory line is a negative safety boundary: an
-		// agent that reads these as a lock will skip the coordination they
-		// exist to prompt.
-		"multica issue runs <issue-id> --siblings --output json",
-		"capped at 20",
-		"Nothing here reserves an issue or serialises anything",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("working-on-issues skill missing %q", want)
-		}
+	if !named(ordinary, PlatformSkillName) {
+		t.Errorf("an ordinary agent does not receive %q, which every agent needs", PlatformSkillName)
 	}
 
-	mustNotContain := []string{
-		// A curated key list is the "recommended fields" concept the owner
-		// ruled out on MUL-5442 — it must not creep back into the skill
-		// that loads exactly when an agent is about to write metadata.
-		"High-signal keys",
-		"reuse these names so queries stay consistent",
-		"scratchpad for run state",
-		"(`pr_url`, `waiting_on`",
-		"Start from the trigger, not from memory",
-		"multica issue get <issue-id> --output json",
-		"multica issue metadata list <issue-id> --output json",
-		"multica issue comment list <issue-id> --thread <trigger-comment-id>",
-		"multica issue comment add <issue-id> --parent <trigger-comment-id>",
+	mika := loadBuiltinSkills(MikaSystemKey)
+	if !named(mika, onboarding) {
+		t.Errorf("Mika does not receive %q, which only Mika can use", onboarding)
 	}
-	for _, forbidden := range mustNotContain {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("working-on-issues skill duplicates runtime prompt contract %q", forbidden)
-		}
+	if !named(mika, PlatformSkillName) {
+		t.Errorf("Mika lost %q; scoping must add to the universal set, not replace it", PlatformSkillName)
 	}
 
-	if !skillHasFile(skill, "references/working-on-issues-source-map.md") {
-		t.Errorf("working-on-issues skill missing supporting file references/working-on-issues-source-map.md")
+	// The resolve path deliberately serves any built-in by id — the claim is
+	// the gate, and re-deriving the scope there would cost an agent read to
+	// re-answer a question the claim already answered.
+	if !named(allBuiltinSkillsForTest(), onboarding) {
+		t.Errorf("the unscoped set is missing %q; bundle resolution would 404 for Mika's daemon", onboarding)
 	}
 }
 
-func TestSkillImportingSkillCoversWorkspaceImportContracts(t *testing.T) {
-	skill, ok := findSkill(t, "multica-skill-importing")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false (skill import guidance triggers from context)", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"multica skill import --url <url> --output json",
-		"/api/skills/import",
-		"clawhub.ai",
-		"skills.sh",
-		"github.com",
-		"config.origin",
-		"--on-conflict fail",
-		"--on-conflict overwrite",
-		"--on-conflict rename",
-		"--on-conflict skip",
-		"status",
-		"conflict",
-		"skipped",
-		"409",
-		"existing_skill",
-		"id",
-		"name",
-		"legacy",
-		"multica skill list --output json",
-		"npx skills add",
-		"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
-		"multica agent skills list <agent-id> --output json",
-		"replace-all",
-		"`set` is the replacement path",
-		"references/skill-importing-source-map.md",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("skill-importing skill missing %q", want)
-		}
-	}
-
-	mustNotContain := []string{
-		"multica agent skills set <agent-id> --skill-ids <skill-id>",
-		"merge the new skill id with the existing ids",
-	}
-	for _, forbidden := range mustNotContain {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("skill-importing skill should not teach stale or destructive binding command %q", forbidden)
-		}
-	}
-
-	if !skillHasFile(skill, "references/skill-importing-source-map.md") {
-		t.Errorf("skill-importing skill missing supporting file references/skill-importing-source-map.md")
-	}
+// containsUnwrapped matches an anchor against prose that Markdown has hard
+// wrapped. These anchors pin a claim, not a line layout — matching raw bytes
+// made every reflow of a paragraph look like a deleted contract, which trains
+// authors to fix the test instead of the text.
+func containsUnwrapped(content, want string) bool {
+	return strings.Contains(collapseSpace(content), collapseSpace(want))
 }
 
-func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
-	skill, ok := findSkill(t, "multica-creating-agents")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
+var whitespaceRun = regexp.MustCompile(`\s+`)
 
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false (agent creation guidance triggers from context)", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"not a parameter manual",
-		"`description` is a catalog summary",
-		"`instructions` is the runtime behavior contract",
-		"`conversation_starters`",
-		"`avatar_url` → a random `emoji:<glyph>`",
-		"multica agent create --name <name> --runtime-id <runtime-id>",
-		"`model` is a first-class persisted column",
-		"custom_env",
-		"Never put credentials or other secrets in `custom_args`",
-		"--custom-env-stdin",
-		"--custom-env-file",
-		"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
-		"multica agent skills list <agent-id> --output json",
-		"multica agent get <agent-id> --output json",
-		"255",
-		"references/creating-agents-source-map.md",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("creating-agents skill missing %q", want)
-		}
-	}
-
-	mustNotContain := []string{
-		"--from-template",
-		"/api/agent-templates",
-		"template_slug",
-		"curated template",
-		"copy this parameter list",
-		// De-coaching: this skill states source-backed contracts, it does not
-		// teach a generic how-to methodology.
-		"Define the job first",
-		"Run a low-risk task",
-		"Decision flow",
-	}
-	for _, forbidden := range mustNotContain {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("creating-agents skill should not teach immature template content or generic how-to coaching %q", forbidden)
-		}
-	}
-
-	if !skillHasFile(skill, "references/creating-agents-source-map.md") {
-		t.Errorf("creating-agents skill missing supporting file references/creating-agents-source-map.md")
-	}
+func collapseSpace(s string) string {
+	return strings.TrimSpace(whitespaceRun.ReplaceAllString(s, " "))
 }
 
-func TestSquadsSkillCoversLeaderRoutingContract(t *testing.T) {
-	skill, ok := findSkill(t, "multica-squads")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false (squad guidance triggers from context)", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"A squad is not an agent",
-		"squad's `leader_id` agent",
-		"squad members are not automatically fanned out",
-		"multica squad member set-role",
-		"mention://squad/<squad-id>",
-		"recording squad activity",
-		"references/squad-source-map.md",
-		// The debugging quick-start must stay a bounded two-step read
-		// (MUL-5442): a roots-only scan alone never returns reply bodies,
-		// where mention triggers and failure reasons usually live — and it
-		// must not regress to a --recent bulk pull either.
-		"--roots-only --summary",
-		"--thread <thread-id> --tail 30",
-		"scan the roots first, then open the threads",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("squads skill missing %q", want)
+func named(skills []AgentSkillData, name string) bool {
+	for _, s := range skills {
+		if s.Name == name {
+			return true
 		}
 	}
-
-	// MUL-5696: no unbounded comment pull anywhere in the skill. #6347 fixed
-	// the quick start's `--recent 10` but missed a second unbounded
-	// `issue comment list` in the CLI section; both shapes contradict the
-	// brief's "two bounded reads, never one bulk pull" doctrine.
-	for _, banned := range []string{
-		"multica issue comment list <issue-id> --output json",
-		"--recent 10",
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("squads skill carries the unbounded comment read %q (MUL-5696)", banned)
-		}
-	}
-
-	if !skillHasFile(skill, "references/squad-source-map.md") {
-		t.Errorf("squads skill missing supporting file references/squad-source-map.md")
-	}
+	return false
 }
 
-func TestAutopilotsSkillCoversDispatchAndSideEffects(t *testing.T) {
-	skill, ok := findSkill(t, "multica-autopilots")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"An autopilot is not an agent",
-		"create_issue",
-		"run_only",
-		"multica autopilot trigger-add <autopilot-id> --kind schedule",
-		"multica autopilot trigger <autopilot-id> --output json",
-		"Do not run `trigger`",
-		"webhook tokens",
-		"{{date}}",
-		"squad's leader agent",
-		"references/autopilots-source-map.md",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("autopilots skill missing %q", want)
-		}
-	}
-	if !skillHasFile(skill, "references/autopilots-source-map.md") {
-		t.Errorf("autopilots skill missing supporting file references/autopilots-source-map.md")
-	}
-}
-
-func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
-	skill, ok := findSkill(t, "multica-runtimes-and-repos")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"agent_task_queue",
-		"daemon polls/claims the task",
-		"multica runtime list --output json",
-		"multica repo checkout <url>",
-		"MULTICA_DAEMON_PORT",
-		"resource_ref.ref",
-		"github_repo",
-		"local_directory",
-		"Runtime and repo commands affect active agent execution",
-		"references/runtimes-and-repos-source-map.md",
-		// An agent reads this to know whether its checkout can be committed to.
-		// Codex on Linux and Windows gets task-local Git metadata; every other
-		// runtime gets a linked worktree (multica-ai/multica#2925, #6449).
-		"Linux and Windows Codex",
-		"task-local Git metadata",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("runtimes-and-repos skill missing %q", want)
-		}
-	}
-	if !skillHasFile(skill, "references/runtimes-and-repos-source-map.md") {
-		t.Errorf("runtimes-and-repos skill missing supporting file references/runtimes-and-repos-source-map.md")
-	}
-}
-
-func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
-	skill, ok := findSkill(t, "multica-projects-and-resources")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["user-invocable"]); got != "false" {
-		t.Errorf("user-invocable = %q, want false", got)
-	}
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"Projects are durable context containers",
-		".multica/project/resources.json",
-		"multica project resource list <project-id> --output json",
-		"multica project resource add <project-id> --type github_repo --url <github-url> --output json",
-		"multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json",
-		"multica project resource add <project-id> --type local_directory",
-		"Project resources are durable and affect future tasks",
-		"github_repo.resource_ref.url",
-		"resource_ref.ref",
-		"references/projects-and-resources-source-map.md",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("projects-and-resources skill missing %q", want)
-		}
-	}
-	if !skillHasFile(skill, "references/projects-and-resources-source-map.md") {
-		t.Errorf("projects-and-resources skill missing supporting file references/projects-and-resources-source-map.md")
-	}
+func allBuiltinSkillsForTest() []AgentSkillData {
+	return loadBuiltinSkillDirs(func(string) bool { return true })
 }
 
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
-	for _, s := range loadBuiltinSkills() {
+	for _, s := range allBuiltinSkillsForTest() {
 		if s.Name == name {
 			return s, true
 		}
 	}
 	t.Errorf("built-in skill %q not found", name)
 	return AgentSkillData{}, false
-}
-
-func skillHasFile(skill AgentSkillData, path string) bool {
-	for _, f := range skill.Files {
-		if f.Path == path {
-			return true
-		}
-	}
-	return false
 }
 
 // splitFrontmatter returns the top-level scalar keys of a leading YAML
@@ -636,11 +678,13 @@ func splitFrontmatter(content string) (map[string]string, string, bool) {
 		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
 			continue // nested value; the template uses only flat scalars
 		}
-		key, val, found := strings.Cut(line, ":")
-		if !found {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		fm[strings.TrimSpace(key)] = strings.Trim(strings.TrimSpace(val), `"'`)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"`)
+		fm[strings.TrimSpace(key)] = value
 	}
 	return fm, body, true
 }
