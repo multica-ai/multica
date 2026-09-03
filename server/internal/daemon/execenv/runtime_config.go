@@ -314,6 +314,39 @@ func locateMarkerBlock(content string) (start, end int, found bool) {
 	return start, end, true
 }
 
+// ReadPriorAgentName reads the agent name recorded in the Multica-managed
+// block of the current runtime config file for the given workDir and provider.
+// It returns the agent name from the "## Agent Identity" section, or an empty
+// string when the file does not exist, has no managed block, or has no agent
+// identity entry. Used by gateResumeToSameAgentName to detect agent renames
+// before a session resume is attempted.
+func ReadPriorAgentName(workDir, provider string) string {
+	path := runtimeConfigPath(workDir, provider)
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	start, end, ok := locateMarkerBlock(string(data))
+	if !ok {
+		return ""
+	}
+	block := string(data)[start:end]
+	const prefix = "**You are: "
+	idx := strings.Index(block, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := block[idx+len(prefix):]
+	end2 := strings.Index(rest, "**")
+	if end2 < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:end2])
+}
+
 // CleanupRuntimeConfig excises the Multica marker block from the runtime
 // config file for the given provider and restores the file to its exact
 // pre-injection state, byte for byte. The cleanup is the second half of

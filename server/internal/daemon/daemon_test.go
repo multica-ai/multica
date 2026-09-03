@@ -2249,6 +2249,94 @@ func TestSessionHomeReachable(t *testing.T) {
 	}
 }
 
+func TestGateResumeToSameAgentName(t *testing.T) {
+	t.Parallel()
+
+	// writeConfig writes a CLAUDE.md with the given agent name so we can
+	// exercise name-mismatch detection against a realistic on-disk file.
+	writeConfig := func(t *testing.T, dir, agentName string) {
+		t.Helper()
+		ctx := execenv.TaskContextForEnv{
+			IssueID:   "00000000-0000-0000-0000-000000000001",
+			AgentName: agentName,
+		}
+		if _, err := execenv.InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+	}
+
+	t.Run("same name keeps session", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeConfig(t, dir, "Backend Builder")
+		task := Task{PriorSessionID: "sess-bb"}
+		taskCtx := execenv.TaskContextForEnv{AgentName: "Backend Builder", PriorSessionResumed: true}
+		gateResumeToSameAgentName(&task, &taskCtx, "claude", dir, slog.Default())
+		if task.PriorSessionID != "sess-bb" {
+			t.Fatalf("session should be kept when name matches, got %q", task.PriorSessionID)
+		}
+		if !taskCtx.PriorSessionResumed {
+			t.Fatal("PriorSessionResumed should remain true")
+		}
+	})
+
+	t.Run("renamed agent drops session", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		// Workdir was last used when agent was named "Reviewer".
+		writeConfig(t, dir, "Reviewer")
+		// Agent was renamed to "Backend Builder".
+		task := Task{PriorSessionID: "sess-reviewer"}
+		taskCtx := execenv.TaskContextForEnv{AgentName: "Backend Builder", PriorSessionResumed: true}
+		gateResumeToSameAgentName(&task, &taskCtx, "claude", dir, slog.Default())
+		if task.PriorSessionID != "" {
+			t.Fatalf("session should be dropped on name change, got %q", task.PriorSessionID)
+		}
+		if taskCtx.PriorSessionResumed {
+			t.Fatal("PriorSessionResumed should be cleared")
+		}
+		// Name-change drop is intentional, not a lost session — no continuity notice.
+		if taskCtx.PriorSessionResumeUnavailable {
+			t.Fatal("PriorSessionResumeUnavailable should not be set on an intentional name-change drop")
+		}
+	})
+
+	t.Run("no prior session is a no-op", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeConfig(t, dir, "Reviewer")
+		task := Task{PriorSessionID: ""}
+		taskCtx := execenv.TaskContextForEnv{AgentName: "Backend Builder", PriorSessionResumed: false}
+		gateResumeToSameAgentName(&task, &taskCtx, "claude", dir, slog.Default())
+		if task.PriorSessionID != "" || taskCtx.PriorSessionResumed {
+			t.Fatal("no-op expected when there is no prior session")
+		}
+	})
+
+	t.Run("no current agent name is a no-op", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeConfig(t, dir, "Reviewer")
+		task := Task{PriorSessionID: "sess-x"}
+		taskCtx := execenv.TaskContextForEnv{AgentName: "", PriorSessionResumed: true}
+		gateResumeToSameAgentName(&task, &taskCtx, "claude", dir, slog.Default())
+		if task.PriorSessionID != "sess-x" {
+			t.Fatalf("session should be kept when current agent name is unknown, got %q", task.PriorSessionID)
+		}
+	})
+
+	t.Run("missing config file keeps session", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir() // no CLAUDE.md written
+		task := Task{PriorSessionID: "sess-x"}
+		taskCtx := execenv.TaskContextForEnv{AgentName: "Backend Builder", PriorSessionResumed: true}
+		gateResumeToSameAgentName(&task, &taskCtx, "claude", dir, slog.Default())
+		if task.PriorSessionID != "sess-x" {
+			t.Fatalf("session should be kept when config is missing, got %q", task.PriorSessionID)
+		}
+	})
+}
+
 // newCodexStoreGuardDaemon builds a Daemon with only the per-issue Codex session
 // store guard initialised — enough to exercise the reserve-vs-mark protocol.
 func newCodexStoreGuardDaemon() *Daemon {
