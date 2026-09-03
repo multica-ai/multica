@@ -173,6 +173,20 @@ func TestCheckNestedLongSubstantiveReplyStillRequiresRequesterMention(t *testing
 	}
 }
 
+func TestCheckNestedFencedSubstantiveReplyStillRequiresRequesterMention(t *testing.T) {
+	requesterID := "31313131-3131-4313-8313-313131313131"
+	response := "Findings:\n\n```md\n" + strings.Repeat("Substantive finding remains unresolved and requires a decision. ", 10) + "```"
+	err := Check(Parent{
+		AuthorType: "agent",
+		AuthorID:   requesterID,
+		Content:    "Could you review this implementation and tell me what you think?",
+		IsReply:    true,
+	}, response)
+	if err == nil {
+		t.Fatal("fenced nested substantive reply was admitted without requester mention")
+	}
+}
+
 func TestCheckNestedNewOpinionRequestStillRequiresRequesterMention(t *testing.T) {
 	requesterID := "28282828-2828-4282-8282-282828282828"
 	err := Check(Parent{

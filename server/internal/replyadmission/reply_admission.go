@@ -200,7 +200,7 @@ func isNestedTerminatingReply(content string) bool {
 	if requestMarkerRE.MatchString(content) || reviewRequestRE.MatchString(content) {
 		return false
 	}
-	normalized := strings.TrimSpace(util.MentionRe.ReplaceAllString(stripCodeSpans(content), " "))
+	normalized := strings.TrimSpace(util.MentionRe.ReplaceAllString(content, " "))
 	words := strings.Fields(normalized)
 	return len(words) > 0 && len(words) <= maxNestedTerminatingReplyWords
 }
