@@ -195,9 +195,10 @@ func TestACPModelIDsEquivalent(t *testing.T) {
 			// for, so it must fall through and send set_model.
 			//
 			// Bare current ids are not hypothetical: acp_effort_test.go
-			// captures `hermes-4` from `hermes acp` v0.20.0 and `gpt-5.6-sol`
-			// from jcode, both unprefixed, and jcode routes through this same
-			// backend.
+			// captures an unprefixed `gpt-5.6-sol` from jcode, which routes
+			// through this same backend. Hermes Agent's encoder has a bare
+			// branch too, though a normally-configured install resolves a
+			// provider and reports the prefixed form.
 			name:       "explicit configured provider vs bare current",
 			configured: "openrouter:hermes-4",
 			current:    "hermes-4",
@@ -3602,8 +3603,8 @@ func TestHermesSkipsRedundantSetModelForBareConfiguredModel(t *testing.T) {
 // asymmetry of the equivalence rules. A caller that names a provider
 // explicitly must get the switch even when the runtime reports a bare current
 // id, because a bare id cannot confirm which provider is actually in use.
-// Runtimes really do answer this way — acp_effort_test.go captures unprefixed
-// ids from both `hermes acp` and jcode, and jcode routes through this backend.
+// Runtimes really do answer this way — acp_effort_test.go captures an
+// unprefixed `gpt-5.6-sol` from jcode, which routes through this backend.
 func TestHermesSendsSetModelWhenExplicitProviderAndBareCurrent(t *testing.T) {
 	t.Parallel()
 

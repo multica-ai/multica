@@ -2159,8 +2159,12 @@ func splitACPModelID(modelID string) (provider, model string) {
 //     that same provider. A session reporting a bare id cannot confirm the
 //     match, so fall through and send set_model rather than silently swallow a
 //     provider switch the caller explicitly asked for. Bare current ids are
-//     not hypothetical: acp_effort_test.go captures unprefixed ids from both
-//     `hermes acp` and jcode, and jcode routes through this same backend.
+//     not hypothetical: acp_effort_test.go captures an unprefixed
+//     `gpt-5.6-sol` from jcode, which routes through this same backend.
+//     Hermes Agent's encoder has a bare branch too — acp_adapter
+//     `_encode_model_choice` returns the model alone when the provider is
+//     empty — but a normally-configured install always resolves one, and a
+//     live `hermes acp` v0.20.0 session reports the prefixed form.
 //
 // Provider and model are compared case-insensitively: Hermes lowercases the
 // provider when encoding the id, so a config written as `Custom:...` would
