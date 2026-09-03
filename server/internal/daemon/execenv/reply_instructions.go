@@ -60,10 +60,11 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 }
 
 // BuildResumedCommentsHint returns the comment-reading pointer for the WARM
-// no-delta path: the daemon is resuming a prior provider session and the
-// triggering comment body has already been injected into the per-turn prompt.
-// newCommentCount == 0 here means no new comments arrived issue-wide since the
-// last run (beyond the injected trigger and the agent's own replies).
+// path where the server COMPUTED an issue-wide delta this claim and it came
+// back empty: the daemon is resuming a prior provider session, the triggering
+// comment body has already been injected into the per-turn prompt, and no
+// other comment arrived since the last run (beyond that trigger and the
+// agent's own replies).
 //
 // That zero is server-computed and issue-wide, so it IS the answer the scan in
 // workflow step 2 exists to produce; the hint says so, which is the one way a
@@ -71,6 +72,13 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 // triggering thread in full stays the agent's own call: step 2 leaves "which
 // threads to expand" to judgment, and this is that judgment, not a decision
 // about whether the wide read happens (MUL-6984).
+//
+// The caller must reach this ONLY on Task.NewCommentsDeltaKnown. A zero count
+// on its own does not mean the delta is empty — a failed anchor read, a failed
+// count read, a cold start and an old server all produce the same zero, and
+// none of them looked at the issue. Claiming the scan is answered from one of
+// those would delete the very fallback the mandatory scan exists to be; that
+// path renders BuildResumedUnknownDeltaCommentsHint instead.
 func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
 	threadID := activeThreadID(triggerThreadID, triggerCommentID)
 	if issueID == "" || threadID == "" {
@@ -86,6 +94,39 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 			"Triggering thread in full, if resumed memory is not enough for the reply: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
 		issueID, threadID,
+	)
+}
+
+// BuildResumedUnknownDeltaCommentsHint returns the comment-reading pointer for
+// a resumed run whose issue-wide delta this claim does NOT carry: the count
+// query or its anchor lookup failed, or the server predates the delta fields.
+//
+// The session context is real, so the hint still says the trigger is injected
+// and offers the thread read. What it must not do is imply anything about the
+// rest of the issue: nothing here looked. Workflow step 2's scan is mandatory
+// by default and only an affirmative server report may waive it, so this hint
+// hands the scan over as a command instead of waiving it (MUL-6984).
+func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
+	threadID := activeThreadID(triggerThreadID, triggerCommentID)
+	if issueID == "" {
+		return ""
+	}
+	if threadID == "" {
+		return fmt.Sprintf(
+			"You're resuming the prior session, and the triggering comment is already included above. "+
+				"This turn carries no issue-wide comment delta, so nothing here answers the scan workflow step 2 requires — run it: "+
+				"`multica issue comment list %s --roots-only --summary --compact --output json`.\n\n",
+			issueID,
+		)
+	}
+	return fmt.Sprintf(
+		"You're resuming the prior session, and the triggering comment is already included above. "+
+			"This turn carries no issue-wide comment delta, so nothing here answers the scan workflow step 2 requires — run it: "+
+			"`multica issue comment list %s --roots-only --summary --compact --output json`, "+
+			"and expand what its `last_activity_at` shows has moved. "+
+			"Triggering thread in full, if resumed memory is not enough for the reply: "+
+			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
+		issueID, issueID, threadID,
 	)
 }
 

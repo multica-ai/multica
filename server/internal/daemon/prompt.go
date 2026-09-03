@@ -439,25 +439,44 @@ func buildCommentPrompt(task Task, provider string) string {
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	// Comment-reading pointer. Which hint renders is decided by whether this
 	// run actually RESUMES a provider session, and only then by the new-comment
-	// delta — never by the delta alone. A run whose resume was dropped (session
-	// store unreachable, Codex rollout missing, provider rejected the resume)
-	// still carries a since-anchor from its last task, but its memory is fresh;
-	// the delta hint would frame a partial read as the catch-up, so that run
-	// takes the fresh-session path and the continuity notice says why
-	// (MUL-6984).
+	// delta — never by the delta alone.
 	//
-	// Resumed + new comments: issue-wide count, the triggering thread's delta,
-	// and the scan as the wide read. Resumed + no new comments: the trigger is
-	// already injected and the server-computed delta is empty, which is the
-	// scan's answer. Fresh session: the triggering thread plus the scan. Whether
-	// the scan happens is never decided here — workflow step 2 owns that; these
-	// hints carry this turn's facts and exact commands. Final fallback (no
-	// trigger id, shouldn't happen here): plain read.
+	// "Resumes" means the LATEST turn's context came back. Two states fail that
+	// and both must take the fresh path. A run with no prior session is the
+	// obvious one. The other is PriorSessionResumeUnavailable: the server
+	// withheld a more recent Codex session whose rollout was missing and handed
+	// back an OLDER fallback session instead (MUL-5305), so PriorSessionID is
+	// non-empty while the memory this turn continues from is stale. Reading
+	// only PriorSessionID would call that a warm resume and could skip both the
+	// full trigger-thread read and the scan, on the strength of context the run
+	// does not have. It reconstructs instead, and the continuity notice
+	// perTurnContextBlocks renders says why (MUL-6984).
+	//
+	// Given a real resume, the delta decides:
+	//   - count > 0            → issue-wide count, the triggering thread's
+	//                            delta, and the scan as the wide read.
+	//   - computed and empty   → the trigger is already injected and the
+	//                            server looked at the rest of the issue and
+	//                            found nothing, which IS the scan's answer.
+	//   - not computed         → same session facts, no claim about the issue:
+	//                            the scan is handed over as a command. A zero
+	//                            count alone cannot be read as "nothing was
+	//                            said" — a failed read, a cold start and an old
+	//                            server all produce that same zero, and none of
+	//                            them looked (NewCommentsDeltaKnown).
+	//
+	// Whether the scan happens is never decided here — workflow step 2 owns
+	// that; these hints carry this turn's facts and exact commands. Final
+	// fallback (no trigger id, shouldn't happen here): plain read.
 	var hint string
-	if task.PriorSessionID != "" {
+	if task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
 		if hint == "" {
-			hint = execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID)
+			if task.NewCommentsDeltaKnown {
+				hint = execenv.BuildResumedCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID)
+			} else {
+				hint = execenv.BuildResumedUnknownDeltaCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID)
+			}
 		}
 	}
 	if hint == "" {

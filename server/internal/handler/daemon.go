@@ -2534,6 +2534,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// the triggering comment itself because that body is already
 				// injected into the prompt. Best-effort: any DB error or zero count
 				// leaves the hint suppressed.
+				//
+				// NewCommentsDeltaKnown is set on the success path REGARDLESS of
+				// the count, and is the only thing that distinguishes "the server
+				// looked and there is nothing" from "the server could not look".
+				// The count fields stay suppressed at zero — the daemon has no
+				// hint to render from a zero — but the daemon must still be able
+				// to tell a computed zero from a failed read, because only the
+				// computed one may waive the workflow's comment scan (MUL-6984).
 				if startedAt, err := h.Queries.GetLastTaskStartedAtForIssueAndAgent(r.Context(), db.GetLastTaskStartedAtForIssueAndAgentParams{
 					AgentID: task.AgentID,
 					IssueID: comment.IssueID,
@@ -2544,9 +2552,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						WorkspaceID: comment.WorkspaceID,
 						Since:       startedAt,
 						AuthorID:    task.AgentID,
-					}); err == nil && cnt > 0 {
-						resp.NewCommentCount = int(cnt)
-						resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+					}); err == nil {
+						resp.NewCommentsDeltaKnown = true
+						if cnt > 0 {
+							resp.NewCommentCount = int(cnt)
+							resp.NewCommentsSince = startedAt.Time.UTC().Format(time.RFC3339)
+						}
 					}
 				}
 			}

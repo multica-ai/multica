@@ -1184,6 +1184,12 @@ func TestBuildPromptResumedNoDeltaDoesNotForceThreadRead(t *testing.T) {
 		PriorSessionID:        "session-123",
 		NewCommentCount:       0,
 		NewCommentsSince:      "",
+		// The zero is the SERVER's answer, not a missing one. Without this the
+		// same fixture is the ambiguous zero (failed read / cold start / old
+		// server), which renders the scan instead of the waiver —
+		// TestBuildPromptResumedDeltaUnavailableStillRequiresScan owns that
+		// branch.
+		NewCommentsDeltaKnown: true,
 	}
 	out := BuildPrompt(task, "claude")
 
@@ -1251,6 +1257,118 @@ func TestBuildPromptDroppedResumeWithNewCommentsTakesFreshPath(t *testing.T) {
 			t.Errorf("dropped-resume prompt must not render the resumed-path hint (%q)\n--- output ---\n%s", banned, out)
 		}
 	}
+}
+
+// TestBuildPromptOlderFallbackSessionTakesFreshPath is the other half of the
+// dropped-resume contract, and the half a PriorSessionID != "" check cannot
+// see.
+//
+// MUL-5305 lets the server withhold a more recent Codex session whose rollout
+// is missing and hand back an OLDER session instead: PriorSessionResumeUnavailable
+// is true AND PriorSessionID is non-empty. The older session may resume
+// perfectly well — it is simply not the turn this run continues from. Treating
+// it as a warm resume would let the run skip the full trigger-thread read and,
+// on an empty delta, the scan too, on the strength of context it does not have.
+func TestBuildPromptOlderFallbackSessionTakesFreshPath(t *testing.T) {
+	const issueID = "issue-fallback-1"
+	task := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi",
+		TriggerAuthorType:     "member",
+		// The server computed a real delta AND handed back a session id — every
+		// warm-path precondition except the one that matters.
+		NewCommentCount:               2,
+		NewCommentsSince:              "2026-05-28T11:00:00Z",
+		NewCommentsDeltaKnown:         true,
+		PriorSessionID:                "older-fallback-session",
+		PriorSessionResumeUnavailable: true,
+	}
+	out := BuildPrompt(task, "claude")
+
+	for _, want := range []string{
+		"starts a fresh session on this issue",
+		"multica issue comment list " + issueID + " --thread thread-root-1 --tail 30 --compact --output json",
+		"`--roots-only --summary` in place of `--thread ... --tail 30`",
+		"## Session Continuity Notice",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("older-fallback prompt missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	for _, banned := range []string{
+		"You're resuming the prior session",
+		"new comment(s) on this issue since your last run",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("older-fallback prompt claims a warm resume (%q)\n--- output ---\n%s", banned, out)
+		}
+	}
+}
+
+// TestBuildPromptResumedDeltaUnavailableStillRequiresScan pins the difference
+// between "the server looked and found nothing" and "the server could not
+// look".
+//
+// Both arrive as NewCommentCount == 0, and so do a cold start and an old
+// server that never sends the fields. Only the first answers the question
+// workflow step 2's scan exists to answer, so only the first may waive it —
+// NewCommentsDeltaKnown is what tells them apart. Waiving on the ambiguous
+// zero would delete the mandatory scan exactly when a count query has just
+// failed, which is when the run is least able to tell whether another thread
+// moved.
+func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
+	const issueID = "issue-unknown-delta-1"
+	base := Task{
+		IssueID:               issueID,
+		TriggerCommentID:      "trigger-1",
+		TriggerThreadID:       "thread-root-1",
+		TriggerCommentContent: "hi",
+		TriggerAuthorType:     "member",
+		PriorSessionID:        "warm-session",
+	}
+
+	t.Run("delta not computed", func(t *testing.T) {
+		out := BuildPrompt(base, "claude")
+
+		// The session facts are real and still stated.
+		if !strings.Contains(out, "You're resuming the prior session") {
+			t.Errorf("resumed prompt lost the session fact\n--- output ---\n%s", out)
+		}
+		// The scan is handed over, not waived.
+		if !strings.Contains(out, "multica issue comment list "+issueID+" --roots-only --summary --compact --output json") {
+			t.Errorf("resumed prompt with no delta must hand over the scan\n--- output ---\n%s", out)
+		}
+		for _, banned := range []string{
+			"No other new comments on this issue since your last run",
+			"which answers the scan workflow step 2 requires",
+		} {
+			if strings.Contains(out, banned) {
+				t.Errorf("resumed prompt claims an answer it does not have (%q)\n--- output ---\n%s", banned, out)
+			}
+		}
+	})
+
+	t.Run("delta computed and empty", func(t *testing.T) {
+		task := base
+		task.NewCommentsDeltaKnown = true
+		out := BuildPrompt(task, "claude")
+
+		for _, want := range []string{
+			"No other new comments on this issue since your last run",
+			"which answers the scan workflow step 2 requires",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("authoritative empty delta lost the waiver %q\n--- output ---\n%s", want, out)
+			}
+		}
+		// The waiver is the whole point of this branch: it must not also hand
+		// the scan over, or the two branches are indistinguishable.
+		if strings.Contains(out, "nothing here answers the scan workflow step 2 requires") {
+			t.Errorf("authoritative empty delta rendered the unknown-delta hint\n--- output ---\n%s", out)
+		}
+	})
 }
 
 // TestBuildCommentPromptCoalescedCrossThread pins MUL-4195 review should-fix #3:
