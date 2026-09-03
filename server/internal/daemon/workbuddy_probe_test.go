@@ -24,11 +24,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
-// stageWorkBuddyInstall lays out a fake WorkBuddy install tree:
-//
-//	<dir>/WorkBuddy(.app)/resources/app.asar.unpacked/cli/bin/codebuddy
-//
-// and returns the WorkBuddy install root (<dir>/WorkBuddy(.app)) — the value
+// stageWorkBuddyInstall lays out a fake WorkBuddy install tree using the real
+// per-platform bundle layout (workbuddyBundleRelativeCLI): on Windows
+// <dir>/WorkBuddy/resources/app.asar.unpacked/cli/bin/codebuddy, on macOS
+// <dir>/WorkBuddy.app/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy.
+// It returns the WorkBuddy install root (<dir>/WorkBuddy(.app)) — the value
 // the probe's bundle-roots list is expected to contain. The CLI is a Node
 // shebang file and is always run under an explicit staged node (the launch
 // prefix), never spawned directly, so it needs no exec bit on any platform.
@@ -38,7 +38,7 @@ func stageWorkBuddyInstall(t *testing.T, dir string) string {
 	if runtime.GOOS != "windows" {
 		root += ".app"
 	}
-	cli := filepath.Join(root, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+	cli := filepath.Join(root, workbuddyBundleRelativeCLI())
 	if err := os.MkdirAll(filepath.Dir(cli), 0o755); err != nil {
 		t.Fatalf("mkdir bundle cli dir: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestProbeAgentCLIs_DiscoversWorkBuddyBundle(t *testing.T) {
 		t.Errorf("workbuddy model = %q, want empty", entry.Model)
 	}
 
-	cli := filepath.Join(bundle, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+	cli := filepath.Join(bundle, workbuddyBundleRelativeCLI())
 	// The entry launches the CLI under the pinned staged node: Path is the node
 	// runtime and LaunchPrefix is the CLI script — the same shape on every
 	// platform, so a daemon whose PATH lacks node (a GUI launch) still works.
@@ -301,7 +301,7 @@ func TestProbeAgentCLIs_WorkBuddyVersionDetectionRunsNodeCli(t *testing.T) {
 	if !ok {
 		t.Fatal("workbuddy was not discovered; test premise broken")
 	}
-	cli := filepath.Join(bundle, "resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+	cli := filepath.Join(bundle, workbuddyBundleRelativeCLI())
 	if entry.Path == "" || len(entry.LaunchPrefix) != 1 || entry.LaunchPrefix[0] != cli {
 		t.Fatalf("entry = {Path:%q LaunchPrefix:%v}, want the staged node + [cli script] launch shape", entry.Path, entry.LaunchPrefix)
 	}
@@ -351,10 +351,86 @@ func TestWorkBuddyNodeSemverOrdering(t *testing.T) {
 		{"…/versions/v22.11.0/bin/node", "…/versions/22.10.0/bin/node", false}, // leading v tolerated
 		{"…/versions/22.10.0-rc.1/bin/node", "…/versions/22.10.0/bin/node", true},
 		{"…/versions/junk/bin/node", "…/versions/22.10.0/bin/node", true}, // unparseable sorts below
+		// Windows flat layout (node.exe directly in the version dir) must parse
+		// the same way as the macOS bin/ shape, or 22.9.0 would beat 22.10.0.
+		{"…/versions/22.9.0/node.exe", "…/versions/22.10.0/node.exe", true},
+		{"…/versions/22.10.0/node.exe", "…/versions/22.9.0/node.exe", false},
+		{"…/versions/22.10.0/node.exe", "…/versions/junk/node.exe", false}, // parseable beats junk
 	}
 	for _, c := range cases {
 		if got := workbuddyNodeVersionLess(c.a, c.b); got != c.want {
 			t.Errorf("workbuddyNodeVersionLess(%q, %q) = %v, want %v", c.a, c.b, got, c.want)
 		}
+	}
+}
+
+func TestWorkBuddyBundleRelativeCLIForPlatform(t *testing.T) {
+	// Windows installs keep resources at the install root; macOS .app bundles
+	// nest them under Contents. Both must end at the bundled codebuddy CLI.
+	wantWindows := filepath.FromSlash("resources/app.asar.unpacked/cli/bin/codebuddy")
+	wantBundle := filepath.FromSlash("Contents/Resources/app.asar.unpacked/cli/bin/codebuddy")
+	for _, goos := range []string{"windows"} {
+		if got := workbuddyBundleRelativeCLIForPlatform(goos); got != wantWindows {
+			t.Errorf("workbuddyBundleRelativeCLIForPlatform(%q) = %q, want %q", goos, got, wantWindows)
+		}
+	}
+	for _, goos := range []string{"darwin", "linux"} {
+		if got := workbuddyBundleRelativeCLIForPlatform(goos); got != wantBundle {
+			t.Errorf("workbuddyBundleRelativeCLIForPlatform(%q) = %q, want %q", goos, got, wantBundle)
+		}
+	}
+}
+
+func TestSemverFromStagedNodePath(t *testing.T) {
+	cases := []struct {
+		path, want string
+	}{
+		// macOS bin/ shape
+		{"C:/Users/u/.workbuddy/binaries/node/versions/22.10.0/bin/node", "22.10.0"},
+		{"C:/Users/u/.workbuddy/binaries/node/versions/22.10.0/bin/node.exe", "22.10.0"},
+		// Windows flat shape (no bin/ layer)
+		{"C:/Users/u/.workbuddy/binaries/node/versions/22.10.0/node.exe", "22.10.0"},
+		{"C:/Users/u/.workbuddy/binaries/node/versions/22.9.0/node.exe", "22.9.0"},
+		// Windows separators parse identically
+		{"C:\\Users\\u\\.workbuddy\\binaries\\node\\versions\\22.10.0\\node.exe", "22.10.0"},
+		// no versions segment at all
+		{"C:/Users/u/.workbuddy/binaries/node/22.10.0/bin/node", ""},
+	}
+	for _, c := range cases {
+		if got := semverFromStagedNodePath(c.path); got != c.want {
+			t.Errorf("semverFromStagedNodePath(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
+
+func TestResolveWorkBuddyNode_WindowsFlatLayout_PicksNewestSemver(t *testing.T) {
+	// Regression for the flat-layout semver gap: before the parser understood
+	// versions/<v>/node.exe, every flat candidate was unparseable and ordering
+	// fell back to lexical order, letting 22.9.0 beat 22.10.0. Two flat
+	// versions must resolve to the semver maximum.
+	stagedRoot := t.TempDir()
+	for _, ver := range []string{"22.9.0", "22.10.0"} {
+		p := filepath.Join(stagedRoot, "versions", ver, "node.exe")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir flat staged node dir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("fake node.exe"), 0o755); err != nil {
+			t.Fatalf("write flat staged node: %v", err)
+		}
+	}
+	origGlob := workbuddyStagedNodeGlobs
+	defer func() { workbuddyStagedNodeGlobs = origGlob }()
+	workbuddyStagedNodeGlobs = func() []string {
+		return []string{filepath.Join(stagedRoot, "versions", "*", "node.exe")}
+	}
+	// No PATH node: an empty PATH dir keeps exec.LookPath honest.
+	t.Setenv("PATH", t.TempDir())
+
+	node, ok := resolveWorkBuddyNode()
+	if !ok {
+		t.Fatal("resolveWorkBuddyNode found nothing with two flat staged versions")
+	}
+	if !strings.Contains(node, "22.10.0") {
+		t.Errorf("resolveWorkBuddyNode = %q, want the 22.10.0 flat staged node (semver max, not lexical)", node)
 	}
 }

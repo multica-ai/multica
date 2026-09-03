@@ -45,11 +45,26 @@ import (
 	"strings"
 )
 
-// workbuddyBundleRelativeCLI is the path of the bundled CLI inside the
-// WorkBuddy install / app bundle, shared by every platform.
-var workbuddyBundleRelativeCLI = filepath.Join(
-	"resources", "app.asar.unpacked", "cli", "bin", "codebuddy",
-)
+// workbuddyBundleRelativeCLI is the path of the bundled CLI inside a WorkBuddy
+// install root. It differs by platform because Electron packages resources
+// differently: on Windows the root is the install directory and resources sit
+// at its top level (<root>\resources\app.asar.unpacked\cli\bin\codebuddy),
+// while on macOS the root is the .app bundle and resources are nested under
+// Contents (<root>/Contents/Resources/app.asar.unpacked/cli/bin/codebuddy).
+// app.asar.unpacked/cli/bin/codebuddy is the common tail.
+func workbuddyBundleRelativeCLI() string {
+	return workbuddyBundleRelativeCLIForPlatform(runtime.GOOS)
+}
+
+// workbuddyBundleRelativeCLIForPlatform is the GOOS-parameterized form of
+// workbuddyBundleRelativeCLI so the per-platform layouts can be asserted in
+// tests without depending on the host platform.
+func workbuddyBundleRelativeCLIForPlatform(goos string) string {
+	if goos == "windows" {
+		return filepath.Join("resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+	}
+	return filepath.Join("Contents", "Resources", "app.asar.unpacked", "cli", "bin", "codebuddy")
+}
 
 // workbuddyBundleRoots returns candidate install roots for the WorkBuddy
 // desktop app, ordered most-likely-first. Windows installs are per-machine
@@ -167,7 +182,7 @@ func probeWorkBuddyAgent() (AgentEntry, bool) {
 	// that belongs to the codebuddy family probe and would make workbuddy
 	// appear twice for one binary.
 	for _, root := range workbuddyBundleRoots() {
-		cli := filepath.Join(root, workbuddyBundleRelativeCLI)
+		cli := filepath.Join(root, workbuddyBundleRelativeCLI())
 		if !workbuddyBundleCLIUsable(cli) {
 			continue
 		}
@@ -301,14 +316,21 @@ func workbuddyNodeVersionLess(a, b string) bool {
 	}
 }
 
-// semverFromStagedNodePath extracts the version segment of a staged node path
-// of the form …/versions/<semver>/bin/node[.exe]. Empty when the path does
-// not match.
+// semverFromStagedNodePath extracts the version segment of a staged node path.
+// WorkBuddy stages Node in two shapes — macOS keeps a bin/ layer
+// (…/versions/<semver>/bin/node) while the Windows layout puts node.exe
+// directly in the version directory (…/versions/<semver>/node.exe) — so the
+// semver is the path component immediately after the "versions" directory in
+// both, not a fixed parent depth from the file. Walking up a fixed number of
+// directories would parse only one shape (the macOS one) and leave every flat
+// Windows candidate unparseable, silently degrading back to lexical ordering.
+// Empty when the path has no "versions" segment.
 func semverFromStagedNodePath(path string) string {
-	dir := filepath.Dir(filepath.Dir(path)) // …/versions/<semver>
-	ver := filepath.Base(dir)
-	if strings.HasPrefix(filepath.Base(filepath.Dir(dir)), "versions") {
-		return ver
+	segs := strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' })
+	for i := 0; i+1 < len(segs); i++ {
+		if segs[i] == "versions" {
+			return segs[i+1]
+		}
 	}
 	return ""
 }
