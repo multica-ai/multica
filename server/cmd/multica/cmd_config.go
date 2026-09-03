@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
 var configCmd = &cobra.Command{
@@ -44,6 +47,7 @@ var configSetSupportedKeys = []string{
 	"disable_auto_update",
 	"auto_update_check_interval",
 	"disable_auto_reload",
+	"extra_headers",
 }
 
 var configSetCmd = &cobra.Command{
@@ -54,11 +58,13 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, " +
 		"heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, " +
+		"extra_headers.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload) mirror their " +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, " +
+		"extra_headers) mirror their " +
 		"--flag / env counterparts and are read by `daemon start` when " +
 		"neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
@@ -67,7 +73,11 @@ var configSetCmd = &cobra.Command{
 		"'0s' is meaningful and explicitly disables the wall-clock cap. " +
 		"disable_auto_update and disable_auto_reload take 'true' or 'false' " +
 		"(single-direction: setting one to 'true' turns that behavior off, " +
-		"'false' clears the override so env/default decides). Pass an empty " +
+		"'false' clears the override so env/default decides). " +
+		"extra_headers takes a JSON object literal of name/value pairs " +
+		"(e.g. '{\"X-Auth\": \"bearer xyz\"}'); header names must not contain " +
+		"CR, LF, NUL, or colons, and values must not contain CR, LF, or NUL — " +
+		"those are rejected to prevent header-injection attacks. Pass an empty " +
 		"string to clear a persisted " +
 		"value (e.g. `config set poll_interval \"\"`).",
 	Args: exactArgs(2),
@@ -109,6 +119,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "extra_headers:", extraHeadersDisplay(cfg.ExtraHeaders))
 	return nil
 }
 
@@ -133,8 +144,17 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 
 	storedValue := value
-	if key == "workspaces_root" {
+	switch key {
+	case "workspaces_root":
 		storedValue = cfg.WorkspacesRoot
+	case "extra_headers":
+		// Don't echo the raw JSON input back: header values are
+		// commonly secrets (Authorization: Bearer …) and the operator
+		// who just wrote them already has them in shell history.
+		// Emit a non-reversible summary instead so the success line
+		// still confirms the write without leaking the secret into
+		// whatever log captured stderr.
+		storedValue = extraHeadersSummary(cfg.ExtraHeaders)
 	}
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, storedValue)
 	return nil
@@ -248,6 +268,32 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
 			return err
 		}
+	case "extra_headers":
+		// extra_headers takes a JSON object literal of name/value pairs
+		// (e.g. '{"X-Auth": "bearer xyz"}'). Empty string clears the
+		// persisted map; a JSON null also clears. The JSON parse catches
+		// syntactic garbage; the per-pair ValidateHeaderNameValue catches
+		// CR/LF/NUL/colon in either side so a misconfigured value can't
+		// smuggle additional headers through the JSON boundary.
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || trimmed == "null" {
+			cfg.ExtraHeaders = nil
+			return nil
+		}
+		parsed := map[string]string{}
+		if err := json.Unmarshal([]byte(value), &parsed); err != nil {
+			return fmt.Errorf("extra_headers must be a JSON object literal of name/value pairs: %w", err)
+		}
+		for name, hv := range parsed {
+			if err := daemon.ValidateHeaderNameValue(name, hv); err != nil {
+				return fmt.Errorf("extra_headers: %w", err)
+			}
+		}
+		if len(parsed) == 0 {
+			cfg.ExtraHeaders = nil
+			return nil
+		}
+		cfg.ExtraHeaders = parsed
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}
@@ -305,6 +351,44 @@ func agentTimeoutDisplay(v *string) string {
 		return *v + " (disabled)"
 	}
 	return *v
+}
+
+// extraHeadersDisplay renders the persisted extra_headers map for
+// `config show`. Empty / nil means "no persisted headers". Header values
+// are deliberately omitted from this output: extra_headers is the
+// primary vehicle for secrets like `Authorization: Bearer …`, and
+// `config show` is the kind of command operators paste into chat /
+// tickets / bug reports — emitting the values there would defeat the
+// whole point of persisting them in the first place. Keys are still
+// listed (sorted, for deterministic diff) so the operator can see
+// WHICH headers are configured without learning their values.
+func extraHeadersDisplay(m map[string]string) string {
+	if len(m) == 0 {
+		return "<none>"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("%d headers: %s (values redacted)", len(m), strings.Join(keys, ", "))
+}
+
+// extraHeadersSummary is the single-line equivalent used by the
+// `config set extra_headers` success echo (runConfigSet's "Set … = …"
+// line). Kept separate from extraHeadersDisplay so the two surfaces
+// can evolve independently — show output is column-aligned to fit
+// the rest of the table; the set echo is a one-shot status line.
+func extraHeadersSummary(m map[string]string) string {
+	if len(m) == 0 {
+		return "<cleared>"
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return fmt.Sprintf("%d header(s) configured (%s); values redacted from echo", len(m), strings.Join(keys, ", "))
 }
 
 func valueOrDefault(v, fallback string) string {

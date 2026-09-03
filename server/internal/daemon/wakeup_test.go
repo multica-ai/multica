@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -589,5 +590,214 @@ func waitForClientWakeup(t *testing.T, clientReceived <-chan struct{}) {
 	case <-clientReceived:
 	case <-time.After(time.Second):
 		t.Errorf("server timed out waiting for client wakeup")
+	}
+}
+
+// TestBuildTaskWakeupHeaders_LayersExtraAndIdentity pins the layering
+// contract for buildTaskWakeupHeaders: Authorization, then extra headers
+// (multi-value), then X-Client-* identity headers, then X-Client-Capabilities.
+// An operator-configured X-Client-* override must NOT survive the identity
+// Set pass — the same defence-in-depth the HTTP path enforces through
+// Client.setIdentityHeaders (MUL-5707 etc.).
+func TestBuildTaskWakeupHeaders_LayersExtraAndIdentity(t *testing.T) {
+	c := NewClient("ws://localhost:8080")
+	c.SetToken("tok")
+	c.SetVersion("9.9.9")
+	c.SetExtraHeaders(http.Header{
+		"X-Operator":        []string{"yes"},
+		"X-Multi":           []string{"a", "b", "c"},
+		"X-Client-Platform": []string{"forged"}, // must lose
+	})
+
+	headers := buildTaskWakeupHeaders(c)
+
+	if got := headers.Get("Authorization"); got != "Bearer tok" {
+		t.Errorf("Authorization = %q, want %q", got, "Bearer tok")
+	}
+	if got := headers.Get("X-Operator"); got != "yes" {
+		t.Errorf("X-Operator = %q, want %q", got, "yes")
+	}
+	if got := headers.Values("X-Multi"); len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "c" {
+		t.Errorf("X-Multi = %v, want [a b c] (multi-value must survive)", got)
+	}
+	if got := headers.Get("X-Client-Platform"); got != "daemon" {
+		t.Errorf("X-Client-Platform = %q, want daemon (operator override must lose)", got)
+	}
+	if got := headers.Get("X-Client-Version"); got != "9.9.9" {
+		t.Errorf("X-Client-Version = %q, want 9.9.9", got)
+	}
+	if got := headers.Get("X-Client-Capabilities"); got == "" {
+		t.Errorf("X-Client-Capabilities missing")
+	}
+}
+
+// TestBuildTaskWakeupHeaders_OmitsWhenUnset ensures the helper is a no-op
+// when no token / version / extra headers are configured. The daemon always
+// sends X-Client-Capabilities (it's how the server gates the WS-only claim
+// features), but nothing else should be invented.
+func TestBuildTaskWakeupHeaders_OmitsWhenUnset(t *testing.T) {
+	c := NewClient("ws://localhost:8080")
+	headers := buildTaskWakeupHeaders(c)
+
+	if got := headers.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q, want empty when no token", got)
+	}
+	if got := headers.Get("X-Client-Version"); got != "" {
+		t.Errorf("X-Client-Version = %q, want empty when SetVersion not called", got)
+	}
+	if got := headers.Get("X-Client-Capabilities"); got == "" {
+		t.Errorf("X-Client-Capabilities missing (server-side capability gating relies on it)")
+	}
+}
+
+// TestTaskWakeupHandshakeCarriesExtraHeaders is the end-to-end wire-level
+// pin for TIM-142 PR 2: bring up an httptest websocket upgrader, dial with
+// the headers buildTaskWakeupHeaders produces, and assert the server sees
+// Authorization, the extra headers (multi-value), and the X-Client-* set on
+// the upgrade request. The HTTP-path test in client_test.go covers the
+// post-upgrade request layer; this covers the one the HTTP path cannot
+// reach — gorilla/websocket.Dialer does not share http.Client's transport
+// hook, so the upgrade headers have to be wired separately.
+func TestTaskWakeupHandshakeCarriesExtraHeaders(t *testing.T) {
+	type observed struct {
+		auth    string
+		extras  map[string][]string
+		ident   map[string][]string
+		upgrade string
+	}
+	var (
+		mu    sync.Mutex
+		notes []observed
+	)
+	record := func(r *http.Request) {
+		extras := map[string][]string{}
+		for _, name := range []string{"X-Test", "X-Multi"} {
+			extras[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		ident := map[string][]string{}
+		for _, name := range []string{"X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-Client-Capabilities"} {
+			ident[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		mu.Lock()
+		notes = append(notes, observed{
+			auth:    r.Header.Get("Authorization"),
+			extras:  extras,
+			ident:   ident,
+			upgrade: r.Header.Get("Upgrade"),
+		})
+		mu.Unlock()
+	}
+
+	upgrader := websocket.Upgrader{}
+	connCh := make(chan *websocket.Conn, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		connCh <- conn
+		// Hold the conn open until the test tears down.
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("tok")
+	c.SetVersion("9.9.9")
+	c.SetExtraHeaders(http.Header{
+		"X-Test":  []string{"alpha", "beta"},
+		"X-Multi": []string{"one", "two"},
+	})
+
+	dialer := websocket.Dialer{HandshakeTimeout: 2 * time.Second}
+	conn, resp, err := dialer.DialContext(context.Background(), taskWakeupTestWSURL(srv.URL), buildTaskWakeupHeaders(c))
+	if err != nil {
+		t.Fatalf("dial: %v (resp=%v)", err, resp)
+	}
+	defer conn.Close()
+
+	// Wait for the server-side upgrader to record what it saw, then assert.
+	select {
+	case srvConn := <-connCh:
+		_ = srvConn
+	case <-time.After(2 * time.Second):
+		t.Fatal("server never received the upgrade")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(notes) != 1 {
+		t.Fatalf("observed %d upgrade requests, want 1: %+v", len(notes), notes)
+	}
+	got := notes[0]
+	if got.upgrade != "websocket" {
+		t.Errorf("Upgrade header = %q, want %q", got.upgrade, "websocket")
+	}
+	if got.auth != "Bearer tok" {
+		t.Errorf("Authorization = %q, want %q", got.auth, "Bearer tok")
+	}
+	if vals := got.extras["X-Test"]; len(vals) != 2 || vals[0] != "alpha" || vals[1] != "beta" {
+		t.Errorf("X-Test = %v, want [alpha beta]", vals)
+	}
+	if vals := got.extras["X-Multi"]; len(vals) != 2 || vals[0] != "one" || vals[1] != "two" {
+		t.Errorf("X-Multi = %v, want [one two]", vals)
+	}
+	if len(got.ident["X-Client-Platform"]) == 0 || got.ident["X-Client-Platform"][0] != "daemon" {
+		t.Errorf("X-Client-Platform = %v, want [daemon]", got.ident["X-Client-Platform"])
+	}
+	if len(got.ident["X-Client-Version"]) == 0 || got.ident["X-Client-Version"][0] != "9.9.9" {
+		t.Errorf("X-Client-Version = %v, want [9.9.9]", got.ident["X-Client-Version"])
+	}
+	if len(got.ident["X-Client-Capabilities"]) == 0 {
+		t.Errorf("X-Client-Capabilities missing on upgrade")
+	}
+}
+
+// TestBuildTaskWakeupHeaders_SkipsReservedFromExtra is the
+// defence-in-depth pin for the WS path: even if a reserved header
+// somehow landed in c.extraHeaders (a future code path that bypassed
+// the parser, a third-party embedder, a hand-built http.Header), the
+// buildTaskWakeupHeaders append site must NOT carry it onto the WS
+// upgrade request. The Upgrade itself is set by gorilla/websocket, so
+// the operator-injected "Upgrade: websocket" must be skipped — leaving
+// gorilla's value alone. Authorization must come from c.Token, not
+// from extras. Sec-WebSocket-* entries must be skipped entirely so
+// they cannot collide with gorilla's own handshake wiring.
+func TestBuildTaskWakeupHeaders_SkipsReservedFromExtra(t *testing.T) {
+	c := NewClient("ws://localhost:8080")
+	c.SetToken("real-token")
+	c.SetVersion("9.9.9")
+	// Every one of these is on the reserved blocklist; the parser
+	// would normally refuse to let them land in c.extraHeaders.
+	c.SetExtraHeaders(http.Header{
+		"Authorization":     {"forged-token"},
+		"X-Client-Platform": {"forged"},
+		"X-Forwarded-For":   {"1.2.3.4"},
+		"Upgrade":           {"websocket"},
+		"Sec-Websocket-Key": {"forged-key"},
+		"Content-Type":      {"text/plain"},
+		"X-Allowed":         {"kept"},
+	})
+
+	headers := buildTaskWakeupHeaders(c)
+
+	if got := headers.Get("Authorization"); got != "Bearer real-token" {
+		t.Errorf("Authorization = %q, want Bearer real-token (operator override must lose)", got)
+	}
+	if got := headers.Get("X-Client-Platform"); got != "daemon" {
+		t.Errorf("X-Client-Platform = %q, want daemon (operator override must lose)", got)
+	}
+	if vals := headers.Values("X-Forwarded-For"); len(vals) != 0 {
+		t.Errorf("X-Forwarded-For = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if vals := headers.Values("Sec-Websocket-Key"); len(vals) != 0 {
+		t.Errorf("Sec-Websocket-Key = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if vals := headers.Values("Content-Type"); len(vals) != 0 {
+		t.Errorf("Content-Type = %v, want [] (reserved header must be skipped entirely)", vals)
+	}
+	if got := headers.Get("X-Allowed"); got != "kept" {
+		t.Errorf("X-Allowed = %q, want kept (non-reserved extras must still pass through)", got)
 	}
 }

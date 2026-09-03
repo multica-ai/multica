@@ -19,6 +19,19 @@ import (
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
+// maxRedirects caps the number of redirects the daemon's HTTP clients
+// follow before giving up. Matches net/http's defaultCheckRedirect; we
+// install our own CheckRedirect and replicate the cap so the redirect
+// loop is bounded even when our origin policy never triggers.
+const maxRedirects = 10
+
+// errCrossOriginRedirect is returned by Client.checkRedirect when a
+// configured extra header would be sent to an origin the operator did
+// not configure. Surfaced via http.Client.Do's error path so the caller
+// can distinguish a transport-level cross-origin leak attempt from a
+// generic network failure.
+var errCrossOriginRedirect = errors.New("daemon extra headers cannot follow a cross-origin redirect")
+
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
 type requestError struct {
 	Method     string
@@ -93,8 +106,14 @@ func isRuntimeNotFoundError(err error) bool {
 // Client handles HTTP communication with the Multica server daemon API.
 type Client struct {
 	baseURL string
-	token   string
-	client  *http.Client
+	// originURL is the parsed scheme + host (+ port) of baseURL, used
+	// by checkRedirect to decide whether a redirect stays within the
+	// configured origin. nil when baseURL cannot be parsed — callers
+	// fall back to comparing against the first via entry, which is
+	// equally strict.
+	originURL *url.URL
+	token     string
+	client    *http.Client
 
 	// bundleClient downloads skill bundles. Unlike client it carries no fixed
 	// Timeout: bundles can be large and slow on jittery links, so the caller
@@ -109,6 +128,15 @@ type Client struct {
 	version  string
 	os       string
 
+	// extraHeaders are the deployment-specific HTTP headers the daemon
+	// attaches to every server call (TIM-142). Populated by SetExtraHeaders
+	// after LoadConfig resolves the three-tier precedence (flag > env >
+	// config.json). nil or empty means "no extra headers"; see the per-call
+	// setIdentityHeaders / WS dial block for how they are applied with
+	// Header.Add so multi-value entries (e.g. several X-Forwarded-For lines)
+	// survive the round trip.
+	extraHeaders http.Header
+
 	workspaceMu                    sync.Mutex
 	workspaceETag                  string
 	workspaceCache                 []WorkspaceInfo
@@ -120,13 +148,89 @@ type Client struct {
 
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
-	return &Client{
-		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
-		bundleClient: &http.Client{},
-		platform:     "daemon",
-		os:           normalizeGOOS(runtime.GOOS),
+	c := &Client{
+		baseURL:   baseURL,
+		originURL: parseOriginURL(baseURL),
+		client:    &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
+		platform:  "daemon",
+		os:        normalizeGOOS(runtime.GOOS),
 	}
+	// Install our CheckRedirect on both the control-plane client and the
+	// bundle download client. net/http invokes CheckRedirect before
+	// following each Location, so the cross-origin policy runs before
+	// extra headers can be copied onto the redirected request.
+	c.client.CheckRedirect = c.checkRedirect
+	c.bundleClient = &http.Client{CheckRedirect: c.checkRedirect}
+	return c
+}
+
+// parseOriginURL extracts the scheme + host (+ port) the daemon is
+// configured to talk to, for use by checkRedirect when deciding
+// whether a redirect stays within the operator's configured trust
+// boundary. A malformed baseURL is recorded as nil — checkRedirect
+// treats nil as "no configured origin" and falls back to comparing
+// against the first via entry, which is conservative.
+func parseOriginURL(baseURL string) *url.URL {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil
+	}
+	return u
+}
+
+// checkRedirect enforces the cross-origin safety policy for every
+// redirect followed by the daemon's HTTP clients (control plane +
+// skill-bundle downloads). When the redirect target's origin (scheme
+// + host) differs from the configured origin, every extra header is
+// stripped before following.
+//
+// Go's stdlib's redirect handler only recognizes Authorization,
+// Cookie, and WWW-Authenticate as sensitive enough to strip on
+// cross-host redirects. Operators can configure arbitrary credentials
+// via extra headers — a Cloudflare Access client secret, a corporate
+// SSO token, a reverse-proxy shared secret — and the stdlib's stripped
+// set does not include any of them, so a 302 to a different host
+// would leak them. We close that gap by stripping every configured
+// extra header on any origin change.
+//
+// The configured origin is captured in NewClient from baseURL.
+// Same-host redirects (the configured server URL itself returns a
+// redirect to a different path on the same host) keep their extra
+// headers because the operator's trust boundary is the host, not the
+// path. When baseURL couldn't be parsed at construction time we fall
+// back to the first via entry — equally strict, just a different
+// reference point.
+func (c *Client) checkRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	baseline := c.originURL
+	if baseline == nil && len(via) > 0 {
+		baseline = via[0].URL
+	}
+	if baseline == nil || sameOrigin(baseline, req.URL) {
+		return nil
+	}
+	// Cross-origin. Strip every extra header. The stdlib's stripped-
+	// on-cross-host set (Authorization, Cookie, WWW-Authenticate) is
+	// applied separately by net/http when the host changes; we add
+	// the operator-controlled extras to that set so a secret like
+	// Cf-Access-Client-Secret cannot leak via a 302.
+	for name := range c.extraHeaders {
+		req.Header.Del(http.CanonicalHeaderKey(name))
+	}
+	return nil
+}
+
+// sameOrigin returns true if a and b share scheme + host (+ port). The
+// port is implicit in url.URL.Host ("example.com:8443" vs
+// "example.com") so the equality check is sufficient — no separate
+// port-defaulting is needed.
+func sameOrigin(a, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Scheme == b.Scheme && a.Host == b.Host
 }
 
 func cloneDefaultTransport() http.RoundTripper {
@@ -167,8 +271,83 @@ func (c *Client) SetVersion(v string) {
 	c.version = v
 }
 
-// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
+// SetExtraHeaders records the deployment-specific headers that
+// setIdentityHeaders and the wakeup WS dial attach to every outbound
+// request/handshake (TIM-142). The map is copied so later mutations of the
+// caller's http.Header (or by SetExtraHeaders itself) don't leak into the
+// already-snapshotted transport — there is no guarantee the caller outlives
+// the daemon. nil or empty clears the override and returns the client to its
+// default "no extra headers" behaviour.
+//
+// Concurrency: SetExtraHeaders is not synchronised with concurrent
+// outbound requests. Call it exactly once, during Daemon startup after
+// LoadConfig resolves the configured headers, before the first request
+// or WS dial. The daemon's own callers follow that contract; a third-
+// party embedder that wants to mutate extra headers live must add its
+// own mutex (or stop accepting requests for the duration of the
+// swap) — the same contract setExtraHeaders / ExtraHeaders have always
+// had, now explicit.
+func (c *Client) SetExtraHeaders(h http.Header) {
+	if len(h) == 0 {
+		c.extraHeaders = nil
+		return
+	}
+	clone := make(http.Header, len(h))
+	for name, values := range h {
+		dup := make([]string, len(values))
+		copy(dup, values)
+		clone[name] = dup
+	}
+	c.extraHeaders = clone
+}
+
+// ExtraHeaders returns a copy of the currently configured extra headers, or
+// nil when none are set. Used by the wakeup WS dial block to mirror the
+// HTTP-path headers onto the upgrade request (they have to be applied in a
+// second place because gorilla/websocket.Dialer doesn't share
+// http.Client's RoundTripper hook). The returned map is a fresh copy so
+// callers cannot mutate the client's live state. See SetExtraHeaders for
+// the concurrency contract.
+func (c *Client) ExtraHeaders() http.Header {
+	if len(c.extraHeaders) == 0 {
+		return nil
+	}
+	clone := make(http.Header, len(c.extraHeaders))
+	for name, values := range c.extraHeaders {
+		dup := make([]string, len(values))
+		copy(dup, values)
+		clone[name] = dup
+	}
+	return clone
+}
+
+// setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set,
+// then layers every configured extra header (TIM-142) on top. Header.Add is
+// used for the extra headers so multi-value pairs (e.g. several
+// X-Forwarded-For entries from a chained proxy) survive intact — Set would
+// drop the second value on the floor. Existing identity headers always win
+// over an operator-configured extra header with the same name: Set runs
+// AFTER the Add pass so a deliberate X-Client-* override is impossible to
+// forge from the daemon's transport.
+//
+// Reserved headers (Authorization, Host, Content-Length, Content-Type,
+// Connection, Upgrade, the X-Client-* family, X-Forwarded-*,
+// Sec-WebSocket-*, X-Workspace-Id, X-Agent-Id, X-Task-Id, Forwarded)
+// are SKIPPED from the extra-headers pass even if they somehow landed
+// in c.extraHeaders. The parse-time blocklist in headers.go is the
+// primary defence; this is belt-and-suspenders so a future code path
+// that bypasses the parser (a test, a third-party embedder, a
+// hand-built http.Header) cannot smuggle a reserved header onto the
+// wire.
 func (c *Client) setIdentityHeaders(req *http.Request) {
+	for name, values := range c.extraHeaders {
+		if IsReservedHeader(name) {
+			continue
+		}
+		for _, v := range values {
+			req.Header.Add(name, v)
+		}
+	}
 	if c.platform != "" {
 		req.Header.Set("X-Client-Platform", c.platform)
 	}

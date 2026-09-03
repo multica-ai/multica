@@ -2,19 +2,20 @@ package daemon
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
-
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
@@ -161,6 +162,201 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+}
+
+// TestClient_ExtraHeaders_PostGetAndListWorkspaces pins TIM-142 PR 2's
+// transport contract: an extra-headers set injected via SetExtraHeaders
+// arrives on every daemon->server request, including the manually-built
+// ListWorkspaces request (which uses http.NewRequestWithContext directly
+// instead of going through postJSON / getJSON) and alongside the existing
+// Authorization + X-Client-* identity headers. Multi-value entries must
+// round-trip intact so a chained proxy's several X-Forwarded-For lines
+// survive a single request.
+func TestClient_ExtraHeaders_PostGetAndListWorkspaces(t *testing.T) {
+	type observed struct {
+		method string
+		path   string
+		auth   string
+		extras map[string][]string
+		// xAfter is the wire-level X-After values, captured into a fresh
+		// slice by `record` so a post-SetExtraHeaders caller-side mutation
+		// that adds a brand-new header cannot escape the asserted contract
+		// (the pre-declared `extras` map only sees the keys we asked for).
+		xAfter []string
+		ident  map[string][]string
+	}
+	var (
+		mu    sync.Mutex
+		notes []observed
+	)
+	record := func(r *http.Request) {
+		extras := map[string][]string{}
+		for _, name := range []string{"X-Test", "X-Multi", "Authorization"} {
+			extras[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		// Capture "X-After" into a separate slice too: the caller mutates
+		// its injected http.Header AFTER SetExtraHeaders returns, so the
+		// check below must observe the actual wire-level values rather
+		// than just the keys present in the pre-declared extras map (a
+		// post-Set mutation could add an entirely new header name).
+		observedXAfter := append([]string(nil), r.Header.Values("X-After")...)
+		ident := map[string][]string{}
+		for _, name := range []string{"X-Client-Platform", "X-Client-Version", "X-Client-OS", "X-Client-Capabilities"} {
+			ident[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		mu.Lock()
+		notes = append(notes, observed{
+			method: r.Method,
+			path:   r.URL.Path,
+			auth:   r.Header.Get("Authorization"),
+			extras: extras,
+			xAfter: observedXAfter,
+			ident:  ident,
+		})
+		mu.Unlock()
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.Header().Set("ETag", `W/"ws-v1"`)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"ws-1","name":"One"}]`))
+	})
+	mux.HandleFunc("/api/daemon/post", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("/api/daemon/get", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("tok")
+	c.SetVersion("9.9.9")
+	// Inject extra headers via the new PR-2 API. Multi-value entries are
+	// critical: Header.Add (not Set) on the wire path is the only thing
+	// keeping the second X-Multi from being silently dropped.
+	injected := http.Header{
+		"X-Test":  []string{"alpha", "beta"},
+		"X-Multi": []string{"one", "two", "three"},
+	}
+	c.SetExtraHeaders(injected)
+	// Mutate the caller's map after SetExtraHeaders returns. The client must
+	// have snapshotted its own copy so the wire request still sees the
+	// original values.
+	injected["X-Test"] = []string{"mutated"}
+	injected["X-After"] = []string{"should-not-appear"}
+
+	if err := c.postJSON(context.Background(), "/api/daemon/post", map[string]any{}, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+	var out map[string]any
+	if err := c.getJSON(context.Background(), "/api/daemon/get", &out); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+	if _, err := c.ListWorkspaces(context.Background()); err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(notes) != 3 {
+		t.Fatalf("observed %d requests, want 3 (post, get, ListWorkspaces): %+v", len(notes), notes)
+	}
+	wantPaths := []string{"/api/daemon/post", "/api/daemon/get", "/api/daemon/workspaces"}
+	for i, want := range wantPaths {
+		if notes[i].path != want {
+			t.Errorf("request %d path = %q, want %q", i, notes[i].path, want)
+		}
+		if notes[i].auth != "Bearer tok" {
+			t.Errorf("request %d Authorization = %q, want %q", i, notes[i].auth, "Bearer tok")
+		}
+		if got := notes[i].extras["X-Test"]; len(got) != 2 || got[0] != "alpha" || got[1] != "beta" {
+			t.Errorf("request %d X-Test = %v, want [alpha beta] (caller-side mutation must not leak)", i, got)
+		}
+		if got := notes[i].extras["X-Multi"]; len(got) != 3 || got[0] != "one" || got[1] != "two" || got[2] != "three" {
+			t.Errorf("request %d X-Multi = %v, want [one two three]", i, got)
+		}
+		if got := notes[i].xAfter; len(got) != 0 {
+			t.Errorf("request %d carried X-After from a post-SetExtraHeaders mutation: %v", i, got)
+		}
+		if notes[i].ident["X-Client-Platform"] == nil {
+			t.Errorf("request %d missing X-Client-Platform identity header", i)
+		}
+		if notes[i].ident["X-Client-Version"] == nil || notes[i].ident["X-Client-Version"][0] != "9.9.9" {
+			t.Errorf("request %d X-Client-Version = %v, want [9.9.9]", i, notes[i].ident["X-Client-Version"])
+		}
+	}
+}
+
+// TestClient_ExtraHeaders_NilOrEmptyClearsOverride ensures SetExtraHeaders
+// can revert the client to its default "no extra headers" behaviour, which
+// the runDaemonForeground path uses when the resolved Config.ExtraHeaders
+// is nil.
+func TestClient_ExtraHeaders_NilOrEmptyClearsOverride(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only the calls after a SetExtraHeaders clear must omit X-Test. The
+		// initial "headers are set" call is supposed to carry them.
+		n := calls.Add(1)
+		if n >= 2 {
+			if vals := r.Header.Values("X-Test"); len(vals) != 0 {
+				t.Errorf("call %d X-Test present after clear: %v", n, vals)
+			}
+		} else {
+			if vals := r.Header.Values("X-Test"); len(vals) != 1 || vals[0] != "alpha" {
+				t.Errorf("call %d X-Test = %v, want [alpha]", n, vals)
+			}
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetExtraHeaders(http.Header{"X-Test": []string{"alpha"}})
+	// First call: extra header is present.
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON with extra headers: %v", err)
+	}
+	// Clear with nil.
+	c.SetExtraHeaders(nil)
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON after clear nil: %v", err)
+	}
+	// Clear with an empty (non-nil) header.
+	c.SetExtraHeaders(http.Header{})
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON after clear empty: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Errorf("calls = %d, want 3", got)
+	}
+}
+
+// TestClient_ExtraHeaders_IdentityWinsOverOperatorOverride pins the
+// defence-in-depth contract: an operator who injects X-Client-Platform via
+// extra-headers must NOT be able to override the daemon's identity header.
+// Otherwise an operator-controlled reverse proxy could spoof the daemon
+// identity and bypass the worktree / capability gates that rely on it
+// (MUL-5707 / DaemonCapabilityLocalWorktreeV1).
+func TestClient_ExtraHeaders_IdentityWinsOverOperatorOverride(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-Client-Platform"); got != "daemon" {
+			t.Errorf("X-Client-Platform = %q, want daemon (operator override must lose)", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetExtraHeaders(http.Header{"X-Client-Platform": []string{"forged"}})
 	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
 		t.Fatalf("postJSON: %v", err)
 	}
@@ -577,5 +773,298 @@ func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
 				t.Fatalf("durable_work_dir = %v, want %q (body: %v)", got, durableWorkDir, body)
 			}
 		})
+	}
+}
+
+// redirectTargetServer is the cross-origin partner of an httptest.NewServer
+// bound to a different scheme/host/port. We use NewUnstartedServer +
+// StartTLS for the https side so the redirect chain can flip schemes; the
+// test skips certificate verification for the redirected target.
+type redirectTargetServer struct {
+	URL    string
+	mu     sync.Mutex
+	extras map[string][]string
+	ident  map[string][]string
+}
+
+func newRedirectTargetServer(t *testing.T, scheme string) *redirectTargetServer {
+	t.Helper()
+	rt := &redirectTargetServer{extras: map[string][]string{}, ident: map[string][]string{}}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		extras := map[string][]string{}
+		for _, name := range []string{"X-Secret", "Cf-Access-Client-Secret", "X-Multi"} {
+			extras[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		ident := map[string][]string{}
+		for _, name := range []string{"X-Client-Platform", "X-Client-Version", "Authorization"} {
+			ident[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		rt.mu.Lock()
+		rt.extras = extras
+		rt.ident = ident
+		rt.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	switch scheme {
+	case "http":
+		srv.Start()
+	case "https":
+		srv.StartTLS()
+	default:
+		t.Fatalf("unsupported scheme %q", scheme)
+	}
+	t.Cleanup(srv.Close)
+	rt.URL = srv.URL
+	return rt
+}
+
+// TestClient_Redirect_StripsExtrasOnHostChange is the cross-origin safety
+// regression (MUL-6636 review item 2). The configured origin points at
+// server A; A returns 302 → server B (different host). The redirected
+// request must NOT carry the operator-configured Cf-Access-Client-Secret
+// or any other configured extra header. The stdlib's stripped-on-host-
+// change set already covers Authorization / Cookie / WWW-Authenticate; the
+// daemon's policy closes the gap on every operator-configured header.
+func TestClient_Redirect_StripsExtrasOnHostChange(t *testing.T) {
+	target := newRedirectTargetServer(t, "http")
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Different host by construction (httptest picks a free port).
+		http.Redirect(w, r, target.URL+"/landed", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.URL)
+	c.SetExtraHeaders(http.Header{
+		"Cf-Access-Client-Secret": {"super-secret-value"},
+		"X-Multi":                 {"one", "two"},
+	})
+
+	if err := c.getJSON(context.Background(), "/api/daemon/test", nil); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if vals := target.extras["Cf-Access-Client-Secret"]; len(vals) != 0 {
+		t.Errorf("cross-origin redirect carried Cf-Access-Client-Secret: %v", vals)
+	}
+	if vals := target.extras["X-Multi"]; len(vals) != 0 {
+		t.Errorf("cross-origin redirect carried X-Multi: %v", vals)
+	}
+}
+
+// TestClient_Redirect_KeepsExtrasOnSameOrigin pins the inverse: a
+// redirect to a different PATH on the same host keeps extra headers,
+// because the operator's trust boundary is the configured origin, not
+// the path. A Cloudflare Access proxy that legitimately 302s to a
+// different endpoint on the same Multica deployment still needs its
+// secret on the follow-up request.
+func TestClient_Redirect_KeepsExtrasOnSameOrigin(t *testing.T) {
+	var (
+		mu          sync.Mutex
+		seenExtras  map[string][]string
+		redirTarget = "/api/daemon/elsewhere"
+	)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/daemon/test":
+			http.Redirect(w, r, redirTarget, http.StatusFound)
+		case redirTarget:
+			extras := map[string][]string{}
+			for _, name := range []string{"Cf-Access-Client-Secret", "X-Multi"} {
+				extras[name] = append([]string(nil), r.Header.Values(name)...)
+			}
+			mu.Lock()
+			seenExtras = extras
+			mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{}`))
+		default:
+			t.Errorf("unexpected path %q", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.URL)
+	c.SetExtraHeaders(http.Header{
+		"Cf-Access-Client-Secret": {"super-secret-value"},
+		"X-Multi":                 {"one", "two"},
+	})
+
+	if err := c.getJSON(context.Background(), "/api/daemon/test", nil); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if vals := seenExtras["Cf-Access-Client-Secret"]; len(vals) != 1 || vals[0] != "super-secret-value" {
+		t.Errorf("same-origin redirect stripped Cf-Access-Client-Secret: %v", vals)
+	}
+	if vals := seenExtras["X-Multi"]; len(vals) != 2 || vals[0] != "one" || vals[1] != "two" {
+		t.Errorf("same-origin redirect stripped X-Multi: %v", vals)
+	}
+}
+
+// TestClient_Redirect_StripsExtrasOnSchemeChange covers the
+// http → https (or vice versa) downgrade path. The scheme is part of
+// the origin even when the host is identical, so a redirect that flips
+// scheme must also strip configured extras.
+func TestClient_Redirect_StripsExtrasOnSchemeChange(t *testing.T) {
+	target := newRedirectTargetServer(t, "https")
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/landed", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.URL)
+	// Disable certificate verification so the https target accepts
+	// the redirected request during the test.
+	c.client.Transport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	c.SetExtraHeaders(http.Header{
+		"Cf-Access-Client-Secret": {"super-secret-value"},
+	})
+
+	if err := c.getJSON(context.Background(), "/api/daemon/test", nil); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if vals := target.extras["Cf-Access-Client-Secret"]; len(vals) != 0 {
+		t.Errorf("scheme-change redirect carried Cf-Access-Client-Secret: %v", vals)
+	}
+}
+
+// TestClient_Redirect_StripsExtrasOnPortChange covers the port-change
+// path. Two httptest servers bound to two different ports on the same
+// loopback host are different origins by the URL.Host definition
+// ("127.0.0.1:NNN" includes the port).
+func TestClient_Redirect_StripsExtrasOnPortChange(t *testing.T) {
+	target := newRedirectTargetServer(t, "http")
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+"/landed", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.URL)
+	c.SetExtraHeaders(http.Header{
+		"Cf-Access-Client-Secret": {"super-secret-value"},
+	})
+
+	if err := c.getJSON(context.Background(), "/api/daemon/test", nil); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if vals := target.extras["Cf-Access-Client-Secret"]; len(vals) != 0 {
+		t.Errorf("port-change redirect carried Cf-Access-Client-Secret: %v", vals)
+	}
+}
+
+// TestClient_Redirect_StripsExtrasAcrossMultipleHops confirms the
+// "strip once and stay stripped" rule: a chain A → B → C must not
+// re-attach the operator's secret on the B → C hop just because B's
+// origin matches A's. We bind B's origin to A's host so the first
+// redirect passes the same-origin check, then B redirects to C (a
+// different host). C must not see the secret.
+func TestClient_Redirect_StripsExtrasAcrossMultipleHops(t *testing.T) {
+	final := newRedirectTargetServer(t, "http")
+
+	var (
+		mu          sync.Mutex
+		hop1Visited bool
+	)
+	hop1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hop1Visited = true
+		mu.Unlock()
+		http.Redirect(w, r, final.URL+"/landed", http.StatusFound)
+	}))
+	defer hop1.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, hop1.URL+"/hop1", http.StatusFound)
+	}))
+	defer origin.Close()
+
+	c := NewClient(origin.URL)
+	c.SetExtraHeaders(http.Header{
+		"Cf-Access-Client-Secret": {"super-secret-value"},
+	})
+
+	if err := c.getJSON(context.Background(), "/api/daemon/test", nil); err != nil {
+		t.Fatalf("getJSON: %v", err)
+	}
+
+	mu.Lock()
+	if !hop1Visited {
+		t.Fatalf("hop1 was not visited; redirect chain collapsed")
+	}
+	mu.Unlock()
+	final.mu.Lock()
+	defer final.mu.Unlock()
+	if vals := final.extras["Cf-Access-Client-Secret"]; len(vals) != 0 {
+		t.Errorf("multi-hop redirect carried Cf-Access-Client-Secret to final: %v", vals)
+	}
+}
+
+// TestClient_SetIdentityHeaders_SkipsReservedFromExtra is the
+// defence-in-depth pin for item 1: even if a reserved header somehow
+// landed in c.extraHeaders (a future code path that bypassed the
+// parser, a third-party embedder, a hand-built http.Header), the
+// per-request append site must NOT carry it onto the wire. The wire
+// must show only the daemon's own identity value.
+func TestClient_SetIdentityHeaders_SkipsReservedFromExtra(t *testing.T) {
+	var seen map[string][]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = map[string][]string{}
+		for _, name := range []string{"Authorization", "X-Client-Platform", "X-Client-Version", "X-Forwarded-For", "Content-Type", "X-Custom"} {
+			seen[name] = append([]string(nil), r.Header.Values(name)...)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("real-token")
+	c.SetVersion("9.9.9")
+	// Every one of these is on the reserved blocklist; the parser
+	// would normally refuse to let them land in c.extraHeaders.
+	c.SetExtraHeaders(http.Header{
+		"Authorization":     {"forged-token"},
+		"X-Client-Platform": {"forged"},
+		"X-Client-Version":  {"forged"},
+		"X-Forwarded-For":   {"1.2.3.4"},
+		"Content-Type":      {"text/plain"},
+		"X-Custom":          {"kept"},
+	})
+
+	if err := c.postJSON(context.Background(), "/api/daemon/test", nil, nil); err != nil {
+		t.Fatalf("postJSON: %v", err)
+	}
+
+	if vals := seen["Authorization"]; len(vals) != 1 || vals[0] != "Bearer real-token" {
+		t.Errorf("Authorization = %v, want [Bearer real-token] (operator override must lose)", vals)
+	}
+	if vals := seen["X-Client-Platform"]; len(vals) != 1 || vals[0] != "daemon" {
+		t.Errorf("X-Client-Platform = %v, want [daemon] (operator override must lose)", vals)
+	}
+	if vals := seen["X-Client-Version"]; len(vals) != 1 || vals[0] != "9.9.9" {
+		t.Errorf("X-Client-Version = %v, want [9.9.9] (operator override must lose)", vals)
+	}
+	if vals := seen["X-Forwarded-For"]; len(vals) != 0 {
+		t.Errorf("X-Forwarded-For = %v, want [] (reserved headers must be skipped, not just overridden)", vals)
+	}
+	if vals := seen["Content-Type"]; len(vals) != 1 || vals[0] != "application/json" {
+		t.Errorf("Content-Type = %v, want [application/json] (operator override must lose)", vals)
+	}
+	if vals := seen["X-Custom"]; len(vals) != 1 || vals[0] != "kept" {
+		t.Errorf("X-Custom = %v, want [kept] (non-reserved extras must still pass through)", vals)
 	}
 }

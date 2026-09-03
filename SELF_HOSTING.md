@@ -523,3 +523,7 @@ multica daemon start
 ## Advanced Configuration
 
 For environment variables, manual setup (without Docker), reverse proxy configuration, database setup, and more, see the [Advanced Configuration Guide](SELF_HOSTING_ADVANCED.md).
+
+### Behind a header-injecting reverse proxy or ZTN
+
+If your Multica server sits behind Cloudflare Access, Tailscale, oauth2-proxy, or any other proxy that authenticates requests by injecting HTTP headers, the daemon needs to attach those headers to its outbound calls. See [Self-Hosted Multica Behind a ZTN or Header-Injecting Reverse Proxy](SELF_HOSTING_ADVANCED.md#self-hosted-multica-behind-a-ztn-or-header-injecting-reverse-proxy) in the Advanced Configuration Guide for the worked Cloudflare Access walkthrough and the table of supported providers (`--extra-header` / `MULTICA_EXTRA_HEADERS` / `extra_headers`).

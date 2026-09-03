@@ -434,11 +434,6 @@ func TestCLIConfig_TaskRootMustBeAbsolute(t *testing.T) {
 		t.Fatalf("CLIConfigPath error = %v, want absolute path validation", err)
 	}
 }
-
-// TestCLIConfig_OpenClawCLITimeout_RoundTrip covers the knob added for #7112:
-// a host whose openclaw CLI is slower than the built-in default needs to
-// record that in the config file, not just in a shell export the GUI-launched
-// daemon never sees.
 func TestCLIConfig_OpenClawCLITimeout_RoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
@@ -468,5 +463,67 @@ func TestCLIConfig_OpenClawCLITimeout_RoundTrip(t *testing.T) {
 	// discovery instead of being pinned to an empty string.
 	if got := loaded.Backends.OpenClaw.BinaryPath; got != "" {
 		t.Errorf("BinaryPath should stay empty, got %q", got)
+	}
+}
+
+// TestCLIConfig_ExtraHeaders_RoundTrip (TIM-142 PR 1) verifies that a
+// persisted map[string]string of extra HTTP headers survives a save →
+// load round-trip without dropping entries or silently re-canonicalising
+// names. Backend values are kept verbatim because the daemon reads them
+// verbatim at startup; only the json keys go through http.CanonicalHeaderKey
+// downstream, not here at the load boundary.
+func TestCLIConfig_ExtraHeaders_RoundTrip(t *testing.T) {
+	// Unset the agent-injected task config root so Save/Load target HOME.
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	original := CLIConfig{
+		ServerURL: "https://api.multica.ai",
+		ExtraHeaders: map[string]string{
+			"X-Auth":   "bearer xyz",
+			"X-Region": "eu-west-1",
+		},
+	}
+	if err := SaveCLIConfig(original); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadCLIConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(loaded.ExtraHeaders), 2; got != want {
+		t.Fatalf("ExtraHeaders length: got %d entries, want %d (got %v)", got, want, loaded.ExtraHeaders)
+	}
+	for name, want := range original.ExtraHeaders {
+		if got := loaded.ExtraHeaders[name]; got != want {
+			t.Errorf("ExtraHeaders[%q]: got %q, want %q", name, got, want)
+		}
+	}
+}
+
+// TestCLIConfig_ExtraHeaders_NilIsOmittedFromJSON mirrors the older
+// BackendOverrides nil-omission guarantee (TestCLIConfig_BackwardCompat_NilBackendsOmittedFromJSON):
+// a config that never set extra_headers must not emit `extra_headers: null`
+// on disk, so users who don't use the feature see an unchanged config file.
+func TestCLIConfig_ExtraHeaders_NilIsOmittedFromJSON(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
+	t.Setenv("HOME", tmp)
+
+	cfg := CLIConfig{ServerURL: "https://api.multica.ai"}
+	if err := SaveCLIConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(tmp, ".multica", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal saved config: %v", err)
+	}
+	if _, ok := raw["extra_headers"]; ok {
+		t.Errorf("extra_headers should be omitted when nil, got: %s", string(data))
 	}
 }
