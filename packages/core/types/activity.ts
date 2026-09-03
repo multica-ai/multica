@@ -7,6 +7,27 @@ export interface AssigneeFrequencyEntry {
   frequency: number;
 }
 
+/**
+ * Total wall-clock time an issue has spent on one status, summed across every
+ * visit to it. Backs the "time in status" hover on the issue detail sidebar.
+ */
+export interface StatusDurationEntry {
+  /** Raw status key. May name a status archived out of the workspace catalog. */
+  status: string;
+  seconds: number;
+  /** The status the issue sits on now — its `seconds` is still growing. */
+  current: boolean;
+}
+
+export interface StatusDurations {
+  /** Ordered by first entry into each status, oldest first. */
+  entries: StatusDurationEntry[];
+  /** Server clock when the open segment was closed off, RFC3339. */
+  computed_at: string;
+  /** True when no transitions were ever logged, so this is a single bucket. */
+  partial: boolean;
+}
+
 export interface TimelineEntry {
   type: "activity" | "comment";
   id: string;

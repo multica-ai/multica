@@ -22,6 +22,34 @@ SELECT * FROM (
 ) AS recent
 ORDER BY created_at ASC, id ASC;
 
+-- name: ListStatusChangesForIssue :many
+-- Every status transition for an issue, oldest first, for the "time in status"
+-- aggregate.
+--
+-- This deliberately does NOT reuse ListActivitiesForIssue. That query caps at
+-- the NEWEST N rows, and on a machine-paced issue the cap bites (MUL-5492) —
+-- the rows it discards are the oldest ones, which are exactly the ones a
+-- duration aggregate needs to attribute the early part of the lifetime. A
+-- truncated timeline renders as "some history is missing"; a truncated
+-- aggregate renders as a confidently wrong number.
+--
+-- Uncapped is safe here because the filter is one action out of ~10 logged
+-- kinds: status transitions are human/agent-paced (tens per issue), not
+-- autosave-paced. idx_activity_log_issue_keyset (migration 068) serves the
+-- issue_id lookup via a backward scan; `action` is filtered on the heap rows
+-- that scan already touches, so no new index is needed.
+-- The ::text casts exist only so sqlc infers `string` instead of `interface{}`
+-- for the JSON extractions. COALESCE keeps a missing key from arriving as a
+-- NULL that every call site would have to unwrap: "" already means "unknown"
+-- in the aggregation below.
+SELECT COALESCE(details->>'from', '')::text AS from_status,
+       COALESCE(details->>'to', '')::text   AS to_status,
+       created_at
+FROM activity_log
+WHERE issue_id = $1
+  AND action = 'status_changed'
+ORDER BY created_at ASC, id ASC;
+
 -- name: GetActivity :one
 SELECT * FROM activity_log
 WHERE id = $1;

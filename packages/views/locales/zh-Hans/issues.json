@@ -539,6 +539,15 @@
   "reply": {
     "placeholder": "回复..."
   },
+  "status_duration": {
+    "title": "各状态耗时",
+    "unavailable": "暂无状态变更记录",
+    "partial_note": "没有状态变更记录，显示的是任务创建至今的时长。",
+    "seconds": "{{count}} 秒",
+    "minutes": "{{count}} 分钟",
+    "hours": "{{count}} 小时",
+    "days": "{{count}} 天"
+  },
   "agent_activity": {
     "hover_header_other": "{{count}} 个智能体工作中",
     "hover_header_tasks_other": "{{count}} 个 task 工作中",

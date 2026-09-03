@@ -539,6 +539,15 @@
   "reply": {
     "placeholder": "답글 남기기..."
   },
+  "status_duration": {
+    "title": "상태별 소요 시간",
+    "unavailable": "상태 변경 기록이 없습니다",
+    "partial_note": "변경 기록이 없어 이슈 생성 이후 경과 시간을 표시합니다.",
+    "seconds": "{{count}}초",
+    "minutes": "{{count}}분",
+    "hours": "{{count}}시간",
+    "days": "{{count}}일"
+  },
   "agent_activity": {
     "hover_header_other": "작업 중인 에이전트 {{count}}개",
     "hover_header_tasks_other": "실행 중인 작업 {{count}}개",
