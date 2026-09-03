@@ -3,7 +3,6 @@ package daemon
 import (
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
@@ -700,8 +699,16 @@ func buildAutopilotPrompt(task Task) string {
 	if task.AutopilotSource != "" {
 		fmt.Fprintf(&b, "Trigger source: %s\n", task.AutopilotSource)
 	}
+	// Rendered whole. Ingress already bounds it — handler.maxWebhookBodyBytes
+	// caps a webhook body at 256 KiB — and this is now the payload's ONLY
+	// rendering (it used to be in the runtime brief as well), so truncating
+	// here would drop task input the agent has no way to fetch back: the
+	// full-payload read exists on the server (GET /api/autopilots/{id}/runs/
+	// {runId}) but no CLI command exposes it, and `autopilot runs` lists runs
+	// without payloads. A cap belongs with that command and a threshold picked
+	// from real payload sizes, not as a side effect of de-duplication.
 	if payload := strings.TrimSpace(string(task.AutopilotTriggerPayload)); payload != "" {
-		fmt.Fprintf(&b, "Trigger payload:\n%s\n", capAutopilotTriggerPayload(payload))
+		fmt.Fprintf(&b, "Trigger payload:\n%s\n", payload)
 	}
 	b.WriteString("\nAutopilot instructions:\n")
 	if strings.TrimSpace(task.AutopilotDescription) != "" {
@@ -722,33 +729,6 @@ func buildAutopilotPrompt(task Task) string {
 	// emission point, and a second hand-maintained per-turn copy is exactly
 	// how the two surfaces drifted into conflict before (MUL-5696).
 	return b.String()
-}
-
-// autopilotTriggerPayloadCap bounds the rendered trigger payload. Webhook
-// bodies are written by whatever system fired the trigger, not by anyone in
-// this workspace, so their size is unbounded from Multica's side — a CI or
-// chat-platform event can run to tens of kilobytes of fields no autopilot
-// instruction will ever mention. This is the payload's only rendering, so the
-// cap has to truncate in place and say so: there is no `autopilot runs` flag
-// that fetches one run's payload for an agent to fall back to.
-const autopilotTriggerPayloadCap = 8000
-
-// capAutopilotTriggerPayload truncates payload to autopilotTriggerPayloadCap
-// bytes, cutting on a rune boundary and appending a notice.
-//
-// The notice is not decoration. The payload renders as JSON, and a truncated
-// body is no longer parseable — an agent that reads a clipped object as a
-// whole one draws conclusions from fields that were never there. Saying the
-// text was cut is what makes the remaining prefix safe to read.
-func capAutopilotTriggerPayload(payload string) string {
-	if len(payload) <= autopilotTriggerPayloadCap {
-		return payload
-	}
-	cut := autopilotTriggerPayloadCap
-	for cut > 0 && !utf8.RuneStart(payload[cut]) {
-		cut--
-	}
-	return payload[:cut] + fmt.Sprintf("\n\n[trigger payload truncated at %d of %d bytes — the JSON above is incomplete, do not read it as a whole object]", cut, len(payload))
 }
 
 // squadBriefingMarker is the first heading of the squad-leader briefing the

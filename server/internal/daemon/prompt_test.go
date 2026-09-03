@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -73,73 +72,6 @@ func TestBuildQuickCreatePromptRules(t *testing.T) {
 		if strings.Contains(out, moved) {
 			t.Errorf("buildQuickCreatePrompt restates brief-owned rule %q\n--- output ---\n%s", moved, out)
 		}
-	}
-}
-
-// TestBuildAutopilotPromptCapsTriggerPayload covers the one unbounded value in
-// this prompt. A webhook body is written by whatever system fired the trigger,
-// so nothing in this workspace bounds its size, and the per-turn message is now
-// its only rendering (MUL-6984) — there is no second copy to fall back to and
-// no `autopilot runs` flag that fetches one run's payload. The cap therefore
-// has to truncate in place AND say so: a clipped JSON object read as a whole
-// one is worse than a short one, because the missing fields are invisible.
-func TestBuildAutopilotPromptCapsTriggerPayload(t *testing.T) {
-	t.Parallel()
-
-	oversized := `{"body":"` + strings.Repeat("x", autopilotTriggerPayloadCap*2) + `"}`
-	out := buildAutopilotPrompt(Task{
-		AutopilotRunID:          "run-1",
-		AutopilotID:             "autopilot-1",
-		AutopilotDescription:    "Check dependencies.",
-		AutopilotTriggerPayload: []byte(oversized),
-	})
-
-	if strings.Contains(out, oversized) {
-		t.Fatalf("oversized trigger payload rendered in full (%d bytes)", len(oversized))
-	}
-	if !strings.Contains(out, "trigger payload truncated") {
-		t.Errorf("truncated payload rendered without saying so\n---\n%s", out)
-	}
-	if !strings.Contains(out, "do not read it as a whole object") {
-		t.Errorf("truncation notice does not warn that the JSON is incomplete\n---\n%s", out)
-	}
-	// The instructions are the point of the run and must survive the cap.
-	if !strings.Contains(out, "Check dependencies.") {
-		t.Errorf("autopilot instructions lost alongside the capped payload\n---\n%s", out)
-	}
-
-	// A payload that fits is rendered verbatim — the cap must not touch the
-	// ordinary case, where the payload IS the trigger's meaning.
-	small := `{"action":"opened","number":7}`
-	out = buildAutopilotPrompt(Task{AutopilotRunID: "run-1", AutopilotTriggerPayload: []byte(small)})
-	if !strings.Contains(out, small) {
-		t.Errorf("payload under the cap was not rendered verbatim\n---\n%s", out)
-	}
-	if strings.Contains(out, "trigger payload truncated") {
-		t.Errorf("payload under the cap reported as truncated\n---\n%s", out)
-	}
-}
-
-// TestCapAutopilotTriggerPayloadCutsOnRuneBoundary keeps the truncation from
-// splitting a multi-byte character. A payload is arbitrary UTF-8 — issue
-// titles, chat messages, commit subjects — and a half rune renders as U+FFFD
-// in the middle of the text the agent is meant to read.
-func TestCapAutopilotTriggerPayloadCutsOnRuneBoundary(t *testing.T) {
-	t.Parallel()
-
-	// Three-byte runes so the cap lands mid-character for at least one offset.
-	payload := strings.Repeat("世", autopilotTriggerPayloadCap)
-	got := capAutopilotTriggerPayload(payload)
-	body := got[:strings.Index(got, "\n\n[trigger payload truncated")]
-
-	if !utf8.ValidString(body) {
-		t.Fatalf("truncated payload is not valid UTF-8 (%d bytes)", len(body))
-	}
-	if len(body) > autopilotTriggerPayloadCap {
-		t.Errorf("truncated body = %d bytes, want <= %d", len(body), autopilotTriggerPayloadCap)
-	}
-	if !strings.HasPrefix(payload, body) {
-		t.Error("truncated body is not a prefix of the original payload")
 	}
 }
 

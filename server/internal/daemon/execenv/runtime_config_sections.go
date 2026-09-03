@@ -949,8 +949,8 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	// Every kind, quick-create included. Quick-create used to be skipped here
-	// and carried its own copy in issue_context.md instead; now that both are
-	// the same names-only index, the brief is the one that survives.
+	// and carried its own names-only index in the workdir sidecar instead;
+	// that sidecar is gone (MUL-6984) and the brief is the single index.
 	writeSkills(&b, ctx)
 
 	if kind == kindIssue {
