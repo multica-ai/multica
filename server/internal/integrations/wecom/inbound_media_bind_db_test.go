@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -166,9 +167,16 @@ type bindTestTasks struct {
 	promoted int
 }
 
-func (*bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool) (db.AgentTaskQueue, error) {
+func (*bindTestTasks) EnqueueChannelChatTask(context.Context, db.ChatSession, pgtype.UUID, bool, int64, pgtype.UUID, int64) (db.AgentTaskQueue, error) {
 	return db.AgentTaskQueue{}, nil
 }
+func (*bindTestTasks) PrepareChatTaskEnqueue(context.Context, pgtype.UUID, pgtype.UUID) (service.PreparedChatTaskEnqueue, error) {
+	return service.PreparedChatTaskEnqueue{}, nil
+}
+func (*bindTestTasks) EnqueuePreparedChannelChatTaskInTx(context.Context, pgx.Tx, db.ChatSession, pgtype.UUID, bool, int64, service.PreparedChatTaskEnqueue) (db.AgentTaskQueue, error) {
+	return db.AgentTaskQueue{}, nil
+}
+func (*bindTestTasks) FinalizeChatTaskEnqueue(context.Context, db.AgentTaskQueue) {}
 func (b *bindTestTasks) PromoteChannelChatTasksIfMediaReady(context.Context, pgtype.UUID) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -272,12 +280,12 @@ func TestInboundImageBecomesAnAttachmentOnTheChatMessage(t *testing.T) {
 	var attachments int
 	for {
 		if err := pool.QueryRow(ctx, `
-			SELECT cm.id, cm.chat_session_id, cm.content, cm.channel_media_pending_until
+			SELECT cm.id, cm.chat_session_id, cm.content
 			FROM chat_message cm
 			JOIN chat_session cs ON cs.id = cm.chat_session_id
 			WHERE cs.workspace_id = $1 AND cm.role = 'user'
 			ORDER BY cm.created_at DESC LIMIT 1`,
-			fixture.workspaceID).Scan(&chatMessageID, &sessionID, &body, &pendingUntil); err != nil {
+			fixture.workspaceID).Scan(&chatMessageID, &sessionID, &body); err != nil {
 			if time.Now().After(deadline) {
 				t.Fatalf("no durable chat_message was ever written: %v", err)
 			}
@@ -355,6 +363,14 @@ func TestInboundImageBecomesAnAttachmentOnTheChatMessage(t *testing.T) {
 	}
 
 	// 4. The pending marker is cleared, which is what releases the agent run.
+	// Read it after observing the attachment and promotion. The polling query
+	// can race with the bind transaction and otherwise leave a stale pre-bind
+	// value in pendingUntil even though the database row has been cleared.
+	if err := pool.QueryRow(ctx,
+		`SELECT channel_media_pending_until FROM chat_message WHERE id = $1`, chatMessageID).
+		Scan(&pendingUntil); err != nil {
+		t.Fatalf("load media pending marker: %v", err)
+	}
 	if pendingUntil.Valid {
 		t.Errorf("channel_media_pending_until = %v, want NULL after binding", pendingUntil.Time)
 	}

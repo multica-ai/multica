@@ -3,7 +3,6 @@ package redact
 import (
 	"encoding/json"
 	"os"
-	"os/user"
 	"strings"
 	"testing"
 )
@@ -197,21 +196,6 @@ func TestRedactGenericCredentials(t *testing.T) {
 	}
 }
 
-func TestRedactHomeDirectory(t *testing.T) {
-	t.Parallel()
-	if homeDir == "" || username == "" {
-		t.Skip("cannot determine home dir or username")
-	}
-	input := "Reading file at " + homeDir + "/Documents/secret.txt"
-	got := Text(input)
-	if strings.Contains(got, username) {
-		t.Fatalf("home directory username not redacted: %s", got)
-	}
-	if !strings.Contains(got, "****") {
-		t.Fatalf("expected **** in path, got: %s", got)
-	}
-}
-
 func TestNoFalsePositivesOnNormalText(t *testing.T) {
 	t.Parallel()
 	inputs := []string{
@@ -362,27 +346,26 @@ func TestInputMapRedactsDeeplyNestedMaps(t *testing.T) {
 	}
 }
 
-func TestInputMapRedactsNestedHomePath(t *testing.T) {
+// Home directory paths are intentionally left intact — see Text's doc comment.
+// This guards the removal: a path under $HOME must survive verbatim, so nobody
+// reintroduces host-path masking as an incidental side effect of another fix.
+func TestTextLeavesHomePathIntact(t *testing.T) {
 	t.Parallel()
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		t.Skip("no home directory resolved in this environment")
 	}
-	u, err := user.Current()
-	if err != nil || u.Username == "" {
-		t.Skip("no current user resolved in this environment")
+	path := home + "/secret/app.go"
+
+	if got := Text(path); got != path {
+		t.Fatalf("home path was rewritten:\n  input:  %s\n  output: %s", path, got)
 	}
-	m := map[string]any{
-		"changes": []any{
-			map[string]any{"path": home + "/secret/app.go"},
-		},
-	}
-	got := InputMap(m)
-	changes, _ := got["changes"].([]any)
+
+	m := map[string]any{"changes": []any{map[string]any{"path": path}}}
+	changes, _ := InputMap(m)["changes"].([]any)
 	first, _ := changes[0].(map[string]any)
-	path, _ := first["path"].(string)
-	if strings.Contains(path, u.Username) {
-		t.Fatalf("username leaked from nested path: %s", path)
+	if got, _ := first["path"].(string); got != path {
+		t.Fatalf("nested home path was rewritten:\n  input:  %s\n  output: %s", path, got)
 	}
 }
 

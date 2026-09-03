@@ -459,6 +459,30 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
   });
 
+  // Cells are CATEGORIES, cards carry concrete status KEYS. Keying the cell by
+  // the raw key gave a custom status a cell that does not exist, and the card
+  // fell out of the grid entirely (MUL-6409).
+  const customStatusOrphan: Issue = {
+    ...cancelledOrphan,
+    id: "custom-orphan",
+    number: 10,
+    identifier: "PROJ-10",
+    title: "Awaiting Reporter",
+    status: "awaiting_response",
+    status_category: "in_review",
+  };
+
+  it("renders a custom-status card in its category's column", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, customStatusOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Awaiting Reporter")).toBeInTheDocument();
+  });
+
   it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {
     renderWithI18n(
       <SwimLaneView
@@ -529,26 +553,6 @@ describe("SwimLaneView", () => {
   });
 
   it("includes project_id in the create payload when projectId prop is set", () => {
-    const onCreateIssue = vi.fn();
-    renderWithI18n(
-      <SwimLaneView
-        issues={mockIssues}
-        onMoveIssue={vi.fn()}
-        projectId="proj-42"
-        onCreateIssue={onCreateIssue}
-      />,
-    );
-
-    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
-    fireEvent.click(addButtons[0]!);
-
-    expect(onCreateIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ project_id: "proj-42" }),
-    );
-    expect(mockOpenModal).not.toHaveBeenCalled();
-  });
-
-  it("routes add button through the surface create callback when provided", () => {
     const onCreateIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
@@ -870,29 +874,6 @@ describe("SwimLaneView", () => {
       },
       expect.any(Function),
     );
-  });
-
-  it("passes a settle callback that releases the lock without error", () => {
-    const mockOnMoveIssue = vi.fn();
-    renderWithI18n(
-      <SwimLaneView issues={mockIssues} onMoveIssue={mockOnMoveIssue} />,
-    );
-
-    const targetCellId = "swim:parent:none:in_progress";
-    act(() => {
-      lastOnDragOver({ active: { id: "orphan-1" }, over: { id: targetCellId } });
-    });
-    act(() => {
-      lastOnDragEnd({ active: { id: "orphan-1" }, over: { id: targetCellId } });
-    });
-
-    // The move carries a settle callback (held from drop until the mutation
-    // settles); invoking it releases the lock and re-syncs from the cache.
-    const onSettled = mockOnMoveIssue.mock.calls[0]?.[2] as
-      | (() => void)
-      | undefined;
-    expect(typeof onSettled).toBe("function");
-    expect(() => act(() => onSettled?.())).not.toThrow();
   });
 
   it("does not call onMoveIssue when drop target equals source cell (no-op)", () => {

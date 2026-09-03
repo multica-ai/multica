@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 A skill is a reusable set of working methods in a workspace. Its main file is `SKILL.md`, optionally accompanied by scripts, templates, and reference material.
 
-Add a skill to an [agent](/agents) and the agent uses its guidance when executing related tasks. The same method no longer has to be copied into each agent's instructions, and updates are maintained in one place.
+Add a skill to an [agent](/agents) and the agent uses its guidance when doing related work. The same method no longer has to be copied into each agent's instructions, and updates are maintained in one place.
 
 ## Skills and agent instructions
 
@@ -19,23 +19,41 @@ Add a skill to an [agent](/agents) and the agent uses its guidance when executin
 
 ## Creating or importing a skill
 
-On the workspace **Skills** page, choose "New skill". Three options are available:
+On the workspace **Skills** page, choose "New skill". Four options are available:
 
 | Option | When it fits |
 |---|---|
 | **Create manually** | Start writing from a blank `SKILL.md`. |
+| **Import from local** | Pick a folder that contains `SKILL.md`, or a `.skill` / `.zip` archive on this computer. |
 | **Import from URL** | Import a published skill from GitHub, ClawHub, or Skills.sh. |
 | **Copy from a runtime** | Scan skills on a connected computer and copy the selected ones into the workspace. |
 
 Copying from a runtime takes a snapshot of the files at that moment. Later changes to the local files do not update the workspace version automatically; re-import or edit in Multica.
 
-With the CLI, you can also import from a `.skill` or `.zip` file:
+The same archive format works from the CLI:
 
 ```bash
 multica skill import --file ./review-helper.skill
 ```
 
-If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import.
+If a skill with the same name already exists in the workspace, the import can stop, overwrite the existing content, save under a new name, or skip. Overwriting through import is limited to the skill's creator; a workspace `admin` who can edit the skill in the app still cannot overwrite it via import. To pull a newer version of a skill that is already in the workspace, use [Updating an imported skill](#updating-an-imported-skill) instead.
+
+## Updating an imported skill
+
+A skill imported from GitHub, ClawHub, or Skills.sh keeps a reference to its source. To pull the latest version, use **Update** on the skill page (or "Update from source" in the list's row menu), or the CLI:
+
+```bash
+multica skill refresh <skill-id>
+```
+
+The skill is re-downloaded from its source and replaced in place:
+
+- **Preserved**: the skill's identity — agent assignments, labels, creator, and creation date. Agents keep the skill without re-adding it.
+- **Replaced**: name (if the source renamed it), description, `SKILL.md`, and all supporting files. Local edits to the skill are overwritten.
+
+The skill's creator and workspace `owner`s / `admin`s can update from source. Skills created manually, imported from an archive file, or copied from a runtime have no hosted source and cannot be updated this way — re-import them instead.
+
+To update several skills at once, select them in the skills list and pick **Update** in the selection toolbar. Every selected skill with a hosted source is re-downloaded from its source; skills without one are skipped.
 
 ## Skill contents
 
@@ -65,7 +83,7 @@ After creating or importing a skill, it still needs to be added to specific agen
 - One agent can use multiple skills;
 - one skill can serve multiple agents;
 - when a skill isn't needed for now, disable the binding instead of deleting the skill;
-- edits take effect from subsequent runs and don't change tasks already running.
+- edits take effect from subsequent runs and don't change runs already in progress.
 
 Only members who can modify the agent can add, remove, or disable its skills.
 

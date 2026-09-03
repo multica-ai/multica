@@ -56,6 +56,50 @@ type preparationRequestPayload struct {
 type preparationResponse struct {
 	Environment *Environment `json:"environment,omitempty"`
 	Error       string       `json:"error,omitempty"`
+	// ErrorKind names the error class the parent must be able to recognise
+	// structurally. Error itself only crosses the pipe as text, so an
+	// errors.Is-based classification on the daemon side would otherwise be
+	// impossible — the daemon would be back to substring-matching, which is
+	// exactly what routed a local openclaw CLI stall into
+	// agent_error.provider_network. Empty means "no special class".
+	ErrorKind string `json:"error_kind,omitempty"`
+}
+
+// preparationErrorKindOpenclawCLITimeout marks a helper failure caused by the
+// local openclaw CLI missing its deadline (ErrOpenclawCLITimeout).
+const preparationErrorKindOpenclawCLITimeout = "openclaw_cli_timeout"
+
+// preparationKindError re-attaches a sentinel to an error that crossed the
+// helper boundary as text, so the daemon's classifier sees the same
+// errors.Is result it would have seen in-process.
+type preparationKindError struct {
+	msg  string
+	kind error
+}
+
+func (e *preparationKindError) Error() string { return e.msg }
+
+func (e *preparationKindError) Unwrap() error { return e.kind }
+
+// preparationErrorKind names the class of err for the wire, or "" when it has
+// none.
+func preparationErrorKind(err error) string {
+	if errors.Is(err, ErrOpenclawCLITimeout) {
+		return preparationErrorKindOpenclawCLITimeout
+	}
+	return ""
+}
+
+// rehydratePreparationError rebuilds a typed error from the wire pair. An
+// unknown kind (helper newer than the daemon) degrades to a plain error with
+// the original message rather than being dropped.
+func rehydratePreparationError(message, kind string) error {
+	switch kind {
+	case preparationErrorKindOpenclawCLITimeout:
+		return &preparationKindError{msg: message, kind: ErrOpenclawCLITimeout}
+	default:
+		return errors.New(message)
+	}
 }
 
 // PrepareIsolated executes Prepare in a killable helper process. command must
@@ -161,7 +205,7 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 		return nil, fmt.Errorf("execenv: decode preparation response: %w", err)
 	}
 	if response.Error != "" {
-		return nil, errors.New(response.Error)
+		return nil, rehydratePreparationError(response.Error, response.ErrorKind)
 	}
 	if response.Environment != nil {
 		// logger is intentionally omitted from JSON. Reattach the owning daemon's
@@ -192,11 +236,26 @@ func marshalPreparationRequest(request preparationRequest) ([]byte, error) {
 	return json.Marshal(payload)
 }
 
+// decodePreparationRequest reads the parent's payload. Unknown fields are
+// IGNORED, not rejected: parent and helper are the same program but not
+// necessarily the same build. The parent is the daemon process that is
+// running; the helper is whatever binary sits at that executable path when the
+// task starts, and every upgrade path replaces the file under a live daemon —
+// Desktop swaps the bundled/managed CLI and defers the restart while the daemon
+// is busy, `brew upgrade` and a manual replacement are picked up by
+// trySelfReload only on its next idle tick. Until the daemon re-execs, an
+// older parent talks to a newer helper.
+//
+// DisallowUnknownFields turned that ordinary window into a hard failure of
+// every task on the host: removing TaskContextForEnv.HandoffNote (#7626) left
+// old daemons still sending an untagged, non-omitempty `"HandoffNote": ""`,
+// and the new helper answered `json: unknown field "HandoffNote"` (MUL-7029).
+// Field drift in a struct nobody versions is expected here, so the request is
+// decoded on the same best-effort terms as the response the parent reads back:
+// a param the other side does not know about is dropped, not fatal.
 func decodePreparationRequest(in io.Reader) (preparationRequest, error) {
 	var request preparationRequest
-	decoder := json.NewDecoder(in)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	if err := json.NewDecoder(in).Decode(&request); err != nil {
 		return preparationRequest{}, err
 	}
 	return request, nil
@@ -222,6 +281,7 @@ func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) erro
 		response.Environment = env
 		if err != nil {
 			response.Error = err.Error()
+			response.ErrorKind = preparationErrorKind(err)
 		}
 	case preparationActionReuse:
 		if request.Reuse == nil || request.Prepare != nil {

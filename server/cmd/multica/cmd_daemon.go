@@ -35,7 +35,7 @@ var daemonCmd = &cobra.Command{
 var daemonStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the local agent runtime daemon",
-	Long:  "Start the daemon process that polls for tasks and executes them using local agent CLIs (Claude, Codex).\nRuns in the background by default. Use --foreground to run in the current terminal.",
+	Long:  "Start the daemon process that polls for runs and executes them using local agent CLIs (Claude, Codex).\nRuns in the background by default. Use --foreground to run in the current terminal.",
 	RunE:  runDaemonStart,
 }
 
@@ -72,9 +72,9 @@ var daemonLogsCmd = &cobra.Command{
 
 var daemonDiskUsageCmd = &cobra.Command{
 	Use:   "disk-usage",
-	Short: "Show daemon workspace disk usage by task or workspace",
-	Long: "Walks the daemon's workspaces root and reports per-task or per-workspace disk usage.\n" +
-		"Default view is per-task, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
+	Short: "Show daemon workspace disk usage by run or workspace",
+	Long: "Walks the daemon's workspaces root and reports per-run or per-workspace disk usage.\n" +
+		"Default view is per-run, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
 		"--top N keeps only the largest N entries.\n\n" +
 		"By default only the current profile's root is scanned. --all-profiles aggregates across every workspace\n" +
 		"root — the default root plus each ~/.multica/profiles/* root, including the Desktop app's dedicated\n" +
@@ -83,7 +83,7 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"Bytes are split into total and the artifact-cleanable subset (node_modules, .next, .turbo by default,\n" +
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
 		"A .git directory counts toward the total but never toward the artifact subset — the GC frees it only\n" +
-		"when it removes the whole task directory. Symlinks are never followed.\n\n" +
+		"when it removes the whole run directory. Symlinks are never followed.\n\n" +
 		"The STATUS column shows the current status of the issue each directory belongs to, which requires\n" +
 		"contacting the server. When the machine is offline, logged out, or the request fails, the column is\n" +
 		"left blank and the rest of the report still prints. --by-workspace has no STATUS column and therefore\n" +
@@ -97,12 +97,13 @@ func init() {
 	f.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	f.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	f.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
-	f.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	f.String("workspaces-root", "", "Base directory for run workspaces (env: MULTICA_WORKSPACES_ROOT)")
+	f.Duration("poll-interval", 0, "Run poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
-	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
+	f.Duration("agent-timeout", 0, "Absolute per-run wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	f.Duration("codex-handshake-timeout", 0, "Codex app-server startup RPC timeout (env: MULTICA_CODEX_HANDSHAKE_TIMEOUT)")
-	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+	f.Int("max-concurrent-tasks", 0, "Maximum concurrent runs (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	f.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
@@ -118,19 +119,20 @@ func init() {
 	rf.String("daemon-id", "", "Unique daemon identifier (env: MULTICA_DAEMON_ID)")
 	rf.String("device-name", "", "Human-readable device name (env: MULTICA_DAEMON_DEVICE_NAME)")
 	rf.String("runtime-name", "", "Runtime display name (env: MULTICA_AGENT_RUNTIME_NAME)")
-	rf.Duration("poll-interval", 0, "Task poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
+	rf.String("workspaces-root", "", "Base directory for run workspaces (env: MULTICA_WORKSPACES_ROOT)")
+	rf.Duration("poll-interval", 0, "Run poll interval (env: MULTICA_DAEMON_POLL_INTERVAL)")
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
-	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
+	rf.Duration("agent-timeout", 0, "Absolute per-run wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
 	rf.Duration("codex-handshake-timeout", 0, "Codex app-server startup RPC timeout (env: MULTICA_CODEX_HANDSHAKE_TIMEOUT)")
-	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
+	rf.Int("max-concurrent-tasks", 0, "Maximum concurrent runs (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
 
 	df := daemonDiskUsageCmd.Flags()
-	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by task")
-	df.Bool("by-task", false, "Per-task view (default; mutually exclusive with --by-workspace)")
+	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
+	df.Bool("by-task", false, "Per-run view (default; mutually exclusive with --by-workspace)")
 	df.Int("top", 0, "Keep only the largest N entries (per root in --all-profiles mode)")
 	df.String("output", "table", "Output format: table or json")
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
@@ -861,6 +863,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if v := flagString(cmd, "runtime-name"); v != "" {
 		args = append(args, "--runtime-name", v)
 	}
+	if v := flagString(cmd, "workspaces-root"); v != "" {
+		args = append(args, "--workspaces-root", v)
+	}
 	if d, _ := cmd.Flags().GetDuration("poll-interval"); d > 0 {
 		args = append(args, "--poll-interval", d.String())
 	}
@@ -962,14 +967,19 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		"MULTICA_AGENT_RUNTIME_NAME",
 		fileCfg.RuntimeName,
 	)
+	workspacesRoot, err := resolveWorkspacesRootForProfile(profile, flagString(cmd, "workspaces-root"))
+	if err != nil {
+		return err
+	}
 
 	overrides := daemon.Overrides{
-		ServerURL:   serverURL,
-		DaemonID:    flagString(cmd, "daemon-id"),
-		DeviceName:  deviceNameFlag,
-		RuntimeName: runtimeNameFlag,
-		Profile:     profile,
-		HealthPort:  healthPortForProfile(profile),
+		ServerURL:      serverURL,
+		DaemonID:       flagString(cmd, "daemon-id"),
+		DeviceName:     deviceNameFlag,
+		RuntimeName:    runtimeNameFlag,
+		WorkspacesRoot: workspacesRoot,
+		Profile:        profile,
+		HealthPort:     healthPortForProfile(profile),
 	}
 	pollFlag, _ := cmd.Flags().GetDuration("poll-interval")
 	pollOverride, err := resolveDaemonDurationOverride(pollFlag, "MULTICA_DAEMON_POLL_INTERVAL", fileCfg.PollInterval)
@@ -1309,7 +1319,7 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
-	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing a running task.")
+	fmt.Fprintln(os.Stderr, "Daemon is still stopping. It may be finishing an in-progress run.")
 	return nil
 }
 
@@ -1495,6 +1505,36 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 
 // --- daemon logs ---
 
+// tailLog is the seam tests replace to observe `daemon logs` without spawning
+// the platform tail implementation.
+var tailLog = tailLogFile
+
+// profileLabel names a profile for humans; the default profile has no name.
+func profileLabel(profile string) string {
+	if profile == "" {
+		return "default"
+	}
+	return profile
+}
+
+// daemonLogSourcePath resolves the daemon.log path for a profile —
+// ~/.multica/daemon.log for the default profile,
+// ~/.multica/profiles/<name>/daemon.log for a named one — and guarantees it is
+// absolute, because this path is shown to the user to paste into an editor or
+// another shell.
+//
+// A relative result means daemonDirForProfile could not resolve the home
+// directory and swallowed the error, leaving a bare "daemon.log". That is
+// reported instead of returned: it would resolve against the caller's cwd and
+// name a file with nothing to do with the daemon.
+func daemonLogSourcePath(profile string) (string, error) {
+	logPath := daemonLogPathForProfile(profile)
+	if !filepath.IsAbs(logPath) {
+		return "", fmt.Errorf("cannot resolve the state directory for profile %q", profileLabel(profile))
+	}
+	return logPath, nil
+}
+
 func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireHumanLocalCommand("daemon logs"); err != nil {
 		return err
@@ -1503,7 +1543,10 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	if err := requireKnownProfile(profile); err != nil {
 		return err
 	}
-	logPath := daemonLogPathForProfile(profile)
+	logPath, err := daemonLogSourcePath(profile)
+	if err != nil {
+		return err
+	}
 	if _, err := os.Stat(logPath); os.IsNotExist(err) {
 		return fmt.Errorf("no log file found at %s\nThe daemon may not have been started in background mode", logPath)
 	}
@@ -1511,7 +1554,14 @@ func runDaemonLogs(cmd *cobra.Command, _ []string) error {
 	follow, _ := cmd.Flags().GetBool("follow")
 	lines, _ := cmd.Flags().GetInt("lines")
 
-	return tailLogFile(logPath, lines, follow)
+	// Name the file before streaming it. Which daemon.log is live is otherwise
+	// unknowable — a stale default-profile log reads fine and looks current —
+	// and this command is the only thing that knows the answer. It goes to
+	// stderr and is written before the tail starts so `-f` output and any
+	// downstream pipe stay clean.
+	fmt.Fprintf(cmd.ErrOrStderr(), "Reading %s (profile: %s)\n", logPath, profileLabel(profile))
+
+	return tailLog(logPath, lines, follow)
 }
 
 // daemonAlive reports whether a health response indicates a live daemon
@@ -1567,7 +1617,8 @@ func envUnset(name string) bool {
 }
 
 // resolveDaemonStringOverride picks the value that goes into
-// daemon.Overrides for a string knob (device_name, runtime_name).
+// daemon.Overrides for a string knob (device_name, runtime_name,
+// workspaces_root).
 // Precedence, highest first:
 //
 //  1. flag (already resolved to string; empty means "not passed")
@@ -1589,6 +1640,20 @@ func resolveDaemonStringOverride(flagValue, envName, cfgValue string) string {
 		return ""
 	}
 	return cfgValue
+}
+
+// resolveWorkspacesRootForProfile is the single human-CLI resolver for the
+// daemon's task workspace root. Keeping daemon start, disk-usage, aggregate
+// scans, and cross-profile hints on this path prevents diagnostics from
+// drifting away from the directory the daemon actually uses.
+func resolveWorkspacesRootForProfile(profile, flagValue string) (string, error) {
+	fileCfg, _ := cli.LoadCLIConfigForProfile(profile)
+	override := resolveDaemonStringOverride(
+		flagValue,
+		"MULTICA_WORKSPACES_ROOT",
+		fileCfg.WorkspacesRoot,
+	)
+	return daemon.ResolveWorkspacesRoot(profile, override)
 }
 
 // resolveDaemonDurationOverride is the numeric counterpart for
@@ -1788,7 +1853,7 @@ func checkTaskDiskUsageScope(profile, rootOverride string, allProfiles bool) err
 // with. Failing closed on a missing value keeps that guess out of the output.
 func resolveDiskUsageRoot(taskContext bool, profile, rootOverride string) (string, error) {
 	if !taskContext {
-		return daemon.ResolveWorkspacesRoot(profile, rootOverride)
+		return resolveWorkspacesRootForProfile(profile, rootOverride)
 	}
 	root := strings.TrimSpace(os.Getenv(daemon.TaskWorkspacesRootEnv))
 	if root == "" {
@@ -1920,12 +1985,10 @@ func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, 
 // (e.g. when MULTICA_WORKSPACES_ROOT pins every profile to one directory) are
 // collapsed to a single entry.
 func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
-	seen := map[string]bool{}
 	out := make([]daemon.DiskUsageRoot, 0)
 
-	if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil {
+	if root, err := resolveWorkspacesRootForProfile("", ""); err == nil {
 		out = append(out, daemon.DiskUsageRoot{Profile: "", Root: root})
-		seen[root] = true
 	}
 
 	profilesRoot, err := profilesRootDir()
@@ -1944,8 +2007,8 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		root, err := daemon.ResolveWorkspacesRoot(name, "")
-		if err != nil || seen[root] {
+		root, err := resolveWorkspacesRootForProfile(name, "")
+		if err != nil || containsDiskUsageRoot(out, root) {
 			continue
 		}
 		// Skip profile roots that were never created on disk — a configured
@@ -1953,10 +2016,18 @@ func enumerateDiskUsageRoots() ([]daemon.DiskUsageRoot, error) {
 		if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
 			continue
 		}
-		seen[root] = true
 		out = append(out, daemon.DiskUsageRoot{Profile: name, Root: root})
 	}
 	return out, nil
+}
+
+func containsDiskUsageRoot(roots []daemon.DiskUsageRoot, candidate string) bool {
+	for _, root := range roots {
+		if samePath(root.Root, candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, byWorkspace bool) {
@@ -1974,7 +2045,7 @@ func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, b
 			printDiskUsageTaskTable(w, root.Report)
 		}
 	}
-	fmt.Fprintf(w, "\nGrand total: %s across %d task(s) in %d root(s); %s reclaimable as artifacts (%.1f%%).\n",
+	fmt.Fprintf(w, "\nGrand total: %s across %d run(s) in %d root(s); %s reclaimable as artifacts (%.1f%%).\n",
 		formatBytes(agg.TotalSizeBytes), agg.TotalTaskCount, len(agg.Roots),
 		formatBytes(agg.TotalArtifactSizeBytes), agg.TotalArtifactRatio*100)
 	if agg.TotalRepoCacheCount > 0 || agg.TotalRepoCacheSizeBytes > 0 {
@@ -1986,7 +2057,7 @@ func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, b
 func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	fmt.Fprintf(w, "Workspaces root: %s\n", report.WorkspacesRoot)
 	if report.TotalTaskCount == 0 {
-		fmt.Fprintln(w, "(no task directories)")
+		fmt.Fprintln(w, "(no run directories)")
 		printRepoCacheLine(w, report)
 		return
 	}
@@ -2010,13 +2081,13 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 		// Report-wide totals stay anchored to the full scan; the displayed
 		// row is what the user is currently looking at. Calling these out
 		// separately keeps `--top N` from misleading at-a-glance triage.
-		fmt.Fprintf(w, "\nShowing top %d of %d task(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
+		fmt.Fprintf(w, "\nShowing top %d of %d run(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",
 			len(report.Tasks), report.TotalTaskCount,
 			formatBytes(displayedSize), formatBytes(displayedArtifact),
 			formatBytes(report.TotalSizeBytes), formatBytes(report.TotalArtifactSizeBytes),
 			report.TotalArtifactRatio*100)
 	} else {
-		fmt.Fprintf(w, "\nTotal: %s across %d task(s); %s reclaimable as artifacts (%.1f%%).\n",
+		fmt.Fprintf(w, "\nTotal: %s across %d run(s); %s reclaimable as artifacts (%.1f%%).\n",
 			formatBytes(report.TotalSizeBytes), report.TotalTaskCount,
 			formatBytes(report.TotalArtifactSizeBytes), report.TotalArtifactRatio*100)
 	}
@@ -2094,9 +2165,9 @@ func printDiskUsageOtherRootsHint(w io.Writer, report daemon.DiskUsageReport, pr
 		return
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Other workspace roots contain task directories:")
+	fmt.Fprintln(w, "Other workspace roots contain run directories:")
 	for _, s := range suggestions {
-		fmt.Fprintf(w, "  %s  # %s (%d task%s)\n",
+		fmt.Fprintf(w, "  %s  # %s (%d run%s)\n",
 			s.Command, s.Root, s.TaskCount, pluralS(s.TaskCount))
 	}
 	fmt.Fprintln(w, "Run 'multica daemon disk-usage --all-profiles' for a combined total across all roots.")
@@ -2112,7 +2183,7 @@ type diskUsageProfileSuggestion struct {
 func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsageProfileSuggestion {
 	out := make([]diskUsageProfileSuggestion, 0)
 	if currentProfile != "" {
-		if root, err := daemon.ResolveWorkspacesRoot("", ""); err == nil && !samePath(root, currentRoot) {
+		if root, err := resolveWorkspacesRootForProfile("", ""); err == nil && !samePath(root, currentRoot) {
 			if taskCount := countDiskUsageTaskDirs(root); taskCount > 0 {
 				out = append(out, diskUsageProfileSuggestion{
 					Profile:   "",
@@ -2140,7 +2211,7 @@ func diskUsageProfileSuggestions(currentProfile, currentRoot string) []diskUsage
 		if profile == currentProfile {
 			continue
 		}
-		root, err := daemon.ResolveWorkspacesRoot(profile, "")
+		root, err := resolveWorkspacesRootForProfile(profile, "")
 		if err != nil || samePath(root, currentRoot) {
 			continue
 		}

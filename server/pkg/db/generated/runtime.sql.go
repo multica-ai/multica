@@ -16,7 +16,7 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now()
 WHERE (runtime_id = ANY($1::uuid[]) OR agent_id = ANY($2::uuid[]))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
 type CancelAgentTasksByRuntimeOrAgentParams struct {
@@ -107,6 +107,9 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -124,6 +127,19 @@ SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
 
 func (q *Queries) CountActiveAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveAgentsByRuntime, runtimeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countTasksByRuntime = `-- name: CountTasksByRuntime :one
+SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1
+`
+
+// Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
+// aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
+func (q *Queries) CountTasksByRuntime(ctx context.Context, runtimeID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countTasksByRuntime, runtimeID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -164,46 +180,6 @@ func (q *Queries) DeleteAgentRuntime(ctx context.Context, id pgtype.UUID) error 
 	return err
 }
 
-const deleteStaleOfflineRuntimes = `-- name: DeleteStaleOfflineRuntimes :many
-DELETE FROM agent_runtime
-WHERE status = 'offline'
-  AND last_seen_at < now() - make_interval(secs => $1::double precision)
-  AND NOT EXISTS (
-    SELECT 1
-    FROM agent
-    WHERE agent.runtime_id = agent_runtime.id
-  )
-RETURNING id, workspace_id
-`
-
-type DeleteStaleOfflineRuntimesRow struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Deletes runtimes that have been offline for longer than the TTL and have
-// no agents bound (active or archived). The FK constraint on agent.runtime_id
-// is ON DELETE RESTRICT, so we must exclude all agent references.
-func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds float64) ([]DeleteStaleOfflineRuntimesRow, error) {
-	rows, err := q.db.Query(ctx, deleteStaleOfflineRuntimes, staleSeconds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []DeleteStaleOfflineRuntimesRow{}
-	for rows.Next() {
-		var i DeleteStaleOfflineRuntimesRow
-		if err := rows.Scan(&i.ID, &i.WorkspaceID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const deleteSystemAgentsByRuntime = `-- name: DeleteSystemAgentsByRuntime :exec
 DELETE FROM agent WHERE runtime_id = $1 AND kind = 'system'
 `
@@ -217,22 +193,43 @@ func (q *Queries) DeleteSystemAgentsByRuntime(ctx context.Context, runtimeID pgt
 }
 
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
-UPDATE agent_task_queue
+WITH victims AS (
+  SELECT task.id
+  FROM agent_task_queue task
+  JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+  WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND runtime.status = 'offline'
+    AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
+        now() - make_interval(secs => $1::double precision)
+  ORDER BY COALESCE(runtime.last_seen_at, runtime.updated_at), task.created_at
+  LIMIT $2::int
+  FOR UPDATE OF task SKIP LOCKED
+)
+UPDATE agent_task_queue AS task
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline',
     wait_reason = NULL
-WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
-  AND runtime_id IN (
-    SELECT id FROM agent_runtime WHERE status = 'offline'
-  )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+FROM victims
+WHERE task.id = victims.id
+  AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision
 `
 
+type FailTasksForOfflineRuntimesParams struct {
+	ReconnectGraceSecs float64 `json:"reconnect_grace_secs"`
+	MaxPerTick         int32   `json:"max_per_tick"`
+}
+
 // Marks dispatched/running/waiting_local_directory tasks as failed when
-// their runtime is offline. This cleans up orphaned tasks after a daemon
-// crash or network partition.
-func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes)
+// their runtime has remained offline beyond the reconnect grace. A short or
+// medium network partition must not terminate a daemon process that is still
+// running locally; a real daemon restart is recovered separately through
+// RecoverOrphanedTasksForRuntime. Bounded per tick so a large recovery backlog
+// cannot monopolise the sweeper transaction. last_seen_at is normally set by
+// the first heartbeat; updated_at is only the fallback for a never-heartbeated
+// runtime, and a forced-offline write starts its grace from that update.
+func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context, arg FailTasksForOfflineRuntimesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes, arg.ReconnectGraceSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
@@ -292,6 +289,9 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -481,6 +481,50 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 	return i, err
 }
 
+const getAgentRuntimeHeartbeatLeases = `-- name: GetAgentRuntimeHeartbeatLeases :many
+SELECT id, workspace_id, daemon_id, status, last_seen_at
+FROM agent_runtime
+WHERE id = ANY($1::uuid[])
+`
+
+type GetAgentRuntimeHeartbeatLeasesRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	DaemonID    pgtype.Text        `json:"daemon_id"`
+	Status      string             `json:"status"`
+	LastSeenAt  pgtype.Timestamptz `json:"last_seen_at"`
+}
+
+// Narrow connection-time and heartbeat-reconciliation projection. The daemon
+// WebSocket authenticates its whole runtime set in one round trip and then
+// keeps these immutable ownership fields plus liveness state in its connection
+// lease, avoiding a GetAgentRuntime call on every heartbeat.
+func (q *Queries) GetAgentRuntimeHeartbeatLeases(ctx context.Context, ids []pgtype.UUID) ([]GetAgentRuntimeHeartbeatLeasesRow, error) {
+	rows, err := q.db.Query(ctx, getAgentRuntimeHeartbeatLeases, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetAgentRuntimeHeartbeatLeasesRow{}
+	for rows.Next() {
+		var i GetAgentRuntimeHeartbeatLeasesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Status,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAgentRuntimes = `-- name: GetAgentRuntimes :many
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE id = ANY($1::uuid[])
@@ -522,6 +566,64 @@ func (q *Queries) GetAgentRuntimes(ctx context.Context, ids []pgtype.UUID) ([]Ag
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const isAgentRuntimeEligibleForGC = `-- name: IsAgentRuntimeEligibleForGC :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime
+  WHERE agent_runtime.id = $1
+    AND status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => $2::double precision)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM agent
+      WHERE agent.runtime_id = agent_runtime.id
+        AND agent.kind = 'user'
+        AND agent.archived_at IS NULL
+    )
+) AS eligible
+`
+
+type IsAgentRuntimeEligibleForGCParams struct {
+	ID           pgtype.UUID `json:"id"`
+	StaleSeconds float64     `json:"stale_seconds"`
+}
+
+// Re-checks the mutable GC predicates after the caller has locked the runtime
+// row FOR UPDATE. Agent inserts/updates and task ownership writes take FOR KEY
+// SHARE on that row, so no new dependency can commit between this check and
+// DeleteAgentRuntime in the same transaction.
+func (q *Queries) IsAgentRuntimeEligibleForGC(ctx context.Context, arg IsAgentRuntimeEligibleForGCParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isAgentRuntimeEligibleForGC, arg.ID, arg.StaleSeconds)
+	var eligible bool
+	err := row.Scan(&eligible)
+	return eligible, err
+}
+
+const listAgentRuntimeIDsByWorkspace = `-- name: ListAgentRuntimeIDsByWorkspace :many
+SELECT id FROM agent_runtime
+WHERE workspace_id = $1
+ORDER BY id ASC
+`
+
+func (q *Queries) ListAgentRuntimeIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -655,6 +757,110 @@ func (q *Queries) ListDaemonCustomNames(ctx context.Context, arg ListDaemonCusto
 			return nil, err
 		}
 		items = append(items, custom_name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleOfflineRuntimeGCCandidates = `-- name: ListStaleOfflineRuntimeGCCandidates :many
+SELECT id FROM agent_runtime
+WHERE status = 'offline'
+  AND last_seen_at < now() - make_interval(secs => $1::double precision)
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent
+    WHERE agent.runtime_id = agent_runtime.id
+      AND agent.kind = 'user'
+      AND agent.archived_at IS NULL
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent_task_queue
+    WHERE agent_task_queue.runtime_id = agent_runtime.id
+      AND agent_task_queue.completed_at IS NULL
+  )
+ORDER BY last_seen_at ASC, id ASC
+LIMIT $2::int
+`
+
+type ListStaleOfflineRuntimeGCCandidatesParams struct {
+	StaleSeconds float64 `json:"stale_seconds"`
+	MaxPerTick   int32   `json:"max_per_tick"`
+}
+
+// Bounded gather for runtime GC. Non-terminal task owners are deliberately
+// excluded here so one permanently-deferred task cannot monopolise the front
+// of every batch and starve otherwise-drainable runtimes. The per-runtime
+// transaction re-checks every predicate after taking FOR UPDATE, so this is an
+// efficiency filter rather than the correctness boundary.
+func (q *Queries) ListStaleOfflineRuntimeGCCandidates(ctx context.Context, arg ListStaleOfflineRuntimeGCCandidatesParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listStaleOfflineRuntimeGCCandidates, arg.StaleSeconds, arg.MaxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisibleAgentRuntimes = `-- name: ListVisibleAgentRuntimes :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'public')
+ORDER BY created_at ASC
+`
+
+type ListVisibleAgentRuntimesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// A private runtime is another member's machine and must not leak into their
+// runtime list. The owner can always see their own runtime; everyone else
+// sees only runtimes the owner has explicitly shared with the workspace.
+func (q *Queries) ListVisibleAgentRuntimes(ctx context.Context, arg ListVisibleAgentRuntimesParams) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listVisibleAgentRuntimes, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.Visibility,
+			&i.ProfileID,
+			&i.CustomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1006,6 +1212,33 @@ func (q *Queries) SetAgentRuntimeOffline(ctx context.Context, id pgtype.UUID) er
 	return err
 }
 
+const setAgentRuntimeOfflineWithReason = `-- name: SetAgentRuntimeOfflineWithReason :exec
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = metadata || jsonb_build_object('offline_reason', $2::jsonb),
+    updated_at = now()
+WHERE id = $1
+`
+
+type SetAgentRuntimeOfflineWithReasonParams struct {
+	ID            pgtype.UUID `json:"id"`
+	OfflineReason []byte      `json:"offline_reason"`
+}
+
+// Takes a runtime offline and records WHY, for the one class of cause the user
+// has to repair before the runtime can come back (MUL-6164). Everything that
+// merely stops — daemon shutdown, laptop asleep — uses SetAgentRuntimeOffline
+// and leaves no reason, because "wait for it" needs no explanation.
+//
+// Merged into metadata rather than a column: registration overwrites metadata
+// wholesale (`metadata = EXCLUDED.metadata`), so a runtime that comes back
+// drops the reason as a side effect of being usable again — there is no stale
+// explanation to clean up and no code path that has to remember to clear it.
+func (q *Queries) SetAgentRuntimeOfflineWithReason(ctx context.Context, arg SetAgentRuntimeOfflineWithReasonParams) error {
+	_, err := q.db.Exec(ctx, setAgentRuntimeOfflineWithReason, arg.ID, arg.OfflineReason)
+	return err
+}
+
 const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
 UPDATE agent_runtime
 SET last_seen_at = now()
@@ -1032,10 +1265,11 @@ func (q *Queries) TouchAgentRuntimeLastSeen(ctx context.Context, id pgtype.UUID)
 	return result.RowsAffected(), nil
 }
 
-const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :execrows
+const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatch :many
 UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY($1::uuid[]) AND status = 'online'
+RETURNING id
 `
 
 // Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
@@ -1044,15 +1278,27 @@ WHERE id = ANY($1::uuid[]) AND status = 'online'
 //
 // Same load-bearing predicate as the single-id form: status='online' avoids
 // silently un-deleting a sweeper-flipped offline row, and we deliberately do
-// NOT touch updated_at so the rows stay HOT-eligible. Affected-rows < len(ids)
-// means some IDs raced to offline between Schedule and flush; their next beat
-// will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
-func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, touchAgentRuntimesLastSeenBatch, ids)
+// NOT touch updated_at so the rows stay HOT-eligible. RETURNING is load-bearing:
+// the scheduler reconciles omitted IDs in one narrow batch query, restoring
+// sweeper-raced offline rows and invalidating connections for deleted rows.
+func (q *Queries) TouchAgentRuntimesLastSeenBatch(ctx context.Context, ids []pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, touchAgentRuntimesLastSeenBatch, ids)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return result.RowsAffected(), nil
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const unbindTasksFromRuntime = `-- name: UnbindTasksFromRuntime :execrows
@@ -1081,7 +1327,7 @@ const unbindUserAgentsFromRuntime = `-- name: UnbindUserAgentsFromRuntime :many
 UPDATE agent
 SET runtime_id = NULL, updated_at = now()
 WHERE runtime_id = $1 AND kind = 'user'
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters
 `
 
 // MUL-5559: the runtime-delete replacement for archive-then-hard-delete. Every
@@ -1132,6 +1378,7 @@ func (q *Queries) UnbindUserAgentsFromRuntime(ctx context.Context, runtimeID pgt
 			&i.SystemKey,
 			&i.DisabledRuntimeSkills,
 			&i.ServiceTier,
+			&i.ConversationStarters,
 		); err != nil {
 			return nil, err
 		}

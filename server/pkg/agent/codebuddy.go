@@ -135,9 +135,9 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -160,7 +160,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	stderrBuf := newStderrTail(newLogWriter(b.cfg.Logger, "[codebuddy:stderr] "), agentStderrTailBytes)
 	cmd.Stderr = stderrBuf
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start codebuddy: %w", err)
@@ -279,6 +279,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 		// Wait for process exit.
 		exitErr := cmd.Wait()
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a

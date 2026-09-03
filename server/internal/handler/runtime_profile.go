@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -363,7 +364,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
 	// agent still pointing at one of these rows would turn a bare delete into a
 	// 500. Active agents are refused (409); everything else is unbound rather
-	// than destroyed, exactly as in unbindRuntimeForDelete.
+	// than destroyed, exactly as in service.TeardownRuntime.
 	// Guard: refuse while any active (non-archived) agent is bound to one of
 	// the profile's runtimes. Keep this a 409 — the profile is the thing that
 	// defines those runtimes, so the user should retire the agents or move them
@@ -429,16 +430,25 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	// remaining (archived) agents and their task history, cancel anything still
 	// in flight, and hard-delete only the system agents, so removing the runtime
 	// rows below cannot destroy an agent, a conversation or a task record.
-	var teardowns []runtimeTeardownResult
+	var teardowns []service.RuntimeTeardownResult
 	for _, rid := range runtimeIDs {
-		teardown, err := unbindRuntimeForDelete(r.Context(), qtx, rid)
+		teardown, err := service.TeardownRuntime(r.Context(), qtx, rid, service.RuntimeTeardownOptions{CancelNonTerminalTasks: true})
 		if err != nil {
-			if errors.Is(err, errRuntimeNotDrained) {
+			if errors.Is(err, service.ErrRuntimeNotDrained) {
 				slog.Error("runtime profile delete aborted: tasks not drained",
 					"runtime_id", uuidToString(rid), "profile_id", uuidToString(profileUUID), "error", err)
 				writeJSON(w, http.StatusConflict, map[string]any{
 					"error": "a runtime of this profile still has tasks in flight; retry in a moment.",
 					"code":  "runtime_delete_not_drained",
+				})
+				return
+			}
+			if errors.Is(err, service.ErrRuntimeWorkspaceMismatch) {
+				slog.Error("runtime profile delete aborted: agent workspace mismatch",
+					"runtime_id", uuidToString(rid), "profile_id", uuidToString(profileUUID), "error", err)
+				writeJSON(w, http.StatusConflict, map[string]any{
+					"error": "a runtime of this profile has an invalid cross-workspace agent binding.",
+					"code":  "runtime_delete_workspace_mismatch",
 				})
 				return
 			}
@@ -452,10 +462,11 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Now the runtime rows have no agent references; remove them, then the
 	// profile itself.
-	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
+	deletedRuntimes, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
 		ProfileID:   profileUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("DeleteAgentRuntimesByProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
 		writeError(w, http.StatusInternalServerError, "failed to clean up runtime instances")
 		return
@@ -473,6 +484,9 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
+	}
+	for _, runtime := range deletedRuntimes {
+		h.NotifyRuntimeGone(uuidToString(runtime.ID))
 	}
 
 	// Tell connected clients to refetch the runtime list (instances vanished),

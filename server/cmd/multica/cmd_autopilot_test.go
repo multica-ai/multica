@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -19,7 +20,6 @@ func newAutopilotCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("mode", "", "")
-	cmd.Flags().String("priority", "none", "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
 	cmd.Flags().StringArray("subscriber", nil, "")
@@ -33,7 +33,6 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("description", "", "")
 	cmd.Flags().String("agent", "", "")
 	cmd.Flags().String("project", "", "")
-	cmd.Flags().String("priority", "", "")
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("mode", "", "")
 	cmd.Flags().String("issue-title-template", "", "")
@@ -41,6 +40,278 @@ func newAutopilotUpdateTestCmd() *cobra.Command {
 	cmd.Flags().Bool("clear-subscribers", false, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
+}
+
+func TestAutopilotCommandsRejectRemovedPriorityFlag(t *testing.T) {
+	for name, cmd := range map[string]*cobra.Command{
+		"create": autopilotCreateCmd,
+		"update": autopilotUpdateCmd,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if cmd.Flags().Lookup("priority") != nil {
+				t.Fatalf("autopilot %s still exposes the removed --priority flag", name)
+			}
+			if err := cmd.ParseFlags([]string{"--priority", "high"}); err == nil {
+				t.Fatalf("autopilot %s silently accepted the removed --priority flag", name)
+			}
+		})
+	}
+}
+
+func newAutopilotGetTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "get"}
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("show-secrets", false, "")
+	return cmd
+}
+
+func TestRunAutopilotGetRedactsWebhookCredentialsByDefault(t *testing.T) {
+	const (
+		autopilotID  = "11111111-1111-1111-1111-111111111111"
+		webhookToken = "awt_super-secret-7890"
+		webhookPath  = "/api/webhooks/autopilots/" + webhookToken
+		webhookURL   = "https://hooks.example.com" + webhookPath
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID, "title": "Deploy"},
+			"triggers": []map[string]any{
+				{
+					"id":                  "trigger-1",
+					"kind":                "webhook",
+					"webhook_token":       webhookToken,
+					"webhook_path":        webhookPath,
+					"webhook_url":         webhookURL,
+					"has_signing_secret":  true,
+					"signing_secret_hint": "abcd",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotGet(newAutopilotGetTestCmd(), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotGet: %v", err)
+	}
+	for _, secret := range []string{webhookToken, webhookPath, webhookURL} {
+		if strings.Contains(out, secret) {
+			t.Fatalf("default output leaked webhook credential %q:\n%s", secret, out)
+		}
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("default output is not valid JSON: %v\n%s", err, out)
+	}
+	triggers, ok := got["triggers"].([]any)
+	if !ok || len(triggers) != 1 {
+		t.Fatalf("triggers = %#v, want one trigger", got["triggers"])
+	}
+	trigger, ok := triggers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("trigger = %#v, want object", triggers[0])
+	}
+	for _, field := range []string{"webhook_token", "webhook_path", "webhook_url"} {
+		if trigger[field] != nil {
+			t.Errorf("%s = %#v, want null", field, trigger[field])
+		}
+	}
+	if trigger["has_webhook_token"] != true {
+		t.Errorf("has_webhook_token = %#v, want true", trigger["has_webhook_token"])
+	}
+	if trigger["webhook_token_hint"] != "7890" {
+		t.Errorf("webhook_token_hint = %#v, want %q", trigger["webhook_token_hint"], "7890")
+	}
+	if trigger["signing_secret_hint"] != "abcd" {
+		t.Errorf("signing_secret_hint = %#v, want existing non-credential metadata preserved", trigger["signing_secret_hint"])
+	}
+}
+
+func TestRunAutopilotGetShowSecretsIsExplicitAndWarns(t *testing.T) {
+	const (
+		autopilotID  = "11111111-1111-1111-1111-111111111111"
+		webhookToken = "awt_super-secret-7890"
+		webhookPath  = "/api/webhooks/autopilots/" + webhookToken
+		webhookURL   = "https://hooks.example.com" + webhookPath
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID, "title": "Deploy"},
+			"triggers": []map[string]any{
+				{
+					"id":            "trigger-1",
+					"kind":          "webhook",
+					"webhook_token": webhookToken,
+					"webhook_path":  webhookPath,
+					"webhook_url":   webhookURL,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotGetTestCmd()
+	_ = cmd.Flags().Set("show-secrets", "true")
+	stderr := captureStderr(t)
+	out, err := captureStdout(t, func() error {
+		return runAutopilotGet(cmd, []string{autopilotID})
+	})
+	errOut := stderr.read()
+	if err != nil {
+		t.Fatalf("runAutopilotGet: %v", err)
+	}
+	for _, secret := range []string{webhookToken, webhookPath, webhookURL} {
+		if !strings.Contains(out, secret) {
+			t.Errorf("--show-secrets output missing %q:\n%s", secret, out)
+		}
+	}
+	if !strings.Contains(strings.ToLower(errOut), "warning") ||
+		!strings.Contains(strings.ToLower(errOut), "webhook credentials") ||
+		!strings.Contains(strings.ToLower(errOut), "logs") {
+		t.Fatalf("stderr = %q, want credential exposure warning", errOut)
+	}
+	if strings.Contains(errOut, webhookToken) {
+		t.Fatalf("warning itself leaked webhook token: %q", errOut)
+	}
+}
+
+func TestRunAutopilotGetTableOutputDoesNotExposeWebhookCredentials(t *testing.T) {
+	const (
+		autopilotID  = "11111111-1111-1111-1111-111111111111"
+		webhookToken = "awt_super-secret-7890"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{
+				"id":             autopilotID,
+				"title":          "Deploy",
+				"status":         "active",
+				"execution_mode": "run_only",
+			},
+			"triggers": []map[string]any{
+				{
+					"id":            "trigger-1",
+					"kind":          "webhook",
+					"webhook_token": webhookToken,
+					"webhook_path":  "/api/webhooks/autopilots/" + webhookToken,
+					"webhook_url":   "https://hooks.example.com/api/webhooks/autopilots/" + webhookToken,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotGetTestCmd()
+	_ = cmd.Flags().Set("output", "table")
+	out, err := captureStdout(t, func() error {
+		return runAutopilotGet(cmd, []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotGet: %v", err)
+	}
+	if strings.Contains(out, webhookToken) {
+		t.Fatalf("table output leaked webhook token:\n%s", out)
+	}
+	if !strings.Contains(out, "Deploy") || !strings.Contains(out, "run_only") {
+		t.Fatalf("table output lost ordinary autopilot details:\n%s", out)
+	}
+}
+
+func TestRedactAutopilotWebhookCredentialsDoesNotDependOnTriggerKind(t *testing.T) {
+	const webhookToken = "awt_schema-drift-secret-1234"
+	trigger := map[string]any{
+		"id":            "trigger-1",
+		"webhook_token": webhookToken,
+		"webhook_path":  "/api/webhooks/autopilots/" + webhookToken,
+		"webhook_url":   "https://hooks.example.com/api/webhooks/autopilots/" + webhookToken,
+	}
+	resp := map[string]any{"triggers": []any{trigger}}
+
+	redactAutopilotWebhookCredentials(resp)
+
+	for _, field := range []string{"webhook_token", "webhook_path", "webhook_url"} {
+		if trigger[field] != nil {
+			t.Errorf("%s = %#v, want null", field, trigger[field])
+		}
+	}
+	if trigger["has_webhook_token"] != true || trigger["webhook_token_hint"] != "1234" {
+		t.Fatalf("redaction metadata = has:%#v hint:%#v", trigger["has_webhook_token"], trigger["webhook_token_hint"])
+	}
+}
+
+func TestRedactAutopilotWebhookCredentialsReportsServerRedactedToken(t *testing.T) {
+	trigger := map[string]any{
+		"id":            "trigger-1",
+		"kind":          "webhook",
+		"webhook_token": nil,
+		"webhook_path":  nil,
+		"webhook_url":   nil,
+	}
+	resp := map[string]any{"triggers": []any{trigger}}
+
+	redactAutopilotWebhookCredentials(resp)
+
+	if trigger["has_webhook_token"] != true {
+		t.Fatalf("has_webhook_token = %#v, want true for a permission-redacted webhook", trigger["has_webhook_token"])
+	}
+	if trigger["webhook_token_hint"] != nil {
+		t.Fatalf("webhook_token_hint = %#v, want null when the server withheld the token", trigger["webhook_token_hint"])
+	}
+}
+
+func TestWebhookTokenHintDoesNotExposeShortToken(t *testing.T) {
+	const shortToken = "abc"
+	if hint := webhookTokenHint(shortToken); hint != "" {
+		t.Fatalf("webhookTokenHint(%q) = %q, want empty hint", shortToken, hint)
+	}
+}
+
+func TestRunAutopilotGetRejectsShowSecretsWithTableOutput(t *testing.T) {
+	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newAutopilotGetTestCmd()
+	_ = cmd.Flags().Set("output", "table")
+	_ = cmd.Flags().Set("show-secrets", "true")
+
+	err := runAutopilotGet(cmd, []string{"11111111-1111-1111-1111-111111111111"})
+	if err == nil {
+		t.Fatal("expected --show-secrets with table output to fail")
+	}
+	if !strings.Contains(err.Error(), "--show-secrets requires --output json") {
+		t.Fatalf("error = %v, want output-mode guidance", err)
+	}
 }
 
 func TestResolveAgent(t *testing.T) {
@@ -471,5 +742,161 @@ func TestUUIDRegexp(t *testing.T) {
 		if got := uuidRegexp.MatchString(tt.in); got != tt.want {
 			t.Errorf("uuidRegexp.MatchString(%q) = %v, want %v", tt.in, got, tt.want)
 		}
+	}
+}
+
+func newAutopilotTriggerListTestCmd(output string) *cobra.Command {
+	cmd := &cobra.Command{Use: "trigger-list"}
+	cmd.Flags().String("output", output, "")
+	cmd.Flags().Bool("full-id", false, "")
+	return cmd
+}
+
+// TestRunAutopilotTriggerListSurfacesIDs covers MUL-6680: the trigger ids that
+// trigger-update / trigger-delete / trigger-rotate-url require must be readable
+// from a command of their own, not only by knowing that `get --output json`
+// returns "triggers" as a sibling of "autopilot".
+func TestRunAutopilotTriggerListSurfacesIDs(t *testing.T) {
+	const (
+		autopilotID = "11111111-1111-1111-1111-111111111111"
+		triggerID   = "22222222-2222-2222-2222-222222222222"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID, "title": "Deploy"},
+			"triggers": []map[string]any{
+				{
+					"id":              triggerID,
+					"kind":            "schedule",
+					"enabled":         true,
+					"cron_expression": "0 9 * * 1-5",
+					"timezone":        "America/New_York",
+					"label":           "weekday morning",
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	// A task-scoped mat_ token so the test also passes inside an agent workdir,
+	// where a daemon task marker makes newAPIClient reject a plain token.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("table"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList: %v", err)
+	}
+	// The short id prefix is what trigger-update accepts, so it must be visible.
+	for _, want := range []string{triggerID[:8], "schedule", "0 9 * * 1-5", "weekday morning"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table output missing %q:\n%s", want, out)
+		}
+	}
+
+	out, err = captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("json"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList (json): %v", err)
+	}
+	var got struct {
+		Triggers []map[string]any `json:"triggers"`
+		Total    int              `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("json output is not valid JSON: %v\n%s", err, out)
+	}
+	if got.Total != 1 || len(got.Triggers) != 1 {
+		t.Fatalf("expected exactly one trigger, got total=%d triggers=%v", got.Total, got.Triggers)
+	}
+	if got.Triggers[0]["id"] != triggerID {
+		t.Errorf("id = %#v, want %q", got.Triggers[0]["id"], triggerID)
+	}
+}
+
+// Webhook triggers carry a URL that grants the ability to fire the autopilot,
+// so trigger-list must redact it the same way `get` does.
+func TestRunAutopilotTriggerListRedactsWebhookCredentials(t *testing.T) {
+	const (
+		autopilotID  = "11111111-1111-1111-1111-111111111111"
+		webhookToken = "awt_super-secret-7890"
+	)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/autopilots/"+autopilotID {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"autopilot": map[string]any{"id": autopilotID},
+			"triggers": []map[string]any{
+				{
+					"id":            "22222222-2222-2222-2222-222222222222",
+					"kind":          "webhook",
+					"enabled":       true,
+					"webhook_token": webhookToken,
+					"webhook_path":  "/api/webhooks/autopilots/" + webhookToken,
+					"webhook_url":   "https://hooks.example.com/api/webhooks/autopilots/" + webhookToken,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	// A task-scoped mat_ token so the test also passes inside an agent workdir,
+	// where a daemon task marker makes newAPIClient reject a plain token.
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	out, err := captureStdout(t, func() error {
+		return runAutopilotTriggerList(newAutopilotTriggerListTestCmd("json"), []string{autopilotID})
+	})
+	if err != nil {
+		t.Fatalf("runAutopilotTriggerList: %v", err)
+	}
+	if strings.Contains(out, webhookToken) {
+		t.Fatalf("trigger-list leaked webhook credential:\n%s", out)
+	}
+}
+
+func TestRelativeTimestampAt(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	at := func(d time.Duration) string {
+		return now.Add(d).Format(time.RFC3339)
+	}
+
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// An autopilot with no schedule must read as visibly different from
+		// one that is scheduled — that ambiguity is the MUL-6680 misdiagnosis.
+		{"empty", "", "—"},
+		{"unparseable", "not-a-timestamp", "—"},
+		{"seconds ahead", at(30 * time.Second), "in 30s"},
+		{"minutes ahead", at(45 * time.Minute), "in 45m"},
+		{"hours ahead", at(2 * time.Hour), "in 2h"},
+		{"days ahead", at(72 * time.Hour), "in 3d"},
+		{"minutes past", at(-45 * time.Minute), "45m ago"},
+		{"hours past", at(-2 * time.Hour), "2h ago"},
+		{"days past", at(-72 * time.Hour), "3d ago"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := relativeTimestampAt(tc.in, now); got != tc.want {
+				t.Errorf("relativeTimestampAt(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

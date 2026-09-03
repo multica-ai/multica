@@ -41,6 +41,7 @@ var modelPrices = map[string]ModelPrice{
 	// static table cannot schedule the published post-intro $3 / $15 change yet,
 	// so keep the intro rate here and update the row when catalog support exists.
 	"anthropic:claude-sonnet-5":   {Provider: "anthropic", Model: "claude-sonnet-5", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.50, OutputPerM: 10.00},
+	"anthropic:claude-fable-5-1":  {Provider: "anthropic", Model: "claude-fable-5-1", InputPerM: 10.00, CacheReadPerM: 0.25, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-fable-5":    {Provider: "anthropic", Model: "claude-fable-5", InputPerM: 10.00, CacheReadPerM: 1.00, CacheWritePerM: 12.50, OutputPerM: 50.00},
 	"anthropic:claude-opus-5":     {Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
 	"anthropic:claude-opus-4.8":   {Provider: "anthropic", Model: "claude-opus-4.8", InputPerM: 5.00, CacheReadPerM: 0.50, CacheWritePerM: 6.25, OutputPerM: 25.00},
@@ -68,13 +69,66 @@ var modelPrices = map[string]ModelPrice{
 	// packages/views/runtimes/utils.ts; keep the two tables in sync.
 	// `grok-composer-*` ships in the Grok Build catalog but is absent from the
 	// price sheet, so it stays unmapped rather than inheriting a guessed rate.
+	"xai:grok-4.6":                     {Provider: "xai", Model: "grok-4.6", InputPerM: 2.00, CacheReadPerM: 0.50, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.5":                     {Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
 	"xai:grok-4.3":                     {Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-build-0.1":               {Provider: "xai", Model: "grok-build-0.1", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 2.00},
 	"xai:grok-4.20-multi-agent-0309":   {Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-reasoning":     {Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 	"xai:grok-4.20-0309-non-reasoning": {Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	// Alibaba Qwen (models.dev providers/alibaba, accessed 2026-08-13;
+	// sourced from alibabacloud.com model-pricing — International ≤256K
+	// input tier — and the qwencloud.com model pages). qwen3.7-plus and
+	// qwen3.6-flash carry the published International ≤256K rates;
+	// CacheWritePerM is the Explicit Cache Creation rate (1.25x input) and
+	// CacheReadPerM the Explicit Cache Read rate (0.1x input). qwen3.8-max
+	// is priced at the published pay-as-you-go rate from its
+	// qwencloud.com/models/qwen3.8-max page (the source models.dev cites);
+	// qwen3.8-max-preview is served through the Alibaba Token Plan
+	// subscription, which does not bill per token, so it stays at 0 (same
+	// convention as the free GLM flash tiers). Mirror
+	// packages/views/runtimes/utils.ts.
+	"alibaba:qwen3.7-plus":        {Provider: "alibaba", Model: "qwen3.7-plus", InputPerM: 0.40, CacheReadPerM: 0.04, CacheWritePerM: 0.50, OutputPerM: 1.60},
+	"alibaba:qwen3.6-flash":       {Provider: "alibaba", Model: "qwen3.6-flash", InputPerM: 0.25, CacheReadPerM: 0.025, CacheWritePerM: 0.3125, OutputPerM: 1.50},
+	"alibaba:qwen3.8-max":         {Provider: "alibaba", Model: "qwen3.8-max", InputPerM: 2.00, CacheReadPerM: 0.17, CacheWritePerM: 2.50, OutputPerM: 6.00},
+	"alibaba:qwen3.8-max-preview": {Provider: "alibaba", Model: "qwen3.8-max-preview", InputPerM: 0, CacheReadPerM: 0, CacheWritePerM: 0, OutputPerM: 0},
+	// Moonshot Kimi K3 (platform.kimi.ai/docs/pricing/chat-k3 via models.dev
+	// providers/moonshotai/models/kimi-k3.toml). Moonshot bills no separate
+	// cache write, so CacheWritePerM mirrors Input.
+	"moonshotai:kimi-k3": {Provider: "moonshotai", Model: "kimi-k3", InputPerM: 3.0, CacheReadPerM: 0.30, CacheWritePerM: 3.0, OutputPerM: 15.0},
+	// Volcengine Ark (ark.cn-beijing.volces.com). `ark-code-latest` is a
+	// rolling alias whose target can be switched in the Volcengine console
+	// (across model families), so it is not a stable model identity; the
+	// daemon reports the alias itself, never the resolved model. No rate is
+	// published for the alias, so it stays unmapped rather than inheriting
+	// a guessed rate (same convention as xAI's `grok-composer-*`).
 }
+
+// claudeVersionEnd terminates a Claude family rule: at most one suffix that
+// the frontend resolver normalizes away, and then the END of the id. Appending
+// it keeps a rule from swallowing a later SKU in the same family — without it
+// `claude-fable-5` also matches `claude-fable-5-1`, whose cache reads are a
+// quarter of Fable 5's, so those reads bill at 4x.
+//
+// The admitted suffixes are exactly what `stripContextTag` and `stripDate`
+// remove in packages/views/runtimes/utils.ts before its exact-key lookup, so
+// both sides accept the same suffix forms. (Only the suffixes: the Claude
+// rules are still substring matches, so a malformed PREFIX is out of scope
+// here.) The trailing `$` is what makes that true and is not optional: these rules are substring matches, so an
+// alternative that merely starts a suffix still matches when arbitrary text
+// follows it (`claude-fable-5-1-latest-preview`, `claude-fable-5-1[1m]junk`),
+// which is the silent tier-borrowing this constant exists to prevent. The
+// bracket form requires a complete tag for the same reason.
+//
+// A date snapshot carrying a context tag (`claude-fable-5-20260401[1m]`) is
+// covered by the tag-stripping retry in PriceForModelAlias, so it does not
+// need a combined alternative here.
+//
+// Anything else — another version digit, a `-preview`-style qualifier — is a
+// distinct SKU at an unknown rate and stays unmapped until it gets a row of
+// its own, the same "every catalog SKU needs its own row" rule the frontend
+// table states.
+const claudeVersionEnd = `(?:-20\d{6}|-20\d{2}-\d{2}-\d{2}|-latest|\[[^\]]+\])?$`
 
 var modelAliasRules = []struct {
 	re       *regexp.Regexp
@@ -96,7 +150,12 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]3-codex$`), "openai:gpt-5.3-codex"},
 	{regexp.MustCompile(`(^|/|:)gpt-5[.-]2-codex$`), "openai:gpt-5.2-codex"},
 	{regexp.MustCompile(`claude-sonnet-5|claude-5-sonnet`), "anthropic:claude-sonnet-5"},
-	{regexp.MustCompile(`claude-fable-5`), "anthropic:claude-fable-5"},
+	// Fable 5.1 shares Fable 5's $10 / $50 and $12.50 cache write but prices
+	// cache reads at 0.025x input ($0.25) instead of the standard 0.1x, so it
+	// needs its own row, and both rules end at their own version
+	// (claudeVersionEnd) so neither can swallow the other's ids.
+	{regexp.MustCompile(`claude-fable-5[-.]1` + claudeVersionEnd), "anthropic:claude-fable-5-1"},
+	{regexp.MustCompile(`claude-fable-5` + claudeVersionEnd), "anthropic:claude-fable-5"},
 	{regexp.MustCompile(`claude-opus-5`), "anthropic:claude-opus-5"},
 	{regexp.MustCompile(`claude-opus-4[-.]8`), "anthropic:claude-opus-4.8"},
 	{regexp.MustCompile(`claude-opus-4[-.]7`), "anthropic:claude-opus-4.7"},
@@ -117,21 +176,76 @@ var modelAliasRules = []struct {
 	// rows above. The frontend resolver does not dash-normalize non-Anthropic
 	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
 	// rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)grok-4\.6$`), "xai:grok-4.6"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.5$`), "xai:grok-4.5"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.3$`), "xai:grok-4.3"},
 	{regexp.MustCompile(`(^|/|:)grok-build-0\.1$`), "xai:grok-build-0.1"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-multi-agent-0309$`), "xai:grok-4.20-multi-agent-0309"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-reasoning$`), "xai:grok-4.20-0309-reasoning"},
 	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-non-reasoning$`), "xai:grok-4.20-0309-non-reasoning"},
+	// Alibaba Qwen. All rules are anchored so unknown suffixed variants
+	// (`qwen3.7-plus-extra`, `qwen3.8-max-preview-extra`) stay unmapped;
+	// an optional complete bracket tag `[…]` with at least one character
+	// inside is admitted to match the frontend's behavior of stripping the
+	// context tag (`\[[^\]]+\]$` in packages/views/runtimes/utils.ts), so
+	// empty tags like `qwen3.7-plus[]` stay unmapped on both sides.
+	// qwen3.8-max stays anchored so `qwen3.8-max-preview` (and its `[1m]`
+	// variant) never borrows the GA tier.
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]7-plus(\[[^\]]+\])?$`), "alibaba:qwen3.7-plus"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]6-flash(\[[^\]]+\])?$`), "alibaba:qwen3.6-flash"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max(\[[^\]]+\])?$`), "alibaba:qwen3.8-max"},
+	{regexp.MustCompile(`(^|/|:)qwen3[.-]8-max-preview(\[[^\]]+\])?$`), "alibaba:qwen3.8-max-preview"},
+	// Kimi K3. Anchored so the distinct CodeBuddy SKU `kimi-k3-1` stays
+	// unmapped; `kimi-code/k3` (Kimi Code CLI) resolves via the `/k3$` form.
+	{regexp.MustCompile(`(^|/|:)kimi-k3$`), "moonshotai:kimi-k3"},
+	{regexp.MustCompile(`(^|/|:)k3$`), "moonshotai:kimi-k3"},
+	// Volcengine Ark `ark-code-latest` is deliberately absent: it is a
+	// console-switchable rolling alias across model families, not a stable
+	// model identity, so it stays unmapped.
 }
 
-func PriceForModelAlias(model string) (ModelPrice, bool) {
-	model = strings.ToLower(strings.TrimSpace(model))
+// contextTagRe matches a trailing context-window variant tag such as the
+// `[1m]` Claude Code appends to the model id. A complete bracket tag with at
+// least one character inside, anchored at the end — the same shape the
+// frontend's `stripContextTag` strips (`\[[^\]]+\]$` in
+// packages/views/runtimes/utils.ts), so empty tags (`model[]`) and non-tag
+// trailing brackets (`model[`) stay unmapped on both sides.
+var contextTagRe = regexp.MustCompile(`\[[^\]]+\]$`)
+
+func matchModelAlias(model string) (ModelPrice, bool) {
 	for _, rule := range modelAliasRules {
 		if rule.re.MatchString(model) {
 			price, ok := modelPrices[rule.priceKey]
 			return price, ok
 		}
+	}
+	return ModelPrice{}, false
+}
+
+func PriceForModelAlias(model string) (ModelPrice, bool) {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if price, ok := matchModelAlias(model); ok {
+		return price, true
+	}
+	// The raw id did not resolve: a harness-appended context-window tag
+	// (`kimi-k3[1m]`, `grok-4.5[1m]`) is the same SKU at the same tier, so
+	// retry against the bare id. The anchored Codex / Grok / Kimi rules end at
+	// `$`, so without this a bracketed variant would take the unpriced branch
+	// in RecordLLMUsage. Only ever turns a miss into a hit — the raw form is
+	// tried first, so an explicit bracketed rule still wins.
+	//
+	// Exactly ONE tag, matching the frontend: `canonicalCandidates` in
+	// packages/views/runtimes/utils.ts strips a single trailing tag and does
+	// not re-strip the result. Retrying a doubly-tagged id would peel `[2m]`
+	// off `claude-fable-5[1m][2m]` and let the leftover `[1m]` satisfy a rule
+	// that already, correctly, rejected the raw form — the dashboard leaves
+	// that id unmapped, so pricing it here would put two different costs on
+	// one usage row. A second tag means the id is not a shape we recognise.
+	if stripped := contextTagRe.ReplaceAllString(model, ""); stripped != model {
+		if contextTagRe.MatchString(stripped) {
+			return ModelPrice{}, false
+		}
+		return matchModelAlias(stripped)
 	}
 	return ModelPrice{}, false
 }

@@ -40,4 +40,6 @@ export interface CoreProviderProps {
   /** Locale adapter for persisting user choice (used by Settings switcher).
    *  Optional because some shells (e.g. CLI auth pages) don't need switching. */
   localeAdapter?: LocaleAdapter;
+  /** Automatically sync the signed-in user's locale. Pause during one-shot handoffs. Default: true. */
+  syncUserLocale?: boolean;
 }

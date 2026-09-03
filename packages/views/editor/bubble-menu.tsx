@@ -126,6 +126,7 @@ function MarkButton({
         render={
           <Toggle
             size="sm"
+            aria-label={label}
             pressed={isActive}
             onPressedChange={() => toggleMarkActions[mark](editor)}
             onMouseDown={(e) => e.preventDefault()}
@@ -222,15 +223,33 @@ function LinkEditBar({
           if (e.key === "Escape") { e.preventDefault(); onClose(); editor.commands.focus(); }
         }}
       />
-      <Button size="icon-xs" variant="ghost" onClick={apply} onMouseDown={(e) => e.preventDefault()}>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label={t(($) => $.bubble_menu.link_edit.apply)}
+        onClick={apply}
+        onMouseDown={(e) => e.preventDefault()}
+      >
         <Check className="size-3.5" />
       </Button>
       {existingHref && (
-        <Button size="icon-xs" variant="ghost" onClick={remove} onMouseDown={(e) => e.preventDefault()}>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label={t(($) => $.bubble_menu.link_edit.remove)}
+          onClick={remove}
+          onMouseDown={(e) => e.preventDefault()}
+        >
           <Unlink className="size-3.5" />
         </Button>
       )}
-      <Button size="icon-xs" variant="ghost" onClick={() => { onClose(); editor.commands.focus(); }} onMouseDown={(e) => e.preventDefault()}>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        aria-label={t(($) => $.bubble_menu.link_edit.close)}
+        onClick={() => { onClose(); editor.commands.focus(); }}
+        onMouseDown={(e) => e.preventDefault()}
+      >
         <X className="size-3.5" />
       </Button>
     </div>
@@ -312,7 +331,12 @@ function ListDropdown({ editor, onOpenChange, isBullet, isOrdered, isTask }: { e
     <Popover modal={false} open={open} onOpenChange={handleOpenChange}>
       <Tooltip>
         <TooltipTrigger render={
-          <PopoverTrigger className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-caption font-medium hover:bg-muted aria-pressed:bg-muted" aria-pressed={isBullet || isOrdered || isTask} onMouseDown={(e) => e.preventDefault()} />
+          <PopoverTrigger
+            className="inline-flex h-7 items-center gap-0.5 rounded-md px-1.5 text-caption font-medium hover:bg-muted aria-pressed:bg-muted"
+            aria-label={t(($) => $.bubble_menu.list)}
+            aria-pressed={isBullet || isOrdered || isTask}
+            onMouseDown={(e) => e.preventDefault()}
+          />
         }>
           <List className="size-3.5" />
           <ChevronDown className="size-3" />
@@ -442,6 +466,7 @@ function CreateSubIssueButton({
         render={
           <Toggle
             size="sm"
+            aria-label={t(($) => $.bubble_menu.sub_issue.tooltip)}
             pressed={false}
             disabled={pending}
             onPressedChange={handleClick}
@@ -617,7 +642,13 @@ function EditorBubbleMenu({
             <Separator orientation="vertical" className="mx-0.5 h-5" />
             <Tooltip>
               <TooltipTrigger render={
-                <Toggle size="sm" pressed={fmt.link} onPressedChange={() => setMode("link-edit")} onMouseDown={(e) => e.preventDefault()} />
+                <Toggle
+                  size="sm"
+                  aria-label={t(($) => $.bubble_menu.link)}
+                  pressed={fmt.link}
+                  onPressedChange={() => setMode("link-edit")}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
               }>
                 <Link2 className="size-3.5" />
               </TooltipTrigger>
@@ -633,7 +664,13 @@ function EditorBubbleMenu({
                 away instead of two. */}
             <Tooltip>
               <TooltipTrigger render={
-                <Toggle size="sm" pressed={fmt.taskList} onPressedChange={() => editor.chain().focus().toggleTaskList().run()} onMouseDown={(e) => e.preventDefault()} />
+                <Toggle
+                  size="sm"
+                  aria-label={t(($) => $.bubble_menu.task_list)}
+                  pressed={fmt.taskList}
+                  onPressedChange={() => editor.chain().focus().toggleTaskList().run()}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
               }>
                 <ListTodo className="size-3.5" />
               </TooltipTrigger>
@@ -641,7 +678,13 @@ function EditorBubbleMenu({
             </Tooltip>
             <Tooltip>
               <TooltipTrigger render={
-                <Toggle size="sm" pressed={fmt.blockquote} onPressedChange={() => editor.chain().focus().toggleBlockquote().run()} onMouseDown={(e) => e.preventDefault()} />
+                <Toggle
+                  size="sm"
+                  aria-label={t(($) => $.bubble_menu.quote)}
+                  pressed={fmt.blockquote}
+                  onPressedChange={() => editor.chain().focus().toggleBlockquote().run()}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
               }>
                 <Quote className="size-3.5" />
               </TooltipTrigger>

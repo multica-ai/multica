@@ -10,10 +10,17 @@
  * Code is mobile-owned — we read and adapt the SVG primitives, we don't
  * import the web component. SVG ops are written with react-native-svg
  * primitives instead of HTML <svg>.
+ *
+ * The glyph set is per CATEGORY, not per status key: a workspace's custom
+ * status renders with its category's icon, which is what makes it read as "the
+ * same kind of thing" (MUL-6243). Callers that hold the workspace catalog pass
+ * `category` and `color`; callers that only hold a key get the built-in
+ * resolution, which is exact for the 7 built-ins.
  */
 import * as React from "react";
 import Svg, { Circle, G, Line, Path } from "react-native-svg";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
+import { statusCategoryOfKey } from "@/lib/issue-status";
 
 const CX = 7;
 const CY = 7;
@@ -21,8 +28,10 @@ const OUTER_R = 6;
 const FILL_R = 3.5;
 
 // Mirrors STATUS_CONFIG.iconColor in packages/core/issues/config/status.ts —
-// translated to hex (see apps/mobile/tailwind.config.js).
-const STATUS_COLOR: Record<IssueStatus, string> = {
+// translated to hex (see apps/mobile/tailwind.config.js). Keyed on CATEGORY:
+// a custom status inherits its category's token unless the catalog gave it a
+// colour of its own.
+const CATEGORY_COLOR: Record<IssueStatusCategory, string> = {
   backlog: "#71717a", // muted-foreground
   todo: "#71717a",
   in_progress: "#eab308", // warning
@@ -129,27 +138,38 @@ function CancelledX({ color }: { color: string }) {
 
 export function StatusIcon({
   status,
+  category: categoryProp,
+  color: colorProp,
   size = 16,
 }: {
   status: IssueStatus;
+  /**
+   * Resolved category, for callers that hold the workspace catalog. Without it
+   * the key resolves on its own — exact for the 7 built-ins, `todo` for a
+   * custom key this render has no catalog for.
+   */
+  category?: IssueStatusCategory;
+  /** A custom status's `#rrggbb`. Built-ins keep their category token. */
+  color?: string | null;
   size?: number;
 }) {
-  const color = STATUS_COLOR[status];
+  const category = categoryProp ?? statusCategoryOfKey(status);
+  const color = colorProp ?? CATEGORY_COLOR[category];
   return (
     <Svg width={size} height={size} viewBox="0 0 14 14">
-      {status === "backlog" ? (
+      {category === "backlog" ? (
         <BacklogIcon color={color} />
-      ) : status === "todo" ? (
+      ) : category === "todo" ? (
         <ProgressCircle progress={0} color={color} />
-      ) : status === "in_progress" ? (
+      ) : category === "in_progress" ? (
         <ProgressCircle progress={0.5} color={color} />
-      ) : status === "in_review" ? (
+      ) : category === "in_review" ? (
         <ProgressCircle progress={0.75} color={color} />
-      ) : status === "done" ? (
+      ) : category === "done" ? (
         <ProgressCircle progress={1} color={color}>
           <DoneCheck />
         </ProgressCircle>
-      ) : status === "blocked" ? (
+      ) : category === "blocked" ? (
         <ProgressCircle progress={0} color={color}>
           <BlockedSlash color={color} />
         </ProgressCircle>

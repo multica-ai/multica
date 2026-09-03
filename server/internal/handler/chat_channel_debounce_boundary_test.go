@@ -99,7 +99,8 @@ func TestChannelChat_ReplyLandingInsideDebounceWindowStillAnswersTheNextMessage(
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	_, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel debounce boundary")
+	agentID, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel debounce boundary")
+	seedChannelBindingOfChatType(t, ctx, agentID, sessionID, "wecom", "p2p", "", "")
 
 	// Turn 1: message in, window expires, task claimed and running.
 	appendChannelUserMessage(t, ctx, sessionID, "测试下")
@@ -115,7 +116,7 @@ func TestChannelChat_ReplyLandingInsideDebounceWindowStillAnswersTheNextMessage(
 	stranded := appendChannelUserMessage(t, ctx, sessionID, "挺好的 正常了")
 
 	// Turn 1 finishes inside that window and writes its reply.
-	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "通了。"), "", "", false, ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "通了。"), "", "", "", false, "", ""); err != nil {
 		t.Fatalf("complete turn 1: %v", err)
 	}
 

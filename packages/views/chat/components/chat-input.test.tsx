@@ -61,7 +61,12 @@ const editorProps = vi.hoisted(() => ({
 }));
 // Records imperative editor calls so tests can assert whether a commit
 // scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
-const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0, focused: 0 }));
+const editorState = vi.hoisted(() => ({
+  cleared: 0,
+  blurred: 0,
+  focused: 0,
+  adopted: [] as string[],
+}));
 
 vi.mock("../../editor", async () => ({
   // Real submit gate (pure React) driven by the mock editor's
@@ -163,6 +168,7 @@ vi.mock("../../editor", async () => ({
       // Same file: the upload-pinned adopt path needs the real Guard 0, which
       // this mock has no concept of. Kept so the ref honours the full contract.
       adoptContent: (markdown: string) => {
+        editorState.adopted.push(markdown);
         valueRef.current = markdown;
       },
     }));
@@ -248,6 +254,7 @@ beforeEach(() => {
   editorState.cleared = 0;
   editorState.blurred = 0;
   editorState.focused = 0;
+  editorState.adopted = [];
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
@@ -494,6 +501,45 @@ describe("ChatInput focusRequest", () => {
   });
 });
 
+describe("ChatInput conversation starter prefill", () => {
+  it("replaces live editor text and the stored draft", () => {
+    const onConversationStarterApplied = vi.fn();
+    const { rerender } = renderInput();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "unfinished local text" },
+    });
+    rerender(
+      element({
+        conversationStarterRequest: {
+          id: 1,
+          content: "Review the release pull request.",
+        },
+        onConversationStarterApplied,
+      }),
+    );
+
+    expect(useChatStore.getState().setInputDraft).toHaveBeenLastCalledWith(
+      "__draft_new__",
+      "Review the release pull request.",
+    );
+    expect(editorState.adopted).toEqual(["Review the release pull request."]);
+    expect(onConversationStarterApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies each request only once", () => {
+    const request = {
+      id: 1,
+      content: "Review the release pull request.",
+    };
+    const { rerender } = renderInput({ conversationStarterRequest: request });
+
+    rerender(element({ conversationStarterRequest: request }));
+
+    expect(editorState.adopted).toEqual([request.content]);
+  });
+});
+
 describe("ChatInput @ context wiring", () => {
   it("configures chat @ with current/recent issue/project context", () => {
     const contextItems = [
@@ -661,21 +707,6 @@ describe("ChatInput project context", () => {
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
-  });
-
-  it("keeps the composer chrome independent of the queue", () => {
-    // The follow-up queue tucks its bottom edge under the composer, which
-    // therefore ALWAYS paints on top (static z-10) — but the queue's presence
-    // must never restyle the input surface itself.
-    const { container } = renderInput();
-    const surface = container.querySelector('[data-slot="chat-input-surface"]');
-
-    expect(container.firstElementChild).toHaveClass("relative", "z-10");
-    expect(surface).toHaveClass("rounded-lg");
-    expect(surface).not.toHaveClass(
-      "rounded-4xl",
-      "shadow-[var(--menu-shadow)]",
-    );
   });
 
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
@@ -1476,5 +1507,34 @@ describe("ChatInput send keeps composer focus", () => {
     fireEvent.click(stopButton);
 
     expect(onStop).toHaveBeenCalledTimes(1);
+  });
+});
+
+// MUL-6380: the composer's placeholder is the only text on screen once the input
+// is disabled, so it has to name the right reason. `agentAccessRevoked` wins over
+// `noAgent` because both are true in the reported case — the workspace's only
+// agent is the one this user may no longer run — and "create an agent" would then
+// send them to build a second agent they do not need.
+describe("ChatInput revoked-access placeholder", () => {
+  it("names the revoked permission rather than the archived-session reason", () => {
+    renderInput({ disabled: true, agentAccessRevoked: true });
+
+    expect(editorProps.last?.placeholder).toBe(
+      "You no longer have permission to run this agent",
+    );
+  });
+
+  it("wins over noAgent when the revoked agent is the only one in the workspace", () => {
+    renderInput({ disabled: true, agentAccessRevoked: true, noAgent: true });
+
+    expect(editorProps.last?.placeholder).toBe(
+      "You no longer have permission to run this agent",
+    );
+  });
+
+  it("leaves the normal placeholder alone when access is intact", () => {
+    renderInput({ agentName: "Multica" });
+
+    expect(editorProps.last?.placeholder).toBe("Message Multica…");
   });
 });

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,8 +37,101 @@ func stripSQLLineComments(body []byte) []byte {
 // leftover as success and the index stays unusable. Nothing at runtime would
 // report that, so the names are checked against the migration files here.
 func TestConcurrentIndexCleanupsMatchTheirMigrations(t *testing.T) {
-	for version, indexName := range concurrentIndexCleanups {
-		path := filepath.Join("..", "..", "migrations", version+".up.sql")
+	assertConcurrentIndexCleanupsMatchTheirMigrations(
+		t,
+		concurrentIndexCleanups,
+		preMigrationHooks,
+		"up",
+	)
+	assertConcurrentIndexCleanupsMatchTheirMigrations(
+		t,
+		concurrentDownIndexCleanups,
+		preRollbackHooks,
+		"down",
+	)
+
+	// The MUL-5999 batch specifically: every one of these builds an index the
+	// new teardown queries depend on, so none of them may lose its hook.
+	for _, version := range []string{
+		"273_agent_task_queue_runtime_id_index",
+		"274_task_token_workspace_id_index",
+		"275_task_token_agent_id_index",
+		"276_chat_draft_restore_task_id_index",
+		"277_autopilot_run_task_id_index",
+	} {
+		if _, ok := concurrentIndexCleanups[version]; !ok {
+			t.Errorf("%s: missing from concurrentIndexCleanups", version)
+		}
+	}
+
+}
+
+// TestEveryConcurrentDownBuildHasCleanup works in the opposite direction from
+// TestConcurrentIndexCleanupsMatchTheirMigrations: every rollback migration
+// that builds an index concurrently must be registered. This prevents a new or
+// historical down migration from silently missing retry cleanup.
+func TestEveryConcurrentDownBuildHasCleanup(t *testing.T) {
+	assertEveryConcurrentBuildHasCleanup(t, "down", concurrentDownIndexCleanups)
+}
+
+// TestEveryConcurrentUpBuildHasCleanup is the up-direction counterpart, added
+// for MUL-6288. Only the down direction was covered before, so registration for
+// up migrations was effectively opt-in: 316, 317, 326, 328, 330 and 331 all
+// shipped without a hook and nothing failed. An unregistered build is invisible
+// until a real interrupted migration turns into either a permanently INVALID
+// index recorded as success (`IF NOT EXISTS`) or a wedged migrator (bare
+// `CREATE`), so the check belongs here rather than in review.
+func TestEveryConcurrentUpBuildHasCleanup(t *testing.T) {
+	assertEveryConcurrentBuildHasCleanup(t, "up", concurrentIndexCleanups)
+}
+
+func assertEveryConcurrentBuildHasCleanup(t *testing.T, direction string, cleanups map[string]string) {
+	t.Helper()
+	suffix := "." + direction + ".sql"
+	paths, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*"+suffix))
+	if err != nil {
+		t.Fatalf("glob %s migrations: %v", direction, err)
+	}
+	if len(paths) == 0 {
+		t.Fatalf("no %s migrations found", direction)
+	}
+
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Errorf("%s: read: %v", path, err)
+			continue
+		}
+		matches := concurrentIndexNamePattern.FindAllSubmatch(stripSQLLineComments(body), -1)
+		if len(matches) == 0 {
+			continue
+		}
+		version := strings.TrimSuffix(filepath.Base(path), suffix)
+		if len(matches) != 1 {
+			t.Errorf("%s: has %d concurrent index builds; cleanup registration supports exactly one", version, len(matches))
+			continue
+		}
+		indexName := string(matches[0][1])
+		registered, ok := cleanups[version]
+		if !ok {
+			t.Errorf("%s: builds %q concurrently on %s but has no %s cleanup", version, indexName, direction, direction)
+			continue
+		}
+		if registered != indexName {
+			t.Errorf("%s: %s cleanup registers %q, migration builds %q", version, direction, registered, indexName)
+		}
+	}
+}
+
+func assertConcurrentIndexCleanupsMatchTheirMigrations(
+	t *testing.T,
+	cleanups map[string]string,
+	hooks map[string]preMigrationHook,
+	direction string,
+) {
+	t.Helper()
+	for version, indexName := range cleanups {
+		path := filepath.Join("..", "..", "migrations", version+"."+direction+".sql")
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("%s: read migration: %v", version, err)
@@ -53,22 +147,8 @@ func TestConcurrentIndexCleanupsMatchTheirMigrations(t *testing.T) {
 		if got := string(match[1]); got != indexName {
 			t.Errorf("%s: hook cleans %q but the migration builds %q", version, indexName, got)
 		}
-		if preMigrationHooks[version] == nil {
+		if hooks[version] == nil {
 			t.Errorf("%s: no pre-migration hook registered", version)
-		}
-	}
-
-	// The MUL-5999 batch specifically: every one of these builds an index the
-	// new teardown queries depend on, so none of them may lose its hook.
-	for _, version := range []string{
-		"273_agent_task_queue_runtime_id_index",
-		"274_task_token_workspace_id_index",
-		"275_task_token_agent_id_index",
-		"276_chat_draft_restore_task_id_index",
-		"277_autopilot_run_task_id_index",
-	} {
-		if _, ok := concurrentIndexCleanups[version]; !ok {
-			t.Errorf("%s: missing from concurrentIndexCleanups", version)
 		}
 	}
 }

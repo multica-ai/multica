@@ -31,6 +31,9 @@ deleted_channel_outbound_cards AS (
 deleted_lark_outbound_cards AS (
     DELETE FROM lark_outbound_card_message WHERE task_id IN (SELECT id FROM batch)
 ),
+deleted_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery WHERE task_id IN (SELECT id FROM batch)
+),
 deleted_draft_restores AS (
     DELETE FROM chat_draft_restore WHERE task_id IN (SELECT id FROM batch)
 )
@@ -85,6 +88,10 @@ detached_client_usage AS (
     UPDATE client_usage_daily
     SET workspace_id = NULL
     WHERE client_usage_daily.workspace_id = $1
+),
+deleted_share_links AS (
+    DELETE FROM workspace_share_link
+    WHERE workspace_share_link.workspace_id = $1
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1
@@ -118,6 +125,26 @@ WHERE autopilot_rule_version.workspace_id = $1
 
 func (q *Queries) DeleteWorkspaceAutopilotChildren(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotChildren, workspaceID)
+	return err
+}
+
+const deleteWorkspaceAutopilotQuotaPeriods = `-- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
+DELETE FROM autopilot_quota_period
+WHERE autopilot_quota_period.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaPeriods(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaPeriods, workspaceID)
+	return err
+}
+
+const deleteWorkspaceAutopilotQuotaReservations = `-- name: DeleteWorkspaceAutopilotQuotaReservations :exec
+DELETE FROM autopilot_quota_reservation
+WHERE autopilot_quota_reservation.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaReservations(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaReservations, workspaceID)
 	return err
 }
 
@@ -167,6 +194,12 @@ const deleteWorkspaceCommunicationRoots = `-- name: DeleteWorkspaceCommunication
 WITH
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
+),
+deleted_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE workspace_id = $1
+),
+deleted_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE workspace_id = $1
 ),
 deleted_channel_installations AS (
     DELETE FROM channel_installation
@@ -377,6 +410,18 @@ deleted_github_check_suites AS (
 deleted_pending_github_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
+deleted_channel_task_deliveries AS (
+    DELETE FROM channel_task_delivery
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_channel_outbound_messages AS (
+    DELETE FROM channel_outbound_message
+    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
+),
+deleted_channel_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT id FROM ws_sessions)
+),
 deleted_vcs_commit_statuses AS (
     DELETE FROM vcs_commit_status
     WHERE connection_id IN (SELECT id FROM ws_vcs_connections)
@@ -385,6 +430,9 @@ deleted_channel_chat_bindings AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
        OR chat_session_id IN (SELECT id FROM ws_sessions)
+),
+deleted_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
 deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
@@ -449,6 +497,62 @@ WHERE channel_media_pending_object.workspace_id = $1
 // performs the idempotent object delete and clears the row afterwards.
 func (q *Queries) DeleteWorkspaceLeafData(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspaceLeafData, workspaceID)
+	return err
+}
+
+const deleteWorkspacePluginData = `-- name: DeleteWorkspacePluginData :exec
+WITH installations AS MATERIALIZED (
+    SELECT plugin_installation.id
+    FROM plugin_installation
+    WHERE plugin_installation.workspace_id = $1
+),
+deleted_storage AS (
+    DELETE FROM plugin_storage
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_secrets AS (
+    DELETE FROM plugin_secret
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_hook_schedules AS (
+    DELETE FROM plugin_hook_schedule
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_invocations AS (
+    DELETE FROM plugin_invocation
+    WHERE workspace_id = $1
+),
+versions AS MATERIALIZED (
+    SELECT plugin_package_version.id
+    FROM plugin_package_version
+    WHERE plugin_package_version.workspace_id = $1
+),
+deleted_package_files AS (
+    DELETE FROM plugin_package_file
+    WHERE version_id IN (SELECT id FROM versions)
+),
+deleted_package_versions AS (
+    DELETE FROM plugin_package_version
+    WHERE workspace_id = $1
+),
+deleted_packages AS (
+    DELETE FROM plugin_package
+    WHERE workspace_id = $1
+)
+DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations)
+`
+
+// Plugin relationships have no foreign keys or cascades. Storage and secrets
+// hang off the installation, so both leaf tables are cleared through the
+// workspace's installation ids before the installations themselves.
+// Hook call records are workspace-scoped in their own right, so this deletes by
+// workspace rather than through the installation ids: a row whose installation
+// was already uninstalled would otherwise survive the workspace it described.
+// Published artifacts are workspace-scoped too, and independent of whether
+// anything installed them. Deleting the workspace without these would leave the
+// stored bundles as the largest orphan the plugin surface can produce.
+func (q *Queries) DeleteWorkspacePluginData(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspacePluginData, workspaceID)
 	return err
 }
 

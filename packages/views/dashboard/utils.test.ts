@@ -58,6 +58,29 @@ describe("aggregateDailyCost", () => {
     expect(result[1]).toMatchObject({ input: 3, output: 7.5, cacheWrite: 0, total: 10.5 });
   });
 
+  it("bills cache reads into the stack and its total (MUL-6334)", () => {
+    // The dashboard feeds the same DailyCostChart the runtime page does, so it
+    // has to bill the same categories. Before the fix this aggregator summed
+    // input + output + cacheWrite only, hiding cache-read spend from the bar,
+    // the tooltip Total and the card's headline.
+    const result = aggregateDailyCost([
+      {
+        date: "2026-05-10",
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 20_000_000,
+        cache_write_tokens: 1_000_000,
+        task_count: 2,
+      },
+    ]);
+    // claude-sonnet-4-6: input $3/M, cacheRead $0.30/M, cacheWrite $3.75/M.
+    // $3 + $6 + $3.75 = $12.75.
+    expect(result[0]).toMatchObject({ input: 3, cacheRead: 6, cacheWrite: 3.75 });
+    expect(result[0]?.total).toBeCloseTo(12.75, 2);
+  });
+
   it("treats unmapped models as zero-cost", () => {
     const result = aggregateDailyCost([
       {

@@ -1,11 +1,11 @@
 ---
 title: GitHub 集成
-description: 把 pull request 与 Multica issue 关联，并在 issue 中查看开发进展。
+description: 把 pull request 与 Multica 任务关联，并在任务中查看开发进展。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-连接 GitHub 后，Multica 根据 issue 编号自动关联 pull request。issue 详情中可直接查看 PR 状态、改动规模、CI 结果和合并冲突。
+连接 GitHub 后，Multica 根据任务编号自动关联 pull request。任务详情中可直接查看 PR 状态、改动规模、CI 结果和合并冲突。
 
 GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 status check。
 
@@ -24,7 +24,7 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 连接状态会显示在同一页面。普通成员可以查看状态，但不能连接、断开或修改开关。
 
 <Callout type="info">
-**GitHub 连接**决定 Multica 从哪些仓库接收 PR 事件；**代码仓库**设置决定智能体执行任务时可以选择哪些仓库。两者用途不同，需要分别配置。
+**GitHub 连接**决定 Multica 从哪些仓库接收 PR 事件；**代码仓库**设置决定智能体运行时可以选择哪些仓库。两者用途不同，需要分别配置。
 </Callout>
 
 ## 功能开关
@@ -34,16 +34,16 @@ GitHub 集成只读取安装时授权的仓库，不会提交代码、评论或 
 | 开关 | 作用 |
 |---|---|
 | GitHub 集成 | 总开关。关闭后，下面三项不再生效，但不会断开 GitHub App。 |
-| PR 侧栏 | 在 issue 详情中显示关联的 pull request。 |
+| PR 侧栏 | 在任务详情中显示关联的 pull request。 |
 | Co-authored-by | 在智能体创建的 commit 中加入 `Co-authored-by: multica-agent <github@multica.ai>`。 |
-| 自动关联 PR | 从 PR 的分支名、标题和正文中识别 issue 编号。 |
+| 自动关联 PR | 从 PR 的分支名、标题和正文中识别任务编号。 |
 | **PR 卡片 → CI 与可合并性** | 对每个关联的 PR，Multica 从 GitHub API 拉取一份经鉴权的快照，把它的 **CI 状态**和**可合并性**镜像到卡片上（见下方 **PR 卡片展示什么**）。 |
 
 
 
-## 让 PR 关联到 issue
+## 让 PR 关联到任务
 
-最简单的做法，是把 issue 编号写进分支名或 PR 标题。例如 issue 为 `MUL-123`：
+最简单的做法，是把任务编号写进分支名或 PR 标题。例如任务为 `MUL-123`：
 
 ```text
 mul-123-fix-login-redirect
@@ -53,7 +53,7 @@ mul-123-fix-login-redirect
 MUL-123 修复登录后的跳转
 ```
 
-Multica 会忽略大小写，并且只匹配当前工作区的 issue 前缀。一个 PR 可以关联多个 issue。
+Multica 会忽略大小写，并且只匹配当前工作区的任务前缀。一个 PR 可以关联多个任务。
 
 只在 PR 正文中写编号时，需要使用 GitHub 的关闭语句：
 
@@ -63,11 +63,11 @@ Fixes MUL-123
 Resolves MUL-123
 ```
 
-正文中的普通提及，例如 `Related to MUL-123`，不会作为该 issue 的工作 PR 显示。Commit message 和 PR 评论也不会触发关联。
+正文中的普通提及，例如 `Related to MUL-123`，不会作为该任务的工作 PR 显示。Commit message 和 PR 评论也不会触发关联。
 
-## 在 issue 中查看 PR
+## 在任务中查看 PR
 
-关联成功后，PR 会出现在 issue 详情的 **Pull requests** 区块。每条记录会显示：
+关联成功后，PR 会出现在任务详情的 **Pull requests** 区块。每条记录会显示：
 
 - 仓库、编号、标题和作者；
 - `Open`、`Draft`、`Merged` 或 `Closed` 状态；
@@ -81,21 +81,21 @@ CI 状态和可合并性来自 Multica 从 GitHub API 拉取的快照，两者�
 
 ## PR 合并转 Done 的条件
 
-PR 合并不一定代表 issue 已完成。Multica 只有在以下条件同时成立时，才把 issue 改为 `Done`：
+PR 合并不一定代表任务已完成。Multica 只有在以下条件同时成立时，才把任务改为 `Done`：
 
 1. 至少一个已合并的关联 PR 使用了紧跟编号的关闭语句，例如 `Closes MUL-123`（`Closes login MUL-123` 这类中间隔词的写法不生效）；
-2. 该 issue 没有其他仍为 `Open` 或 `Draft` 的工作 PR（正文中的普通提及不算）；
-3. issue 当前不是 `done` 或 `cancelled`。
+2. 该任务没有其他仍为 `Open` 或 `Draft` 的工作 PR（正文中的普通提及不算）；
+3. 任务当前不是 `done` 或 `cancelled`。
 
-因此，仅在分支名或标题中写 `MUL-123` 会建立关联，但不会单独触发完成。PR 关闭但没有合并，也不会完成 issue。
+因此，仅在分支名或标题中写 `MUL-123` 会建立关联，但不会单独触发完成。PR 关闭但没有合并，也不会完成任务。
 
-状态变化会以系统操作写入时间线，订阅该 issue 的成员会收到通知。
+状态变化会以系统操作写入时间线，订阅该任务的成员会收到通知。
 
 ## 多个工作区
 
-同一个 GitHub App installation 可以连接到多个 Multica 工作区。GitHub 事件会分别进入每个工作区，再按照各自的 issue 前缀匹配。
+同一个 GitHub App installation 可以连接到多个 Multica 工作区。GitHub 事件会分别进入每个工作区，再按照各自的任务前缀匹配。
 
-例如一个 PR 同时引用 `MUL-1` 和 `ENG-2`，它可以在两个不同前缀的工作区中分别关联。工作区之间不会看到对方的 issue。
+例如一个 PR 同时引用 `MUL-1` 和 `ENG-2`，它可以在两个不同前缀的工作区中分别关联。工作区之间不会看到对方的任务。
 
 ## 断开连接
 
@@ -124,6 +124,7 @@ Repository permissions：
 | 权限 | 级别 |
 |---|---|
 | Metadata | Read-only |
+| Contents | Read-only；PR 快照查询需要它，一次读取 head commit、可合并状态与 CI 汇总 |
 | Pull requests | Read-only |
 | Checks | Read-only；用于显示 CI 状态 |
 | Commit statuses | Read-only；用于汇总 legacy status 形式的 CI |
@@ -133,7 +134,7 @@ Repository permissions：
 - **Pull request**；
 - **Check suite**、**Check run** 和 **Status**，用于触发 CI 与可合并性刷新。
 
-如果不需要在 Multica 中显示 CI，可以不授予 Checks 和 Commit statuses 权限，也不订阅对应事件。
+如果不需要在 Multica 中显示 CI，可以不授予 Checks 和 Commit statuses 权限，也不订阅对应事件。但 Contents 仍然必须授予——缺少它时整个快照查询会直接失败，PR 卡片连合并状态也会一起消失。
 
 <Callout type="warning">
 这里需要的是 **Webhook secret**，不是 OAuth Client secret。两边填写的 Webhook secret 不一致时，GitHub delivery 会返回 `401 invalid signature`。
@@ -158,7 +159,7 @@ GITHUB_APP_ID=<GitHub App 的数字 ID>
 GITHUB_APP_PRIVATE_KEY=<完整 PEM 私钥，保留 BEGIN/END 行和换行>
 ```
 
-私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置时集成会平稳降级：PR 照常镜像，issue 照常自动关联并在合并时转 Done，只是 PR 卡片不显示 CI 或合并状态。
+私钥在 GitHub App 的 **Private keys → Generate a private key** 中生成。不配置时集成会平稳降级：PR 照常镜像，任务照常自动关联并在合并时转 Done，只是 PR 卡片不显示 CI 或合并状态。
 
 ### 3. 更新数据库并连接
 
@@ -176,11 +177,11 @@ make migrate-up
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启，以及编号是否属于当前工作区。
 - **正文写了编号但没显示**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中。
-- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Checks 与 Commit statuses 的只读权限并订阅了对应事件。给已安装的 App 补加权限后，还需要各 installation 的所有者在 GitHub 上批准才会生效。
-- **PR 合并后 issue 没完成**：确认 PR 使用了关闭语句，并检查是否还有其他关联 PR 处于 Open 或 Draft。
+- **没有 CI 状态**：确认 `GITHUB_APP_ID` 和 `GITHUB_APP_PRIVATE_KEY` 已配置，App 具有 Contents、Checks 与 Commit statuses 的只读权限并订阅了对应事件。缺少 Contents 会让整个快照失败，PR 卡片既没有 CI 也没有合并状态。给已安装的 App 补加权限后，还需要各 installation 的所有者在 GitHub 上批准才会生效。
+- **PR 合并后任务没完成**：确认 PR 使用了关闭语句，并检查是否还有其他关联 PR 处于 Open 或 Draft。
 
 ## 接下来
 
-- [Issues](/issues) — 状态流转与 PR 合并转 Done 的关系。
+- [任务](/issues) — 状态流转与 PR 合并转 Done 的关系。
 - [项目资源](/project-resources) — 智能体执行时使用哪些仓库。
 - [环境变量](/environment-variables) — 自托管 GitHub App 的完整配置。

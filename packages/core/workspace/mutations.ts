@@ -87,3 +87,74 @@ export function useDeleteWorkspace() {
     },
   });
 }
+
+/**
+ * Adds a server to the workspace library. It is assigned to no agent: an
+ * agent owner gives it to their agent separately.
+ */
+export function useCreateWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, config }: { name: string; config: Record<string, unknown> }) =>
+      api.createWorkspaceMcpServer(wsId, name, config),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+  });
+}
+
+export function useUpdateWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ serverId, ...update }: {
+      serverId: string;
+      name?: string;
+      config?: Record<string, unknown>;
+    }) => api.updateWorkspaceMcpServer(wsId, serverId, update),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) }),
+  });
+}
+
+export function useDeleteWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (serverId: string) => api.deleteWorkspaceMcpServer(wsId, serverId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) });
+      // Deleting a library entry drops it from every agent that had it, so
+      // no agent's assignment list can be trusted afterwards.
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}
+
+/**
+ * Assignment writes all return the agent's resulting list, so the cache is
+ * updated from the server's answer rather than a guess.
+ */
+function useAgentMcpMutation<TVariables>(
+  agentId: string,
+  mutationFn: (variables: TVariables) => Promise<unknown>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["agents", agentId, "mcp-servers"] }),
+  });
+}
+
+export function useAddAgentMcpServer(agentId: string) {
+  return useAgentMcpMutation(agentId, (serverId: string) =>
+    api.addAgentMcpServer(agentId, serverId));
+}
+
+export function useSetAgentMcpServerEnabled(agentId: string) {
+  return useAgentMcpMutation(agentId, ({ serverId, enabled }: { serverId: string; enabled: boolean }) =>
+    api.setAgentMcpServerEnabled(agentId, serverId, enabled));
+}
+
+export function useRemoveAgentMcpServer(agentId: string) {
+  return useAgentMcpMutation(agentId, (serverId: string) =>
+    api.removeAgentMcpServer(agentId, serverId));
+}

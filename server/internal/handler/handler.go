@@ -22,6 +22,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbreader"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -29,10 +31,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -83,14 +88,19 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used only to build webhook_url responses for autopilot webhook triggers
-	// — never for auth, routing, or workspace resolution. Empty when unset,
-	// in which case clients fall back to webhook_path + their own origin.
+	// Used to build webhook_url responses and the fixed Remote MCP OAuth
+	// callback URI — never to decide request identity, routing, or workspace
+	// scope. Empty when unset; webhook clients can fall back to their own origin,
+	// while OAuth Connect fails closed because providers require an exact URI.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
 	// the server into minting webhook URLs pointing at an attacker-controlled
 	// host.
 	PublicURL string
+	// AppURL is the browser application's canonical origin, resolved from
+	// MULTICA_APP_URL (falling back to FRONTEND_ORIGIN). It is kept separate
+	// from PublicURL because split app/API deployments use different origins.
+	AppURL string
 	// TrustedProxies are CIDRs whose source IP we trust to set
 	// X-Forwarded-For / X-Real-IP. Empty means "trust nothing": the rate
 	// limiter uses r.RemoteAddr exclusively. Populated via the
@@ -99,11 +109,11 @@ type Config struct {
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.
 	TrustedProxies []netip.Prefix
-	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
-	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
-	// return 503 instead of attempting to dial a hard-coded private service.
-	CloudRuntimeFleetURL     string
-	CloudRuntimeFleetTimeout time.Duration
+	// CloudURL enables the SaaS-only multica-cloud connection when set. Empty
+	// keeps self-hosted deployments explicit: Cloud endpoints return 503 instead
+	// of attempting to dial a hard-coded private service.
+	CloudURL                 string
+	CloudTimeout             time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
@@ -111,6 +121,10 @@ type Config struct {
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments
 	// can frame API-hosted PDFs without allowing arbitrary third-party frames.
 	AttachmentFrameAncestors []string
+	// PluginSurfaceOrigin is the dedicated, cookie-free browser origin that
+	// routes /plugin-surfaces/* back to this server. It must not be the app/API
+	// origin: the route serves stored third-party JavaScript as HTML.
+	PluginSurfaceOrigin string
 	// LLM* configure the basic LLM API layer (MUL-4238). They back the
 	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
 	// The generic OpenAI-compatible passthrough endpoints were removed in
@@ -120,9 +134,16 @@ type Config struct {
 	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
+	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
+	// LLMMaxRetries is the parsed MULTICA_LLM_MAX_RETRIES budget. nil means
+	// unset (llm.DefaultMaxRetries applies); llm.Retries(0) disables retries.
+	// The type carries the validation: it can only be built through llm.Retries,
+	// and cmd/server additionally fails the boot on an out-of-range value before
+	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
+	LLMMaxRetries *llm.RetryOverride
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -144,37 +165,61 @@ type WorkspaceSetRefreshNotifier interface {
 }
 
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
-// daemon so a queued heartbeat-carried request (model discovery) is picked up
-// immediately instead of on the daemon's next scheduled tick (MUL-5444).
+// daemon so a queued heartbeat-carried request (model discovery, capability
+// discovery, or local-skill import) is picked up immediately instead of on the
+// daemon's next scheduled tick (MUL-5444).
 // Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
 // (multi-node, fans out through Redis).
 type DaemonPendingWorkNotifier interface {
 	NotifyPendingWork(runtimeID, kind string)
 }
 
+// RuntimeGoneNotifier invalidates a runtime that was deleted while its daemon
+// still has an authenticated WebSocket connection.
+type RuntimeGoneNotifier interface {
+	NotifyRuntimeGone(runtimeID string)
+}
+
 type Handler struct {
 	Queries                *db.Queries
+	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
 	TxStarter              txStarter
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
 	DaemonWorkspaceRefresh WorkspaceSetRefreshNotifier
+	DaemonRuntimeGone      RuntimeGoneNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
+	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
-	EmailService           *service.EmailService
-	UpdateStore            UpdateStore
-	ModelListStore         ModelListStore
-	LocalSkillListStore    LocalSkillListStore
-	LocalSkillImportStore  LocalSkillImportStore
-	FeatureFlags           *featureflag.Service
-	LivenessStore          LivenessStore
-	HeartbeatScheduler     HeartbeatScheduler
-	Storage                storage.Storage
-	CFSigner               *auth.CloudFrontSigner
-	Analytics              analytics.Client
+	// Entitlements supplies workspace-scoped commercial gates. A nil provider
+	// preserves self-hosted behavior without extra reads.
+	Entitlements entitlement.Provider
+	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
+	// disabled preserves self-hosted behavior.
+	SeatCapacity          seatcapacity.Executor
+	SeatCapacityLocker    seatcapacity.WorkspaceLocker
+	SeatCapacityWorker    *seatcapacity.Worker
+	EmailService          *service.EmailService
+	UpdateStore           UpdateStore
+	ModelListStore        ModelListStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
+	FeatureFlags          *featureflag.Service
+	// IssueStatusCatalog reads the workspace status catalog. Defaults to
+	// Queries; a test can substitute a counting wrapper to assert HOW MANY
+	// catalog reads a request performs, which is the only property that
+	// distinguishes the current one-read derivation from the N+1 it replaced.
+	// (MUL-6243)
+	IssueStatusCatalog issuestatus.Querier
+	LivenessStore      LivenessStore
+	HeartbeatScheduler HeartbeatScheduler
+	Storage            storage.Storage
+	CFSigner           *auth.CloudFrontSigner
+	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -196,11 +241,14 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// TaskConfigProvider resolves control-plane-managed task_config bytes for
 	// daemon requests. New wires a lazy AWS provider; tests may replace it.
 	TaskConfigProvider TaskConfigProvider
+	// Test-only HTTP override; nil uses the default client in production.
+	googleOAuthHTTPClient *http.Client
 	// Lark integration. All three are nil when the Lark master key
 	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
 	// handlers return 503 in that case so a misconfigured self-host
@@ -230,9 +278,10 @@ type Handler struct {
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it UNCONDITIONALLY — it drives any
-	// channel type, not just Feishu, so it does not depend on the Lark
-	// master key; each platform registers its Factory only when configured
+	// engine). The router constructs it independently of platform secrets — it
+	// drives any channel type, not just Feishu. It remains nil when lease
+	// configuration is unsafe or a selected Redis backend fails its startup
+	// readiness check; each platform registers its Factory only when configured
 	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
 	// call Run; the process owner (main.go) starts it under a long-running
 	// context and joins via WaitWithTimeout (bounded, fenced by
@@ -289,6 +338,18 @@ type Handler struct {
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
 
+	// TelegramInstall owns the Telegram bot install lifecycle (register a
+	// pasted BotFather token / list / revoke) and the at-rest encryption of
+	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
+	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Telegram account" prompt. Nil unless Telegram is configured.
+	TelegramBindingTokens *telegram.BindingTokenService
+	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
+	// The process owner starts and joins it; the synchronous event bus only
+	// enqueues EventChatDone work.
+	TelegramOutbound *telegram.Outbound
+
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
 	// conversation. It answers the claim response's
@@ -325,6 +386,9 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
+	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
+	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
+	PluginSurfaceTokens *secretbox.Box
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
@@ -360,33 +424,53 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 	var daemonProfileRefresh RuntimeProfileRefreshNotifier
 	var daemonWorkspaceRefresh WorkspaceSetRefreshNotifier
+	var daemonRuntimeGone RuntimeGoneNotifier
 	if daemonHub != nil {
 		daemonProfileRefresh = daemonHub
 		daemonWorkspaceRefresh = daemonHub
+		daemonRuntimeGone = daemonHub
 	}
 
 	llmClient := llm.New(llm.Config{
 		APIKey:       cfg.LLMAPIKey,
 		BaseURL:      cfg.LLMBaseURL,
 		DefaultModel: cfg.LLMDefaultModel,
+		MaxRetries:   cfg.LLMMaxRetries,
 	})
+	// Report the effective retry policy so an operator can confirm from the
+	// boot log alone what a misbehaving upstream will cost, instead of inferring
+	// it from an env var whose semantics used to be unguessable (MUL-6364).
+	// Read off the client, not off cfg, so the line cannot drift from what the
+	// SDK actually enforces. Counts and an enum only — never the key or the base
+	// URL, since a self-hosted gateway URL routinely embeds a token.
+	llmRetry := llmClient.RetryBudget()
+	slog.Info("llm retry policy",
+		"max_retries", llmRetry.MaxRetries,
+		"source", llmRetry.Source,
+		"request_timeout", llmRetry.RequestTimeout,
+		"enabled", llmClient.Enabled(),
+	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.SourceContextStorage = store
 	// Chat follow-up suggestions run through the same internal LLM layer that
 	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
 	// a disabled client, which turns the feature off rather than failing.
 	taskSvc.QuickActions = llmClient
 	h := &Handler{
 		Queries:                      queries,
+		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
 		DB:                           executor,
 		TxStarter:                    txStarter,
 		Hub:                          hub,
 		DaemonHub:                    daemonHub,
 		DaemonProfileRefresh:         daemonProfileRefresh,
 		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
+		DaemonRuntimeGone:            daemonRuntimeGone,
 		Bus:                          bus,
 		TaskService:                  taskSvc,
+		PluginService:                service.NewPluginService(queries, txStarter),
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:                 emailService,
@@ -403,9 +487,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
-			BaseURL: cfg.CloudRuntimeFleetURL,
-			Timeout: cfg.CloudRuntimeFleetTimeout,
+			BaseURL: cfg.CloudURL,
+			Timeout: cfg.CloudTimeout,
 		}),
 		TaskConfigProvider: NewDefaultTaskConfigProvider(),
 		LLM:                llmClient,
@@ -478,6 +563,26 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
+func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID, expected, actual int64) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             "resource changed since it was loaded",
+		"code":              "revision_conflict",
+		"resource_type":     resourceType,
+		"resource_id":       uuidToString(resourceID),
+		"expected_revision": expected,
+		"actual_revision":   actual,
+	})
+}
+
+func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":         "resource field changed since it was loaded",
+		"code":          "revision_conflict",
+		"resource_type": resourceType,
+		"resource_id":   uuidToString(resourceID),
+	})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site
@@ -497,8 +602,11 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
-func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func timestampToNanoPtr(t pgtype.Timestamptz) *string {
+	return util.TimestampToNanoPtr(t)
+}
+func dateToPtr(d pgtype.Date) *string { return util.DateToPtr(d) }
+func uuidToPtr(u pgtype.UUID) *string { return util.UUIDToPtr(u) }
 
 // uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
 // entries. Returns nil (not an empty slice) when there is nothing to emit so
@@ -629,6 +737,15 @@ func (h *Handler) notifyDaemonWorkspacesChanged(userIDs ...string) {
 		seen[userID] = struct{}{}
 		h.DaemonWorkspaceRefresh.NotifyWorkspacesChanged(userID)
 	}
+}
+
+// NotifyRuntimeGone emits the post-commit runtime invalidation signal. It is
+// exported so the runtime GC can use the same publisher as request handlers.
+func (h *Handler) NotifyRuntimeGone(runtimeID string) {
+	if h == nil || h.DaemonRuntimeGone == nil || runtimeID == "" {
+		return
+	}
+	h.DaemonRuntimeGone.NotifyRuntimeGone(runtimeID)
 }
 
 // publishTask is publish() plus a TaskID hint so the realtime layer can route

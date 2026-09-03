@@ -36,21 +36,21 @@ import {
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
-import { useT } from "../../i18n";
+import { useLocale, useT } from "../../i18n";
 
 const apiLogger = createLogger("chat.api");
 
 // IM-style timestamp: today → clock, this year → M/D, else full date.
-function formatChatTime(dateStr: string): string {
+function formatChatTime(dateStr: string, locale: string): string {
   const d = new Date(dateStr);
   const now = new Date();
   if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   }
   if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString([], { month: "numeric", day: "numeric" });
+    return d.toLocaleDateString(locale, { month: "numeric", day: "numeric" });
   }
-  return d.toLocaleDateString();
+  return d.toLocaleDateString(locale);
 }
 
 // Collapse a (possibly markdown / multi-line) message into a one-line preview.
@@ -63,11 +63,12 @@ function toPreview(content: string): string {
 }
 
 /**
- * IM-style conversation list: each row is agent avatar + name + last-message
- * preview + time, with a red unread *count* badge. An in-flight agent shows a
- * "typing…" indicator; a failed last reply shows a destructive hint. Rows are
- * rendered in the server's order (most-recent activity first). Renaming lives
- * in the conversation header's ⋯ menu, not here.
+ * IM-style conversation list: each row is agent avatar + session title + agent
+ * name + last-message preview + time, with a red unread *count* badge. An
+ * in-flight agent shows a "typing…" indicator; a failed last reply shows a
+ * destructive hint. Rows are rendered in the server's order (most-recent
+ * activity first). Renaming lives in the conversation header's ⋯ menu, not
+ * here.
  *
  * Two views, toggled locally: the default "history" view lists active chats and
  * hovering a row reveals pin + archive (or stop, while running) — archiving is
@@ -94,6 +95,7 @@ export function ChatThreadList({
   onArchive: (session: ChatSession) => void;
 }) {
   const { t } = useT("chat");
+  const locale = useLocale();
   const wsId = useWorkspaceId();
   // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
   // tests outside a workspace route; without a slug the web modifier-click
@@ -204,6 +206,7 @@ export function ChatThreadList({
   const renderRow = (session: ChatSession) => {
     const isCurrent = session.id === activeSessionId;
     const agent = agentById.get(session.agent_id) ?? null;
+    const agentName = agent?.name.trim() || null;
     const pendingTask = pendingTaskBySessionId.get(session.id);
     const isRunning = !!pendingTask;
     // Only "offline" (definitively long-offline) downgrades typing → waiting.
@@ -218,7 +221,9 @@ export function ChatThreadList({
     const isConfirmingAction = isConfirmingDelete || isConfirmingStop;
     const titleText = session.title?.trim() || t(($) => $.window.untitled);
     const last = session.last_message ?? null;
-    const timeText = last ? formatChatTime(last.created_at) : formatChatTime(session.updated_at);
+    const timeText = last
+      ? formatChatTime(last.created_at, locale)
+      : formatChatTime(session.updated_at, locale);
 
     // The second line: typing/waiting → failed → preview.
     let previewNode: React.ReactNode;
@@ -413,7 +418,19 @@ export function ChatThreadList({
                 />
               ) : (
                 <>
-                  <div className="min-w-0 flex-1 overflow-hidden text-caption">{previewNode}</div>
+                  <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-caption">
+                    {agentName && (
+                      <>
+                        <span className="max-w-[40%] shrink-0 truncate font-medium text-muted-foreground">
+                          {agentName}
+                        </span>
+                        <span aria-hidden="true" className="shrink-0 text-faint-foreground">
+                          ·
+                        </span>
+                      </>
+                    )}
+                    <div className="min-w-0 flex-1 overflow-hidden">{previewNode}</div>
+                  </div>
                   {unread > 0 && (
                     <span
                       aria-label={t(($) => $.session_history.row_subtitle.new_reply)}

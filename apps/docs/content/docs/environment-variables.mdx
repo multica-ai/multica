@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Multica reads environment variables at process startup. After changing one, restart the affected API, web, or daemon process. Docker Compose's `docker compose restart` does not re-read `.env`; recreate containers with `up -d` for changes to take effect.
 
-This page lists deployment-facing configuration only; test variables and internal task variables are not covered here. It is a grouped reference — for full deployment steps, see the [self-host quickstart](/self-host-quickstart).
+This page lists deployment-facing configuration only; test variables and internal run variables are not covered here. It is a grouped reference — for full deployment steps, see the [self-host quickstart](/self-host-quickstart).
 
 ## Minimum production configuration
 
@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 You also need to pick an email service, otherwise verification codes and invitations are only written to the server log.
 
 <Callout type="warning">
-Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_VERIFICATION_CODE`.
+`JWT_SECRET` is required in production: with `APP_ENV=production` the backend refuses to boot if it is empty or a known placeholder (generate one with `openssl rand -hex 32`). Do not set `MULTICA_DEV_VERIFICATION_CODE`.
 </Callout>
 
 ## API and database
@@ -33,14 +33,22 @@ Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_V
 | `DATABASE_URL` | local `multica` database | PostgreSQL connection string |
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
+| `DATABASE_REPLICA_URL` | empty | Optional PostgreSQL read-only replica connection string; new connections are validated as read-only, while businesses must explicitly opt into eventual-consistency reads in code |
+| `DATABASE_REPLICA_MAX_CONNS` | `10` | Maximum replica connections per API process |
+| `DATABASE_REPLICA_MIN_CONNS` | `0` | Minimum replica connections each API process keeps |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | Container-level retry budget shared by migration and API startup; set to `0` for one fail-fast attempt per phase |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | Fallback timeout for each startup connection attempt; native pgx `connect_timeout`, `PGCONNECT_TIMEOUT`, or service settings take precedence |
 | `PORT` | `8080` | API listen port |
-| `JWT_SECRET` | fixed development value | Secret for sign-in JWTs and some signing flows |
+| `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
 | `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight runs fail; values below `150s` are clamped |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
+
+The primary and replica connection limits are independent. Budget their sum across every API process against the PostgreSQL cluster's connection ceiling. Replica connections are recycled after five minutes by default to refresh read-only validation after promotion. Replica connection failures transparently fall back to primary and open a short passive circuit; no background database probe is added. Replica reads have no application-enforced staleness bound, so monitor lag in the database layer and keep consistency-sensitive reads on primary.
 
 ## Public URLs and browser access
 
@@ -49,9 +57,14 @@ When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must
 | `FRONTEND_ORIGIN` | empty | Frontend origin users visit; used for CORS, cookies, and invitation links |
 | `MULTICA_APP_URL` | falls back to `FRONTEND_ORIGIN` | User-reachable web URL; CLI sign-in and account-link URLs use it |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL; used for webhook URLs and runtime connection instructions |
+| `MULTICA_DAEMON_SERVER_URL` | falls back to `MULTICA_PUBLIC_URL`, then `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | Server URL the API process inserts into `multica setup self-host`; set it when daemons reach the API at a different URL than the public webhook URL |
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
 | `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
 | `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
+
+<Callout type="warning">
+`MULTICA_DAEMON_SERVER_URL` is returned by the unauthenticated `/api/config` endpoint and is visible to clients. Treat it as public configuration; never put credentials, tokens, or other secrets in it.
+</Callout>
 
 When the frontend and API run on different hosts and the browser talks to the API domain directly, you must set `COOKIE_DOMAIN` — otherwise the browser cannot read the CSRF cookie: every write request returns `403 CSRF validation failed` while reads work fine. Use the narrowest parent domain that covers both hosts (`.agent.example.com` over `.example.com`). It spreads the sign-in session cookie to every host under that domain, which is only acceptable when all of those hosts are operated by the same trusted party. After changing it, clear the old cookies on both hosts and sign in again. If you follow the same-origin recipe in the [self-host quickstart](/self-host-quickstart#3-choose-how-to-access) (the browser only visits the app domain), keep it empty. Do not use an IP address — browsers ignore cookies whose Domain is an IP.
 
@@ -142,16 +155,19 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Used for auth rate limiting, realtime events, and the token cache; when unset, realtime events fall back to in-process memory and auth rate limiting is off |
+| `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Workspace invitations each inviter may create per 10-minute sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Workspace invitations all admins may create per workspace per 24-hour sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations one normalized recipient email may receive across workspaces per 24-hour sliding window; `0` disables this gate |
 | `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs allowed to provide `X-Forwarded-For` |
 | `MULTICA_TRUSTED_PROXIES` | empty | Trusted proxy CIDRs for automation webhooks and realtime connections |
 
 Deployments behind a reverse proxy must list their real proxy ranges. Do not blanket-trust all sources, or clients can forge forwarded IPs.
 
-The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; without it, the startup log notes that rate limiting is disabled. If Redis becomes temporarily unavailable, the limiter fails open and does not block normal sign-ins.
+The auth rate limits require `REDIS_URL`; without it, the startup log notes that auth rate limiting is disabled. Invitation limits still run in process-local memory without Redis and become shared across replicas when Redis is configured. If configured Redis becomes temporarily unavailable, auth rate limiting fails open, while invitation creation returns a retryable `503` instead of sending email without protection.
 
 ## External integrations
 
@@ -163,27 +179,44 @@ The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; wit
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |
 | Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
 | Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
+| Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Base64-encoded 32-byte key for stored secrets and encrypted surface launch URLs |
+| Plugins | `MULTICA_PLUGIN_SURFACE_ORIGIN` | Dedicated cookie-free browser origin routed to this backend; must differ from app/API origins and preserve `Host` |
+| Plugins | `MULTICA_PLUGIN_API_URL` | Complete versioned Plugin Public API base URL, such as `https://plugin-api.example.com/v1`; falls back to `MULTICA_PUBLIC_URL` + `/v1` |
+| Plugins | `MULTICA_PLUGIN_DIR` | Optional absolute directory used to publish local plugin bundles during development |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
-For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
+For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [Slack bot](/slack-bot-integration#self-hosting-setup), and [Telegram bot](/telegram-bot-integration#self-hosting-setup).
 
 ## Server-side LLM
 
-This group configures server-side assist generation, such as conversation titles; it is not the AI coding tool credentials agents use to execute tasks.
+This group configures server-side assist generation, such as conversation titles; it is not the AI coding tool credentials agents use to execute runs.
 
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_LLM_API_KEY` | empty | OpenAI-compatible API key |
 | `MULTICA_LLM_BASE_URL` | empty | OpenAI-compatible endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | Used when a request does not specify a model |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | Retry ceiling per call; `0` disables retries, `1`–`5` cap it at N |
 
-When both the API key and base URL are empty, server-side LLM generation is off and callers use local fallback logic.
+`MULTICA_LLM_MAX_RETRIES` is the single source for the retry policy. Leave it unset for the default of 2, set `0` to send exactly one request per call, or set 1–5 to cap retries at that many. It is a ceiling, not a quota: only retryable failures consume it, and a success or the caller's own deadline can end the call sooner. Any other value — negative, non-numeric, or above 5 — fails startup instead of being corrected silently. The ceiling is a latency budget: backoff starts at 0.5s and doubles to an 8s cap, so a larger budget would outlast the callers' own deadlines and turn a retryable failure into a timeout. Retries cover connection failures and HTTP 408, 409, 429 and 5xx; all other 4xx responses are returned as-is. The server logs the effective policy at startup as `llm retry policy`, with no credentials in the line.
+
+Two features use this layer, and each one sends chat content to the endpoint you configure:
+
+- **Chat auto-titling** — the first user message of a new chat session, sent verbatim. Attachments are never included.
+- **Follow-up questions** (the suggestion buttons under an agent reply) — the tail of the conversation: up to 6 messages, with the reply being answered capped at 3000 characters and each older message at 800.
+
+When both the API key and the base URL are empty, this layer is disabled and makes no upstream request at all — neither feature above sends anything. That is the supported configuration when your policy does not allow this layer to send chat content off the deployment: chat sessions keep the title the client derives from the first message, the follow-up question buttons do not appear, and everything else is unaffected.
+
+<Callout type="info">
+This covers the assist layer only. Running an agent is a separate data path: when an agent answers a chat, your daemon executes that agent's AI coding tool using the tool's own credentials, and does not forward the `MULTICA_LLM_*` settings above to it. (The run-scoped Multica connection variables the agent needs are injected by the daemon separately.) Emptying the variables above does not affect that path — govern it through the agent's runtime configuration.
+</Callout>
 
 ## Daemon configuration
 
@@ -194,22 +227,26 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Multica API / WebSocket URL; also accepts `http(s)` |
 | `MULTICA_DAEMON_DEVICE_NAME` | hostname | Device name shown in the runtime list |
 | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` | Runtime display name |
-| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Task polling interval when no wake event arrives |
+| `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Run polling interval when no wake event arrives |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
-| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent task ceiling per daemon |
+| `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent run ceiling per daemon |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Silence ceiling with no output and no tool execution |
-| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | Silence ceiling with no output and no tool execution; `0` disables the watchdog entirely |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Silence ceiling for a single tool call; set it only to give tools more room than the model gets, `0` never force-stops a tool call |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
-| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex semantic-silence threshold |
-| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as `MULTICA_AGENT_IDLE_WATCHDOG` | Codex semantic-silence threshold. Codex's own timer cannot see that a tool is running, so it tracks the larger of the idle / tool budgets instead of holding a separate, shorter ceiling |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
-| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
-| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
+| `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for run working directories |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-run temp dirs; must be an existing, writable absolute directory, and an invalid value fails run startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
+| `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep run directories for debugging |
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw is the exception: it has no `MULTICA_QWENPAW_MODEL`, because Multica never sends it a model — see [AI coding tools comparison](/providers#model-sources). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
+For the internal context that the daemon injects into agent tasks, see [Task runtime environment](/daemon-runtimes#task-runtime-environment).
+
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Dim supports `MULTICA_DIM_PATH` and `MULTICA_DIM_MODEL` (a model id from the dim catalog). ZeroClaw supports `MULTICA_ZEROCLAW_PATH` but has no model variable; its agent profile owns the model selection. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -236,12 +273,13 @@ Supported keys:
 | `workspace_id` | empty | Default workspace |
 | `device_name` | hostname | Device name shown in the runtime list |
 | `runtime_name` | `Local Agent` | Runtime display name |
-| `max_concurrent_tasks` | `20` | Concurrent task ceiling; `0` or empty means unset |
-| `poll_interval` | `30s` | Task polling interval |
+| `workspaces_root` | profile-aware path under `~` | Root directory for run working directories |
+| `max_concurrent_tasks` | `20` | Concurrent run ceiling; `0` or empty means unset |
+| `poll_interval` | `30s` | Run polling interval |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
 | `agent_timeout` | unlimited | Absolute time limit per run |
-| `codex_semantic_inactivity_timeout` | `10m` | Codex semantic-silence threshold |
-| `codex_handshake_timeout` | `30s` | Codex app-server handshake ceiling |
+| `codex_semantic_inactivity_timeout` | derived | Codex semantic-silence threshold. With nothing set it takes the larger of the idle and tool watchdog budgets; a tool budget of `0` falls back to the idle budget, and only when the whole watchdog suite is disabled does Codex keep its own `10m` |
+| `codex_handshake_timeout` | `30s`; `thread/start`, `thread/resume`: `60s` | Codex app-server startup handshake ceilings. An explicit value overrides both budgets globally |
 | `disable_auto_update` | follows environment | `true` turns auto-update off; `false` clears the local override and returns to the env var or default |
 | `auto_update_check_interval` | `6h` | Update check interval |
 | `disable_auto_reload` | follows environment | `true` stops the daemon following a binary replaced on disk; `false` clears the local override. Resolved separately from `disable_auto_update` |
@@ -251,6 +289,7 @@ A few value rules:
 - Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
 - Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
 - `max_concurrent_tasks` requires a non-negative integer.
+- Relative `workspaces_root` values are converted to absolute paths when saved.
 
 ## Observability and analytics
 

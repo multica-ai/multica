@@ -46,7 +46,7 @@ images:
 existingSecret: multica-secrets
 
 # -----------------------------------------------------------------------------
-# PostgreSQL (pgvector)
+# PostgreSQL
 # -----------------------------------------------------------------------------
 postgres:
   # Set external.enabled=true to skip the built-in postgres Deployment/PVC and
@@ -96,8 +96,7 @@ backend:
       # ReadWriteOnce, which prevents `backend.replicas > 1` from scheduling a
       # second pod (Multi-Attach error); disabling persistence — or switching
       # accessModes to a ReadWriteMany class — removes that constraint on the
-      # storage side. Note: backend startup migrations are not yet serialized
-      # across pods, so multi-replica still requires care beyond the chart.
+      # storage side.
       enabled: true
       size: 5Gi
       # Leave empty to use the cluster's default StorageClass.
@@ -111,6 +110,13 @@ backend:
         - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
+    # The migrator and API server retry transient PostgreSQL startup failures
+    # within this budget. Set to 0 to restore fail-fast startup behavior.
+    databaseStartupTimeout: 3m
+    # Fallback bound for each PostgreSQL connection attempt during startup.
+    # Native connect_timeout / PGCONNECT_TIMEOUT / service settings take
+    # precedence so existing deployments keep their pgx connection behavior.
+    databaseConnectTimeout: 5s
     appEnv: production
     appUrl: http://multica.dev.lan
     frontendOrigin: http://multica.dev.lan
@@ -129,6 +135,10 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
+    # Managed multica-cloud connection. Empty keeps self-hosting independent.
+    # Fleet, Billing, entitlement policy and strict seat capacity share it.
+    cloud:
+      url: ""
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""
@@ -153,7 +163,7 @@ backend:
 frontend:
   replicas: 1
   config:
-    # Backend origin used by the frontend runtime proxy for /api, /auth,
+    # Backend origin used by the frontend runtime proxy for /v1, /api, /auth,
     # /uploads, and /ws. Empty defaults to this release's backend Service.
     remoteApiUrl: ""
     # Optional docs origin used by the frontend runtime proxy for /docs.
@@ -195,17 +205,3 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
-
-# -----------------------------------------------------------------------------
-# Monitoring
-# -----------------------------------------------------------------------------
-monitoring:
-  prometheusRule:
-    # Requires the Prometheus Operator CRD (monitoring.coreos.com/v1). Kept
-    # disabled by default so minimal self-host installs without that CRD still
-    # render and install.
-    enabled: false
-    additionalLabels: {}
-    samplerQueryErrorsFor: 5m
-    samplerQueryLatencyFor: 10m
-    severity: warning

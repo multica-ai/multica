@@ -17,7 +17,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useTimeAgo } from "../../i18n";
+import { useLocale, useT, useTimeAgo } from "../../i18n";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -27,11 +27,10 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { CustomStatusChip, useIsCustomStatus } from "./custom-status-chip";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
-import { useT } from "../../i18n";
-
-function formatDate(date: string): string {
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
+function formatDate(date: string, locale: string): string {
+  return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
 /** Stops event from bubbling to Link/drag handlers */
@@ -59,6 +58,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   project?: Project;
 }) {
   const { t } = useT("issues");
+  const locale = useLocale();
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
   const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
@@ -91,6 +91,9 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showProject = storeProperties.project && project;
   const showChildProgress = storeProperties.childProgress && childProgress;
   const showLabels = storeProperties.labels && labels.length > 0;
+  // Keeps the chip row from rendering an empty flex container when the status
+  // chip is the only thing in it and it decides to render nothing.
+  const showCustomStatus = useIsCustomStatus(issue.status);
 
   const showAssigneeName = showAssigneeSection && hasAssignee && !showStartDate && !showDueDate;
   const showUpdatedHint = showAssigneeName && !showChildProgress;
@@ -141,6 +144,7 @@ export const BoardCardContent = memo(function BoardCardContent({
         actorId={issue.assignee_id!}
         size="sm"
         enableHoverCard
+        profileLink={false}
         className="shrink-0"
       />
       {assigneeName && (
@@ -195,9 +199,12 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels + custom property values */}
-      {(showProject || showLabels || cardCustomProperties.length > 0) && (
+      {/* Chip row: status + project + labels + custom property values.
+          The status chip renders only for a CUSTOM status — the column header
+          already names the category. (MUL-6243) */}
+      {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+          <CustomStatusChip status={issue.status} />
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />
@@ -238,7 +245,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                       trigger={
                         <span className="flex items-center gap-1 text-caption text-muted-foreground">
                           <CalendarClock className="size-3" />
-                          {formatDate(issue.start_date!)}
+                          {formatDate(issue.start_date!, locale)}
                         </span>
                       }
                     />
@@ -246,7 +253,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 ) : (
                   <span className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
                     <CalendarClock className="size-3" />
-                    {formatDate(issue.start_date!)}
+                    {formatDate(issue.start_date!, locale)}
                   </span>
                 )
               )}
@@ -265,7 +272,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                           }`}
                         >
                           <CalendarDays className="size-3" />
-                          {formatDate(issue.due_date!)}
+                          {formatDate(issue.due_date!, locale)}
                         </span>
                       }
                     />
@@ -279,7 +286,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                     }`}
                   >
                     <CalendarDays className="size-3" />
-                    {formatDate(issue.due_date!)}
+                    {formatDate(issue.due_date!, locale)}
                   </span>
                 )
               )}
@@ -346,6 +353,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
       <div
         ref={setNodeRef}
         style={style}
+        data-board-card=""
         {...attributes}
         {...listeners}
         className={`group/card ${isDragging ? "opacity-30" : ""}`}

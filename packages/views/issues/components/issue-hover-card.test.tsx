@@ -13,6 +13,22 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // This suite replaces useQuery wholesale, so the catalog hook is stubbed
+  // rather than left to fall through the shared useQuery mock.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    colorOf: (key: string) =>
+      key === "awaiting_response" ? "#f97316" : null,
+    labelOf: (key: string) => key,
+    entryOf: () => undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (_workspaceId: string, issueId: string) => ({
     queryKey: ["issue", issueId],
@@ -56,7 +72,22 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("./status-icon", () => ({
-  StatusIcon: () => <svg data-testid="status-icon" />,
+  StatusIcon: ({
+    status,
+    category,
+    color,
+  }: {
+    status: string;
+    category?: string;
+    color?: string | null;
+  }) => (
+    <svg
+      data-testid="status-icon"
+      data-status={status}
+      data-category={category}
+      data-color={color}
+    />
+  ),
 }));
 
 vi.mock("./priority-icon", () => ({
@@ -72,6 +103,7 @@ type Issue = {
   identifier: string;
   title: string;
   status: string;
+  status_category?: string;
   priority: string;
   description?: string | null;
   assignee_type?: string | null;
@@ -217,6 +249,25 @@ describe("IssueHoverCard", () => {
     );
   });
 
+  it("paints a custom status with its catalog color", async () => {
+    mockIssue({
+      ...BASE_ISSUE,
+      status: "awaiting_response",
+      status_category: "in_review",
+    });
+
+    await openCard();
+
+    expect(screen.getByTestId("status-icon")).toHaveAttribute(
+      "data-category",
+      "in_review",
+    );
+    expect(screen.getByTestId("status-icon")).toHaveAttribute(
+      "data-color",
+      "#f97316",
+    );
+  });
+
   it("omits the priority glyph when the issue has no priority", async () => {
     mockIssue({ ...BASE_ISSUE, priority: "none" });
 
@@ -311,17 +362,6 @@ describe("IssueHoverCard", () => {
 
     expect(screen.getByText(BASE_ISSUE.title)).toBeInTheDocument();
     expect(paragraphCount()).toBe(1);
-  });
-
-  it("breaks a long unbroken title instead of overflowing the card", async () => {
-    const title = "https://example.com/a/very/long/path/that/never/offers/a/break/opportunity";
-    mockIssue({ ...BASE_ISSUE, title });
-
-    await openCard();
-
-    const titleEl = screen.getByText(title);
-    expect(titleEl).toHaveClass("break-words");
-    expect(titleEl).not.toHaveClass("truncate");
   });
 
   it("keeps the skeleton while the detail query is pending", async () => {

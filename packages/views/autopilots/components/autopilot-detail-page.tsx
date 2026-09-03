@@ -18,7 +18,7 @@ import {
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
+import { api, clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -69,6 +69,7 @@ import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
+import { PageHeader } from "../../layout/page-header";
 
 // A run that already happened is an instant in the reader's day, so it reads in
 // the reader's zone (no timeZone passed). A run that is still to come belongs to
@@ -664,11 +665,11 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   if (isLoading) {
     return (
       <div className="flex h-full flex-col">
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-5">
+        <PageHeader>
           <Skeleton className="h-4 w-4" />
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />
-        </div>
+        </PageHeader>
         <div className="flex-1 overflow-y-auto">
           <div className="max-w-4xl mx-auto p-6 space-y-8">
             <section className="space-y-4">
@@ -740,7 +741,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         toast.error(message);
       }
     } catch (e: any) {
-      toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
+      const reason = dispatchReasonCode(e);
+      if (reason) {
+        toast.error(t(($) => $.detail[runNowBlockedKey(reason)]));
+        return;
+      }
+      // Only a 4xx message is written for the user; a 5xx one is internal
+      // server detail (MUL-6472), so an unclassified dispatch failure shows the
+      // localized generic sentence instead of the raw body.
+      toast.error(clientErrorMessage(e) || t(($) => $.detail.toast_trigger_failed));
     }
   };
 
@@ -889,28 +898,30 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
                   {t(($) => $.execution_mode[autopilot.execution_mode as AutopilotExecutionMode])}
                 </div>
               </div>
-              {autopilot.execution_mode === "create_issue" && (
-                <div>
-                  <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_project)}</label>
-                  <div className="mt-1 min-w-0">
-                    {!autopilot.project_id ? (
-                      <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
-                    ) : projectLoading ? (
-                      <Skeleton className="h-5 w-32" />
-                    ) : project ? (
-                      <AppLink
-                        href={wsPaths.projectDetail(project.id)}
-                        className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
-                      >
-                        <ProjectIcon project={project} size="md" />
-                        <span className="truncate">{project.title}</span>
-                      </AppLink>
-                    ) : (
-                      <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
-                    )}
-                  </div>
+              {/* Shown for BOTH output modes (MUL-6681): a run_only autopilot's
+                  project decides its execution environment (repository /
+                  local_directory, and therefore worktree isolation), so an
+                  operator debugging a run needs to see it here. */}
+              <div>
+                <label className="text-caption text-muted-foreground">{t(($) => $.detail.field_project)}</label>
+                <div className="mt-1 min-w-0">
+                  {!autopilot.project_id ? (
+                    <span className="text-muted-foreground">{t(($) => $.detail.no_project)}</span>
+                  ) : projectLoading ? (
+                    <Skeleton className="h-5 w-32" />
+                  ) : project ? (
+                    <AppLink
+                      href={wsPaths.projectDetail(project.id)}
+                      className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:underline"
+                    >
+                      <ProjectIcon project={project} size="md" />
+                      <span className="truncate">{project.title}</span>
+                    </AppLink>
+                  ) : (
+                    <span className="text-muted-foreground">{t(($) => $.detail.project_unavailable)}</span>
+                  )}
                 </div>
-              )}
+              </div>
               {autopilot.execution_mode === "create_issue" && (
                 <div className="col-span-2">
                   <label className="text-caption text-muted-foreground">

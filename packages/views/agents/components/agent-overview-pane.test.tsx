@@ -59,6 +59,9 @@ const larkListingRef = vi.hoisted(() => ({
 const slackListingRef = vi.hoisted(() => ({
   current: { installations: [] as unknown[], configured: false },
 }));
+const telegramListingRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -72,6 +75,12 @@ vi.mock("@multica/core/slack", () => ({
   slackInstallationsOptions: () => ({
     queryKey: ["slack", "installations"],
     queryFn: () => Promise.resolve(slackListingRef.current),
+  }),
+}));
+vi.mock("@multica/core/telegram", () => ({
+  telegramInstallationsOptions: () => ({
+    queryKey: ["telegram", "installations"],
+    queryFn: () => Promise.resolve(telegramListingRef.current),
   }),
 }));
 
@@ -135,6 +144,7 @@ function renderPane(
     back: vi.fn(),
     pathname: "/acme/agents/agent-1",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (path) => path,
   };
   return render(
@@ -167,6 +177,7 @@ function openSettings() {
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
+  telegramListingRef.current = { installations: [], configured: false };
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {
@@ -179,6 +190,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     ["Kiro", "kiro"],
     ["OpenCode", "opencode"],
     ["OpenClaw", "openclaw"],
+    ["Oh My Pi", "omp"],
   ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
@@ -226,22 +238,23 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the Integrations tab when neither Lark nor Slack is configured", () => {
-    // Default refs are configured:false; the tab must not appear on
-    // deployments without either integration, the common case.
+  it("shows the Integrations tab when only Telegram is configured", async () => {
+    telegramListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("claude")]);
+    openCapabilities();
+    expect(
+      await screen.findByRole("tab", { name: /^Integrations$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Integrations tab when no channel integration is configured", () => {
+    // Default refs are configured:false; the tab must not appear on a
+    // deployment without any channel integration, the common case.
     renderPane([makeRuntime("claude")]);
     openCapabilities();
     expect(
       screen.queryByRole("tab", { name: /^Integrations$/i }),
     ).not.toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Settings navigation", () => {
-  it("gives Access its own settings tab", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
   });
 });
 

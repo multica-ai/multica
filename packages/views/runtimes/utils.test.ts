@@ -4,6 +4,7 @@ import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
+  aggregateByDate,
   aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
@@ -143,6 +144,20 @@ describe("estimateCost", () => {
       cache_write_tokens: 1_000_000,
     });
     expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
+  });
+
+  it("prices Claude Fable 5.1 at the Mythos-class tier with quarter-rate cache reads", () => {
+    // Same $10 / $50 and $12.50 cache write as Fable 5, but cache reads are
+    // 0.025x input ($0.25) rather than the usual 0.1x.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5-1",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 0.25 + 12.5, 5);
   });
 
   it("prices Claude Sonnet 5 at Anthropic's intro $2 / $10 tier", () => {
@@ -334,6 +349,106 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("strips `provider:model` routing prefixes (Hermes custom providers) before resolving", () => {
+    // Regression: canonicalCandidates only stripped `/` prefixes, so Hermes
+    // ids like `alibaba-coding-plan:qwen3.8-max` and `custom:ark-code-latest`
+    // never resolved and stayed uncosted. `:` must be stripped like `/`.
+    const cost = estimateCost({
+      ...zeroUsage,
+      provider: "hermes",
+      model: "alibaba-coding-plan:qwen3.8-max",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    // 1M × $2 + 1M × $6 + 1M × $0.17 + 1M × $2.50 = $10.67.
+    expect(cost).toBeCloseTo(10.67, 5);
+    // `ark-code-latest` is a rolling Volcengine alias, not a stable model
+    // identity, so it is deliberately unmapped after the prefix strip.
+    expect(isModelPriced("custom:ark-code-latest", "hermes")).toBe(false);
+    expect(isModelPriced("kimi-coding:kimi-k3", "hermes")).toBe(true);
+  });
+
+  it("prices the Qwen / Kimi models added from models.dev", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.7-plus",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2.0, 5); // $0.40 + $1.60 (International ≤256K tier)
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-code/k3",
+        provider: "kimi",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(18, 5); // kimi/k3 → $3 + $15
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.6-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.75, 5); // $0.25 + $1.50 (International ≤256K tier)
+    // `ark-code-latest` is a rolling Volcengine alias (target switched in
+    // the console, possibly across model families), not a stable model
+    // identity — it stays unmapped like grok-composer-*.
+    expect(isModelPriced("ark-code-latest")).toBe(false);
+  });
+
+  it("keeps subscription-only and preview SKUs distinct from their GA siblings", () => {
+    // qwen3.8-max-preview is subscription-priced at 0; it must NOT inherit
+    // qwen3.8-max's $2/$6 tier, and `qwen3.8-max-preview[1m]` must resolve
+    // to the preview row after the context-tag strip.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.8-max-preview[1m]",
+        input_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "qwen3.8-max",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(2, 5);
+  });
+
+  it("iteratively strips nested routing prefixes (custom:anthropic/claude-opus-4.7)", () => {
+    // Regression for the review blocker: stripProvider used to peel a single
+    // `/` or `:` layer, so a Hermes-style `custom:anthropic/claude-opus-4.7`
+    // stopped at `anthropic/claude-opus-4.7` and missed the table while the
+    // backend substring rules matched it. Iterative peeling must resolve it
+    // to the Opus tier: 1M × $5 + 1M × $25 = $30.
+    const cost = estimateCost({
+      ...zeroUsage,
+      provider: "hermes",
+      model: "custom:anthropic/claude-opus-4.7",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(30, 5);
+    expect(isModelPriced("custom:anthropic/claude-opus-4.7", "hermes")).toBe(true);
+  });
+
+  it("keeps unknown suffixed Qwen variants unmapped (anchored aliases)", () => {
+    // Regression for the review blocker: the backend alias regexes were
+    // unanchored substrings, so `qwen3.7-plus-extra` / `qwen3.8-max-preview-extra`
+    // silently borrowed a tier. The frontend exact matcher must agree and
+    // leave them unmapped so both sides surface the same diagnostics.
+    expect(isModelPriced("qwen3.7-plus-extra")).toBe(false);
+    expect(isModelPriced("qwen3.6-flash-extra")).toBe(false);
+    expect(isModelPriced("qwen3.8-max-preview-extra")).toBe(false);
+  });
+
   it("returns 0 for a genuinely unknown model so the UI can flag it", () => {
     expect(
       estimateCost({
@@ -500,6 +615,21 @@ describe("estimateCost", () => {
         cache_read_tokens: 1_000_000,
       }),
     ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices grok-4.6 at xAI's short-context $2.00 / $6.00 tier with $0.50 cached input", () => {
+    // grok-4.6 cached input is $0.50/1M, not grok-4.5's $0.30.
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.50.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.5, 5);
   });
 
   it("prices the rest of the published Grok catalog", () => {
@@ -770,6 +900,7 @@ describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
     expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-fable-5")).toBe(true);
+    expect(isModelPriced("claude-fable-5-1")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -783,6 +914,7 @@ describe("isModelPriced", () => {
     // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
     // as "unmapped" and the user has to type the price in by hand.
     expect(isModelPriced("claude-sonnet-5")).toBe(true);
+    expect(isModelPriced("claude-fable-5.1")).toBe(true);
     expect(isModelPriced("claude-haiku-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
@@ -796,6 +928,7 @@ describe("isModelPriced", () => {
     // The provider prefix is routing metadata, not part of the SKU.
     expect(isModelPriced("anthropic/claude-sonnet-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
+    expect(isModelPriced("anthropic/claude-fable-5-1")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
@@ -1095,6 +1228,109 @@ describe("sliceWindow (timezone-aware)", () => {
   });
 });
 
+describe("aggregateByDate", () => {
+  // MUL-6334: the daily cost stack computed `estimateCostBreakdown` and then
+  // summed only three of its four components, silently dropping cache-read
+  // spend from every bar and from the tooltip Total that sums them.
+  function makeUsage(
+    date: string,
+    tokens: Partial<{
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }>,
+    model = "gpt-5.6-sol",
+  ): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "openai",
+      model,
+      input_tokens: tokens.input ?? 0,
+      output_tokens: tokens.output ?? 0,
+      cache_read_tokens: tokens.cacheRead ?? 0,
+      cache_write_tokens: tokens.cacheWrite ?? 0,
+    };
+  }
+
+  it("bills cache reads in the daily stack and its total", () => {
+    // gpt-5.6-sol: input $5/M, output $30/M, cacheRead $0.50/M.
+    const rows = [
+      makeUsage("2026-05-11", { input: 1_000_000, cacheRead: 10_000_000 }),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    const day = dailyCostStack[0];
+    expect(day?.cacheRead).toBeCloseTo(5, 2);
+    expect(day?.total).toBeCloseTo(10, 2);
+  });
+
+  it("keeps every daily bucket's total equal to the sum of estimateCost", () => {
+    // The invariant the reporter asked for. A cache-read-dominated workload is
+    // the only shape that catches the regression: with zero cache reads the
+    // broken and fixed totals are identical.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+      makeUsage("2026-05-11", { input: 1_000, output: 500 }),
+      makeUsage("2026-05-12", { cacheRead: 50_000_000 }),
+      // Anthropic rows exercise the cache-write segment too.
+      makeUsage(
+        "2026-05-12",
+        { input: 200_000, output: 20_000, cacheRead: 8_000_000, cacheWrite: 400_000 },
+        "claude-sonnet-4-6",
+      ),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack).toHaveLength(2);
+    for (const day of dailyCostStack) {
+      const expected = rows
+        .filter((r) => r.date === day.date)
+        .reduce((sum, r) => sum + estimateCost(r), 0);
+      // Each of the four segments is rounded to cents before being summed —
+      // that is what keeps the tooltip footer equal to the bars above it — so
+      // the bucket can sit up to half a cent per segment off the exact figure.
+      // The tolerance is the rounding, not slack for a dropped category: a
+      // missing segment shows up as dollars, not cents.
+      expect(Math.abs(day.total - expected)).toBeLessThanOrEqual(0.02);
+      // Total is what the tooltip footer prints; the segments are what it
+      // sums to get there. They have to be exactly the same number.
+      expect(day.input + day.output + day.cacheRead + day.cacheWrite).toBeCloseTo(
+        day.total,
+        10,
+      );
+    }
+  });
+
+  it("reproduces the reported gpt-5.6-sol undercount", () => {
+    // The exact workload from the bug report: the chart showed $35.19 against
+    // a true $74.84, hiding $39.65 (53%) of spend.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+    ];
+    const { dailyCostStack, dailyCost } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(74.84, 2);
+    // The non-stacked series always included cache reads; the stack now agrees
+    // with it, which is what makes the chart agree with the Cost KPI.
+    expect(dailyCostStack[0]?.total).toBeCloseTo(dailyCost[0]?.cost ?? 0, 2);
+  });
+
+  it("still reports a non-zero total when spend is entirely cache reads", () => {
+    // `total` gates the chart's empty state, which blames an unmapped model
+    // when it reads 0. A cache-read-only bucket used to trip that.
+    const rows = [makeUsage("2026-05-11", { cacheRead: 20_000_000 })];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(10, 2);
+  });
+});
+
 describe("aggregateByWeek", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -1107,6 +1343,8 @@ describe("aggregateByWeek", () => {
     date: string,
     input: number,
     output: number,
+    cacheRead = 0,
+    cacheWrite = 0,
   ): RuntimeUsage {
     return {
       runtime_id: "r",
@@ -1115,8 +1353,8 @@ describe("aggregateByWeek", () => {
       model: "claude-sonnet-4-6",
       input_tokens: input,
       output_tokens: output,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
     };
   }
 
@@ -1177,6 +1415,24 @@ describe("aggregateByWeek", () => {
     const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
     expect(weeklyCostStack).toHaveLength(1);
     expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
+  });
+
+  it("bills cache reads in the weekly stack and its total (MUL-6334)", () => {
+    vi.setSystemTime(new Date("2026-05-17T12:00:00Z"));
+    // claude-sonnet-4-6: input $3/M, output $15/M, cacheRead $0.30/M,
+    // cacheWrite $3.75/M. Row: $3 + $15 + $6 (20M cache reads) + $3.75 = $27.75.
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 1_000_000, 20_000_000, 1_000_000),
+    ];
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    const week = weeklyCostStack[0];
+    expect(week?.cacheRead).toBeCloseTo(6, 2);
+    expect(week?.total).toBeCloseTo(27.75, 2);
+    // Same invariant the daily stack holds: bucket total === sum of estimateCost.
+    expect(week?.total).toBeCloseTo(
+      rows.reduce((sum, r) => sum + estimateCost(r), 0),
+      2,
+    );
   });
 
   it("emits trailing calendar weeks pinned to today, dropping older populated weeks", () => {

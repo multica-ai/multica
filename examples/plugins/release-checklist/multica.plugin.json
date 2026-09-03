@@ -1,0 +1,53 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.release-checklist",
+  "name": "Release Checklist",
+  "description": "A per-issue definition-of-done checklist. The team edits the items once in plugin settings; every issue gets its own state, and completing the list posts a sign-off comment.",
+  "version": "1.0.0",
+  "author": {
+    "name": "multica",
+    "url": "https://multica.ai"
+  },
+  "scopes": [
+    "issues:read",
+    "comments:write",
+    "storage:workspace"
+  ],
+  "config": {
+    "items": {
+      "type": "string",
+      "label": "Checklist items",
+      "description": "One per line. Shared by the whole workspace.",
+      "required": true,
+      "placeholder": "Tests pass\nDocs updated\nMigration reviewed",
+      "multiline": true
+    },
+    "signoff_template": {
+      "type": "string",
+      "label": "Sign-off comment",
+      "description": "Posted when every item is checked. {{items}} expands to the completed list.",
+      "required": true,
+      "placeholder": "Release checklist complete:\n{{items}}",
+      "multiline": true
+    },
+    "strict": {
+      "type": "bool",
+      "label": "Require sign-off before posting",
+      "description": "When on, the comment is only offered once every item is checked."
+    }
+  },
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "checklist",
+        "type": "issue_panel",
+        "name": "Release Checklist",
+        "entry": "ui/main.js",
+        "platforms": [
+          "web",
+          "desktop"
+        ]
+      }
+    ]
+  }
+}

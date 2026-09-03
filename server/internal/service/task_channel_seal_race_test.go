@@ -60,7 +60,7 @@ func TestEnqueueChatTaskSealsMessageStrandedByPredecessorReply(t *testing.T) {
 
 	// Turn 1 completes inside that window: its reply row is NEWER than the
 	// waiting message, but it answers turn 1's batch, not this message.
-	if _, err := svc.CompleteTask(ctx, first.ID, []byte(`{"output":"通了。"}`), "", "", false, ""); err != nil {
+	if _, err := svc.CompleteTask(ctx, first.ID, []byte(`{"output":"通了。"}`), "", "", "", false, "", ""); err != nil {
 		t.Fatalf("complete turn 1: %v", err)
 	}
 
@@ -232,6 +232,7 @@ func seedChannelChatSession(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, id)
 	})
+	seedChannelTaskBinding(t, pool, id)
 	return id
 }
 

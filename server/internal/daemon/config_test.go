@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +15,82 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
+
+func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	for _, shimName := range []string{"volta-shim", "vp"} {
+		t.Run(shimName, func(t *testing.T) {
+			managerDir := t.TempDir()
+			manager := filepath.Join(managerDir, shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+				t.Fatalf("write dispatcher: %v", err)
+			}
+
+			binDir := t.TempDir()
+			entrypoint := filepath.Join(binDir, "claude")
+			if err := os.Symlink(manager, entrypoint); err != nil {
+				t.Fatalf("symlink dispatcher: %v", err)
+			}
+			t.Setenv("PATH", binDir)
+
+			got, err := resolveAgentExecutablePath("claude")
+			if err != nil {
+				t.Fatalf("resolveAgentExecutablePath: %v", err)
+			}
+			realBinDir, err := filepath.EvalSymlinks(binDir)
+			if err != nil {
+				t.Fatalf("resolve bin directory: %v", err)
+			}
+			want := filepath.Join(realBinDir, "claude")
+			if got != want {
+				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
+			}
+			output, err := exec.Command(got, "--version").CombinedOutput()
+			if err != nil {
+				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+			}
+			if got := strings.TrimSpace(string(output)); got != "claude" {
+				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			}
+		})
+	}
+}
+
+func TestResolveAgentExecutablePath_CanonicalizesOrdinaryVersionTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	versionDir := t.TempDir()
+	target := filepath.Join(versionDir, "claude-2.1.216")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write versioned executable: %v", err)
+	}
+
+	binDir := t.TempDir()
+	entrypoint := filepath.Join(binDir, "claude")
+	if err := os.Symlink(target, entrypoint); err != nil {
+		t.Fatalf("symlink versioned executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	got, err := resolveAgentExecutablePath("claude")
+	if err != nil {
+		t.Fatalf("resolveAgentExecutablePath: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(entrypoint)
+	if err != nil {
+		t.Fatalf("resolve versioned executable: %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved path = %q, want pinned version target %q", got, want)
+	}
+}
 
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "")
@@ -29,9 +106,104 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	}
 }
 
-func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
-	if DefaultGCInterval != 2*time.Hour {
-		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
+// A localhost server URL is not the official cloud host, so this exercises the
+// self-host branch of defaultGCCompletedTaskTTL: retention stays unbounded until
+// an operator opts in, and a daemon upgrade never starts deleting on its own.
+func TestLoadConfig_CompletedTaskTTLDefaultsDisabledOnSelfHostAndReadsEnv(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
+
+	overrides := Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	}
+	cfg, err := LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with default completed-task TTL: %v", err)
+	}
+	if cfg.GCCompletedTaskTTL != 0 {
+		t.Fatalf("GCCompletedTaskTTL = %s, want disabled", cfg.GCCompletedTaskTTL)
+	}
+
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with completed-task TTL: %v", err)
+	}
+	if cfg.GCCompletedTaskTTL != 36*time.Hour {
+		t.Fatalf("GCCompletedTaskTTL = %s, want 36h", cfg.GCCompletedTaskTTL)
+	}
+
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "not-a-duration")
+	if _, err := LoadConfig(overrides); err == nil || !strings.Contains(err.Error(), "MULTICA_GC_COMPLETED_TASK_TTL") {
+		t.Fatalf("LoadConfig invalid completed-task TTL error = %v, want named validation error", err)
+	}
+}
+
+func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "")
+
+	overrides := Overrides{
+		ServerURL:      "https://" + officialCloudHost,
+		WorkspacesRoot: t.TempDir(),
+	}
+	cfg, err := LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig on official cloud: %v", err)
+	}
+	if cfg.GCCompletedTaskTTL != 14*24*time.Hour {
+		t.Fatalf("GCCompletedTaskTTL = %s, want 14d on official cloud", cfg.GCCompletedTaskTTL)
+	}
+
+	// An explicit 0 has to win on cloud too — otherwise the only way back to the
+	// previous retention behavior would be downgrading the daemon.
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "0")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with cloud opt-out: %v", err)
+	}
+	if cfg.GCCompletedTaskTTL != 0 {
+		t.Fatalf("GCCompletedTaskTTL = %s, want an explicit 0 to disable the cloud default", cfg.GCCompletedTaskTTL)
+	}
+
+	t.Setenv("MULTICA_GC_COMPLETED_TASK_TTL", "36h")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with cloud override: %v", err)
+	}
+	if cfg.GCCompletedTaskTTL != 36*time.Hour {
+		t.Fatalf("GCCompletedTaskTTL = %s, want the env override to win on cloud", cfg.GCCompletedTaskTTL)
+	}
+}
+
+func TestDefaultGCCompletedTaskTTLOnlyBoundsOfficialCloudHost(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		serverURL string
+		want      time.Duration
+	}{
+		{"official cloud", "https://api.multica.ai", DefaultGCCompletedTaskTTLCloud},
+		{"official cloud with port and path", "https://API.Multica.AI:443/api", DefaultGCCompletedTaskTTLCloud},
+		// Staging and previews inherit the self-host value for the same reason
+		// officialCloudHost excludes them from the auto-update default.
+		{"staging", "https://api-staging.multica.ai", DefaultGCCompletedTaskTTLSelfHost},
+		{"self-host", "https://multica.example.com", DefaultGCCompletedTaskTTLSelfHost},
+		{"localhost", "http://localhost:8080", DefaultGCCompletedTaskTTLSelfHost},
+		{"unparseable", "://nope", DefaultGCCompletedTaskTTLSelfHost},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := defaultGCCompletedTaskTTL(tc.serverURL); got != tc.want {
+				t.Fatalf("defaultGCCompletedTaskTTL(%q) = %s, want %s", tc.serverURL, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -450,6 +622,9 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
 		t.Fatalf("CodexHandshakeTimeout = %s, want default %s", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != DefaultCodexThreadHandshakeTimeout {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want default %s", cfg.CodexThreadHandshakeTimeout, DefaultCodexThreadHandshakeTimeout)
+	}
 
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "47s")
 
@@ -463,6 +638,24 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != 47*time.Second {
 		t.Fatalf("CodexHandshakeTimeout = %s, want 47s from env", cfg.CodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != 47*time.Second {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 47s env override", cfg.CodexThreadHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "1d")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with day-unit env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 24*time.Hour {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 24h from 1d env", cfg.CodexHandshakeTimeout)
+	}
+	if cfg.CodexThreadHandshakeTimeout != 24*time.Hour {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 24h env override", cfg.CodexThreadHandshakeTimeout)
+	}
 
 	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "0")
 	cfg, err = LoadConfig(Overrides{
@@ -475,6 +668,9 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
 		t.Fatalf("CodexHandshakeTimeout = %s, want default %s for zero env", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
 	}
+	if cfg.CodexThreadHandshakeTimeout != DefaultCodexThreadHandshakeTimeout {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want default %s for zero env", cfg.CodexThreadHandshakeTimeout, DefaultCodexThreadHandshakeTimeout)
+	}
 
 	cfg, err = LoadConfig(Overrides{
 		ServerURL:             "http://localhost:8080",
@@ -486,6 +682,236 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 	if cfg.CodexHandshakeTimeout != 12*time.Second {
 		t.Fatalf("CodexHandshakeTimeout = %s, want 12s from override", cfg.CodexHandshakeTimeout)
+	}
+	if cfg.CodexThreadHandshakeTimeout != 12*time.Second {
+		t.Fatalf("CodexThreadHandshakeTimeout = %s, want legacy 12s override", cfg.CodexThreadHandshakeTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
+// explicit "0" both mean "keep the backend default" (0 = unset), while a positive
+// value is honored verbatim. There is deliberately no Overrides/CLI parity — this
+// knob is environment-only.
+func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with unset: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 when unset", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "30m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 30*time.Minute {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 30m from env", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 for explicit zero", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns pins the equality
+// edge (multica-eve review on #6753): because the semantic-inactivity timer is
+// armed before the first-turn timer, equal durations still let the semantic
+// deadline win and drop the #3291 startup retry. LoadConfig must warn when the
+// first-turn timeout is >= the semantic timeout, and stay quiet only when the
+// semantic timeout is strictly greater.
+func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
+	stageFakeAgent(t)
+
+	const warnNeedle = "MULTICA_CODEX_FIRST_TURN_TIMEOUT is greater than or equal to the semantic-inactivity timeout"
+
+	loadWithLoggedWarnings := func(t *testing.T, semantic, firstTurn string) string {
+		t.Helper()
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+
+		t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", semantic)
+		t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", firstTurn)
+		if _, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		}); err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return buf.String()
+	}
+
+	// Equal durations: the semantic timer is armed first, so the retry can still
+	// be lost. The warning MUST fire — this is the edge the earlier `>`-only
+	// check missed.
+	if logs := loadWithLoggedWarnings(t, "15m", "15m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("equal durations must warn; logs = %q", logs)
+	}
+
+	// First-turn strictly above semantic: also warns (the original truncation case).
+	if logs := loadWithLoggedWarnings(t, "10m", "30m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("first-turn above semantic must warn; logs = %q", logs)
+	}
+
+	// Semantic strictly above first-turn: the recommended safe configuration —
+	// no warning.
+	if logs := loadWithLoggedWarnings(t, "30m", "10m"); strings.Contains(logs, warnNeedle) {
+		t.Fatalf("semantic strictly above first-turn must not warn; logs = %q", logs)
+	}
+}
+
+// TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog pins the merge: the
+// in-flight-tool budget is no longer an independent constant, so an operator
+// who raises the idle budget cannot accidentally leave tool calls capped at a
+// lower, invisible ceiling.
+func TestLoadConfig_ToolWatchdogDefaultsToIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+
+	load := func(t *testing.T) Config {
+		t.Helper()
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := load(t)
+	if cfg.AgentIdleWatchdog != DefaultAgentIdleWatchdog {
+		t.Fatalf("AgentIdleWatchdog = %s, want default %s", cfg.AgentIdleWatchdog, DefaultAgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != cfg.AgentIdleWatchdog {
+		t.Fatalf("AgentToolWatchdog = %s, want it to track AgentIdleWatchdog %s", cfg.AgentToolWatchdog, cfg.AgentIdleWatchdog)
+	}
+
+	// Raising only the idle budget must carry the tool budget with it.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "6h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour || cfg.AgentToolWatchdog != 6*time.Hour {
+		t.Fatalf("idle=%s tool=%s, want both 6h", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+
+	// An explicit tool override still wins, so "tools may run longer than the
+	// model may think" stays expressible.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "12h")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 6*time.Hour {
+		t.Fatalf("AgentIdleWatchdog = %s, want 6h", cfg.AgentIdleWatchdog)
+	}
+	if cfg.AgentToolWatchdog != 12*time.Hour {
+		t.Fatalf("AgentToolWatchdog = %s, want 12h from env", cfg.AgentToolWatchdog)
+	}
+
+	// Zero keeps its distinct meaning: never force-stop while a tool is in
+	// flight. It must NOT be re-derived from the idle budget.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "0")
+	cfg = load(t)
+	if cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("AgentToolWatchdog = %s, want 0 from env", cfg.AgentToolWatchdog)
+	}
+
+	// Disabling the suite disables both.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "0")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+	cfg = load(t)
+	if cfg.AgentIdleWatchdog != 0 || cfg.AgentToolWatchdog != 0 {
+		t.Fatalf("idle=%s tool=%s, want both 0", cfg.AgentIdleWatchdog, cfg.AgentToolWatchdog)
+	}
+}
+
+// TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog pins the fix for
+// the gap the 2h change left behind: Codex's own semantic-inactivity timer is
+// not tool-aware, so if it keeps a 10m ceiling it kills a quiet build long
+// before the daemon budget that was supposed to protect it, and the raised
+// budget is a lie for Codex users.
+func TestLoadConfig_CodexSemanticInactivityDerivesFromWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	for _, key := range []string{
+		"MULTICA_AGENT_IDLE_WATCHDOG",
+		"MULTICA_AGENT_TOOL_WATCHDOG",
+		"MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT",
+	} {
+		t.Setenv(key, "")
+	}
+
+	load := func(t *testing.T) Config {
+		t.Helper()
+		cfg, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		})
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return cfg
+	}
+
+	cfg := load(t)
+	if cfg.CodexSemanticInactivityTimeout != DefaultAgentIdleWatchdog {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the idle budget %s", cfg.CodexSemanticInactivityTimeout, DefaultAgentIdleWatchdog)
+	}
+
+	// Raising the idle budget carries Codex with it.
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "6h")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 6*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want 6h", got)
+	}
+
+	// A wider tool budget wins: this timer cannot see that a tool is in flight,
+	// so it has to be sized like the larger of the two or it re-creates the very
+	// bug being fixed, one tier up.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "9h")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 9*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the wider tool budget 9h", got)
+	}
+
+	// A tool budget of 0 means "never force-stop during a tool", which this
+	// timer cannot express; it falls back to the idle budget rather than
+	// silently running unbounded.
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "0")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 6*time.Hour {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the idle budget 6h when the tool budget is unbounded", got)
+	}
+
+	// The explicit env still wins over the derivation.
+	t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", "20m")
+	if got := load(t).CodexSemanticInactivityTimeout; got != 20*time.Minute {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want 20m from env", got)
+	}
+
+	// Disabling the watchdog suite has never disabled this timer; Codex keeps
+	// its own built-in default rather than becoming unbounded.
+	t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", "")
+	t.Setenv("MULTICA_AGENT_IDLE_WATCHDOG", "0")
+	t.Setenv("MULTICA_AGENT_TOOL_WATCHDOG", "")
+	if got := load(t).CodexSemanticInactivityTimeout; got != DefaultCodexSemanticInactivityTimeout {
+		t.Fatalf("CodexSemanticInactivityTimeout = %s, want the codex built-in %s when watchdogs are off", got, DefaultCodexSemanticInactivityTimeout)
 	}
 }
 
@@ -1018,6 +1444,7 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
 		"MULTICA_REASONIX_PATH",
+		"MULTICA_DSH_PATH",
 		"MULTICA_KIRO_PATH",
 		"MULTICA_GROK_PATH",
 	} {
@@ -1283,4 +1710,42 @@ func agentKeys(m map[string]AgentEntry) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// TestApplyOpenclawOverride_CLITimeout covers the #7112 knob on the same
+// precedence contract as binary_path / state_dir: the config file supplies it
+// when the environment does not, and an environment value the user exported
+// upstream always wins.
+func TestApplyOpenclawOverride_CLITimeout(t *testing.T) {
+	t.Run("config file supplies the value", func(t *testing.T) {
+		os.Unsetenv(execenv.OpenclawCLITimeoutEnv)
+		t.Cleanup(func() { os.Unsetenv(execenv.OpenclawCLITimeoutEnv) })
+
+		applyOpenclawOverride(&cli.OpenClawOverride{CLITimeout: "45s"})
+
+		if got := os.Getenv(execenv.OpenclawCLITimeoutEnv); got != "45s" {
+			t.Errorf("%s: got %q, want 45s", execenv.OpenclawCLITimeoutEnv, got)
+		}
+	})
+
+	t.Run("env wins over config", func(t *testing.T) {
+		t.Setenv(execenv.OpenclawCLITimeoutEnv, "20s")
+
+		applyOpenclawOverride(&cli.OpenClawOverride{CLITimeout: "45s"})
+
+		if got := os.Getenv(execenv.OpenclawCLITimeoutEnv); got != "20s" {
+			t.Errorf("%s: env should win, got %q want 20s", execenv.OpenclawCLITimeoutEnv, got)
+		}
+	})
+
+	t.Run("unset field leaves the env alone", func(t *testing.T) {
+		os.Unsetenv(execenv.OpenclawCLITimeoutEnv)
+		t.Cleanup(func() { os.Unsetenv(execenv.OpenclawCLITimeoutEnv) })
+
+		applyOpenclawOverride(&cli.OpenClawOverride{StateDir: "/from/config/state"})
+
+		if _, set := os.LookupEnv(execenv.OpenclawCLITimeoutEnv); set {
+			t.Errorf("%s must not be set when the field is empty", execenv.OpenclawCLITimeoutEnv)
+		}
+	})
 }

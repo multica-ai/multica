@@ -66,6 +66,18 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	}
 }
 
+func TestIssueWorkflowCarriesSourceContextPrecedenceOnce(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
+	const rule = "If the issue JSON contains `source_context`"
+	if count := strings.Count(out, rule); count != 1 {
+		t.Fatalf("source-context precedence rule count = %d, want 1", count)
+	}
+	if !strings.Contains(out, "current issue title, description, and comments are authoritative task instructions") {
+		t.Fatal("source-context rule does not identify the current issue as authoritative")
+	}
+}
+
 // The brief must no longer carry any parent-notification guidance. PR
 // #2918 added a "Tell the parent when you finish a child" rule that
 // turned into noise (self-mention loops, planner ack ping-pong,
@@ -139,13 +151,24 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 	}
 }
 
-// Comment-triggered briefs must NOT carry any unconditional status-flip
-// command targeting the current issue. Previous revisions had a
-// dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;
-// the comment-triggered workflow rule "Do NOT change the issue status
-// unless the comment explicitly asks for it" must remain the source of
-// truth (Elon's blocking review on PR #2918).
-func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
+// The status rule is a fact judgment with two write moments (MUL-6417): no
+// trigger-type modes, no assignee gate. A turn that advances the issue's own
+// ask records in_progress when it STARTS — judged only at turn end, a fresh
+// assignment sat in todo for the whole first work turn (Bohan's post-merge
+// report) — and the end of the turn records the state the work reached. The
+// two invariants MUL-6300 pinned as gates (PR #205, reinforced by Elon's
+// blocking review on PR #2918) survive as consequences of the fact anchor and
+// stay pinned here:
+//
+//   - a purely conversational turn changes nothing about the issue's state,
+//     so it writes nothing — at either moment;
+//   - concurrently triggered agents judging the same fact write the same
+//     value or nothing, so the board cannot flap.
+//
+// The brief must also still carry no unconditional placeholder flip: a bare
+// `multica issue status <this-issue-id> in_review` command would fire on every
+// turn regardless of whether the turn delivered anything.
+func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
 		IssueID:          "55555555-6666-7777-8888-999999999999",
@@ -154,51 +177,99 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	out := buildMetaSkillContent("claude", ctx)
 
 	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
-		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
+		t.Errorf("brief must not contain a placeholder `<this-issue-id> in_review` flip — status is judged from what the turn delivered")
 	}
-
-	const guardrail = "Do NOT change the issue status unless the comment explicitly asks for it"
-	if !strings.Contains(out, guardrail) {
-		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
-	}
-
-	// For an ordinary agent the guardrail is absolute — the squad-leader
-	// carve-out below must not leak into this path.
-	if strings.Contains(out, "Own the parent issue status") {
-		t.Errorf("ordinary-agent comment brief must not reference the squad status grant:\n%s", out)
-	}
-}
-
-// A squad leader on a comment-triggered turn gets the same guardrail plus a
-// named exception. Without it the guardrail and the Squad Operating Protocol's
-// "Own the parent issue status" responsibility contradict each other on the
-// @mention-dispatch shape, where the member's delivery comment never asks for
-// a status change and no child-done system comment exists to ask on its
-// behalf — so the parent would sit in in_progress forever.
-func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
-	t.Parallel()
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
-		IssueID:          "55555555-6666-7777-8888-999999999999",
-		TriggerCommentID: "66666666-7777-8888-9999-aaaaaaaaaaaa",
-		IsSquadLeader:    true,
-	})
 
 	for _, want := range []string{
-		"Do NOT change the issue status unless the comment explicitly asks for it",
-		`Squad Operating Protocol's "Own the parent issue status"`,
-		"only appears when this issue is assigned to your squad",
-		"without waiting to be asked",
-		"When it is absent, the rule above is absolute.",
+		// The anchor: issue state, not run lifecycle, written when it changes.
+		"**Issue status — write the state the issue is in, whenever it changes**",
+		"Status reflects the state the ISSUE is in, not your run's lifecycle",
+		// The start moment: INSIDE step 3, at the read→work boundary. A run
+		// on MUL-6460 proved a detached status-block bullet does not fire —
+		// the model is walking the numbered list when the condition triggers.
+		"3. If any part of what this turn will produce is what the issue itself asks for",
+		// Category-scoped skip so a custom in_progress-category status (e.g.
+		// Planning, MUL-6460) already counts as "recorded" once agents can
+		// see the catalog.
+		"already in an `in_progress`-category status",
+		"the board should show the issue being worked while you work, not only after",
+		// No assignee gate: the judgment applies to whoever is running.
+		"whoever the assignee is",
+		// Delivery lands in in_review and the ceiling keeps `done` human.
+		"`done` stays human",
+		// Assigned deliverables must not be misread as status-neutral
+		// research: stage barriers and parent notifications key off the
+		// delivery write.
+		"stage barriers and parent notifications depend on that signal",
+		// Invariant 1: conversation does not move the board. Ancillary is
+		// defined by OUTPUT (no part of the issue's own deliverable), not by
+		// activity words like "research" that also describe real work.
+		"questions, discussion, and acknowledgements never touch status",
+		"Your turn produced none of the issue's own deliverable",
+		// Invariant 2: concurrent agents converge instead of flapping.
+		"This no-write default is what keeps concurrent runs from flapping the board",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("squad-leader comment brief missing %q\n---\n%s", want, out)
+			t.Errorf("status rule missing %q\n---\n%s", want, out)
 		}
 	}
 
-	// The unqualified sentence must be gone: its presence alongside the grant
-	// is the contradiction this branch exists to remove.
-	if strings.Contains(out, "explicitly asks for it\n") {
-		t.Errorf("squad-leader comment brief still ends the guardrail unqualified\n---\n%s", out)
+	// The retired gates must not come back: no trigger-type modes, no
+	// assignee-scoped arc, no UNCONDITIONAL opening flip (the start moment is
+	// conditional on the turn advancing the issue's ask), and no end-only
+	// timing that hides a long first work turn in todo.
+	for _, banned := range []string{
+		"Turn mode",
+		"Ownership mode",
+		"Reply mode",
+		"when this issue is assigned to you and this turn does substantive work on it",
+		"set `in_progress` when you start",
+		"Before step 3, run `multica issue status",
+		"judge once, at the end of the turn",
+		"do not open with a status write",
+		// The example that misled the MUL-6460 run: research that IS the
+		// issue's ask pattern-matched an example meant for consult pull-ins.
+		"asked to research stays",
+		// Activity-word lists must not come back in EITHER direction — the
+		// negative lists are the failure class behind the research and
+		// review cases, and the positive form-list ("in whatever form:
+		// code, research, ...") is the same shape read as exhaustive
+		// (J's review on #7295).
+		"A turn that only answers, reviews, or consults",
+		"you only answered a question, reviewed, or discussed",
+		"in whatever form: code, research",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("brief still carries retired status gate %q (MUL-6417)\n---\n%s", banned, out)
+		}
+	}
+
+	// Position is load-bearing, not style (J's review on #7295): a
+	// presence-pin cannot tell WHERE a sentence lives, and both field
+	// incidents came from correct sentences sitting in positions that do
+	// not fire. The two anchors must live INSIDE their numbered steps.
+	var step3, step5 string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "3. ") {
+			step3 = line
+		}
+		if strings.HasPrefix(line, "5. ") {
+			step5 = line
+		}
+	}
+	if !strings.Contains(step3, "set `in_progress` FIRST") {
+		t.Errorf("the start write must be anchored inside step 3\n---\n%s", step3)
+	}
+	if !strings.Contains(step3, "never decides") {
+		t.Errorf("the never-decides guard must live inside step 3, the position that fires\n---\n%s", step3)
+	}
+	if !strings.Contains(step5, "confirm the status still matches") {
+		t.Errorf("the exit-side status check must be anchored inside step 5\n---\n%s", step5)
+	}
+
+	// The squad-leader bullet must not leak into the ordinary path.
+	if strings.Contains(out, "dispatching members is not delivery") {
+		t.Errorf("ordinary-agent brief must not carry the squad-leader status bullet:\n%s", out)
 	}
 }
 
@@ -362,19 +433,19 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
 		// One enumeration, in Instruction Precedence, covering every action
-		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
 		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
-		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
-		// header instead of once per status bullet.
-		"skip any status call below that your Agent Identity forbids",
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
-		"Complete the task within your Agent Identity boundaries",
-		// Step 4 keeps only what the enumeration cannot express: a
+		// MUL-5442 (carried through MUL-6417): the forbids-clause is stated
+		// once on the status-rule header instead of once per status bullet.
+		"skip any status call your Agent Identity forbids",
+		"complete the task within your Agent Identity boundaries",
+		// Step 3 keeps only what the enumeration cannot express: a
 		// delegation-only role stops once the delegation is delivered.
 		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
-		"When done, run `multica issue status <issue-id> in_review`.",
-		"If blocked, run `multica issue status <issue-id> blocked`, and post a comment explaining the blocker unless your Agent Identity forbids issue comments.",
+		// The blocked end-state keeps its own comment carve-out: an agent
+		// whose identity forbids comments must still be able to mark blocked.
+		"post a comment explaining the blocker unless your Agent Identity forbids issue comments",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -392,8 +463,11 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
-// Squad-leader briefs must open the parent with in_progress, but must not
-// treat the first dispatch turn as completion (no unconditional in_review).
+// A squad leader's dispatch turn must not read as completion: the end-of-turn
+// fact is in_progress, and in_review waits for the re-trigger that confirms
+// the overall goal is met. Without this bullet the general rule's "delivered →
+// in_review" reading would let a leader close out the parent on the very turn
+// it hands work to members.
 func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	t.Parallel()
 	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -403,21 +477,15 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
-		"After this initial dispatch, leave the parent issue `in_progress`",
-		// The guest-leader contract test (handler side) bans any runnable
-		// in_review command shape from reaching a guest — the dispatch rule
-		// therefore states the prohibition without a command form.
-		"do NOT move it to `in_review` or `done` on this turn",
-		"only then, if the overall goal is met, move the parent to `in_review`",
+		"dispatching members is not delivery",
+		"a dispatch turn leaves the parent `in_progress`",
+		"where you confirm the overall goal is met",
+		// The shared no-write default still governs leader conversation turns.
+		"questions, discussion, and acknowledgements never touch status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("squad-leader issue brief missing %q\n---\n%s", want, out)
 		}
-	}
-
-	if strings.Contains(out, "When done, run `multica issue status <issue-id> in_review`") {
-		t.Errorf("squad-leader issue brief must not contain the ordinary-agent completion step\n---\n%s", out)
 	}
 }
 
@@ -445,16 +513,15 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 	for _, banned := range []string{
 		"### Squad maintenance",
 		"multica squad member set-role",
-		"Squad leader rule:",
 		"multica squad activity",
-		`Squad Operating Protocol's "Own the parent issue status"`,
-		"After this initial dispatch, leave the parent issue `in_progress`",
+		"unless your outcome is `no_action`",
+		"dispatching members is not delivery",
 	} {
 		if strings.Contains(out, banned) {
 			t.Fatalf("ordinary-agent brief leaked leader-only content %q\n---\n%s", banned, out)
 		}
 	}
-	if !strings.Contains(out, "**Posting your reply as a comment is mandatory**") {
+	if !strings.Contains(out, "**Post your final results as a comment — this step is mandatory**") {
 		t.Fatalf("ordinary-agent brief lost the unconditional reply obligation\n---\n%s", out)
 	}
 }
@@ -933,6 +1000,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
+		{"codearts", "AGENTS.md"},
 		{"openclaw", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
 		{"pi", "AGENTS.md"},
@@ -940,6 +1008,9 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
 		{"reasonix", "AGENTS.md"},
+		{"dsh", "AGENTS.md"},
+		{"dim", "AGENTS.md"},
+		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1309,6 +1380,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
+		{"codearts", "AGENTS.md"},
 		{"openclaw", "AGENTS.md"},
 		{"hermes", "AGENTS.md"},
 		{"pi", "AGENTS.md"},
@@ -1316,6 +1388,9 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
 		{"reasonix", "AGENTS.md"},
+		{"dsh", "AGENTS.md"},
+		{"dim", "AGENTS.md"},
+		{"zeroclaw", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1840,6 +1915,74 @@ func firstBriefDiff(want, got string) string {
 		"\n--- variant ---\n" + got[lo:hiG]
 }
 
+// TestAutopilotBriefByteIdenticalAcrossRunScopedFields is the invariant
+// MUL-6984 actually moved, and the one TestBriefByteIdenticalAcrossRunsForEveryKind
+// cannot see: its autopilot row pins run-1 / ap-1 and its variants only mutate
+// the generic resume / initiator / connected-app fields, so reinserting the
+// autopilot title, source, payload or description into the brief would leave
+// it green.
+//
+// Every field below identifies ONE run. The brief lands in messages[0], ahead
+// of the whole conversation, so a per-run value here throws away the prompt
+// cache for the entire history on resume (MUL-5377) — and it also gives a
+// second hand-maintained copy somewhere to drift from the per-turn one, which
+// is how MUL-5696 happened. Two runs of the same autopilot, and two runs of
+// different autopilots, must all produce the same bytes.
+func TestAutopilotBriefByteIdenticalAcrossRunScopedFields(t *testing.T) {
+	t.Parallel()
+
+	base := TaskContextForEnv{AgentID: "a-1", AgentName: "Eve", AutopilotRunID: "run-1", AutopilotID: "ap-1"}
+
+	runs := []struct {
+		name string
+		ctx  TaskContextForEnv
+	}{
+		{"baseline", base},
+		{"second run of the same autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-2"
+			c.AutopilotTitle = "Nightly dependency sweep"
+			c.AutopilotSource = "schedule"
+			c.AutopilotDescription = "Check dependencies and report outdated packages."
+			c.AutopilotTriggerPayload = `{"schedule":"0 3 * * *"}`
+			return c
+		}()},
+		{"run of a different autopilot", func() TaskContextForEnv {
+			c := base
+			c.AutopilotRunID = "run-3"
+			c.AutopilotID = "ap-2"
+			c.AutopilotTitle = "Triage inbound issues"
+			c.AutopilotSource = "webhook"
+			c.AutopilotDescription = "Read the payload and file one issue per report."
+			c.AutopilotTriggerPayload = `{"action":"opened","issue":{"number":7,"title":"crash on start"}}`
+			return c
+		}()},
+	}
+
+	want := buildMetaSkillContent("claude", runs[0].ctx)
+	for _, r := range runs[1:] {
+		if got := buildMetaSkillContent("claude", r.ctx); got != want {
+			t.Errorf("autopilot brief changed for %q — a per-run value reached the cache prefix\n%s",
+				r.name, firstBriefDiff(want, got))
+		}
+	}
+
+	// Byte-identity alone would also hold if the brief rendered none of these
+	// AND the values never reached the agent at all. Pin the other half here:
+	// the brief must not carry them, and daemon.TestBuildPromptAutopilotRunOnly
+	// pins the per-turn message as the surface that does.
+	for _, banned := range []string{
+		"run-1", "ap-1", "Nightly dependency sweep", "Triage inbound issues",
+		"schedule", "webhook", "Check dependencies", "0 3 * * *", "crash on start",
+	} {
+		for _, r := range runs {
+			if strings.Contains(buildMetaSkillContent("claude", r.ctx), banned) {
+				t.Errorf("autopilot brief (%s) carries the run-scoped value %q; the per-turn message owns it", r.name, banned)
+			}
+		}
+	}
+}
+
 // TestBriefByteIdenticalAcrossRunsForEveryKind extends the MUL-5377 guarantee
 // past issue runs.
 //
@@ -1972,5 +2115,65 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
 			}
 		})
+	}
+}
+
+// Every brief that teaches `--output json` also says not to merge stderr into
+// it, because the two facts are only useful together. The CLI is right:
+// confirmations go to stderr, JSON goes to stdout, and `--output json | jq` has
+// always worked. It stays right only while the caller keeps the streams apart,
+// and `2>&1` is ordinary shell habit. The cost of merging them is not a cosmetic
+// parse error: a confirmation line inside the JSON makes the parse fail, so a
+// write that SUCCEEDED reads as one that failed, and the retry posts the comment
+// or sends the file a second time.
+//
+// The assertions are on the rule's wording, not on loose substrings, because
+// `2>&1` and "look like it failed" both survive a brief that says to merge the
+// streams. Each builder must carry the prohibition verbatim, exactly once, with
+// the consequence attached.
+//
+// Both brief builders are checked, not one. The quick-create brief is a
+// separate function with its own copy of the `--output json` line, so guidance
+// added to the full brief alone would be missing from exactly the runs that are
+// given the least context to work it out for themselves.
+func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing.T) {
+	t.Parallel()
+	const (
+		wantFlag = "--output json"
+		// The premise the rule rests on. "Do not merge them" says nothing about
+		// WHICH stream carries what, so a brief that swapped the two would pass
+		// every other assertion here while telling an agent the opposite of the
+		// truth — the same defect one clause to the left.
+		wantPremise = "writes JSON to stdout; confirmations and warnings go to stderr"
+		// The prohibition itself, not just the operator it names: "Always merge
+		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
+		wantRule = "Do not merge them (`2>&1`)"
+		// The consequence, in the direction that makes the rule worth obeying;
+		// the inverse claim ("failed write looks like it succeeded") is a
+		// different bug and must not satisfy this.
+		wantWhy = "a write that SUCCEEDED look like it failed"
+	)
+	briefs := map[string]string{
+		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
+		"quick-create": buildMetaSkillContent("claude", TaskContextForEnv{QuickCreatePrompt: "make an issue"}),
+	}
+	for name, brief := range briefs {
+		if !strings.Contains(brief, wantFlag) {
+			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
+		}
+		if !strings.Contains(brief, wantPremise) {
+			t.Errorf("%s brief teaches %s without saying %q — the rule below it is only correct while the streams carry what this says they carry", name, wantFlag, wantPremise)
+		}
+		switch got := strings.Count(brief, wantRule); got {
+		case 1:
+		case 0:
+			t.Errorf("%s brief teaches %s without saying %q — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantRule)
+			continue // the reason check below would report a rule that is not there
+		default:
+			t.Errorf("%s brief repeats %q %d times; one rule, one place, or the next edit fixes only one of them", name, wantRule, got)
+		}
+		if !strings.Contains(brief, wantWhy) {
+			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
 	}
 }

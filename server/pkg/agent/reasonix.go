@@ -85,9 +85,9 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// narrows the generic auto-approval policy; --workspace-only independently
 	// keeps configured extra write roots out of unattended tasks.
 	reasonixArgs := append(reasonixACPLaunchArgs(), filterCustomArgs(opts.CustomArgs, reasonixBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, reasonixArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, reasonixArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", reasonixArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(reasonixArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -119,7 +119,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("reasonix stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start reasonix: %w", err)
 	}
@@ -235,6 +235,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

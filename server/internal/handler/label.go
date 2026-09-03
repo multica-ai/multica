@@ -408,7 +408,10 @@ func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list labels")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"labels": labelsToResponse(labels)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"labels":         labelsToResponse(labels),
+		"issue_revision": issue.Revision,
+	})
 }
 
 // AttachLabel attaches a label to an issue.
@@ -455,11 +458,12 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+	attached, err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
 		IssueID:     issue.ID,
 		LabelID:     labelID,
 		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
 		return
@@ -475,11 +479,18 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
-		"issue_id": uuidToString(issue.ID),
-		"labels":   resp,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
+	if attached.Changed {
+		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"labels":         resp,
+			"issue_revision": attached.IssueRevision,
+		})
+	}
+	payload := map[string]any{"labels": resp}
+	if attached.IssueRevision > 0 {
+		payload["issue_revision"] = attached.IssueRevision
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // DetachLabel removes a label from an issue.
@@ -520,11 +531,12 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
+	detached, err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
 		IssueID:     issue.ID,
 		LabelID:     labelUUID,
 		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to detach label")
 		return
@@ -536,11 +548,18 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
-		"issue_id": uuidToString(issue.ID),
-		"labels":   resp,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
+	if detached.Changed {
+		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"labels":         resp,
+			"issue_revision": detached.IssueRevision,
+		})
+	}
+	payload := map[string]any{"labels": resp}
+	if detached.IssueRevision > 0 {
+		payload["issue_revision"] = detached.IssueRevision
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,80 @@
+---
+title: Telegram Bot 連携
+description: 独自の Telegram Bot を Multica エージェントに接続し、DM、グループ、forum topic、/issue で利用します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica は Telegram 公式の [@BotFather](https://t.me/BotFather) で作成した Bot を使用します。1 つの Bot は 1 つの Multica エージェントに対応します。
+
+Telegram 連携は[コミュニティメンテナンス](/community-maintained)です。毎リリースに同梱されますが、公式のサポート SLA は付きません。問題があれば [GitHub issues](https://github.com/multica-ai/multica/issues) に報告してください。
+
+## 準備
+
+- 接続できるのはワークスペースの owner または admin です。
+- API サーバーから `https://api.telegram.org` に接続できる必要があります。
+- @BotFather が発行した Bot token が必要です。パスワードと同様に扱ってください。
+
+## 1. Bot を作成する
+
+1. [@BotFather](https://t.me/BotFather) を開き、`/newbot` を送信します。
+2. 表示名と、`bot` で終わる username を設定します。
+3. HTTP API token をコピーします。
+4. **Group Privacy** は有効のままにします。グループではコマンド、明示的な @mention、Bot への返信だけを処理します。
+
+<Callout type="warning">
+token を issue、チャット、ログ、リポジトリに記録しないでください。漏えいした場合は @BotFather で失効させ、新しい token で再接続します。
+</Callout>
+
+## 2. エージェントに接続する
+
+1. Multica の **Agents** で対象エージェントを開き、**Integrations** を選びます。
+2. **Connect Telegram** をクリックします。
+3. Bot token を貼り付け、**Connect** をクリックします。
+
+Multica は Telegram で Bot を検証し、long polling と競合する webhook がないことを確認して token を暗号化保存し、監視された `getUpdates` 接続を開始します。他のエージェントやワークスペースに接続済みの Bot は、先に元の接続を解除してください。
+
+## 初回利用とアカウント連携
+
+メンバーが初めて Bot にメッセージを送ると、1 回だけ使える Multica アカウント連携リンクが届きます。同じワークスペースの Multica アカウントでサインインし、Telegram に戻ってメッセージを再送してください。リンクは 15 分で期限切れになります。
+
+グループには bearer link を公開しません。Bot は送信者に、先に DM を開始するよう案内します。利用できるのは現在のワークスペースメンバーだけです。
+
+## Bot を使う
+
+- **DM**: @mention なしでテキストを送信します。
+- **グループ**: Bot を追加し、@mention するか Bot のメッセージに直接返信します。受理されたメッセージは継続中の Multica 会話に残りますが、Bot 宛てでない会話は収集されません。他のメンバーのメッセージへ返信する場合は Bot も明示的に @mention してください。その場合に限り、引用元の送信者とテキスト（または caption）が新しい指示の文脈に含まれます。@mention なしの人への返信は Bot を起動しません。forum topic は topic ごとにセッションが分離されます。
+- **`/new` / `/new <message>`**: 空の新しい Multica Chat を作成し、その Telegram 会話の後続メッセージを新しい Chat にルーティングします。メッセージを付けた場合は新しい Chat の最初のターンになります。他のメンバーへの返信で Bot を明示的に @mention した場合、選択した引用内容も最初のターンに含まれます。
+- **`/clear` / `/clear <message>`**: 現在の Multica Chat を維持したまま、次の空でないメッセージに新しいエージェント可視コンテキストを適用します。メッセージを付けた場合は境界後の最初のターンになり、明示的に選択した返信の引用も保持されます。
+- **`/issue <title>`**: Multica issue を作成します。2 行目以降は任意の説明です。`/issue@your_bot` 形式も利用できます。
+
+Bot は Telegram メッセージを送信・編集してテキストをストリーミング表示し、元メッセージを引用して forum topic を維持します。長い返信は自動分割されます。最終返信はプロセス内で非同期に配信されます。通常、あるチャットのバックオフ待機は worker を占有しません。キャッシュが上限に達してバックオフ状態が圧縮されると、同じ Bot installation の他のチャットも安全側に遅延する場合があります。終端キューの容量は固定で、上限超過は明示的に拒否されてエラーとして記録されます。キューはサービス再起動後に復元されません。
+
+現在はテキストのみ対応しています。画像、ファイル、動画、音声、sticker などは、DM または Bot 宛てのグループメッセージで明確な非対応通知を返します。
+
+## 管理とセルフホスティング
+
+**Settings → Integrations → Telegram** で接続済み Bot を確認できます。owner と admin は接続を解除できます。会話と監査履歴は保持されます。
+
+セルフホスト環境では、API 起動前に固定の 32-byte 暗号鍵を設定します。
+
+```dotenv
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
+```
+
+`openssl rand -base64 32` で生成できます。連携リンクは `MULTICA_APP_URL`（未設定時は `FRONTEND_ORIGIN`）を使用します。サーバーから `api.telegram.org` への HTTPS 接続も必要で、標準の `HTTPS_PROXY` / `NO_PROXY` を利用できます。
+
+## トラブルシューティング
+
+- **Bot を検証できない**: まずサーバーのネットワークと proxy を確認します。Telegram が token を拒否した場合だけ再発行します。
+- **webhook conflict**: 接続前に既存 webhook を削除します。
+- **409 polling conflict**: 同じ Bot を polling している別プロセスを停止するか、環境ごとに Bot を分けます。
+- **グループで返信しない**: Bot が参加していて、@mention または Bot への返信になっていることを確認します。
+- **連携リンクが期限切れ**: Bot に新しい DM を送り、最新リンクを使用します。
+- **実行されない**: エージェントの archive 状態と[ランタイム](/daemon-runtimes)を確認します。
+
+## 次のステップ
+
+- [チャット連携](/channels)
+- [チャット](/chat)
+- [Issues](/issues)

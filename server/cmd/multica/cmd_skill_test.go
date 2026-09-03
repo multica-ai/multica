@@ -460,3 +460,212 @@ func TestRunSkillInlineEmptyContentKeepsExistingBehavior(t *testing.T) {
 		t.Fatalf("upsert inline empty error = %v", err)
 	}
 }
+
+func TestRunSkillRefreshPostsToRefreshEndpointAndPrintsTable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/skills/skill-123/refresh" {
+			t.Fatalf("path = %q, want /api/skills/skill-123/refresh", r.URL.Path)
+		}
+		if r.Header.Get("X-Workspace-ID") != "workspace-123" {
+			t.Fatalf("X-Workspace-ID = %q, want workspace-123", r.Header.Get("X-Workspace-ID"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "skill-123",
+			"name":        "review-helper",
+			"description": "refreshed",
+			"content":     "# refreshed",
+			"files":       []any{},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "refresh"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "table", "")
+
+	out, err := captureStdout(t, func() error {
+		return runSkillRefresh(cmd, []string{"skill-123"})
+	})
+	if err != nil {
+		t.Fatalf("runSkillRefresh: %v", err)
+	}
+	if !strings.Contains(out, "review-helper") || !strings.Contains(out, "skill-123") {
+		t.Fatalf("table output %q must contain skill name and id", out)
+	}
+}
+
+func TestRunSkillRefreshJsonPrintsSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "skill-123",
+			"name": "review-helper",
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "refresh"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "json", "")
+
+	out, err := captureStdout(t, func() error {
+		return runSkillRefresh(cmd, []string{"skill-123"})
+	})
+	if err != nil {
+		t.Fatalf("runSkillRefresh: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if got["id"] != "skill-123" || got["name"] != "review-helper" {
+		t.Fatalf("got = %#v", got)
+	}
+}
+
+func newSkillGetTestCmd(withContent bool) *cobra.Command {
+	cmd := &cobra.Command{Use: "get"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "json", "")
+	cmd.Flags().Bool("with-content", withContent, "")
+	return cmd
+}
+
+func newSkillFilesListTestCmd(withContent bool) *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("with-content", withContent, "")
+	return cmd
+}
+
+// newSkillQueryCaptureServer records the query string the CLI sent and answers
+// with an empty payload of the right shape.
+func newSkillQueryCaptureServer(t *testing.T, wantPath string, gotQuery *string, payload any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != wantPath {
+			t.Errorf("path = %q, want %q", r.URL.Path, wantPath)
+		}
+		*gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(payload)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// `skill get`'s table view prints four columns; asking for every file body to
+// render them is what made a large skill unfetchable (GH #7498).
+func TestRunSkillGetAsksForMetadataUnlessContentRequested(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		withContent bool
+		wantQuery   string
+	}{
+		{"default", false, "include=metadata"},
+		{"--with-content", true, "include=content"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			var gotQuery string
+			srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123", &gotQuery, map[string]any{
+				"id":   "skill-123",
+				"name": "review-helper",
+			})
+			setSkillServerEnv(t, srv.URL)
+
+			if _, err := captureStdout(t, func() error {
+				return runSkillGet(newSkillGetTestCmd(tc.withContent), []string{"skill-123"})
+			}); err != nil {
+				t.Fatalf("runSkillGet: %v", err)
+			}
+			if gotQuery != tc.wantQuery {
+				t.Errorf("query = %q, want %q", gotQuery, tc.wantQuery)
+			}
+		})
+	}
+}
+
+func TestRunSkillFilesListAsksForMetadataUnlessContentRequested(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		withContent bool
+		wantQuery   string
+	}{
+		{"default", false, "include=metadata"},
+		{"--with-content", true, "include=content"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			var gotQuery string
+			srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123/files", &gotQuery, []any{})
+			setSkillServerEnv(t, srv.URL)
+
+			if _, err := captureStdout(t, func() error {
+				return runSkillFilesList(newSkillFilesListTestCmd(tc.withContent), []string{"skill-123"})
+			}); err != nil {
+				t.Fatalf("runSkillFilesList: %v", err)
+			}
+			if gotQuery != tc.wantQuery {
+				t.Errorf("query = %q, want %q", gotQuery, tc.wantQuery)
+			}
+		})
+	}
+}
+
+// The size column exists to name the oversized file. Rendering it through
+// strVal would print a 1.2MB file as "1.234567e+06" — JSON numbers decode as
+// float64 — which is unreadable at exactly the sizes that matter.
+func TestRunSkillFilesListRendersReadableSizes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var gotQuery string
+	srv := newSkillQueryCaptureServer(t, "/api/skills/skill-123/files", &gotQuery, []any{
+		map[string]any{"id": "f1", "path": "reference.md", "size": 1234567, "content_hash": "abc"},
+		map[string]any{"id": "f2", "path": "small.md", "size": 128, "content_hash": "def"},
+	})
+	setSkillServerEnv(t, srv.URL)
+
+	out, err := captureStdout(t, func() error {
+		return runSkillFilesList(newSkillFilesListTestCmd(false), []string{"skill-123"})
+	})
+	if err != nil {
+		t.Fatalf("runSkillFilesList: %v", err)
+	}
+	if !strings.Contains(out, "SIZE") {
+		t.Errorf("table has no SIZE column: %q", out)
+	}
+	if strings.Contains(out, "e+06") {
+		t.Errorf("size rendered in scientific notation: %q", out)
+	}
+	if !strings.Contains(out, "1.2 MiB") {
+		t.Errorf("expected a human-readable size for the large file, got %q", out)
+	}
+	if !strings.Contains(out, "128 B") {
+		t.Errorf("expected an exact byte count for the small file, got %q", out)
+	}
+}

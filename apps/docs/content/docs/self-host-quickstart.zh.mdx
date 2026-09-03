@@ -57,6 +57,13 @@ make selfhost
 
 <Callout type="info">
 `make selfhost` 拉取已发布的镜像，不会编译当前 checkout 中的代码。需要测试本地源码时，使用 `make selfhost-build`。
+
+已发布的镜像跟随最新的 **release tag**，而直接 `git clone` 检出的是 `main`，通常领先于发版。如果你要在这个 checkout 上构建任何东西——CLI，或通过 `make selfhost-build` 构建镜像——先切换到与镜像对应的 release tag，让构建产物和运行中的容器保持同一版本：
+
+```bash
+git fetch --tags --depth 1
+git checkout $(git tag -l 'v*' --sort=-v:refname | head -1)
+```
 </Callout>
 
 ## 2. 确认服务已经就绪
@@ -85,7 +92,7 @@ Backend 容器每次启动时都会先运行数据库 migration，再启动服�
 
 ### 本机访问
 
-直接打开 [http://localhost:3000](http://localhost:3000)。后面运行 `multica setup self-host` 时也不需要传 URL。
+直接打开 [http://localhost:3000P172。后面运行 `multica setup self-host` 时也不需要传 URL。
 
 ### 远程访问
 
@@ -110,33 +117,70 @@ MULTICA_PUBLIC_URL=https://api.example.com
 
 ```text
 app.example.com {
-    # 浏览器的 WebSocket 直接交给 backend
-    @ws path /ws /ws/*
-    handle @ws {
-        reverse_proxy 127.0.0.1:8080 {
-            flush_interval -1
-        }
-    }
+ # 浏览器的 WebSocket 直接交给 backend
+ @ws path /ws /ws/*
+ handle @ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
 
-    # 其余路径交给 frontend；它会转发 API 和登录请求
-    handle {
-        reverse_proxy 127.0.0.1:3000
-    }
+ # 其余路径交给 frontend；它会转发 API 和登录请求
+ handle {
+ reverse_proxy 127.0.0.1:3000
+ }
 }
 
 api.example.com {
-    reverse_proxy 127.0.0.1:8080 {
-        flush_interval -1
-    }
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
 }
 ```
+
+如果想让所有流量走**单一 origin**（一个域名，或一台主机一个端口——小服务器上常见），把守护进程依赖的路径显式转给 backend，其余交给 frontend：
+
+```text
+multica.example.com {
+ # CLI 可达性探测：`multica setup` 会 GET <server-url>/health 并要求 200，
+ # 旧版 frontend 不转发这个路径，直接路由到 backend
+ handle /health {
+ reverse_proxy 127.0.0.1:8080
+ }
+
+ # 网页端 realtime WebSocket——前端镜像代理不了 WS 升级，直通 backend
+ handle /ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
+
+ # daemon 长连接：拨的是 {server-url}/api/daemon/ws（不是 /ws）。
+ # 缺了这条，握手失败后 daemon 会静默回退到轮询
+ handle /api/daemon/ws {
+ reverse_proxy 127.0.0.1:8080 {
+ flush_interval -1
+ }
+ }
+
+ # 其余路径交给 frontend；它会转发 API 和登录请求
+ handle {
+ reverse_proxy 127.0.0.1:3000
+ }
+}
+```
+
+单一 origin 模式下，两个 URL 都指向它（`.env` 里的 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL`，以及 `multica setup self-host` 的 `--server-url` 和 `--app-url`）。
 
 Caddy 会申请 TLS 证书并转发 WebSocket。修改 `.env` 后，用 `up -d` 重新创建容器，让新配置生效：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml up -d
 curl -fsS https://api.example.com/readyz
+curl -fsS https://app.example.com/api/config | grep -o '"daemon_server_url":"[^"]*"'
 ```
+
+最后一条命令输出 `daemon_server_url`——daemon 连接 API 用的地址：设了 `MULTICA_DAEMON_SERVER_URL` 时用它，其次是 `MULTICA_PUBLIC_URL`，否则用 app URL（`MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`）。当 `MULTICA_APP_URL` 和 `FRONTEND_ORIGIN` 都没设时，这个字段会整个从响应里省略（上面的 grep 无输出）——即使设了 `MULTICA_DAEMON_SERVER_URL` 或 `MULTICA_PUBLIC_URL` 也是如此。如果输出的是 `localhost`，说明 `.env` 里还是本地默认值：不要依赖从 `.env.example` 复制来的 `${FRONTEND_PORT}` 引用，把 `FRONTEND_ORIGIN` 和 `MULTICA_APP_URL` 显式设置为公网地址，然后重建容器。
 
 <Callout type="warning">
 `docker compose restart` 只重启现有容器，不会重新读取 `.env`。修改配置后，重新读取 `.env` 需要运行 `docker compose -f docker-compose.selfhost.yml up -d`。
@@ -150,7 +194,7 @@ curl -fsS https://api.example.com/readyz
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs backend \
-  | grep "Verification code"
+ | grep "Verification code"
 ```
 
 日志中会出现类似内容：
@@ -170,7 +214,7 @@ docker compose -f docker-compose.selfhost.yml logs backend \
 下面的命令在**运行 AI 编程工具的电脑**上执行，不一定是运行 Docker 的服务器。
 
 <Callout type="warning">
-任务以运行守护进程的用户的全部权限执行——该用户能读写的一切，任务都能读写。请用专用 Unix 用户、容器或虚拟机来运行守护进程，而不是你的个人账号。详见[安全模型](/security-model)。
+每次执行都拥有守护进程所属用户的全部权限——该用户能读写的一切，运行都能读写。请用专用 Unix 用户、容器或虚拟机来运行守护进程，而不是你的个人账号。详见[安全模型](/security-model)。
 </Callout>
 
 先安装 Multica CLI：
@@ -197,11 +241,11 @@ multica setup self-host
 
 ```bash
 multica setup self-host \
-  --server-url https://api.example.com \
-  --app-url https://app.example.com
+ --server-url https://api.example.com \
+ --app-url https://app.example.com
 ```
 
-这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。
+这条命令会先检查 `<server-url>/health`，再打开浏览器完成登录。登录完成后，它会保存本机凭据并启动守护进程。这一步报 `Server not reachable`，说明 `/health` 没有通过探测拿到 200：可能是代理把所有流量转给了不转发该路径的旧版 frontend，可能是代理根本没把 `/health` 路由到 backend，也可能是更底层的问题（DNS、TLS、防火墙、超时、backend 返回 5xx）——见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)。
 
 确认连接状态：
 
@@ -217,7 +261,7 @@ multica daemon status
 
 ## 6. 完成第一次执行
 
-回到 Multica。运行时列表中出现在线的运行时后，创建一个智能体，并把第一个 issue 分配给它。
+回到 Multica。运行时列表中出现在线的运行时后，创建一个智能体，并把第一个任务分配给它。
 
 执行日志变为"已完成"、时间线中出现智能体的回复，说明自托管服务、执行电脑和 AI 编程工具已经连通。详细步骤见[快速上手](/cloud-quickstart)第 3-5 步。
 
@@ -274,7 +318,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ```bash
 grep MULTICA_IMAGE_TAG .env
-# MULTICA_IMAGE_TAG=v0.4.5   ← 钉死了：先改成 latest（或你想要的版本）
+# MULTICA_IMAGE_TAG=v0.4.5 ← 钉死了：先改成 latest（或你想要的版本）
 ```
 </Callout>
 
@@ -288,7 +332,7 @@ migration 只往前走、不回滚，所以正式环境升级前先导一份：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml exec -T postgres \
-  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
+ pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
 
 <Callout type="warning">
@@ -299,7 +343,7 @@ docker compose -f docker-compose.selfhost.yml exec -T postgres \
 
 ### migration 自动执行
 
-和[第 1 步](#1-拉取项目--一键启动后端)一样，backend 容器启动时会在对外提供服务之前先跑 `./migrate up`（`docker/entrypoint.sh`）。没有单独的升级命令——把新镜像起起来，本身就是升级这一步。想看过程：
+和[第 1 步](#1-启动-multica)一样，backend 容器启动时会在对外提供服务之前先跑 `./migrate up`（`docker/entrypoint.sh`）。没有单独的升级命令——把新镜像起起来，本身就是升级这一步。想看过程：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml logs -f backend
@@ -334,9 +378,9 @@ Helm 有自己的升级路径：在 values 文件里把 `images.backend.tag` / `
 |---|---|
 | `/readyz` 没有返回 `ok` | 运行 `docker compose -f docker-compose.selfhost.yml logs backend postgres`。 |
 | 收不到验证码 | 请求一次验证码，再从 backend 日志中查找 `Verification code`。 |
-| `setup self-host` 提示 server 不可达 | 在执行电脑上请求 `https://api.example.com/health`，确认 DNS、TLS 和反向代理都可达。 |
+| `setup self-host` 提示 server 不可达 | 在执行电脑上请求 `https://api.example.com/health`，确认 DNS、TLS 和反向代理都可达。返回 404 说明代理把 `/health` 转给了不转发该路径的旧版 frontend——改为直通 backend（见[故障排查](/troubleshooting#multica-setup-报告服务器不可达)）。 |
 | 守护进程没有列出 `Agents` | 确认 AI 编程工具在 `PATH` 中并已登录，然后运行 `multica daemon restart`。 |
-| issue 一直排队 | 运行 `multica daemon status`，确认守护进程正在运行并连接了工作区。 |
+| 任务一直排队 | 运行 `multica daemon status`，确认守护进程正在运行并连接了工作区。 |
 
 更多情况见[故障排查](/troubleshooting)。
 

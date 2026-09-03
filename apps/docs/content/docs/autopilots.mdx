@@ -28,9 +28,9 @@ An autopilot is enabled by default after saving; **Run now** manually executes t
 | Mode | Behavior | Best for |
 |---|---|---|
 | **Create issue** | Each trigger first creates an issue, then assigns it to the assignee; discussion, status, and run records all live on the issue. | Work the team needs to review, confirm, or follow up on. |
-| **Run only** | Creates a task directly with no issue; results are visible only in the autopilot's run history. | Background runs that need no collaboration record. |
+| **Run only** | Creates a run directly with no issue; results are visible only in the autopilot's run history. | Background runs that need no collaboration record. |
 
-**Create issue** mode uses the same task queue as regular issues: when the runtime is offline, the issue is still created and the task waits for the runtime to come online.
+**Create issue** mode uses the same run queue as regular issues: when the runtime is offline, the issue is still created and the run waits for the runtime to come online.
 
 **Run only** requires the runtime to be available at trigger time; otherwise the run shows as skipped, and no waiting issue is left behind.
 
@@ -54,7 +54,7 @@ For example:
 
 Cron has no seconds field, and timezones use IANA names like `Asia/Shanghai`. Before saving, check the result against the "next runs" times shown on the page.
 
-![The autopilot editor: Runbook, schedule settings, and a preview of the next few runs](/images/docs/autopilot-schedule.png)
+![The autopilot editor: Runbook, schedule settings, and a preview of the next few runs](/images/docs/autopilot-schedule.webp)
 
 ## Run from a webhook
 
@@ -120,13 +120,13 @@ Event and action inference order:
 
 ## View runs and deliveries
 
-Run history shows the trigger source, time, status, the linked issue or task, and the reason for a failure or skip. Webhook triggers additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason.
+Run history shows the trigger source, time, status, the linked issue or run, and the reason for a failure or skip. Webhook triggers additionally keep separate delivery records, including the parsed event, the response, deduplication info, and the failure reason.
 
 A fully processed webhook delivery can be replayed from its detail view. A replay creates a new delivery and run without rewriting the original record; deliveries that failed signature verification or are still queued can't be replayed, and replays don't participate in deduplication.
 
 ## Failures, pausing, and deletion
 
-A failed task in run-only mode is not retried automatically; the next schedule still fires as planned. Create-issue mode produces regular issue tasks, and infrastructure failures follow the rules in [Tasks](/tasks#failures-and-automatic-retries).
+A failed run in run-only mode is not retried automatically; the next schedule still fires as planned. Create-issue mode produces regular issue runs, and infrastructure failures follow the rules in [Runs](/tasks#failures-and-automatic-retries).
 
 Multica periodically checks whether recent runs keep failing: when the past 7 days have at least 50 completed or failed runs with a failure rate of 90%, the system pauses the autopilot and notifies its creator; fix the cause, then resume it manually.
 
@@ -143,10 +143,13 @@ Pausing manually stops schedules, webhooks, and **Run now**. Deletion is actuall
 ## Use the CLI
 
 ```bash
+multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
+
+`autopilot get` sets `webhook_token`, `webhook_path`, and `webhook_url` to `null` by default, and returns `has_webhook_token` plus `webhook_token_hint` instead. Add `--show-secrets` only when you intentionally need the live credential; the CLI prints a warning to stderr so piped JSON stays valid.
 
 See [Using the CLI](/cli) for the full parameters.
 
@@ -154,4 +157,4 @@ See [Using the CLI](/cli) for the full parameters.
 
 - [Assign issues to agents](/assigning-issues) — assignment and the confirmation window.
 - [Inbox and subscriptions](/inbox) — where run notifications arrive.
-- [Tasks](/tasks) — run states and failure handling.
+- [Runs](/tasks) — run states and failure handling.

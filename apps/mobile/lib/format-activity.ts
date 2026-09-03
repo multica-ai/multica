@@ -10,22 +10,9 @@
  * mobile clients in the wild must render them as a generic fallback, not
  * crash).
  */
-import type {
-  IssuePriority,
-  IssueStatus,
-  TimelineEntry,
-} from "@multica/core/types";
+import type { IssuePriority, TimelineEntry } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
-
-const STATUS_LABEL: Record<IssueStatus, string> = {
-  backlog: "Backlog",
-  todo: "Todo",
-  in_progress: "In Progress",
-  in_review: "In Review",
-  done: "Done",
-  blocked: "Blocked",
-  cancelled: "Cancelled",
-};
+import { STATUS_LABEL, isIssueStatusCategory } from "@/lib/issue-status";
 
 const PRIORITY_LABEL: Record<IssuePriority, string> = {
   urgent: "Urgent",
@@ -35,9 +22,21 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
   none: "No priority",
 };
 
-function statusName(s: string | undefined): string {
-  if (s && s in STATUS_LABEL) return STATUS_LABEL[s as IssueStatus];
-  return s ?? "?";
+/**
+ * Names a status KEY out of a timeline entry. `resolveLabel` comes from the
+ * workspace catalog and is what names a CUSTOM status; without it (or for a key
+ * the catalog never heard of) a built-in still gets its own copy and anything
+ * else falls back to the raw key rather than rendering blank. Mirrors web's
+ * `statusLabel` in packages/views/issues/components/issue-detail.tsx.
+ * (MUL-6243)
+ */
+function statusName(
+  s: string | undefined,
+  resolveLabel?: (statusKey: string) => string,
+): string {
+  if (!s) return "?";
+  if (resolveLabel) return resolveLabel(s);
+  return isIssueStatusCategory(s) ? STATUS_LABEL[s] : s;
 }
 
 function priorityName(p: string | undefined): string {
@@ -58,13 +57,14 @@ export function formatActivity(
     type: string | null | undefined,
     id: string | null | undefined,
   ) => string,
+  resolveStatusLabel?: (statusKey: string) => string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
     case "created":
       return "created the issue";
     case "status_changed":
-      return `changed status: ${statusName(details.from)} → ${statusName(details.to)}`;
+      return `changed status: ${statusName(details.from, resolveStatusLabel)} → ${statusName(details.to, resolveStatusLabel)}`;
     case "priority_changed":
       return `changed priority: ${priorityName(details.from)} → ${priorityName(details.to)}`;
     case "assignee_changed": {

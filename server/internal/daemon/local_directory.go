@@ -19,13 +19,23 @@ import (
 // constant — keep in sync if the type string is ever renamed.
 const localDirectoryResourceType = "local_directory"
 
+// Execution modes for local_directory resources. Mirrors the server-side
+// constants in handler/project_resource.go — keep in sync. An absent or empty
+// value means in_place, so resources created before worktree mode existed keep
+// their original behavior.
+const (
+	localDirectoryModeInPlace  = "in_place"
+	localDirectoryModeWorktree = "worktree"
+)
+
 // localDirectoryRef mirrors the server-side ref shape for local_directory
 // project resources. Defined locally so the daemon does not have to import
 // the server handler package.
 type localDirectoryRef struct {
-	LocalPath string `json:"local_path"`
-	DaemonID  string `json:"daemon_id"`
-	Label     string `json:"label,omitempty"`
+	LocalPath     string `json:"local_path"`
+	DaemonID      string `json:"daemon_id"`
+	Label         string `json:"label,omitempty"`
+	ExecutionMode string `json:"execution_mode,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
@@ -40,15 +50,106 @@ type localDirectoryAssignment struct {
 	RealPath string // canonical key for the path mutex
 }
 
+// UsesWorktree reports whether this assignment runs each task in its own git
+// worktree instead of in the user's directory. Worktree tasks skip the per-path
+// mutex entirely — that is the whole point of the mode — so every caller that
+// serialises, cleans up sidecars, or exempts the env root from GC must branch
+// on this rather than on "is there a local_directory assignment at all".
+func (a *localDirectoryAssignment) UsesWorktree() bool {
+	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
+}
+
+// DisplayName is the human-facing name for this directory, safe to render in
+// UI. It is deliberately NOT the absolute path: the wait reason built from it
+// is stored server-side and pushed to every client on the session, and a chip
+// in a chat transcript ends up in screen shares and screenshots. Absolute
+// paths carry the account name, which is why handler.relativeWorkDir exists
+// for the sibling work_dir chip; this is the same contract for the same reason.
+//
+// The resource's own label wins when the user set one — that is the name they
+// chose for this directory. Otherwise the basename, which is what distinguishes
+// sibling checkouts ("NuvioTV" vs "multica") without naming their parent.
+func (a *localDirectoryAssignment) DisplayName() string {
+	if a == nil {
+		return ""
+	}
+	if label := strings.TrimSpace(a.Ref.Label); label != "" {
+		return label
+	}
+	return filepath.Base(a.AbsPath)
+}
+
+// ValidateExecutionMode rejects a mode this daemon does not implement.
+//
+// Falling back to in_place would be the wrong direction, even though it is the
+// older and more conservative code path. execution_mode is how a user asks for
+// ISOLATION, not merely for concurrency: silently running in_place instead
+// would let the agent edit the working copy the user explicitly asked it to
+// stay out of. Losing concurrency is a nuisance; ignoring a request to not
+// touch someone's files is a broken promise. So an unrecognised mode fails the
+// task with a message naming the version skew.
+func (a *localDirectoryAssignment) ValidateExecutionMode() error {
+	if a == nil {
+		return nil
+	}
+	switch strings.TrimSpace(a.Ref.ExecutionMode) {
+	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
+		return nil
+	default:
+		return fmt.Errorf(
+			"local_directory: this daemon does not support execution_mode %q for %q "+
+				"(update the daemon, or set the resource's execution mode to %q or %q); "+
+				"refusing to run in place, since that would modify a directory the resource asked to isolate",
+			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree)
+	}
+}
+
 // localDirectoryAssignmentForTask returns the local_directory assignment a task
 // should execute inside. Squad-leader tasks are coordinators: they may create
 // child issues or comments, but should not bind to the user's repo worktree or
 // hold the path mutex while downstream workers are ready to write.
+//
+// This answers WHERE a task runs, and only that. Its result also drives the
+// agent's working directory (daemon.runTask plumbs AbsPath into
+// execenv.PrepareParams.LocalWorkDir) and the GC-meta stamp that exempts a
+// user-owned path from env-root cleanup. Whether the task additionally takes
+// the per-path mutex is a SEPARATE question, answered by
+// localDirectoryLockExempt — collapsing the two is what made a read-only chat
+// turn queue behind a 20-minute build (issue #7344), and answering "no
+// assignment" there to free the lock would have silently moved chat out of the
+// user's directory as well.
 func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
 	if task.IsLeaderTask {
 		return nil, nil
 	}
 	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+}
+
+// localDirectoryLockExempt reports whether a task may run inside an in_place
+// local_directory WITHOUT serialising on the per-path mutex. It is asked only
+// after an assignment has been resolved and validated, so an exempt task still
+// runs in the user's directory — it just doesn't queue for it.
+//
+// What the mutex actually protects: two long coding runs interleaving two sets
+// of edits into one working tree. It was never a general write barrier and
+// cannot become one — the user's own editor, their terminal, and any external
+// script write to that same tree unsynchronised, and always have. So the
+// question a task must answer to earn the lock is not "could it ever write?"
+// (everything could) but "is it a second heavyweight writer?".
+//
+// A chat turn is not. It is a conversation that reads the tree to answer
+// questions and at most saves a file the way the user's own Cmd+S does — the
+// risk class the lock already declines to cover. Serialising it bought nothing
+// and muted the squad leader for the length of every build (issue #7344).
+//
+// Keyed on ChatSessionID because that is the daemon's only chat discriminator
+// (see Task.ChatSessionID). IsLeaderTask cannot serve here even though the
+// comment above it describes chat's semantics exactly: the server never writes
+// that column on the chat-task insert path (service.EnqueueChatTask →
+// db.CreateChatTaskParams has no such field), so it is false on every chat
+// turn ever dispatched.
+func localDirectoryLockExempt(task Task) bool {
+	return task.ChatSessionID != ""
 }
 
 // findLocalDirectoryAssignment scans the task's project resources for one of

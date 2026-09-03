@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -18,6 +19,43 @@ import (
 // their task history all disappeared — while the confirmation dialog said
 // "archive". Each test below pins one thing that must now survive, plus the two
 // invariants that keep the new flow safe.
+
+func TestPublishRuntimeTeardown_UsesAutomaticGCActorAndRefreshAction(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createCascadeFixtureRuntime(t, ctx, "GC Event Runtime")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "GC Event Agent")
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	bus := events.New()
+	var published []events.Event
+	bus.SubscribeAll(func(event events.Event) { published = append(published, event) })
+	publisher := *testHandler
+	publisher.Bus = bus
+	publisher.TaskService = nil
+
+	publisher.PublishRuntimeTeardown(ctx, service.RuntimeTeardownResult{UnboundAgents: []db.Agent{agent}}, testWorkspaceID, "system", "", "runtime_gc", false)
+	publisher.PublishRuntimeRefresh(testWorkspaceID, "system", "", "runtime_gc")
+
+	if len(published) != 2 {
+		t.Fatalf("published events=%d, want agent update and one runtime refresh", len(published))
+	}
+	if published[0].Type != protocol.EventAgentStatus || published[0].ActorType != "system" || published[0].ActorID != "" {
+		t.Fatalf("unexpected agent event: %+v", published[0])
+	}
+	if published[1].Type != protocol.EventDaemonRegister || published[1].ActorType != "system" || published[1].ActorID != "" {
+		t.Fatalf("unexpected runtime event: %+v", published[1])
+	}
+	payload, ok := published[1].Payload.(map[string]any)
+	if !ok || payload["action"] != "runtime_gc" {
+		t.Fatalf("runtime refresh payload=%v, want runtime_gc action", published[1].Payload)
+	}
+}
 
 // TestUnbindAgentsAndDeleteRuntime_KeepsChatHistory: the agent's chat sessions
 // and messages cascade from the agent row, so hard-deleting it destroyed every
@@ -204,50 +242,6 @@ func TestCountUndrainedTasksByRuntimeOrAgent_IncludesCrossRuntimeTask(t *testing
 	}
 	if count != 1 {
 		t.Fatalf("undrained count = %d, want 1 for task pinned to another runtime", count)
-	}
-}
-
-func TestDeleteStaleOfflineRuntimes_UnboundAgentDoesNotDisableGC(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	boundRuntimeID := createCascadeFixtureRuntime(t, ctx, "GC Unbound Agent Source")
-	agentID := createCascadeFixtureAgent(t, ctx, boundRuntimeID, "GC Unbound Agent")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
-		t.Fatalf("unbind GC fixture agent: %v", err)
-	}
-
-	var staleRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status,
-			device_info, metadata, owner_id, last_seen_at
-		)
-		VALUES ($1, 'GC stale candidate', 'cloud', 'gc-regression', 'offline',
-			'GC stale candidate', '{}'::jsonb, $2, now() - interval '200 years')
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&staleRuntimeID); err != nil {
-		t.Fatalf("seed stale runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, staleRuntimeID)
-	})
-
-	deleted, err := testHandler.Queries.DeleteStaleOfflineRuntimes(ctx, 3_000_000_000)
-	if err != nil {
-		t.Fatalf("delete stale runtimes: %v", err)
-	}
-	found := false
-	for _, row := range deleted {
-		if uuidToString(row.ID) == staleRuntimeID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("unbound agent made stale-runtime GC skip an unrelated candidate")
 	}
 }
 

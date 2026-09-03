@@ -9,7 +9,7 @@ The source of truth for code naming, i18n glossary, and Chinese product voice is
 - `apps/docs/content/docs/developers/conventions.mdx`
 - `apps/docs/content/docs/developers/conventions.zh.mdx`
 
-Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy. Do not rely on `packages/views/locales/glossary.md`; it is only a redirect stub.
+Read it before editing translations in `packages/views/locales/`, naming routes/packages/files/DB columns/types, or writing Chinese UI/docs copy.
 
 ## Project Shape
 
@@ -76,9 +76,16 @@ Mobile is independent. It may import types and pure functions from `@multica/cor
 Use the repo scripts as the source of truth. Common commands:
 
 ```bash
-make dev              # auto-setup and start the app
+make up               # start this checkout's environment (C=api,web,daemon,desktop)
+make status           # what is running, with pid/commit proof it is yours
+make list             # every development environment on this machine
+make down             # stop the processes, keep the database
+make destroy          # stop, then drop the database and free the slot
+make dev              # auto-setup and start the app in the foreground
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout
+make db-drop          # permanently drop this checkout's local database
+make remove-worktree WORKTREE=../path  # drop a linked worktree DB, then remove it
 make server           # run Go server only
 make daemon           # run local daemon
 make test             # Go tests
@@ -94,9 +101,11 @@ pnpm exec playwright test
 pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 ```
 
-Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
+`make up` records each environment in `~/.multica/dev/`, allocates its API, Web and Desktop renderer ports plus database name under a lock instead of recomputing them from the path, and verifies the database through `DATABASE_URL` rather than `docker exec` — a `docker exec` create lands in the wrong server whenever a native PostgreSQL owns 5432. It reuses an API only when `/health` proves its listener pid, process group and commit belong to this checkout. `make down` keeps the data; `make destroy` consumes the database, profile, daemon workspaces, Desktop userData and registry entry. Agent-owned TTL environments are collected best-effort on the next `make up`, or explicitly with `make gc`.
 
-CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
+Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. Direct `pnpm dev:desktop` self-isolates from the path; `make up C=desktop` overrides that fallback with the registry-allocated renderer port and app name so Desktop shares the environment ledger.
+
+CI runs Node 22, the latest Go 1.26 patch, and a `pgvector/pgvector:pg17` PostgreSQL service.
 
 ## Database and Migration Rules
 
@@ -104,6 +113,7 @@ These are hard requirements for every new or modified database design and produc
 
 - Do not add database foreign keys (`FOREIGN KEY` / `REFERENCES`), cascading deletes, or cascading updates. Resolve relationships, validation, and dependent cleanup explicitly in application code. Use an application transaction when cleanup and the parent operation must commit or roll back atomically.
 - Every index created by a migration must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`, including indexes on newly created tables. PostgreSQL rejects concurrent index creation inside a transaction or a multi-command string, so keep each concurrent index build in its own single-statement migration file. The repository migration runner executes migration files outside an explicit transaction to support this.
+- A conditionally skipped migration is still recorded in `schema_migrations`, so the ledger proves ordering, not that every migration's SQL executed. Later migrations that touch conditionally present objects must use idempotent DDL such as `IF EXISTS` / `IF NOT EXISTS`, and the introducing change must document recovery when losing the selected object would break runtime behavior.
 
 ## Coding Rules
 
@@ -206,11 +216,16 @@ Tests follow the code:
 Rules:
 
 - Never test shared component behavior in an app test file.
+- Give each product behavior ONE canonical layer. Pure parsing, state transitions and boundary matrices belong in a `.test.ts` beside the helper; the component suite keeps the happy path, the wiring, accessibility and named regressions, and points at the canonical file in a comment. Do not re-run a helper's matrix through a DOM mount.
+- A `.test.ts` that needs no DOM must start with `// @vitest-environment node`. jsdom costs ~0.8s of setup per file and buys such a suite nothing. Do not add it to a test whose code under test branches on `typeof window`/`document` — under node it would silently take the SSR path and still pass.
 - `packages/views/` tests must not mock `next/*` or `react-router-dom`.
 - Mock `@multica/core` stores with the Zustand callable-store shape (`selectorFn` plus `getState`).
 - Mock `@multica/core/api` for API calls.
 - E2E tests should use `TestApiClient` for setup/teardown.
 - Prefer writing the failing test in the correct package before implementation when the change is behavioral.
+- DB-backed Go tests build their rows through `server/internal/testutil` (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and drive handlers through `testutil.Call(h, req).Want(status).JSON(&out)`. Do not open-code an `INSERT ... RETURNING id` with its matching `t.Cleanup(DELETE ...)`, or a `httptest.NewRecorder()` / status-check / decode quartet, in a new test. `internal/handler` held ~1000 of the first and ~1200 of the second before the shared fixtures landed, and every change to a shared contract had to be made once per copy.
+- Keep an assertion where the test wrote it when its message says something the shared one cannot. `.Want()` prints the request line, both statuses and the response body; it does not know which case in a loop was running.
+- Helpers in `internal/testutil` insert rows, run handlers and report mismatches. They must not assert a product rule on a test's behalf — a helper that knows what a correct response looks like has taken the assertion away from the test making it.
 - Default tests must never resolve or execute user-installed agent CLIs. Pass a test-created fake executable path or a test-created missing path to agent subprocess code.
 - Real-agent smoke tests belong behind the `agentintegration` build tag and must check `MULTICA_RUN_REAL_AGENT_SMOKE=1` before executable lookup or account access.
 - Run an explicitly authorized real-agent smoke test with `(cd server && MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run '<test-name>' -count=1 -v)`. This command may access an authenticated account and consume quota.

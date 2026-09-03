@@ -86,9 +86,9 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		qwenpawArgs = append(qwenpawArgs, "--workspace", opts.QwenpawWorkspace)
 	}
 
-	cmd := exec.CommandContext(runCtx, execPath, qwenpawArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, qwenpawArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", qwenpawArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(qwenpawArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -112,7 +112,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("qwenpaw stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start qwenpaw: %w", err)
 	}
@@ -179,6 +179,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

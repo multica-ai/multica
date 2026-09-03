@@ -18,7 +18,7 @@
     "last_run_empty": "--",
     "empty": {
       "title": "No autopilots yet",
-      "hint": "Schedule recurring tasks for your AI agents. Pick a template or start from scratch."
+      "hint": "Schedule recurring work for your AI agents. Pick a template or start from scratch."
     },
     "scope_all": "All",
     "no_matches": "No automations match",
@@ -83,6 +83,8 @@
     "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
     "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
     "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_quota_exceeded": "Not triggered — the run limit for this period has been reached",
+    "run_blocked_issue_limit_reached": "Not triggered — the workspace has reached its issue limit",
     "run_blocked_generic": "Not triggered — the run was blocked",
     "section_properties": "Properties",
     "section_triggers": "Triggers",
@@ -257,7 +259,7 @@
     "sr_edit": "Edit Autopilot",
     "header_create": "New autopilot",
     "header_edit": "Edit autopilot",
-    "subtitle": "A recurring AI task",
+    "subtitle": "Recurring AI work",
     "expand": "Expand",
     "collapse": "Collapse",
     "close": "Close",
@@ -284,6 +286,7 @@
     "select_agent": "Select agent",
     "select_assignee": "Select agent or squad",
     "section_project": "Project",
+    "project_hint": "Also sets where runs execute — the project's repository or local directory",
     "no_project": "No project",
     "section_output_mode": "Output mode",
     "section_subscribers": "Subscribers",
@@ -308,6 +311,8 @@
     "event_filter_docs_link_label": "Learn how event filters work",
     "event_filter_event_placeholder": "e.g. workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "Add",
+    "event_filter_remove_label": "Remove filter",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",

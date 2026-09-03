@@ -6,29 +6,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-func TestLegacyCompatibilityCommandsRemainAvailable(t *testing.T) {
-	t.Run("workspace get remains available", func(t *testing.T) {
-		if _, _, err := workspaceCmd.Find([]string{"get"}); err != nil {
-			t.Fatalf("expected workspace get command to exist: %v", err)
-		}
-	})
-
-	t.Run("workspace member list remains available", func(t *testing.T) {
-		if _, _, err := workspaceCmd.Find([]string{"member", "list"}); err != nil {
-			t.Fatalf("expected workspace member list command to exist: %v", err)
-		}
-	})
-
-	t.Run("config show and set remain available", func(t *testing.T) {
-		if _, _, err := configCmd.Find([]string{"show"}); err != nil {
-			t.Fatalf("expected config show command to exist: %v", err)
-		}
-		if _, _, err := configCmd.Find([]string{"set"}); err != nil {
-			t.Fatalf("expected config set command to exist: %v", err)
-		}
-	})
-}
-
 func TestRunConfigSetPersistsValues(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	cmd := testCmd()

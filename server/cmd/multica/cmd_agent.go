@@ -65,7 +65,7 @@ var agentRestoreCmd = &cobra.Command{
 
 var agentTasksCmd = &cobra.Command{
 	Use:   "tasks <id>",
-	Short: "List tasks for an agent",
+	Short: "List runs for an agent",
 	Args:  exactArgs(1),
 	RunE:  runAgentTasks,
 }
@@ -164,7 +164,7 @@ func init() {
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
-	agentCreateCmd.Flags().String("service-tier", "", "Codex execution service tier from the selected model's runtime catalog (e.g. priority, displayed as Fast). Empty = inherit local Codex configuration.")
+	agentCreateCmd.Flags().String("service-tier", "", "Codex execution speed: empty = inherit local Codex configuration; default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
 	agentCreateCmd.Flags().Bool("custom-env-stdin", false, "Read the --custom-env JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --custom-env and --custom-env-file.")
@@ -176,7 +176,7 @@ func init() {
 	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
 	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
-	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks (1-50)")
+	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent update
@@ -187,7 +187,7 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
-	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution service tier from the selected model's runtime catalog. Pass an empty string to clear and inherit local Codex configuration.")
+	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution speed: default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast. Pass an empty string to clear and inherit local Codex configuration.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path admits the agent owner or a
@@ -206,7 +206,7 @@ func init() {
 	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
 	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
-	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks (1-50)")
+	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -259,11 +259,10 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
 		// real task is a leftover marker from a crashed daemon task in a
 		// local_directory. Name the exact file so a normal user can recover
-		// instead of hitting an opaque "requires mat_ token" error.
-		if !inAgentExecutionContext() && os.Getenv("MULTICA_DAEMON_PORT") == "" {
-			if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
-				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
-			}
+		// instead of hitting an opaque "requires mat_ token" error. Shares its
+		// wording with requireHumanLocalCommand: same cause, same remedy.
+		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
+			return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", leftoverMarkerSuffix(markerPath))
 		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token%s", daemonPortOnlyContextHint())
 	}
@@ -407,6 +406,14 @@ func requireTaskLocalConfigRoot() error {
 		return nil
 	}
 	if strings.TrimSpace(os.Getenv(cli.TaskConfigRootEnv)) == "" {
+		// The third refusal path a leftover marker can trigger, alongside
+		// newAPIClient and requireHumanLocalCommand. It has to name the file
+		// too: a user hitting this one through `config show` or `auth status`
+		// is as stuck as one hitting the others, and "which command did you
+		// happen to run first" must not decide whether the error is actionable.
+		if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
+			return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, leftoverMarkerSuffix(markerPath))
+		}
 		return fmt.Errorf("daemon-managed task requires a task-local Multica config root in %s%s", cli.TaskConfigRootEnv, daemonPortOnlyContextHint())
 	}
 	return nil
@@ -416,10 +423,20 @@ func requireTaskLocalConfigRoot() error {
 // set up, or operate the human-owned local daemon/profile. Task API commands
 // remain available with the injected mat_ token; these local commands do not.
 func requireHumanLocalCommand(command string) error {
-	if inDaemonTaskIdentityContext() {
-		return fmt.Errorf("%s is not available inside a daemon-managed task", command)
+	if !inDaemonTaskIdentityContext() {
+		return nil
 	}
-	return nil
+	// A task-scoped workdir marker with no task identity in the environment is
+	// the one signal that can outlive the task that wrote it: a local_directory
+	// run that never cleaned up leaves it in the user's own repository, where it
+	// disables every command below this function for that whole directory tree
+	// until someone deletes the file by hand (MUL-6132). Name it, so the user
+	// knows which file that is; the bare message below sends them to the source
+	// instead. Mirrors newAPIClient's leftover-marker handling.
+	if markerPath := leftoverDaemonTaskMarkerPath(); markerPath != "" {
+		return fmt.Errorf("%s is not available inside a daemon-managed task%s", command, leftoverMarkerSuffix(markerPath))
+	}
+	return fmt.Errorf("%s is not available inside a daemon-managed task", command)
 }
 
 func hasDaemonTaskContextMarker() bool {
@@ -862,7 +879,7 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 
 	var tasks []map[string]any
 	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/tasks", &tasks); err != nil {
-		return fmt.Errorf("list agent tasks: %w", err)
+		return fmt.Errorf("list agent runs: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
@@ -1283,50 +1300,77 @@ func resolveCustomEnv(cmd *cobra.Command) (map[string]string, bool, error) {
 
 // parseMcpConfig validates the --mcp-config value and returns the raw JSON to
 // send. It accepts a JSON object (the MCP config, e.g. {"mcpServers": {…}}) or
-// the literal `null` to clear the agent's config. A top-level array or
-// primitive is rejected because it can never be a valid MCP config — this
-// mirrors the agent-settings UI (mcp-config-tab.tsx). Empty/whitespace input
-// is rejected rather than treated as a clear: for the stdin/file channels it
-// almost always signals an upstream failure (missing file, unset pipe) rather
-// than a deliberate clear, and silently wiping a secret-bearing field is the
-// wrong default — pass an explicit `null` to clear.
+// the literal `null` to clear the agent's config.
+func parseMcpConfig(raw string) (json.RawMessage, error) {
+	return parseMcpJSONObject("--mcp-config", raw, true)
+}
+
+// parseMcpJSONObject validates a JSON-object payload supplied through one of
+// the secret-safe flag channels. A top-level array or primitive is rejected
+// because it can never be a valid MCP payload — this mirrors the agent-settings
+// UI (mcp-config-tab.tsx). Empty/whitespace input is rejected rather than
+// treated as a clear: for the stdin/file channels it almost always signals an
+// upstream failure (missing file, unset pipe) rather than a deliberate clear,
+// and silently wiping a secret-bearing field is the wrong default.
+//
+// allowNull controls whether the literal `null` is accepted as the clear
+// sentinel. It is not for a single server entry, where removing something has
+// its own command and `null` is far more likely to be a mistake.
 //
 // The payload is treated as secret material (MCP entries routinely carry API
 // tokens), so parse errors never wrap the underlying json error, which can
 // echo short fragments of malformed input.
-func parseMcpConfig(raw string) (json.RawMessage, error) {
+func parseMcpJSONObject(flag, raw string, allowNull bool) (json.RawMessage, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return nil, fmt.Errorf("--mcp-config: empty input; pass 'null' to clear or a JSON object to set")
+		if allowNull {
+			return nil, fmt.Errorf("%s: empty input; pass 'null' to clear or a JSON object to set", flag)
+		}
+		return nil, fmt.Errorf("%s: empty input; pass a JSON object", flag)
 	}
 	var probe any
 	if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
-		return nil, fmt.Errorf("--mcp-config must be a valid JSON object, or 'null' to clear")
+		if allowNull {
+			return nil, fmt.Errorf("%s must be a valid JSON object, or 'null' to clear", flag)
+		}
+		return nil, fmt.Errorf("%s must be a valid JSON object", flag)
 	}
-	// null → clear (NULL column server-side; on create it is a no-op).
 	if probe == nil {
-		return json.RawMessage("null"), nil
+		if allowNull {
+			// null → clear (NULL column server-side; on create it is a no-op).
+			return json.RawMessage("null"), nil
+		}
+		return nil, fmt.Errorf("%s must be a JSON object, not null", flag)
 	}
 	if _, ok := probe.(map[string]any); !ok {
-		return nil, fmt.Errorf("--mcp-config must be a JSON object, or 'null' to clear")
+		if allowNull {
+			return nil, fmt.Errorf("%s must be a JSON object, or 'null' to clear", flag)
+		}
+		return nil, fmt.Errorf("%s must be a JSON object", flag)
 	}
 	return json.RawMessage(trimmed), nil
 }
 
 // resolveMcpConfig collects the --mcp-config, --mcp-config-stdin, and
 // --mcp-config-file flags and returns the raw JSON value to send, a bool
-// indicating whether the caller supplied any of them, and any error. The
-// three input channels are mutually exclusive so callers can't accidentally
-// provide a secret twice. Stdin and file inputs exist to keep mcp_config —
-// which routinely embeds API tokens — out of shell history and 'ps'. Mirrors
+// indicating whether the caller supplied any of them, and any error. Mirrors
 // resolveCustomEnv; the only behavioural difference is the clear sentinel
 // (`null` here vs `{}` for custom_env), because mcp_config distinguishes an
 // explicit empty object from an absent config server-side.
 func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
-	inline := cmd.Flags().Changed("mcp-config")
-	fromStdin, _ := cmd.Flags().GetBool("mcp-config-stdin")
-	filePath, _ := cmd.Flags().GetString("mcp-config-file")
-	fromFile := cmd.Flags().Changed("mcp-config-file")
+	return resolveMcpJSONObject(cmd, "mcp-config", true)
+}
+
+// resolveMcpJSONObject collects the `<prefix>`, `<prefix>-stdin`, and
+// `<prefix>-file` flags. The three input channels are mutually exclusive so
+// callers can't accidentally provide a secret twice. Stdin and file inputs
+// exist to keep payloads — which routinely embed API tokens — out of shell
+// history and 'ps'.
+func resolveMcpJSONObject(cmd *cobra.Command, prefix string, allowNull bool) (json.RawMessage, bool, error) {
+	inline := cmd.Flags().Changed(prefix)
+	fromStdin, _ := cmd.Flags().GetBool(prefix + "-stdin")
+	filePath, _ := cmd.Flags().GetString(prefix + "-file")
+	fromFile := cmd.Flags().Changed(prefix + "-file")
 
 	count := 0
 	if inline {
@@ -1342,39 +1386,43 @@ func resolveMcpConfig(cmd *cobra.Command) (json.RawMessage, bool, error) {
 	case count == 0:
 		return nil, false, nil
 	case count > 1:
-		return nil, false, fmt.Errorf("--mcp-config, --mcp-config-stdin, and --mcp-config-file are mutually exclusive; pick one")
+		return nil, false, fmt.Errorf("--%s, --%s-stdin, and --%s-file are mutually exclusive; pick one", prefix, prefix, prefix)
 	}
 
+	clearHint := ""
+	if allowNull {
+		clearHint = "; pass 'null' to clear"
+	}
 	var raw string
 	switch {
 	case inline:
-		raw, _ = cmd.Flags().GetString("mcp-config")
+		raw, _ = cmd.Flags().GetString(prefix)
 	case fromStdin:
 		buf, err := io.ReadAll(cmd.InOrStdin())
 		if err != nil {
-			return nil, false, fmt.Errorf("read --mcp-config-stdin: %w", err)
+			return nil, false, fmt.Errorf("read --%s-stdin: %w", prefix, err)
 		}
 		raw = string(buf)
 		if strings.TrimSpace(raw) == "" {
-			return nil, false, fmt.Errorf("--mcp-config-stdin: empty input; pass 'null' to clear")
+			return nil, false, fmt.Errorf("--%s-stdin: empty input%s", prefix, clearHint)
 		}
 	case fromFile:
 		if filePath == "" {
-			return nil, false, fmt.Errorf("--mcp-config-file: path must not be empty")
+			return nil, false, fmt.Errorf("--%s-file: path must not be empty", prefix)
 		}
 		buf, err := os.ReadFile(filePath)
 		if err != nil {
 			// Filesystem errors may include the path but not the contents —
 			// safe to surface via %w.
-			return nil, false, fmt.Errorf("read --mcp-config-file: %w", err)
+			return nil, false, fmt.Errorf("read --%s-file: %w", prefix, err)
 		}
 		raw = string(buf)
 		if strings.TrimSpace(raw) == "" {
-			return nil, false, fmt.Errorf("--mcp-config-file %q: empty contents; pass 'null' to clear", filePath)
+			return nil, false, fmt.Errorf("--%s-file %q: empty contents%s", prefix, filePath, clearHint)
 		}
 	}
 
-	mc, err := parseMcpConfig(raw)
+	mc, err := parseMcpJSONObject("--"+prefix, raw, allowNull)
 	if err != nil {
 		return nil, false, err
 	}

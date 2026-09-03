@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -99,13 +101,22 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	// Drop any past-due pending invitations to 'expired' first. The partial unique
 	// index idx_invitation_unique_pending only filters by status = 'pending', so a
 	// stale row would otherwise block CreateInvitation below — see issue #2055.
-	if err := h.Queries.ExpireStalePendingInvitations(r.Context(), db.ExpireStalePendingInvitationsParams{
-		WorkspaceID:  requester.WorkspaceID,
-		InviteeEmail: email,
-	}); err != nil {
+	expiredInvitations, err := h.Queries.ExpireStalePendingInvitations(r.Context(), db.ExpireStalePendingInvitationsParams{
+		WorkspaceID: requester.WorkspaceID, InviteeEmail: email,
+	})
+	if err != nil {
 		slog.Warn("expire stale invitations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create invitation")
 		return
+	}
+	if h.seatCapacityEnabled() {
+		for _, expired := range expiredInvitations {
+			if err := enqueueCapacityRelease(r.Context(), h.Queries, uuid.UUID(expired.WorkspaceID.Bytes), uuid.UUID(expired.ID.Bytes)); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to release expired invitation capacity")
+				return
+			}
+			h.compensateCapacityIntent(r.Context(), uuid.UUID(expired.ID.Bytes))
+		}
 	}
 
 	// Check if there is still a live pending invitation.
@@ -123,15 +134,71 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	if existingUser.ID.Valid {
 		inviteeUserID = existingUser.ID
 	}
+	admission, ok := h.checkInvitationAdmission(
+		w,
+		r,
+		uuidToString(requester.UserID),
+		uuidToString(requester.WorkspaceID),
+		email,
+	)
+	if !ok {
+		return
+	}
 
-	inv, err := h.Queries.CreateInvitation(r.Context(), db.CreateInvitationParams{
-		WorkspaceID:   requester.WorkspaceID,
-		InviterID:     requester.UserID,
-		InviteeEmail:  email,
-		InviteeUserID: inviteeUserID,
-		Role:          role,
-	})
+	invitationID := uuid.New()
+	expiresAt := time.Now().Add(7 * 24 * time.Hour)
+	if err := h.reserveInvitationCapacity(r.Context(), uuid.UUID(requester.WorkspaceID.Bytes), invitationID, expiresAt); err != nil {
+		if isPersistentSeatCapacityAdmissionRejection(err) {
+			// Full and overcommitted workspaces cannot admit another member until
+			// their durable capacity facts change. Charge repeated attempts to the
+			// actor budget so this endpoint cannot hammer the capacity service,
+			// while preserving workspace and recipient budgets for a later valid
+			// invitation.
+			h.consumeInvitationActorAdmission(r, admission)
+		}
+		writeSeatCapacityError(w, err)
+		return
+	}
+
+	// The non-consuming abuse checks run before Cloud. Spend all budgets only
+	// after Cloud has secured capacity. Persistent capacity rejections spend the
+	// actor budget only in the branch above; transient failures spend none.
+	h.consumeInvitationAdmission(r, admission)
+
+	createParams := db.CreateInvitationParams{
+		ID: uuidToPG(invitationID), WorkspaceID: requester.WorkspaceID, InviterID: requester.UserID,
+		InviteeEmail: email, InviteeUserID: inviteeUserID, Role: role,
+		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	}
+	var inv db.WorkspaceInvitation
+	if h.seatCapacityEnabled() {
+		tx, txErr := h.TxStarter.Begin(r.Context())
+		if txErr != nil {
+			h.compensateCapacityIntent(r.Context(), invitationID)
+			writeError(w, http.StatusInternalServerError, "failed to create invitation")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		inv, err = qtx.CreateInvitation(r.Context(), createParams)
+		if err == nil {
+			err = qtx.DeleteSeatCapacityIntentForAction(r.Context(), db.DeleteSeatCapacityIntentForActionParams{
+				OperationToken: uuidToPG(invitationID), Action: seatcapacity.ActionReserveInvitation,
+			})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err != nil {
+			// Release transaction locks before the out-of-transaction Cloud
+			// compensation below reads and transitions the durable intent.
+			_ = tx.Rollback(r.Context())
+		}
+	} else {
+		inv, err = h.Queries.CreateInvitation(r.Context(), createParams)
+	}
 	if err != nil {
+		h.compensateCapacityIntent(r.Context(), invitationID)
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "invitation already pending for this email")
 			return
@@ -241,9 +308,34 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.RevokeInvitation(r.Context(), inv.ID); err != nil {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
 		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	rows, err := qtx.RevokeInvitation(r.Context(), inv.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
+		return
+	}
+	if rows != 1 {
+		writeError(w, http.StatusNotFound, "invitation not found")
+		return
+	}
+	if h.seatCapacityEnabled() {
+		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
+		return
+	}
+	if h.seatCapacityEnabled() {
+		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 
 	slog.Info("invitation revoked", "invitation_id", invitationID, "workspace_id", workspaceID)
@@ -396,6 +488,11 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusGone, "invitation has expired")
 		return
 	}
+	capacityActive, err := h.beginCapacityConsume(r.Context(), uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(inv.ID.Bytes), uuid.UUID(user.ID.Bytes))
+	if err != nil {
+		writeSeatCapacityError(w, err)
+		return
+	}
 
 	// Use a transaction: mark accepted + create member atomically.
 	tx, err := h.TxStarter.Begin(r.Context())
@@ -442,10 +539,19 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
 		return
 	}
+	if capacityActive {
+		if err := transitionCapacityIntentToConfirm(r.Context(), qtx, uuid.UUID(inv.ID.Bytes), uuid.UUID(member.ID.Bytes), seatcapacity.ActionConsumeInvitation); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to accept invitation")
+			return
+		}
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
+	}
+	if capacityActive {
+		h.confirmCapacityIntent(r.Context(), uuid.UUID(accepted.WorkspaceID.Bytes), uuid.UUID(accepted.ID.Bytes), uuid.UUID(member.ID.Bytes))
 	}
 
 	slog.Info("invitation accepted", "invitation_id", invitationID, "user_id", userID, "workspace_id", uuidToString(accepted.WorkspaceID))
@@ -534,10 +640,30 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	declined, err := h.Queries.DeclineInvitation(r.Context(), inv.ID)
+	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	declined, err := qtx.DeclineInvitation(r.Context(), inv.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
+		return
+	}
+	if h.seatCapacityEnabled() {
+		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to decline invitation")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
+		return
+	}
+	if h.seatCapacityEnabled() {
+		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 
 	slog.Info("invitation declined", "invitation_id", invitationID, "user_id", userID)

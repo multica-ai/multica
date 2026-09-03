@@ -14,6 +14,7 @@
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",
     "placeholder_runtime_required": "绑定运行时后继续",
+    "placeholder_access_revoked": "你已没有运行该智能体的权限",
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
@@ -36,6 +37,7 @@
     "clear": "全部清空",
     "steer": "引导",
     "steer_unavailable": "当前回复开始后才能引导",
+    "steer_no_permission": "你已没有运行该智能体的权限",
     "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
@@ -48,7 +50,7 @@
     "replied_in": "{{elapsed}} 内回复",
     "failed_after": "{{elapsed}} 后失败",
     "finished_in": "{{elapsed}} 内结束",
-    "no_response": "本轮已结束，Agent 没有返回文字回复。",
+    "no_response": "本轮已结束，智能体没有返回文字回复。",
     "failure": {
       "agent_error": "智能体运行时出错，没能完成回复。请重试。",
       "timeout": "智能体处理超时，未能完成。可以重试，或把需求拆得更小一些。",
@@ -57,12 +59,14 @@
       "runtime_recovery": "智能体在完成前重启了。请重试。",
       "manual": "这次回复已取消。",
       "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
+      "runtime_cli_timeout": "本机 OpenClaw CLI 没能在超时时间内响应，这次运行没有启动。这是本地启动超时，不是网络问题——除非 CLI 变快或调大超时（MULTICA_OPENCLAW_CLI_TIMEOUT），否则重试也不会成功。",
+      "environment_prepare_failed": "运行智能体的那台机器没能把这次运行准备好，任务没有启动。下方的原始错误会说明是哪一步失败——常见的是磁盘空间、权限、目录仍被占用，或本地配置读不出来。与智能体和模型厂商无关。",
       "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
       "provider_auth_or_access": "智能体的模型账号登录已失效。重新登录后再试。",
       "provider_quota_limit": "智能体的模型账号额度已用尽。充值或更换账号后再试。",
       "provider_capacity_or_rate_limit": "模型服务繁忙或触发了限流。稍后再试。",
       "context_overflow": "这次对话超出了模型的上下文长度。开一个新会话，或把需求拆得更小一些。",
-      "runtime_missing_executable": "在这台设备上找不到智能体的 CLI。确认已安装并且在 PATH 中，然后重试。",
+      "runtime_missing_executable": "无法在这台设备上运行智能体的 CLI。确认已正确安装并且在 PATH 中，然后重试。",
       "runtime_version_unsupported": "智能体的 CLI 版本过低。升级后重试。",
       "fallback": "出了点问题，智能体未能完成回复。请重试。"
     },
@@ -75,6 +79,7 @@
     "copy_failed_toast": "复制失败",
     "loading_older": "正在加载更早的消息…",
     "quick_actions_heading": "后续提问",
+    "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
     "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
   },
@@ -97,8 +102,8 @@
     },
     "stop_dialog": {
       "title": "停止这次运行？",
-      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体 task。已产生的内容会保留在对话里。",
-      "description_default": "这会取消当前智能体 task。已产生的内容会保留在对话里。",
+      "description_with_title": "这会取消 \"{{title}}\" 里的当前智能体运行。已产生的内容会保留在对话里。",
+      "description_default": "这会取消当前智能体运行。已产生的内容会保留在对话里。",
       "cancel": "继续运行",
       "confirm": "停止运行",
       "confirming": "停止中..."
@@ -143,10 +148,21 @@
     "returning_subtitle": "试试问",
     "chat_with_named": "与 {{name}} 对话"
   },
-  "starter_prompts": {
-    "list_open": "按优先级列出我未完成的任务",
-    "summarize_today": "总结一下我今天做了什么",
-    "plan_next": "规划接下来该做什么"
+  "conversation_starters": {
+    "aria_label": "对话开场建议",
+    "capabilities": {
+      "label": "你能帮我做什么？",
+      "prompt": "你最擅长帮我做什么？请简要介绍。"
+    },
+    "first_task": {
+      "label": "建议第一个任务",
+      "prompt": "建议三个适合分配给你的实用任务。"
+    },
+    "recommend": {
+      "label": "推荐一个操作",
+      "prompt": "根据你对我的工作区的了解，推荐一个有用的初始操作。"
+    },
+    "customize": "自定义开场建议"
   },
   "onboarding_cards": {
     "aria_label": "开始方式",
@@ -170,6 +186,7 @@
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
+  "agent_access_revoked_banner": "你已没有运行 {{name}} 的权限——此会话为只读。",
   "runtime_required_banner": {
     "fallback_name": "该智能体",
     "message": "{{name}} 需要绑定运行时后才能回复。",
@@ -187,6 +204,7 @@
       "retrying": "重试中",
       "queued": "排队中",
       "waiting_local_directory": "等待本地目录释放",
+      "waiting_local_directory_reason": "等待 {{reason}}",
       "starting_up": "启动中",
       "thinking": "思考中",
       "typing": "输入中"
@@ -206,9 +224,9 @@
     "you_prefix": "你：",
     "no_messages": "还没有消息",
     "no_response_preview": "无文字回复",
-    "quick_agents": "常用 Agent",
+    "quick_agents": "常用智能体",
     "add": "添加",
-    "add_agent": "添加常用 Agent",
+    "add_agent": "添加常用智能体",
     "unpin_agent": "移出常用",
     "waiting": "等待回复",
     "pin": "置顶",
@@ -220,7 +238,7 @@
     "row_actions_aria": "聊天操作"
   },
   "header": {
-    "view_profile": "查看 Agent 资料",
+    "view_profile": "查看智能体资料",
     "rename": "重命名会话",
     "delete": "删除会话",
     "archive": "归档会话",
