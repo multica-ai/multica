@@ -558,3 +558,28 @@ func (l actorDisplayLookup) agent(id string) string {
 	}
 	return id
 }
+
+// autopilotAssignee displays an autopilot's agent or squad assignee without
+// adding a type prefix, preserving the existing agent table output while
+// resolving squad IDs to their names.
+func (l actorDisplayLookup) autopilotAssignee(actorType, id string) string {
+	if id == "" {
+		return ""
+	}
+	// Older API responses omit assignee_type and default to an agent.
+	if actorType == "" {
+		actorType = "agent"
+	}
+	switch actorType {
+	case "agent":
+		return l.agent(id)
+	case "squad":
+		l.loadSquads()
+		if l.state != nil && l.state.squads != nil {
+			if name := l.state.squads[id]; name != "" {
+				return name
+			}
+		}
+	}
+	return id
+}
