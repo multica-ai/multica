@@ -219,24 +219,32 @@ func (s *WorkflowService) advanceAfterClosedStage(
 			return WorkflowMutationResult{}, fmt.Errorf("%w: stage %d contains active work before activation", ErrWorkflowConflict, nextStage)
 		}
 
-		changes := make([]WorkflowIssueChange, 0, len(rows))
+		toPromote := make([]db.Issue, 0, len(rows))
 		for _, child := range rows {
 			effective := issuestatus.Effective(ctx, qtx, p.WorkspaceID, child.Status)
 			if workflowTerminal(effective) || effective != issuestatus.Backlog {
 				continue
 			}
+			toPromote = append(toPromote, child)
+		}
+		// Advance the durable run before activating children. The issue-level
+		// workflow admission guard only permits non-backlog work in the run's
+		// current stage, and the whole transaction still rolls back atomically if
+		// any child promotion fails.
+		updated, transition, err := persistWorkflowTransition(ctx, qtx, run, workflowTransitionMutation{
+			Status: "running", CurrentStage: nextStage, Kind: "stage_advanced", Actor: p.Actor,
+			Payload: map[string]any{"stage": nextStage, "promoted_count": len(toPromote)},
+		})
+		if err != nil {
+			return WorkflowMutationResult{}, err
+		}
+		changes := make([]WorkflowIssueChange, 0, len(toPromote))
+		for _, child := range toPromote {
 			after, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: child.ID, Status: issuestatus.Todo, WorkspaceID: p.WorkspaceID})
 			if err != nil {
 				return WorkflowMutationResult{}, fmt.Errorf("promote workflow stage %d child: %w", nextStage, err)
 			}
 			changes = append(changes, WorkflowIssueChange{Before: child, After: after})
-		}
-		updated, transition, err := persistWorkflowTransition(ctx, qtx, run, workflowTransitionMutation{
-			Status: "running", CurrentStage: nextStage, Kind: "stage_advanced", Actor: p.Actor,
-			Payload: map[string]any{"stage": nextStage, "promoted_count": len(changes)},
-		})
-		if err != nil {
-			return WorkflowMutationResult{}, err
 		}
 		transitions = append(transitions, transition)
 		if err := tx.Commit(ctx); err != nil {
@@ -278,24 +286,28 @@ func (s *WorkflowService) materializeBlockedStage(
 	run db.WorkflowRun,
 	rows []db.Issue,
 ) (WorkflowMutationResult, error) {
-	changes := make([]WorkflowIssueChange, 0, len(rows))
+	toPromote := make([]db.Issue, 0, len(rows))
 	for _, child := range rows {
 		effective := issuestatus.Effective(ctx, qtx, p.WorkspaceID, child.Status)
 		if workflowTerminal(effective) || effective != issuestatus.Backlog {
 			continue
 		}
+		toPromote = append(toPromote, child)
+	}
+	updated, transition, err := persistWorkflowTransition(ctx, qtx, run, workflowTransitionMutation{
+		Status: "running", CurrentStage: run.CurrentStage, Kind: "materialized", Actor: p.Actor,
+		Payload: map[string]any{"stage": run.CurrentStage, "promoted_count": len(toPromote)},
+	})
+	if err != nil {
+		return WorkflowMutationResult{}, err
+	}
+	changes := make([]WorkflowIssueChange, 0, len(toPromote))
+	for _, child := range toPromote {
 		after, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: child.ID, Status: issuestatus.Todo, WorkspaceID: p.WorkspaceID})
 		if err != nil {
 			return WorkflowMutationResult{}, fmt.Errorf("activate materialized workflow child: %w", err)
 		}
 		changes = append(changes, WorkflowIssueChange{Before: child, After: after})
-	}
-	updated, transition, err := persistWorkflowTransition(ctx, qtx, run, workflowTransitionMutation{
-		Status: "running", CurrentStage: run.CurrentStage, Kind: "materialized", Actor: p.Actor,
-		Payload: map[string]any{"stage": run.CurrentStage, "promoted_count": len(changes)},
-	})
-	if err != nil {
-		return WorkflowMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return WorkflowMutationResult{}, fmt.Errorf("commit workflow materialization: %w", err)

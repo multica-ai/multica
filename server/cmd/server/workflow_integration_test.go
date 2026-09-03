@@ -422,3 +422,111 @@ func TestWorkflowHTTPWorkspaceIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkflowOrderGuardReturnsConflictThroughIssueUpdate(t *testing.T) {
+	ownerID, token := workflowTestUser(t, "owner")
+	definitionID := workflowCreateDefinitionAPI(t, token, "Build", "Test")
+	parentID, children := workflowSeedIssueTree(t, ownerID, 2)
+
+	resp := workflowAuthRequest(t, token, http.MethodPost, "/api/issues/"+parentID+"/workflow/start", map[string]any{"workflow_definition_id": definitionID})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start workflow status = %d", resp.StatusCode)
+	}
+
+	resp = workflowAuthRequest(t, token, http.MethodPut, "/api/issues/"+children[1], map[string]any{"status": "todo"})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("future stage update status = %d, want 409", resp.StatusCode)
+	}
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, children[1]).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "backlog" {
+		t.Fatalf("future stage status = %q, want backlog", status)
+	}
+}
+
+func TestWorkflowOrderGuardReturnsConflictThroughIssueCreate(t *testing.T) {
+	ownerID, token := workflowTestUser(t, "owner")
+	definitionID := workflowCreateDefinitionAPI(t, token, "Build", "Test")
+	parentID, _ := workflowSeedIssueTree(t, ownerID, 2)
+	resp := workflowAuthRequest(t, token, http.MethodPost, "/api/issues/"+parentID+"/workflow/start", map[string]any{"workflow_definition_id": definitionID})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start workflow status = %d", resp.StatusCode)
+	}
+
+	resp = workflowAuthRequest(t, token, http.MethodPost, "/api/issues", map[string]any{
+		"title": "illegal future work", "status": "todo", "parent_issue_id": parentID, "stage": 2,
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("future stage create status = %d, want 409", resp.StatusCode)
+	}
+}
+
+func TestWorkflowOrderGuardReturnsConflictThroughBatchUpdate(t *testing.T) {
+	ownerID, token := workflowTestUser(t, "owner")
+	definitionID := workflowCreateDefinitionAPI(t, token, "Build", "Test")
+	parentID, children := workflowSeedIssueTree(t, ownerID, 2)
+	resp := workflowAuthRequest(t, token, http.MethodPost, "/api/issues/"+parentID+"/workflow/start", map[string]any{"workflow_definition_id": definitionID})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("start workflow status = %d", resp.StatusCode)
+	}
+
+	resp = workflowAuthRequest(t, token, http.MethodPost, "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{children[1]}, "updates": map[string]any{"status": "todo"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("future stage batch update status = %d, want 409", resp.StatusCode)
+	}
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, children[1]).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "backlog" {
+		t.Fatalf("future stage status = %q, want backlog", status)
+	}
+}
+
+func TestWorkflowOrderGuardBatchPreflightPreventsPartialMutation(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reverse=%v", reverse), func(t *testing.T) {
+			ownerID, token := workflowTestUser(t, "owner")
+			definitionID := workflowCreateDefinitionAPI(t, token, "Build", "Test")
+			parentID, children := workflowSeedIssueTree(t, ownerID, 2)
+			resp := workflowAuthRequest(t, token, http.MethodPost, "/api/issues/"+parentID+"/workflow/start", map[string]any{"workflow_definition_id": definitionID})
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("start workflow status = %d", resp.StatusCode)
+			}
+
+			ids := []string{children[0], children[1]}
+			if reverse {
+				ids[0], ids[1] = ids[1], ids[0]
+			}
+			resp = workflowAuthRequest(t, token, http.MethodPost, "/api/issues/batch-update", map[string]any{
+				"issue_ids": ids, "updates": map[string]any{"status": "done"},
+			})
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusConflict {
+				t.Fatalf("cross-stage batch status = %d, want 409", resp.StatusCode)
+			}
+
+			var stage1, stage2 string
+			if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, children[0]).Scan(&stage1); err != nil {
+				t.Fatal(err)
+			}
+			if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id=$1`, children[1]).Scan(&stage2); err != nil {
+				t.Fatal(err)
+			}
+			if stage1 != "todo" || stage2 != "backlog" {
+				t.Fatalf("batch partially mutated workflow: stage1=%q stage2=%q", stage1, stage2)
+			}
+		})
+	}
+}

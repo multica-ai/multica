@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -55,18 +56,15 @@ func TestBatchChildDoneWorkflowReconcilesOnceForClosedStage(t *testing.T) {
 func runBatchWorkflowScenario(t *testing.T, order []int) batchWorkflowOutcome {
 	t.Helper()
 	parentID := dbfx.Issue(t, "batch order parent", testutil.Cols{"status": "in_progress"})
-	s1 := dbfx.Issue(t, "batch order stage1", testutil.Cols{"parent_issue_id": parentID, "stage": 1, "status": "backlog"})
+	s1a := dbfx.Issue(t, "batch order stage1 a", testutil.Cols{"parent_issue_id": parentID, "stage": 1, "status": "backlog"})
+	s1b := dbfx.Issue(t, "batch order stage1 b", testutil.Cols{"parent_issue_id": parentID, "stage": 1, "status": "backlog"})
 	s2 := dbfx.Issue(t, "batch order stage2", testutil.Cols{"parent_issue_id": parentID, "stage": 2, "status": "backlog"})
-	s3 := dbfx.Issue(t, "batch order stage3", testutil.Cols{"parent_issue_id": parentID, "stage": 3, "status": "backlog"})
-	startChildDoneWorkflowRaw(t, parentID, `{"schema_version":1,"stages":[{"key":"one","name":"One"},{"key":"two","name":"Two"},{"key":"three","name":"Three"}]}`)
+	startChildDoneWorkflowRaw(t, parentID, `{"schema_version":1,"stages":[{"key":"one","name":"One"},{"key":"two","name":"Two"}]}`)
 
-	byStage := map[int]string{1: s1, 2: s2}
-	ids := make([]string, 0, len(order))
-	for _, stage := range order {
-		ids = append(ids, byStage[stage])
-	}
+	children := []string{s1a, s1b}
+	ids := []string{children[order[0]], children[order[1]]}
 	batchFinishWorkflowChildren(t, ids)
-	assertWorkflowIssueStatusHandler(t, s3, "todo")
+	assertWorkflowIssueStatusHandler(t, s2, "todo")
 
 	status, current := workflowRunForIssue(t, parentID)
 	out := batchWorkflowOutcome{RunStatus: status, CurrentStage: current}
@@ -112,18 +110,46 @@ func runBatchWorkflowScenario(t *testing.T, order []int) batchWorkflowOutcome {
 	}
 	return out
 }
+
 func TestBatchChildDoneWorkflowIsOrderIndependent(t *testing.T) {
-	a := runBatchWorkflowScenario(t, []int{1, 2})
-	b := runBatchWorkflowScenario(t, []int{2, 1})
+	a := runBatchWorkflowScenario(t, []int{0, 1})
+	b := runBatchWorkflowScenario(t, []int{1, 0})
 	if !reflect.DeepEqual(a, b) {
 		t.Fatalf("order changed outcome: a=%+v b=%+v", a, b)
 	}
-	wantKinds := []string{"stage_satisfied", "stage_advanced"}
+	wantKinds := []string{"stage_advanced"}
 	if !reflect.DeepEqual(a.TransitionKinds, wantKinds) {
 		t.Fatalf("transition kinds = %v, want %v", a.TransitionKinds, wantKinds)
 	}
-	if a.RunStatus != "running" || a.CurrentStage != 3 {
-		t.Fatalf("run = %s stage %d, want running stage 3", a.RunStatus, a.CurrentStage)
+	if a.RunStatus != "running" || a.CurrentStage != 2 {
+		t.Fatalf("run = %s stage %d, want running stage 2", a.RunStatus, a.CurrentStage)
+	}
+}
+
+func TestBatchChildDoneWorkflowRejectsCrossStageBatchWithoutPartialWrites(t *testing.T) {
+	for _, order := range [][]int{{1, 2}, {2, 1}} {
+		t.Run(fmt.Sprintf("order-%d-%d", order[0], order[1]), func(t *testing.T) {
+			parentID := dbfx.Issue(t, "batch cross-stage parent", testutil.Cols{"status": "in_progress"})
+			s1 := dbfx.Issue(t, "batch cross-stage stage1", testutil.Cols{"parent_issue_id": parentID, "stage": 1, "status": "backlog"})
+			s2 := dbfx.Issue(t, "batch cross-stage stage2", testutil.Cols{"parent_issue_id": parentID, "stage": 2, "status": "backlog"})
+			startChildDoneWorkflowRaw(t, parentID, `{"schema_version":1,"stages":[{"key":"one","name":"One"},{"key":"two","name":"Two"}]}`)
+			byStage := map[int]string{1: s1, 2: s2}
+			w := httptest.NewRecorder()
+			req := newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{
+				"issue_ids": []string{byStage[order[0]], byStage[order[1]]},
+				"updates":   map[string]any{"status": "done"},
+			})
+			testHandler.BatchUpdateIssues(w, req)
+			if w.Code != http.StatusConflict {
+				t.Fatalf("batch status = %d, want 409: %s", w.Code, w.Body.String())
+			}
+			assertWorkflowIssueStatusHandler(t, s1, "todo")
+			assertWorkflowIssueStatusHandler(t, s2, "backlog")
+			status, current := workflowRunForIssue(t, parentID)
+			if status != "running" || current != 1 {
+				t.Fatalf("run = %s stage %d, want running stage 1", status, current)
+			}
+		})
 	}
 }
 

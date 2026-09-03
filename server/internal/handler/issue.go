@@ -3084,6 +3084,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueLimitReached(w, err) {
 		return
 	}
+	if writeWorkflowOrderViolation(w, err) {
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -3565,6 +3568,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
+			return
+		}
+		if writeWorkflowOrderViolation(w, err) {
 			return
 		}
 		if errors.Is(err, errIssueFieldConflict) {
@@ -4125,6 +4131,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		batchProjectID = projectUUID
 	}
 
+	if err := h.preflightBatchWorkflowOrder(r.Context(), wsUUID, req.IssueIDs, req.Updates, rawUpdates, batchStatusKey); err != nil {
+		if writeWorkflowOrderViolation(w, err) {
+			return
+		}
+		slog.Warn("batch update issues: workflow preflight failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to validate workflow ordering")
+		return
+	}
+
 	updated := 0
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
@@ -4304,6 +4319,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err != nil {
+			if writeWorkflowOrderViolation(w, err) {
+				return
+			}
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -155,8 +157,100 @@ func (h *Handler) workflowActor(w http.ResponseWriter, r *http.Request, workspac
 	return service.WorkflowActor{Type: actorType, ID: actorUUID}, actorType, actorID, true
 }
 
+func (h *Handler) preflightBatchWorkflowOrder(ctx context.Context, workspaceID pgtype.UUID, issueIDs []string, updates UpdateIssueRequest, rawUpdates map[string]json.RawMessage, targetStatus string) error {
+	_, touchesStage := rawUpdates["stage"]
+	_, touchesParent := rawUpdates["parent_issue_id"]
+	if updates.Status == nil && !touchesStage && !touchesParent {
+		return nil
+	}
+	for _, rawID := range issueIDs {
+		issueID, err := util.ParseUUID(rawID)
+		if err != nil {
+			continue
+		}
+		issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
+		if err != nil {
+			continue
+		}
+		parentID := issue.ParentIssueID
+		if touchesParent {
+			if updates.ParentIssueID == nil {
+				parentID = pgtype.UUID{}
+			} else {
+				parentID, err = util.ParseUUID(*updates.ParentIssueID)
+				if err != nil {
+					continue
+				}
+			}
+		}
+		if !parentID.Valid {
+			continue
+		}
+		stage := issue.Stage
+		if touchesStage {
+			if updates.Stage == nil {
+				stage = pgtype.Int4{}
+			} else {
+				if *updates.Stage < 1 {
+					continue
+				}
+				stage = pgtype.Int4{Int32: *updates.Stage, Valid: true}
+			}
+		}
+		status := issue.Status
+		if updates.Status != nil {
+			status = targetStatus
+		}
+		if parentID == issue.ParentIssueID && stage == issue.Stage && status == issue.Status {
+			continue
+		}
+		run, err := h.Queries.GetActiveWorkflowRunForIssue(ctx, db.GetActiveWorkflowRunForIssueParams{WorkspaceID: workspaceID, IssueID: parentID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("preflight active workflow: %w", err)
+		}
+		spec, err := service.ValidateWorkflowDefinition(run.DefinitionSnapshot)
+		if err != nil {
+			return fmt.Errorf("preflight workflow snapshot: %w", err)
+		}
+		effective := issuestatus.Effective(ctx, h.Queries, workspaceID, status)
+		terminal := effective == issuestatus.Done || effective == issuestatus.Cancelled
+		if !stage.Valid || stage.Int32 < 1 || int(stage.Int32) > len(spec.Stages) {
+			if terminal {
+				continue
+			}
+			return service.ErrWorkflowOrderViolation
+		}
+		if stage.Int32 < run.CurrentStage && !terminal {
+			return service.ErrWorkflowOrderViolation
+		}
+		if stage.Int32 > run.CurrentStage && effective != issuestatus.Backlog {
+			return service.ErrWorkflowOrderViolation
+		}
+		if stage.Int32 == run.CurrentStage && run.Status == "running" && effective == issuestatus.Backlog {
+			return service.ErrWorkflowOrderViolation
+		}
+		if stage.Int32 == run.CurrentStage && run.Status == "blocked_materialization" && effective != issuestatus.Backlog && !terminal {
+			return service.ErrWorkflowOrderViolation
+		}
+	}
+	return nil
+}
+
+func writeWorkflowOrderViolation(w http.ResponseWriter, err error) bool {
+	if !service.IsWorkflowOrderViolation(err) {
+		return false
+	}
+	writeError(w, http.StatusConflict, "workflow stage order violation")
+	return true
+}
+
 func writeWorkflowError(w http.ResponseWriter, err error) {
 	switch {
+	case service.IsWorkflowOrderViolation(err):
+		writeError(w, http.StatusConflict, "workflow stage order violation")
 	case errors.Is(err, service.ErrInvalidWorkflowDefinition):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, service.ErrWorkflowDefinitionNotFound), errors.Is(err, service.ErrWorkflowRunNotFound), errors.Is(err, pgx.ErrNoRows):

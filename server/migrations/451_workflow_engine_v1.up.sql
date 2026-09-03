@@ -53,3 +53,75 @@ CREATE TABLE workflow_transition (
 
 CREATE INDEX workflow_transition_run_order
     ON workflow_transition(workspace_id, workflow_run_id, created_at, id);
+
+
+CREATE OR REPLACE FUNCTION enforce_issue_workflow_stage_order()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    active_stage integer;
+    active_run_status text;
+    stage_count integer;
+    effective_status text;
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND NEW.status IS NOT DISTINCT FROM OLD.status
+       AND NEW.stage IS NOT DISTINCT FROM OLD.stage
+       AND NEW.parent_issue_id IS NOT DISTINCT FROM OLD.parent_issue_id THEN
+        RETURN NEW;
+    END IF;
+    IF NEW.parent_issue_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT current_stage, status, jsonb_array_length(definition_snapshot->'stages')
+    INTO active_stage, active_run_status, stage_count
+    FROM workflow_run
+    WHERE workspace_id = NEW.workspace_id
+      AND issue_id = NEW.parent_issue_id
+      AND status IN ('running', 'blocked_materialization')
+    ORDER BY created_at DESC
+    LIMIT 1;
+    IF NOT FOUND THEN
+        RETURN NEW;
+    END IF;
+
+    SELECT COALESCE((
+        SELECT category FROM issue_status
+        WHERE workspace_id = NEW.workspace_id AND key = NEW.status
+    ), NEW.status) INTO effective_status;
+
+    IF NEW.stage IS NULL OR NEW.stage < 1 OR NEW.stage > stage_count THEN
+        IF effective_status IN ('done', 'cancelled') THEN
+            RETURN NEW;
+        END IF;
+        RAISE EXCEPTION 'active workflow child must remain on a declared stage'
+            USING ERRCODE = '23514', CONSTRAINT = 'issue_workflow_order_guard';
+    END IF;
+
+    IF NEW.stage < active_stage
+       AND effective_status NOT IN ('done', 'cancelled') THEN
+        RAISE EXCEPTION 'completed workflow stages must remain terminal'
+            USING ERRCODE = '23514', CONSTRAINT = 'issue_workflow_order_guard';
+    END IF;
+    IF NEW.stage > active_stage AND effective_status <> 'backlog' THEN
+        RAISE EXCEPTION 'future workflow stages must remain in backlog'
+            USING ERRCODE = '23514', CONSTRAINT = 'issue_workflow_order_guard';
+    END IF;
+    IF NEW.stage = active_stage AND active_run_status = 'running' AND effective_status = 'backlog' THEN
+        RAISE EXCEPTION 'running workflow stage cannot return to backlog'
+            USING ERRCODE = '23514', CONSTRAINT = 'issue_workflow_order_guard';
+    END IF;
+    IF NEW.stage = active_stage
+       AND active_run_status = 'blocked_materialization'
+       AND effective_status NOT IN ('backlog', 'done', 'cancelled') THEN
+        RAISE EXCEPTION 'blocked workflow stage must be resumed before active work begins'
+            USING ERRCODE = '23514', CONSTRAINT = 'issue_workflow_order_guard';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER issue_workflow_order_guard_write
+AFTER INSERT OR UPDATE OF status, stage, parent_issue_id ON issue
+FOR EACH ROW EXECUTE FUNCTION enforce_issue_workflow_stage_order();

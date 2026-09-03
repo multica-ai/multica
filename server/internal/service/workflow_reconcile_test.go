@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -196,20 +195,35 @@ func TestWorkflowResumePromotesMaterializedStage(t *testing.T) {
 }
 
 func TestWorkflowAdvanceSkipsAlreadyTerminalDeclaredStage(t *testing.T) {
-	fx := newStartedWorkflowFixture(t, 3)
-	q := db.New(fx.pool)
-	if _, err := q.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{ID: fx.children[2][0].ID, Status: "done", WorkspaceID: fx.workspaceID}); err != nil {
+	base := newWorkflowTestFixture(t)
+	stages := []WorkflowStageSpec{{Key: "stage_1", Name: "Stage 1"}, {Key: "stage_2", Name: "Stage 2"}, {Key: "stage_3", Name: "Stage 3"}}
+	raw, err := json.Marshal(WorkflowDefinitionSpec{SchemaVersion: 1, Stages: stages})
+	if err != nil {
 		t.Fatal(err)
 	}
-	fx.finishStage(t, 1)
-	got, err := fx.service.AdvanceFromClosedStage(context.Background(), AdvanceWorkflowParams{WorkspaceID: fx.workspaceID, IssueID: fx.parent.ID, ClosedStage: 1, Actor: systemWorkflowActor()})
+	def := base.createDefinition(t, "Skip terminal", string(raw))
+	parent := base.createParent(t, "todo")
+	s1 := base.createChild(t, parent.ID, 1, "backlog")
+	base.createChild(t, parent.ID, 2, "done")
+	s3 := base.createChild(t, parent.ID, 3, "backlog")
+	if _, err := base.service.Start(context.Background(), StartWorkflowParams{
+		WorkspaceID: base.workspaceID, IssueID: parent.ID, DefinitionID: def.ID,
+		Actor: WorkflowActor{Type: "member", ID: base.userID},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	q := db.New(base.pool)
+	if _, err := q.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{ID: s1.ID, Status: "done", WorkspaceID: base.workspaceID}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := base.service.AdvanceFromClosedStage(context.Background(), AdvanceWorkflowParams{WorkspaceID: base.workspaceID, IssueID: parent.ID, ClosedStage: 1, Actor: systemWorkflowActor()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Run.CurrentStage != 3 || got.Run.Status != "running" {
 		t.Fatalf("run = %+v", got.Run)
 	}
-	assertWorkflowIssueStatus(t, fx.pool, fx.children[3][0].ID, "todo")
+	assertWorkflowIssueStatus(t, base.pool, s3.ID, "todo")
 	if len(got.Transitions) != 2 || got.Transitions[0].Kind != "stage_satisfied" || got.Transitions[1].Kind != "stage_advanced" {
 		t.Fatalf("transitions = %+v", got.Transitions)
 	}
@@ -234,29 +248,24 @@ func TestWorkflowAdvanceFinalStageCompletesPendingReview(t *testing.T) {
 	}
 }
 
-func TestWorkflowAdvanceLaterStageActiveConflictRollsBack(t *testing.T) {
+func TestWorkflowOrderGuardRejectsLaterStageActivationWithoutChangingRun(t *testing.T) {
 	fx := newStartedWorkflowFixture(t, 2)
 	q := db.New(fx.pool)
-	if _, err := q.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{ID: fx.children[2][0].ID, Status: "in_progress", WorkspaceID: fx.workspaceID}); err != nil {
-		t.Fatal(err)
-	}
-	fx.finishStage(t, 1)
 	beforeRun, err := q.GetActiveWorkflowRunForIssue(context.Background(), db.GetActiveWorkflowRunForIssueParams{WorkspaceID: fx.workspaceID, IssueID: fx.parent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fx.service.AdvanceFromClosedStage(context.Background(), AdvanceWorkflowParams{WorkspaceID: fx.workspaceID, IssueID: fx.parent.ID, ClosedStage: 1, Actor: systemWorkflowActor()})
-	if !errors.Is(err, ErrWorkflowConflict) {
-		t.Fatalf("err = %v, want ErrWorkflowConflict", err)
+	if _, err := q.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{ID: fx.children[2][0].ID, Status: "in_progress", WorkspaceID: fx.workspaceID}); err == nil {
+		t.Fatal("future stage activation succeeded; want workflow order rejection")
 	}
 	afterRun, err := q.GetActiveWorkflowRunForIssue(context.Background(), db.GetActiveWorkflowRunForIssueParams{WorkspaceID: fx.workspaceID, IssueID: fx.parent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if afterRun.Revision != beforeRun.Revision || afterRun.CurrentStage != beforeRun.CurrentStage || afterRun.Status != beforeRun.Status {
-		t.Fatalf("run changed on conflict: before=%+v after=%+v", beforeRun, afterRun)
+		t.Fatalf("run changed on rejected mutation: before=%+v after=%+v", beforeRun, afterRun)
 	}
-	assertWorkflowIssueStatus(t, fx.pool, fx.children[2][0].ID, "in_progress")
+	assertWorkflowIssueStatus(t, fx.pool, fx.children[2][0].ID, "backlog")
 }
 
 func TestWorkflowParentTerminalCancelsRun(t *testing.T) {

@@ -19,6 +19,7 @@ var ErrWorkflowConflict = errors.New("workflow state conflict")
 var ErrActiveWorkflowRun = errors.New("active workflow run exists")
 var ErrWorkflowDefinitionNotFound = errors.New("workflow definition not found")
 var ErrWorkflowRunNotFound = errors.New("workflow run not found")
+var ErrWorkflowOrderViolation = errors.New("workflow stage order violation")
 
 type WorkflowActor struct {
 	Type string
@@ -178,6 +179,14 @@ func workflowTerminal(effective string) bool {
 func workflowActiveRunUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "workflow_run_one_active_per_issue"
+}
+
+func IsWorkflowOrderViolation(err error) bool {
+	if errors.Is(err, ErrWorkflowOrderViolation) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "issue_workflow_order_guard"
 }
 
 func (s *WorkflowService) Cancel(ctx context.Context, workspaceID, issueID pgtype.UUID, actor WorkflowActor) (WorkflowMutationResult, error) {
