@@ -13,7 +13,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberNeedsMikaSetup, useBootstrapMika } from "@multica/core/onboarding";
+import {
+  isMikaAgent,
+  memberNeedsMikaSetup,
+  useBootstrapMika,
+} from "@multica/core/onboarding";
 import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
 import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
@@ -22,7 +26,7 @@ import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { AgentRuntime } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -87,6 +91,7 @@ export function RuntimesPage({
   bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
+  const { t } = useT("runtimes");
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
@@ -100,16 +105,14 @@ export function RuntimesPage({
   const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
     runtimeProfileListOptions(wsId),
   );
-  const { data: agents = [], isLoading: agentsLoading } = useQuery(
-    agentListOptions(wsId),
-  );
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const { data: agents = [] } = agentsQuery;
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   // The Mika entrypoint is per member, not per workspace: the agent alone does
   // not say whether *this* member's conversation was ever opened and kicked
   // off. See memberNeedsMikaSetup.
-  const { data: chatSessions = [], isLoading: chatSessionsLoading } = useQuery(
-    chatSessionsOptions(wsId),
-  );
+  const chatSessionsQuery = useQuery(chatSessionsOptions(wsId));
+  const { data: chatSessions = [] } = chatSessionsQuery;
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -179,17 +182,42 @@ export function RuntimesPage({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
-            {!agentsLoading &&
-              !chatSessionsLoading &&
+            {(agentsQuery.isError || chatSessionsQuery.isError) && (
+              <div
+                role="alert"
+                className="mb-6 flex items-center justify-between gap-4 rounded-xl border p-5"
+              >
+                <p className="text-body text-muted-foreground">
+                  {t(($) => $.mika_setup.check_failed)}
+                </p>
+                <Button
+                  className="shrink-0"
+                  variant="outline"
+                  disabled={
+                    agentsQuery.isFetching || chatSessionsQuery.isFetching
+                  }
+                  onClick={() => {
+                    if (agentsQuery.isError) void agentsQuery.refetch();
+                    if (chatSessionsQuery.isError)
+                      void chatSessionsQuery.refetch();
+                  }}
+                >
+                  {t(($) => $.mika_setup.retry)}
+                </Button>
+              </div>
+            )}
+            {agentsQuery.isSuccess &&
+              chatSessionsQuery.isSuccess &&
               memberNeedsMikaSetup(agents, chatSessions) &&
               runtimes.length > 0 && (
-              <MikaSetupCard
-                workspaceId={wsId}
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                currentUserId={currentUserId ?? null}
-              />
-            )}
+                <MikaSetupCard
+                  workspaceId={wsId}
+                  agent={agents.find(isMikaAgent)}
+                  runtimes={runtimes}
+                  runtimesLoading={runtimesLoading}
+                  currentUserId={currentUserId ?? null}
+                />
+              )}
             {(machines.length > 0 || bootstrapping) && (
               <MachineList
                 machines={machines}
@@ -226,16 +254,19 @@ export function RuntimesPage({
  * the box this was reported from), so "the first online one" is arbitrary and
  * could well be a CLI the member never intended to run their Chief of Staff
  * on. Onboarding already makes this an explicit choice; this is the same
- * decision reached from a different entry point, so it asks the same way and
- * reuses the same two controls.
+ * decision reached from a different entry point, so first-time setup reuses
+ * the same two controls. Recovery keeps the existing agent's configuration
+ * and goes straight to completing the member's conversation.
  */
 function MikaSetupCard({
   workspaceId,
+  agent,
   runtimes,
   runtimesLoading,
   currentUserId,
 }: {
   workspaceId: string;
+  agent?: Agent;
   runtimes: AgentRuntime[];
   runtimesLoading?: boolean;
   currentUserId: string | null;
@@ -259,16 +290,25 @@ function MikaSetupCard({
     runtimeId: defaultRuntimeId,
     model: "",
   };
-  const runtimeId = value.runtimeId;
+  // Provisioning needs a choice; recovery must keep the existing binding.
+  // The server resolves the same agent/session under locks on every retry.
+  const runtimeId = agent ? agent.runtime_id : value.runtimeId;
+  const title = agent
+    ? t(($) => $.mika_setup.resume_title)
+    : t(($) => $.mika_setup.title);
 
   const handleStart = async () => {
-    if (!runtimeId || bootstrapMika.isPending) return;
+    if (bootstrapMika.isPending) return;
+    if (!runtimeId) {
+      if (agent) toast.error(t(($) => $.mika_setup.runtime_missing));
+      return;
+    }
     const lang = pickContentLang(i18n.language);
     try {
       const result = await bootstrapMika.mutateAsync({
         workspaceSlug: wsSlug,
         runtimeId,
-        model: value.model || undefined,
+        model: agent ? undefined : value.model || undefined,
         ...getMikaOnboarding(lang),
       });
       setOpen(false);
@@ -285,25 +325,34 @@ function MikaSetupCard({
       <div className="mb-6 flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
         <span
           role="img"
-          aria-label={t(($) => $.mika_setup.title)}
+          aria-label={title}
           className="flex size-10 shrink-0 select-none items-center justify-center rounded-full bg-muted text-title-lg leading-none"
         >
           {MIKA_PLACEHOLDER_EMOJI}
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="text-body font-semibold">
-            {t(($) => $.mika_setup.title)}
-          </h2>
+          <h2 className="text-body font-semibold">{title}</h2>
           <p className="mt-1 text-body leading-relaxed text-muted-foreground">
-            {t(($) => $.mika_setup.description)}
+            {agent
+              ? t(($) => $.mika_setup.resume_description)
+              : t(($) => $.mika_setup.description)}
           </p>
         </div>
-        <Button className="shrink-0" onClick={() => setOpen(true)}>
-          {t(($) => $.mika_setup.action)}
+        <Button
+          className="shrink-0"
+          disabled={bootstrapMika.isPending}
+          onClick={agent ? () => void handleStart() : () => setOpen(true)}
+        >
+          {bootstrapMika.isPending && (
+            <Loader2 aria-hidden className="size-4 animate-spin" />
+          )}
+          {agent
+            ? t(($) => $.mika_setup.resume_action)
+            : t(($) => $.mika_setup.action)}
         </Button>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open && !agent} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>{t(($) => $.mika_setup.dialog_title)}</DialogTitle>

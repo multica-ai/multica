@@ -38,9 +38,7 @@ export interface BootstrapMikaResult {
  * decided here; the server owns it, which is why this can no longer drift from
  * the product definition the way a client-built payload could.
  */
-export async function bootstrapMika(
-  input: BootstrapMikaInput,
-): Promise<
+export async function bootstrapMika(input: BootstrapMikaInput): Promise<
   BootstrapMikaResult & {
     kickoff: Awaited<ReturnType<typeof api.startMikaOnboarding>>;
   }
@@ -81,6 +79,18 @@ export function useBootstrapMika(workspaceId: string) {
 
   return useMutation({
     mutationFn: (input: BootstrapMikaInput) => bootstrapMika(input),
+    // Agent/session creation can commit before a later step fails. Refresh
+    // those durable results even when the websocket event was missed, so a
+    // retry resumes setup instead of offering to provision Mika again.
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: workspaceKeys.agents(workspaceId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: chatKeys.sessions(workspaceId),
+        }),
+      ]),
     onSuccess: ({ chatSession }) => {
       // No pending task is seeded any more: the opening is written by the
       // server and already persisted by the time this resolves, so there is
@@ -88,12 +98,6 @@ export function useBootstrapMika(workspaceId: string) {
       // list is what makes it appear — and because it is real persisted state,
       // it survives a reload, unlike the pending-task marker it replaces.
       return Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: workspaceKeys.agents(workspaceId),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: chatKeys.sessions(workspaceId),
-        }),
         queryClient.invalidateQueries({
           queryKey: chatKeys.messages(chatSession.id),
         }),

@@ -28,6 +28,12 @@
     }
   },
   "mika_setup": {
+    "resume_title": "Mika の初期設定を続けましょう。",
+    "resume_description": "既存の Mika との会話を開いて、初期設定を完了します。",
+    "resume_action": "設定を続ける",
+    "check_failed": "Mika の設定状況を確認できませんでした。",
+    "retry": "再試行",
+    "runtime_missing": "Mika にランタイムが設定されていません。先にエージェント設定で選択してください。",
     "title": "ランタイムの準備ができました。Mika と始めましょう。",
     "description": "Mika は目標をタスクに落とし込み、適切なエージェントを調整し、ワークフローに必要な再利用可能な specialist の追加を支援します。",
     "action": "Mika と始める",

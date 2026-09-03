@@ -28,6 +28,12 @@
     }
   },
   "mika_setup": {
+    "resume_title": "Continue getting started with Mika.",
+    "resume_description": "Continue your first conversation with Mika using its current setup.",
+    "resume_action": "Continue setup",
+    "check_failed": "Couldn't check whether Mika setup is complete.",
+    "retry": "Retry",
+    "runtime_missing": "Mika has no runtime configured. Choose one in the agent settings first.",
     "title": "Your runtime is ready. Start with Mika.",
     "description": "Mika turns your goal into an issue, coordinates the right agent, and helps you add reusable specialists when your workflow needs them.",
     "action": "Start with Mika",

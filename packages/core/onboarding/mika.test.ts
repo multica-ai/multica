@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import { isMikaAgent, memberNeedsMikaSetup, workspaceNeedsMika } from "./mika";
 
@@ -5,7 +7,11 @@ const mika = { id: "agent-mika", system_key: "mika" };
 const other = { id: "agent-other", system_key: undefined };
 const kicked = {
   agent_id: "agent-mika",
-  last_message: { content: "…", role: "user" as const, created_at: "2026-01-01" },
+  last_message: {
+    content: "…",
+    role: "user" as const,
+    created_at: "2026-01-01",
+  },
 };
 
 describe("workspaceNeedsMika", () => {
@@ -53,7 +59,10 @@ describe("memberNeedsMikaSetup", () => {
 
   it("stays true when the session exists but the kickoff never landed", () => {
     expect(
-      memberNeedsMikaSetup([mika], [{ agent_id: "agent-mika", last_message: null }]),
+      memberNeedsMikaSetup(
+        [mika],
+        [{ agent_id: "agent-mika", last_message: null }],
+      ),
     ).toBe(true);
   });
 
@@ -66,5 +75,23 @@ describe("memberNeedsMikaSetup", () => {
 
   it("is false once the member has a kicked-off Mika conversation", () => {
     expect(memberNeedsMikaSetup([other, mika], [kicked])).toBe(false);
+  });
+
+  it("does not restart onboarding when an empty conversation precedes existing history", () => {
+    const empty = { agent_id: mika.id, last_message: null };
+    expect(memberNeedsMikaSetup([mika], [empty, kicked])).toBe(false);
+    expect(memberNeedsMikaSetup([mika], [kicked, empty])).toBe(false);
+  });
+
+  it("keeps recovery available when all of the member's Mika conversations are empty", () => {
+    expect(
+      memberNeedsMikaSetup(
+        [mika],
+        [
+          { agent_id: mika.id, last_message: null },
+          { agent_id: mika.id, last_message: undefined },
+        ],
+      ),
+    ).toBe(true);
   });
 });

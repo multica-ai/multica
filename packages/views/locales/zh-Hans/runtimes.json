@@ -28,6 +28,12 @@
     }
   },
   "mika_setup": {
+    "resume_title": "继续完成 Mika 的上手引导。",
+    "resume_description": "使用现有 Mika 继续你的首次对话。",
+    "resume_action": "继续引导",
+    "check_failed": "暂时无法确认 Mika 的引导状态。",
+    "retry": "重试",
+    "runtime_missing": "Mika 尚未配置运行时，请先在智能体设置中选择。",
     "title": "运行时已准备好，和 Mika 开始。",
     "description": "Mika 会把你的目标转化为任务、协调合适的智能体，并在工作流需要时帮你添加可复用的 specialist。",
     "action": "和 Mika 开始",

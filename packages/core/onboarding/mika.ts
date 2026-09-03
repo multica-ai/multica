@@ -46,11 +46,9 @@ export function memberNeedsMikaSetup(
   const mika = agents.find(isMikaAgent);
   if (!mika) return true;
 
-  // Sessions are per member, so this is the caller's own conversation.
-  const session = sessions.find((s) => s.agent_id === mika.id);
-  if (!session) return true;
-
-  // The opening turn is stored as a real (hidden) message, so an empty
-  // conversation means the kickoff never landed.
-  return !session.last_message;
+  // Sessions are per member and include archived conversations. A newer or
+  // pinned empty conversation must not hide an already-started one.
+  return !sessions.some(
+    (session) => session.agent_id === mika.id && Boolean(session.last_message),
+  );
 }

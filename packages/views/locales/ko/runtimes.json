@@ -28,6 +28,12 @@
     }
   },
   "mika_setup": {
+    "resume_title": "Mika 시작 설정을 계속하세요.",
+    "resume_description": "기존 Mika와의 대화를 열고 시작 설정을 완료하세요.",
+    "resume_action": "설정 계속",
+    "check_failed": "Mika 설정 상태를 확인하지 못했습니다.",
+    "retry": "다시 시도",
+    "runtime_missing": "Mika에 런타임이 설정되지 않았습니다. 먼저 에이전트 설정에서 선택하세요.",
     "title": "런타임이 준비되었습니다. Mika와 시작하세요.",
     "description": "Mika가 목표를 태스크로 구체화하고 적합한 에이전트를 조율하며, 워크플로에 필요할 때 재사용 가능한 specialist 추가를 돕습니다.",
     "action": "Mika와 시작",
