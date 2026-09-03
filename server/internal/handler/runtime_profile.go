@@ -484,6 +484,9 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")
 		return
 	}
+	for _, runtimeID := range runtimeIDs {
+		h.NotifyRuntimeGone(uuidToString(runtimeID))
+	}
 
 	// Tell connected clients to refetch the runtime list (instances vanished),
 	// and fan out the per-runtime teardown so unbound agents and cancelled

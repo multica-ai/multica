@@ -336,6 +336,13 @@ func (h *Hub) NotifyPendingWork(runtimeID, kind string) {
 	h.notifyPendingWork(runtimeID, kind, "")
 }
 
+// NotifyRuntimeGone tells daemons watching runtimeID that the server deleted
+// the runtime. The existing heartbeat lookup remains the correctness fallback;
+// this notification only closes the active-connection invalidation gap.
+func (h *Hub) NotifyRuntimeGone(runtimeID string) {
+	h.notifyRuntimeGone(runtimeID, "")
+}
+
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
@@ -379,6 +386,22 @@ func (h *Hub) notifyPendingWork(runtimeID, kind, eventID string) {
 		return
 	}
 	data, err := pendingWorkFrame(runtimeID, kind)
+	if err != nil {
+		return
+	}
+	delivered, deduped := h.notifyFrame(runtimeID, data, eventID)
+	if delivered {
+		M.WakeupDeliveredHit.Add(1)
+	} else if !deduped {
+		M.WakeupDeliveredMiss.Add(1)
+	}
+}
+
+func (h *Hub) notifyRuntimeGone(runtimeID, eventID string) {
+	if h == nil || runtimeID == "" {
+		return
+	}
+	data, err := runtimeGoneFrame(runtimeID)
 	if err != nil {
 		return
 	}
@@ -439,6 +462,19 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		var payload protocol.PendingWorkPayload
 		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
 			slog.Debug("daemon websocket relay: invalid pending_work payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonHeartbeatAck:
+		var payload protocol.DaemonHeartbeatAckPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" || payload.Status != protocol.HeartbeatStatusRuntimeGone || !payload.RuntimeGone {
+			slog.Debug("daemon websocket relay: invalid runtime_gone payload", "error", err, "scope_id", scopeID, "event_id", eventID)
 			M.WakeupDeliveredMiss.Add(1)
 			return
 		}
@@ -571,6 +607,17 @@ func pendingWorkFrame(runtimeID, kind string) ([]byte, error) {
 		Payload: mustMarshalRaw(protocol.PendingWorkPayload{
 			RuntimeID: runtimeID,
 			Kind:      kind,
+		}),
+	})
+}
+
+func runtimeGoneFrame(runtimeID string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonHeartbeatAck,
+		Payload: mustMarshalRaw(protocol.DaemonHeartbeatAckPayload{
+			RuntimeID:   runtimeID,
+			Status:      protocol.HeartbeatStatusRuntimeGone,
+			RuntimeGone: true,
 		}),
 	})
 }
