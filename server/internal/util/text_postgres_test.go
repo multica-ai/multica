@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -80,6 +81,100 @@ func TestSanitizeTextForPostgresToValidUTF8IsNotEnough(t *testing.T) {
 }
 
 func TestSanitizeJSONForPostgres(t *testing.T) {
+	t.Run("preserves distinct keys that collide after sanitization", func(t *testing.T) {
+		in := map[string]any{
+			"tool":     "unchanged",
+			"tool\x00": "contained a NUL",
+		}
+
+		out, ok := SanitizeJSONForPostgres(in).(map[string]any)
+		if !ok {
+			t.Fatalf("SanitizeJSONForPostgres returned %T, want map[string]any", SanitizeJSONForPostgres(in))
+		}
+		if len(out) != 2 {
+			t.Fatalf("sanitized key collision dropped an entry: got %v", out)
+		}
+		if got := out["tool"]; got != "unchanged" {
+			t.Fatalf("out[tool] = %v, want unchanged value", got)
+		}
+		if got := out["tool#2"]; got != "contained a NUL" {
+			t.Fatalf("out[tool#2] = %v, want sanitized collision value", got)
+		}
+	})
+
+	t.Run("does not overwrite an existing collision suffix", func(t *testing.T) {
+		in := map[string]any{
+			"tool":     "unchanged",
+			"tool#2":   "existing suffix",
+			"tool\x00": "contained a NUL",
+		}
+
+		out := SanitizeJSONForPostgres(in).(map[string]any)
+		if len(out) != 3 {
+			t.Fatalf("sanitized key collision dropped an entry: got %v", out)
+		}
+		if got := out["tool#2"]; got != "existing suffix" {
+			t.Fatalf("out[tool#2] = %v, want existing suffix value", got)
+		}
+		if got := out["tool#3"]; got != "contained a NUL" {
+			t.Fatalf("out[tool#3] = %v, want sanitized collision value", got)
+		}
+	})
+
+	t.Run("assigns multiple collisions deterministically after reserved suffixes", func(t *testing.T) {
+		entries := []struct {
+			key   string
+			value string
+		}{
+			{key: "tool", value: "unchanged base"},
+			{key: "tool#2", value: "unchanged suffix two"},
+			{key: "tool#3", value: "unchanged suffix three"},
+			{key: "\x00tool", value: "leading NUL"},
+			{key: "to\x00ol", value: "middle NUL"},
+			{key: "tool\x00", value: "trailing NUL"},
+			{key: "tool\x00\x00", value: "two trailing NULs"},
+		}
+		want := map[string]any{
+			"tool":   "unchanged base",
+			"tool#2": "unchanged suffix two",
+			"tool#3": "unchanged suffix three",
+			"tool#4": "leading NUL",
+			"tool#5": "middle NUL",
+			"tool#6": "trailing NUL",
+			"tool#7": "two trailing NULs",
+		}
+
+		var first map[string]any
+		for _, reverse := range []bool{false, true} {
+			in := make(map[string]any, len(entries))
+			for i := range entries {
+				index := i
+				if reverse {
+					index = len(entries) - 1 - i
+				}
+				in[entries[index].key] = entries[index].value
+			}
+
+			out := SanitizeJSONForPostgres(in).(map[string]any)
+			if !reflect.DeepEqual(out, want) {
+				t.Fatalf("reverse=%v: output = %#v, want %#v", reverse, out, want)
+			}
+			if first == nil {
+				first = out
+			} else if !reflect.DeepEqual(out, first) {
+				t.Fatalf("output changed with insertion order: first=%#v, reversed=%#v", first, out)
+			}
+
+			encoded, err := json.Marshal(out)
+			if err != nil {
+				t.Fatalf("marshal sanitized value: %v", err)
+			}
+			if strings.Contains(string(encoded), "\\u0000") {
+				t.Fatalf("sanitized JSON still carries a NUL escape: %s", encoded)
+			}
+		}
+	})
+
 	t.Run("cleans strings at every depth, keys included", func(t *testing.T) {
 		in := map[string]any{
 			"cmd\x00": "cat\x00 binary",
@@ -152,4 +247,39 @@ func TestSanitizeJSONForPostgres(t *testing.T) {
 			t.Fatalf("got %v, want nil", got)
 		}
 	})
+}
+
+func TestSanitizePostgresJSONMapKeysCollisionAllocationScalesLinearly(t *testing.T) {
+	makeCollisions := func(size int) map[string]any {
+		const base = "abcdefghijklmnop"
+		values := make(map[string]any, size)
+		for mask := 0; mask < size; mask++ {
+			var key strings.Builder
+			key.Grow(len(base) * 2)
+			for index := range len(base) {
+				if mask&(1<<index) != 0 {
+					key.WriteByte(0)
+				}
+				key.WriteByte(base[index])
+			}
+			values[key.String()] = mask
+		}
+		return values
+	}
+
+	small := makeCollisions(128)
+	large := makeCollisions(256)
+	smallAllocs := testing.AllocsPerRun(3, func() {
+		sanitizePostgresJSONMapKeys(small)
+	})
+	largeAllocs := testing.AllocsPerRun(3, func() {
+		sanitizePostgresJSONMapKeys(large)
+	})
+
+	// Doubling a collision group may roughly double allocation work. A
+	// quadratic suffix scan instead grows close to fourfold because it rebuilds
+	// every already-rejected candidate for every later key.
+	if largeAllocs > smallAllocs*3 {
+		t.Fatalf("allocations grew superlinearly: size 128=%0.f, size 256=%0.f", smallAllocs, largeAllocs)
+	}
 }

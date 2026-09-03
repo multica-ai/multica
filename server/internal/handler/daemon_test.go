@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -26,29 +25,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
-
-func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
-	var logs bytes.Buffer
-	prev := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
-	t.Cleanup(func() { slog.SetDefault(prev) })
-
-	logClaimEndpointSlow("runtime-1", "claimed", time.Now().Add(-600*time.Millisecond), 10, 20, 30, 4096, 2, 8, 3072)
-
-	got := logs.String()
-	for _, want := range []string{
-		"msg=\"claim_endpoint slow\"",
-		"runtime_id=runtime-1",
-		"payload_bytes=4096",
-		"agent_skill_count=2",
-		"builtin_skill_count=8",
-		"skill_payload_bytes=3072",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("slow claim log missing %q in %s", want, got)
-		}
-	}
-}
 
 // slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
 // HasPending until the provided context is cancelled. PopPending delegates
@@ -653,6 +629,10 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Workspace context claim runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+	var workspaceSlug, issuePrefix string
+	var issueNumber int32
+	dbfx.QueryRow(t, `SELECT slug, issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&workspaceSlug, &issuePrefix)
+	dbfx.QueryRow(t, `SELECT number FROM issue WHERE id = $1`, issueID).Scan(&issueNumber)
 
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "workspace-context-claim")
@@ -663,6 +643,8 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 		Task *struct {
 			ID               string `json:"id"`
 			WorkspaceContext string `json:"workspace_context"`
+			WorkspaceSlug    string `json:"workspace_slug"`
+			IssueIdentifier  string `json:"issue_identifier"`
 		} `json:"task"`
 	}
 	w.JSON(&resp)
@@ -674,6 +656,12 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	}
 	if resp.Task.WorkspaceContext != wsContext {
 		t.Errorf("workspace_context = %q, want %q", resp.Task.WorkspaceContext, wsContext)
+	}
+	if resp.Task.WorkspaceSlug != workspaceSlug {
+		t.Errorf("workspace_slug = %q, want %q", resp.Task.WorkspaceSlug, workspaceSlug)
+	}
+	if want := service.IssueIdentifier(issuePrefix, issueNumber); resp.Task.IssueIdentifier != want {
+		t.Errorf("issue_identifier = %q, want %q", resp.Task.IssueIdentifier, want)
 	}
 }
 
@@ -2723,11 +2711,11 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 	dbfx.QueryRow(t, `
 		INSERT INTO agent (
 			workspace_id, name, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks
+			runtime_id, visibility, max_concurrent_tasks, owner_id
 		)
-		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
+		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3, $4)
 		RETURNING id
-	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID)
+	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID, testUserID).Scan(&agentID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
 
 	return agentID, runtimeID, daemonID

@@ -41,7 +41,7 @@
     "filters": {
       "all": "전체",
       "online": "온라인",
-      "issues": "이슈"
+      "issues": "문제"
     },
     "section_local": "로컬",
     "section_remote": "원격",
@@ -64,7 +64,7 @@
       "runtimes_hint_other": "온라인 {{count}}개",
       "health": "상태",
       "health_clear": "문제 없음",
-      "health_issues_other": "이슈 {{count}}개",
+      "health_issues_other": "문제 {{count}}개",
       "workload": "작업량",
       "workload_value_idle": "유휴",
       "workload_idle": "모두 유휴",
@@ -100,9 +100,9 @@
       "label": "오프라인",
       "description": "5분 넘게 heartbeat가 없습니다. 데몬을 다시 시작하거나 호스트를 확인하세요."
     },
-    "about_to_gc": {
-      "label": "곧 정리됨",
-      "description": "6일 넘게 오프라인입니다. 다시 연결되지 않으면 7일째 자동 삭제됩니다."
+    "long_offline": {
+      "label": "장기 오프라인",
+      "description": "6일 넘게 heartbeat가 없습니다. 이 호스트를 복구하지 않을 경우 연결된 에이전트를 다른 런타임에 다시 할당하거나 이 런타임을 삭제하세요."
     }
   },
   "detail": {

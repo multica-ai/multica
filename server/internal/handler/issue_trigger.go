@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentver "github.com/multica-ai/multica/server/pkg/agent"
@@ -263,7 +264,7 @@ func (h *Handler) runtimeSupportsHandoff(ctx context.Context, agentID pgtype.UUI
 	if err != nil || !agent.RuntimeID.Valid {
 		return false
 	}
-	rt, err := h.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID)
 	if err != nil {
 		return false
 	}

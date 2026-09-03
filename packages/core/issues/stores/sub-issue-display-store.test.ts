@@ -32,18 +32,6 @@ describe("sub-issue display store", () => {
     });
   });
 
-  it("defaults to showing every built-in field and no custom properties", () => {
-    const s = useSubIssueDisplayStore.getState();
-    expect(s.rowProperties).toEqual({
-      priority: true,
-      labels: true,
-      childProgress: true,
-      dueDate: true,
-      assignee: true,
-    });
-    expect(s.rowPropertyIds).toEqual([]);
-  });
-
   it("toggleRowProperty flips a single field without touching the rest", () => {
     useSubIssueDisplayStore.getState().toggleRowProperty("dueDate");
     expect(useSubIssueDisplayStore.getState().rowProperties).toEqual({

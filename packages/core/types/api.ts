@@ -1,4 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
+import type { PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -185,8 +186,9 @@ export interface ListIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -234,8 +236,9 @@ export interface ListGroupedIssuesParams {
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
   /** Custom-property filter: definition id → accepted values (option ids or
-   *  "true"/"false" for checkbox). OR within a definition, AND across. */
-  properties?: Record<string, string[]>;
+   *  "true"/"false" for checkbox; a plain string is exact equality, an
+   *  operator object narrows it). OR within a definition, AND across. */
+  properties?: Record<string, PropertyFilterValue[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -299,7 +302,9 @@ export interface IssueTableFilters {
   project_ids?: string[];
   include_no_project?: boolean;
   label_ids?: string[];
-  properties?: Record<string, string[]>;
+  /** Same shape as `ListIssuesParams.properties`: bare strings are exact
+   *  equality / "No value", operator objects narrow scalar matches. */
+  properties?: Record<string, PropertyFilterValue[]>;
   date?: {
     field: "created_at" | "updated_at";
     start: string;

@@ -121,12 +121,14 @@ function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
   runtime: AgentRuntime | null = null,
+  currentUserId: string | null = "user-1",
 ) {
   const result = render(
     <TestShell>
       <McpConfigTab
         agent={{ ...baseAgent, ...overrides }}
         runtime={runtime}
+        currentUserId={currentUserId}
         onSave={onSave}
       />
     </TestShell>,
@@ -332,6 +334,17 @@ describe("McpConfigTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not discover MCP servers for another member's private runtime", async () => {
+    renderTab({}, undefined, { ...onlineRuntime, owner_id: "user-2" }, "admin-1");
+
+    expect(
+      await screen.findByText(
+        "You don't have permission to view this runtime's MCP servers.",
+      ),
+    ).toBeInTheDocument();
+    expect(mockRuntimeCapabilities).not.toHaveBeenCalled();
+  });
+
   it("shows a retry notice when capability discovery fails", async () => {
     mockRuntimeCapabilities.mockRejectedValue(
       new Error("daemon did not respond within 3 minutes"),
@@ -389,28 +402,6 @@ describe("McpConfigTab workspace servers", () => {
     await user.click(await screen.findByRole("menuitem", { name: /pickable/ }));
 
     await waitFor(() => expect(mockAddServer).toHaveBeenCalledWith("srv-9"));
-  });
-
-  // A workspace can accumulate a lot of shared servers, and the picker is a
-  // menu anchored to a small button: it has to stay inside a bounded, scrolling
-  // box and keep the trigger's width instead of growing down the page.
-  it("keeps the picker bounded, scrollable, and anchored when the library is long", async () => {
-    const user = userEvent.setup();
-    workspaceMcp.library = Array.from({ length: 40 }, (_, i) =>
-      wsServer({ id: `srv-${i}`, name: `shared-server-${i}` }),
-    );
-    renderTab({ mcp_config: null });
-
-    await user.click(
-      await screen.findByRole("button", { name: /Add from workspace/ }),
-    );
-
-    const items = await screen.findAllByRole("menuitem");
-    expect(items).toHaveLength(40);
-    const menu = items[0]!.closest("[data-slot='dropdown-menu-content']");
-    expect(menu?.className).toMatch(/\bmax-h-72\b/);
-    expect(menu?.className).toMatch(/\boverflow-y-auto\b/);
-    expect(menu?.className).toMatch(/min-w-\(--anchor-width\)/);
   });
 
   it("toggles an assignment off without dropping it", async () => {

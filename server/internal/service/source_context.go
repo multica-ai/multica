@@ -38,6 +38,20 @@ const (
 	SourceContextMaxAttachmentBytes  = int64(500 << 20)
 )
 
+const (
+	// sourceContextObjectDeleteTimeout bounds a single object-store delete.
+	// Cleanup runs on its own sweeper goroutine, so an unhealthy endpoint can no
+	// longer starve runtime and task recovery, but without a per-object deadline
+	// one hung delete would still hold a whole cleanup round open.
+	sourceContextObjectDeleteTimeout = 30 * time.Second
+	// sourceContextIntentReleaseTimeout bounds the retry-backoff write that
+	// follows a failed delete. It runs detached from the caller's round budget:
+	// when the budget is what cut the delete short, a cancelled release would
+	// leave the intent immediately claimable and every later round would retry
+	// the same unhealthy object ahead of the ones queued behind it.
+	sourceContextIntentReleaseTimeout = 5 * time.Second
+)
+
 var (
 	ErrAnchorCommentDeleted          = errors.New("anchor comment deleted")
 	ErrSourceIssueDeleted            = errors.New("source issue deleted")
@@ -633,13 +647,25 @@ func (s *TaskService) CleanupSourceContextObjectIntents(ctx context.Context, lim
 		return 0, nil
 	}
 	cleaned := 0
-	for cleaned < limit {
+	// limit bounds ATTEMPTS, not successes. Counting successes alone made one
+	// round's work proportional to the number of due intents rather than to the
+	// batch size, which is exactly what a storage outage produces: every delete
+	// fails, nothing increments, and the round keeps claiming the next row.
+	for attempt := 0; attempt < limit; attempt++ {
+		if ctx.Err() != nil {
+			return cleaned, nil
+		}
 		leaseToken := dbid.NewV7()
 		intent, err := s.Queries.ClaimSourceContextObjectIntentForCleanup(ctx, leaseToken)
 		if errors.Is(err, pgx.ErrNoRows) {
 			break
 		}
 		if err != nil {
+			// A round that ran out of budget mid-claim is a normal stop, not a
+			// failure worth alerting on; the next round resumes where this left off.
+			if ctx.Err() != nil {
+				return cleaned, nil
+			}
 			return cleaned, fmt.Errorf("claim source context object intent: %w", err)
 		}
 		referenced, err := s.Queries.SourceContextObjectIntentIsReferenced(ctx, db.SourceContextObjectIntentIsReferencedParams{
@@ -647,19 +673,15 @@ func (s *TaskService) CleanupSourceContextObjectIntents(ctx context.Context, lim
 			AttachmentID: intent.AttachmentID, ObjectUrl: intent.ObjectUrl,
 		})
 		if err != nil {
-			_, _ = s.Queries.ReleaseSourceContextObjectIntent(ctx, db.ReleaseSourceContextObjectIntentParams{
-				LastError: pgtype.Text{String: err.Error(), Valid: true}, StorageKey: intent.StorageKey, WorkspaceID: intent.WorkspaceID, LeaseToken: leaseToken,
-			})
+			s.releaseSourceContextObjectIntent(ctx, intent, leaseToken, err)
 			return cleaned, fmt.Errorf("check source context object reference: %w", err)
 		}
 		if !referenced {
-			deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			deleteCtx, cancel := context.WithTimeout(ctx, sourceContextObjectDeleteTimeout)
 			deleteErr := s.SourceContextStorage.DeleteObject(deleteCtx, intent.StorageKey)
 			cancel()
 			if deleteErr != nil {
-				_, _ = s.Queries.ReleaseSourceContextObjectIntent(ctx, db.ReleaseSourceContextObjectIntentParams{
-					LastError: pgtype.Text{String: deleteErr.Error(), Valid: true}, StorageKey: intent.StorageKey, WorkspaceID: intent.WorkspaceID, LeaseToken: leaseToken,
-				})
+				s.releaseSourceContextObjectIntent(ctx, intent, leaseToken, deleteErr)
 				continue
 			}
 		}
@@ -672,6 +694,23 @@ func (s *TaskService) CleanupSourceContextObjectIntents(ctx context.Context, lim
 		cleaned++
 	}
 	return cleaned, nil
+}
+
+// releaseSourceContextObjectIntent stamps the retry backoff for an intent this
+// round could not settle. The write is detached from the round budget on
+// purpose: when the budget is what stopped the delete, a cancelled release
+// would leave the row claimable with no backoff, so the next round would pick
+// the same unhealthy object again instead of making progress on the rest.
+func (s *TaskService) releaseSourceContextObjectIntent(ctx context.Context, intent db.IssueSourceContextObjectIntent, leaseToken pgtype.UUID, cause error) {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sourceContextIntentReleaseTimeout)
+	defer cancel()
+	if _, err := s.Queries.ReleaseSourceContextObjectIntent(releaseCtx, db.ReleaseSourceContextObjectIntentParams{
+		LastError: pgtype.Text{String: cause.Error(), Valid: true}, StorageKey: intent.StorageKey,
+		WorkspaceID: intent.WorkspaceID, LeaseToken: leaseToken,
+	}); err != nil {
+		slog.Warn("source context cleanup: failed to record object intent retry backoff",
+			"storage_key", intent.StorageKey, "error", err)
+	}
 }
 
 // CleanupAbandonedSourceContexts abandons terminal quick-create captures only
@@ -713,6 +752,11 @@ func (s *TaskService) CleanupAbandonedSourceContexts(ctx context.Context, limit 
 	}
 	removed := 0
 	for _, sourceContext := range abandoned {
+		// Stop cleanly when the round budget is gone. Every deletion below is
+		// idempotent, so the next round resumes from whatever is still abandoned.
+		if ctx.Err() != nil {
+			return removed, nil
+		}
 		attachments, err := s.Queries.ListAttachmentsBySourceContext(ctx, db.ListAttachmentsBySourceContextParams{
 			WorkspaceID: sourceContext.WorkspaceID, SourceContextID: sourceContext.ID,
 		})
@@ -721,8 +765,14 @@ func (s *TaskService) CleanupAbandonedSourceContexts(ctx context.Context, limit 
 		}
 		deleteFailed := false
 		for _, attachment := range attachments {
+			if ctx.Err() != nil {
+				return removed, nil
+			}
 			key := s.SourceContextStorage.KeyFromURL(attachment.Url)
-			if err := s.SourceContextStorage.DeleteObject(ctx, key); err != nil {
+			deleteCtx, cancel := context.WithTimeout(ctx, sourceContextObjectDeleteTimeout)
+			err := s.SourceContextStorage.DeleteObject(deleteCtx, key)
+			cancel()
+			if err != nil {
 				deleteFailed = true
 				slog.Warn("source context cleanup: object delete failed; retained row for retry",
 					"source_context_id", util.UUIDToString(sourceContext.ID), "attachment_id", util.UUIDToString(attachment.ID), "error", err)

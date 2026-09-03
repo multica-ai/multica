@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -30,11 +31,12 @@ import (
 // default, which is always closer to what the user's account /
 // environment actually supports than a static guess here.
 type Model struct {
-	ID           string             `json:"id"`
-	Label        string             `json:"label"`
-	Provider     string             `json:"provider,omitempty"`
-	Default      bool               `json:"default,omitempty"`
-	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
+	ID                                  string             `json:"id"`
+	Label                               string             `json:"label"`
+	Provider                            string             `json:"provider,omitempty"`
+	Default                             bool               `json:"default,omitempty"`
+	ServiceTiers                        []ModelServiceTier `json:"service_tiers,omitempty"`
+	SupportsExplicitStandardServiceTier bool               `json:"supports_explicit_standard_service_tier,omitempty"`
 	// Thinking advertises the runtime's reasoning/effort catalog for this
 	// model. nil means the runtime/model has no thinking-level control
 	// (or the daemon couldn't discover one); the UI hides its picker. The
@@ -42,6 +44,29 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// UnavailableModel is a model the runtime named but will not run on this host —
+// today only Claude Code, reporting one that needs a newer CLI than the
+// installed one. Reason is the runtime's own remedy ("Update to 2.1.255+ to use
+// Fable 5.1"), forwarded verbatim so the copy stays right without Multica
+// tracking upstream version floors.
+//
+// It is a distinct type, and travels in a distinct list, precisely so it can
+// never be mistaken for something selectable. Marking such a row with a flag
+// inside the models list was the first attempt and it was wrong twice over:
+// every consumer that did not learn the flag (the inspector picker, the agent
+// builder) kept offering it, and — the part a flag cannot fix — an already
+// installed desktop client does not know the field at all, so it would render
+// the row as an ordinary model and persist a model id the CLI rejects. Keeping
+// the two lists separate makes old clients correct by construction, since they
+// only ever read `models` (MUL-6961).
+type UnavailableModel struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	// Reason is display copy, not a machine contract: it comes from the
+	// runtime and may be empty when it offered none.
+	Reason string `json:"reason,omitempty"`
 }
 
 // ModelServiceTier is one runtime-native execution tier advertised for a
@@ -82,6 +107,11 @@ type ThinkingLevel struct {
 // plus whether they were actually discovered.
 type Catalog struct {
 	Models []Model
+	// Unavailable carries models the runtime named but will not run here. It is
+	// deliberately NOT part of Models: every capability lookup in this package
+	// walks Models, so keeping these out is what makes an unrunnable model fail
+	// closed everywhere without each lookup having to remember a flag.
+	Unavailable []UnavailableModel
 	// Fallback reports that discovery did not succeed and Models is a static
 	// stand-in rather than the runtime's real catalog.
 	//
@@ -107,8 +137,9 @@ func discovered(models []Model, err error) (Catalog, error) {
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
 type modelCacheEntry struct {
-	models    []Model
-	expiresAt time.Time
+	models      []Model
+	unavailable []UnavailableModel
+	expiresAt   time.Time
 }
 
 var (
@@ -120,15 +151,14 @@ const modelCacheTTL = 60 * time.Second
 
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
-// list; for providers with a CLI discovery mechanism (codex, opencode,
-// pi, openclaw) it shells out with caching and falls back where the
+// list; for providers with a CLI discovery mechanism (claude, codex,
+// opencode, pi, openclaw) it shells out with caching and falls back where the
 // provider has a safe static catalog.
 //
-// For claude, codex, opencode, pi, and kimi, the catalog is augmented with
-// per-model thinking-level options discovered from the local CLI. Codex
-// discovery failures fall back to a model + thinking snapshot; providers
-// without a safe fallback leave Thinking nil, which makes the UI hide the
-// thinking picker.
+// For claude, codex, opencode, pi, and kimi, the catalog carries per-model
+// thinking-level options taken from the local CLI. Claude and Codex discovery
+// failures fall back to a model + thinking snapshot; providers without a safe
+// fallback leave Thinking nil, which makes the UI hide the thinking picker.
 //
 // runtimeCmd lets the caller point at a non-default binary; pass the zero
 // Command to use the provider's default name on PATH. Its launch prefix — a
@@ -154,11 +184,9 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	}
 	switch providerType {
 	case "claude":
-		models := claudeStaticModels()
-		annotateClaudeThinking(ctx, models, runtimeCmd)
-		// Claude's catalog is static by design, not by failure: there is no
-		// discovery step to fall back from, so this is authoritative.
-		return Catalog{Models: models}, nil
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverClaudeCatalog(ctx, runtimeCmd), nil
+		})
 	case "codex":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverCodexModels(ctx, runtimeCmd), nil)
@@ -212,6 +240,10 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 	case "opencode":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discovered(discoverOpenCodeModels(ctx, runtimeCmd))
+		})
+	case "codearts":
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCodeArtsModels(ctx, runtimeCmd))
 		})
 	case "deveco":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
@@ -476,9 +508,9 @@ func modelHasKnownPrefix(model string) bool {
 func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	modelCacheMu.Lock()
 	if entry, ok := modelCache[key]; ok && time.Now().Before(entry.expiresAt) {
-		out := entry.models
+		out, unavailable := entry.models, entry.unavailable
 		modelCacheMu.Unlock()
-		return Catalog{Models: out}, nil
+		return Catalog{Models: out, Unavailable: unavailable}, nil
 	}
 	modelCacheMu.Unlock()
 
@@ -503,7 +535,11 @@ func cachedDiscovery(key string, fn func() (Catalog, error)) (Catalog, error) {
 	}
 
 	modelCacheMu.Lock()
-	modelCache[key] = modelCacheEntry{models: catalog.Models, expiresAt: time.Now().Add(modelCacheTTL)}
+	modelCache[key] = modelCacheEntry{
+		models:      catalog.Models,
+		unavailable: catalog.Unavailable,
+		expiresAt:   time.Now().Add(modelCacheTTL),
+	}
 	modelCacheMu.Unlock()
 	return catalog, nil
 }
@@ -536,6 +572,7 @@ func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-fable-5-1", Label: "Claude Fable 5.1", Provider: "anthropic"},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-5", Label: "Claude Opus 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
@@ -729,7 +766,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// Parse whatever the verbose command printed, even on a non-zero exit — a
 	// stale config entry can make `opencode models` exit non-zero while still
 	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
-	out, _ := cmd.Output()
+	out, _ := outputOwned(cmd, runtimeCmd.logger)
 	models := parseOpenCodeModels(string(out))
 	if len(models) == 0 {
 		// Verbose yielded nothing usable (unsupported flag, error text, or an
@@ -737,7 +774,7 @@ func discoverOpenCodeModels(ctx context.Context, runtimeCmd Command) ([]Model, e
 		// but still prints the IDs.
 		cmd = runtimeCmd.exec(runCtx, "models")
 		hideAgentWindow(cmd)
-		out, _ = cmd.Output()
+		out, _ = outputOwned(cmd, runtimeCmd.logger)
 		models = parseOpenCodeModels(string(out))
 	}
 	if len(models) == 0 {
@@ -1020,10 +1057,11 @@ func discoverPiModelsRPC(ctx context.Context, runtimeCmd Command, lookedUp strin
 		_ = stdin.Close()
 		return nil, false
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		_ = stdin.Close()
 		return nil, false
 	}
+	defer releaseProcessGroup(cmd)
 
 	encoder := json.NewEncoder(stdin)
 	requests := []map[string]string{
@@ -1175,7 +1213,7 @@ func discoverPiModelsTable(ctx context.Context, runtimeCmd Command) ([]Model, er
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
 		return []Model{}, nil
 	}
@@ -1307,7 +1345,7 @@ func discoverOmpModels(ctx context.Context, runtimeCmd Command) ([]Model, error)
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models", "--json")
 	hideAgentWindow(cmd)
-	stdout, err := cmd.Output()
+	stdout, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil || len(stdout) == 0 {
 		return []Model{}, nil
 	}
@@ -1588,7 +1626,7 @@ func discoverKimiProviderThinking(ctx context.Context, runtimeCmd Command) (map[
 	cmd := runtimeCmd.exec(runCtx, "provider", "list", "--json")
 	hideAgentWindow(cmd)
 	cmd.Stderr = io.Discard
-	raw, err := cmd.Output()
+	raw, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil {
 		return nil, fmt.Errorf("kimi provider list: %w", err)
 	}
@@ -1918,14 +1956,17 @@ func discoverACPModels(ctx context.Context, runtimeCmd Command, p acpDiscoveryPr
 	// Discard stderr; noisy logs here don't help us and we don't
 	// want them bleeding into the daemon log every 60s.
 	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, runtimeCmd.logger); err != nil {
 		return fail("process start", err)
 	}
-	// Ensure the child process is always reaped.
+	// Ensure the child process and everything it spawned are always reaped.
+	// This probe runs on a discovery schedule, so a leaked ACP server here
+	// accumulates rather than showing up once.
 	defer func() {
 		_ = stdin.Close()
-		_ = cmd.Process.Kill()
+		signalProcessGroup(cmd, syscall.SIGKILL)
 		_, _ = cmd.Process.Wait()
+		releaseProcessGroup(cmd)
 	}()
 
 	scanner := bufio.NewScanner(stdout)
@@ -2285,7 +2326,7 @@ func discoverAntigravityModels(ctx context.Context, runtimeCmd Command) ([]Model
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return nil, nil
 	}
@@ -2483,7 +2524,7 @@ func discoverCursorModels(ctx context.Context, runtimeCmd Command) (Catalog, err
 	defer cancel()
 	cmd := runtimeCmd.exec(runCtx, "--list-models")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return Catalog{Models: cursorStaticModels(), Fallback: true}, nil
 	}
@@ -2573,6 +2614,17 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 
 	// Try JSON modes first. Different openclaw builds expose the
 	// flag under different names; trying a couple is cheap.
+	//
+	// outputOwned, and this loop already has the salvage built in: a lingering
+	// `openclaw-config` helper makes Wait report exec.ErrWaitDelay with the
+	// catalog in the buffer, and `err != nil && len(out) == 0` lets a populated
+	// buffer through to the parse. The parse is the real gate — a truncated list
+	// does not unmarshal, so a short catalog cannot be mistaken for the real one.
+	//
+	// Not the collector in run_collect_quiet.go: it returns on the direct child's
+	// exit, and a wrapper that exits before the real CLI has printed would have
+	// its catalog killed mid-write. Pipe EOF is the signal that no more output is
+	// coming. See detectCLIVersion.
 	for _, jsonArgs := range [][]string{
 		{"agents", "list", "--json"},
 		{"agents", "list", "--output", "json"},
@@ -2580,7 +2632,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	} {
 		cmd := runtimeCmd.exec(runCtx, jsonArgs...)
 		hideAgentWindow(cmd)
-		out, err := cmd.Output()
+		out, err := outputOwned(cmd, runtimeCmd.logger)
 		if err != nil && len(out) == 0 {
 			continue
 		}
@@ -2594,7 +2646,7 @@ func discoverOpenclawAgents(ctx context.Context, runtimeCmd Command) ([]Model, e
 	// the wrong tokens produces nonsense entries like "Identity:".
 	cmd := runtimeCmd.exec(runCtx, "agents", "list")
 	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+	out, err := outputOwned(cmd, runtimeCmd.logger)
 	if err != nil && len(out) == 0 {
 		return []Model{}, nil
 	}

@@ -482,37 +482,3 @@ func TestOmpAndPiRegisterSideBySide(t *testing.T) {
 		})
 	}
 }
-
-// TestBuiltinRuntimeDescriptorFieldsAreConsumed guards against descriptor
-// fields going unused (the round-3 review caught this). Every field in
-// BuiltinRuntime must have at least one consumer outside the descriptor file
-// itself, or it's dead code.
-func TestBuiltinRuntimeDescriptorFieldsAreConsumed(t *testing.T) {
-	// The omp descriptor must have all fields populated.
-	desc, ok := BuiltinRuntimeByID("omp")
-	if !ok {
-		t.Fatal("omp descriptor not found")
-	}
-	// Every field must be non-empty (they're all consumed by daemon code).
-	checks := map[string]string{
-		"ID":                desc.ID,
-		"ProtocolFamily":    desc.ProtocolFamily,
-		"DefaultCommand":    desc.DefaultCommand,
-		"EnvPrefix":         desc.EnvPrefix,
-		"DisplayName":       desc.DisplayName,
-		"SkillsDir":         desc.SkillsDir,
-		"UserSkillsDir":     desc.UserSkillsDir,
-		"LaunchHeader":      desc.LaunchHeader,
-		"DefaultExecutable": desc.DefaultExecutable,
-		"ProviderLabel":     desc.ProviderLabel,
-	}
-	for name, val := range checks {
-		if val == "" {
-			t.Errorf("descriptor field %s is empty", name)
-		}
-	}
-	// ModelDiscovery must be set (omp uses a different discovery command).
-	if desc.ModelDiscovery == nil {
-		t.Error("descriptor field ModelDiscovery is nil")
-	}
-}

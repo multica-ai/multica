@@ -256,7 +256,7 @@ skill in place:
   `import --on-conflict overwrite`, which stays creator-only.
 
 The success response is the plain `SkillWithFilesResponse` (same shape as
-`multica skill get`), not the import result envelope. Failure modes to report
+`multica skill get --with-content`), not the import result envelope. Failure modes to report
 instead of retrying in a loop:
 
 - `422`: the skill has no refreshable provenance (created manually, imported
@@ -266,6 +266,24 @@ instead of retrying in a loop:
 - `403`: caller is neither the creator nor a workspace admin.
 - `502` / `503` / `504` / `413`: upstream fetch failed (gone, unavailable,
   timed out, or now exceeds import caps); the skill is left untouched.
+
+## Reading a skill back: metadata by default
+
+`multica skill get` and `multica skill files list` return **metadata only** —
+path, byte size and content hash per file, plus the size and hash of the
+SKILL.md body. That is what the conflict and verification steps above need, and
+it is what keeps a large skill inspectable at all: inlining every body made a
+~600KB skill impossible to fetch over a slow link (GH #7498).
+
+```bash
+multica skill get <skill-id> --output json                  # metadata
+multica skill get <skill-id> --with-content --output json   # bodies inlined
+multica skill files list <skill-id>                         # paths and sizes
+```
+
+Reach for `--with-content` only when you are going to read the content. To find
+out why a skill is large, the default output already answers it: the `size`
+column names the file.
 
 ## Incorrect → correct
 

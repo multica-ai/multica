@@ -105,7 +105,7 @@ func redisString(v any) string {
 	}
 }
 
-func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope) {
+func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, wecomOutbound WecomOutboundDeliverer, ev envelope) {
 	if ev.PayloadJSON == "" {
 		return
 	}
@@ -114,6 +114,10 @@ func deliverEnvelope(hub *Hub, daemonRuntime DaemonRuntimeDeliverer, ev envelope
 	case ScopeDaemonRuntime:
 		if daemonRuntime != nil {
 			daemonRuntime.DeliverDaemonRuntime(ev.ScopeID, frame, ev.EventID)
+		}
+	case ScopeWecomOutbound:
+		if wecomOutbound != nil {
+			wecomOutbound.DeliverWecomOutbound(ev.ScopeID, frame, ev.EventID)
 		}
 	case "global":
 		hub.fanoutAllDedup(frame, "", ev.EventID)
@@ -147,6 +151,7 @@ type RedisRelay struct {
 	ttlScanSeen       map[string]struct{}
 
 	daemonRuntime DaemonRuntimeDeliverer
+	wecomOutbound WecomOutboundDeliverer
 }
 
 type scopeConsumer struct {
@@ -191,6 +196,10 @@ func NewRedisRelayWithClientsAndConfig(hub *Hub, writeRDB, readRDB *redis.Client
 
 // NodeID returns this relay's randomly-assigned node identifier.
 func (r *RedisRelay) NodeID() string { return r.nodeID }
+
+func (r *RedisRelay) SetWecomOutboundDeliverer(d WecomOutboundDeliverer) {
+	r.wecomOutbound = d
+}
 
 func (r *RedisRelay) SetDaemonRuntimeDeliverer(d DaemonRuntimeDeliverer) {
 	r.daemonRuntime = d
@@ -460,7 +469,7 @@ func (r *RedisRelay) deliverMessage(scopeType, scopeID string, msg redis.XMessag
 	if ev.ScopeID == "" {
 		ev.ScopeID = scopeID
 	}
-	deliverEnvelope(r.hub, r.daemonRuntime, ev)
+	deliverEnvelope(r.hub, r.daemonRuntime, r.wecomOutbound, ev)
 }
 
 // fanoutUser is implemented in hub.go.

@@ -277,7 +277,14 @@ func TestPrepareIsolatedKeepsTheClaimWithTheParent(t *testing.T) {
 		taskID      = "01a01ec0-e69d-7000-8000-0123456789ab"
 	)
 
-	claim, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	rootParams := RootDirParams{
+		WorkspacesRoot:  workspacesRoot,
+		WorkspaceID:     workspaceID,
+		WorkspaceSlug:   "Readable Workspace",
+		TaskID:          taskID,
+		IssueIdentifier: "MUL-6063",
+	}
+	claim, err := ClaimEnvRoot(rootParams)
 	if err != nil {
 		t.Fatalf("parent claim: %v", err)
 	}
@@ -286,7 +293,9 @@ func TestPrepareIsolatedKeepsTheClaimWithTheParent(t *testing.T) {
 	env, err := PrepareIsolated(context.Background(), preparationHelperTestCommand(), PrepareParams{
 		WorkspacesRoot:    workspacesRoot,
 		WorkspaceID:       workspaceID,
+		WorkspaceSlug:     "Readable Workspace",
 		TaskID:            taskID,
+		IssueIdentifier:   "MUL-6063",
 		AgentName:         "Isolated",
 		EnvRootPreclaimed: true,
 		Task:              TaskContextForEnv{IssueID: taskID},
@@ -297,17 +306,20 @@ func TestPrepareIsolatedKeepsTheClaimWithTheParent(t *testing.T) {
 	if env == nil || env.WorkDir == "" {
 		t.Fatal("PrepareIsolated returned no environment")
 	}
+	if env.RootDir != claim.RootDir() {
+		t.Fatalf("helper prepared %q while parent claimed %q", env.RootDir, claim.RootDir())
+	}
 
 	// The helper has exited. If the claim had been taken inside it, the lock
 	// would be gone and this second claim would succeed.
-	if second, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID); err == nil {
+	if second, err := ClaimEnvRoot(rootParams); err == nil {
 		second.Release()
 		t.Fatal("production PrepareIsolated returned without retaining the execution lock")
 	}
 
 	// And releasing it must hand the env root back for a later dispatch.
 	claim.Release()
-	next, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	next, err := ClaimEnvRoot(rootParams)
 	if err != nil {
 		t.Fatalf("env root stayed locked after release: %v", err)
 	}
@@ -380,7 +392,7 @@ func TestPrepareIsolatedFailsLoudlyWhenPreclaimIsNotDeclared(t *testing.T) {
 		taskID      = "01a01ec0-e69d-7000-8000-0123456789ab"
 	)
 
-	claim, err := ClaimEnvRoot(workspacesRoot, workspaceID, taskID)
+	claim, err := ClaimEnvRoot(RootDirParams{WorkspacesRoot: workspacesRoot, WorkspaceID: workspaceID, TaskID: taskID})
 	if err != nil {
 		t.Fatalf("parent claim: %v", err)
 	}

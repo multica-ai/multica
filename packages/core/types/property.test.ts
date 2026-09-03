@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   actorRefsFromValue,
@@ -5,7 +6,9 @@ import {
   hasUnknownActorRef,
   formatActorRef,
   isActorPropertyType,
+  isFilterablePropertyType,
   isKnownPropertyType,
+  isScalarPropertyType,
   parseActorRef,
 } from "./property";
 
@@ -30,6 +33,39 @@ describe("isActorPropertyType", () => {
     expect(isActorPropertyType("multi_actor")).toBe(true);
     expect(isActorPropertyType("select")).toBe(false);
     expect(isActorPropertyType("multi_select")).toBe(false);
+  });
+});
+
+describe("isFilterablePropertyType", () => {
+  it("admits every type the filter menu supports", () => {
+    for (const type of [
+      "select",
+      "multi_select",
+      "checkbox",
+      "text",
+      "number",
+      "date",
+      "url",
+      "actor",
+      "multi_actor",
+    ]) {
+      expect(isFilterablePropertyType(type)).toBe(true);
+    }
+  });
+
+  it("rejects unknown types", () => {
+    expect(isFilterablePropertyType("relation")).toBe(false);
+  });
+});
+
+describe("isScalarPropertyType", () => {
+  it("covers the four single-valued types and nothing else", () => {
+    for (const type of ["text", "number", "date", "url"]) {
+      expect(isScalarPropertyType(type)).toBe(true);
+    }
+    expect(isScalarPropertyType("select")).toBe(false);
+    expect(isScalarPropertyType("checkbox")).toBe(false);
+    expect(isScalarPropertyType("actor")).toBe(false);
   });
 });
 

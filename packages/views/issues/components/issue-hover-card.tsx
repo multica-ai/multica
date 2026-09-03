@@ -1,6 +1,7 @@
 "use client";
 
 import { issueStatusCategory } from "@multica/core/issues";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useStatusLabel } from "./../utils/status-label";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -117,6 +118,7 @@ function IssueHoverCardBody({
   fallbackLabel?: string;
 }) {
   const wsId = useWorkspaceId();
+  const { colorOf: statusColorOf } = useIssueStatuses(wsId);
   const resolveStatusLabel = useStatusLabel(wsId);
   const detail = useQuery(issueDetailOptions(wsId, issueId));
   // One workspace-wide progress snapshot shared with the issues list and issue
@@ -188,6 +190,7 @@ function IssueHoverCardBody({
           <StatusIcon
             status={issue.status}
             category={issueStatusCategory(issue) ?? undefined}
+            color={statusColorOf(issue.status)}
             className="h-3.5 w-3.5 shrink-0"
           />
         </span>

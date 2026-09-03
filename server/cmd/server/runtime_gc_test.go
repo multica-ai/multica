@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -24,8 +24,8 @@ func TestRuntimeGC_KeepsTerminalTaskHistory(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "history")
 	agentID := createRuntimeGCFixtureAgent(t, ctx, runtimeID, "history")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
-		t.Fatalf("unbind fixture agent: %v", err)
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("archive fixture agent: %v", err)
 	}
 
 	tasks := make([]string, 0, 3)
@@ -52,15 +52,18 @@ func TestRuntimeGC_KeepsTerminalTaskHistory(t *testing.T) {
 		t.Fatalf("insert task token: %v", err)
 	}
 
-	workspaceID, deleted, blocked, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
 	if err != nil {
 		t.Fatalf("gcRuntime: %v", err)
 	}
-	if !deleted || blocked {
-		t.Fatalf("gc result deleted=%v blocked=%v, want deleted", deleted, blocked)
+	if !result.deleted || result.skipReason != "" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want deleted", result.deleted, result.skipReason)
 	}
-	if workspaceID != testWorkspaceID {
-		t.Fatalf("workspace id = %q, want %q", workspaceID, testWorkspaceID)
+	if result.workspaceID != testWorkspaceID {
+		t.Fatalf("workspace id = %q, want %q", result.workspaceID, testWorkspaceID)
+	}
+	if len(result.teardown.CancelledTasks) != 0 {
+		t.Fatalf("automatic GC cancelled %d tasks, want none", len(result.teardown.CancelledTasks))
 	}
 
 	var runtimeRows int
@@ -69,6 +72,17 @@ func TestRuntimeGC_KeepsTerminalTaskHistory(t *testing.T) {
 	}
 	if runtimeRows != 0 {
 		t.Fatalf("runtime rows = %d, want 0", runtimeRows)
+	}
+	var survivingAgents int
+	var agentUnbound bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*), bool_and(runtime_id IS NULL)
+		FROM agent WHERE id = $1
+	`, agentID).Scan(&survivingAgents, &agentUnbound); err != nil {
+		t.Fatalf("read archived agent: %v", err)
+	}
+	if survivingAgents != 1 || !agentUnbound {
+		t.Fatalf("archived agent rows=%d unbound=%v, want preserved and unbound", survivingAgents, agentUnbound)
 	}
 	for _, id := range tasks {
 		var taskRows int
@@ -92,6 +106,10 @@ func TestRuntimeGC_KeepsTerminalTaskHistory(t *testing.T) {
 			t.Fatalf("%s rows = %d, want %d", table, rows, want)
 		}
 	}
+	repeated, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	if err != nil || repeated.deleted || repeated.skipReason != "" {
+		t.Fatalf("repeated GC result deleted=%v skip_reason=%q err=%v, want idempotent no-op", repeated.deleted, repeated.skipReason, err)
+	}
 }
 
 func TestRuntimeGC_ProtectsEveryNonTerminalTaskStatus(t *testing.T) {
@@ -106,12 +124,12 @@ func TestRuntimeGC_ProtectsEveryNonTerminalTaskStatus(t *testing.T) {
 			runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "blocked-"+status)
 			taskID := createRuntimeGCFixtureTask(t, ctx, runtimeID, agentID, status, false)
 
-			_, deleted, blocked, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+			result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
 			if err != nil {
 				t.Fatalf("gcRuntime: %v", err)
 			}
-			if deleted || !blocked {
-				t.Fatalf("gc result deleted=%v blocked=%v, want safely blocked", deleted, blocked)
+			if result.deleted || result.skipReason != "non_terminal_task" {
+				t.Fatalf("gc result deleted=%v skip_reason=%q, want safely task-blocked", result.deleted, result.skipReason)
 			}
 
 			var runtimeRows, taskRows int
@@ -131,7 +149,7 @@ func TestRuntimeGC_ProtectsEveryNonTerminalTaskStatus(t *testing.T) {
 	}
 }
 
-func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testing.T) {
+func TestRuntimeGCCandidates_ExcludeBlockedRuntimes(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -139,6 +157,18 @@ func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testi
 	agentID := runtimeGCFixtureAgentID(t, ctx)
 	drainableRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-drainable")
 	blockedRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-blocked")
+	activeRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-active")
+	_ = createRuntimeGCFixtureAgent(t, ctx, activeRuntimeID, "candidate-active")
+	archivedRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-archived")
+	archivedAgentID := createRuntimeGCFixtureAgent(t, ctx, archivedRuntimeID, "candidate-archived")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, archivedAgentID); err != nil {
+		t.Fatalf("archive candidate agent: %v", err)
+	}
+	systemRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "candidate-system")
+	systemAgentID := createRuntimeGCFixtureAgent(t, ctx, systemRuntimeID, "candidate-system")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET kind = 'system', system_key = $2 WHERE id = $1`, systemAgentID, "runtime_gc_candidate_"+systemAgentID); err != nil {
+		t.Fatalf("convert candidate to system agent: %v", err)
+	}
 	_ = createRuntimeGCFixtureTask(t, ctx, blockedRuntimeID, agentID, "deferred", false)
 	queries := db.New(testPool)
 
@@ -149,28 +179,225 @@ func TestRuntimeGCCandidates_ExcludeBlockedRuntimesWithoutHidingBacklog(t *testi
 	if err != nil {
 		t.Fatalf("list GC candidates: %v", err)
 	}
-	foundDrainable := false
+	foundDrainable, foundArchived, foundSystem := false, false, false
 	for _, id := range candidates {
 		idString := util.UUIDToString(id)
 		if idString == blockedRuntimeID {
 			t.Fatal("non-terminal task owner entered the bounded GC batch")
 		}
+		if idString == activeRuntimeID {
+			t.Fatal("runtime with an active user agent entered the bounded GC batch")
+		}
 		if idString == drainableRuntimeID {
 			foundDrainable = true
+		}
+		if idString == archivedRuntimeID {
+			foundArchived = true
+		}
+		if idString == systemRuntimeID {
+			foundSystem = true
 		}
 	}
 	if !foundDrainable {
 		t.Fatal("drainable runtime missing from GC candidates")
 	}
-	blocked, err := queries.CountStaleOfflineRuntimesBlockedByTasks(ctx, db.CountStaleOfflineRuntimesBlockedByTasksParams{
-		StaleSeconds: offlineRuntimeTTLSeconds,
-		MaxRows:      runtimeGCBlockedScanLimit,
-	})
-	if err != nil {
-		t.Fatalf("count blocked GC runtimes: %v", err)
+	if !foundArchived || !foundSystem {
+		t.Fatalf("archived/system candidates found=%v/%v, want both", foundArchived, foundSystem)
 	}
-	if blocked < 1 {
-		t.Fatalf("blocked runtime gauge source = %d, want at least 1", blocked)
+}
+
+func TestRuntimeGC_ArchivedAgentTaskPinnedToAnotherRuntimeFailsClosed(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	staleRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "cross-runtime-owner")
+	otherRuntimeID := createRuntimeGCFixtureRuntime(t, ctx, "cross-runtime-task")
+	agentID := createRuntimeGCFixtureAgent(t, ctx, staleRuntimeID, "cross-runtime")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("archive fixture agent: %v", err)
+	}
+	taskID := createRuntimeGCFixtureTask(t, ctx, otherRuntimeID, agentID, "queued", false)
+
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(staleRuntimeID))
+	if err != nil {
+		t.Fatalf("gcRuntime: %v", err)
+	}
+	if result.deleted || result.skipReason != "non_terminal_task" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want non-terminal-task skip", result.deleted, result.skipReason)
+	}
+
+	var agentRuntime, taskRuntime, taskStatus string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&agentRuntime); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text, status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskRuntime, &taskStatus); err != nil {
+		t.Fatalf("read task: %v", err)
+	}
+	if agentRuntime != staleRuntimeID || taskRuntime != otherRuntimeID || taskStatus != "queued" {
+		t.Fatalf("GC mutated blocked data: agent runtime=%q task runtime=%q status=%q", agentRuntime, taskRuntime, taskStatus)
+	}
+}
+
+func TestRuntimeGC_RechecksRuntimeEligibilityUnderLock(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "eligibility-changed")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("bring fixture runtime online: %v", err)
+	}
+
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("gcRuntime: %v", err)
+	}
+	if result.deleted || result.skipReason != "eligibility_changed" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want eligibility-changed skip", result.deleted, result.skipReason)
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&status); err != nil {
+		t.Fatalf("read runtime: %v", err)
+	}
+	if status != "online" {
+		t.Fatalf("runtime status=%q, want online", status)
+	}
+}
+
+func TestRuntimeGC_DeletesSystemAgentAndRuntime(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "system-agent")
+	agentID := createRuntimeGCFixtureAgent(t, ctx, runtimeID, "system-agent")
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent SET kind = 'system', system_key = $2 WHERE id = $1
+	`, agentID, "runtime_gc_probe_"+agentID); err != nil {
+		t.Fatalf("convert fixture to system agent: %v", err)
+	}
+
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("gcRuntime: %v", err)
+	}
+	if !result.deleted || result.skipReason != "" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want deleted", result.deleted, result.skipReason)
+	}
+	var runtimeRows, agentRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE id = $1`, agentID).Scan(&agentRows); err != nil {
+		t.Fatalf("count system agent: %v", err)
+	}
+	if runtimeRows != 0 || agentRows != 0 {
+		t.Fatalf("runtime rows=%d system agent rows=%d, want both deleted", runtimeRows, agentRows)
+	}
+}
+
+func TestRuntimeGC_ProfileBackedInstanceKeepsProfile(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	profileID := createRuntimeGCFixtureProfile(t, ctx, "preserved")
+	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "profile-backed")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET profile_id = $2 WHERE id = $1`, runtimeID, profileID); err != nil {
+		t.Fatalf("bind runtime profile: %v", err)
+	}
+
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("gcRuntime: %v", err)
+	}
+	if !result.deleted || result.skipReason != "" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want deleted", result.deleted, result.skipReason)
+	}
+	var profiles int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM runtime_profile WHERE id = $1`, profileID).Scan(&profiles); err != nil {
+		t.Fatalf("count runtime profile: %v", err)
+	}
+	if profiles != 1 {
+		t.Fatalf("runtime profile rows=%d, want preserved", profiles)
+	}
+}
+
+func TestRuntimeGC_CrossWorkspaceAgentReferenceFailsClosed(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	foreignWorkspaceID := createRuntimeGCFixtureWorkspace(t, ctx, "mismatch")
+	runtimeID := createRuntimeGCFixtureRuntime(t, ctx, "workspace-mismatch")
+	agentID := createRuntimeGCFixtureAgentForWorkspace(t, ctx, foreignWorkspaceID, runtimeID, "workspace-mismatch")
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("archive cross-workspace agent: %v", err)
+	}
+
+	result, err := gcRuntime(ctx, testPool, db.New(testPool), parseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("gcRuntime: %v", err)
+	}
+	if result.deleted || result.skipReason != "workspace_mismatch" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q, want workspace-mismatch skip", result.deleted, result.skipReason)
+	}
+	var runtimeRows int
+	var agentRuntime string
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&agentRuntime); err != nil {
+		t.Fatalf("read cross-workspace agent: %v", err)
+	}
+	if runtimeRows != 1 || agentRuntime != runtimeID {
+		t.Fatalf("workspace mismatch mutated data: runtime rows=%d agent runtime=%q", runtimeRows, agentRuntime)
+	}
+}
+
+func TestRuntimeGCBatch_PublishesSystemActorAndDeduplicatesWorkspaceRefresh(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	workspaceID := createRuntimeGCFixtureWorkspace(t, ctx, "events")
+	runtimeA := createRuntimeGCFixtureRuntimeForWorkspace(t, ctx, workspaceID, "events-a")
+	runtimeB := createRuntimeGCFixtureRuntimeForWorkspace(t, ctx, workspaceID, "events-b")
+	publisher := &recordingRuntimeGCPublisher{}
+
+	gcRuntimesWithBudget(ctx, testPool, db.New(testPool), nil, publisher, 5*time.Second)
+
+	var teardownCalls, refreshCalls int
+	gone := make(map[string]int)
+	for _, call := range publisher.calls {
+		if call.kind == "runtime_gone" {
+			gone[call.runtimeID]++
+			continue
+		}
+		if call.workspaceID != workspaceID {
+			continue
+		}
+		if call.actorType != "system" || call.actorID != "" || call.action != "runtime_gc" {
+			t.Fatalf("unexpected GC event metadata: %+v", call)
+		}
+		if call.kind == "teardown" {
+			teardownCalls++
+			if call.publishRuntimeRefresh {
+				t.Fatal("per-runtime teardown published an undeduplicated refresh")
+			}
+			if call.cancelledTasks != 0 {
+				t.Fatalf("automatic GC exposed %d cancelled tasks", call.cancelledTasks)
+			}
+		} else if call.kind == "refresh" {
+			refreshCalls++
+		}
+	}
+	if teardownCalls != 2 || refreshCalls != 1 {
+		t.Fatalf("workspace GC events: teardown=%d refresh=%d, want 2 and 1", teardownCalls, refreshCalls)
+	}
+	if gone[runtimeA] != 1 || gone[runtimeB] != 1 {
+		t.Fatalf("runtime-gone notifications = %v, want one each for %s and %s", gone, runtimeA, runtimeB)
 	}
 }
 
@@ -184,12 +411,12 @@ func TestRuntimeGC_RollsBackDetachedHistoryWhenDeleteFails(t *testing.T) {
 	taskID := createRuntimeGCFixtureTask(t, ctx, runtimeID, agentID, "completed", true)
 
 	starter := failRuntimeDeleteTxStarter{pool: testPool}
-	_, deleted, blocked, err := gcRuntime(ctx, starter, db.New(testPool), parseUUID(runtimeID))
+	result, err := gcRuntime(ctx, starter, db.New(testPool), parseUUID(runtimeID))
 	if err == nil || !strings.Contains(err.Error(), "injected runtime delete failure") {
 		t.Fatalf("gcRuntime error = %v, want injected delete failure", err)
 	}
-	if deleted || blocked {
-		t.Fatalf("gc result deleted=%v blocked=%v after error", deleted, blocked)
+	if result.deleted || result.skipReason != "" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q after error", result.deleted, result.skipReason)
 	}
 
 	var runtimeRows int
@@ -218,14 +445,13 @@ func TestRuntimeGC_RuntimeLockRejectsConcurrentEnqueue(t *testing.T) {
 	proceed := make(chan struct{})
 	starter := signalRuntimeLockTxStarter{pool: testPool, locked: locked, proceed: proceed}
 	type gcResult struct {
-		deleted bool
-		blocked bool
-		err     error
+		result runtimeGCResult
+		err    error
 	}
 	gcDone := make(chan gcResult, 1)
 	go func() {
-		_, deleted, blocked, err := gcRuntime(ctx, starter, db.New(testPool), parseUUID(runtimeID))
-		gcDone <- gcResult{deleted: deleted, blocked: blocked, err: err}
+		result, err := gcRuntime(ctx, starter, db.New(testPool), parseUUID(runtimeID))
+		gcDone <- gcResult{result: result, err: err}
 	}()
 	select {
 	case <-locked:
@@ -258,8 +484,8 @@ func TestRuntimeGC_RuntimeLockRejectsConcurrentEnqueue(t *testing.T) {
 	}
 
 	result := <-gcDone
-	if result.err != nil || !result.deleted || result.blocked {
-		t.Fatalf("gc result deleted=%v blocked=%v err=%v", result.deleted, result.blocked, result.err)
+	if result.err != nil || !result.result.deleted || result.result.skipReason != "" {
+		t.Fatalf("gc result deleted=%v skip_reason=%q err=%v", result.result.deleted, result.result.skipReason, result.err)
 	}
 	if err := <-writerDone; !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("concurrent enqueue error = %v, want pgx.ErrNoRows from ownership fence", err)
@@ -282,7 +508,7 @@ func TestRuntimeGC_TickBudgetBoundsWholeBatch(t *testing.T) {
 	starter := &blockingRuntimeGCTxStarter{}
 
 	startedAt := time.Now()
-	gcRuntimesWithBudget(ctx, starter, db.New(testPool), nil, events.New(), 250*time.Millisecond)
+	gcRuntimesWithBudget(ctx, starter, db.New(testPool), nil, nil, 250*time.Millisecond)
 	elapsed := time.Since(startedAt)
 
 	if got := starter.begins.Load(); got != 1 {
@@ -302,6 +528,50 @@ func TestRuntimeGC_TickBudgetBoundsWholeBatch(t *testing.T) {
 
 type blockingRuntimeGCTxStarter struct {
 	begins atomic.Int32
+}
+
+type runtimeGCPublishCall struct {
+	kind                  string
+	workspaceID           string
+	actorType             string
+	actorID               string
+	action                string
+	publishRuntimeRefresh bool
+	cancelledTasks        int
+	runtimeID             string
+}
+
+type recordingRuntimeGCPublisher struct {
+	calls []runtimeGCPublishCall
+}
+
+func (p *recordingRuntimeGCPublisher) PublishRuntimeTeardown(_ context.Context, result service.RuntimeTeardownResult, workspaceID, actorType, actorID, action string, publishRuntimeRefresh bool) {
+	p.calls = append(p.calls, runtimeGCPublishCall{
+		kind:                  "teardown",
+		workspaceID:           workspaceID,
+		actorType:             actorType,
+		actorID:               actorID,
+		action:                action,
+		publishRuntimeRefresh: publishRuntimeRefresh,
+		cancelledTasks:        len(result.CancelledTasks),
+	})
+}
+
+func (p *recordingRuntimeGCPublisher) PublishRuntimeRefresh(workspaceID, actorType, actorID, action string) {
+	p.calls = append(p.calls, runtimeGCPublishCall{
+		kind:        "refresh",
+		workspaceID: workspaceID,
+		actorType:   actorType,
+		actorID:     actorID,
+		action:      action,
+	})
+}
+
+func (p *recordingRuntimeGCPublisher) NotifyRuntimeGone(runtimeID string) {
+	p.calls = append(p.calls, runtimeGCPublishCall{
+		kind:      "runtime_gone",
+		runtimeID: runtimeID,
+	})
 }
 
 func (s *blockingRuntimeGCTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -369,8 +639,14 @@ type signalRuntimeLockRow struct {
 
 func (row signalRuntimeLockRow) Scan(dest ...any) error {
 	err := row.Row.Scan(dest...)
-	close(row.locked)
-	<-row.proceed
+	select {
+	case <-row.locked:
+		// The shared teardown defensively re-acquires the same runtime lock.
+		// Only the first acquisition is the synchronization point for this test.
+	default:
+		close(row.locked)
+		<-row.proceed
+	}
 	return err
 }
 
@@ -395,6 +671,10 @@ func waitForRuntimeGCBlockedWriter(ctx context.Context, pid int32) error {
 }
 
 func createRuntimeGCFixtureRuntime(t *testing.T, ctx context.Context, suffix string) string {
+	return createRuntimeGCFixtureRuntimeForWorkspace(t, ctx, testWorkspaceID, suffix)
+}
+
+func createRuntimeGCFixtureRuntimeForWorkspace(t *testing.T, ctx context.Context, workspaceID, suffix string) string {
 	t.Helper()
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `
@@ -405,7 +685,7 @@ func createRuntimeGCFixtureRuntime(t *testing.T, ctx context.Context, suffix str
 		VALUES ($1, $2, 'cloud', 'runtime-gc-test', 'offline',
 			'', '{}'::jsonb, $3, now() - interval '8 days')
 		RETURNING id
-	`, testWorkspaceID, "Runtime GC "+suffix, testUserID).Scan(&runtimeID); err != nil {
+	`, workspaceID, "Runtime GC "+suffix, testUserID).Scan(&runtimeID); err != nil {
 		t.Fatalf("create runtime fixture: %v", err)
 	}
 	t.Cleanup(func() {
@@ -416,6 +696,10 @@ func createRuntimeGCFixtureRuntime(t *testing.T, ctx context.Context, suffix str
 }
 
 func createRuntimeGCFixtureAgent(t *testing.T, ctx context.Context, runtimeID, suffix string) string {
+	return createRuntimeGCFixtureAgentForWorkspace(t, ctx, testWorkspaceID, runtimeID, suffix)
+}
+
+func createRuntimeGCFixtureAgentForWorkspace(t *testing.T, ctx context.Context, workspaceID, runtimeID, suffix string) string {
 	t.Helper()
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
@@ -425,7 +709,7 @@ func createRuntimeGCFixtureAgent(t *testing.T, ctx context.Context, runtimeID, s
 		)
 		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
 		RETURNING id
-	`, testWorkspaceID, "Runtime GC Agent "+suffix, runtimeID, testUserID).Scan(&agentID); err != nil {
+	`, workspaceID, "Runtime GC Agent "+suffix, runtimeID, testUserID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent fixture: %v", err)
 	}
 	t.Cleanup(func() {
@@ -433,6 +717,40 @@ func createRuntimeGCFixtureAgent(t *testing.T, ctx context.Context, runtimeID, s
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 	return agentID
+}
+
+func createRuntimeGCFixtureProfile(t *testing.T, ctx context.Context, suffix string) string {
+	t.Helper()
+	var profileID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO runtime_profile (
+			workspace_id, display_name, protocol_family, command_name, created_by
+		)
+		VALUES ($1, $2, 'codex', $3, $4)
+		RETURNING id
+	`, testWorkspaceID, "Runtime GC Profile "+suffix, "runtime-gc-"+suffix, testUserID).Scan(&profileID); err != nil {
+		t.Fatalf("create runtime profile fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, profileID)
+	})
+	return profileID
+}
+
+func createRuntimeGCFixtureWorkspace(t *testing.T, ctx context.Context, suffix string) string {
+	t.Helper()
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2 || '-' || substr(gen_random_uuid()::text, 1, 8), '')
+		RETURNING id
+	`, "Runtime GC "+suffix, "runtime-gc-"+suffix).Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	})
+	return workspaceID
 }
 
 func runtimeGCFixtureAgentID(t *testing.T, ctx context.Context) string {

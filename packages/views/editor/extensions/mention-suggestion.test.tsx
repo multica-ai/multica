@@ -11,6 +11,11 @@ import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 import enEditor from "../../locales/en/editor.json";
 import enIssues from "../../locales/en/issues.json";
+import zhCommon from "../../locales/zh-Hans/common.json";
+import zhAuth from "../../locales/zh-Hans/auth.json";
+import zhSettings from "../../locales/zh-Hans/settings.json";
+import zhEditor from "../../locales/zh-Hans/editor.json";
+import zhIssues from "../../locales/zh-Hans/issues.json";
 
 const TEST_RESOURCES = {
   en: {
@@ -19,6 +24,13 @@ const TEST_RESOURCES = {
     settings: enSettings,
     editor: enEditor,
     issues: enIssues,
+  },
+  "zh-Hans": {
+    common: zhCommon,
+    auth: zhAuth,
+    settings: zhSettings,
+    editor: zhEditor,
+    issues: zhIssues,
   },
 };
 
@@ -30,9 +42,24 @@ function I18nWrapper({ children }: { children: ReactNode }) {
   );
 }
 
+function ZhI18nWrapper({ children }: { children: ReactNode }) {
+  return (
+    <I18nProvider locale="zh-Hans" resources={TEST_RESOURCES}>
+      {children}
+    </I18nProvider>
+  );
+}
+
 // Mock the workspace id singleton — items() reads it imperatively.
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => ({
+    colorOf: (status: string) =>
+      status === "awaiting_response" ? "#f97316" : null,
+  }),
 }));
 
 // Mock the API so we control search responses + observe calls.
@@ -611,6 +638,32 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
   });
 
+  it("paints issue suggestions with their custom status color", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            {
+              id: "issue-6956",
+              label: "MUL-6956",
+              type: "issue",
+              status: "awaiting_response",
+              statusCategory: "in_review",
+            },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    const statusIcon = screen
+      .getByText("MUL-6956")
+      .closest("button")
+      ?.querySelector("svg");
+    expect(statusIcon).toHaveStyle({ color: "#f97316" });
+  });
+
   it("does not inject current/recent chat context into the normal @ results", () => {
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
@@ -688,6 +741,26 @@ describe("createMentionSuggestion", () => {
     expect(screen.getByText("Recently viewed")).toBeInTheDocument();
     expect(screen.getByText("MUL-1")).toBeInTheDocument();
     expect(screen.getByText("Roadmap")).toBeInTheDocument();
+  });
+
+  it("localizes agent and squad badges", () => {
+    render(
+      <ZhI18nWrapper>
+        <MentionList
+          items={[
+            { id: "a1", label: "Aegis", type: "agent" },
+            { id: "s1", label: "Core team", type: "squad" },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </ZhI18nWrapper>,
+    );
+
+    expect(screen.getByText("智能体")).toBeInTheDocument();
+    expect(screen.getByText("小队")).toBeInTheDocument();
+    expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Squad")).not.toBeInTheDocument();
   });
 
   it("includes squads with a runnable leader in the mention list", () => {

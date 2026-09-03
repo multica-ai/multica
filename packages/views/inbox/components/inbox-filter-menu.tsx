@@ -1,17 +1,21 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { CircleDot, Filter, RotateCcw, SignalHigh } from "lucide-react";
+import { CircleDot, Filter, Mail, RotateCcw, SignalHigh, UserRound } from "lucide-react";
 import { PRIORITY_DISPLAY_ORDER } from "@multica/core/issues/config";
 import {
   filterInboxItems,
+  inboxActorKey,
+  inboxActorKeyParts,
   inboxFiltersForPrioritySupport,
   inboxFilterCount,
   type InboxPriorityFilterSupport,
   useInboxFilters,
   useInboxFilterStore,
 } from "@multica/core/inbox/filter-store";
+import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
+import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -51,7 +55,17 @@ function priorityCounts(items: InboxItem[]): Map<string, number> {
   return counts;
 }
 
-/** Priority/status facets for the deduplicated list currently on screen. */
+function actorCounts(items: InboxItem[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    const key = inboxActorKey(item);
+    if (key == null) continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** Faceted filters for the deduplicated list currently on screen. */
 export function InboxFilterMenu({
   wsId,
   items,
@@ -68,6 +82,11 @@ export function InboxFilterMenu({
   const togglePriority = useInboxFilterStore(
     (state) => state.togglePriorityFilter,
   );
+  const toggleActor = useInboxFilterStore((state) => state.toggleActorFilter);
+  const toggleUnreadOnly = useInboxFilterStore(
+    (state) => state.toggleUnreadOnly,
+  );
+  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
   const clearFilters = useInboxFilterStore((state) => state.clearFilters);
   const clearPriorityFilters = useInboxFilterStore(
     (state) => state.clearPriorityFilters,
@@ -108,24 +127,27 @@ export function InboxFilterMenu({
     wsId,
   ]);
 
-  // Counts are faceted: a status count respects the active priority filter
-  // (and vice versa) while ignoring its own dimension, so every number says
-  // how many rows selecting that value can actually reveal.
+  // Counts are faceted: every count respects the other active dimensions while
+  // ignoring its own, so each number says how many rows selecting that value
+  // can actually reveal.
   const statusFacetItems = useMemo(
-    () =>
-      filterInboxItems(items, {
-        statuses: [],
-        priorities: effectiveFilters.priorities,
-      }),
-    [items, effectiveFilters.priorities],
+    () => filterInboxItems(items, { ...effectiveFilters, statuses: [] }),
+    [items, effectiveFilters],
   );
   const priorityFacetItems = useMemo(
+    () => filterInboxItems(items, { ...effectiveFilters, priorities: [] }),
+    [items, effectiveFilters],
+  );
+  const actorFacetItems = useMemo(
+    () => filterInboxItems(items, { ...effectiveFilters, actors: [] }),
+    [items, effectiveFilters],
+  );
+  const unreadCount = useMemo(
     () =>
-      filterInboxItems(items, {
-        statuses: effectiveFilters.statuses,
-        priorities: [],
-      }),
-    [items, effectiveFilters.statuses],
+      filterInboxItems(items, { ...effectiveFilters, unreadOnly: false }).filter(
+        (item) => item.read !== true,
+      ).length,
+    [items, effectiveFilters],
   );
   const statuses = useMemo(
     () => statusCounts(statusFacetItems),
@@ -135,6 +157,27 @@ export function InboxFilterMenu({
     () => priorityCounts(priorityFacetItems),
     [priorityFacetItems],
   );
+  const actors = useMemo(
+    () => actorCounts(actorFacetItems),
+    [actorFacetItems],
+  );
+  // The universe of actors comes from every row in the view rather than the
+  // faceted subset: picking one actor must not remove the others from the menu
+  // that offers them. Sorted by name so the list does not reshuffle as counts
+  // change under other selections.
+  const actorOptions = useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of items) {
+      const key = inboxActorKey(item);
+      if (key != null) keys.add(key);
+    }
+    return [...keys]
+      .map((key) => {
+        const { type, id } = inboxActorKeyParts(key);
+        return { key, type, id, name: getActorName(type, id) };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [items, getActorName]);
   const triggerLabel =
     activeCount > 0
       ? t(($) => $.filters.active_count, { count: activeCount })
@@ -163,6 +206,63 @@ export function InboxFilterMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-auto min-w-44">
+        <DropdownMenuCheckboxItem
+          checked={effectiveFilters.unreadOnly}
+          onCheckedChange={() => toggleUnreadOnly(wsId)}
+        >
+          <Mail className="size-3.5" />
+          <span className="flex-1">{t(($) => $.filters.unread_only)}</span>
+          {unreadCount > 0 && (
+            <span className="text-caption text-muted-foreground">
+              {t(($) => $.filters.notification_count, { count: unreadCount })}
+            </span>
+          )}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+
+        {actorOptions.length > 0 && (
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger>
+              <UserRound className="size-3.5" />
+              <span className="flex-1">{t(($) => $.filters.from)}</span>
+              {effectiveFilters.actors.length > 0 && (
+                <span className="text-caption font-medium text-primary">
+                  {effectiveFilters.actors.length}
+                </span>
+              )}
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="w-auto min-w-48">
+              {actorOptions.map((option) => {
+                const checked = effectiveFilters.actors.includes(option.key);
+                const count = actors.get(option.key) ?? 0;
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={option.key}
+                    checked={checked}
+                    onCheckedChange={() => toggleActor(wsId, option.key)}
+                  >
+                    <ActorAvatar
+                      size="xs"
+                      name={option.name}
+                      initials={getActorInitials(option.type, option.id)}
+                      avatarUrl={getActorAvatarUrl(option.type, option.id)}
+                      isAgent={option.type === "agent"}
+                      isSquad={option.type === "squad"}
+                      isSystem={option.type === "system"}
+                    />
+                    <span className="flex-1">{option.name}</span>
+                    {count > 0 && (
+                      <span className="text-caption text-muted-foreground">
+                        {t(($) => $.filters.notification_count, { count })}
+                      </span>
+                    )}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        )}
+
         <DropdownMenuSub>
           <DropdownMenuSubTrigger>
             <CircleDot className="size-3.5" />

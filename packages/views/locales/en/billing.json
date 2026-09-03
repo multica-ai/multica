@@ -142,10 +142,6 @@
       "canceled_title": "Subscription is canceled",
       "canceled_description": "The entitlement badge above shows the plan currently enforced for this workspace."
     },
-    "read_only": {
-      "title": "Read-only billing access",
-      "description": "You can view the workspace plan and limits. Only owners and admins can purchase or manage a subscription."
-    },
     "current": {
       "title": "Current plan",
       "plan": "Workspace plan",
@@ -169,8 +165,6 @@
       "pro_for_team_other": "Pro for {{count}} human seats",
       "price_loading": "Loading subscription prices",
       "unit_price": "{{price}} per human seat",
-      "estimated_monthly_total": "Estimated monthly total: {{price}}",
-      "estimated_yearly_total": "Estimated yearly total: {{price}}",
       "price_at_checkout": "The server re-counts human members before purchase. Stripe Checkout shows the authoritative per-seat price and total before you pay."
     },
     "management": {
@@ -182,13 +176,12 @@
     },
     "limits": {
       "title": "Usage and limits",
-      "description": "Limits come from the current entitlement. Automation usage comes from server quota accounting.",
-      "issues": "Recent issues",
-      "issues_description": "Free keeps the most recently active issues available. Pro has no window limit.",
-      "autopilots": "Successful automations",
-      "autopilots_description": "The Free allowance resets each UTC calendar month. Pro is unlimited.",
+      "description": "Limits and usage come from the server's current entitlement and quota accounting.",
+      "issues": "Issues",
+      "issues_description": "Current issue usage and the effective limit reported by the server.",
+      "autopilots": "Automation runs",
+      "autopilots_description": "Current automation usage and reset time reported by the server.",
       "unlimited": "Unlimited",
-      "unavailable": "Unavailable",
       "per_month": "{{count}} / month",
       "usage_loading": "Loading automation usage",
       "usage_label": "Automation quota usage",
@@ -224,6 +217,7 @@
       "summary_unavailable_description": "The current plan is still shown, but purchased and scheduled seat quantities could not be loaded.",
       "members_over_capacity_title": "Members exceed purchased seats",
       "members_over_capacity_description": "This workspace has {{actual}} members but only {{purchased}} purchased seats. Add enough seats or remove members before sending more invitations.",
+      "occupancy_over_capacity_description": "This workspace occupies {{occupied}} of {{purchased}} purchased seats ({{members}} members and {{reserved}} pending invitations). Add seats, remove a member, or revoke a pending invitation before inviting someone else.",
       "updated": "Seat purchase submitted"
     },
     "seat_purchase": {

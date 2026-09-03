@@ -33,7 +33,8 @@ type stubSeatCapacity struct {
 	consumeErr      error
 }
 
-func (s *stubSeatCapacity) Enabled() bool { return true }
+func (*stubSeatCapacity) RecoveryAvailable() bool { return true }
+
 func (s *stubSeatCapacity) ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (seatcapacity.Decision, error) {
 	s.reserveCalls++
 	return s.reserveDecision, s.reserveErr
@@ -66,21 +67,10 @@ func (s *stubSeatCapacity) GetOperation(context.Context, uuid.UUID, uuid.UUID) (
 func useSeatCapacity(t *testing.T, executor seatcapacity.Executor) {
 	t.Helper()
 	previous := testHandler.SeatCapacity
-	previousEnforcement := testHandler.SeatCapacityEnforcementEnabled
 	testHandler.SeatCapacity = executor
-	testHandler.SeatCapacityEnforcementEnabled = true
 	t.Cleanup(func() {
 		testHandler.SeatCapacity = previous
-		testHandler.SeatCapacityEnforcementEnabled = previousEnforcement
 	})
-}
-
-func TestDefaultInvitationRateLimits(t *testing.T) {
-	limits := DefaultInvitationRateLimits()
-	want := SlidingWindowRateLimit{Limit: 6, Window: 24 * time.Hour}
-	if limits.Recipient != want {
-		t.Fatalf("recipient limit = %+v, want %+v", limits.Recipient, want)
-	}
 }
 
 type stubInvitationRateLimiter struct {
@@ -215,6 +205,10 @@ func TestCreateInvitation_BlocksWhenPurchasedCapacityIsFull(t *testing.T) {
 		Managed: true, Allowed: false, Reason: "capacity_full",
 	}}
 	useSeatCapacity(t, capacity)
+	actor := &stubInvitationRateLimiter{allowed: true}
+	workspace := &stubInvitationRateLimiter{allowed: true}
+	recipient := &stubInvitationRateLimiter{allowed: true}
+	useInvitationRateLimiters(t, InvitationRateLimiters{Actor: actor, Workspace: workspace, Recipient: recipient})
 
 	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
 		Email: "capacity-full-invite@multica.ai", Role: "member",
@@ -238,6 +232,23 @@ func TestCreateInvitation_BlocksWhenPurchasedCapacityIsFull(t *testing.T) {
 	if capacity.reserveCalls != 1 {
 		t.Fatalf("reserve calls = %d, want 1", capacity.reserveCalls)
 	}
+	for name, calls := range map[string]int{
+		"actor checks": len(actor.checkKeys), "workspace checks": len(workspace.checkKeys), "recipient checks": len(recipient.checkKeys),
+	} {
+		if calls != 1 {
+			t.Errorf("%s = %d, want 1", name, calls)
+		}
+	}
+	if calls := len(actor.allowKeys); calls != 1 {
+		t.Errorf("actor allows = %d, want 1 when persistent capacity_full is rejected", calls)
+	}
+	for name, calls := range map[string]int{
+		"workspace allows": len(workspace.allowKeys), "recipient allows": len(recipient.allowKeys),
+	} {
+		if calls != 0 {
+			t.Errorf("%s = %d, want 0 so a later purchased-seat invitation keeps shared budget", name, calls)
+		}
+	}
 	var invitationCount, outboxCount int
 	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM workspace_invitation WHERE workspace_id = $1 AND invitee_email = $2`, parseUUID(testWorkspaceID), "capacity-full-invite@multica.ai").Scan(&invitationCount); err != nil {
 		t.Fatal(err)
@@ -247,6 +258,104 @@ func TestCreateInvitation_BlocksWhenPurchasedCapacityIsFull(t *testing.T) {
 	}
 	if invitationCount != 0 || outboxCount != 0 {
 		t.Fatalf("persisted invitation=%d outbox=%d, want both zero", invitationCount, outboxCount)
+	}
+}
+
+func TestCreateInvitation_BlocksOvercommittedCapacityWithoutOfferingSingleSeatSemantics(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	capacity := &stubSeatCapacity{reserveErr: &seatcapacity.HTTPError{
+		StatusCode: http.StatusConflict,
+		Code:       "capacity_overcommitted",
+	}}
+	useSeatCapacity(t, capacity)
+	actor := &stubInvitationRateLimiter{allowed: true}
+	workspace := &stubInvitationRateLimiter{allowed: true}
+	recipient := &stubInvitationRateLimiter{allowed: true}
+	useInvitationRateLimiters(t, InvitationRateLimiters{Actor: actor, Workspace: workspace, Recipient: recipient})
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
+		Email: "capacity-overcommitted-invite@multica.ai", Role: "member",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateInvitation(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "seat_capacity_overcommitted" {
+		t.Fatalf("code = %q, want seat_capacity_overcommitted", body.Code)
+	}
+	if capacity.reserveCalls != 1 {
+		t.Fatalf("reserve calls = %d, want 1", capacity.reserveCalls)
+	}
+	if calls := len(actor.allowKeys); calls != 1 {
+		t.Errorf("actor allows = %d, want 1 when persistent capacity_overcommitted is rejected", calls)
+	}
+	for name, calls := range map[string]int{
+		"workspace allows": len(workspace.allowKeys), "recipient allows": len(recipient.allowKeys),
+	} {
+		if calls != 0 {
+			t.Errorf("%s = %d, want 0 while capacity remains overcommitted", name, calls)
+		}
+	}
+}
+
+func TestCreateInvitation_MapsCloudCapacityRateLimitWithoutConsumingInvitationBudget(t *testing.T) {
+	clearInvitationsForTestWorkspace(t)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("clear capacity outbox: %v", err)
+	}
+	capacity := &stubSeatCapacity{reserveErr: &seatcapacity.HTTPError{
+		StatusCode: http.StatusTooManyRequests,
+		RetryAfter: 3 * time.Second,
+	}}
+	useSeatCapacity(t, capacity)
+	actor := &stubInvitationRateLimiter{allowed: true}
+	workspace := &stubInvitationRateLimiter{allowed: true}
+	recipient := &stubInvitationRateLimiter{allowed: true}
+	useInvitationRateLimiters(t, InvitationRateLimiters{Actor: actor, Workspace: workspace, Recipient: recipient})
+
+	req := newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", CreateMemberRequest{
+		Email: "capacity-rate-limited@multica.ai", Role: "member",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	rec := httptest.NewRecorder()
+	testHandler.CreateInvitation(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want 429: %s", rec.Code, rec.Body.String())
+	}
+	if rec.Header().Get("Retry-After") != "3" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected retry/cache headers: %v", rec.Header())
+	}
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "seat_capacity_rate_limited" {
+		t.Fatalf("code = %q, want seat_capacity_rate_limited", body.Code)
+	}
+	if capacity.reserveCalls != 1 || capacity.releaseCalls != 0 {
+		t.Fatalf("capacity calls reserve=%d release=%d, want 1/0", capacity.reserveCalls, capacity.releaseCalls)
+	}
+	for name, calls := range map[string]int{
+		"actor allows": len(actor.allowKeys), "workspace allows": len(workspace.allowKeys), "recipient allows": len(recipient.allowKeys),
+	} {
+		if calls != 0 {
+			t.Errorf("%s = %d, want 0 after Cloud rate limit", name, calls)
+		}
+	}
+	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); intents != 0 {
+		t.Fatalf("capacity intents = %d, want 0 after Cloud rate limit", intents)
 	}
 }
 
@@ -350,8 +459,13 @@ func TestCreateInvitation_AllowsAfterExpiry(t *testing.T) {
 	}
 }
 
-func TestCreateInvitation_RateLimitChecksEveryGateBeforeWrite(t *testing.T) {
+func TestCreateInvitation_RateLimitChecksEveryGateBeforeCapacityReservation(t *testing.T) {
 	clearInvitationsForTestWorkspace(t)
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("clear capacity outbox: %v", err)
+	}
+	capacity := &stubSeatCapacity{reserveDecision: seatcapacity.Decision{Managed: true, Allowed: true}}
+	useSeatCapacity(t, capacity)
 	actor := &stubInvitationRateLimiter{allowed: false, retryAfter: 10 * time.Minute}
 	workspace := &stubInvitationRateLimiter{allowed: true}
 	recipient := &stubInvitationRateLimiter{allowed: false, retryAfter: 24 * time.Hour}
@@ -426,6 +540,12 @@ func TestCreateInvitation_RateLimitChecksEveryGateBeforeWrite(t *testing.T) {
 	if pendingCount != 0 {
 		t.Fatalf("pending invitation count = %d, want 0 after rate limit rejection", pendingCount)
 	}
+	if capacity.reserveCalls != 0 || capacity.releaseCalls != 0 {
+		t.Fatalf("capacity calls reserve=%d release=%d, want 0/0", capacity.reserveCalls, capacity.releaseCalls)
+	}
+	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE workspace_id = $1`, parseUUID(testWorkspaceID)); intents != 0 {
+		t.Fatalf("capacity intents = %d, want 0 after compensated rate-limit rejection", intents)
+	}
 }
 
 func TestCreateInvitation_RateLimiterFailureReturnsServiceUnavailable(t *testing.T) {
@@ -493,7 +613,7 @@ func TestCreateInvitation_RateLimiterFailureReturnsServiceUnavailable(t *testing
 	}
 }
 
-func TestAdmitInvitation_RejectedActorDoesNotConsumeWorkspaceBudget(t *testing.T) {
+func TestInvitationAdmission_RejectedActorDoesNotConsumeWorkspaceBudget(t *testing.T) {
 	limits := InvitationRateLimits{
 		Actor:     SlidingWindowRateLimit{Limit: 1, Window: time.Hour},
 		Workspace: SlidingWindowRateLimit{Limit: 2, Window: time.Hour},
@@ -504,7 +624,11 @@ func TestAdmitInvitation_RejectedActorDoesNotConsumeWorkspaceBudget(t *testing.T
 
 	admit := func(actorID, email string) bool {
 		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/workspace-a/members", nil)
-		return h.admitInvitation(httptest.NewRecorder(), req, actorID, "workspace-a", email)
+		admission, ok := h.checkInvitationAdmission(httptest.NewRecorder(), req, actorID, "workspace-a", email)
+		if ok {
+			h.consumeInvitationAdmission(req, admission)
+		}
+		return ok
 	}
 
 	if !admit("actor-a", "first@multica.ai") {
@@ -520,7 +644,7 @@ func TestAdmitInvitation_RejectedActorDoesNotConsumeWorkspaceBudget(t *testing.T
 	}
 }
 
-func TestAdmitInvitation_RejectedActorDoesNotConsumeRecipientBudget(t *testing.T) {
+func TestInvitationAdmission_RejectedActorDoesNotConsumeRecipientBudget(t *testing.T) {
 	limits := InvitationRateLimits{
 		Actor:     SlidingWindowRateLimit{Limit: 1, Window: time.Hour},
 		Workspace: SlidingWindowRateLimit{Limit: 10, Window: time.Hour},
@@ -531,7 +655,11 @@ func TestAdmitInvitation_RejectedActorDoesNotConsumeRecipientBudget(t *testing.T
 
 	admit := func(actorID, workspaceID string) bool {
 		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/members", nil)
-		return h.admitInvitation(httptest.NewRecorder(), req, actorID, workspaceID, "shared@multica.ai")
+		admission, ok := h.checkInvitationAdmission(httptest.NewRecorder(), req, actorID, workspaceID, "shared@multica.ai")
+		if ok {
+			h.consumeInvitationAdmission(req, admission)
+		}
+		return ok
 	}
 
 	if !admit("actor-a", "workspace-a") {
@@ -545,7 +673,7 @@ func TestAdmitInvitation_RejectedActorDoesNotConsumeRecipientBudget(t *testing.T
 	}
 }
 
-func TestAdmitInvitation_AllowsBoundedOvershootWhenGateFillsAfterCheck(t *testing.T) {
+func TestInvitationAdmission_AllowsBoundedOvershootWhenGateFillsAfterCheck(t *testing.T) {
 	allowDenied := false
 	actor := &stubInvitationRateLimiter{allowed: true, allowResult: &allowDenied}
 	workspace := &stubInvitationRateLimiter{allowed: true}
@@ -554,9 +682,11 @@ func TestAdmitInvitation_AllowsBoundedOvershootWhenGateFillsAfterCheck(t *testin
 	h.InvitationRateLimiters = InvitationRateLimiters{Actor: actor, Workspace: workspace, Recipient: recipient}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/workspace-a/members", nil)
-	if !h.admitInvitation(httptest.NewRecorder(), req, "actor-a", "workspace-a", "recipient@multica.ai") {
-		t.Fatal("concurrent fill rejected after a different gate may already have consumed")
+	admission, ok := h.checkInvitationAdmission(httptest.NewRecorder(), req, "actor-a", "workspace-a", "recipient@multica.ai")
+	if !ok {
+		t.Fatal("invitation was rejected during the non-consuming check")
 	}
+	h.consumeInvitationAdmission(req, admission)
 	for name, calls := range map[string]int{
 		"actor checks": len(actor.checkKeys), "workspace checks": len(workspace.checkKeys), "recipient checks": len(recipient.checkKeys),
 		"actor allows": len(actor.allowKeys), "workspace allows": len(workspace.allowKeys), "recipient allows": len(recipient.allowKeys),
@@ -567,7 +697,7 @@ func TestAdmitInvitation_AllowsBoundedOvershootWhenGateFillsAfterCheck(t *testin
 	}
 }
 
-func TestAdmitInvitation_AllowsBoundedOvershootWhenBackendFailsAfterChecks(t *testing.T) {
+func TestInvitationAdmission_AllowsBoundedOvershootWhenBackendFailsAfterChecks(t *testing.T) {
 	actor := &stubInvitationRateLimiter{allowed: true}
 	workspace := &stubInvitationRateLimiter{allowed: true, allowErr: errors.New("redis unavailable")}
 	recipient := &stubInvitationRateLimiter{allowed: true}
@@ -576,9 +706,11 @@ func TestAdmitInvitation_AllowsBoundedOvershootWhenBackendFailsAfterChecks(t *te
 
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/workspace-a/members", nil)
 	rec := httptest.NewRecorder()
-	if !h.admitInvitation(rec, req, "actor-a", "workspace-a", "recipient@multica.ai") {
-		t.Fatalf("backend failed after successful checks: request was rejected with %d: %s", rec.Code, rec.Body.String())
+	admission, ok := h.checkInvitationAdmission(rec, req, "actor-a", "workspace-a", "recipient@multica.ai")
+	if !ok {
+		t.Fatalf("invitation was rejected during successful checks with %d: %s", rec.Code, rec.Body.String())
 	}
+	h.consumeInvitationAdmission(req, admission)
 	if rec.Body.Len() != 0 || rec.Header().Get("Retry-After") != "" {
 		t.Fatalf("backend failure after checks wrote an error response: headers=%v body=%s", rec.Header(), rec.Body.String())
 	}

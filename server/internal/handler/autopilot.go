@@ -83,7 +83,9 @@ type AutopilotQuotaUsageResponse struct {
 	Action        string           `json:"action"`
 	Used          *int64           `json:"used"`
 	Reserved      *int64           `json:"reserved"`
+	Total         *int64           `json:"total"`
 	Limit         *int64           `json:"limit"`
+	Reached       *bool            `json:"reached"`
 	PeriodStart   *string          `json:"period_start"`
 	PeriodEnd     *string          `json:"period_end"`
 	ResetAt       *string          `json:"reset_at"`
@@ -432,11 +434,40 @@ func (h *Handler) ListAutopilots(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Subscribers are fetched for the whole page in one batched query. An
+	// earlier version passed nil here to dodge an N+1, but the response type
+	// serializes a nil slice as [] rather than omitting it, so every listed
+	// autopilot claimed to have no subscribers while the detail endpoint
+	// reported the real ones — a silently wrong value is worse than a missing
+	// one (MUL-6680). The batch keys off the primary key's leading column, so
+	// this costs one indexed query per page, not one per row.
+	subsByAutopilot := map[string][]db.AutopilotSubscriber{}
+	autopilotIDs := make([]pgtype.UUID, 0, len(autopilots))
+	for _, row := range autopilots {
+		autopilotIDs = append(autopilotIDs, row.Autopilot.ID)
+	}
+	if len(autopilotIDs) > 0 {
+		subs, err := h.Queries.ListAutopilotSubscribersForAutopilots(r.Context(), autopilotIDs)
+		if err != nil {
+			// Fail closed. Degrading to an empty set here would reintroduce
+			// exactly the bug this endpoint was fixed for: subscribers is a
+			// non-omitempty field documented as authoritative, so an empty
+			// value on a failed read is indistinguishable from "none
+			// configured" — and a caller acting on it can overwrite a real
+			// subscriber list. An error the caller can see and retry is the
+			// only honest answer.
+			writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+			return
+		}
+		for _, s := range subs {
+			id := uuidToString(s.AutopilotID)
+			subsByAutopilot[id] = append(subsByAutopilot[id], s)
+		}
+	}
+
 	resp := make([]AutopilotResponse, len(autopilots))
 	for i, row := range autopilots {
-		// Omit subscribers to avoid an N+1; GET /api/autopilots/{id} is
-		// the source of truth for the populated template.
-		r := autopilotToResponse(row.Autopilot, nil)
+		r := autopilotToResponse(row.Autopilot, subsByAutopilot[uuidToString(row.Autopilot.ID)])
 		r.TriggerKinds = row.TriggerKinds
 		if row.NextRunAt.Valid {
 			r.NextRunAt = timestampToPtr(row.NextRunAt)
@@ -466,8 +497,11 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 
 	subs, err := h.Queries.ListAutopilotSubscribers(r.Context(), autopilot.ID)
 	if err != nil {
-		// Don't 500 the detail fetch over template metadata.
-		subs = nil
+		// Fail closed for the same reason the list endpoint does: an empty
+		// subscribers array is a claim, not an absence, and this response is
+		// what clients round-trip back into a full-replace PATCH.
+		writeError(w, http.StatusInternalServerError, "failed to list autopilot subscribers")
+		return
 	}
 	resp := autopilotToResponse(autopilot, subs)
 
@@ -1015,18 +1049,21 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// A substantive change (target / enabled-state / execution mode) republishes the
-	// rule: append a new version with THIS member as publisher, so a later run
-	// attributes to whoever last changed what the rule does — not the original
-	// creator. Cosmetic edits (title / description / template) write no version and
-	// leave accountability with the previous publisher (MUL-4302 §3.4).
+	// rule: append a new version with THIS member as publisher, recording who last
+	// changed what the rule does. Cosmetic edits (title / description / template)
+	// write no version (MUL-4302 §3.4). Since MUL-6951 the rule publisher is an
+	// AUDIT value only — it is the coarse fallback a run degrades to when its
+	// trigger records no creator, and such a run carries no authorization.
 	if autopilotRuleSubstantiveChange(prev, autopilot) {
 		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, autopilot, "member", parseUUID(userID)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 			return
 		}
-		// An autopilot-level substantive edit governs every trigger, so responsibility
-		// for each firing trigger transfers to this editor (source=trigger_owner). A
-		// trigger-scoped edit re-stamps only its own row (see UpdateAutopilotTrigger).
+		// An autopilot-level substantive edit governs every trigger, so CONFIG
+		// responsibility for each one transfers to this editor. A trigger-scoped edit
+		// re-stamps only its own row (see UpdateAutopilotTrigger). Since MUL-6951 this
+		// moves published_by alone: the runs each trigger fires keep acting as, and
+		// stay accountable to, that trigger's immutable created_by.
 		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
 			AutopilotID:     autopilot.ID,
 			PublishedByType: pgtype.Text{String: "member", Valid: true},
@@ -1462,11 +1499,17 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
-		// Seed the responsible publisher = creator; a later substantive edit re-stamps
-		// it to the editor so runs attribute to whoever last shaped this trigger
-		// (source=trigger_owner, MUL-4302).
+		// published_by records who is currently responsible for this trigger's
+		// CONFIG: seeded to the creator, re-stamped to whoever later substantively
+		// edits it (MUL-4302). Since MUL-6951 it no longer decides anything about a
+		// run — neither authorization nor the task's accountable human — so an edit
+		// moves this column alone.
 		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 		PublishedByID:   publisherID,
+		// created_by is the AUTHORIZATION principal and is immutable: the run acts
+		// as this member forever, so no edit may move it (MUL-6951).
+		CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		CreatedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1529,10 +1572,15 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
-			// Seed the responsible publisher = creator; re-stamped to the editor on a
-			// later substantive edit (source=trigger_owner, MUL-4302).
+			// published_by records CONFIG responsibility only: seeded to the creator,
+			// re-stamped to a later substantive editor (MUL-4302). It has no bearing
+			// on the runs this trigger fires (MUL-6951).
 			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
 			PublishedByID:   publisherID,
+			// Immutable authorization principal — see the schedule path above
+			// (MUL-6951).
+			CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			CreatedByID:   publisherID,
 		})
 		if err != nil {
 			tx.Rollback(ctx)
@@ -2142,7 +2190,9 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	// A manual "run now" is a direct human action, so the run is attributed
 	// direct_human to the triggering member (MUL-4302 §4). Resolve the actor the
 	// same way assign/promote does; only a member actor is a human — an agent
-	// triggering via A2A yields an invalid actor and falls back to rule_owner.
+	// triggering via A2A yields an invalid actor, which then follows the automation
+	// path: the firing trigger's creator, or nobody when this entry point supplies
+	// no trigger, in which case the run carries no authorization (MUL-6951).
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
@@ -2214,7 +2264,8 @@ func (h *Handler) GetAutopilotQuotaUsage(w http.ResponseWriter, r *http.Request)
 	resp := AutopilotQuotaUsageResponse{Action: "off"}
 	if usage.Enabled {
 		resp.Action = usage.Action
-		resp.Used, resp.Reserved, resp.Limit = usage.Used, usage.Reserved, usage.Limit
+		resp.Used, resp.Reserved, resp.Total = usage.Used, usage.Reserved, usage.Total
+		resp.Limit, resp.Reached = usage.Limit, usage.Reached
 		resp.BlockedCounts = usage.BlockedCounts
 		if usage.PeriodStart != nil {
 			v := usage.PeriodStart.UTC().Format(time.RFC3339)

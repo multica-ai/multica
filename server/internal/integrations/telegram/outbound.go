@@ -17,7 +17,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -67,9 +66,7 @@ type Outbound struct {
 // outboundQueries is the slice of generated queries the subscriber needs.
 // *db.Queries satisfies it.
 type outboundQueries interface {
-	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
-	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
 
@@ -968,59 +965,26 @@ type replyTarget struct {
 	botToken  string
 }
 
-// resolveTarget maps an event to its Telegram binding + credentials. Returns
-// (nil, nil) when the session is not Telegram-bound. When viaTask is true the
-// chat session id is recovered from the task row (EventTaskMessage carries
-// only TaskID).
-func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, viaTask bool) (*replyTarget, error) {
-	var task *db.AgentTaskQueue
+// resolveTarget maps an event's immutable task delivery snapshot to Telegram
+// credentials. A missing snapshot means the task came from Web/Desktop/Mobile
+// and must not reach an external conversation, even if its Chat once had a
+// Telegram route.
+func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, _ bool) (*replyTarget, error) {
 	taskID, hasTaskID := eventTaskID(e)
-	sessionID, err := util.ParseUUID(e.ChatSessionID)
-	if err != nil || !sessionID.Valid {
-		if !viaTask || !hasTaskID {
-			return nil, nil
-		}
-		taskRow, terr := o.q.GetAgentTask(ctx, taskID)
-		if terr != nil {
-			return nil, fmt.Errorf("load agent task: %w", terr)
-		}
-		if !taskRow.ChatSessionID.Valid {
-			return nil, nil
-		}
-		task = &taskRow
-		sessionID = taskRow.ChatSessionID
-	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
-		ChatSessionID: sessionID,
-		ChannelType:   string(TypeTelegram),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // not a Telegram session
-		}
-		return nil, fmt.Errorf("lookup telegram chat binding: %w", err)
-	}
-	// A bound session can be reused by web/mobile tasks. Only a task whose
-	// immutable input provenance came from a channel may reply to Telegram;
-	// chat_input_task_id alone cannot distinguish direct tasks from channel
-	// tasks. Fail closed when the task id or provenance lookup is unavailable.
 	if !hasTaskID {
 		return nil, nil
 	}
-	if task == nil {
-		taskRow, terr := o.q.GetAgentTask(ctx, taskID)
-		if terr != nil {
-			return nil, fmt.Errorf("load agent task: %w", terr)
-		}
-		task = &taskRow
-	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, *task)
+	delivery, err := o.q.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
-		return nil, fmt.Errorf("classify task input origin: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("lookup telegram task delivery: %w", err)
 	}
-	if !deliver {
+	if delivery.ChannelType != string(TypeTelegram) {
 		return nil, nil
 	}
+	binding := telegramBindingFromTaskDelivery(delivery)
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeTelegram),
@@ -1044,6 +1008,16 @@ func (o *Outbound) resolveTarget(ctx context.Context, e events.Event, viaTask bo
 		replyTo:   replyTo,
 		botToken:  creds.BotToken,
 	}, nil
+}
+
+func telegramBindingFromTaskDelivery(delivery db.ChannelTaskDelivery) db.ChannelChatSessionBinding {
+	return db.ChannelChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelType: delivery.ChannelType, ChannelChatID: delivery.ChannelChatID,
+		ChatType: delivery.ChatType, LastMessageID: delivery.ChannelMessageID,
+		LastThreadID: delivery.ChannelThreadID, RouteRevision: delivery.RouteRevision,
+		Config: delivery.Config,
+	}
 }
 
 // outboundTarget recovers the numeric chat id (from the binding config when

@@ -210,13 +210,12 @@ func TestSeatCapacityIntentCannotRegressOrBeDeletedByStaleWorker(t *testing.T) {
 	}
 }
 
-func TestCapacitySettlementContinuesForInvitationWhileEnforcementIsPaused(t *testing.T) {
+func TestCapacityConsumeRecordsDeliveredIntent(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := uuid.UUID(parseUUID(testWorkspaceID).Bytes)
 	token, userID := uuid.New(), uuid.New()
 	executor := &stubSeatCapacity{}
 	useSeatCapacity(t, executor)
-	testHandler.SeatCapacityEnforcementEnabled = false
 	previousLocker := testHandler.SeatCapacityLocker
 	testHandler.SeatCapacityLocker = seatcapacity.NewWorkspaceLocker(testPool)
 	t.Cleanup(func() {
@@ -236,37 +235,36 @@ func TestCapacitySettlementContinuesForInvitationWhileEnforcementIsPaused(t *tes
 		t.Fatal(err)
 	}
 	if intent.Action != seatcapacity.ActionConsumeInvitation || !intent.DeliveredAt.Valid {
-		t.Fatalf("paused-enforcement consume intent = %+v", intent)
+		t.Fatalf("consume intent = %+v", intent)
 	}
 }
 
-func TestCapacityEnforcementPauseFailsOpenConsumeError(t *testing.T) {
+func TestCapacityConsumeFailsClosedWhenCloudIsUnavailable(t *testing.T) {
 	ctx := context.Background()
 	workspaceID := uuid.UUID(parseUUID(testWorkspaceID).Bytes)
 	token, userID := uuid.New(), uuid.New()
 	executor := &stubSeatCapacity{consumeErr: errors.New("capacity service unavailable")}
 	useSeatCapacity(t, executor)
-	testHandler.SeatCapacityEnforcementEnabled = false
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(ctx, `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, token)
 	})
 
 	active, err := testHandler.beginCapacityConsume(ctx, workspaceID, token, token, userID)
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, errSeatCapacityUnavailable) {
+		t.Fatalf("consume error = %v, want errSeatCapacityUnavailable", err)
 	}
 	if active || executor.consumeCalls != 1 {
 		t.Fatalf("active=%v consumeCalls=%d, want false/1", active, executor.consumeCalls)
 	}
-	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE operation_token = $1`, uuidToPG(token)); intents != 0 {
-		t.Fatalf("capacity intents = %d, want 0 after fail-open", intents)
+	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE operation_token = $1`, uuidToPG(token)); intents != 1 {
+		t.Fatalf("capacity intents = %d, want 1 for recovery", intents)
 	}
 }
 
-func TestAcceptInvitationAllowsDeniedCapacityWhenEnforcementIsPaused(t *testing.T) {
+func TestAcceptInvitationRejectsUnavailableReservedCapacity(t *testing.T) {
 	ctx := context.Background()
-	email := "paused-capacity-invite-" + uuid.NewString() + "@multica.ai"
-	userID := dbfx.User(t, "Paused Capacity Invitee", email)
+	email := "strict-capacity-invite-" + uuid.NewString() + "@multica.ai"
+	userID := dbfx.User(t, "Strict Capacity Invitee", email)
 	invitationID := dbfx.Insert(t, "workspace_invitation", testutil.Cols{
 		"workspace_id":    testWorkspaceID,
 		"inviter_id":      testUserID,
@@ -279,29 +277,28 @@ func TestAcceptInvitationAllowsDeniedCapacityWhenEnforcementIsPaused(t *testing.
 	dbfx.Cleanup(t, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID))
 	dbfx.Cleanup(t, `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, parseUUID(invitationID))
 
-	denied := seatcapacity.Decision{Managed: true, Allowed: false, Reason: "capacity_full"}
-	executor := &stubSeatCapacity{consumeDecision: &denied}
+	rejected := seatcapacity.Decision{Managed: true, Allowed: false, Reason: "capacity_full"}
+	executor := &stubSeatCapacity{consumeDecision: &rejected}
 	useSeatCapacity(t, executor)
-	testHandler.SeatCapacityEnforcementEnabled = false
 
 	req := newRequest("POST", "/api/invitations/"+invitationID+"/accept", nil)
 	req.Header.Set("X-User-ID", userID)
 	req = withURLParam(req, "id", invitationID)
 	rec := testutil.Call(t, testHandler.AcceptInvitation, req)
-	rec.Want(200)
+	rec.Want(409)
 
 	var invitationStatus string
 	if err := testPool.QueryRow(ctx, `SELECT status FROM workspace_invitation WHERE id = $1`, parseUUID(invitationID)).Scan(&invitationStatus); err != nil {
 		t.Fatal(err)
 	}
-	if invitationStatus != "accepted" {
-		t.Fatalf("invitation status = %q, want accepted", invitationStatus)
+	if invitationStatus != "expired" {
+		t.Fatalf("invitation status = %q, want expired", invitationStatus)
 	}
-	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 1 {
-		t.Fatalf("member count = %d, want 1", members)
+	if members := dbfx.Count(t, `SELECT count(*) FROM member WHERE workspace_id = $1 AND user_id = $2`, parseUUID(testWorkspaceID), parseUUID(userID)); members != 0 {
+		t.Fatalf("member count = %d, want 0", members)
 	}
 	if intents := dbfx.Count(t, `SELECT count(*) FROM seat_capacity_outbox WHERE operation_token = $1`, parseUUID(invitationID)); intents != 0 {
-		t.Fatalf("capacity intents = %d, want 0 after fail-open", intents)
+		t.Fatalf("capacity intents = %d, want 0 after denial", intents)
 	}
 	if executor.consumeCalls != 1 {
 		t.Fatalf("capacity consume calls = %d, want 1", executor.consumeCalls)

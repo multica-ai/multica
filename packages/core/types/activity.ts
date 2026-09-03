@@ -13,6 +13,9 @@ export interface TimelineEntry {
   actor_type: string;
   actor_id: string;
   created_at: string;
+  /** Display identity hydrated from the actor's global user row when available. */
+  actor_name?: string;
+  actor_avatar_url?: string;
   // Activity fields
   action?: string;
   details?: Record<string, unknown>;

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
-  ChildIssueProgressResponseSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -27,11 +26,14 @@ import {
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
   ChatPendingTaskSchema,
+  ChatSessionListSchema,
+  ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CHAT_PENDING_TASK,
+  EMPTY_CHAT_SESSION,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
@@ -96,41 +98,104 @@ const baseIssue = {
   updated_at: "2026-01-01T00:00:00Z",
 };
 
-describe("ChildIssueProgressResponseSchema", () => {
-  it("keeps older server responses compatible when visibility fields are absent", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{ parent_issue_id: "parent-1", total: 3, done: 1 }],
+describe("ChatSessionSchema", () => {
+  const baseSession = {
+    id: "chat-1",
+    workspace_id: "ws-1",
+    agent_id: "agent-1",
+    creator_id: "user-1",
+    title: "Channel chat",
+    status: "active",
+    has_unread: false,
+    created_at: "2026-08-18T00:00:00Z",
+    updated_at: "2026-08-18T00:00:00Z",
+  };
+
+  it("accepts channel route metadata and leaves it absent for first-party Chats", () => {
+    expect(ChatSessionSchema.parse(baseSession).channel_source).toBeUndefined();
+
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      channel_source: {
+        channel_type: "slack",
+        installation_id: "installation-1",
+        route_revision: 3,
+      },
+      is_current_channel_route: false,
     });
-    expect(parsed.progress[0]).toEqual({ parent_issue_id: "parent-1", total: 3, done: 1 });
+    expect(parsed.channel_source).toEqual({
+      channel_type: "slack",
+      installation_id: "installation-1",
+      route_revision: 3,
+    });
+    expect(parsed.is_current_channel_route).toBe(false);
   });
 
-  it("parses full and visible progress independently", () => {
-    const parsed = ChildIssueProgressResponseSchema.parse({
-      progress: [{
-        parent_issue_id: "parent-1",
-        total: 10,
-        done: 3,
-        visible_total: 4,
-        visible_done: 3,
-        hidden_total: 6,
-      }],
+  it("degrades malformed session metadata without dropping the Chat", () => {
+    const parsed = ChatSessionSchema.parse({
+      ...baseSession,
+      channel_source: { channel_type: 42 },
+      is_current_channel_route: "yes",
     });
-    expect(parsed.progress[0]?.hidden_total).toBe(6);
-    expect(parsed.progress[0]?.visible_total).toBe(4);
+    expect(parsed.channel_source).toBeUndefined();
+    expect(parsed.is_current_channel_route).toBeUndefined();
+    expect(parsed.id).toBe("chat-1");
+
+    expect(parseWithFallback({ id: 42 }, ChatSessionSchema, EMPTY_CHAT_SESSION, {
+      endpoint: "GET /api/chat/sessions/:id",
+    })).toEqual(EMPTY_CHAT_SESSION);
   });
 
-  it("falls back instead of exposing malformed progress to installed clients", () => {
-    const fallback = { progress: [] };
-    expect(parseWithFallback(
-      { progress: [{ parent_issue_id: "parent-1", total: "many", done: 1 }] },
-      ChildIssueProgressResponseSchema,
-      fallback,
-      { endpoint: "GET /api/issues/child-progress" },
-    )).toEqual(fallback);
+  it("drops one malformed list item without hiding the other Chats", () => {
+    const parsed = ChatSessionListSchema.parse([
+      baseSession,
+      { ...baseSession, id: 42 },
+      {
+        ...baseSession,
+        id: "onboarding-chat",
+        last_message: {
+          content: "Welcome",
+          role: "assistant",
+          created_at: "2026-08-18T00:00:00Z",
+          message_kind: "onboarding_opening",
+        },
+      },
+    ]);
+
+    expect(parsed.map((session) => session.id)).toEqual(["chat-1", "onboarding-chat"]);
+    expect(parsed[1]?.last_message?.message_kind).toBe("onboarding_opening");
   });
 });
-
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  // A custom status key can be derived rather than readable — "客户确认" becomes
+  // `in_review_2` — so the display name travels with it. The field has to
+  // survive a server that predates it, since an issue that fails validation
+  // degrades to a stub rather than losing one field. (MUL-6749)
+  it("carries a custom status's display name", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, status: "in_review_2", status_name: "客户确认" }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.status_name).toBe("客户确认");
+  });
+  it("drops only a malformed status_name, keeping the issue and the list", () => {
+    for (const bad of [42, { name: "x" }, ["x"], true]) {
+      const parsed = ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, status: "in_review_2", status_name: bad }],
+        total: 1,
+      });
+      expect(parsed.issues).toHaveLength(1);
+      expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+      expect(parsed.issues[0]?.status).toBe("in_review_2");
+      expect(parsed.issues[0]?.status_name).toBeUndefined();
+    }
+  });
+  it("still parses an issue from a server that does not send status_name", () => {
+    const { status_name: _omitted, ...withoutName } = { ...baseIssue, status_name: "x" };
+    const parsed = ListIssuesResponseSchema.parse({ issues: [withoutName], total: 1 });
+    expect(parsed.issues[0]?.id).toBe(baseIssue.id);
+    expect(parsed.issues[0]?.status_name).toBeUndefined();
+  });
   it("keeps the issue while independently dropping a malformed source context", () => {
     const parsed = ListIssuesResponseSchema.parse({
       issues: [{ ...baseIssue, source_context: { snapshot: "bad" } }],
@@ -491,6 +556,26 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+
+  it("preserves server-hydrated historical actor identity", () => {
+    const parsed = TimelineEntriesSchema.parse([
+      {
+        type: "comment",
+        id: "comment-1",
+        actor_type: "member",
+        actor_id: "former-user-1",
+        actor_name: "Former Member",
+        actor_avatar_url: "https://profiles.example.com/former.png",
+        created_at: "2026-01-01T00:00:00Z",
+        content: "Authored before leaving",
+      },
+    ]);
+
+    expect(parsed[0]?.actor_name).toBe("Former Member");
+    expect(parsed[0]?.actor_avatar_url).toBe(
+      "https://profiles.example.com/former.png",
+    );
   });
 });
 
@@ -1079,6 +1164,26 @@ describe("AppConfigSchema local_worktree_supported drift", () => {
   });
 });
 
+describe("AppConfigSchema agent_conversation_starters_supported drift", () => {
+  it("defaults to false when the server predates the persistence contract", () => {
+    expect(AppConfigSchema.parse({}).agent_conversation_starters_supported).toBe(false);
+  });
+
+  it("coerces a malformed declaration to false", () => {
+    expect(
+      AppConfigSchema.parse({ agent_conversation_starters_supported: "yes" })
+        .agent_conversation_starters_supported,
+    ).toBe(false);
+  });
+
+  it("carries a genuine declaration through", () => {
+    expect(
+      AppConfigSchema.parse({ agent_conversation_starters_supported: true })
+        .agent_conversation_starters_supported,
+    ).toBe(true);
+  });
+});
+
 describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
@@ -1452,6 +1557,7 @@ describe("RuntimeModelListRequestSchema", () => {
           default_level: "low",
         },
         service_tiers: [{ id: "fast", name: "Fast" }],
+        supports_explicit_standard_service_tier: true,
       },
     ],
   };
@@ -1470,6 +1576,9 @@ describe("RuntimeModelListRequestSchema", () => {
       { value: "high", label: "High" },
     ]);
     expect(parsed.models?.[0]?.service_tiers).toEqual([{ id: "fast", name: "Fast" }]);
+    expect(
+      parsed.models?.[0]?.supports_explicit_standard_service_tier,
+    ).toBe(true);
     expect(parsed.cached).toBeUndefined();
   });
 
@@ -1499,6 +1608,66 @@ describe("RuntimeModelListRequestSchema", () => {
     expect(parsed.cached).toBeUndefined();
   });
 
+  // MUL-6961: models the runtime cannot run arrive in their OWN list. The
+  // separation is the compatibility contract — a client that never learned the
+  // field reads `models` and therefore cannot offer one — so the schema must
+  // keep them apart rather than folding them together.
+  it("parses unavailable models without letting them into the selectable list", () => {
+    const parsed = parseWithFallback(
+      {
+        ...completed,
+        unavailable_models: [
+          {
+            id: "cc-update-required-1",
+            label: "Fable 5.1 (disabled)",
+            reason: "Update to 2.1.255+ to use Fable 5.1",
+          },
+        ],
+      },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.unavailable_models?.[0]?.id).toBe("cc-update-required-1");
+    expect(parsed.unavailable_models?.[0]?.reason).toBe(
+      "Update to 2.1.255+ to use Fable 5.1",
+    );
+    expect(parsed.models?.map((m) => m.id)).not.toContain(
+      "cc-update-required-1",
+    );
+  });
+
+  // An older daemon or server sends no such key. The picker then shows no
+  // unavailable section, which is exactly the pre-MUL-6961 behaviour.
+  it("tolerates a backend that omits unavailable models entirely", () => {
+    const parsed = parseWithFallback(
+      completed,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.unavailable_models).toBeUndefined();
+    expect(parsed.models?.length).toBe(1);
+  });
+
+  it("treats an older daemon that omits explicit-standard support as unsupported", () => {
+    const model = completed.models[0]!;
+    const {
+      supports_explicit_standard_service_tier: _omitted,
+      ...oldDaemonModel
+    } = model;
+    const parsed = parseWithFallback(
+      { ...completed, models: [oldDaemonModel] },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+
+    expect(
+      parsed.models?.[0]?.supports_explicit_standard_service_tier,
+    ).toBeUndefined();
+  });
+
   it("passes an unknown status through instead of failing the whole response", () => {
     const parsed = parseWithFallback(
       { ...completed, status: "superseded" },
@@ -1523,6 +1692,15 @@ describe("RuntimeModelListRequestSchema", () => {
       { ...completed, supported: "yes" },
       { ...completed, models: "nope" },
       { ...completed, models: [{ label: "no id" }] },
+      {
+        ...completed,
+        models: [
+          {
+            ...completed.models[0],
+            supports_explicit_standard_service_tier: "yes",
+          },
+        ],
+      },
     ]) {
       const parsed = parseWithFallback(
         malformed,

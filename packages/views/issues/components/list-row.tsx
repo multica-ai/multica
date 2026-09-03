@@ -25,18 +25,15 @@ import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
-import { useT } from "../../i18n";
+import { useLocale } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
   total: number;
-  visibleDone?: number;
-  visibleTotal?: number;
-  hiddenTotal?: number;
 }
 
-function formatDate(date: string): string {
-  return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
+function formatDate(date: string, locale: string): string {
+  return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
 }
 
 function ListRowContent({
@@ -58,7 +55,7 @@ function ListRowContent({
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
-  const { t } = useT("issues");
+  const locale = useLocale();
   const selection = useIssueSurfaceSelection();
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
@@ -113,7 +110,7 @@ function ListRowContent({
           newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <span className="w-16 shrink-0 text-caption text-muted-foreground">
+          <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={issue.id} />
@@ -129,11 +126,6 @@ function ListRowContent({
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
-                {(childProgress!.hiddenTotal ?? 0) > 0 && (
-                  <span className="text-micro text-warning tabular-nums font-medium">
-                    {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
-                  </span>
-                )}
               </span>
             )}
             {showLabels && (
@@ -170,12 +162,12 @@ function ListRowContent({
           )}
           {showStartDate && (
             <span className="shrink-0 text-caption text-muted-foreground">
-              {formatDate(issue.start_date!)}
+              {formatDate(issue.start_date!, locale)}
             </span>
           )}
           {showDueDate && (
             <span className="shrink-0 text-caption text-muted-foreground">
-              {formatDate(issue.due_date!)}
+              {formatDate(issue.due_date!, locale)}
             </span>
           )}
           {showAssignee && (

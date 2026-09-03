@@ -20,32 +20,36 @@ export type AutopilotUsageView =
 
 /**
  * Quota admission counts completed and reserved runs. Keep reserved work
- * visible so the progress bar matches the server's blocking decision. A
- * complete metered response is authoritative independently of entitlement
- * state; only the unlimited fallback comes from the entitlement response.
+ * visible so the progress bar matches the server's blocking decision for a
+ * limited workspace. Limit mode and the reached decision are server facts;
+ * this helper only prepares presentation values.
  */
 export function resolveAutopilotUsage(
   entitlements: WorkspaceSubscriptionEntitlements,
   usage: AutopilotQuotaUsage | undefined,
   failed: boolean,
-  allowEntitlementUnlimited: boolean,
 ): AutopilotUsageView {
+  if (entitlements.limits.autopilotRuns.mode === "unlimited") {
+    return { kind: "unlimited" };
+  }
+
   if (!failed && usage !== undefined && usage.action !== "off") {
-    const { used, reserved, limit, reset_at: resetAt } = usage;
+    const { used, reserved, total, limit, reached, reset_at: resetAt } = usage;
     if (
       used !== null &&
       reserved !== null &&
+      total !== null &&
       limit !== null &&
+      reached !== null &&
       resetAt !== null &&
       used >= 0 &&
       reserved >= 0 &&
       limit >= 0 &&
       Number.isFinite(used) &&
       Number.isFinite(reserved) &&
+      Number.isFinite(total) &&
       Number.isFinite(limit)
     ) {
-      const total = used + reserved;
-      const reached = total >= limit;
       const progress =
         limit === 0
           ? 100
@@ -64,45 +68,11 @@ export function resolveAutopilotUsage(
     }
   }
 
-  if (
-    allowEntitlementUnlimited &&
-    entitlements.plan === "pro" &&
-    entitlements.autopilotRuns === null
-  ) {
-    return { kind: "unlimited" };
-  }
-
   return { kind: "unavailable" };
 }
-
-const PURCHASABLE_SUBSCRIPTION_STATUSES = new Set([
-  "inactive",
-  "canceled",
-  "incomplete_expired",
-]);
 
 export function hasActiveWorkspaceSeatCapacity(
   summary: WorkspaceSubscriptionSummary | null | undefined,
 ): boolean {
   return summary?.seatCapacity != null;
-}
-
-export function hasWorkspaceBillingRelationship(
-  summary: WorkspaceSubscriptionSummary | null | undefined,
-): boolean {
-  return summary?.hasStripeCustomer === true;
-}
-
-/**
- * Checkout creates a new subscription. Cloud accepts an existing record only
- * after cancellation or incomplete setup expiry; every other known status may
- * still represent a live or recoverable subscription and stays in Portal.
- */
-export function canPurchaseWorkspaceSubscription(
-  entitlements: WorkspaceSubscriptionEntitlements,
-): boolean {
-  return (
-    entitlements.plan === "free" &&
-    PURCHASABLE_SUBSCRIPTION_STATUSES.has(entitlements.status)
-  );
 }

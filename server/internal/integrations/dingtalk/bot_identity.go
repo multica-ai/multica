@@ -131,6 +131,14 @@ func (r *BotNameResolver) Resolve(ctx context.Context, installation db.ChannelIn
 	if err != nil {
 		return "", err
 	}
+	return r.resolveCredentials(ctx, credentials, conversationID)
+}
+
+// resolveCredentials is the adapter-ingest entry point. The Stream channel
+// already owns the decrypted credentials, so normalization can share the exact
+// same cache and OpenAPI implementation as group-presence discovery without a
+// database round trip or a second resolver.
+func (r *BotNameResolver) resolveCredentials(ctx context.Context, credentials credentials, conversationID string) (string, error) {
 	identityKey := "identity\x00" + credentials.AppKey + "\x00" + credentials.RobotCode
 	if cached, ok := r.cached(identityKey); ok {
 		return cached.name, cached.err

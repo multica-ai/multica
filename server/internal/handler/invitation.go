@@ -109,7 +109,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		for _, expired := range expiredInvitations {
 			if err := enqueueCapacityRelease(r.Context(), h.Queries, uuid.UUID(expired.WorkspaceID.Bytes), uuid.UUID(expired.ID.Bytes)); err != nil {
 				writeError(w, http.StatusInternalServerError, "failed to release expired invitation capacity")
@@ -129,30 +129,41 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Consume every applicable budget only after validation and idempotency
-	// checks, but before the invitation row or email side effect is created.
-	if !h.admitInvitation(
-		w,
-		r,
-		uuidToString(requester.UserID),
-		uuidToString(requester.WorkspaceID),
-		email,
-	) {
-		return
-	}
-
 	// Resolve invitee_user_id if the user already exists.
 	var inviteeUserID pgtype.UUID
 	if existingUser.ID.Valid {
 		inviteeUserID = existingUser.ID
 	}
+	admission, ok := h.checkInvitationAdmission(
+		w,
+		r,
+		uuidToString(requester.UserID),
+		uuidToString(requester.WorkspaceID),
+		email,
+	)
+	if !ok {
+		return
+	}
 
 	invitationID := uuid.New()
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 	if err := h.reserveInvitationCapacity(r.Context(), uuid.UUID(requester.WorkspaceID.Bytes), invitationID, expiresAt); err != nil {
+		if isPersistentSeatCapacityAdmissionRejection(err) {
+			// Full and overcommitted workspaces cannot admit another member until
+			// their durable capacity facts change. Charge repeated attempts to the
+			// actor budget so this endpoint cannot hammer the capacity service,
+			// while preserving workspace and recipient budgets for a later valid
+			// invitation.
+			h.consumeInvitationActorAdmission(r, admission)
+		}
 		writeSeatCapacityError(w, err)
 		return
 	}
+
+	// The non-consuming abuse checks run before Cloud. Spend all budgets only
+	// after Cloud has secured capacity. Persistent capacity rejections spend the
+	// actor budget only in the branch above; transient failures spend none.
+	h.consumeInvitationAdmission(r, admission)
 
 	createParams := db.CreateInvitationParams{
 		ID: uuidToPG(invitationID), WorkspaceID: requester.WorkspaceID, InviterID: requester.UserID,
@@ -313,7 +324,7 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "invitation not found")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
 			return
@@ -323,7 +334,7 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to revoke invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 
@@ -641,7 +652,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		if err := enqueueCapacityRelease(r.Context(), qtx, uuid.UUID(inv.WorkspaceID.Bytes), uuid.UUID(inv.ID.Bytes)); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 			return
@@ -651,7 +662,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to decline invitation")
 		return
 	}
-	if h.seatCapacitySettlementEnabled() {
+	if h.seatCapacityEnabled() {
 		h.compensateCapacityIntent(r.Context(), uuid.UUID(inv.ID.Bytes))
 	}
 

@@ -207,6 +207,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude` | Anthropic's coding agent |
 | [Antigravity CLI](https://antigravity.google/docs/cli-install) | `agy` | Google Antigravity CLI |
 | [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) | `codebuddy` | Tencent CodeBuddy Code (reads `CODEBUDDY.md`, not `CLAUDE.md`) |
+| [Huawei Cloud CodeArts](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0001.html) | `codearts` | Huawei Cloud coding agent (OpenCode-compatible JSON protocol) |
 | [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) | `deveco` | OpenHarmony DevEco Code |
 | [Codex](https://github.com/openai/codex) | `codex` | OpenAI's coding agent |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot) | `copilot` | GitHub's coding agent (model routed by your GitHub entitlement) |
@@ -234,7 +235,7 @@ You need at least one installed. The daemon registers each detected CLI as an av
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace
-2. It polls the server at a configurable interval (default: 3s) for claimed tasks
+2. The server pushes a wake signal over the WebSocket connection when work is waiting, and the daemon claims across all of its runtimes in one batch. A periodic poll (default: 30s) runs as the catch-up path — a wake signal cuts the wait short, so this interval puts no floor under normal task pickup; it bounds how long work can sit when a signal is missed or the connection is down
 3. When a task arrives, it creates an isolated workspace directory, spawns the agent CLI, and streams results back
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
@@ -245,10 +246,14 @@ Daemon behavior is configured via flags or environment variables:
 
 | Setting | Flag | Env Variable | Default |
 |---------|------|--------------|---------|
-| Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` |
+| Poll interval | `--poll-interval` | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` (catch-up fallback; WebSocket wake signals deliver work sooner) |
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
-| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
+| Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
+| Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
+| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as the idle watchdog (Codex's timer is not tool-aware, so it tracks the larger of the idle / tool budgets) |
+| Codex first-turn no-progress timeout | — | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` (keeps the built-in `60s` ceiling) |
+| Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start` and `thread/resume`: `60s` (an explicit value overrides both budgets globally) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
@@ -304,6 +309,8 @@ Agent-specific overrides:
 | `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
 | `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
 | `MULTICA_CODEBUDDY_ARGS` | Default extra arguments for CodeBuddy runs |
+| `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
+| `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_DEVECO_PATH` | Custom path to the `deveco` binary |
 | `MULTICA_DEVECO_MODEL` | Override the DevEco Code model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
@@ -497,15 +504,23 @@ multica issue list --status todo --sort position       # board order (the defaul
 multica issue list --sort created_at --direction desc  # newest first
 ```
 
-Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
+Table output shows a routable issue `KEY` such as `MUL-123`; copy that key into follow-up commands like `issue get`, `issue comment list`, `issue status`, or `--parent`. Add `--full-id` when you need canonical UUIDs. Available filters: `--status`, `--priority`, `--assignee` / `--assignee-id`, `--project`, `--metadata`, `--property`, `--limit`. Use `--assignee-id <uuid>` for unambiguous filtering when names overlap.
 
-Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, or `priority`.
+Results come back in board order (`position`, ascending) by default. Pass `--sort` to change the column (`position`, `title`, `created_at`, `start_date`, `due_date`, `priority`, or `property:<name-or-id>` for a custom property — select properties order by option order, and issues without the property sort last) and `--direction asc|desc` to flip the order. `position` is always ascending (it is the manual drag order), so `--direction` is rejected when `--sort` is `position` or omitted — use it only with `title`, `created_at`, `start_date`, `due_date`, `priority`, or a `property:` sort.
 
 Use `--metadata key=value` (repeatable; combined with AND) to filter by per-issue metadata. The value is JSON-parsed: `true`/`false` become bool, numbers become numbers, anything else is a string. Wrap as `'"42"'` to force a string when the value would otherwise sniff as a number:
 
 ```bash
 multica issue list --metadata pipeline_status=waiting_review
 multica issue list --metadata pr_number=482 --metadata is_blocked=true
+```
+
+Use `--property "Name=Value"` (repeatable; one value per flag) to filter by custom property. Names and select option values are case-insensitive and resolve to ids; repeating the same property matches any of its values, different properties must all match. Values are option names or ids (select types), `true`/`false` (checkbox), a member name, email, or id (actor types), or the stored value itself for `text`, `url`, `number`, and `date` (`YYYY-MM-DD`). Only `=` is supported today; the `>=`, `<=` and `!=` spellings are reserved for comparison filters and are rejected. The reserved value `__none__` matches issues where the property is unset:
+
+```bash
+multica issue list --property "Impact=High" --property "Impact=Medium"
+multica issue list --property "Impact=__none__" --status in_review
+multica issue list --property "Score=42" --property "Ship Date=2026-08-28"
 ```
 
 ### Get Issue
@@ -694,6 +709,23 @@ multica issue runs <issue-id>
 multica issue runs <issue-id> --full-id
 multica issue runs <issue-id> --output json
 
+# Only work in flight (queued / dispatched / running / waiting_local_directory)
+multica issue runs <issue-id> --active --output json
+
+# ...and across the sub-issue family: the issue's parent (or itself, when it has
+# no parent) plus every child of that parent, each row labelled with its issue.
+# Answers "is another agent already working next to me?" before you start
+# overlapping code or PR work. Advisory only — it reserves nothing.
+#
+# Returns a compact per-run row — task_id, issue_id, issue_identifier,
+# issue_title, agent_id, status, created_at, started_at — not the full
+# execution-log record. Follow a task_id with `issue run-messages` for detail.
+#
+# Ordered running-first, newest-first within a status, capped at 20 rows. When
+# the cap truncates the answer the server sets X-Active-Runs-Truncated and the
+# CLI warns on stderr, so a short list is never mistaken for a complete one.
+multica issue runs <issue-id> --siblings --output json
+
 # View messages for a specific execution run
 multica issue run-messages <task-id>
 multica issue run-messages <short-task-id> --issue <issue-id>
@@ -835,6 +867,11 @@ multica autopilot get <id>
 multica autopilot get <id> --output json   # includes triggers
 ```
 
+In JSON output `triggers` is a **top-level key alongside `autopilot`**, not nested
+inside it — the payload is `{"autopilot": {...}, "triggers": [...], "collaborators": [...]}`.
+Read trigger ids with `jq '.triggers[].id'`, or use `autopilot trigger-list` below.
+The table output shows only the autopilot's own fields, not its triggers.
+
 ### Create / Update / Delete
 
 ```bash
@@ -871,12 +908,22 @@ multica autopilot runs <id> --limit 50 --output json
 ### Schedule Triggers
 
 ```bash
+multica autopilot trigger-list <autopilot-id>              # ids, kind, schedule, next run
+multica autopilot trigger-list <autopilot-id> --full-id    # canonical UUIDs
 multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
 multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
 multica autopilot trigger-delete <autopilot-id> <trigger-id>
 ```
 
-Only cron-based `schedule` triggers are currently exposed via the CLI. The data model also defines `webhook` and `api` kinds, but there is no server endpoint that fires them yet, so they're not surfaced here.
+`trigger-list` is the way to obtain the `<trigger-id>` that `trigger-update`,
+`trigger-delete` and `trigger-rotate-url` require. Like autopilot ids, trigger ids
+may be passed as a short prefix as long as it is unique within that autopilot; use
+`--full-id` to print canonical UUIDs. Webhook credentials are redacted in this
+output — use `autopilot get <id> --output json --show-secrets` to reveal them.
+
+The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
+triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
+also defines an `api` kind, which is not surfaced here.
 
 ## Other Commands
 
@@ -973,3 +1020,47 @@ always at least this value, so raising it takes effect across all commands.
 ```bash
 MULTICA_HTTP_TIMEOUT=60s multica issue list
 ```
+
+### Stall detection (skill commands)
+
+A total-elapsed timeout punishes the transfer that is working: a large skill
+arriving steadily over a slow link is cut off mid-body, while a dead connection
+is held open for the full budget. The `skill` commands therefore fail on a lack
+of *progress* instead:
+
+- A read that receives no bytes for **15 seconds** fails immediately, reported
+  as a stalled transfer rather than a timeout.
+- A transfer that keeps producing bytes runs to completion, however long it
+  takes, behind a loose **10 minute** whole-request ceiling.
+
+Override the no-progress budget with `MULTICA_HTTP_STALL_TIMEOUT` (same format
+as `MULTICA_HTTP_TIMEOUT`). If only `MULTICA_HTTP_TIMEOUT` is set it applies on
+this path too, as the no-progress budget — it keeps meaning "the longest I will
+wait for this server", not "the longest this download may take".
+
+```bash
+MULTICA_HTTP_STALL_TIMEOUT=45s multica skill get <id>
+```
+
+Every other command still uses the total-elapsed timeout above. Stall detection
+starts here because skill payloads are the largest responses the CLI reads; the
+mechanism itself is not skill-specific.
+
+### Skill payload size
+
+`multica skill get` and `multica skill files list` return **metadata only** by
+default — path, byte size and content hash for each file, plus the size and
+hash of the SKILL.md body. Sizes are what tell you which file makes a skill
+large, and they stay available no matter how large it gets.
+
+Pass `--with-content` when you actually need the bodies:
+
+```bash
+multica skill files list <id>                  # paths and sizes
+multica skill files list <id> --with-content   # bodies inlined
+```
+
+On the API, both endpoints accept `?include=content` and `?include=metadata`.
+A request that sends neither still gets `content`, on both endpoints, so a
+server upgrade never changes what an un-upgraded client receives — it is the
+CLI that asks for the smaller shape.

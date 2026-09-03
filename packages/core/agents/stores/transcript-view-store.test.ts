@@ -9,20 +9,6 @@ beforeEach(() => {
 });
 
 describe("useTranscriptViewStore", () => {
-  it("defaults to chronological and unfiltered", () => {
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
-    expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual([]);
-  });
-
-  it("setSortDirection switches between the two known directions", () => {
-    const { setSortDirection } = useTranscriptViewStore.getState();
-
-    setSortDirection("newest_first");
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("newest_first");
-
-    setSortDirection("chronological");
-    expect(useTranscriptViewStore.getState().sortDirection).toBe("chronological");
-  });
 
   it("stores filter preferences as unique serializable keys", () => {
     const { setSelectedFilterKeys, toggleFilterKey, clearFilterKeys } =

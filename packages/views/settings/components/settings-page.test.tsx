@@ -42,6 +42,7 @@ const navigationState = { search: "" };
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
     searchParams: new URLSearchParams(navigationState.search),
+    hash: "",
     pathname: "/acme/settings",
     replace,
   }),

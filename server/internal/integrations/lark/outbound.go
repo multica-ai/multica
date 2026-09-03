@@ -144,6 +144,7 @@ func (defaultRenderer) Render(in RenderInput) (CardRender, error) {
 type PatcherQueries interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
+	GetChannelTaskDelivery(ctx context.Context, taskID pgtype.UUID) (db.ChannelTaskDelivery, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetLarkInstallation(ctx context.Context, id pgtype.UUID) (Installation, error)
@@ -339,13 +340,21 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 		return nil
 	}
 
-	binding, err := p.queries.GetLarkChatSessionBindingBySession(ctx, chatSessionID)
+	delivery, err := p.queries.GetChannelTaskDelivery(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Web-only chat session — not a Lark target.
+			// Direct Multica task or violated snapshot invariant — fail closed.
 			return nil
 		}
-		return fmt.Errorf("lookup chat session binding: %w", err)
+		return fmt.Errorf("lookup lark task delivery: %w", err)
+	}
+	if delivery.ChannelType != channelTypeFeishu {
+		return nil
+	}
+	binding := ChatSessionBinding{
+		ID: delivery.BindingID, InstallationID: delivery.InstallationID,
+		ChannelChatID: delivery.ChannelChatID, ChatType: delivery.ChatType, Config: delivery.Config,
+		LastMessageID: delivery.ChannelMessageID, LastThreadID: delivery.ChannelThreadID,
 	}
 
 	// Only bound sessions reach here, so classify the task origin before

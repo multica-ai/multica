@@ -1,6 +1,6 @@
 ---
 title: AI コーディングツールをインストールする
-description: 対応する AI コーディングツールをインストールしてログインし、Multica がローカル環境でタスクを実行できるようにします。
+description: 対応する AI コーディングツールをインストールしてログインし、Multica がローカル環境で作業を実行できるようにします。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -18,6 +18,7 @@ Multica は現在、次のコマンドを検出します。
 | Antigravity CLI | `agy` | [Antigravity のインストールとログイン](https://antigravity.google/docs/cli-install) |
 | Claude Code | `claude` | [Claude Code クイックスタート](https://code.claude.com/docs/en/quickstart) |
 | CodeBuddy Code | `codebuddy` | [CodeBuddy クイックスタート](https://www.codebuddy.ai/docs/cli/quickstart) |
+| CodeArts | `codearts` | [CodeArts CLI クイックスタート](https://support.huaweicloud.com/qs-codeartssnap/codeartsagent_qs_0004.html) |
 | Codex CLI | `codex` | [Codex CLI](https://developers.openai.com/codex/cli/) |
 | GitHub Copilot CLI | `copilot` | [Copilot CLI のインストール](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) |
 | Cursor Agent | `cursor-agent` | [Cursor CLI のインストール](https://docs.cursor.com/en/cli/installation) |
@@ -45,6 +46,8 @@ Multica は現在、次のコマンドを検出します。
 ## 2. ローカル環境でログインする
 
 インストール後、まずターミナルからツールを単独で起動し、各ツールの手順に従ってログインするか、モデルプロバイダーを設定してください。ターミナル上でリクエストを実行できない場合は、デーモンから呼び出しても失敗します。
+
+CodeArts では、TUI だけでなく `codearts run --model provider/model "OK とだけ返してください"` で非対話モードを確認してください。現在の CodeArts CLI では、カスタム provider が TUI で動作しても、`run`、`models`、`serve` には引き続き [`CODEARTS_CLI_AK` / `CODEARTS_CLI_SK`](https://support.huaweicloud.com/usermanual-cli/codeartsagent_cli_0026.html) が必要な場合があります。Multica は `~/.codeartsdoer/codearts_cli.json` または `.jsonc` からカスタムモデルを検出できますが、作業実行には `codearts run` を使用するため、その認証要件に従います。
 
 Reasonix を使う場合は、デーモンを起動する前に `reasonix setup` を実行し、デフォルトのプロバイダーとモデルを設定してください。
 
@@ -112,7 +115,7 @@ Multica Desktop を使っている場合は、アプリを終了して開き直�
 4. デーモンを再起動し、現在の環境を読み込み直します。
 5. **ランタイム**ページに戻り、コンピューターとツールがどちらもオンラインであることを確認します。
 
-ツールがオンラインと表示されているのに実行が失敗する場合は、イシューの実行ログで CLI が返した具体的なエラーを確認するか、[トラブルシューティング](/troubleshooting)を参照してください。
+ツールがオンラインと表示されているのに実行が失敗する場合は、タスクの実行ログで CLI が返した具体的なエラーを確認するか、[トラブルシューティング](/troubleshooting)を参照してください。
 
 ## 次のステップ
 

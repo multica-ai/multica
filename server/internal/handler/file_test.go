@@ -36,8 +36,10 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 
 	var sessionID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		VALUES ($1, $2, $3, $4, 'active')
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, title, status, explicitly_created_at
+		)
+		VALUES ($1, $2, $3, $4, 'active', now())
 		RETURNING id
 	`, testWorkspaceID, agentID, testUserID, "Handler Test Chat Session").Scan(&sessionID); err != nil {
 		t.Fatalf("failed to create handler test chat session: %v", err)
@@ -57,6 +59,8 @@ type mockStorage struct {
 	files               map[string][]byte
 	presignCalls        []string
 	presignDispositions []string
+	getReaderCalls      int
+	uploadStreamCalls   int
 }
 
 func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ string, _ string) (string, error) {
@@ -70,6 +74,9 @@ func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ strin
 }
 
 func (m *mockStorage) UploadStream(ctx context.Context, key string, reader io.Reader, _ int64, contentType string, filename string) (string, error) {
+	m.mu.Lock()
+	m.uploadStreamCalls++
+	m.mu.Unlock()
 	data, err := io.ReadAll(reader)
 	if err != nil {
 		return "", err
@@ -115,10 +122,16 @@ func (m *mockStorageNoCdn) CdnDomain() string { return "" }
 func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.getReaderCalls++
 	if data, ok := m.files[key]; ok {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	return nil, fmt.Errorf("mockStorage GetReader: key not found: %q", key)
+}
+func (m *mockStorage) streamCopyCalls() (getReader, uploadStream int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getReaderCalls, m.uploadStreamCalls
 }
 func (m *mockStorage) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
 	m.mu.Lock()

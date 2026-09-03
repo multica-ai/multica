@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1077,16 +1079,136 @@ const (
 	// cannot collide with a real option id (select option ids are UUIDs and
 	// checkbox uses "true"/"false").
 	noPropertyValue = "__none__"
+	// operatorPatternKey marks a compiled operator alternative (see
+	// parsePropertiesFilterParam). Neither this nor the sibling keys spell a
+	// UUID, so the marker can never collide with a containment pattern, whose
+	// single key is the definition id.
+	operatorPatternKey = "__op__"
 )
+
+// propertyFilterOperator is a structured member of a properties filter —
+// {"op": "contains", "value": "foo"} — alongside plain string members, which
+// keep meaning exact equality. Op semantics:
+//
+//   - contains: case-insensitive substring over the value's text form
+//     (text / url).
+//   - gt / gte / lt / lte: numeric comparison, matched only against stored
+//     jsonb numbers (number).
+//   - before / after: lexicographic comparison against stored strings, which
+//     is chronological for the "YYYY-MM-DD" date-only strings date
+//     properties store (date).
+type propertyFilterOperator struct {
+	Op    string `json:"op"`
+	Value string `json:"value"`
+}
+
+// propertyOperatorPattern is the compiled operator alternative: the JSON
+// object {"__op__": "<op>", "def": "<definitionId>", "value": "<value>"} that
+// both propertiesFilterPredicate and the static ListOpenIssues unroll
+// recognize. For `contains` the value is stored already ILIKE-escaped so both
+// consumers can concatenate it into the pattern directly.
+type propertyOperatorPattern struct {
+	Op    string `json:"__op__"`
+	Def   string `json:"def"`
+	Value string `json:"value"`
+	// Prefilter repeats Value for the `contains` needles worth pre-screening
+	// against LOWER(properties::text) (see prefilterableContainsNeedle). It is
+	// absent — never empty — for the rest, so the static unroll can test for
+	// the key.
+	Prefilter string `json:"prefilter,omitempty"`
+}
+
+var propertyFilterOps = map[string]string{
+	"contains": "",
+	"gt":       ">",
+	"gte":      ">=",
+	"lt":       "<",
+	"lte":      "<=",
+	"before":   "<",
+	"after":    ">",
+}
+
+// escapeLikePattern escapes SQL LIKE wildcards for a literal substring match
+// under the default backslash escape character.
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
+}
+
+// prefilterableContainsNeedle reports whether a raw `contains` needle may be
+// pre-screened against LOWER(properties::text), the expression
+// idx_issue_properties_bigm indexes (migration 446). A needle that cannot falls
+// back to today's per-key-only filtering: slower on a large workspace, never
+// wrong.
+//
+// The one disqualifier is JSON escaping. Postgres writes jsonb strings through
+// escape_json, which escapes `"`, `\` and every character below U+0020; a
+// needle containing one of those has no literal occurrence in properties::text,
+// so pre-screening on it would drop rows the per-key ILIKE does match.
+//
+// Everything else matches literally and is prefiltered, however short. CJK and
+// other non-ASCII text is passed through by escape_json in every server
+// encoding, and pg_bigm indexes 1- and 2-character keywords — the capability it
+// exists for over pg_trgm, and the length at which a CJK needle is already a
+// real word. Length is deliberately not a condition here: excluding short
+// needles would exclude exactly the searches this index was chosen to serve.
+func prefilterableContainsNeedle(needle string) bool {
+	return !strings.ContainsFunc(needle, func(r rune) bool {
+		return r == '"' || r == '\\' || r < 0x20
+	})
+}
+
+// validatePropertyFilterOperator checks one operator member and returns the
+// compiled pattern. The value rules mirror the legacy string rules: non-empty,
+// bounded, and only comparable shapes (a float for numeric ops, a real
+// date-only string for before/after).
+func validatePropertyFilterOperator(definitionID string, op propertyFilterOperator) (propertyOperatorPattern, error) {
+	if _, known := propertyFilterOps[op.Op]; !known {
+		return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q is not supported", op.Op)
+	}
+	if op.Value == "" {
+		return propertyOperatorPattern{}, errors.New("properties filter operator values cannot be empty")
+	}
+	pattern := propertyOperatorPattern{Op: op.Op, Def: definitionID, Value: op.Value}
+	switch op.Op {
+	case "contains":
+		if utf8.RuneCountInString(op.Value) > maxPropertyTextValueLen {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter value must be %d characters or fewer", maxPropertyTextValueLen)
+		}
+		pattern.Value = escapeLikePattern(op.Value)
+		if prefilterableContainsNeedle(op.Value) {
+			pattern.Prefilter = pattern.Value
+		}
+	case "gt", "gte", "lt", "lte":
+		num, err := strconv.ParseFloat(op.Value, 64)
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a finite number", op.Op)
+		}
+		// Canonicalize to plain decimal before storing: ParseFloat accepts forms
+		// Postgres ::numeric rejects ("0x1p4" hex-float, "1_000" underscores on
+		// older PG), and the static open_only unroll casts this exact string
+		// inside SQL — an uncanonicalized value would 500 that path while the
+		// dynamic path (which binds the parsed float) succeeds.
+		pattern.Value = strconv.FormatFloat(num, 'f', -1, 64)
+	case "before", "after":
+		if _, err := time.Parse("2006-01-02", op.Value); err != nil {
+			return propertyOperatorPattern{}, fmt.Errorf("properties filter op %q requires a YYYY-MM-DD date", op.Op)
+		}
+	}
+	return pattern, nil
+}
 
 // parsePropertiesFilterParam reads the `properties` query parameter — a JSON
 // object of {<definitionId>: [<value>, ...]} — and compiles it into OR-groups
-// of containment objects: OR within a definition, AND across definitions.
+// of alternatives: OR within a definition, AND across definitions.
 //
-// Values are option ids for select/multi_select and "true"/"false" for
-// checkbox. The stored value shape differs per type (string, array element,
-// boolean), so each value expands to every containment form it could match;
-// forms that can't match are simply never satisfied.
+// A plain string member means equality; it expands to every containment form
+// it could match (option id string, array element, boolean, jsonb number),
+// and the forms that can't match are simply never satisfied. Values are
+// option ids for select/multi_select and "true"/"false" for checkbox.
+//
+// An object member {"op", "value"} is a scalar operator (see
+// propertyFilterOperator) and compiles to one operator pattern.
 //
 // The special value noPropertyValue ("__none__") means "unset": it emits the
 // marker object {"__none__": "<definitionId>"} that parseNoPropertyValuePattern
@@ -1097,7 +1219,7 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 	if raw == "" {
 		return nil, true
 	}
-	var parsed map[string][]string
+	var parsed map[string][]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		writeError(w, http.StatusBadRequest, "properties filter must be a JSON object of {definitionId: [values]}")
 		return nil, false
@@ -1131,32 +1253,65 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			return true
 		}
 		hasNoValue := false
-		for _, value := range values {
-			if value == "" {
-				writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
-				return nil, false
-			}
-			if value == noPropertyValue {
-				if hasNoValue {
+		for _, rawValue := range values {
+			// A plain string member keeps the legacy equality semantics.
+			var stringValue string
+			if err := json.Unmarshal(rawValue, &stringValue); err == nil {
+				value := stringValue
+				if value == "" {
+					writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
+					return nil, false
+				}
+				if value == noPropertyValue {
+					if hasNoValue {
+						continue
+					}
+					marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
+					if err != nil {
+						writeError(w, http.StatusBadRequest, "properties filter is invalid")
+						return nil, false
+					}
+					alternatives = append(alternatives, marker)
+					hasNoValue = true
 					continue
 				}
-				marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
-				if err != nil {
-					writeError(w, http.StatusBadRequest, "properties filter is invalid")
+				if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
 					return nil, false
 				}
-				alternatives = append(alternatives, marker)
-				hasNoValue = true
+				if value == "true" || value == "false" {
+					if !appendAlt(value == "true") { // checkbox boolean
+						return nil, false
+					}
+				}
+				if num, err := strconv.ParseFloat(value, 64); err == nil &&
+					!math.IsNaN(num) && !math.IsInf(num, 0) {
+					// number property scalar: a numeric filter value must match the
+					// stored jsonb number, not the string form appended above. NaN /
+					// Infinity are skipped: they are not representable as JSON, so
+					// marshaling them would 400 the whole filter.
+					if !appendAlt(num) {
+						return nil, false
+					}
+				}
 				continue
 			}
-			if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
+			// An object member is a scalar operator.
+			var op propertyFilterOperator
+			if err := json.Unmarshal(rawValue, &op); err != nil || op.Op == "" {
+				writeError(w, http.StatusBadRequest, "properties filter values must be strings or {op, value} objects")
 				return nil, false
 			}
-			if value == "true" || value == "false" {
-				if !appendAlt(value == "true") { // checkbox boolean
-					return nil, false
-				}
+			pattern, err := validatePropertyFilterOperator(definitionID, op)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return nil, false
 			}
+			buf, marshalErr := json.Marshal(pattern)
+			if marshalErr != nil {
+				writeError(w, http.StatusBadRequest, "properties filter is invalid")
+				return nil, false
+			}
+			alternatives = append(alternatives, buf)
 		}
 		totalAlternatives += len(alternatives)
 		groups = append(groups, alternatives)
@@ -1185,15 +1340,81 @@ func parseNoPropertyValuePattern(alt json.RawMessage) (string, bool) {
 	return defID, ok
 }
 
-// propertiesFilterPredicate renders the AND-of-ORs containment check for a
-// compiled filter as plain `i.properties @> $n` disjunctions with one bind
-// parameter per alternative. Constant containment operands are what lets the
-// planner drive the jsonb_path_ops GIN index (a correlated
+// parseOperatorPattern reports whether an alternative is a compiled scalar
+// operator (see parsePropertiesFilterParam) and returns its parts. Containment
+// patterns never carry the "__op__" key, so the two shapes cannot be confused.
+func parseOperatorPattern(alt json.RawMessage) (propertyOperatorPattern, bool) {
+	var marker map[string]string
+	if err := json.Unmarshal(alt, &marker); err != nil {
+		return propertyOperatorPattern{}, false
+	}
+	op, hasOp := marker[operatorPatternKey]
+	def, hasDef := marker["def"]
+	if !hasOp || !hasDef {
+		return propertyOperatorPattern{}, false
+	}
+	return propertyOperatorPattern{Op: op, Def: def, Value: marker["value"], Prefilter: marker["prefilter"]}, true
+}
+
+// operatorPatternPredicate renders one operator alternative as SQL. Ops were
+// validated at parse time, so the re-parses below cannot fail for compiled
+// input; a malformed pattern degrades to FALSE rather than matching.
+func operatorPatternPredicate(pattern propertyOperatorPattern, addArg func(any) string) string {
+	defArg := addArg(pattern.Def)
+	switch pattern.Op {
+	case "contains":
+		// Value is ILIKE-escaped at parse time. Restrict substring matching to
+		// stored strings: ->> also serializes numbers, booleans, and arrays, while
+		// the client matcher intentionally treats contains as a text/url operator.
+		match := fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND (i.properties ->> %s) ILIKE '%%' || %s || '%%')",
+			defArg, defArg, addArg(pattern.Value))
+		if pattern.Prefilter == "" {
+			return match
+		}
+		// Redundant prefilter over the whole object's text form, which
+		// idx_issue_properties_bigm indexes (migration 446). The per-key check
+		// above still decides the result — this one only narrows the candidate
+		// set from "every issue in the workspace" to what the bigram index
+		// returns, and by construction (prefilterableContainsNeedle) never
+		// drops a row the per-key check would keep.
+		//
+		// LOWER(...) LIKE LOWER(...) rather than a second ILIKE: pg_bigm 1.2 has
+		// no ILIKE index scan (migration 036), and lowering both sides in SQL is
+		// exactly how ILIKE folds case, so the two cannot disagree.
+		return fmt.Sprintf("(LOWER(i.properties::text) LIKE LOWER('%%' || %s || '%%') AND %s)",
+			addArg(pattern.Prefilter), match)
+	case "gt", "gte", "lt", "lte":
+		// Bind the canonical decimal as numeric on every serving path. CASE makes
+		// the jsonb type guard structural instead of relying on SQL qualifier
+		// evaluation order before the cast.
+		num, err := strconv.ParseFloat(pattern.Value, 64)
+		if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
+			return "FALSE"
+		}
+		canonical := strconv.FormatFloat(num, 'f', -1, 64)
+		return fmt.Sprintf("(CASE WHEN jsonb_typeof(i.properties -> %s) = 'number' THEN (i.properties ->> %s)::numeric END %s %s::numeric)",
+			defArg, defArg, propertyFilterOps[pattern.Op], addArg(canonical))
+	case "before", "after":
+		return fmt.Sprintf("(jsonb_typeof(i.properties -> %s) = 'string' AND i.properties ->> %s %s %s)",
+			defArg, defArg, propertyFilterOps[pattern.Op], addArg(pattern.Value))
+	default:
+		return "FALSE"
+	}
+}
+
+// propertiesFilterPredicate renders the AND-of-ORs filter check with one bind
+// parameter per alternative. Equality alternatives are plain
+// `i.properties @> $n` containment disjunctions — constant operands are what
+// lets the planner drive the jsonb_path_ops GIN index (a correlated
 // jsonb_array_elements form defeats it — verified via EXPLAIN in review).
 //
 // A "no value" marker alternative renders as a key-absence disjunction —
 // `NOT (i.properties ? $m)` — which cannot use the GIN index but is exact for
-// the unset state (property values are never null; DELETE unsets).
+// the unset state (property values are never null; DELETE unsets). An operator
+// alternative renders as its typed comparison (ILIKE / numeric / date string):
+// scalar ranges fundamentally cannot use a containment index, and only
+// `contains` gets an indexable prefilter in front of it (see
+// operatorPatternPredicate).
 func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) string) string {
 	groupSQL := make([]string, 0, len(groups))
 	for _, alternatives := range groups {
@@ -1201,6 +1422,10 @@ func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) stri
 		for _, alt := range alternatives {
 			if defID, ok := parseNoPropertyValuePattern(alt); ok {
 				ors = append(ors, fmt.Sprintf("NOT (i.properties ? %s)", addArg(defID)))
+				continue
+			}
+			if pattern, ok := parseOperatorPattern(alt); ok {
+				ors = append(ors, operatorPatternPredicate(pattern, addArg))
 				continue
 			}
 			ors = append(ors, fmt.Sprintf("i.properties @> %s::jsonb", addArg(string(alt))))
@@ -1249,13 +1474,50 @@ func (h *Handler) propertySortExpr(r *http.Request, workspaceID string, sortValu
 	}
 	// uuidToString re-serializes the parsed UUID: hex and dashes only, safe
 	// to embed in the ORDER BY string.
+	//
+	// The literal token "::numeric" in the number and select branches is a
+	// contract, not a formatting choice: issueTableOrderBy sniffs it
+	// (strings.Contains) to give the keyset cursor a numeric cast instead of
+	// text. Writing e.g. "::integer" would silently break table pagination.
 	id := uuidToString(def.ID)
 	switch def.Type {
 	case "number":
 		return fmt.Sprintf("CASE WHEN jsonb_typeof(i.properties->'%s') = 'number' THEN (i.properties->>'%s')::numeric END", id, id), true, nil
-	case "date", "text", "url", "select":
+	case "select":
+		return selectPropertySortExpr(id, parsePropertyConfig(def.Config)), true, nil
+	case "date", "text", "url":
 		return fmt.Sprintf("NULLIF(i.properties->>'%s', '')", id), true, nil
 	default: // multi_select, checkbox, future types: no meaningful order
 		return "", true, nil
 	}
+}
+
+// selectPropertySortExpr ranks a select property's stored value by its
+// position in the definition's option list, so an ordinal scale (Low < Medium
+// < High) sorts by meaning rather than by the option-id string. A stored value
+// no longer in the config — and an issue without the property — yields NULL,
+// which the callers order last.
+//
+// Each CASE arm embeds the option id's ORIGINAL config spelling: explicit ids
+// are stored as supplied (validatePropertyConfig trims but does not
+// re-serialize), and issue values must equal that spelling exactly, so a
+// canonicalized form would never match. Embedding is inert because uuid.Parse
+// gates every arm and its accepted grammar (hex, dashes, braces, urn:uuid:
+// prefix) admits no quote or backslash. An empty or malformed config — the API
+// enforces at least one option, so only a corrupt row — degrades to "" and the
+// caller keeps position order, like an unknown definition.
+func selectPropertySortExpr(defID string, cfg PropertyConfig) string {
+	var b strings.Builder
+	rank := 0
+	for _, opt := range cfg.Options {
+		if _, err := uuid.Parse(opt.ID); err != nil {
+			continue
+		}
+		fmt.Fprintf(&b, " WHEN '%s' THEN %d", opt.ID, rank)
+		rank++
+	}
+	if rank == 0 {
+		return ""
+	}
+	return fmt.Sprintf("(CASE i.properties->>'%s'%s END)::numeric", defID, b.String())
 }

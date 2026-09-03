@@ -143,6 +143,7 @@ function makeAdapter(
     back: vi.fn(),
     pathname: "/acme/skills",
     searchParams: new URLSearchParams(),
+    hash: "",
     getShareableUrl: (p) => p,
     openInNewTab: vi.fn(),
     ...overrides,

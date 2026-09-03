@@ -95,7 +95,6 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	args = append(args, filterCustomArgs(opts.CustomArgs, mcodeBlockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	configureProcessGroup(cmd)
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			signalProcessGroup(cmd, syscall.SIGKILL)

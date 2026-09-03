@@ -261,6 +261,16 @@ func TestWorkingOnIssuesSkillCoversIssueLoopContracts(t *testing.T) {
 		// Owner ruling: metadata is deliberately free-form custom state;
 		// the platform curates no key vocabulary.
 		"the platform curates no vocabulary",
+		// #7768: nothing about concurrent runs is pushed into the prompt any
+		// more (MUL-6984), so the skill has to carry the pull path itself.
+		// All three anchors are load-bearing — the command is the remedy, the
+		// cap disclosure is what stops a truncated answer from reading as an
+		// empty one, and the advisory line is a negative safety boundary: an
+		// agent that reads these as a lock will skip the coordination they
+		// exist to prompt.
+		"multica issue runs <issue-id> --siblings --output json",
+		"capped at 20",
+		"Nothing here reserves an issue or serialises anything",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {
@@ -373,6 +383,7 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 		"not a parameter manual",
 		"`description` is a catalog summary",
 		"`instructions` is the runtime behavior contract",
+		"`conversation_starters`",
 		"`avatar_url` → a random `emoji:<glyph>`",
 		"multica agent create --name <name> --runtime-id <runtime-id>",
 		"`model` is a first-class persisted column",

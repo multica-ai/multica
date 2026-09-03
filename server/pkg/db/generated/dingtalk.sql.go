@@ -82,6 +82,14 @@ cleared_group_routes AS (
     DELETE FROM dingtalk_group_route
     WHERE installation_id IN (SELECT id FROM retired)
 ),
+cleared_task_deliveries AS (
+    DELETE FROM channel_task_delivery
+    WHERE installation_id IN (SELECT id FROM retired)
+),
+cleared_outbound_messages AS (
+    DELETE FROM channel_outbound_message
+    WHERE installation_id IN (SELECT id FROM retired)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM retired)

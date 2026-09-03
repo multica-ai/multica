@@ -27,7 +27,10 @@ vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: () => null,
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("./inbox-detail-label", () => ({ InboxDetailLabel: () => null }));
+vi.mock("./inbox-detail-label", () => ({
+  InboxDetailLabel: () => null,
+  useTypeLabels: () => ({}),
+}));
 
 // Import after mocks.
 import { InboxContextMenuProvider } from "./inbox-context-menu";
@@ -64,6 +67,7 @@ const navigationAdapter = {
   back: vi.fn(),
   pathname: "/",
   searchParams: new URLSearchParams(),
+  hash: "",
   getShareableUrl: (p: string) => p,
   openInNewTab: vi.fn(),
 };

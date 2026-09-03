@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,6 +27,29 @@ func TestChunkMessage(t *testing.T) {
 	}
 	if len([]rune(chunks[0])) != 100 || len([]rune(chunks[2])) != 50 {
 		t.Errorf("chunk sizes wrong: %d / %d", len([]rune(chunks[0])), len([]rune(chunks[2])))
+	}
+}
+
+func TestSendWithMetadataTagsEverySlackMessage(t *testing.T) {
+	var gotForm url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		gotForm = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"channel":"C123","ts":"1.1"}`))
+	}))
+	defer srv.Close()
+	c := newSlackSender(credentials{TeamID: "T1"}, slack.New("xoxb-test", slack.OptionAPIURL(srv.URL+"/")), nil)
+	metadata := outboundMetadata(uid(3), 2, "control_ack")
+	if _, err := c.SendWithMetadata(context.Background(), channel.OutboundMessage{ChatID: "C123", Text: "started"}, metadata); err != nil {
+		t.Fatalf("SendWithMetadata: %v", err)
+	}
+	var got slack.SlackMetadata
+	if err := json.Unmarshal([]byte(gotForm.Get("metadata")), &got); err != nil {
+		t.Fatalf("decode metadata %q: %v", gotForm.Get("metadata"), err)
+	}
+	if got.EventType != slackOutboundMetadataEvent || got.EventPayload["kind"] != "control_ack" {
+		t.Fatalf("metadata=%+v", got)
 	}
 }
 

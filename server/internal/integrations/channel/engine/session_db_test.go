@@ -43,34 +43,41 @@ func sessionPersistenceTestDB(t *testing.T) *pgxpool.Pool {
 }
 
 type sessionPersistenceFixture struct {
-	workspaceID pgtype.UUID
-	userID      pgtype.UUID
-	agentID     pgtype.UUID
-	sessionID   pgtype.UUID
+	workspaceID    pgtype.UUID
+	userID         pgtype.UUID
+	agentID        pgtype.UUID
+	sessionID      pgtype.UUID
+	installationID pgtype.UUID
+	channelChatID  string
 }
 
 func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPersistenceFixture {
 	f := seedSessionPersistenceFixtureWithoutChannel(t, pool)
 	ctx := context.Background()
-	var installationID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO channel_installation (
 			workspace_id, agent_id, channel_type, config, status, installer_user_id
 		) VALUES ($1, $2, 'lark', '{}'::jsonb, 'active', $3)
 		RETURNING id
-	`, f.workspaceID, f.agentID, f.userID).Scan(&installationID); err != nil {
+	`, f.workspaceID, f.agentID, f.userID).Scan(&f.installationID); err != nil {
 		t.Fatalf("create channel installation: %v", err)
 	}
+	f.channelChatID = "channel-media-" + fmt.Sprint(time.Now().UnixNano())
 	if _, err := db.New(pool).CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
-		ChatSessionID: f.sessionID, InstallationID: installationID, ChannelType: "lark",
-		ChannelChatID: "channel-media-" + fmt.Sprint(time.Now().UnixNano()), ChatType: "p2p", Config: []byte("{}"),
+		ChatSessionID: f.sessionID, InstallationID: f.installationID, ChannelType: "lark",
+		ChannelChatID: f.channelChatID, ChatType: "p2p", Config: []byte("{}"),
 	}); err != nil {
 		t.Fatalf("create channel binding: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, f.sessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, f.sessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+		_, _ = pool.Exec(context.Background(), `
+			DELETE FROM channel_chat_context_generation
+			WHERE chat_session_id IN (
+				SELECT chat_session_id FROM channel_chat_session_binding WHERE installation_id = $1
+			)
+		`, f.installationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE installation_id = $1`, f.installationID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, f.installationID)
 	})
 	return f
 }
@@ -121,107 +128,82 @@ func seedSessionPersistenceFixtureWithoutChannel(t *testing.T, pool *pgxpool.Poo
 		RETURNING id`, f.workspaceID, f.agentID, f.userID).Scan(&f.sessionID); err != nil {
 		t.Fatalf("create chat session: %v", err)
 	}
-
 	return f
 }
 
-func TestAppendUserMessage_AdvancesPendingFreshForBindingCreatedByLegacyServer(t *testing.T) {
+func TestChannelRouteRevisionContinuesAfterCurrentBindingIsRemoved(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
-	fixture := seedSessionPersistenceFixtureWithoutChannel(t, pool)
+	fixture := seedSessionPersistenceFixture(t, pool)
 	ctx := context.Background()
 	queries := db.New(pool)
-	session := NewChatSession(queries, pool, channel.TypeFeishu, SessionTitles{})
+	session := NewChatSession(queries, pool, channel.Type("lark"), SessionTitles{})
 
-	var installationID pgtype.UUID
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO channel_installation (
-			workspace_id, agent_id, channel_type, config, status, installer_user_id
-		)
-		VALUES ($1, $2, 'lark', '{}'::jsonb, 'active', $3)
-		RETURNING id
-	`, fixture.workspaceID, fixture.agentID, fixture.userID).Scan(&installationID); err != nil {
-		t.Fatalf("create legacy installation: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, fixture.sessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, fixture.sessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
-	})
-
-	// Simulate an old server running after the schema migration: it creates the
-	// legacy binding shape, writes a normal turn, then records a bare /new only
-	// on channel_chat_session_binding. No generation row exists yet.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO channel_chat_session_binding (
-			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type
-		)
-		VALUES ($1, $2, 'lark', 'legacy-created-binding', 'p2p')
-	`, fixture.sessionID, installationID); err != nil {
-		t.Fatalf("create legacy binding: %v", err)
+		UPDATE channel_chat_session_binding
+		SET retired_at = now()
+		WHERE installation_id = $1 AND channel_chat_id = $2 AND retired_at IS NULL
+	`, fixture.installationID, fixture.channelChatID); err != nil {
+		t.Fatalf("retire first route: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO chat_message (chat_session_id, role, content, channel_ingested)
-		VALUES ($1, 'user', 'old context', TRUE)
-	`, fixture.sessionID); err != nil {
-		t.Fatalf("create legacy context message: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-		UPDATE channel_chat_session_binding SET pending_fresh = TRUE
-		WHERE chat_session_id = $1
-	`, fixture.sessionID); err != nil {
-		t.Fatalf("mark legacy pending fresh: %v", err)
-	}
-
-	result, err := session.AppendUserMessage(ctx, AppendInput{
-		SessionID: fixture.sessionID,
-		Sender:    fixture.userID,
-		Body:      "new context",
-		MessageID: "new-context-message",
+	secondSession, err := session.EnsureSession(ctx, EnsureSessionInput{
+		WorkspaceID: fixture.workspaceID, AgentID: fixture.agentID,
+		InstallationID: fixture.installationID, Sender: fixture.userID,
+		BindingKey: fixture.channelChatID, ChatType: channel.ChatTypeP2P,
 	})
 	if err != nil {
-		t.Fatalf("append through new server: %v", err)
+		t.Fatalf("ensure route after archive: %v", err)
 	}
-	if result.ContextRevision != 2 {
-		t.Fatalf("new message revision = %d, want 2", result.ContextRevision)
-	}
-	if len(result.PendingContexts) != 2 || result.PendingContexts[0].Revision != 1 || result.PendingContexts[1].Revision != 2 {
-		t.Fatalf("pending contexts = %v, want revisions [1 2]", result.PendingContexts)
-	}
-	if result.PendingContexts[0].InitiatorUserID.Valid {
-		t.Fatalf("legacy context initiator = %v, want missing fail-closed snapshot", result.PendingContexts[0].InitiatorUserID)
-	}
-	if result.PendingContexts[1].InitiatorUserID != fixture.userID {
-		t.Fatalf("new context initiator = %v, want %v", result.PendingContexts[1].InitiatorUserID, fixture.userID)
-	}
-
-	var bindingRevision int64
-	var revisions []int64
+	var secondRevision int64
 	if err := pool.QueryRow(ctx, `
-		SELECT context_revision FROM channel_chat_session_binding
+		SELECT route_revision FROM channel_chat_session_binding
 		WHERE chat_session_id = $1
-	`, fixture.sessionID).Scan(&bindingRevision); err != nil {
-		t.Fatalf("load repaired binding revision: %v", err)
+	`, secondSession).Scan(&secondRevision); err != nil {
+		t.Fatalf("load recreated route: %v", err)
 	}
-	rows, err := pool.Query(ctx, `
-		SELECT revision FROM channel_chat_context_generation
-		WHERE chat_session_id = $1 ORDER BY revision
-	`, fixture.sessionID)
+	if secondRevision != 2 {
+		t.Fatalf("recreated route revision = %d, want 2", secondRevision)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE channel_chat_session_binding SET retired_at = now()
+		WHERE chat_session_id = $1
+	`, secondSession); err != nil {
+		t.Fatalf("retire recreated route: %v", err)
+	}
+	started, err := session.StartSession(ctx, StartSessionInput{EnsureSessionInput: EnsureSessionInput{
+		WorkspaceID: fixture.workspaceID, AgentID: fixture.agentID,
+		InstallationID: fixture.installationID, Sender: fixture.userID,
+		BindingKey: fixture.channelChatID, ChatType: channel.ChatTypeP2P,
+	}})
 	if err != nil {
-		t.Fatalf("list repaired generations: %v", err)
+		t.Fatalf("start route after archive: %v", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var revision int64
-		if err := rows.Scan(&revision); err != nil {
-			t.Fatalf("scan repaired generation: %v", err)
-		}
-		revisions = append(revisions, revision)
+	if started.RouteRevision != 3 || started.Append.RouteRevision != 3 {
+		t.Fatalf("started route revisions = result:%d append:%d, want 3", started.RouteRevision, started.Append.RouteRevision)
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate repaired generations: %v", err)
+}
+
+func TestAppendUserMessageReplacesLegacyImplicitChannelTitle(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ctx := context.Background()
+	session := NewChatSession(db.New(pool), pool, channel.Type("lark"), SessionTitles{})
+
+	res, err := session.AppendUserMessage(ctx, AppendInput{
+		SessionID: fixture.sessionID, Sender: fixture.userID,
+		InstallationID: fixture.installationID, Body: "Real first title", MessageID: "m-title",
+	})
+	if err != nil {
+		t.Fatalf("append first channel message: %v", err)
 	}
-	if bindingRevision != 2 || len(revisions) != 2 || revisions[0] != 1 || revisions[1] != 2 {
-		t.Fatalf("repaired context = binding:%d generations:%v, want 2/[1 2]", bindingRevision, revisions)
+	if !res.BecameVisible || res.InitialTitle != "Real first title" {
+		t.Fatalf("append result = %+v, want newly visible deterministic title", res)
+	}
+	var title string
+	if err := pool.QueryRow(ctx, `SELECT title FROM chat_session WHERE id = $1`, fixture.sessionID).Scan(&title); err != nil {
+		t.Fatalf("load initialized title: %v", err)
+	}
+	if title != "Real first title" {
+		t.Fatalf("persisted title = %q, want %q", title, "Real first title")
 	}
 }
 

@@ -398,6 +398,8 @@ export function McpServerDialog({
                     onChange={(event) =>
                       setForm((current) => ({ ...current, command: event.target.value }))
                     }
+                    // An example command the user types, not copy.
+                    // eslint-disable-next-line no-restricted-syntax
                     placeholder="npx"
                     aria-invalid={formError === "command" || undefined}
                   />
@@ -564,13 +566,21 @@ function KeyValueEditor({
   rows: KeyValue[];
   onChange: (rows: KeyValue[]) => void;
 }) {
+  // `label` / `addLabel` / `removeLabel` arrive translated from the caller, but
+  // the per-row strings are this component's own — including the aria-labels,
+  // which used to concatenate an English word onto a translated label and read
+  // out half in each language.
+  const { t } = useT("agents");
   return (
     <fieldset className="space-y-2">
       <legend className="text-body font-medium">{label}</legend>
       {rows.map((row, index) => (
         <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
           <Input
-            aria-label={`${label} key ${index + 1}`}
+            aria-label={t(($) => $.tab_body.mcp_config.dialog_pair_key_aria, {
+              label,
+              index: index + 1,
+            })}
             name={`mcp-pair-key-${index}`}
             autoComplete="off"
             spellCheck={false}
@@ -580,10 +590,15 @@ function KeyValueEditor({
                 itemIndex === index ? { ...item, key: event.target.value } : item,
               ))
             }
-            placeholder="Key"
+            placeholder={t(
+              ($) => $.tab_body.mcp_config.dialog_pair_key_placeholder,
+            )}
           />
           <Input
-            aria-label={`${label} value ${index + 1}`}
+            aria-label={t(($) => $.tab_body.mcp_config.dialog_pair_value_aria, {
+              label,
+              index: index + 1,
+            })}
             name={`mcp-pair-value-${index}`}
             autoComplete="off"
             spellCheck={false}
@@ -593,7 +608,9 @@ function KeyValueEditor({
                 itemIndex === index ? { ...item, value: event.target.value } : item,
               ))
             }
-            placeholder="Value"
+            placeholder={t(
+              ($) => $.tab_body.mcp_config.dialog_pair_value_placeholder,
+            )}
           />
           <Button
             type="button"

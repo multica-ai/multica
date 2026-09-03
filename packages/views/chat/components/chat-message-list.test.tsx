@@ -20,16 +20,21 @@ vi.mock("react-virtuoso", () => ({
     computeItemKey,
     components,
     context,
+    followOutput,
   }: {
     data: unknown[];
     itemContent: (i: number, item: unknown) => ReactElement;
     computeItemKey: (i: number, item: unknown) => string;
     components?: { Footer?: (p: { context?: unknown }) => ReactElement | null };
     context?: unknown;
+    followOutput?: (atBottom: boolean) => "smooth" | "auto" | false;
   }) => {
     const Footer = components?.Footer;
     return (
-      <div>
+      <div
+        data-follow-at-bottom={String(followOutput?.(true))}
+        data-follow-away-from-bottom={String(followOutput?.(false))}
+      >
         {data.map((item, i) => (
           <div key={computeItemKey(i, item)} data-row-key={computeItemKey(i, item)}>
             {itemContent(i, item)}
@@ -87,6 +92,46 @@ function pushTaskMessage(qc: QueryClient, msg: TaskMessagePayload) {
     );
   });
 }
+
+describe("ChatMessageList live follow (#6697)", () => {
+  it("follows appended output immediately only while Virtuoso is at the live end", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-follow-at-bottom]");
+    expect(list).toHaveAttribute("data-follow-at-bottom", "auto");
+    expect(list).toHaveAttribute("data-follow-away-from-bottom", "false");
+  });
+
+  it("does not follow while older history is being prepended", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={null}
+            availability="online"
+            isFetchingOlderMessages
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(container.querySelector("[data-follow-at-bottom]")).toHaveAttribute(
+      "data-follow-at-bottom",
+      "false",
+    );
+  });
+});
 
 describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
   // The live footer is passed to Virtuoso through `components`. If that prop
@@ -408,6 +453,20 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
     renderFailure("skill_bundle_unavailable");
     expect(
       await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
+  });
+
+  it("renders dedicated copy for a failed environment preparation", async () => {
+    // #7913. Without an entry of its own this reason has no agent_error
+    // family to degrade into, so it would land on the generic fallback —
+    // and the one thing the reader needs to know is that the problem is on
+    // the machine running the agent, which the fallback cannot say.
+    renderFailure("environment_prepare_failed");
+    expect(
+      await screen.findByText(
+        enChat.message_list.failure.environment_prepare_failed,
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
   });

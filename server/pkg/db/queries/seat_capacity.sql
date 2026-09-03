@@ -186,17 +186,6 @@ FROM due
 WHERE outbox.operation_token = due.operation_token
 RETURNING outbox.*;
 
--- name: SeatCapacityOutboxStats :many
-SELECT action,
-       count(*) FILTER (WHERE dead_lettered_at IS NULL)::bigint AS pending_count,
-       count(*) FILTER (WHERE dead_lettered_at IS NOT NULL)::bigint AS dead_lettered_count,
-       COALESCE(
-           EXTRACT(EPOCH FROM now() - min(created_at) FILTER (WHERE dead_lettered_at IS NULL)),
-           0
-       )::double precision AS oldest_pending_age_seconds
-FROM seat_capacity_outbox
-GROUP BY action;
-
 -- name: MarkSeatCapacityIntentDelivered :exec
 UPDATE seat_capacity_outbox
 SET delivered_at = now(),
@@ -266,6 +255,17 @@ SET attempt_count = attempt_count + 1,
 WHERE operation_token = sqlc.arg('operation_token')
   AND action = sqlc.arg('action')
   AND lease_token = sqlc.arg('lease_token');
+
+-- name: DeferClaimedSeatCapacityIntent :execrows
+UPDATE seat_capacity_outbox
+SET last_error = left(sqlc.arg('last_error'), 1000),
+    next_attempt_at = sqlc.arg('next_attempt_at'),
+    lease_token = NULL,
+    updated_at = now()
+WHERE operation_token = sqlc.arg('operation_token')
+  AND action = sqlc.arg('action')
+  AND lease_token = sqlc.arg('lease_token')
+  AND dead_lettered_at IS NULL;
 
 -- name: DeleteSeatCapacityIntentForAction :exec
 DELETE FROM seat_capacity_outbox

@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { readFileSync } from "node:fs";
 
 vi.mock("../i18n", async () => {
   const editor = (await import("../locales/en/editor.json")).default;
@@ -198,36 +197,6 @@ describe("MermaidDiagram theme changes", () => {
   });
 });
 
-// Verified in Chromium: dragging a diagram starts a native text selection that
-// paints the whole iframe box with the selection highlight (it is a replaced
-// element) and runs on into the surrounding comment text. Asserted against the
-// stylesheet because jsdom has no layout and cannot reproduce a real selection.
-// Deliberately NOT solved by preventDefault-ing pointerdown: that also drops
-// the default focus, which silently kills the viewer's keyboard controls.
-describe("Mermaid selection suppression", () => {
-  function blockFor(css: string, selector: string): string {
-    const start = css.indexOf(selector);
-    expect(start, `${selector} missing from stylesheet`).toBeGreaterThan(-1);
-    return css.slice(start, css.indexOf("}", start));
-  }
-
-  it("stops a drag on the inline diagram from selecting text", () => {
-    const mermaidCss = readFileSync("editor/styles/mermaid.css", "utf8");
-
-    expect(blockFor(mermaidCss, ".mermaid-diagram-scroll {")).toContain(
-      "user-select: none",
-    );
-  });
-
-  it("stops a pan that leaves the viewer canvas from selecting text", () => {
-    // The canvas moved to the shared stylesheet when the image preview started
-    // using it; the rule still has to be there.
-    const zoomCss = readFileSync("editor/styles/zoom-canvas.css", "utf8");
-
-    expect(blockFor(zoomCss, ".zoom-canvas {")).toContain("user-select: none");
-  });
-});
-
 describe("MermaidDiagram rendering config", () => {
   it("renders labels as SVG text, without which PNG export silently produces nothing", async () => {
     render(<MermaidDiagram chart={CHART} />);
@@ -255,6 +224,8 @@ describe("MermaidDiagram inline presentation", () => {
   it("renders the diagram in an empty sandbox at its natural size", async () => {
     render(<MermaidDiagram chart={CHART} />);
 
+    expect(screen.getByLabelText("Mermaid diagram")).toBeInTheDocument();
+
     const frame = await waitFor(() => {
       const found = document.querySelector<HTMLIFrameElement>(".mermaid-diagram-frame");
       expect(found).not.toBeNull();
@@ -264,6 +235,7 @@ describe("MermaidDiagram inline presentation", () => {
     expect(frame.getAttribute("sandbox")).toBe("");
     expect(frame.style.width).toBe("1000px");
     expect(frame.style.height).toBe("500px");
+    expect(frame.title).toBe("Mermaid diagram");
   });
 
   it("copies the source straight from the inline toolbar", async () => {

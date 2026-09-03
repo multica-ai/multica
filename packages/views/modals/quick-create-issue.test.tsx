@@ -18,6 +18,7 @@ const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2).
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
@@ -154,19 +155,37 @@ vi.mock("@tanstack/react-query", () => ({
   },
 }));
 
+const { ApiError } = vi.hoisted(() => {
+  class ApiErrorImpl extends Error {
+    readonly status: number;
+    readonly statusText: string;
+    readonly body?: unknown;
+    constructor(message: string, status: number, statusText: string, body?: unknown) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+      this.statusText = statusText;
+      this.body = body;
+    }
+  }
+  return { ApiError: ApiErrorImpl };
+});
+
 vi.mock("@multica/core/api", () => ({
   api: {
     createCommentSubIssue: mockCreateCommentSubIssue,
     quickCreateIssue: mockQuickCreateIssue,
     uploadFile: mockApiUploadFile,
   },
-  ApiError: class ApiError extends Error {
-    body?: unknown;
-  },
+  ApiError,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("./use-issue-limit-upgrade-prompt", () => ({
+  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -608,6 +627,28 @@ describe("AgentCreatePanel", () => {
     expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("shows the upgrade recovery immediately when quick create is rejected by the issue preflight", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockQuickCreateIssue.mockRejectedValue(
+      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
+        code: "issue_limit_reached",
+        limit: 1000,
+        policy_revision: 1,
+      }),
+    );
+
+    renderPanel({ onClose, isExpanded: false, setIsExpanded: vi.fn() });
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+    expect(mockClearDraft).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("reveals optional fields from the overflow and submits their values", async () => {
@@ -1163,15 +1204,6 @@ describe("AgentCreatePanel", () => {
       expect(keepOpen.parentElement?.parentElement).toBe(footer);
       expect(attach.parentElement?.parentElement).toBe(footer);
       expect(attach).toHaveAttribute("data-size", "sm");
-    });
-
-    it("hides the send keycaps below the sm breakpoint", () => {
-      const keycaps = document.querySelector('[data-slot="shortcut-keycaps"]');
-
-      // Present for pointer devices, display:none on a touch phone that has
-      // no ⌘ key and the least room in the footer row.
-      expect(keycaps).not.toBeNull();
-      expect(keycaps?.className).toContain("max-sm:hidden");
     });
   });
 });

@@ -33,23 +33,9 @@ default_config="$(
     --show-only templates/configmap.yaml
 )"
 require_rendered_value "$default_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "true"'
-require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_ENABLED: "false"'
-require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_URL: ""'
-require_rendered_value "$default_config" 'MULTICA_SUBSCRIPTION_CAPACITY_ENABLED: "false"'
-require_rendered_value "$default_config" 'MULTICA_SUBSCRIPTION_CAPACITY_WORKER_ENABLED: "false"'
-require_rendered_value "$default_config" 'MULTICA_SUBSCRIPTION_CAPACITY_URL: ""'
-require_rendered_value "$default_config" 'MULTICA_TASK_QUEUED_TTL: "2h"'
+require_rendered_value "$default_config" 'MULTICA_CLOUD_URL: ""'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
 require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
-reject_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_SERVICE_TOKEN'
-reject_rendered_value "$default_config" 'MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN'
-
-queued_ttl_config="$(
-  helm template multica "$CHART_DIR" \
-    --show-only templates/configmap.yaml \
-    --set-string backend.config.taskQueuedTTL=12h
-)"
-require_rendered_value "$queued_ttl_config" 'MULTICA_TASK_QUEUED_TTL: "12h"'
 
 default_backend="$(
   helm template multica "$CHART_DIR" \
@@ -67,43 +53,11 @@ disabled_config="$(
 )"
 require_rendered_value "$disabled_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "false"'
 
-entitlement_config="$(
-  helm template multica "$CHART_DIR" \
-    --show-only templates/configmap.yaml \
-    --set backend.config.entitlementPolicy.enabled=true \
-    --set-string backend.config.entitlementPolicy.url=https://multica-cloud.internal \
-    --set-string backend.config.entitlementPolicy.timeout=2s \
-    --set-string backend.config.entitlementPolicy.staleGrace=10m \
-    --set backend.config.entitlementPolicy.emergencyDisabled=false
-)"
-require_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_POLICY_ENABLED: "true"'
-require_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_POLICY_URL: "https://multica-cloud.internal"'
-require_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_POLICY_TIMEOUT: "2s"'
-require_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_STALE_GRACE: "10m"'
-require_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: "false"'
-reject_rendered_value "$entitlement_config" 'MULTICA_ENTITLEMENT_SERVICE_TOKEN'
-
 capacity_config="$(
   helm template multica "$CHART_DIR" \
     --show-only templates/configmap.yaml \
-    --set backend.config.subscriptionCapacity.enabled=true \
-    --set backend.config.subscriptionCapacity.workerEnabled=true \
-    --set-string backend.config.subscriptionCapacity.url=https://multica-cloud.internal \
-    --set-string backend.config.subscriptionCapacity.timeout=2s
+    --set-string backend.config.cloud.url=https://multica-cloud.internal
 )"
-require_rendered_value "$capacity_config" 'MULTICA_SUBSCRIPTION_CAPACITY_ENABLED: "true"'
-require_rendered_value "$capacity_config" 'MULTICA_SUBSCRIPTION_CAPACITY_WORKER_ENABLED: "true"'
-require_rendered_value "$capacity_config" 'MULTICA_SUBSCRIPTION_CAPACITY_URL: "https://multica-cloud.internal"'
-require_rendered_value "$capacity_config" 'MULTICA_SUBSCRIPTION_CAPACITY_TIMEOUT: "2s"'
-reject_rendered_value "$capacity_config" 'MULTICA_SUBSCRIPTION_CAPACITY_SERVICE_TOKEN'
-
-capacity_alerts="$(
-  helm template multica "$CHART_DIR" \
-    --show-only templates/prometheusrule.yaml \
-    --set monitoring.prometheusRule.enabled=true
-)"
-require_rendered_value "$capacity_alerts" 'alert: MulticaSeatCapacityOutboxDeadLettered'
-require_rendered_value "$capacity_alerts" 'alert: MulticaSeatCapacityOutboxStalled'
-require_rendered_value "$capacity_alerts" 'multica_seat_capacity_outbox_oldest_pending_age_seconds'
+require_rendered_value "$capacity_config" 'MULTICA_CLOUD_URL: "https://multica-cloud.internal"'
 
 echo "helm config rendering ok"

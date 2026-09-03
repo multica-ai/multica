@@ -34,6 +34,7 @@ const (
 	agentOfflineText        = "⚠️ The agent is offline, so this message won't be processed automatically."
 	agentArchivedText       = "⚠️ This agent has been archived and can't respond. Please contact your workspace admin."
 	freshPendingText        = "✅ Fresh start ready. Your next chat message will run without previous context."
+	chatStartedText         = "✅ Started a new Multica chat. Your next message will enter it."
 	issueUsageText          = "Please include an issue title. Use:\n\n`/issue <title>`\n\n`[description]` (optional)"
 	issueUsageWithMediaText = "Please add a title and resend with the image (*image can come before or after the command*):\n\n`/issue <title>`\n\n`[description]` (optional)"
 	// Refusals for dropped /issue commands, carried over from the deleted
@@ -127,6 +128,10 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: fresh-start confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeChatStarted:
+		if err := r.post(ctx, inst, msg, chatStartedText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: new-chat confirmation failed", "installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeIssueUsage:
 		text := issueUsageText
