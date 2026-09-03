@@ -576,13 +576,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
 
-	// Arm the rollback BEFORE the first write, not after writeContextFiles
-	// returns. writeContextFiles puts the daemon task marker down as its very
-	// first act and can then fail on any later step — .agent_context, skill
-	// files, project resources — so a defer registered after it returns would
-	// miss exactly the failures that strand a marker with nothing else around
-	// it. Rolling back an empty manifest is a no-op, which is what makes it
-	// safe to arm this early.
+	// Arm the rollback BEFORE the first write, not after
+	// writeContextFilesWithSkillNames returns. That function puts the daemon
+	// task marker down as its very first act and can then fail on any later
+	// step — skill files or project resources. A defer registered after it
+	// returns would miss exactly the failures that strand a marker with nothing
+	// else around it. Rolling back an empty manifest is a no-op, which is what
+	// makes it safe to arm this early.
 	//
 	// The manifest that records these writes is not persisted until the end of
 	// Prepare, and the caller receives no Environment on any failure path, so
@@ -648,7 +648,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	if params.Provider == "claude" {
-		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
+		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
 		}
@@ -727,7 +728,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
-	// writeContextFiles above). Fail closed on errors: a malformed user
+	// writeContextFilesWithSkillNames above). Fail closed on errors: a malformed user
 	// config that the openclaw CLI can't read is a real problem and
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
@@ -812,7 +813,8 @@ type ReuseParams struct {
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
-// Returns nil if the workdir does not exist (caller should fall back to Prepare).
+// Returns nil if the workdir does not exist or a required refresh cannot finish;
+// the caller should fall back to Prepare.
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
@@ -908,9 +910,19 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// legacy local_directory Reuse fallback — skip the persist in that
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
+	rollbackRefreshedSidecars := func() {
+		if rollbackErr := rollBackPreparedSidecars(*manifest); rollbackErr != nil {
+			logger.Warn("execenv: roll back incomplete reused sidecars failed", "error", rollbackErr)
+		}
+	}
 	preparedSkillNames, err := writeContextFilesWithSkillNames(params.WorkDir, params.Provider, params.Task, manifest)
 	if err != nil {
-		logger.Warn("execenv: refresh context files failed", "error", err)
+		if preparedSkillNames == nil {
+			logger.Warn("execenv: refresh context files failed before skill materialization completed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
+		}
+		logger.Warn("execenv: refresh project resources failed (non-fatal)", "error", err)
 	}
 	env.PreparedSkillNames = preparedSkillNames
 	if err := prepareOmpMcpConfig(params.WorkDir, params.Provider, params.McpConfig, manifest); err != nil {
@@ -924,22 +936,35 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
-			logger.Warn("execenv: refresh codex-home failed", "error", err)
-		} else {
-			env.CodexHome = codexHome
-			if env.PreparedSkillNames, err = hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
-				logger.Warn("execenv: refresh codex skills failed", "error", err)
-			}
+			logger.Warn("execenv: refresh codex-home failed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
 		}
+		env.CodexHome = codexHome
+		preparedSkillNames, err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger)
+		if err != nil && preparedSkillNames == nil {
+			logger.Warn("execenv: refresh codex skills failed before materialization completed; forcing fresh prepare", "error", err)
+			if cleanupErr := os.RemoveAll(filepath.Join(codexHome, "skills")); cleanupErr != nil {
+				logger.Warn("execenv: remove incomplete reused codex skills failed", "error", cleanupErr)
+			}
+			rollbackRefreshedSidecars()
+			return nil
+		}
+		if err != nil {
+			logger.Warn("execenv: refresh codex skill policy failed (non-fatal)", "error", err)
+		}
+		env.PreparedSkillNames = preparedSkillNames
 	}
 
 	if params.Provider == "claude" && env.RootDir != "" {
-		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		preparedTask := ApplyPreparedSkillNames(params.Task, env.PreparedSkillNames)
+		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, preparedTask.AgentSkills)
 		if err != nil {
-			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
-		} else {
-			env.ClaudeSettingsPath = settingsPath
+			logger.Warn("execenv: refresh claude skill settings failed; forcing fresh prepare", "error", err)
+			rollbackRefreshedSidecars()
+			return nil
 		}
+		env.ClaudeSettingsPath = settingsPath
 	}
 
 	// Re-deny Reasonix's `ask` tool on reuse: CleanupSidecars above removed the
@@ -1071,7 +1096,7 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
 		logger.Warn("execenv: seed user codex skills failed", "error", err)
 	}
-	var preparedSkillNames []string
+	preparedSkillNames := resolveSkillSlugs(workspaceSkills)
 	if len(workspaceSkills) > 0 {
 		var err error
 		preparedSkillNames, err = writeSkillFilesWithNames(skillsDir, workspaceSkills, nil)
@@ -1079,7 +1104,8 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 			return nil, err
 		}
 	}
-	return preparedSkillNames, ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, workspaceSkills)
+	preparedTask := ApplyPreparedSkillNames(TaskContextForEnv{AgentSkills: workspaceSkills}, preparedSkillNames)
+	return preparedSkillNames, ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, preparedTask.AgentSkills)
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

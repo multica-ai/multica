@@ -118,9 +118,9 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 	return nil
 }
 
-// writeContextFiles writes the task's sidecar files: the task-context marker,
-// agent skills in the appropriate provider-native location, and project
-// resources.
+// writeContextFilesWithSkillNames writes the task's sidecar files: the
+// task-context marker, agent skills in the appropriate provider-native
+// location, and project resources.
 //
 // It deliberately writes no per-task Markdown brief. There used to be an
 // .agent_context/issue_context.md carrying the issue id, trigger comment id,
@@ -145,7 +145,8 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
-// QwenPaw:      skills → {workDir}/.qwenpaw/skills/{name}/SKILL.md  (native project-level discovery)
+// QwenPaw:      sidecar → {workDir}/.qwenpaw/skills/{name}/SKILL.md;
+// actual discovery uses per-task qwenpaw-workspace/skills passed via --workspace
 // MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md

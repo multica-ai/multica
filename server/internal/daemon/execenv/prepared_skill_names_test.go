@@ -160,6 +160,12 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 					{Name: "Review", Content: "Second assigned review."},
 				}},
 			}
+			if provider == "codex" {
+				params.Task.DisabledRuntimeSkills = []RuntimeSkillRefForEnv{
+					{Root: "provider", Key: "review-multica"},
+					{Root: "provider", Key: "review-multica-multica"},
+				}
+			}
 			env, err := Prepare(params, testLogger())
 			if err != nil {
 				t.Fatalf("Prepare: %v", err)
@@ -211,6 +217,20 @@ func TestPreparedSkillNamesMatchPrivateDiscoveryDirectories(t *testing.T) {
 				}
 				if provider == "codex" && strings.Contains(brief, "**review-multica**") {
 					t.Errorf("%s: runtime brief advertises the user skill as an assigned skill", phase)
+				}
+				if provider == "codex" {
+					config, err := os.ReadFile(filepath.Join(discoveryRoot, "config.toml"))
+					if err != nil {
+						t.Fatalf("%s: read Codex skill policy: %v", phase, err)
+					}
+					userPath := filepath.ToSlash(filepath.Join(discoveryRoot, "skills", "review-multica", "SKILL.md"))
+					assignedPath := filepath.ToSlash(filepath.Join(discoveryRoot, "skills", "review-multica-multica", "SKILL.md"))
+					if !strings.Contains(string(config), userPath) {
+						t.Errorf("%s: Codex policy stopped disabling the user skill:\n%s", phase, config)
+					}
+					if strings.Contains(string(config), assignedPath) {
+						t.Errorf("%s: Codex policy disabled the allocated workspace skill:\n%s", phase, config)
+					}
 				}
 				for _, name := range []string{"review", "review-multica"} {
 					if got, err := os.ReadFile(filepath.Join(sharedHome, "skills", name, "SKILL.md")); err != nil || string(got) != userSkill {
@@ -316,5 +336,224 @@ func TestHydrateCodexSkillsReturnsNamesOnConfigError(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(codexHome, "skills", name, "SKILL.md")); err != nil {
 			t.Errorf("returned name %q has no materialized skill: %v", name, err)
 		}
+	}
+}
+
+func TestRuntimeSkillPolicyUsesAllocatedClaudeName(t *testing.T) {
+	for _, mode := range []string{"prepare", "reuse"} {
+		t.Run(mode, func(t *testing.T) {
+			task := TaskContextForEnv{
+				IssueID:     "issue-claude-policy",
+				AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}},
+				DisabledRuntimeSkills: []RuntimeSkillRefForEnv{
+					{Root: "provider", Key: "review", Name: "review"},
+					{Root: "provider", Key: "review-multica", Name: "review-multica"},
+				},
+			}
+			params := PrepareParams{
+				WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-claude-policy",
+				TaskID: "task-claude-policy-" + mode, Provider: "claude", Task: task,
+			}
+			var env *Environment
+			var err error
+			if mode == "prepare" {
+				params.LocalWorkDir = t.TempDir()
+				mustWrite(t, filepath.Join(params.LocalWorkDir, ".claude", "skills", "review", "SKILL.md"), "User-owned skill.")
+				env, err = Prepare(params, testLogger())
+			} else {
+				initial := params
+				initial.Task = TaskContextForEnv{IssueID: task.IssueID}
+				env, err = Prepare(initial, testLogger())
+				if err == nil {
+					mustWrite(t, filepath.Join(env.WorkDir, ".claude", "skills", "review", "SKILL.md"), "User-owned skill.")
+					env = Reuse(ReuseParams{
+						WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+						Provider: params.Provider, Task: task,
+					}, testLogger())
+				}
+			}
+			if err != nil || env == nil {
+				t.Fatalf("%s environment = %#v, error = %v", mode, env, err)
+			}
+			defer env.Cleanup(true)
+			if !reflect.DeepEqual(env.PreparedSkillNames, []string{"review-multica"}) {
+				t.Fatalf("prepared names = %v, want [review-multica]", env.PreparedSkillNames)
+			}
+			policy, err := os.ReadFile(env.ClaudeSettingsPath)
+			if err != nil {
+				t.Fatalf("read Claude skill policy: %v", err)
+			}
+			if strings.Contains(string(policy), "review-multica") {
+				t.Fatalf("Claude policy disabled the allocated workspace skill:\n%s", policy)
+			}
+			if !strings.Contains(string(policy), "Skill(review)") {
+				t.Fatalf("Claude policy stopped disabling the user-owned collision:\n%s", policy)
+			}
+		})
+	}
+}
+
+func TestReuseFailsClosedWhenSkillNamesAreUnavailable(t *testing.T) {
+	for _, provider := range []string{"claude", "codex"} {
+		t.Run(provider, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			t.Setenv("CODEX_HOME", sharedHome)
+			params := PrepareParams{
+				WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-reuse-failure",
+				TaskID: "task-reuse-failure-" + provider, Provider: provider,
+				Task: TaskContextForEnv{IssueID: "issue-reuse-failure"},
+			}
+			env, err := Prepare(params, testLogger())
+			if err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+			defer env.Cleanup(true)
+
+			if provider == "claude" {
+				mustWrite(t, filepath.Join(env.WorkDir, ".claude", "skills", "review", "SKILL.md"), "User-owned skill.")
+			}
+			task := TaskContextForEnv{
+				IssueID: "issue-reuse-failure",
+				AgentSkills: []SkillContextForEnv{{
+					Name: "Review", Content: "Assigned review.",
+					Files: []SkillFileContextForEnv{
+						{Path: "blocker", Content: "file"},
+						{Path: "blocker/child", Content: "cannot be written below a file"},
+					},
+				}},
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			reused, err := ReuseIsolated(ctx, preparationHelperTestCommand(), ReuseParams{
+				WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+				Provider: provider, Task: task,
+			}, testLogger())
+			if err != nil {
+				t.Fatalf("ReuseIsolated: %v", err)
+			}
+			if reused != nil {
+				t.Fatalf("Reuse continued with incomplete skill materialization: %#v", reused.PreparedSkillNames)
+			}
+			if _, err := os.Stat(filepath.Join(env.WorkDir, TaskContextMarkerRelPath)); !os.IsNotExist(err) {
+				t.Errorf("incomplete reuse left the task marker behind: %v", err)
+			}
+			if provider == "claude" {
+				if _, err := os.Stat(filepath.Join(env.WorkDir, ".claude", "skills", "review-multica")); !os.IsNotExist(err) {
+					t.Errorf("incomplete reuse left the allocated skill behind: %v", err)
+				}
+				if got, err := os.ReadFile(filepath.Join(env.WorkDir, ".claude", "skills", "review", "SKILL.md")); err != nil || string(got) != "User-owned skill." {
+					t.Errorf("incomplete reuse changed the user skill: %q, %v", got, err)
+				}
+			} else if _, err := os.Stat(filepath.Join(env.RootDir, codexHomeDirName, "skills")); !os.IsNotExist(err) {
+				t.Errorf("incomplete reuse left Codex skills behind: %v", err)
+			}
+		})
+	}
+}
+
+func TestReuseKeepsProjectResourceWriteFailureBestEffort(t *testing.T) {
+	params := PrepareParams{
+		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-resource-collision",
+		TaskID: "task-resource-collision", Provider: "claude",
+		Task: TaskContextForEnv{IssueID: "issue-resource-collision"},
+	}
+	env, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	task := TaskContextForEnv{
+		IssueID:     "issue-resource-collision",
+		AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}},
+		ProjectID:   "project-resource-collision",
+		ProjectResources: []ProjectResourceForEnv{{
+			ID: "resource-collision", ResourceType: "github_repo",
+			ResourceRef: []byte(`{`),
+		}},
+	}
+	reused := Reuse(ReuseParams{
+		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+		Provider: params.Provider, Task: task,
+	}, testLogger())
+	if reused == nil || !reflect.DeepEqual(reused.PreparedSkillNames, []string{"review"}) {
+		t.Fatalf("best-effort project resource failure prevented reuse: %#v", reused)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
+		t.Fatalf("invalid project resource unexpectedly produced a sidecar: %v", err)
+	}
+}
+
+func TestReuseFallsBackWhenClaudeSkillPolicyCannotBeWritten(t *testing.T) {
+	params := PrepareParams{
+		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-claude-policy-error",
+		TaskID: "task-claude-policy-error", Provider: "claude",
+		Task: TaskContextForEnv{IssueID: "issue-claude-policy-error"},
+	}
+	env, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	userSkill := filepath.Join(env.WorkDir, ".claude", "skills", "review", "SKILL.md")
+	mustWrite(t, userSkill, "User-owned skill.")
+	if err := os.Mkdir(filepath.Join(env.RootDir, claudeRuntimeSkillSettingsFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	task := TaskContextForEnv{
+		IssueID:     "issue-claude-policy-error",
+		AgentSkills: []SkillContextForEnv{{Name: "Review", Content: "Assigned review."}},
+		DisabledRuntimeSkills: []RuntimeSkillRefForEnv{
+			{Root: "provider", Key: "review", Name: "review"},
+		},
+	}
+	if reused := Reuse(ReuseParams{
+		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+		Provider: params.Provider, Task: task,
+	}, testLogger()); reused != nil {
+		t.Fatalf("Reuse continued without the required Claude skill policy: %#v", reused)
+	}
+	for _, path := range []string{
+		filepath.Join(env.WorkDir, TaskContextMarkerRelPath),
+		filepath.Join(env.WorkDir, ".claude", "skills", "review-multica"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("failed Claude policy refresh left %q behind: %v", path, err)
+		}
+	}
+	if got, err := os.ReadFile(userSkill); err != nil || string(got) != "User-owned skill." {
+		t.Fatalf("failed Claude policy refresh changed the user skill: %q, %v", got, err)
+	}
+}
+
+func TestReuseFallsBackWhenCodexHomeRefreshFails(t *testing.T) {
+	t.Setenv("CODEX_HOME", t.TempDir())
+	params := PrepareParams{
+		WorkspacesRoot: t.TempDir(), WorkspaceID: "workspace-codex-home-error",
+		TaskID: "task-codex-home-error", Provider: "codex",
+		Task: TaskContextForEnv{IssueID: "issue-codex-home-error"},
+	}
+	env, err := Prepare(params, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	codexHome := filepath.Join(env.RootDir, codexHomeDirName)
+	if err := os.RemoveAll(codexHome); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(codexHome, []byte("not a directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if reused := Reuse(ReuseParams{
+		WorkspacesRoot: params.WorkspacesRoot, WorkDir: env.WorkDir,
+		Provider: params.Provider, Task: params.Task,
+	}, testLogger()); reused != nil {
+		t.Fatalf("Reuse continued after Codex home refresh failed: %#v", reused)
+	}
+	if _, err := os.Stat(filepath.Join(env.WorkDir, TaskContextMarkerRelPath)); !os.IsNotExist(err) {
+		t.Errorf("failed Codex home refresh left the task marker behind: %v", err)
 	}
 }
