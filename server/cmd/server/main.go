@@ -370,10 +370,10 @@ func main() {
 	logPoolConfig("primary", pool)
 
 	// The replica is an optional capacity optimization, never a startup
-	// dependency. It starts ineligible and the background selector below only
-	// admits it after proving that it is a read-only standby within the replay
-	// lag budget. Invalid or unreachable configuration therefore preserves the
-	// existing primary-only behavior.
+	// dependency. Invalid configuration preserves primary-only behavior. New
+	// replica connections are validated as read-only by the pool configuration,
+	// while request-driven fallback and a passive circuit breaker handle runtime
+	// failures without background SQL.
 	var replicaPool *pgxpool.Pool
 	if replicaURL := strings.TrimSpace(os.Getenv("DATABASE_REPLICA_URL")); replicaURL != "" {
 		replicaPool, err = newReplicaDBPool(context.Background(), replicaURL, startupSettings.ConnectTimeout)
@@ -621,12 +621,7 @@ func main() {
 	if dbRoutingMetrics != nil {
 		readRecorder = dbRoutingMetrics
 	}
-	readSelector := dbreader.New(pool, replicaPool, dbreader.Config{
-		ProbeInterval: envDuration("DATABASE_REPLICA_PROBE_INTERVAL", dbreader.DefaultProbeInterval),
-		ProbeTimeout:  envDuration("DATABASE_REPLICA_PROBE_TIMEOUT", dbreader.DefaultProbeTimeout),
-		MaxReplayLag:  envDuration("DATABASE_REPLICA_MAX_REPLAY_LAG", dbreader.DefaultMaxReplayLag),
-		Logger:        slog.Default(),
-	}, readRecorder)
+	readSelector := dbreader.New(pool, replicaPool, readRecorder)
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
@@ -693,7 +688,6 @@ func main() {
 	if autopilotSvc.QuotaEnabled() {
 		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
 	}
-	go readSelector.Run(sweepCtx)
 	go runDBStatsLogger(sweepCtx, "primary", pool)
 	if replicaPool != nil {
 		go runDBStatsLogger(sweepCtx, "replica", replicaPool)

@@ -39,19 +39,19 @@ func NewDBCollector(primary, replica *pgxpool.Pool) *DBCollector {
 	return &DBCollector{
 		pools: pools,
 
-		acquiredConns:         newDBDesc("acquired_conns", "Currently acquired PostgreSQL connections by database role."),
-		idleConns:             newDBDesc("idle_conns", "Currently idle PostgreSQL connections by database role."),
-		maxConns:              newDBDesc("max_conns", "Maximum PostgreSQL connections allowed by the pool by database role."),
-		totalConns:            newDBDesc("total_conns", "Total PostgreSQL connections currently in the pool by database role."),
-		constructingConns:     newDBDesc("constructing_conns", "PostgreSQL connections currently being established by database role."),
-		acquireCount:          newDBDesc("acquire_count", "Total successful PostgreSQL connection acquires by database role."),
-		acquireDuration:       newDBDesc("acquire_duration_seconds_total", "Total time spent acquiring PostgreSQL connections by database role."),
-		emptyAcquireCount:     newDBDesc("empty_acquire_count", "Total acquires that waited because the PostgreSQL pool was empty by database role."),
-		emptyAcquireWaitTime:  newDBDesc("empty_acquire_wait_seconds_total", "Total time spent waiting for PostgreSQL connections when the pool was empty by database role."),
-		canceledAcquireCount:  newDBDesc("canceled_acquire_count", "Total canceled PostgreSQL connection acquires by database role."),
-		newConnsCount:         newDBDesc("new_conns_count", "Total PostgreSQL connections created by the pool by database role."),
-		maxIdleDestroyCount:   newDBDesc("max_idle_destroy_count", "Total PostgreSQL connections destroyed due to idle limits by database role."),
-		maxLifetimeDestroyCnt: newDBDesc("max_lifetime_destroy_count", "Total PostgreSQL connections destroyed due to max lifetime by database role."),
+		acquiredConns:         newDBDesc("acquired_conns", "PostgreSQL pool connections currently acquired, by database role."),
+		idleConns:             newDBDesc("idle_conns", "PostgreSQL pool connections currently idle, by database role."),
+		maxConns:              newDBDesc("max_conns", "Maximum PostgreSQL pool connections by database role."),
+		totalConns:            newDBDesc("total_conns", "Total current PostgreSQL pool connections by database role."),
+		constructingConns:     newDBDesc("constructing_conns", "PostgreSQL pool connections currently being established by database role."),
+		acquireCount:          newDBDesc("acquire_count", "Total successful PostgreSQL pool acquires by database role."),
+		acquireDuration:       newDBDesc("acquire_duration_seconds_total", "Total time spent acquiring PostgreSQL pool connections by database role."),
+		emptyAcquireCount:     newDBDesc("empty_acquire_count", "Total acquires that waited on an empty PostgreSQL pool by database role."),
+		emptyAcquireWaitTime:  newDBDesc("empty_acquire_wait_seconds_total", "Total time spent waiting on an empty PostgreSQL pool by database role."),
+		canceledAcquireCount:  newDBDesc("canceled_acquire_count", "Total canceled PostgreSQL pool acquires by database role."),
+		newConnsCount:         newDBDesc("new_conns_count", "Total PostgreSQL pool connections created by database role."),
+		maxIdleDestroyCount:   newDBDesc("max_idle_destroy_count", "Total PostgreSQL pool connections destroyed due to idle limits by database role."),
+		maxLifetimeDestroyCnt: newDBDesc("max_lifetime_destroy_count", "Total PostgreSQL pool connections destroyed due to max lifetime by database role."),
 	}
 }
 

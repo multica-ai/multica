@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 )
@@ -36,19 +37,27 @@ const (
 	defaultMaxConns int32 = 25
 	defaultMinConns int32 = 5
 
-	// The optional replica has its own connection budget. Do not clone the
-	// primary's warm pool per API process: a newly configured replica should
-	// not double idle connections before any business opts into replica reads.
+	// The optional replica has its own connection budget. Ten connections allow
+	// a small burst of the first Dashboard aggregation workload without cloning
+	// the primary's 25-connection ceiling. MinConns=0 avoids idle connections
+	// before any business opts into replica reads.
 	defaultReplicaMaxConns int32 = 10
 	defaultReplicaMinConns int32 = 0
+
+	// pgx validates target_session_attrs only when a connection is established.
+	// Five minutes bounds how long a pooled replica connection can survive a
+	// promotion without being revalidated, instead of pgx's one-hour default.
+	defaultReplicaMaxConnLifetime = 5 * time.Minute
 )
 
 type dbPoolSizing struct {
-	maxConnsEnv     string
-	minConnsEnv     string
-	defaultMaxConns int32
-	defaultMinConns int32
-	allowZeroMin    bool
+	maxConnsEnv            string
+	minConnsEnv            string
+	defaultMaxConns        int32
+	defaultMinConns        int32
+	defaultMaxConnLifetime time.Duration
+	allowZeroMin           bool
+	requireReadOnly        bool
 }
 
 var (
@@ -59,11 +68,13 @@ var (
 		defaultMinConns: defaultMinConns,
 	}
 	replicaPoolSizing = dbPoolSizing{
-		maxConnsEnv:     "DATABASE_REPLICA_MAX_CONNS",
-		minConnsEnv:     "DATABASE_REPLICA_MIN_CONNS",
-		defaultMaxConns: defaultReplicaMaxConns,
-		defaultMinConns: defaultReplicaMinConns,
-		allowZeroMin:    true,
+		maxConnsEnv:            "DATABASE_REPLICA_MAX_CONNS",
+		minConnsEnv:            "DATABASE_REPLICA_MIN_CONNS",
+		defaultMaxConns:        defaultReplicaMaxConns,
+		defaultMinConns:        defaultReplicaMinConns,
+		defaultMaxConnLifetime: defaultReplicaMaxConnLifetime,
+		allowZeroMin:           true,
+		requireReadOnly:        true,
 	}
 )
 
@@ -101,6 +112,14 @@ func newSizedDBPool(ctx context.Context, dbURL string, connectTimeout time.Durat
 
 func applyPoolSizing(cfg *pgxpool.Config, dbURL string, sizing dbPoolSizing) {
 	urlParams := poolParamsFromURL(dbURL)
+	if sizing.requireReadOnly {
+		// Enforce the replica contract in code even when the connection string
+		// omits target_session_attrs. This check runs on every new connection.
+		cfg.ConnConfig.Config.ValidateConnect = pgconn.ValidateConnectTargetSessionAttrsReadOnly
+	}
+	if sizing.defaultMaxConnLifetime > 0 && !urlParams["pool_max_conn_lifetime"] {
+		cfg.MaxConnLifetime = sizing.defaultMaxConnLifetime
+	}
 
 	// Compute the non-env fallback first: honor URL pool_* params if the
 	// operator set them, otherwise use our code default. This fallback is

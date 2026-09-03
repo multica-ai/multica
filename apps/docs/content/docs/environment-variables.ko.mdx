@@ -33,12 +33,9 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | 로컬 `multica` 데이터베이스 | PostgreSQL 연결 주소 |
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
-| `DATABASE_REPLICA_URL` | 비어 있음 | 선택적 PostgreSQL 읽기 전용 대기 서버 연결 주소. 설정만으로는 상태 확인만 활성화되며 각 기능은 코드에서 복제본 읽기를 명시적으로 선택해야 함 |
+| `DATABASE_REPLICA_URL` | 비어 있음 | 선택적 PostgreSQL 읽기 전용 복제본 연결 주소. 새 연결은 읽기 전용 상태를 검증하며 각 기능은 코드에서 최종 일관성 읽기를 명시적으로 선택해야 함 |
 | `DATABASE_REPLICA_MAX_CONNS` | `10` | API 프로세스당 최대 복제본 연결 수 |
 | `DATABASE_REPLICA_MIN_CONNS` | `0` | API 프로세스가 유지하는 최소 복제본 연결 수 |
-| `DATABASE_REPLICA_PROBE_INTERVAL` | `2s` | 복제본이 읽기에 적합한 대기 서버인지 확인하는 간격 |
-| `DATABASE_REPLICA_PROBE_TIMEOUT` | `1s` | primary와 복제본을 함께 확인하는 단일 적격성 점검의 제한 시간 |
-| `DATABASE_REPLICA_MAX_REPLAY_LAG` | `5s` | 복제본 WAL 위치가 primary보다 뒤처질 때 허용되는 최대 재생 지연. 초과하면 primary로 폴백 |
 | `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | 컨테이너 시작 중 migration과 API가 공유하는 일시적인 데이터베이스 장애 재시도 시간. `0`으로 설정하면 각 단계에서 한 번만 시도 |
 | `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 시작 중 각 연결 시도의 폴백 제한 시간. pgx 기본 `connect_timeout`, `PGCONNECT_TIMEOUT` 또는 service 설정이 우선 적용됨 |
 | `PORT` | `8080` | API listen port |
@@ -51,7 +48,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`가 hold와 실제 종료에 필요한 시간의 합보다 커야 합니다.
 
-primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API 프로세스의 연결 합계가 PostgreSQL 클러스터 연결 한도 내에 있도록 설정해야 합니다. 복제본은 선택적이며 중요하지 않은 의존성입니다. 설정 오류, 연결 불가, primary 승격, 쓰기 가능 또는 지연 초과 상태에서는 선택되지 않으며, 명시적으로 연동된 읽기는 primary를 사용합니다.
+primary와 복제본의 연결 한도는 서로 독립적입니다. 모든 API 프로세스의 연결 합계가 PostgreSQL 클러스터 연결 한도 내에 있도록 설정해야 합니다. 복제본 연결은 기본적으로 5분 후 재생성되어 승격 뒤 읽기 전용 상태를 다시 검증합니다. 연결 실패 시 인프라가 투명하게 primary로 폴백하고 짧은 수동 회로 차단기를 열며, 백그라운드 데이터베이스 점검은 추가하지 않습니다. 애플리케이션은 복제본 데이터의 최대 지연을 보장하지 않으므로 데이터베이스 계층에서 복제 지연을 모니터링하고 일관성이 중요한 읽기는 primary에 유지하십시오.
 
 ## 공개 주소와 브라우저 접근
 

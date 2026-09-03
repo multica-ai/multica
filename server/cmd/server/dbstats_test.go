@@ -1,14 +1,17 @@
 package main
 
 import (
+	"reflect"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// resolvedPoolSizing runs the production env+URL precedence logic without
-// opening a connection.
-func resolvedPoolSizing(t *testing.T, dbURL, envMax, envMin string, sizing dbPoolSizing) (max, min int32) {
+// resolvedPoolConfig runs the production pool policy without opening a
+// connection.
+func resolvedPoolConfig(t *testing.T, dbURL, envMax, envMin string, sizing dbPoolSizing) *pgxpool.Config {
 	t.Helper()
 	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
@@ -21,6 +24,11 @@ func resolvedPoolSizing(t *testing.T, dbURL, envMax, envMin string, sizing dbPoo
 		t.Setenv(sizing.minConnsEnv, envMin)
 	}
 	applyPoolSizing(cfg, dbURL, sizing)
+	return cfg
+}
+
+func resolvedPoolSizing(t *testing.T, dbURL, envMax, envMin string, sizing dbPoolSizing) (max, min int32) {
+	cfg := resolvedPoolConfig(t, dbURL, envMax, envMin, sizing)
 	return cfg.MaxConns, cfg.MinConns
 }
 
@@ -104,5 +112,36 @@ func TestReplicaPoolSizingAllowsExplicitZeroMinimum(t *testing.T) {
 	)
 	if max != 8 || min != 0 {
 		t.Fatalf("replica sizing = %d/%d, want 8/0", max, min)
+	}
+}
+
+func TestReplicaPoolEnforcesReadOnlyAndShortConnectionLifetime(t *testing.T) {
+	cfg := resolvedPoolConfig(
+		t,
+		"postgres://u:p@replica/db?sslmode=disable",
+		"",
+		"",
+		replicaPoolSizing,
+	)
+	gotValidator := reflect.ValueOf(cfg.ConnConfig.Config.ValidateConnect).Pointer()
+	wantValidator := reflect.ValueOf(pgconn.ValidateConnectTargetSessionAttrsReadOnly).Pointer()
+	if gotValidator != wantValidator {
+		t.Fatal("replica ValidateConnect does not enforce target_session_attrs=read-only")
+	}
+	if cfg.MaxConnLifetime != defaultReplicaMaxConnLifetime {
+		t.Fatalf("replica max lifetime = %s, want %s", cfg.MaxConnLifetime, defaultReplicaMaxConnLifetime)
+	}
+}
+
+func TestReplicaPoolHonorsExplicitConnectionLifetime(t *testing.T) {
+	cfg := resolvedPoolConfig(
+		t,
+		"postgres://u:p@replica/db?sslmode=disable&pool_max_conn_lifetime=11m",
+		"",
+		"",
+		replicaPoolSizing,
+	)
+	if cfg.MaxConnLifetime != 11*time.Minute {
+		t.Fatalf("replica max lifetime = %s, want 11m", cfg.MaxConnLifetime)
 	}
 }

@@ -9,157 +9,75 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const testBusiness Business = "test"
 
 type recorderStub struct {
-	configured bool
-	status     Status
-	probes     []Status
-	routes     []Selection
-	fallbacks  int
+	routes []selection
 }
 
-func (r *recorderStub) SetReplicaConfigured(configured bool) { r.configured = configured }
-func (r *recorderStub) SetReplicaStatus(healthy bool, lagBytes int64, replayLag time.Duration) {
-	r.status = Status{Healthy: healthy, LagBytes: lagBytes, ReplayLag: replayLag}
-}
-func (r *recorderStub) ObserveReplicaProbe(healthy bool, reason string) {
-	r.probes = append(r.probes, Status{Healthy: healthy, Reason: Reason(reason)})
-}
 func (r *recorderStub) RecordReadRoute(_, role, reason string) {
-	r.routes = append(r.routes, Selection{Role: Role(role), Reason: Reason(reason)})
+	r.routes = append(r.routes, selection{role: Role(role), reason: Reason(reason)})
 }
-func (r *recorderStub) RecordReadFallback(_, _ string) { r.fallbacks++ }
 
-func testSelector(t *testing.T, snapshot probeSnapshot, probeErr error) (*Selector, *db.Queries, *db.Queries, *recorderStub) {
-	t.Helper()
+func testSelector() (*Selector, *db.Queries, *db.Queries, *recorderStub) {
 	primary := &db.Queries{}
 	replica := &db.Queries{}
 	recorder := &recorderStub{}
-	selector := newSelector(primary, replica, Config{
-		ProbeInterval: time.Hour,
-		ProbeTimeout:  time.Second,
-		MaxReplayLag:  5 * time.Second,
-		Logger:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}, func(context.Context) (probeSnapshot, error) {
-		return snapshot, probeErr
-	}, recorder)
+	selector := newSelector(
+		primary,
+		replica,
+		recorder,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+	)
 	return selector, primary, replica, recorder
-}
-
-func healthySnapshot() probeSnapshot {
-	return probeSnapshot{
-		primaryDatabase: "multica",
-		replicaDatabase: "multica",
-		inRecovery:      true,
-		readOnly:        true,
-		replayKnown:     true,
-	}
 }
 
 func TestPrimaryOnlySelectorPreservesExistingRouting(t *testing.T) {
 	primary := &db.Queries{}
 	selector := NewPrimaryOnly(primary)
 
-	selection := selector.Select(testBusiness, EventualConsistency)
-	if selection.Queries != primary || selection.Role != RolePrimary || selection.Reason != ReasonReplicaDisabled {
-		t.Fatalf("selection = %#v, want disabled primary", selection)
-	}
-}
-
-func TestSelectorRequiresSuccessfulProbeBeforeReplica(t *testing.T) {
-	selector, primary, replica, recorder := testSelector(t, healthySnapshot(), nil)
-
-	before := selector.Select(testBusiness, EventualConsistency)
-	if before.Queries != primary || before.Reason != ReasonInitializing {
-		t.Fatalf("before probe = %#v, want initializing primary", before)
-	}
-
-	status := selector.ProbeNow(context.Background())
-	if !status.Healthy || status.Reason != ReasonHealthy {
-		t.Fatalf("status = %#v, want healthy", status)
-	}
-	after := selector.Select(testBusiness, EventualConsistency)
-	if after.Queries != replica || after.Role != RoleReplica {
-		t.Fatalf("after probe = %#v, want replica", after)
-	}
-	if !recorder.configured || len(recorder.probes) != 1 {
-		t.Fatalf("recorder = %#v, want configured probe", recorder)
-	}
-}
-
-func TestSelectorStrongConsistencyAlwaysUsesPrimary(t *testing.T) {
-	selector, primary, _, _ := testSelector(t, healthySnapshot(), nil)
-	selector.ProbeNow(context.Background())
-
-	selection := selector.Select(testBusiness, StrongConsistency)
-	if selection.Queries != primary || selection.Reason != ReasonStrongConsistency {
-		t.Fatalf("selection = %#v, want strong primary", selection)
-	}
-}
-
-func TestClassifyReplica(t *testing.T) {
-	tests := []struct {
-		name    string
-		mutate  func(*probeSnapshot)
-		reason  Reason
-		healthy bool
-	}{
-		{name: "healthy", reason: ReasonHealthy, healthy: true},
-		{name: "not standby", mutate: func(s *probeSnapshot) { s.inRecovery = false }, reason: ReasonNotStandby},
-		{name: "not read only", mutate: func(s *probeSnapshot) { s.readOnly = false }, reason: ReasonNotReadOnly},
-		{name: "replay unknown", mutate: func(s *probeSnapshot) { s.replayKnown = false }, reason: ReasonReplayUnknown},
-		{name: "database mismatch", mutate: func(s *probeSnapshot) { s.replicaDatabase = "wrong" }, reason: ReasonDatabaseMismatch},
-		{
-			name: "lag over budget",
-			mutate: func(s *probeSnapshot) {
-				s.lagBytes = 1
-				s.replayLag = 6 * time.Second
-			},
-			reason: ReasonReplayLag,
-		},
-		{
-			name: "idle caught up ignores old replay timestamp",
-			mutate: func(s *probeSnapshot) {
-				s.lagBytes = 0
-				s.replayLag = time.Hour
-			},
-			reason:  ReasonHealthy,
-			healthy: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			snapshot := healthySnapshot()
-			if tt.mutate != nil {
-				tt.mutate(&snapshot)
-			}
-			got := classify(snapshot, 5*time.Second)
-			if got.Reason != tt.reason || got.Healthy != tt.healthy {
-				t.Fatalf("classify = %#v, want reason=%s healthy=%v", got, tt.reason, tt.healthy)
-			}
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
+		func(_ context.Context, queries *db.Queries) (*db.Queries, error) {
+			return queries, nil
 		})
+	if err != nil || got != primary {
+		t.Fatalf("Read = %#v, %v; want primary", got, err)
 	}
 }
 
-func TestProbeFailureKeepsPrimaryEligible(t *testing.T) {
-	selector, primary, _, _ := testSelector(t, probeSnapshot{}, errors.New("replica unavailable"))
-	status := selector.ProbeNow(context.Background())
-	if status.Healthy || status.Reason != ReasonProbeFailed {
-		t.Fatalf("status = %#v, want failed probe", status)
-	}
-	selection := selector.Select(testBusiness, EventualConsistency)
-	if selection.Queries != primary || selection.Reason != ReasonProbeFailed {
-		t.Fatalf("selection = %#v, want primary fallback", selection)
+func TestStrongConsistencyAlwaysUsesPrimary(t *testing.T) {
+	selector, primary, _, _ := testSelector()
+
+	got, err := Read(context.Background(), selector, testBusiness, StrongConsistency,
+		func(_ context.Context, queries *db.Queries) (*db.Queries, error) {
+			return queries, nil
+		})
+	if err != nil || got != primary {
+		t.Fatalf("Read = %#v, %v; want primary", got, err)
 	}
 }
 
-func TestReadFallsBackOnceForRetryableReplicaError(t *testing.T) {
-	selector, primary, replica, recorder := testSelector(t, healthySnapshot(), nil)
-	selector.ProbeNow(context.Background())
+func TestEventualConsistencyUsesConfiguredReplica(t *testing.T) {
+	selector, _, replica, recorder := testSelector()
+
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
+		func(_ context.Context, queries *db.Queries) (*db.Queries, error) {
+			return queries, nil
+		})
+	if err != nil || got != replica {
+		t.Fatalf("Read = %#v, %v; want replica", got, err)
+	}
+	if len(recorder.routes) != 1 || recorder.routes[0].role != RoleReplica {
+		t.Fatalf("routes = %#v, want one replica route", recorder.routes)
+	}
+}
+
+func TestReadFallsBackOnceForServerConnectionError(t *testing.T) {
+	selector, primary, replica, recorder := testSelector()
 	var calls []*db.Queries
 
 	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
@@ -176,8 +94,144 @@ func TestReadFallsBackOnceForRetryableReplicaError(t *testing.T) {
 	if len(calls) != 2 || calls[0] != replica || calls[1] != primary {
 		t.Fatalf("calls = %#v, want replica then primary", calls)
 	}
-	if recorder.fallbacks != 1 || len(recorder.probes) != 1 || selector.Status().Reason != ReasonQueryFailed {
-		t.Fatalf("fallbacks=%d status=%#v", recorder.fallbacks, selector.Status())
+	if len(recorder.routes) != 2 || recorder.routes[1].role != RolePrimary || recorder.routes[1].reason != ReasonConnectionFailed {
+		t.Fatalf("routes = %#v, want replica then connection-failed primary", recorder.routes)
+	}
+}
+
+func TestConnectErrorFallsBackToPrimary(t *testing.T) {
+	pool, err := pgxpool.New(context.Background(), "postgres://multica:multica@127.0.0.1:1/multica?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatalf("create unreachable pool: %v", err)
+	}
+	defer pool.Close()
+	connectErr := pool.Ping(context.Background())
+	if connectErr == nil {
+		t.Fatal("unreachable pool unexpectedly connected")
+	}
+	var typedConnectErr *pgconn.ConnectError
+	if !errors.As(connectErr, &typedConnectErr) {
+		t.Fatalf("Ping error = %T, want *pgconn.ConnectError", connectErr)
+	}
+	if !shouldFallback(context.Background(), connectErr) {
+		t.Fatalf("shouldFallback(%T) = false, want true", connectErr)
+	}
+
+	selector, primary, replica, _ := testSelector()
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency,
+		func(_ context.Context, queries *db.Queries) (string, error) {
+			if queries == replica {
+				return "", connectErr
+			}
+			if queries != primary {
+				t.Fatalf("unexpected queries handle: %#v", queries)
+			}
+			return "primary result", nil
+		})
+	if err != nil || got != "primary result" {
+		t.Fatalf("Read = %q, %v; want primary result", got, err)
+	}
+}
+
+func TestCircuitSkipsReplicaThenClosesAfterHalfOpenSuccess(t *testing.T) {
+	selector, primary, replica, recorder := testSelector()
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	selector.now = func() time.Time { return now }
+	replicaFailures := 1
+	var calls []*db.Queries
+	query := func(_ context.Context, queries *db.Queries) (string, error) {
+		calls = append(calls, queries)
+		if queries == replica && replicaFailures > 0 {
+			replicaFailures--
+			return "", &pgconn.PgError{Code: "08006", Message: "connection failure"}
+		}
+		if queries == replica {
+			return "replica result", nil
+		}
+		return "primary result", nil
+	}
+
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "primary result" {
+		t.Fatalf("failed replica read = %q, %v", got, err)
+	}
+	calls = nil
+	got, err = Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "primary result" || len(calls) != 1 || calls[0] != primary {
+		t.Fatalf("open-circuit read = %q, %v, calls=%#v; want direct primary", got, err, calls)
+	}
+
+	now = now.Add(defaultReplicaCircuitCooldown)
+	calls = nil
+	got, err = Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "replica result" || len(calls) != 1 || calls[0] != replica {
+		t.Fatalf("half-open read = %q, %v, calls=%#v; want replica", got, err, calls)
+	}
+	calls = nil
+	got, err = Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "replica result" || len(calls) != 1 || calls[0] != replica {
+		t.Fatalf("closed-circuit read = %q, %v, calls=%#v; want replica", got, err, calls)
+	}
+
+	foundCircuitRoute := false
+	for _, route := range recorder.routes {
+		if route.role == RolePrimary && route.reason == ReasonCircuitOpen {
+			foundCircuitRoute = true
+		}
+	}
+	if !foundCircuitRoute {
+		t.Fatalf("routes = %#v, want circuit-open primary route", recorder.routes)
+	}
+}
+
+func TestCircuitAllowsOnlyOneHalfOpenTrial(t *testing.T) {
+	var circuit replicaCircuit
+	now := time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC)
+	allowed, generation, halfOpen := circuit.allow(now)
+	if !allowed || halfOpen {
+		t.Fatalf("initial allow = %v, halfOpen=%v; want normal replica read", allowed, halfOpen)
+	}
+	if !circuit.fail(generation, now, 1, defaultReplicaCircuitCooldown) {
+		t.Fatal("first availability failure did not open circuit")
+	}
+	if allowed, _, _ := circuit.allow(now); allowed {
+		t.Fatal("open circuit allowed replica before cooldown")
+	}
+
+	now = now.Add(defaultReplicaCircuitCooldown)
+	allowed, _, halfOpen = circuit.allow(now)
+	if !allowed || !halfOpen {
+		t.Fatalf("first post-cooldown allow = %v, halfOpen=%v; want one trial", allowed, halfOpen)
+	}
+	if allowed, _, _ := circuit.allow(now); allowed {
+		t.Fatal("circuit allowed a second concurrent half-open trial")
+	}
+}
+
+func TestRecoveryConflictFallsBackWithoutOpeningCircuit(t *testing.T) {
+	selector, primary, replica, _ := testSelector()
+	replicaCalls := 0
+	query := func(_ context.Context, queries *db.Queries) (string, error) {
+		if queries == replica {
+			replicaCalls++
+			if replicaCalls == 1 {
+				return "", &pgconn.PgError{Code: "40001", Message: "conflict with recovery"}
+			}
+			return "replica result", nil
+		}
+		if queries != primary {
+			t.Fatalf("unexpected queries handle: %#v", queries)
+		}
+		return "primary result", nil
+	}
+
+	got, err := Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "primary result" {
+		t.Fatalf("conflicted read = %q, %v; want primary result", got, err)
+	}
+	got, err = Read(context.Background(), selector, testBusiness, EventualConsistency, query)
+	if err != nil || got != "replica result" || replicaCalls != 2 {
+		t.Fatalf("next read = %q, %v, replicaCalls=%d; want replica", got, err, replicaCalls)
 	}
 }
 
@@ -205,8 +259,7 @@ func TestReadDoesNotHideApplicationOrCancellationErrors(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			selector, _, _, recorder := testSelector(t, healthySnapshot(), nil)
-			selector.ProbeNow(context.Background())
+			selector, _, _, recorder := testSelector()
 			ctx, cancel := tt.ctx()
 			defer cancel()
 			calls := 0
@@ -215,9 +268,15 @@ func TestReadDoesNotHideApplicationOrCancellationErrors(t *testing.T) {
 					calls++
 					return "", tt.err
 				})
-			if !errors.Is(err, tt.err) || calls != 1 || recorder.fallbacks != 0 {
-				t.Fatalf("err=%v calls=%d fallbacks=%d", err, calls, recorder.fallbacks)
+			if !errors.Is(err, tt.err) || calls != 1 || len(recorder.routes) != 1 {
+				t.Fatalf("err=%v calls=%d routes=%#v", err, calls, recorder.routes)
 			}
 		})
+	}
+}
+
+func TestBareContextDeadlineDoesNotFallback(t *testing.T) {
+	if shouldFallback(context.Background(), context.DeadlineExceeded) {
+		t.Fatal("bare operation deadline should not fall back")
 	}
 }

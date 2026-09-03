@@ -3,22 +3,28 @@ package dbreader
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
+	"net"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const (
-	DefaultProbeInterval = 2 * time.Second
-	DefaultProbeTimeout  = time.Second
-	DefaultMaxReplayLag  = 5 * time.Second
+	// Availability failures prove that the replica cannot serve this request,
+	// so one failure is enough to stop making every caller pay the connection
+	// timeout. The read callback is explicitly idempotent, so the failed attempt
+	// can be retried once on primary.
+	defaultReplicaCircuitFailureThreshold = 1
+
+	// A two-second cooldown caps failed replica connection attempts at one per
+	// API process per interval while restoring replica traffic quickly. Recovery
+	// is driven by one half-open business read, not a background database query.
+	defaultReplicaCircuitCooldown = 2 * time.Second
 )
 
 type Business string
@@ -42,161 +48,82 @@ type Reason string
 const (
 	ReasonStrongConsistency Reason = "strong_consistency"
 	ReasonReplicaDisabled   Reason = "replica_disabled"
-	ReasonInitializing      Reason = "initializing"
-	ReasonHealthy           Reason = "healthy"
-	ReasonProbeFailed       Reason = "probe_failed"
-	ReasonNotStandby        Reason = "not_standby"
-	ReasonNotReadOnly       Reason = "not_read_only"
-	ReasonReplayUnknown     Reason = "replay_unknown"
-	ReasonDatabaseMismatch  Reason = "database_mismatch"
-	ReasonReplayLag         Reason = "replay_lag"
-	ReasonQueryFailed       Reason = "query_failed"
+	ReasonReplicaSelected   Reason = "replica_selected"
+	ReasonCircuitOpen       Reason = "circuit_open"
+	ReasonConnectionFailed  Reason = "connection_failed"
+	ReasonRecoveryConflict  Reason = "recovery_conflict"
 )
 
 // Recorder is implemented by the optional Prometheus metrics sink. The
 // selector stays usable when metrics are disabled by accepting nil.
 type Recorder interface {
-	SetReplicaConfigured(configured bool)
-	SetReplicaStatus(healthy bool, lagBytes int64, replayLag time.Duration)
-	ObserveReplicaProbe(healthy bool, reason string)
 	RecordReadRoute(business, role, reason string)
-	RecordReadFallback(business, reason string)
 }
 
-type Config struct {
-	ProbeInterval time.Duration
-	ProbeTimeout  time.Duration
-	MaxReplayLag  time.Duration
-	Logger        *slog.Logger
-}
-
-func (c Config) normalized() Config {
-	if c.ProbeInterval <= 0 {
-		c.ProbeInterval = DefaultProbeInterval
-	}
-	if c.ProbeTimeout <= 0 {
-		c.ProbeTimeout = DefaultProbeTimeout
-	}
-	if c.MaxReplayLag <= 0 {
-		c.MaxReplayLag = DefaultMaxReplayLag
-	}
-	if c.Logger == nil {
-		c.Logger = slog.Default()
-	}
-	return c
-}
-
-type Status struct {
-	Configured bool
-	Healthy    bool
-	Reason     Reason
-	LagBytes   int64
-	ReplayLag  time.Duration
-	CheckedAt  time.Time
-}
-
-type Selection struct {
-	Queries *db.Queries
-	Role    Role
-	Reason  Reason
-}
-
-type probeSnapshot struct {
-	primaryDatabase string
-	replicaDatabase string
-	inRecovery      bool
-	readOnly        bool
-	replayKnown     bool
-	lagBytes        int64
-	replayLag       time.Duration
-}
-
-type probeFunc func(context.Context) (probeSnapshot, error)
-
-// Selector keeps primary as the safe default. A configured replica is not
-// eligible until a probe proves that it is a read-only standby within the lag
-// budget. Existing callers continue to use their primary *db.Queries directly;
-// only explicitly opted-in read paths should call Select or Read.
+// Selector keeps primary as the safe default. Existing handlers continue to
+// use their primary *db.Queries directly; an eventual-consistency read must
+// explicitly use Read, which owns replica selection, fallback, and recovery.
 type Selector struct {
-	primary    *db.Queries
-	replica    *db.Queries
-	config     Config
-	probe      probeFunc
-	recorder   Recorder
-	configured bool
-	state      atomic.Pointer[Status]
-	now        func() time.Time
+	primary  *db.Queries
+	replica  *db.Queries
+	recorder Recorder
+	logger   *slog.Logger
+	now      func() time.Time
+	circuit  replicaCircuit
 }
 
-func New(primaryPool, replicaPool *pgxpool.Pool, cfg Config, recorder Recorder) *Selector {
+type replicaCircuit struct {
+	mu                  sync.Mutex
+	generation          uint64
+	consecutiveFailures int
+	openUntil           time.Time
+	halfOpenInFlight    bool
+}
+
+type selection struct {
+	queries    *db.Queries
+	role       Role
+	reason     Reason
+	generation uint64
+	halfOpen   bool
+}
+
+type fallbackDecision struct {
+	retry       bool
+	openCircuit bool
+	reason      Reason
+}
+
+func New(primaryPool, replicaPool *pgxpool.Pool, recorder Recorder) *Selector {
 	primary := db.New(primaryPool)
 	if replicaPool == nil {
-		return newSelector(primary, nil, cfg, nil, recorder)
+		return newSelector(primary, nil, recorder, slog.Default())
 	}
-	return newSelector(primary, db.New(replicaPool), cfg, newSQLProbe(primaryPool, replicaPool), recorder)
+	return newSelector(primary, db.New(replicaPool), recorder, slog.Default())
 }
 
 func NewPrimaryOnly(primary *db.Queries) *Selector {
-	return newSelector(primary, nil, Config{}, nil, nil)
+	return newSelector(primary, nil, nil, slog.Default())
 }
 
-func newSelector(primary, replica *db.Queries, cfg Config, probe probeFunc, recorder Recorder) *Selector {
-	cfg = cfg.normalized()
-	s := &Selector{
-		primary:    primary,
-		replica:    replica,
-		config:     cfg,
-		probe:      probe,
-		recorder:   recorder,
-		configured: replica != nil,
-		now:        time.Now,
+func newSelector(primary, replica *db.Queries, recorder Recorder, logger *slog.Logger) *Selector {
+	if logger == nil {
+		logger = slog.Default()
 	}
-	initial := Status{Reason: ReasonReplicaDisabled}
-	if s.configured {
-		initial.Configured = true
-		initial.Reason = ReasonInitializing
+	return &Selector{
+		primary:  primary,
+		replica:  replica,
+		recorder: recorder,
+		logger:   logger,
+		now:      time.Now,
 	}
-	s.state.Store(&initial)
-	if recorder != nil {
-		recorder.SetReplicaConfigured(s.configured)
-	}
-	return s
 }
 
-func (s *Selector) Status() Status {
-	status := s.state.Load()
-	if status == nil {
-		return Status{Reason: ReasonReplicaDisabled}
-	}
-	return *status
-}
-
-func (s *Selector) Select(business Business, consistency Consistency) Selection {
-	if consistency != EventualConsistency {
-		return s.selection(business, s.primary, RolePrimary, ReasonStrongConsistency)
-	}
-	status := s.Status()
-	if !status.Configured {
-		return s.selection(business, s.primary, RolePrimary, ReasonReplicaDisabled)
-	}
-	if !status.Healthy {
-		return s.selection(business, s.primary, RolePrimary, status.Reason)
-	}
-	return s.selection(business, s.replica, RoleReplica, ReasonHealthy)
-}
-
-func (s *Selector) selection(business Business, queries *db.Queries, role Role, reason Reason) Selection {
-	if s.recorder != nil {
-		s.recorder.RecordReadRoute(string(business), string(role), string(reason))
-	}
-	return Selection{Queries: queries, Role: role, Reason: reason}
-}
-
-// Read executes a read against the selected pool. A transport failure or a
-// standby serialization conflict immediately ejects the replica and retries
-// the explicitly idempotent read once on primary. SQL, permission, read-only,
-// and caller cancellation errors are returned unchanged so routing cannot hide
-// application bugs or exceed the caller's latency budget.
+// Read executes one explicitly idempotent read. Strong-consistency and
+// unconfigured reads use primary. Eventual-consistency reads use replica when
+// its passive circuit permits, then retry once on primary for connection,
+// transport, server-availability, or standby recovery-conflict errors. SQL,
+// permission, and caller-cancellation errors are returned unchanged.
 func Read[T any](
 	ctx context.Context,
 	selector *Selector,
@@ -204,194 +131,219 @@ func Read[T any](
 	consistency Consistency,
 	query func(context.Context, *db.Queries) (T, error),
 ) (T, error) {
-	selection := selector.Select(business, consistency)
-	result, err := query(ctx, selection.Queries)
-	if err == nil || selection.Role != RoleReplica || !shouldFallback(ctx, err) {
+	selected := selector.selectForRead(business, consistency)
+	result, err := query(ctx, selected.queries)
+	if selected.role != RoleReplica {
 		return result, err
 	}
-
-	selector.markUnhealthy(ReasonQueryFailed, err)
-	if selector.recorder != nil {
-		selector.recorder.RecordReadFallback(string(business), string(ReasonQueryFailed))
+	if err == nil {
+		selector.replicaSucceeded(selected)
+		return result, nil
 	}
+
+	decision := fallbackFor(ctx, err)
+	if !decision.retry {
+		selector.replicaDidNotProveAvailability(selected, err)
+		return result, err
+	}
+	if decision.openCircuit {
+		selector.replicaFailed(selected, decision.reason, err)
+	} else {
+		// A structured server response proves the connection is usable. A
+		// recovery conflict affects only this query and must not eject the
+		// replica globally.
+		selector.replicaSucceeded(selected)
+	}
+
+	selector.recordRoute(business, RolePrimary, decision.reason)
 	return query(ctx, selector.primary)
 }
 
-func shouldFallback(ctx context.Context, err error) bool {
-	if err == nil || ctx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return false
+func (s *Selector) selectForRead(business Business, consistency Consistency) selection {
+	if consistency != EventualConsistency {
+		return s.route(business, s.primary, RolePrimary, ReasonStrongConsistency, 0, false)
+	}
+	if s.replica == nil {
+		return s.route(business, s.primary, RolePrimary, ReasonReplicaDisabled, 0, false)
+	}
+
+	allowed, generation, halfOpen := s.circuit.allow(s.now())
+	if !allowed {
+		return s.route(business, s.primary, RolePrimary, ReasonCircuitOpen, generation, false)
+	}
+	return s.route(business, s.replica, RoleReplica, ReasonReplicaSelected, generation, halfOpen)
+}
+
+func (s *Selector) route(
+	business Business,
+	queries *db.Queries,
+	role Role,
+	reason Reason,
+	generation uint64,
+	halfOpen bool,
+) selection {
+	s.recordRoute(business, role, reason)
+	return selection{
+		queries:    queries,
+		role:       role,
+		reason:     reason,
+		generation: generation,
+		halfOpen:   halfOpen,
+	}
+}
+
+func (s *Selector) recordRoute(business Business, role Role, reason Reason) {
+	if s.recorder != nil {
+		s.recorder.RecordReadRoute(string(business), string(role), string(reason))
+	}
+}
+
+func fallbackFor(ctx context.Context, err error) fallbackDecision {
+	if err == nil || ctx.Err() != nil {
+		return fallbackDecision{}
+	}
+
+	// ConnectError covers the failures that happen before PostgreSQL can emit
+	// a SQLSTATE: refused connections, DNS, authentication, and TLS errors.
+	// The query cannot have executed, so retrying an idempotent read is safe.
+	var connectErr *pgconn.ConnectError
+	if errors.As(err, &connectErr) {
+		return fallbackDecision{retry: true, openCircuit: true, reason: ReasonConnectionFailed}
+	}
+	// A bare context error belongs to a narrower operation inside the callback,
+	// not the replica connection. ConnectError is checked first because pgx may
+	// wrap its own connection timeout with context.DeadlineExceeded.
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return fallbackDecision{}
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return fallbackDecision{retry: true, openCircuit: true, reason: ReasonConnectionFailed}
 	}
 	if pgconn.SafeToRetry(err) {
-		return true
+		return fallbackDecision{retry: true, openCircuit: true, reason: ReasonConnectionFailed}
 	}
+
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
-		return false
+		return fallbackDecision{}
 	}
 	if strings.HasPrefix(pgErr.Code, "08") {
-		return true
+		return fallbackDecision{retry: true, openCircuit: true, reason: ReasonConnectionFailed}
 	}
 	switch pgErr.Code {
-	case "40001", "57P01", "57P02", "57P03":
-		return true
+	case "40001":
+		return fallbackDecision{retry: true, reason: ReasonRecoveryConflict}
+	case "57P01", "57P02", "57P03":
+		return fallbackDecision{retry: true, openCircuit: true, reason: ReasonConnectionFailed}
 	default:
-		return false
+		return fallbackDecision{}
 	}
 }
 
-func (s *Selector) Run(ctx context.Context) {
-	if !s.configured {
+func shouldFallback(ctx context.Context, err error) bool {
+	return fallbackFor(ctx, err).retry
+}
+
+func (s *Selector) replicaSucceeded(selected selection) {
+	if s.circuit.succeed(selected.generation, selected.halfOpen) {
+		s.logger.Info("database replica circuit closed after successful read")
+	}
+}
+
+func (s *Selector) replicaFailed(selected selection, reason Reason, err error) {
+	if s.circuit.fail(
+		selected.generation,
+		s.now(),
+		defaultReplicaCircuitFailureThreshold,
+		defaultReplicaCircuitCooldown,
+	) {
+		s.logger.Warn("database replica circuit opened; using primary",
+			"reason", reason,
+			"cooldown", defaultReplicaCircuitCooldown.String(),
+			"error", err,
+		)
+	}
+}
+
+func (s *Selector) replicaDidNotProveAvailability(selected selection, err error) {
+	if !selected.halfOpen {
 		return
 	}
-	s.ProbeNow(ctx)
-	ticker := time.NewTicker(s.config.ProbeInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.ProbeNow(ctx)
-		}
+	if isPostgresResponse(err) {
+		s.replicaSucceeded(selected)
+		return
 	}
+	s.circuit.abandonTrial(selected.generation, s.now(), defaultReplicaCircuitCooldown)
 }
 
-func (s *Selector) ProbeNow(ctx context.Context) Status {
-	if !s.configured || s.probe == nil {
-		return s.Status()
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, s.config.ProbeTimeout)
-	snapshot, err := s.probe(probeCtx)
-	cancel()
-	if err != nil {
-		if ctx.Err() != nil {
-			return s.Status()
-		}
-		status := s.storeStatus(Status{
-			Configured: true,
-			Reason:     ReasonProbeFailed,
-			CheckedAt:  s.now(),
-		}, err)
-		s.observeProbe(status)
-		return status
-	}
-	status := classify(snapshot, s.config.MaxReplayLag)
-	status.Configured = true
-	status.CheckedAt = s.now()
-	status = s.storeStatus(status, nil)
-	s.observeProbe(status)
-	return status
+func isPostgresResponse(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr)
 }
 
-func classify(snapshot probeSnapshot, maxReplayLag time.Duration) Status {
-	status := Status{
-		Healthy:   false,
-		Reason:    ReasonHealthy,
-		LagBytes:  max(snapshot.lagBytes, 0),
-		ReplayLag: max(snapshot.replayLag, 0),
+func (c *replicaCircuit) allow(now time.Time) (allowed bool, generation uint64, halfOpen bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.openUntil.IsZero() {
+		return true, c.generation, false
 	}
-	switch {
-	case !snapshot.inRecovery:
-		status.Reason = ReasonNotStandby
-	case !snapshot.readOnly:
-		status.Reason = ReasonNotReadOnly
-	case !snapshot.replayKnown:
-		status.Reason = ReasonReplayUnknown
-	case snapshot.primaryDatabase != snapshot.replicaDatabase:
-		status.Reason = ReasonDatabaseMismatch
-	case status.LagBytes > 0 && status.ReplayLag > maxReplayLag:
-		status.Reason = ReasonReplayLag
-	default:
-		status.Healthy = true
+	if now.Before(c.openUntil) || c.halfOpenInFlight {
+		return false, c.generation, false
 	}
-	return status
+	c.halfOpenInFlight = true
+	return true, c.generation, true
 }
 
-func (s *Selector) markUnhealthy(reason Reason, err error) {
-	status := s.Status()
-	status.Healthy = false
-	status.Reason = reason
-	status.CheckedAt = s.now()
-	s.storeStatus(status, err)
+func (c *replicaCircuit) succeed(generation uint64, halfOpen bool) (closed bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if generation != c.generation {
+		return false
+	}
+	if c.openUntil.IsZero() {
+		c.consecutiveFailures = 0
+		return false
+	}
+	if !halfOpen || !c.halfOpenInFlight {
+		return false
+	}
+	c.generation++
+	c.consecutiveFailures = 0
+	c.openUntil = time.Time{}
+	c.halfOpenInFlight = false
+	return true
 }
 
-func (s *Selector) storeStatus(next Status, err error) Status {
-	previous := s.Status()
-	s.state.Store(&next)
-	if s.recorder != nil {
-		s.recorder.SetReplicaStatus(next.Healthy, next.LagBytes, next.ReplayLag)
+func (c *replicaCircuit) fail(generation uint64, now time.Time, threshold int, cooldown time.Duration) (opened bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if generation != c.generation {
+		return false
 	}
-	if previous.Healthy == next.Healthy && previous.Reason == next.Reason {
-		return next
+	c.consecutiveFailures++
+	if c.consecutiveFailures < threshold {
+		return false
 	}
-	fields := []any{
-		"healthy", next.Healthy,
-		"reason", next.Reason,
-		"lag_bytes", next.LagBytes,
-		"replay_lag", next.ReplayLag.String(),
-	}
-	if err != nil {
-		fields = append(fields, "error", err)
-	}
-	if next.Healthy {
-		s.config.Logger.Info("database replica became eligible for reads", fields...)
-	} else {
-		s.config.Logger.Warn("database replica is ineligible for reads; using primary", fields...)
-	}
-	return next
+	wasOpen := !c.openUntil.IsZero()
+	c.generation++
+	c.consecutiveFailures = 0
+	c.openUntil = now.Add(cooldown)
+	c.halfOpenInFlight = false
+	return !wasOpen
 }
 
-func (s *Selector) observeProbe(status Status) {
-	if s.recorder != nil {
-		s.recorder.ObserveReplicaProbe(status.Healthy, string(status.Reason))
+func (c *replicaCircuit) abandonTrial(generation uint64, now time.Time, cooldown time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if generation != c.generation || !c.halfOpenInFlight {
+		return
 	}
-}
-
-type queryRower interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}
-
-func newSQLProbe(primary, replica queryRower) probeFunc {
-	return func(ctx context.Context) (probeSnapshot, error) {
-		var snapshot probeSnapshot
-		var primaryLSN string
-		if err := primary.QueryRow(ctx, `SELECT current_database(), pg_current_wal_lsn()::text`).Scan(
-			&snapshot.primaryDatabase,
-			&primaryLSN,
-		); err != nil {
-			return probeSnapshot{}, fmt.Errorf("read primary WAL position: %w", err)
-		}
-
-		var replayLagSeconds float64
-		if err := replica.QueryRow(ctx, `
-SELECT
-    current_database(),
-    pg_is_in_recovery(),
-    current_setting('transaction_read_only') = 'on',
-    pg_last_wal_replay_lsn() IS NOT NULL,
-    COALESCE(
-        GREATEST(pg_wal_lsn_diff($1::pg_lsn, pg_last_wal_replay_lsn()), 0),
-        0
-    )::bigint,
-    CASE
-        WHEN pg_last_wal_replay_lsn() IS NULL
-          OR pg_last_wal_replay_lsn() >= $1::pg_lsn THEN 0
-        ELSE COALESCE(
-            EXTRACT(EPOCH FROM (clock_timestamp() - pg_last_xact_replay_timestamp())),
-            0
-        )
-    END::double precision
-`, primaryLSN).Scan(
-			&snapshot.replicaDatabase,
-			&snapshot.inRecovery,
-			&snapshot.readOnly,
-			&snapshot.replayKnown,
-			&snapshot.lagBytes,
-			&replayLagSeconds,
-		); err != nil {
-			return probeSnapshot{}, fmt.Errorf("read replica recovery position: %w", err)
-		}
-		snapshot.replayLag = time.Duration(replayLagSeconds * float64(time.Second))
-		return snapshot, nil
-	}
+	c.generation++
+	c.openUntil = now.Add(cooldown)
+	c.halfOpenInFlight = false
 }
