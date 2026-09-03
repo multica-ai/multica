@@ -733,6 +733,7 @@ VITE_WS_URL=ws://localhost:${BACKEND_PORT}/ws
 EOF
   launch_detached desktop env \
     DESKTOP_RENDERER_PORT="$DESKTOP_RENDERER_PORT" DESKTOP_APP_SUFFIX="$DESKTOP_APP_SUFFIX" \
+    MULTICA_DEV_PROFILE="$PROFILE" MULTICA_DEV_PROFILES_HOME="$DEV_PROFILES_HOME" \
     make -C "$REPO_ROOT" -s desktop-dev ENV_FILE="$ENV_FILE"
 
   while [ "$waited" -lt 300 ]; do
@@ -967,7 +968,7 @@ print_status_json() {
 }
 
 print_handoff() {
-  local entrypoint
+  local entrypoint auth_handoff
   if component_selected web; then
     entrypoint="Open        http://localhost:${FRONTEND_PORT}/${WORKSPACE_SLUG}/issues"
   elif component_selected desktop; then
@@ -975,12 +976,17 @@ print_handoff() {
   else
     entrypoint="API only    http://localhost:${BACKEND_PORT}"
   fi
+  if component_selected desktop; then
+    auth_handoff="Auth        automatic via local profile ${PROFILE}"
+  else
+    auth_handoff="Sign in     ${DEV_EMAIL}  ·  code ${MULTICA_DEV_VERIFICATION_CODE:-$DEV_CODE_DEFAULT}"
+  fi
   cat <<EOF
 
 ${C_GREEN}✓ Environment ready.${C_OFF}
 
   ${entrypoint}
-  Sign in     ${DEV_EMAIL}  ·  code ${MULTICA_DEV_VERIFICATION_CODE:-$DEV_CODE_DEFAULT}
+  ${auth_handoff}
   Backend     http://localhost:${BACKEND_PORT}   (GET /health reports pid + commit + started_at)
   Commit      $(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
   Environment ${NAME}$( [ "${TTL_HOURS:-0}" != 0 ] && printf ' (expires %s)' "$EXPIRES_AT" )
@@ -1196,7 +1202,13 @@ Start the rest with 'make up C=api,web', or run 'make up C=daemon' from your own
   component_selected api && start_api
   component_selected web && start_web
   component_selected daemon && start_daemon
-  component_selected desktop && start_desktop
+  if component_selected desktop; then
+    # Desktop consumes this isolated profile's token in development, avoiding
+    # the interactive login screen without weakening server authorization.
+    # ensure_credentials is idempotent and validates an existing token first.
+    ensure_credentials
+    start_desktop
+  fi
 
   print_handoff
 }
