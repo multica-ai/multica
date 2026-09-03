@@ -109,6 +109,39 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 		}
 	})
 
+	t.Run("GetWorkflowDefinitionInWorkspace", func(t *testing.T) {
+		var definitionID pgtype.UUID
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO workflow_definition (workspace_id, name, version, definition, created_by)
+			VALUES ($1, 'scope guard workflow', 1, '{"schema_version":1,"stages":[{"key":"build","name":"Build"}]}'::jsonb, $2)
+			RETURNING id`, wsA, parseUUID(testUserID)).Scan(&definitionID); err != nil {
+			t.Fatalf("seed workflow definition: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workflow_definition WHERE id = $1`, definitionID) })
+		_, err := queries.GetWorkflowDefinitionInWorkspace(ctx, db.GetWorkflowDefinitionInWorkspaceParams{ID: definitionID, WorkspaceID: wsB})
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("cross-workspace GetWorkflowDefinitionInWorkspace: expected pgx.ErrNoRows, got %v", err)
+		}
+	})
+
+	t.Run("GetActiveWorkflowRunForIssue", func(t *testing.T) {
+		issueID := seedIssue(t, ctx)
+		var definitionID, runID pgtype.UUID
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO workflow_definition (workspace_id, name, version, definition, created_by)
+			VALUES ($1, 'scope guard active run', 1, '{"schema_version":1,"stages":[{"key":"build","name":"Build"}]}'::jsonb, $2)
+			RETURNING id`, wsA, parseUUID(testUserID)).Scan(&definitionID); err != nil { t.Fatal(err) }
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO workflow_run (workspace_id, issue_id, workflow_definition_id, definition_snapshot, status, current_stage, started_by_type, started_by_id)
+			VALUES ($1, $2, $3, '{"schema_version":1,"stages":[{"key":"build","name":"Build"}]}'::jsonb, 'running', 1, 'member', $4)
+			RETURNING id`, wsA, issueID, definitionID, parseUUID(testUserID)).Scan(&runID); err != nil { t.Fatal(err) }
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM workflow_run WHERE id = $1`, runID); testPool.Exec(ctx, `DELETE FROM workflow_definition WHERE id = $1`, definitionID); testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+		_, err := queries.GetActiveWorkflowRunForIssue(ctx, db.GetActiveWorkflowRunForIssueParams{WorkspaceID: wsB, IssueID: issueID})
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("cross-workspace GetActiveWorkflowRunForIssue: expected pgx.ErrNoRows, got %v", err)
+		}
+	})
+
 	// Sanity check: a buggy guard that returns no-op for every call would
 	// also satisfy the cross-workspace assertions above. This sub-test
 	// proves the in-workspace path still mutates.
