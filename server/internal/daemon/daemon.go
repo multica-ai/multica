@@ -1732,6 +1732,14 @@ func (d *Daemon) Run(ctx context.Context) error {
 	if err := execenv.EnsureWorkspacesRootMarker(d.cfg.WorkspacesRoot); err != nil {
 		d.logger.Warn("workspaces root marker not written; CLI fail-closed guard limited to task workdirs", "error", err)
 	}
+	// Reclaim manifest-owned sidecars left by a task whose daemon stopped before
+	// its in-process cleanup defer ran. This is deliberately scoped to paths
+	// recorded by the daemon and never scans or removes user files.
+	if cleaned, err := execenv.CleanupSidecarManifests(d.cfg.WorkspacesRoot); err != nil {
+		d.logger.Warn("task sidecar recovery incomplete", "manifests", cleaned, "error", err)
+	} else if cleaned > 0 {
+		d.logger.Info("recovered task sidecar manifests", "manifests", cleaned)
+	}
 
 	// Load auth token from CLI config.
 	if err := d.resolveAuth(); err != nil {
@@ -6019,6 +6027,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
 		}
 	}()
+
+	// Materialize control-plane-managed task configuration only after the
+	// workdir exists and before the task becomes running. The provider bytes
+	// stay in this process long enough to write the atomically published file;
+	// they are never copied into task metadata, environment variables, or logs.
+	var taskConfig *taskConfigMaterialization
+	if candidate, ref, found, refErr := taskConfigResource(task); found {
+		if refErr != nil {
+			return TaskResult{}, errors.New("task config binding is invalid")
+		}
+		var err error
+		taskConfig, err = d.materializeTaskConfigForTask(prepareCtx, task, env)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("task config materialization failed: %w", err)
+		}
+		if taskConfig == nil || candidate == nil {
+			return TaskResult{}, errors.New("task config materialization produced no attestation")
+		}
+		defer func() {
+			if err := cleanupTaskConfig(taskConfig); err != nil {
+				taskLog.Warn("task config cleanup failed", "error", err)
+			}
+		}()
+		if err := preflightTaskConfig(task.ID, taskConfig, ref); err != nil {
+			return TaskResult{}, err
+		}
+	}
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
 	// server-side state machine dispatched (or waiting_local_directory) →

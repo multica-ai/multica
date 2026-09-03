@@ -314,6 +314,14 @@ func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID strin
 	return resp.Bundles[0], nil
 }
 
+// ResolveTaskConfig fetches provider bytes over a task-scoped daemon endpoint.
+// The response is deliberately octet-stream rather than JSON/base64 so the
+// claim and API JSON surfaces can never carry configuration content.
+func (c *Client) ResolveTaskConfig(ctx context.Context, runtimeID, taskID, resourceID string, selectors TaskConfigSelectors) ([]byte, error) {
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/configs/%s/resolve", runtimeID, taskID, resourceID)
+	return c.postBytes(ctx, path, map[string]any{"selectors": selectors})
+}
+
 func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/prepare-lease", runtimeID, taskID), map[string]any{}, nil)
 }
@@ -979,6 +987,36 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
+}
+
+func (c *Client) postBytes(ctx context.Context, path string, reqBody any) ([]byte, error) {
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		errorBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(errorBody))}
+	}
+	content, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+	if err != nil {
+		return nil, err
+	}
+	return content, nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {

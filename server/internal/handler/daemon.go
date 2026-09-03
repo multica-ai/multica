@@ -2672,8 +2672,31 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error", err,
 		)
 	}
+	if selectors, ok := taskConfigSelectorsFromClaimResources(resp.ProjectResources); ok {
+		resp.TaskConfigSelectors = &selectors
+	}
 
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+func taskConfigSelectorsFromClaimResources(resources []ProjectResourceData) (TaskConfigSelectors, bool) {
+	var selectors TaskConfigSelectors
+	found := false
+	for _, resource := range resources {
+		if resource.ResourceType != "task_config" || found {
+			if resource.ResourceType == "task_config" {
+				return TaskConfigSelectors{}, false
+			}
+			continue
+		}
+		var ref taskConfigRef
+		if json.Unmarshal(resource.ResourceRef, &ref) != nil {
+			return TaskConfigSelectors{}, false
+		}
+		selectors = TaskConfigSelectors{Repo: ref.Repo, Target: ref.Target, Account: ref.Account, Region: ref.Region}
+		found = true
+	}
+	return selectors, found
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.

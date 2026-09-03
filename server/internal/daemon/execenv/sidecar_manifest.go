@@ -227,6 +227,149 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 	return os.WriteFile(filepath.Join(envRoot, sidecarManifestFile), data, 0o644)
 }
 
+// RegisterSidecarFiles records ownership before a caller creates any of the
+// listed paths. This is used for atomic task-config writes where a daemon
+// crash between CreateTemp and Rename must still leave a durable cleanup
+// intent. Paths are stored only as filesystem metadata; file contents never
+// enter the manifest.
+func RegisterSidecarFiles(envRoot string, files ...string) error {
+	if envRoot == "" || len(files) == 0 {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(envRoot, sidecarManifestFile))
+	var m sidecarManifest
+	if err == nil {
+		if err := json.Unmarshal(data, &m); err != nil {
+			return fmt.Errorf("parse sidecar manifest %s: %w", filepath.Join(envRoot, sidecarManifestFile), err)
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("read sidecar manifest %s: %w", filepath.Join(envRoot, sidecarManifestFile), err)
+	}
+	seen := make(map[string]struct{}, len(m.Files))
+	for _, path := range m.Files {
+		seen[path] = struct{}{}
+	}
+	for _, path := range files {
+		if path == "" {
+			return errors.New("execenv: empty sidecar path")
+		}
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		m.Files = append(m.Files, path)
+		seen[path] = struct{}{}
+	}
+	return writeSidecarManifest(envRoot, &m)
+}
+
+// SidecarFileRegistered reports whether path is currently covered by the
+// durable manifest. Callers use it as an ownership check before consuming a
+// managed file; a file that merely happens to have the expected name is not
+// sufficient.
+func SidecarFileRegistered(envRoot, path string) bool {
+	if envRoot == "" || path == "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(envRoot, sidecarManifestFile))
+	if err != nil {
+		return false
+	}
+	var m sidecarManifest
+	if json.Unmarshal(data, &m) != nil {
+		return false
+	}
+	for _, recorded := range m.Files {
+		if recorded == path {
+			return true
+		}
+	}
+	return false
+}
+
+// CleanupSidecarFiles removes only the manifest-owned files supplied by the
+// caller and leaves unrelated Prepare sidecars intact. It is intentionally
+// conservative when the manifest is missing: an unproven path is never
+// deleted merely because its name looks managed.
+func CleanupSidecarFiles(envRoot string, files ...string) error {
+	if envRoot == "" || len(files) == 0 {
+		return nil
+	}
+	manifestPath := filepath.Join(envRoot, sidecarManifestFile)
+	data, err := os.ReadFile(manifestPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read sidecar manifest %s: %w", manifestPath, err)
+	}
+	var m sidecarManifest
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parse sidecar manifest %s: %w", manifestPath, err)
+	}
+	wanted := make(map[string]struct{}, len(files))
+	for _, path := range files {
+		wanted[path] = struct{}{}
+	}
+	var firstErr error
+	remaining := m.Files[:0]
+	for _, path := range m.Files {
+		if _, ok := wanted[path]; !ok {
+			remaining = append(remaining, path)
+			continue
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("remove %s: %w", path, err)
+			}
+			remaining = append(remaining, path)
+		}
+	}
+	m.Files = remaining
+	if len(m.Files) == 0 && len(m.Dirs) == 0 {
+		if err := os.Remove(manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) && firstErr == nil {
+			firstErr = fmt.Errorf("remove manifest %s: %w", manifestPath, err)
+		}
+	} else if err := writeSidecarManifest(envRoot, &m); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
+}
+
+// CleanupSidecarManifests reclaims manifest-owned files left by a daemon that
+// stopped before its task defer ran. It is called once during daemon startup;
+// user-created files are never traversed or removed, only paths previously
+// recorded by the daemon are considered.
+func CleanupSidecarManifests(workspacesRoot string) (int, error) {
+	if workspacesRoot == "" {
+		return 0, nil
+	}
+	cleaned := 0
+	var firstErr error
+	err := filepath.WalkDir(workspacesRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if firstErr == nil {
+				firstErr = walkErr
+			}
+			return nil
+		}
+		if entry.IsDir() || entry.Name() != sidecarManifestFile {
+			return nil
+		}
+		if err := CleanupSidecars(filepath.Dir(path)); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			return nil
+		}
+		cleaned++
+		return nil
+	})
+	if err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return cleaned, firstErr
+}
+
 // CleanupSidecars rolls the user's workdir back to its pre-Prepare
 // state by removing every file the manifest at envRoot records and
 // then rmdir-ing every directory it records, deepest first.

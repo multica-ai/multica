@@ -50,6 +50,15 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// TaskConfigSelectors bind a task-config version to its deployment target.
+// They are metadata only and never contain provider bytes.
+type TaskConfigSelectors struct {
+	Repo    string `json:"repo,omitempty"`
+	Target  string `json:"target,omitempty"`
+	Account string `json:"account,omitempty"`
+	Region  string `json:"region,omitempty"`
+}
+
 // ConnectedAppData keeps the claim-response field local to daemon types while
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
@@ -71,10 +80,11 @@ type Task struct {
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                         []RepoData             `json:"repos,omitempty"`
-	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
-	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
-	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief
-	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`                // project-scoped resources to expose to the agent
+	ProjectID                     string                 `json:"project_id,omitempty"`          // active project for this task, when present
+	ProjectTitle                  string                 `json:"project_title,omitempty"`       // human-readable project title for context injection
+	ProjectDescription            string                 `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`   // project-scoped resources to expose to the agent
+	TaskConfigSelectors           *TaskConfigSelectors   `json:"task_config_selectors,omitempty"`
 	IsLeaderTask                  bool                   `json:"is_leader_task,omitempty"`                   // true when executing in the squad-leader coordinator role
 	LeaderRoleResolved            bool                   `json:"leader_role_resolved,omitempty"`             // server capability: IsLeaderTask/SquadID authoritatively answer "is this a leader run". Absent on servers predating it — those before #4951 never sent is_leader_task at all, later ones send it without this guarantee — so taskIsSquadLeader falls back to the briefing marker for both (MUL-5811)
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue

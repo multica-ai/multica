@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
@@ -76,9 +77,68 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 		return validateGithubRepoRef(ref)
 	case "local_directory":
 		return validateLocalDirectoryRef(ref)
+	case "task_config":
+		return validateTaskConfigRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
+}
+
+// taskConfigRef is the non-secret binding stored for a control-plane-managed
+// task configuration. Provider bytes are deliberately absent from this type.
+type taskConfigRef struct {
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
+	Version     string `json:"version"`
+	Path        string `json:"path"`
+	Mode        uint32 `json:"mode"`
+	Repo        string `json:"repo,omitempty"`
+	Target      string `json:"target,omitempty"`
+	Account     string `json:"account,omitempty"`
+	Region      string `json:"region,omitempty"`
+}
+
+func validateTaskConfigRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload taskConfigRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, errors.New("invalid task_config payload")
+	}
+	payload.Provider = strings.TrimSpace(payload.Provider)
+	payload.ProviderRef = strings.TrimSpace(payload.ProviderRef)
+	payload.Version = strings.TrimSpace(payload.Version)
+	payload.Path = strings.TrimSpace(strings.ReplaceAll(payload.Path, "\\", "/"))
+	payload.Repo = strings.TrimSpace(payload.Repo)
+	payload.Target = strings.TrimSpace(payload.Target)
+	payload.Account = strings.TrimSpace(payload.Account)
+	payload.Region = strings.TrimSpace(payload.Region)
+	if payload.Provider != "aws_secrets_manager" {
+		return nil, errors.New("task_config: unsupported provider")
+	}
+	if payload.ProviderRef == "" || payload.Version == "" {
+		return nil, errors.New("task_config: provider_ref and version are required")
+	}
+	if payload.Mode != 0o600 {
+		return nil, errors.New("task_config: mode must be 0600")
+	}
+	if !isSafeTaskConfigPath(payload.Path) {
+		return nil, errors.New("task_config: path must be a safe relative path")
+	}
+	return json.Marshal(payload)
+}
+
+func isSafeTaskConfigPath(path string) bool {
+	if path == "" || strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
+		return false
+	}
+	if len(path) >= 3 && isDriveLetter(path[0]) && path[1] == ':' && path[2] == '/' {
+		return false
+	}
+	for _, part := range strings.Split(path, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return filepath.Clean(path) == path
 }
 
 type githubRepoRef struct {
@@ -378,6 +438,17 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		nextRef = normalized
+	}
+	if existing.ResourceType == "task_config" {
+		var oldRef, newRef taskConfigRef
+		if err := json.Unmarshal(existing.ResourceRef, &oldRef); err != nil || json.Unmarshal(nextRef, &newRef) != nil {
+			writeError(w, http.StatusBadRequest, "task_config: invalid stored binding")
+			return
+		}
+		if oldRef.Version != newRef.Version {
+			writeError(w, http.StatusBadRequest, "task_config: version is immutable")
+			return
+		}
 	}
 
 	if conflict, err := h.findLocalDirectoryConflict(r.Context(), project.ID, existing.ResourceType, nextRef, existing.ID); err != nil {

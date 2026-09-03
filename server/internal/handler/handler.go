@@ -198,6 +198,9 @@ type Handler struct {
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
+	// TaskConfigProvider resolves control-plane-managed task_config bytes for
+	// daemon requests. New wires a lazy AWS provider; tests may replace it.
+	TaskConfigProvider TaskConfigProvider
 	// Lark integration. All three are nil when the Lark master key
 	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
 	// handlers return 503 in that case so a misconfigured self-host
@@ -404,8 +407,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,
 		}),
-		LLM: llmClient,
-		cfg: cfg,
+		TaskConfigProvider: NewDefaultTaskConfigProvider(),
+		LLM:                llmClient,
+		cfg:                cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 
