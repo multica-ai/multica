@@ -20,6 +20,17 @@ import (
 // that remains is the `--status todo` vs `--status backlog` rule for
 // creating sub-issues, which is unrelated to the notification path.
 
+// platformSkillFixture is the built-in every issue brief expects to be able to
+// point at. The pointer is resolved from the task's actual skills, so a brief
+// built without it deliberately carries no pointer at all.
+func platformSkillFixture() SkillContextForEnv {
+	return SkillContextForEnv{
+		Name:    "multica-platform",
+		Source:  skillbundle.SourceBuiltin,
+		Content: "---\nname: multica-platform\n---\n\nbody",
+	}
+}
+
 func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -28,13 +39,17 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 	}{
 		{
 			name: "assignment-triggered",
-			ctx:  TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"},
+			ctx: TaskContextForEnv{
+				IssueID:     "11111111-2222-3333-4444-555555555555",
+				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
+			},
 		},
 		{
 			name: "comment-triggered",
 			ctx: TaskContextForEnv{
 				IssueID:          "22222222-3333-4444-5555-666666666666",
 				TriggerCommentID: "33333333-4444-5555-6666-777777777777",
+				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 		},
 	}
@@ -2113,6 +2128,108 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			}
 			if !strings.Contains(out, "discovered automatically") {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
+			}
+		})
+	}
+}
+
+// TestBriefIssuePointerFollowsTheInstalledSkill covers the compatibility
+// direction the server cannot reach (MUL-6986).
+//
+// The brief is assembled here, in the daemon, from a binary the user installs
+// on their own schedule. A backend deploy does not rewrite it, and an app
+// update does not wait for a deploy, so both skews happen:
+//
+//   - old daemon, new backend — the server ships a redirect stub under the old
+//     name, because this code is already frozen on that machine;
+//   - new daemon, old backend — the server has no idea the merge happened, so
+//     THIS code has to cope, which is why the pointer is resolved from the
+//     skills the task actually received rather than hardcoded.
+//
+// The third case is the one that matters most: when neither skill is installed
+// the brief says nothing. Naming a skill the agent does not have is worse than
+// omitting the pointer — it sends the agent hunting, and on a miss it may skip
+// the contract altogether.
+func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
+	t.Parallel()
+
+	builtin := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Source: skillbundle.SourceBuiltin, Content: "---\nname: " + name + "\n---\n\nbody"}
+	}
+	workspace := func(name string) SkillContextForEnv {
+		return SkillContextForEnv{Name: name, Source: skillbundle.SourceWorkspace, Content: "---\nname: " + name + "\n---\n\nbody"}
+	}
+
+	cases := []struct {
+		name   string
+		skills []SkillContextForEnv
+		want   string // exact pointer text; "" = no pointer at all
+	}{
+		{
+			name:   "current backend",
+			skills: []SkillContextForEnv{builtin("multica-platform")},
+			want:   "`references/issues.md` in the `multica-platform` skill",
+		},
+		{
+			// New daemon against a backend that has not been deployed yet.
+			name:   "pre-merge backend",
+			skills: []SkillContextForEnv{builtin("multica-working-on-issues")},
+			want:   "the `multica-working-on-issues` skill",
+		},
+		{
+			// Mid-transition: the redirect stub rides along with the merged
+			// skill. The merged skill wins — the stub is only a signpost.
+			name:   "merged skill wins over the redirect stub",
+			skills: []SkillContextForEnv{builtin("multica-working-on-issues"), builtin("multica-platform")},
+			want:   "`references/issues.md` in the `multica-platform` skill",
+		},
+		{
+			name:   "neither installed",
+			skills: []SkillContextForEnv{workspace("pr-review")},
+			want:   "",
+		},
+		{
+			// A workspace skill that merely shares the name must never be
+			// advertised as the source of platform contracts.
+			name:   "lookalike workspace skill only",
+			skills: []SkillContextForEnv{workspace("multica-platform")},
+			want:   "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", TaskContextForEnv{
+				IssueID:     "issue-1",
+				AgentSkills: tc.skills,
+			})
+
+			// The flags themselves are unconditional: they stay discoverable
+			// with or without a skill to point at.
+			for _, always := range []string{
+				"`--status todo` starts an agent-assigned child immediately",
+				"`--stage <N>` groups children into ordered stages",
+				"never secrets or long content",
+			} {
+				if !strings.Contains(out, always) {
+					t.Errorf("brief lost unconditional content %q", always)
+				}
+			}
+
+			if tc.want == "" {
+				for _, banned := range []string{"Full write discipline:", "Before creating sub-issues, read"} {
+					if strings.Contains(out, banned) {
+						t.Errorf("brief points at a skill with none installed (%q):\n%s", banned, out)
+					}
+				}
+				return
+			}
+			if !strings.Contains(out, "Full write discipline: "+tc.want+".") {
+				t.Errorf("metadata pointer does not name %q:\n%s", tc.want, out)
+			}
+			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
+				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)
 			}
 		})
 	}

@@ -6113,8 +6113,11 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			// express — the read stance, the re-read bar, and the two
 			// write-time boundaries (secrets, length). The full ban list
 			// and the key-naming conventions live in the multica-platform
-			// skill, pinned by TestPlatformSkillCoversPlatformContracts so
-			// this pointer cannot dangle. The recommended-keys block was
+			// skill, pinned by TestPlatformSkillCoversPlatformContracts.
+			// The pointer names whichever skill this task actually received
+			// and is omitted when neither is installed
+			// (TestBriefIssuePointerFollowsTheInstalledSkill), so it cannot
+			// dangle in either upgrade direction. The recommended-keys block was
 			// removed outright: metadata is deliberately free-form custom
 			// state (owner decision on MUL-5442), not a vocabulary the
 			// platform curates in every brief.
@@ -6159,6 +6162,7 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			ctx: TaskContextForEnv{
 				IssueID:          "issue-md-1",
 				TriggerCommentID: "comment-md-1",
+				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
@@ -6189,8 +6193,11 @@ func TestInjectRuntimeConfigIssueMetadataSectionScope(t *testing.T) {
 			want: withSection,
 		},
 		{
-			name:     "assignment_triggered",
-			ctx:      TaskContextForEnv{IssueID: "issue-md-2"},
+			name: "assignment_triggered",
+			ctx: TaskContextForEnv{
+				IssueID:     "issue-md-2",
+				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
+			},
 			provider: "claude",
 			filename: "CLAUDE.md",
 			workflowStepPresent: []string{
