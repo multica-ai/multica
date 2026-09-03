@@ -65,3 +65,25 @@ func TestCleanupSidecarManifestsReclaimsInterruptedTask(t *testing.T) {
 		t.Fatalf("interrupted target survived restart cleanup: %v", err)
 	}
 }
+
+func TestCleanupTaskConfigManifestsRejectsTamperedAbsolutePaths(t *testing.T) {
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "workspace", "task")
+	work := filepath.Join(envRoot, "workdir")
+	outside := filepath.Join(root, "outside.hcl")
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outside, []byte("must survive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, taskConfigIntentFile), []byte(`{"task_id":"task-1","work_dir":"`+work+`","paths":["../../outside.hcl"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cleaned, err := CleanupTaskConfigManifests(root); cleaned != 1 || err == nil {
+		t.Fatalf("tampered manifest cleanup = cleaned %d, err %v; want one rejected manifest", cleaned, err)
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("outside file was affected: %v", err)
+	}
+}

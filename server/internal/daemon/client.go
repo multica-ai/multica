@@ -317,9 +317,13 @@ func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID strin
 // ResolveTaskConfig fetches provider bytes over a task-scoped daemon endpoint.
 // The response is deliberately octet-stream rather than JSON/base64 so the
 // claim and API JSON surfaces can never carry configuration content.
-func (c *Client) ResolveTaskConfig(ctx context.Context, runtimeID, taskID, resourceID string, selectors TaskConfigSelectors) ([]byte, error) {
+func (c *Client) ResolveTaskConfig(ctx context.Context, runtimeID, taskID, resourceID string, ref taskConfigRef, selectors TaskConfigSelectors) ([]byte, error) {
 	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/configs/%s/resolve", runtimeID, taskID, resourceID)
-	return c.postBytes(ctx, path, map[string]any{"selectors": selectors})
+	return c.postBytes(ctx, path, map[string]any{
+		"provider": ref.Provider, "provider_ref": ref.ProviderRef,
+		"version": ref.Version, "path": ref.Path, "mode": ref.Mode,
+		"selectors": selectors,
+	})
 }
 
 func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {

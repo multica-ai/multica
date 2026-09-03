@@ -120,6 +120,9 @@ func validateTaskConfigRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.Mode != 0o600 {
 		return nil, errors.New("task_config: mode must be 0600")
 	}
+	if payload.Repo == "" || payload.Target == "" || payload.Account == "" || payload.Region == "" {
+		return nil, errors.New("task_config: repo, target, account, and region selectors are required")
+	}
 	if !isSafeTaskConfigPath(payload.Path) {
 		return nil, errors.New("task_config: path must be a safe relative path")
 	}

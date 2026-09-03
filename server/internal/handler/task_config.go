@@ -13,6 +13,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 const taskConfigSourceType = "control_plane_managed"
@@ -111,7 +112,12 @@ func (p *SecretsManagerTaskConfigProvider) Resolve(ctx context.Context, req Task
 }
 
 type taskConfigResolvePayload struct {
-	Selectors TaskConfigSelectors `json:"selectors"`
+	Provider    string              `json:"provider"`
+	ProviderRef string              `json:"provider_ref"`
+	Version     string              `json:"version"`
+	Path        string              `json:"path"`
+	Mode        uint32              `json:"mode"`
+	Selectors   TaskConfigSelectors `json:"selectors"`
 }
 
 // ResolveTaskConfig resolves one project binding for the currently claimed
@@ -123,6 +129,13 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 	resourceID := chi.URLParam(r, "resourceId")
 	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
+		return
+	}
+	// Config bytes are never available through a member PAT/JWT. Require the
+	// daemon token's executor identity and bind it to the runtime row, so a
+	// workspace member cannot resolve another machine's provider reference.
+	if daemonID := middleware.DaemonIDFromContext(r.Context()); daemonID == "" || !runtime.DaemonID.Valid || runtime.DaemonID.String != daemonID {
+		writeError(w, http.StatusNotFound, "task_config binding not found")
 		return
 	}
 	task, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
@@ -176,7 +189,7 @@ func (h *Handler) ResolveTaskConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	want := TaskConfigSelectors{Repo: binding.Repo, Target: binding.Target, Account: binding.Account, Region: binding.Region}
-	if !taskConfigSelectorsEqual(payload.Selectors, want) {
+	if payload.Provider != binding.Provider || payload.ProviderRef != binding.ProviderRef || payload.Version != binding.Version || payload.Path != binding.Path || payload.Mode != binding.Mode || !taskConfigSelectorsEqual(payload.Selectors, want) {
 		writeError(w, http.StatusForbidden, "task_config selector mismatch")
 		return
 	}

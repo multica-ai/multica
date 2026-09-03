@@ -46,6 +46,9 @@ func validateTaskConfigRef(ref taskConfigRef) error {
 	if ref.Mode != 0o600 || !safeTaskConfigRelativePath(ref.Path) {
 		return errors.New("task_config: invalid destination")
 	}
+	if strings.TrimSpace(ref.Repo) == "" || strings.TrimSpace(ref.Target) == "" || strings.TrimSpace(ref.Account) == "" || strings.TrimSpace(ref.Region) == "" {
+		return errors.New("task_config: incomplete selector tuple")
+	}
 	return nil
 }
 
@@ -113,11 +116,20 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 	if err := execenv.RegisterSidecarFiles(envRoot, target, tempPath); err != nil {
 		return nil, errors.New("task_config: register cleanup intent failed")
 	}
+	if err := execenv.RegisterTaskConfigIntent(envRoot, taskID, workDir, target, tempPath); err != nil {
+		_ = execenv.CleanupSidecarFiles(envRoot, target, tempPath)
+		return nil, errors.New("task_config: register cleanup intent failed")
+	}
 	registered := true
 	cleanOnError := true
 	defer func() {
 		if registered && cleanOnError {
-			_ = execenv.CleanupSidecarFiles(envRoot, target, tempPath)
+			paths, _ := execenv.CleanupTaskConfigIntent(envRoot)
+			if len(paths) > 0 {
+				_ = execenv.CleanupSidecarFiles(envRoot, paths...)
+			} else {
+				_ = execenv.CleanupSidecarFiles(envRoot, target, tempPath)
+			}
 		}
 	}()
 
@@ -140,8 +152,16 @@ func materializeTaskConfig(ctx context.Context, taskID, envRoot, workDir string,
 	if err := f.Close(); err != nil {
 		return nil, errors.New("task_config: close destination failed")
 	}
-	if err := os.Rename(tempPath, target); err != nil {
+	if err := validateExistingParents(workDir, ref.Path); err != nil {
+		return nil, err
+	}
+	// Link is the portable no-replace publish primitive available here: unlike
+	// Rename it cannot clobber a target that appeared after the initial probe.
+	if err := os.Link(tempPath, target); err != nil {
 		return nil, errors.New("task_config: publish destination failed")
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return nil, errors.New("task_config: remove temporary destination failed")
 	}
 	cleanOnError = false
 	return &taskConfigMaterialization{
@@ -226,7 +246,13 @@ func cleanupTaskConfig(m *taskConfigMaterialization) error {
 	if m == nil {
 		return nil
 	}
-	return execenv.CleanupSidecarFiles(m.EnvRoot, m.Path, m.TempPath)
+	paths, firstErr := execenv.CleanupTaskConfigIntent(m.EnvRoot)
+	if len(paths) > 0 {
+		if err := execenv.CleanupSidecarFiles(m.EnvRoot, paths...); firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (d *Daemon) materializeTaskConfigForTask(ctx context.Context, task Task, env *execenv.Environment) (*taskConfigMaterialization, error) {
@@ -245,7 +271,7 @@ func (d *Daemon) materializeTaskConfigForTask(ctx context.Context, task Task, en
 		if task.TaskConfigSelectors != nil {
 			selectors = *task.TaskConfigSelectors
 		}
-		return d.client.ResolveTaskConfig(resolveCtx, task.RuntimeID, task.ID, resource.ID, selectors)
+		return d.client.ResolveTaskConfig(resolveCtx, task.RuntimeID, task.ID, resource.ID, ref, selectors)
 	})
 	if m != nil {
 		if task.TaskConfigSelectors != nil {

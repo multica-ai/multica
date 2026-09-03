@@ -1735,7 +1735,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Reclaim manifest-owned sidecars left by a task whose daemon stopped before
 	// its in-process cleanup defer ran. This is deliberately scoped to paths
 	// recorded by the daemon and never scans or removes user files.
-	if cleaned, err := execenv.CleanupSidecarManifests(d.cfg.WorkspacesRoot); err != nil {
+	if cleaned, err := execenv.CleanupTaskConfigManifests(d.cfg.WorkspacesRoot); err != nil {
 		d.logger.Warn("task sidecar recovery incomplete", "manifests", cleaned, "error", err)
 	} else if cleaned > 0 {
 		d.logger.Info("recovered task sidecar manifests", "manifests", cleaned)
@@ -6047,7 +6047,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		defer func() {
 			if err := cleanupTaskConfig(taskConfig); err != nil {
-				taskLog.Warn("task config cleanup failed", "error", err)
+				taskLog.Error("task config cleanup failed", "error", err)
+				if returnErr == nil {
+					returnErr = errors.New("task config cleanup failed")
+				}
 			}
 		}()
 		if err := preflightTaskConfig(task.ID, taskConfig, ref); err != nil {
