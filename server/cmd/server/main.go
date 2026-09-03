@@ -621,7 +621,9 @@ func main() {
 	// EmptyClaim cache into TaskService; constructing a second TaskService for
 	// scheduled Autopilot dispatch would send the daemon wakeup without bumping
 	// that cache's version, so an idle runtime could keep returning an empty
-	// claim until the cache TTL expires.
+	// claim until the cache TTL expires. Reusing it also means the shared
+	// post-terminal comment reconciler wired in handler.go covers the sweeper /
+	// orphan-recovery fail paths that run through this same instance (#5278).
 	taskSvc, autopilotSvc := backgroundServices(h)
 	registerAutopilotListeners(bus, autopilotSvc)
 
